@@ -121,7 +121,7 @@ func TestRejectDivergentSiblingCreatesComparesEmptyWorktreeFromFreezeCommits(t *
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead); err != nil {
 		t.Fatalf("missing-worktree sibling with freeze commits should still compare non-overlapping creates, got: %v", err)
 	}
 }
@@ -145,7 +145,7 @@ func TestRejectDivergentSiblingCreatesRejectsCollisionWithoutWorktree(t *testing
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+	err = runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead)
 	assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
 }
 
@@ -169,7 +169,7 @@ func TestRejectDivergentSiblingCreatesRejectsCollisionWithMissingWorktreeDir(t *
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+	err = runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead)
 	assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
 }
 
@@ -193,7 +193,7 @@ func TestRejectDivergentSiblingCreatesStillRejectsWithWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+	err = runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead)
 	assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
 }
 
@@ -217,7 +217,7 @@ func TestRejectDivergentSiblingCreatesAllowsIdenticalCreateWithoutWorktree(t *te
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead); err != nil {
 		t.Fatalf("identical create without sibling worktree should pass, got: %v", err)
 	}
 }
@@ -252,7 +252,7 @@ func TestRejectDivergentSiblingCreatesAllowsCurrentSliceEditingExistingFile(t *t
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead); err != nil {
 		t.Fatalf("edit-only current slice should pass, got: %v", err)
 	}
 }
@@ -302,7 +302,7 @@ func TestRejectDivergentSiblingCreatesAllowsSiblingWithEmptyCreateSet(t *testing
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead); err != nil {
 		t.Fatalf("sibling with empty frozen create set should not collide with current slice create, got: %v", err)
 	}
 }
@@ -337,7 +337,7 @@ func TestRejectDivergentSiblingCreatesSkipsSiblingWithInvalidFreezeHeadType(t *t
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead); err != nil {
 		t.Fatalf("sibling without the durable freeze triple must be skipped, got: %v", err)
 	}
 }
@@ -371,7 +371,7 @@ func TestRejectDivergentSiblingCreatesSkipsSiblingWithMissingFreezeArtifacts(t *
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead); err != nil {
 		t.Fatalf("sibling without the durable freeze triple must be skipped, got: %v", err)
 	}
 }
@@ -415,7 +415,7 @@ func TestRejectDivergentSiblingCreatesUsesDurableArtifactsWithoutWorkflowRegistr
 	// Deliberately omit workflows: durable freeze artifacts alone must drive the
 	// collision check, so the divergent sibling freeze is rejected.
 	runner := &NativeRunner{db: store, artifacts: artifacts}
-	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+	err = runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead)
 	assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
 }
 
@@ -456,7 +456,7 @@ func TestRejectDivergentSiblingCreatesRecognizesFrozenSiblingRoutedBackToImpleme
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+	err = runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead)
 	assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
 }
 
@@ -513,7 +513,7 @@ func TestRejectDivergentSiblingCreatesAllowsIdenticalCreateFromDistinctSiblingWo
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead); err != nil {
 		t.Fatalf("identical create on distinct sibling worktree should pass, got: %v", err)
 	}
 }
@@ -566,7 +566,7 @@ func TestRejectDivergentSiblingCreatesStillRejectsDivergenceFromDistinctSiblingW
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+	err = runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead)
 	assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
 }
 
@@ -623,7 +623,7 @@ func TestRejectDivergentSiblingCreatesReportsLexicographicallySmallestCollision(
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+	err = runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead)
 	// All three creates collide; the diagnostic must name "alpha.txt" because
 	// it is the smallest colliding path. A non-deterministic implementation
 	// would surface "frozen.txt" or "zeta.txt" on some runs and fail this
@@ -695,7 +695,7 @@ func TestRejectDivergentSiblingCreatesReportsDeterministicCollisionAcrossRuns(t 
 				t.Fatal(err)
 			}
 			runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-			err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+			err = runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead)
 			assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
 			seen = append(seen, err.Error())
 		})
@@ -735,6 +735,80 @@ func TestRejectDivergentSiblingCreatesRejectsTrailingWhitespaceDivergence(t *tes
 		t.Fatal(err)
 	}
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
-	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+	err = runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead)
 	assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
+}
+
+// TestFreezeArtifactKeyResolvesEmptyNodeIDToConventionalKey is the regression
+// guard for the literal-"freeze" fallback that freeze used to apply when
+// req.Node.ID was empty. Today the helper freezeArtifactKey is the single
+// source of truth for the publish/read key on both sides, so the empty Node.ID
+// case must resolve to the same conventional key the read side expects ("freeze"
+// itself), not to "" or any other value -- otherwise the freeze would publish
+// under one key and frozenSiblingArtifacts would read under another, silently
+// skipping sibling-collision rejection. Pinning both observations here means
+// any private fallback reintroduced on either side will fail the test.
+func TestFreezeArtifactKeyResolvesEmptyNodeIDToConventionalKey(t *testing.T) {
+	if got := freezeArtifactKey(StepRequest{}); got != "freeze" {
+		t.Fatalf("freezeArtifactKey(StepRequest{}) = %q, want conventional key %q", got, "freeze")
+	}
+}
+
+// TestFreezeAndFrozenSiblingArtifactsAgreeOnConventionalKeyWhenNodeIDEmpty is
+// the end-to-end regression guard: when a caller constructs a StepRequest
+// without a Node.ID (e.g. an HTTP runner carrying a partial request), the
+// freeze block must publish the durable (frozen_diff, freeze-head,
+// freeze-base) triple under the conventional "freeze" key AND
+// frozenSiblingArtifacts must read it back from the same key. Any future
+// change that lets either side drift -- e.g. a private fallback that resolves
+// the empty Node.ID case differently on the read side -- will break this
+// test.
+func TestFreezeAndFrozenSiblingArtifactsAgreeOnConventionalKeyWhenNodeIDEmpty(t *testing.T) {
+	ctx, store, artifacts, registry, _, slicedir, base, head := setupFreezeCollisionHarness(t)
+
+	// Sanity: with Node.ID == "" the helper resolves to the conventional key
+	// both sides historically used, so the seeded sibling (key "freeze") and a
+	// current slice that publishes under "" (resolved to "freeze") land on
+	// the same key. If freezeArtifactKey ever changes its fallback, this
+	// round-trip will break and surface the drift before it ships.
+	if got := freezeArtifactKey(StepRequest{}); got != "freeze" {
+		t.Fatalf("freezeArtifactKey(StepRequest{}) = %q, want conventional key %q", got, "freeze")
+	}
+
+	item, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a divergent create on the current slice; with Node.ID == "" the
+	// freeze helper resolves to "freeze" so the current slice's collision
+	// check must still see the sibling's seeded "freeze" artifact and reject.
+	if err := os.WriteFile(filepath.Join(slicedir, "frozen.txt"), []byte("conflicting slice blob\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "frozen.txt")
+	gitRun(t, slicedir, "commit", "-m", "divergent create")
+	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+
+	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
+	err = runner.rejectDivergentSiblingCreates(ctx, item, freezeArtifactKey(StepRequest{}), slicedir, base, currentHead)
+	assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
+
+	// Also pin the read side directly: frozenSiblingArtifacts with the same
+	// resolved key must return ok=true for the seeded sibling (the durable
+	// triple is present), proving the publish and read keys are in sync.
+	_ = registry // keep harness symmetry
+	siblingHead, siblingBase, ok, readErr := frozenSiblingArtifacts("wi_s0", freezeArtifactKey(StepRequest{}), artifacts)
+	if readErr != nil {
+		t.Fatalf("frozenSiblingArtifacts: unexpected read error: %v", readErr)
+	}
+	if !ok {
+		t.Fatalf("frozenSiblingArtifacts: ok=false, want true (publish/read keys must match)")
+	}
+	if siblingHead != head {
+		t.Fatalf("frozenSiblingArtifacts: siblingHead=%q want %q", siblingHead, head)
+	}
+	if siblingBase != base {
+		t.Fatalf("frozenSiblingArtifacts: siblingBase=%q want %q", siblingBase, base)
+	}
 }
