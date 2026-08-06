@@ -115,21 +115,42 @@ static void test_delegates(void)
    delegates_canonicalize_over_handler("implement", role, sizeof(role));
    assert(strcmp(role, "code") == 0);
 
-   /* The handler must canonicalize via aimee_delegates_role_canonical() — the
-    * single shared table — for EVERY alias, not just the one spot-check above.
-    * The handler and delegate_role.c's local (bus-free binary) path each used to
-    * carry their own byte-identical copy; pinning the whole table here means a
-    * re-introduced private copy that drifts on any alias fails this test rather
-    * than silently canonicalizing a role differently depending on the binary. */
-   static const char *const aliases[] = {
-       "implement", "build",   "reviewer", "verifier",          "test",          "check",
-       "evaluate",  "inspect", "research", "enforce",           "recall",        "synthesize",
-       "rank-fuse", "planner", "planning", "evaluate-optimize", "classify-score"};
-   for (size_t i = 0; i < sizeof(aliases) / sizeof(aliases[0]); ++i)
+   /* The role alias table exists TWICE, byte-for-byte identical: here in the bus
+    * module handler (modules/delegates/module_adapter.c) and in delegate_role.c's
+    * local path, used by binaries that host no bus — the thin client. Nothing in
+    * the build keeps them in sync, so a one-sided edit would make the same role
+    * canonicalize differently depending on which binary ran it.
+    *
+    * Deduplicating them means editing delegates module source, which is a
+    * vendored mirror pinned by dependencies/aimee-repositories.lock.json — that
+    * needs a coordinated module release. Until then this table is the guard: it
+    * pins the handler's full mapping so a drifting edit fails here. The mirror of
+    * this expectation for the local path is test_delegate_role.c; the two must
+    * state the same pairs, and that is the invariant a reviewer should check when
+    * touching either table.
+    *
+    * Expectations are written out rather than computed FROM the table under test,
+    * so this cannot pass vacuously by reading the same array it is checking. */
+   static const struct
    {
-      delegates_canonicalize_over_handler(aliases[i], role, sizeof(role));
-      assert(strcmp(role, aimee_delegates_role_canonical(aliases[i])) == 0);
-      assert(strcmp(role, aliases[i]) != 0); /* every entry really is an alias */
+      const char *alias;
+      const char *canonical;
+   } expected[] = {
+       {"implement", "code"},        {"build", "code"},
+       {"reviewer", "review"},       {"verifier", "validate"},
+       {"test", "validate"},         {"check", "validate"},
+       {"evaluate", "validate"},     {"evaluate-optimize", "validate"},
+       {"inspect", "diagnose"},      {"research", "execute"},
+       {"enforce", "execute"},       {"recall", "search"},
+       {"synthesize", "summarize"},  {"rank-fuse", "reason"},
+       {"classify-score", "reason"}, {"planner", "plan"},
+       {"planning", "plan"},
+   };
+   for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i)
+   {
+      delegates_canonicalize_over_handler(expected[i].alias, role, sizeof(role));
+      assert(strcmp(role, expected[i].canonical) == 0);
+      assert(strcmp(role, expected[i].alias) != 0); /* every entry really is an alias */
    }
 
    /* An already-canonical or unknown role passes through untouched. */
