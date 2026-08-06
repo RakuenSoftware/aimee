@@ -98,6 +98,21 @@ func Convene(ctx context.Context, delegates Delegates, run Run, panel Panel, foc
 		rt.CostUnknown = analysis.CostUnknown
 		return *rt, nil
 	}
+	// AUDIT LINE. A review that approves is a decision, and until now it left no
+	// trace: 35 log lines for a whole run, none of them saying what was reviewed,
+	// against what, or why it passed. Diagnosing why a panel waved through work
+	// the request never asked for meant guessing, because the evidence did not
+	// exist.
+	//
+	// Logs what is needed to answer that without leaking the artifact: the run,
+	// how many discrete asks the seats enumerated and how many they judged
+	// unaddressed, the alignment status, and how long the original request was.
+	// A request length of zero here is impossible now (Convene refuses it), so a
+	// SHORT one is the signal worth seeing -- it means the caller passed a
+	// paraphrase of its own plan rather than the ticket, which satisfies the
+	// requirement while defeating its purpose.
+	logReviewDecision(run, analysis)
+
 	feedback, approvals, totalCost := analysis.Feedback, analysis.Approvals, analysis.CostUSD
 	totalCostUnknown := analysis.CostUnknown
 	discussionFailed := 0
