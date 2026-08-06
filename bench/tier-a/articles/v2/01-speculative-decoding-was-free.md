@@ -1,6 +1,6 @@
 # Speculative decoding doubled throughput and cost nothing I could measure
 
-ROUGH DRAFT. Four of six paired arms banked. E4B Q6 and Q8 land tonight.
+ROUGH DRAFT. All six paired arms are banked.
 
 Multi-token prediction on gemma-4 more than doubles throughput on this
 extraction task. It changes 26% of the output text. It changes accuracy by an
@@ -24,18 +24,30 @@ the draft model as the only difference between two arms:
 | E2B | Q6 | 0.6344 | 0.6331 | +0.0013 | +91.6% |
 | E2B | Q8 | 0.6329 | 0.6351 | −0.0022 | +102.5% |
 | E4B | Q4 | 0.6301 | 0.6306 | −0.0005 | +110.6% |
+| E4B | Q6 | 0.6452 | 0.6435 | +0.0017 | +116.2% |
+| E4B | Q8 | 0.6337 | 0.6327 | +0.0010 | **+131.3%** |
 
 10,000 notes per arm, three processes, RX 7900 XTX. The accuracy deltas scatter
-around zero and the sign flips twice. Throughput climbs the whole way.
+around zero, the sign flips three times, and the largest of them is 0.0039.
+Throughput climbs the whole way and never stops climbing.
 
-On the one pair with a paired bootstrap, 20,000 replicates over the same 10,000
+Three of the six carry a paired bootstrap, 20,000 replicates over the same 10,000
 notes:
 
-> no-MTP − MTP = **+0.0005, 95% CI [−0.0028, +0.0036]**
+> E4B Q4: no-MTP − MTP = **+0.0005, 95% CI [−0.0028, +0.0036]**
+> E4B Q6: no-MTP − MTP = **−0.0017, 95% CI [−0.0048, +0.0013]**
+> E4B Q8: no-MTP − MTP = **−0.0010, 95% CI [−0.0041, +0.0021]**
 
-That is not "I cannot tell". It is *the effect is smaller than four thousandths
-of an F1 point in either direction*. A precise null is a stronger statement than
-an indistinguishable one, and it took 10,000 notes to buy.
+None of those is "I cannot tell". Each says *the effect is smaller than five
+thousandths of an F1 point in either direction*. A precise null is a stronger
+statement than an indistinguishable one, and it took 60,000 notes to buy three of
+them.
+
+The throughput column is the other half of the result. 84, 92, 102, 111, 116,
+131% — the gain rises with quant size inside each family, which is what
+bandwidth-bound decoding predicts. A heavier target spends more time waiting on
+memory, so there is more idle compute for speculation to reclaim. Q8 gains most
+because it is the most expensive to read.
 
 ## It is not output-identical, and that is the interesting part
 
