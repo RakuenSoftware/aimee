@@ -244,7 +244,91 @@ func TestRejectDivergentSiblingCreatesAllowsEditOnlyChange(t *testing.T) {
 	}
 }
 
-func TestRejectDivergentSiblingCreatesFailsClosedWithoutFreezeArtifacts(t *testing.T) {
+// TestRejectDivergentSiblingCreatesRejectsOnInvalidFreezeHeadType exercises
+// the wrong-type branch: the sibling's freeze-head artifact exists but its
+// declared type is not "commit", so the freeze-base/freeze-head derived
+// comparison cannot run. The current slice's freeze must fail closed (no
+// silent allow) and the error must identify the sibling rather than a
+// fabricated conflicting path.
+func TestRejectDivergentSiblingCreatesRejectsOnInvalidFreezeHeadType(t *testing.T) {
+	ctx, store, artifacts, registry, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
+
+	if err := store.SetWorktree(ctx, "wi_s0", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := artifacts.PutNodeArtifact("wi_s0", "freeze-head", "opaque", []byte("not a commit")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(slicedir, "frozen.txt"), []byte("conflicting slice blob\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "frozen.txt")
+	gitRun(t, slicedir, "commit", "-m", "divergent create")
+	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+
+	item, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
+	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+	assertFreezeSiblingUncomparable(t, err, item.ID, "wi_s0")
+}
+
+// TestRejectDivergentSiblingCreatesFailsClosedWithMissingFreezeArtifacts
+// covers the genuinely-missing branch: all three freeze artifacts are removed
+// from the store, so there is no basis on which to compute the sibling's
+// create set. The current slice must fail closed with the same
+// freeze_create_create_collision prefix and both slice names — silently
+// passing would let a colliding freeze through.
+func TestRejectDivergentSiblingCreatesFailsClosedWithMissingFreezeArtifacts(t *testing.T) {
+	ctx, store, artifacts, registry, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
+
+	if err := store.SetWorktree(ctx, "wi_s0", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.DeleteWorkItem("wi_s0"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(slicedir, "frozen.txt"), []byte("conflicting slice blob\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "frozen.txt")
+	gitRun(t, slicedir, "commit", "-m", "divergent create")
+	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+
+	item, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
+func assertFreezeSiblingUncomparable(t *testing.T, err error, currentSlice, siblingSlice string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected fail-closed freeze_create_create_collision error, got nil")
+	}
+	for _, want := range []string{freezeCreateCreateCollision, "cannot compare", currentSlice, siblingSlice} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected fail-closed error containing %q, got: %v", want, err)
+		}
+	}
+}
+
+func assertFreezeCreateCollision(t *testing.T, err error, path, currentSlice, siblingSlice string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected freezeCreateCreateCollision error, got nil")
+	}
+	for _, want := range []string{freezeCreateCreateCollision, path, currentSlice, siblingSlice} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected collision error containing %q, got: %v", want, err)
+		}
+	}
+}
+	assertFreezeSiblingUncomparable(t, err, item.ID, "wi_s0")
+}
 	ctx, store, artifacts, registry, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
 
 	if err := store.SetWorktree(ctx, "wi_s0", ""); err != nil {
