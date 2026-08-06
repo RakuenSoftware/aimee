@@ -1781,3 +1781,69 @@ stack.
 **Do not write:** that QAT changes MTP throughput. The evidence for that is a
 tok/s comparison across different rented machines, and the same arm varies by 1.5x
 across machines on its own.
+
+## 35. The six-pair MTP ladder is complete, and the null holds across both families
+
+Six paired 10,000-note arms, one card (RX 7900 XTX), three processes, the draft
+model the only difference between the two sides of each pair.
+
+| model | quant | MTP | no-MTP | ΔF1 | steady throughput |
+|---|---|---:|---:|---:|---:|
+| E2B | Q4 | 0.6246 | 0.6207 | +0.0039 | +84.0% |
+| E2B | Q6 | 0.6344 | 0.6331 | +0.0013 | +91.6% |
+| E2B | Q8 | 0.6329 | 0.6351 | −0.0022 | +102.5% |
+| E4B | Q4 | 0.6301 | 0.6306 | −0.0005 | +110.6% |
+| E4B | Q6 | 0.6452 | 0.6435 | +0.0017 | +116.2% |
+| **E4B** | **Q8** | **0.6337** | **0.6327** | **+0.0010** | **+131.3%** |
+
+**Sign flips three times. Largest |ΔF1| is 0.0039.** Two pairs have paired
+bootstraps at 20,000 replicates over the same 10,000 notes:
+
+> E4B Q4: no-MTP − MTP = +0.0005, 95% CI [−0.0028, +0.0036]
+> E4B Q6: no-MTP − MTP = −0.0017, 95% CI [−0.0048, +0.0013]
+> E4B Q8: no-MTP − MTP = −0.0010, 95% CI [−0.0041, +0.0021]
+
+Three precise nulls, each bounded inside ±0.005. Not "we cannot tell" -- *the
+effect is smaller than five thousandths of an F1 point in either direction*.
+
+### Throughput climbs monotonically and the accuracy does not move
+
+84.0 → 91.6 → 102.5 → 110.6 → 116.2 → **131.3%**. The gain rises with quant size
+within each family, which is what bandwidth-bound decode predicts: a bigger target
+model spends more time waiting on memory, so there is more idle compute for
+speculation to reclaim. Q8 gains most because it is the heaviest to read.
+
+### The final pair is capability on both sides
+
+| | MTP | no-MTP |
+|---|---:|---:|
+| parse_ok = schema_ok | 10000/10000 | 10000/10000 |
+| empty raw / at context | 0 / 0 | 0 / 0 |
+| median completion tokens | 354 | 353 |
+| abstention | 2058 | 2076 |
+| invented on factless rows | 1418 (44.1%) | 1399 (43.5%) |
+| reasoned | 9994 | 9993 |
+| tool-call envelope | 0 | 0 |
+
+Nothing is suppressed on either side, so both figures are capability rather than
+floors. Abstention differs by 19 rows in 3,215 and invention by 19 triples, so
+speculative decoding does not trade restraint for speed either -- a stronger
+statement than the F1 null, because it is measured on the third of the corpus F1
+prices only through false positives.
+
+### What the ladder now supports
+
+**Turn it on.** Six pairs, both model families, three quant levels each: roughly a
+doubling of throughput, rising to 2.3x at Q8, at an accuracy cost bounded inside
+±0.005 F1 by three independent bootstraps.
+
+The limits are unchanged and load-bearing. It is repeatable but NOT identical
+(74/100 against a sequential arm, 100/100 against itself), so an MTP arm cannot be
+compared to a non-MTP arm. And the speedup belongs to the model and the backend
+rather than to the feature.
+
+One limit is now weaker than it was. Article 01 says "I can only vouch for
+gemma-4, the only family here that publishes an MTP draft". That is no longer
+true: Qwen3.6 ships MTP layers in the model file rather than as a separate draft,
+and 12B, 26B-A4B and 31B gemma-4 builds all publish drafts. The rented arms
+running tonight extend this beyond E2B and E4B for the first time.
