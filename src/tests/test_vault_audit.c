@@ -33,6 +33,24 @@ int server_send_response(server_conn_t *conn, cJSON *resp)
    return 0;
 }
 
+/* vault_audit_server_write() also publishes the row onto the audit event bus.
+ * That is a SEPARATE control with its own end-to-end test — test_bus_vault_audit.c
+ * drives the real bridge onto a real bus and reads the ledger back. This test pins
+ * only the D2/D2c 0600 file sink, and linking the bridge here would drag the whole
+ * event bus into a test that has nothing to say about it.
+ *
+ * NOTE this is deliberately a no-op, not an assertion: a change that stops
+ * publishing must fail in test_bus_vault_audit, which owns that behavior, not here. */
+void vault_audit_bridge_server_write(const char *principal, const char *agent, const char *cred,
+                                     const char *fingerprint, const char *transport)
+{
+   (void)principal;
+   (void)agent;
+   (void)cred;
+   (void)fingerprint;
+   (void)transport;
+}
+
 static char *slurp(const char *path, size_t *len_out)
 {
    FILE *f = fopen(path, "rb");
