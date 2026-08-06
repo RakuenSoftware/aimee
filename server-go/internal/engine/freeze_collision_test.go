@@ -381,7 +381,11 @@ func TestRejectDivergentSiblingCreatesAllowsIdenticalCreateFromDistinctSiblingWo
 	// slicedir. This is the production layout for two simultaneous sibling
 	// slices whose durable Worktrees live behind separate git directory
 	// boundaries — slicedir cannot see the sibling-only objects.
-	siblingDir := filepath.Join(t.TempDir(), "sibling")
+	root := t.TempDir()
+	siblingDir := filepath.Join(root, "sibling")
+	if err := os.MkdirAll(siblingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	gitRun(t, siblingDir, "clone", repo, ".")
 	gitRun(t, siblingDir, "checkout", "-q", "-B", "aimee/wi/wi_s0", base)
 	if err := os.WriteFile(filepath.Join(siblingDir, "frozen.txt"), []byte("frozen sibling blob\n"), 0o600); err != nil {
@@ -430,7 +434,11 @@ func TestRejectDivergentSiblingCreatesStillRejectsDivergenceFromDistinctSiblingW
 
 	// Sibling frozen in a clone of the repo so the post-clone sibling-only
 	// commits are unreachable from the current slicedir.
-	siblingDir := filepath.Join(t.TempDir(), "sibling")
+	root := t.TempDir()
+	siblingDir := filepath.Join(root, "sibling")
+	if err := os.MkdirAll(siblingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	gitRun(t, siblingDir, "clone", repo, ".")
 	gitRun(t, siblingDir, "checkout", "-q", "-B", "aimee/wi/wi_s0", base)
 	if err := os.WriteFile(filepath.Join(siblingDir, "frozen.txt"), []byte("frozen sibling blob\n"), 0o600); err != nil {
