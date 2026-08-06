@@ -716,6 +716,58 @@ to date is a valid measurement of aimee's retrieval, and the first one that will
 be is the rerun on the build that fixes this.
 
 
+## Finding 20 — the review was asked exactly the right question and rubber-stamped it
+
+On am_312e901904 the agent invoked `roundtable_review` correctly and with a
+better brief than most humans would write:
+
+```json
+"original_request": "...TICKET.txt: Two defects behind the same report..."
+"brief": {"focus": [
+   "Verify both distinct defects in the ticket are actually fixed",
+   "Check fd remapping/chdir ordering for regressions",
+   "Check bulk-clone selection and inventory reconciliation in both UIs"]}
+"artifact_stage": "frozen_diff"
+```
+
+The first focus item names the exact failure. The patch under review fixed
+defect 1 and misdiagnosed defect 2 (it guessed stale client selection state; the
+real bug was repos filed under the browsed owner instead of their own
+clone_url, in server_http_routes_git.c, which the patch never touches).
+
+The panel returned:
+
+```json
+"approved": true,
+"artifact": "Roundtable approved the artifact with no findings.",
+"participants_total": 1, "participants_used": 1, "cost_usd": 0
+```
+
+**The configured default panel is one seat.**
+
+```json
+"seats": [{"model": "$random", "persona": "qa"}],
+"chairman": "$random", "chairman_enabled": true,
+"min_successful": 1, "max_cost_usd": 0
+```
+
+A roundtable of one is a reviewer, not a roundtable, and the chairman has
+nothing to synthesise. `cost_usd: 0` is unexplained: a real model review is not
+free, and no delegate or convene line appears in the server log for the run id.
+Whether the seat ran a model and missed the omission, or never ran, is NOT yet
+established -- and the two have very different fixes.
+
+**Why this is the most actionable finding in the document.** Every other defect
+found in this study was in plumbing. This one is in the mechanism that is
+supposed to be aimee's advantage. The agent did its part: it froze the diff,
+passed the full ticket as original_request (which the tool documents as
+goal-drift detection -- "the change is reasonable but is not the change that was
+asked for"), and briefed the panel to check both defects. The review failed open.
+
+Fixing it is the difference between an arm that ships half a ticket and an arm
+that catches its own omission, and it costs nothing in agent turns because the
+call is already being made.
+
 ## Methodology traps hit in this work
 
 Record these; several produced wrong published numbers first.
