@@ -1129,13 +1129,13 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
                           sizeof(*batch_vecs));
       batch_dim = batch_vecs ? kb_embed_file_chunks(c, n_chunks, batch_vecs) : 0;
    }
-   if (!wants_vector)
-   {
-      free(doc_ids);
-      return;
-   }
-
-   for (int ci = 0; ci < n_chunks; ci++)
+   /* Gate the embed loop, NOT the rest of the function. Returning early here
+    * skipped the per-file bookkeeping at the bottom -- the dedup sketches, the
+    * minhash signature, and above all kb_file_index_store_from_path. A file
+    * with no file-index row is never skippable, so every non-prose file was
+    * re-chunked on every build; and files_indexed stopped counting, which is
+    * why a pass reported "0 indexed" while adding 7683 chunks. */
+   for (int ci = 0; wants_vector && ci < n_chunks; ci++)
    {
       int64_t doc_id = doc_ids[ci];
       if (doc_id < 0)
