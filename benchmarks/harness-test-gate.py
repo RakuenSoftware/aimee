@@ -37,6 +37,7 @@ Deliberately NOT part of this gate: whether the agent's test resembles the
 reference. Converging on the upstream approach is worth measuring and is
 reported separately, but requiring it would grade style rather than behaviour.
 """
+import ast
 import py_compile
 import re
 import shutil
@@ -48,7 +49,21 @@ RUNNER = Path("/opt/bench/ponytail-codex-benchmark/battery/codex_matrix_runner.p
 GATE = '''
 
 # --- agent test gate -------------------------------------------------------
-TEST_PATH_RE = re.compile(r"(^|/)tests?/|(^|/)test_[^/]+$|_test\\.(go|py|ts|tsx)$")
+# Building a C test target is far slower than running one, so it does not share
+# CHECK_TIMEOUT. Defined here rather than assumed: the gate is injected into a
+# runner it does not own, and referencing a global that runner happens not to
+# define fails at grading time, after the cell has already been paid for.
+BUILD_TIMEOUT = int(os.environ.get("PT_BUILD_TIMEOUT", "900"))
+# `.test.ts` / `.spec.tsx` is the dominant JS/TS convention and the original
+# pattern only knew `_test.ts`. On am_312e901904 that made the agent's
+# frontend/src/setup/ownerUrl.test.ts invisible to the gate, which would
+# have scored a two-defect fix as if only the C half carried a test.
+TEST_PATH_RE = re.compile(
+    r"(^|/)tests?/"                      # tests/ or test/ directory
+    r"|(^|/)test_[^/]+$"                 # test_foo.py
+    r"|_test\\.(go|py|ts|tsx|js|jsx)$"    # foo_test.go
+    r"|\\.(test|spec)\\.[jt]sx?$"          # foo.test.ts, foo.spec.tsx
+)
 
 
 def agent_test_files(changed):
@@ -134,6 +149,59 @@ def agent_test_gate(workspace, task, changed):
 '''
 
 
+def unresolved_globals(gate_src, runner_src):
+    """Free names in `gate_src` that `runner_src` does not define.
+
+    The gate is injected into a runner it does not own, so it can only use
+    globals that runner already provides. Referencing one it does not -- as
+    BUILD_TIMEOUT did -- raises NameError at GRADING time, i.e. after the agent
+    has run and the cell has been paid for. py_compile cannot see it, so the
+    names are resolved statically here instead.
+    """
+    import builtins
+    import symtable
+
+    free = set()
+    for scope in _walk_scopes(symtable.symtable(gate_src, "<gate>", "exec")):
+        for sym in scope.get_symbols():
+            if sym.is_global() and not sym.is_assigned():
+                free.add(sym.get_name())
+
+    try:
+        defined = _module_level_names(ast.parse(runner_src))
+    except SyntaxError as exc:
+        return ["runner does not parse: %s" % exc]
+    defined |= set(dir(builtins))
+    # Names the gate defines for itself at module level.
+    defined |= _module_level_names(ast.parse(gate_src))
+
+    missing = sorted(n for n in free if n not in defined)
+    return ["gate references `%s`, which the runner does not define" % n for n in missing]
+
+
+def _walk_scopes(scope):
+    yield scope
+    for child in scope.get_children():
+        yield from _walk_scopes(child)
+
+
+def _module_level_names(tree):
+    names = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                names.add((alias.asname or alias.name).split(".")[0])
+    return names
+
+
 def main():
     text = RUNNER.read_text()
     if "agent_test_gate" in text:
@@ -184,6 +252,12 @@ def main():
         py_compile.compile(str(RUNNER), doraise=True)
     except py_compile.PyCompileError as exc:
         problems.append("does not compile: %s" % exc)
+
+    # Every global the gate reads must exist in the runner it is injected into.
+    # BUILD_TIMEOUT did not, and nothing caught it until grading -- one more
+    # cell run to completion and then discarded. A NameError inside a function
+    # is invisible to py_compile, so resolve the free names explicitly.
+    problems += unresolved_globals(GATE, RUNNER.read_text())
 
     body = RUNNER.read_text()
     bind = body.find("changed, loc = collect_patch")
