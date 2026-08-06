@@ -116,7 +116,14 @@ def agent_test_gate(workspace, task, changed):
         return {"ok": False, "reason": "agent_test_does_not_build", "files": written}
 
     # RED: the same test files, on the PRISTINE corpus, must fail.
+    #
+    # A missing seed is a HARNESS condition, not an agent failure. Raising here
+    # killed the whole cell after the agent had already run; report it instead
+    # so the run survives and the cause is legible in the results.
     seed = seed_for(task)
+    if not seed.is_dir():
+        return {"ok": False, "reason": "seed_unavailable_for_red_replay:%s" % seed,
+                "files": written}
     with tempfile.TemporaryDirectory(prefix="aimee-redgate-") as tmp:
         pristine = Path(tmp) / "ws"
         shutil.copytree(seed, pristine, symlinks=True)
