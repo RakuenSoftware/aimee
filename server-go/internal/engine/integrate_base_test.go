@@ -324,6 +324,143 @@ func TestFreezeRejectsDivergentSiblingCreateCreateCollision(t *testing.T) {
 	}
 }
 
+// Two sibling slices edit non-overlapping hunks of the same pre-existing base
+// file with differing content. Both freezes must succeed: the diff-vs-base is
+// pure modifications to a file that already exists in the parent, so the
+// create-create rejection must not fire. This pins the scope of
+// rejectDivergentSiblingCreates to sibling creates of new files and prevents
+// future scope creep that would incorrectly reject legitimate existing-file
+// edits.
+func TestFreezeAllowsSiblingsEditingDistinctHunksOfExistingBaseFile(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin.git")
+	repo := filepath.Join(root, "repo")
+	gitRun(t, root, "init", "--bare", "-b", "trunk", origin)
+	gitRun(t, root, "clone", origin, repo)
+	// A multi-hunk pre-existing base file so each slice can edit a distinct region.
+	readme := []byte("line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\n")
+	if err := os.WriteFile(filepath.Join(repo, "README"), readme, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "README")
+	gitRun(t, repo, "commit", "-m", "init")
+	gitRun(t, repo, "push", "-u", "origin", "trunk")
+
+	feature := "aimee/feat/wi_parent"
+	gitRun(t, repo, "branch", feature)
+	gitRun(t, repo, "push", "origin", feature)
+
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: slice\nstart: freeze\nnodes:\n  - id: branch\n    block: branch.open\n  - id: freeze\n    block: freeze\n    in: {branch: branch.out}\n    next: review\n  - id: review\n    block: review\n    in: {src: freeze.out}\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "slice.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := wfe.NewRegistry(workflowDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	for _, in := range []db1.CreateWorkItem{
+		{ID: "wi_parent", Repo: repo, ProposalPath: "p", WorkflowName: "build", StartStage: "feature"},
+		{ID: "wi_s0", Repo: repo, ProposalPath: "s0", WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"},
+		{ID: "wi_s1", Repo: repo, ProposalPath: "s1", WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"},
+	} {
+		if err := store.CreateWorkItem(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manager, err := NewWorktreeManager(store, filepath.Join(root, "trees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, worktrees: manager, artifacts: artifacts, workflows: registry}
+
+	first, err := store.WorkItem(ctx, "wi_s0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDir, _, err := manager.Ensure(ctx, first, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Slice A edits the top half of README.
+	if err := os.WriteFile(filepath.Join(firstDir, "README"), []byte("sliceA-1\nsliceA-2\nline3\nline4\nline5\nline6\nline7\nline8\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, firstDir, "add", "README")
+	gitRun(t, firstDir, "commit", "-m", "slice A existing-file edit")
+	firstResult, err := runner.freeze(ctx, StepRequest{WorkItem: first, Node: wfe.Node{ID: "freeze"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstResult.Status != StepAdvanced {
+		t.Fatalf("first freeze status=%q detail=%q", firstResult.Status, firstResult.Detail)
+	}
+	// Advance the sibling past freeze so rejectDivergentSiblingCreates considers
+	// it a durably frozen peer when evaluating the second slice.
+	if err := store.Move(ctx, "wi_s0", "freeze", "review", "advance", "", firstResult.ContentHash, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondDir, _, err := manager.Ensure(ctx, second, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Slice B edits the bottom half of the SAME README — non-overlapping hunk,
+	// different content from slice A.
+	if err := os.WriteFile(filepath.Join(secondDir, "README"), []byte("line1\nline2\nline3\nline4\nsliceB-5\nsliceB-6\nsliceB-7\nsliceB-8\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, secondDir, "add", "README")
+	gitRun(t, secondDir, "commit", "-m", "slice B existing-file edit")
+
+	secondResult, err := runner.freeze(ctx, StepRequest{WorkItem: second, Node: wfe.Node{ID: "freeze"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The acceptance criterion: pre-existing file edits must not be rejected
+	// by rejectDivergentSiblingCreates. If a future regression broadens that
+	// rejection to include diffs against pre-existing files, this freeze will
+	// fail with freezeCreateCreateCollision (or similar) and the test fails.
+	if secondResult.Status != StepAdvanced {
+		t.Fatalf("second freeze of existing-file edit was rejected: status=%q detail=%q", secondResult.Status, secondResult.Detail)
+	}
+	if strings.Contains(secondResult.Detail, freezeCreateCreateCollision) {
+		t.Fatalf("rejectDivergentSiblingCreates should not flag pre-existing file edits, got detail=%q", secondResult.Detail)
+	}
+
+	if err := store.Move(ctx, "wi_s1", "freeze", "review", "advance", "", secondResult.ContentHash, 0); err != nil {
+		t.Fatal(err)
+	}
+	storedSecond, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storedSecond.Stage != "review" {
+		t.Fatalf("second slice stage=%q want %q (freeze must transition to review)", storedSecond.Stage, "review")
+	}
+	if _, err := artifacts.NodeArtifact("wi_s1", "freeze"); err != nil {
+		t.Fatalf("second freeze should publish artifact: %v", err)
+	}
+}
+
 // Replays the appliance-runbook packet failure mode: two slices from the same
 // packet set create the same new runbook path differently. The scheduler must
 // stop the losing packet at freeze and never queue PR or merge work for it.
