@@ -105,10 +105,13 @@ type Engine struct {
 }
 
 // rootCompletionLock returns the existing short per-root serialization lock.
-// Capped work uses it after a runner completes to order accounting and lifecycle
-// commits. Freeze acquires the same lock before inspecting sibling state and
-// holds it through artifact publication and Move, making compare-and-record
-// atomic without introducing a second parent-lock implementation.
+// Freeze acquires the same lock before invoking its runner and holds it through
+// the freeze runner and its artifact writes (publication and Move), so that the
+// freeze runner plus its artifact writes execute atomically with respect to
+// sibling completion work and no second parent-lock implementation is needed.
+// Capped-work runners are intentionally invoked outside this lock — the lock is
+// only taken once the capped runner returns, to order the actual-cost
+// reconciliation and lifecycle commit per root.
 func (e *Engine) rootCompletionLock(rootID string) *sync.Mutex {
 	e.budgetMu.Lock()
 	defer e.budgetMu.Unlock()
@@ -260,9 +263,11 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	// terminal transition happening to move the row off 'reserved' first.
 	close(stopHeartbeat)
 	<-heartbeatDone
-	// Runner calls are deliberately outside this lock. Atomic durable reservation
-	// permits capped siblings to execute concurrently; only the short actual-cost
-	// reconciliation and lifecycle commit remain ordered per root.
+	// Freeze holds completionLock across its runner and artifact writes (set up
+	// above); here we only need to take it for capped-work reconciliation and
+	// lifecycle commit, which intentionally run outside the runner call so that
+	// capped siblings can execute concurrently while only the short accounting
+	// step remains ordered per root.
 	if budget.MaxUSD > 0 && !completionLocked {
 		completionLock = e.rootCompletionLock(budget.RootID)
 		completionLock.Lock()
