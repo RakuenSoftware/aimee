@@ -379,9 +379,18 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 		if artifactType == "" {
 			artifactType = block.Produces
 		}
-		if _, artifactErr := e.artifacts.PutNodeArtifact(item.ID, node.ID, artifactType,
-			[]byte(step.Artifact)); artifactErr != nil {
+		written, artifactErr := e.artifacts.PutNodeArtifact(item.ID, node.ID, artifactType,
+			[]byte(step.Artifact))
+		if artifactErr != nil {
 			return out, e.parkAfterSpend(ctx, item, "artifact_write_failed", artifactErr, step.CostUSD)
+		}
+		// Non-freeze runners commonly leave StepResult.ContentHash empty; the
+		// store's hash is derived from the bytes we just persisted, so adopt it
+		// whenever the runner did not pre-populate the field. Freeze already
+		// computes the same hash in its pre-write under the completion lock, so
+		// for freeze the value is identical and re-applying it here is a no-op.
+		if step.ContentHash == "" {
+			step.ContentHash = written.Hash
 		}
 	}
 	switch step.Status {
