@@ -188,7 +188,6 @@ func TestFreezeUsesMergedRemoteFeatureTip(t *testing.T) {
 	}
 }
 
-
 func TestFreezeRejectsDivergentSiblingCreateCreateCollision(t *testing.T) {
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin.git")
@@ -976,7 +975,6 @@ nodes:
 	}
 }
 
-
 func TestIntegrateFeatureBaseNoopWhenAlreadyCurrent(t *testing.T) {
 	repo, slicedir := setupSliceRepo(t)
 	_ = repo
@@ -1272,14 +1270,18 @@ func TestDocumentPartialNoChangeAdvancesUnchangedHead(t *testing.T) {
 		t.Fatalf("document no-op dirtied the worktree: %q", got)
 	}
 }
+
 // assertFreezeSiblingUncomparable verifies that err is a freezeSiblingUncomparableError:
-// it carries the freeze_create_create_collision prefix (so callers matching on the
-// prefix catch both genuine and un-comparable shapes), names the requested path, and
-// names both the current slice and the frozen sibling slice.
+// it carries the freeze_create_create_collision sentinel (so callers matching on
+// errors.Is catch both genuine and un-comparable shapes), names the requested
+// path, and names both the current slice and the frozen sibling slice.
 func assertFreezeSiblingUncomparable(t *testing.T, err error, path, currentSlice, siblingSlice string) {
 	t.Helper()
 	if err == nil {
 		t.Fatal("expected freezeSiblingUncomparableError, got nil")
+	}
+	if !errors.Is(err, ErrFreezeCreateCreateCollision) {
+		t.Fatalf("expected freeze_create_create_collision sentinel, got: %v", err)
 	}
 	msg := err.Error()
 	for _, want := range []string{freezeCreateCreateCollision, path, currentSlice, siblingSlice} {

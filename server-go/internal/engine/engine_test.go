@@ -1574,3 +1574,116 @@ nodes:
 		t.Fatalf("persisted state = %q, want rejected", item.State)
 	}
 }
+
+// freezeCollisionFromHTTPRunnerRunner returns StepFailed with ErrKind (and
+// Detail) but no Err, simulating exactly what HTTPRunner delivers after JSON
+// decode: StepResult.Err is tagged `json:"-"` so the typed sentinel cannot
+// cross that boundary, and the in-process Err value must be nil at this
+// point. engine.Advance is responsible for rehydrating the typed sentinel
+// from ErrKind before downstream errors.Is matching.
+type freezeCollisionFromHTTPRunnerRunner struct{}
+
+func (freezeCollisionFromHTTPRunnerRunner) Run(context.Context, StepRequest) (StepResult, error) {
+	return StepResult{
+		Status:  StepFailed,
+		Detail:  ErrFreezeCreateCreateCollision.Error() + ": path foo current slice wi_http conflicts with already frozen sibling slice wi_sibling",
+		ErrKind: freezeCreateCreateCollision,
+	}, nil
+}
+
+// TestFreezeCollisionSentinelSurvivesHTTPRunnerJSONBoundary is the regression
+// guard for the boundary defect: the typed freeze-create-create-collision
+// sentinel must remain detectable via errors.Is after the StepResult has
+// round-tripped through the HTTP runner's JSON encode/decode, where the
+// in-memory Err field is stripped. The marker field ErrKind survives the
+// round trip and engine.Advance rehydrates the typed sentinel before
+// propagating AdvanceResult.Err to the scheduler.
+func TestFreezeCollisionSentinelSurvivesHTTPRunnerJSONBoundary(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte(`name: slice
+start: freeze
+nodes:
+  - id: source
+    block: understand
+  - id: impl
+    block: implement
+    in: {plan: source.out}
+  - id: freeze
+    block: freeze
+    in: {branch: impl.out}
+    next: pr
+  - id: pr
+    block: pr.open
+    in: {src: freeze.out}
+    next: ci
+  - id: ci
+    block: gate.ci
+    in: {pr: pr.out}
+    on_pass: merge
+    on_fail: impl
+  - id: merge
+    block: merge
+    in: {pr: pr.out}
+`)
+	if err := os.WriteFile(filepath.Join(workflowDir, "slice.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal("wi_http", []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := artifacts.PutNodeArtifact("wi_http", "impl", "branch", []byte("branch-stub")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkItem(context.Background(), db1.CreateWorkItem{ID: "wi_http",
+		Repo: "repo", ProposalPath: "p", WorkflowName: "slice",
+		WorkflowVersion: def.Version, StartStage: "freeze"}); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := New(store, artifacts, workflowDir, freezeCollisionFromHTTPRunnerRunner{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := eng.Advance(context.Background(), "wi_http")
+	if err != nil {
+		t.Fatalf("advance: %v", err)
+	}
+	if out.Err == nil {
+		t.Fatal("expected AdvanceResult.Err to be populated by rehydration, got nil")
+	}
+	if !errors.Is(out.Err, ErrFreezeCreateCreateCollision) {
+		t.Fatalf("expected errors.Is(out.Err, ErrFreezeCreateCreateCollision) to be true, got: %v", out.Err)
+	}
+	if !out.Terminal || out.State != "rejected" {
+		t.Fatalf("collision must finish the item rejected, got terminal=%v state=%q",
+			out.Terminal, out.State)
+	}
+	// Operator-facing detail survives end-to-end via the durable StepResult.Detail
+	// (passed to e.db.Finish and persisted on the rejected item), while the
+	// typed sentinel exposes errors.Is matching. The rehydrated sentinel itself
+	// only carries the collision marker text; the human-readable path/slice
+	// detail is preserved separately on StepResult.Detail, unchanged for callers.
+	item, err := store.WorkItem(context.Background(), "wi_http")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.State != "rejected" {
+		t.Fatalf("persisted state = %q, want rejected", item.State)
+	}
+}

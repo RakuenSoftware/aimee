@@ -58,7 +58,15 @@ type StepResult struct {
 	Feedback     *wfe.ReviewFeedback `json:"feedback,omitempty"`
 	PauseReason  string              `json:"pause_reason,omitempty"`
 	Detail       string              `json:"detail,omitempty"`
-	CostUSD      float64             `json:"cost_usd,omitempty"`
+	Err          error               `json:"-"`
+	// ErrKind carries a JSON-safe marker for the sentinel wrapped by Err. The
+	// HTTP runner serializes StepResult across a JSON boundary and `error` is
+	// tagged `json:"-"`, so the in-memory sentinel value cannot cross that
+	// boundary. Runners populate ErrKind with a stable identifier (e.g.
+	// freezeCreateCreateCollision) and engine.Advance rehydrates the typed
+	// sentinel from it before downstream errors.Is matching.
+	ErrKind string  `json:"err_kind,omitempty"`
+	CostUSD float64 `json:"cost_usd,omitempty"`
 	// CostUnknown means at least one billable call in this step produced no
 	// measurement. CostUSD is then a lower bound, so the engine must charge the
 	// authorized reservation instead of under-committing measured spend.
@@ -170,6 +178,7 @@ type AdvanceResult struct {
 	NextStage   string
 	State       string
 	PauseReason string
+	Err         error `json:"-"`
 }
 
 func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult, error) {
@@ -538,6 +547,16 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 		return out, nil
 
 	case StepFailed:
+		// The HTTP runner serializes StepResult across a JSON boundary and Err is
+		// tagged `json:"-"`, so the in-memory sentinel cannot survive the round
+		// trip. Rehydrate the typed sentinel from ErrKind before downstream
+		// errors.Is matching.
+		if step.Err == nil && step.ErrKind == freezeCreateCreateCollision {
+			step.Err = ErrFreezeCreateCreateCollision
+		}
+		if errors.Is(step.Err, ErrFreezeCreateCreateCollision) {
+			out.Err = step.Err
+		}
 		if err := e.db.Finish(ctx, item.ID, node.ID, "rejected", step.Detail,
 			step.ContentHash, step.CostUSD); err != nil {
 			return out, err

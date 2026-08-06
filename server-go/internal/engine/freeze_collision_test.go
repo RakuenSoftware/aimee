@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -318,6 +319,9 @@ func assertFreezeCreateCollision(t *testing.T, err error, path, currentSlice, si
 	t.Helper()
 	if err == nil {
 		t.Fatal("expected freezeCreateCreateCollision error, got nil")
+	}
+	if !errors.Is(err, ErrFreezeCreateCreateCollision) {
+		t.Fatalf("expected freeze_create_create_collision sentinel, got: %v", err)
 	}
 	for _, want := range []string{freezeCreateCreateCollision, path, currentSlice, siblingSlice} {
 		if !strings.Contains(err.Error(), want) {
