@@ -97,6 +97,14 @@ int main(void)
    assert(vault_service_delete(p, "claude", "api_key") == VAULT_OK);
    assert(vault_service_unlock(p, ATTEST_TCP_BEARER, rk, sizeof rk, T0) == VAULT_ERR_TRANSPORT);
 
+   /* The server-principal WRITE (POST /v1/vault/set_server, agent API-key writes).
+    * It is driven from the HTTP layer and does NOT pass through vault_service's
+    * access hook, so it needs its own bridge call — before that existed this row
+    * reached only the local audit_log file and never the bus, leaving the
+    * highest-privilege vault op the one op absent from the replayable trail.
+    * Only the non-secret fingerprint crosses; `so` stays out of scope entirely. */
+   vault_audit_bridge_server_write(p, "openai", "api_key", "a1b2c3d4", "webchat");
+
    obs_bus_stop(); /* drains every in-flight row into the ledger */
 
    cJSON *rows = audit_ledger_read(NULL, NULL);
@@ -130,6 +138,17 @@ int main(void)
    assert(unlock_deny);
    assert(strcmp(sval(unlock_deny, "verdict"), "deny") == 0);
    assert(strcmp(sval(unlock_deny, "reason_code"), "transport_not_allowed") == 0);
+
+   /* The server-principal write lands on the SAME bus -> ledger stream as every
+    * access row above: same actor, correlated by the same command identity, with
+    * the attesting transport as mode and the key fingerprint (never the key) as
+    * the reason. This is the row that previously existed only in a local file. */
+   cJSON *set_server = find_row(rows, "vault.set_server", "openai/api_key");
+   assert(set_server);
+   assert(strcmp(sval(set_server, "actor"), p) == 0);
+   assert(strcmp(sval(set_server, "verdict"), "allow") == 0);
+   assert(strcmp(sval(set_server, "mode"), "webchat") == 0);
+   assert(strcmp(sval(set_server, "reason_code"), "fp=a1b2c3d4") == 0);
 
    /* THE invariant: no secret plaintext leaked into ANY field of ANY row. */
    char *dump = cJSON_PrintUnformatted(rows);
