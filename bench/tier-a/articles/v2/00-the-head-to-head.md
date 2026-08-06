@@ -10,8 +10,6 @@ Then I rented bigger GPUs.
 
 The ceiling moved to 0.7257. Almost none of the movement came from size.
 
-## The table
-
 | model | quant | F1 | prec | rec | parse | abstain | spurious | reasons |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | Qwen3.6-35B-A3B | UD-Q4, MoE | **0.7257** | 0.6841 | 0.7727 | 1.00 | 0.699 | 99 | 1.00 |
@@ -138,7 +136,7 @@ unreadable rows as failures. Its real capability is above the number I printed, 
 overstated by an amount I cannot currently quantify.
 
 **MiniCPM5-1B parses 0.87.** Its 0.963 abstention and 12 spurious triples look like
-world-class restraint until you notice it is barely emitting anything.
+the best discipline in the table until you notice it is barely emitting anything.
 
 **LFM2.5-1.2B parses 0.73.**
 
@@ -163,24 +161,6 @@ problem, and I cannot tell you which rows.
 
 One model reasons partially: gemma-4-E4B under QAT, on 85% of rows. I do not know
 why.
-
-## What I would run today
-
-**If it fits: Qwen3.6-35B-A3B.** The only separably best model in the field, parses
-everything, 0.699 abstention, 234 tok/s. 16.4 GiB at UD-Q4, so a 24 GB card.
-
-**On a 16 GB card: gemma-4-26B-A4B at QAT UD-Q4.** 0.6804, indistinguishable from
-models three rows above it, and **323 tok/s, the fastest arm in this project.** It
-fits in 13.27 GiB because QAT shrinks it. The non-QAT build of the same model is
-15.84 GiB and does not fit that card at all.
-
-**If invented facts are expensive: granite-4.1-3b.** A quarter of the invention rate
-of the model directly above it.
-
-**If you need recall: gemma-4-31B.** 0.8000, and you pay in precision and restraint.
-
-**Nothing below about 1.2B on this prompt.** It either fails to parse or answers
-confidently and wrongly.
 
 ## What this is not
 
@@ -213,7 +193,25 @@ alone is worth about 0.0105 F1 here.
 throughput is settled across three readings at 64.5, 64.5 and 64.2 tok/s, so the
 speed claim holds. It has no F1 in this table and I have not written one in.
 
-## What would change the recommendation
+## What I would run today
+
+**If it fits: Qwen3.6-35B-A3B.** The only separably best model in the field, parses
+everything, 0.699 abstention, 234 tok/s. 16.4 GiB at UD-Q4, so a 24 GB card.
+
+**On a 16 GB card: gemma-4-26B-A4B at QAT UD-Q4.** 0.6804, indistinguishable from
+models three rows above it, and **323 tok/s, the fastest arm in this project.** It
+fits in 13.27 GiB because QAT shrinks it. The non-QAT build of the same model is
+15.84 GiB and does not fit that card at all.
+
+**If invented facts are expensive: granite-4.1-3b.** A quarter of the invention rate
+of the model directly above it.
+
+**If you need recall: gemma-4-31B.** 0.8000, and you pay in precision and restraint.
+
+**Nothing below about 1.2B on this prompt.** It either fails to parse or answers
+confidently and wrongly.
+
+## Four things would move this table
 
 1. **The 12B parse failures diagnosed.** 83 to 98 unreadable rows on a model near
    the top is the largest single understatement in this table, and I have not opened

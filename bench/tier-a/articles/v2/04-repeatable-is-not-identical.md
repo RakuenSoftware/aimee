@@ -61,7 +61,7 @@ The three-way check matters more than a second run would. Two identical runs can
 happen because something was cached or copied. A third, launched from a different
 script on a different day, is harder to explain that way.
 
-## The title, in one comparison
+## Two configurations, each perfectly repeatable, permanently 0.0105 apart
 
 That same three-process arm does **not** agree with a one-process run of the same
 model, quant, prompt and decoding setting. Process count is the only difference.
@@ -168,7 +168,7 @@ on. Prefilling 600 tokens is noise next to two seconds of generation.
 I wrote "that is the article owner's call" into a defect entry rather than spending
 40 minutes finding out.
 
-## What to require
+## Require self-reproduction three ways before you trust an arm
 
 **Self-reproduction, per configuration, three ways.** Run one arm three times before
 you trust any arm. Two can agree because something was cached.
@@ -208,7 +208,7 @@ both and compared. Every cross-card number I have published carries an unquantif
 term because of it, which is why the two quant pairs now running keep each pair on a
 single card rather than splitting halves across the field.
 
-## What I have not measured
+## Long generations, and the division I cannot do
 
 Both identity measurements used the standard extraction prompt, a few hundred
 tokens. A configuration that drifts only on long generations would not appear in

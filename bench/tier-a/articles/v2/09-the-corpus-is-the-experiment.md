@@ -137,7 +137,7 @@ file I cannot reproduce, and the only honest options are to version it as a bina
 artifact and say so, or to rebuild from scratch and lose comparability with
 everything already banked.
 
-## What to do
+## Stratify, and keep what built the corpus
 
 **Commit the generator inputs before the first run.** Not after. I lost this and
 cannot get it back.
@@ -155,7 +155,7 @@ template looks like from the outside.
 **Turn the cache off before comparing across corpora**, or accept that a subset is
 a different measurement from a run.
 
-## The limit I cannot close from inside
+## Every conclusion in this series rides on one corpus
 
 Everything here ran on one corpus from one pipeline with one generator model. Any
 bias in that generator is shared by every arm, so a quant direction and a corpus

@@ -152,7 +152,7 @@ membership. Each would have traded a fragmentation problem for a precision probl
 Early result at n=223 under the expanded ontology: novel-predicate rate fell from
 23.5% to 10.0%. Provisional, because that arm was interrupted.
 
-## What to do
+## Read the scorer as the specification it already is
 
 **Diff your scorer against your pipeline, line by line.** Every normalisation the
 scorer performs and the pipeline does not is a place where you are measuring a
@@ -173,7 +173,7 @@ were undefined.
 **When you fold, under-fold.** The error you can undo is better than the error you
 cannot.
 
-## What this piece does not have
+## A structural defect does not need a large n, and one claim here is not structural
 
 Sample size. Most of these were found during a 70-note era, and the polarity figure
 is two models on one corpus.

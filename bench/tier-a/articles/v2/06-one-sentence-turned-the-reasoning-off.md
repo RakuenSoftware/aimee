@@ -9,7 +9,7 @@ hardware and moved on.
 It should have taken six hours. The model was not thinking, and it was not thinking
 because of a sentence I had written to make its output easier to parse.
 
-## The clause
+## One sentence, applied to a channel I did not mean
 
 The extraction prompt ended with:
 
@@ -207,7 +207,7 @@ ones lacking the capability.
 I have run the diagnostic on four of twenty-two. Until it runs on the rest, the split
 in that column is a hypothesis about my prompt as much as about the models.
 
-## What to do
+## Make the reasoning count a gate, not a field
 
 **Count reasoning rows and print the percentage.** Not a flag, a percentage, per
 arm. Mine was one field in the prediction row and nothing read it for weeks.

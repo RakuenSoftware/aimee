@@ -199,7 +199,7 @@ interval. **State whether each F1 is a floor or a capability, then bound the
 correction before arguing.** Here the bound was a tenth of the noise. On other arms
 in this project the same check was the whole result.
 
-## The decision I made
+## Check for a QAT build before you argue about bit width
 
 - **Check for a QAT build before choosing a bit width.** On E2B it beat every
   bit-width step in this project. On a 16 GB card it decides which models exist.
@@ -216,7 +216,7 @@ Note what that rests on. Not significance, which I mostly do not have. Direction
 that has never reversed, magnitude differing between families, and metric agreement
 in one family and not the other.
 
-## The limits I cannot close
+## One corpus, and three pairs split across two machines
 
 **One corpus.** Every ladder ran on one pipeline with one generator model. A quant
 direction and a generator artifact are indistinguishable from inside. The test is a

@@ -7,7 +7,7 @@ Every failure below produced a number, most of them plausible. One produced a ra
 If you are ranking local models on one column, this is what that column does not
 carry.
 
-## Concede the strong version first
+## F1 is not blind, and I published that it was
 
 F1 is not blind. I published that it was, and it was wrong.
 
@@ -173,7 +173,7 @@ that check builds. The guard blocked a valid arm.
 **The general failure:** a guard with no override, on a naming convention you do
 not control. Mine now takes an explicit override, used where it is documented why.
 
-## What to print
+## Six columns your harness already computes and does not show
 
 **Parse rate and schema rate.** Separates "cannot do it" from "wrong envelope".
 
@@ -195,7 +195,7 @@ take a working model to zero, and it did, twice.
 Every one of those was already being computed somewhere in my harness before I
 printed it. The cost of this list is display, not measurement.
 
-## What is still open
+## E4B stops reasoning on 16% of rows and I cannot say why
 
 I do not know why E4B declines to reason on 16% of rows. Not context length, not
 truncation, not the tool-call envelope: all three are zero across that arm. That

@@ -135,7 +135,7 @@ That is the largest open item in this piece, and it points the same way every ti
 **before concluding a small model cannot do the task, check that your prompt let it
 try.**
 
-## What I would do
+## Shortlist at 2B to 4B, then spend the VRAM somewhere else
 
 **Shortlist at 2B to 4B, then check what a bigger card would buy.** In my field that
 is +0.047 for fifteen times the parameters, and I would rather spend the VRAM on a
@@ -157,7 +157,7 @@ right shape, and two extracted correctly and were emptied by a confidence gate.
 to load before serving its first note, and that appears in no accuracy column
 anywhere.
 
-## What this piece still needs
+## The sub-2B rows are the weakest thing here
 
 1. **The sub-2B models re-run with matched prompts.** Two are floors and one is
    untested against its own format.

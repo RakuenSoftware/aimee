@@ -195,7 +195,7 @@ The Qwen mislabelling is the same failure with a different surface. `draft_n` wa
 in every row of both files. I read the throughput column instead and explained it
 with a feature the model does not have.
 
-## What to do with it
+## Turn it on, then stop quoting a single speedup for it
 
 Turn it on. On this task, across two model families and four sizes, it is worth
 roughly a doubling of throughput for no accuracy cost that 10,000 notes can detect,
@@ -227,7 +227,7 @@ I can only vouch for gemma-4. It is still the only family in this field publishi
 an MTP draft: I checked Qwen3.6 directly after mislabelling it, and the repo has
 none.
 
-## Still open
+## The null is bounded, not explained
 
 1. **Acceptance against accuracy at the note level.** I have acceptance per arm and
    F1 per arm. Whether the notes where drafting fails are the notes where the model

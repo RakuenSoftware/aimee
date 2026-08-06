@@ -205,7 +205,7 @@ with no client attached means the same thing locally that it means on a rented b
 Whatever starts a server stops it, in the script that started it. Clearing a port
 range proves nothing about a card.
 
-## What to do
+## Set the context size yourself, and measure your own process curve
 
 **Set your context size explicitly.** The default is sized for a workload that is
 probably not yours, and it is reserved per process.
@@ -222,7 +222,7 @@ QAT build moves your model down a tier before you buy a bigger card.
 **Rent by the hour and check the bill against the fleet, not against your intent.**
 Renting a 31B arm costs under a dollar. Forgetting one costs more than running it.
 
-## What I have not measured
+## Where the returns stop, and the Vulkan gap I never closed
 
 Where the returns actually stop. Everything above is one to four processes, and the
 six-process cap is inherited from an assumption.

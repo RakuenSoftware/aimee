@@ -209,7 +209,7 @@ does not have. Recording a mechanism is not the same as consulting it.
 **Already on disk:** in every row of both files, in the field I added for this exact
 purpose.
 
-## What survives
+## Print the denominators your harness already has
 
 A benchmark computes more than it prints. The discarded column is the one that
 catches you, and in eight of the nine cases here it was already being computed. The
