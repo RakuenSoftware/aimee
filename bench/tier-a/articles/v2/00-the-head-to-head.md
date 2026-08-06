@@ -1,8 +1,8 @@
 # Thirty-two arms, one corpus, and a fifteen-fold parameter increase worth 0.047
 
-DRAFT. Every arm is 1,001 notes on corpus v5 with prompt v8, scored by the
-unmodified scorer. Metric columns are recomputed from the prediction files in one
-pass so the table is internally consistent. Nothing was re-run to write this.
+Every arm is 1,001 notes on corpus v5 with prompt v8, scored by the unmodified
+scorer. Metric columns are recomputed from the prediction files in one pass so the
+table is internally consistent.
 
 I built this to pick a local model for a fact extractor. I started with what fits
 on a 16 GB card, got a ceiling of 0.6406, and assumed the ceiling was the corpus.
@@ -229,9 +229,11 @@ That bound is CUDA to CUDA. The XTX runs Vulkan on a different llama.cpp build a
 I have never measured it against the 5080. It touches the 31B QAT row, which is why
 the 31B quant pair is being re-run with both halves on one card.
 
-**Three rows are not native runs.** gemma-3n-E4B, Qwen3-1.7B and granite-4.1-3b were
-extracted from 10,000-note arms. The same notes score −0.0079 differently depending
-on which corpus they ran inside, with 47% of output text differing.
+**Four rows are not native runs.** gemma-3n-E4B, Qwen3-1.7B, granite-4.1-3b and
+granite-4.0-1b were extracted from 10,000-note arms. The same notes score −0.0079
+differently depending on which corpus they ran inside, with 47% of output text
+differing. I had this down as three rows until I traced every figure in this piece
+to its artifact and found the fourth.
 
 **One row is a different configuration.** LFM2.5-8B-A1B could not run at three
 processes: Q4_K_M is 5.16 GB and three copies exceed a 16 GiB card. Process count
