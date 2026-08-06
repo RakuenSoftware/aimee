@@ -1409,6 +1409,77 @@ Both have since been repaired to the level of detail am_e4c4afa194 already used,
 and cells before and after that repair ARE NOT COMPARABLE. Pass rates quoted
 from the pre-repair corpus understate every arm equally, but they understate.
 
+## Finding 31 — repairing two tickets turned 0/8 into 8/10, and made everyone cheaper
+
+Findings 24 and 30 identified two tickets as unwinnable as written. Both were
+repaired with ONE sentence naming the deliverable the graded test asserts, at the
+level of detail am_e4c4afa194's ticket already used. Neither addition hands over
+an implementation.
+
+am_b84c9294aa gained: "The pool already records a lease site for every member,
+but the line it emits before giving up reports only counts. It must name the
+holders, so the operator restarting the process knows which code leaked."
+
+am_1e7cb3da16 gained: "Park the parent under a distinct self-resolving pause
+reason, `slices_running`, which the autonomy sweep re-drives once every child has
+merged; `pending_human` stays reserved for genuine human gates." The identifier
+had to be named because the graded test does strcmp on it in four places.
+
+### am_b84c9294aa: 0/4 -> 5/5
+
+| config | before | after |
+|---|---|---|
+| aimee (review on) | fail, 54.01 | **pass, 22.12** |
+| aimee (review off) | fail, 49.56 | **pass, 29.53** |
+| baseline | fail, 69.59 | pass, 19.04 |
+| ponytail-instructions | fail, 84.64 | pass, 19.83 |
+| ponytail-addon | fail, 43.88 | pass, 25.20 |
+
+Every arm got CHEAPER as well as correct -- ponytail-instructions by 4.3x. A
+ticket that makes agents hunt for the deliverable costs real money: they explore
+hard, converge on a plausible wrong fix, and fail anyway.
+
+Review-on is cheaper here than review-off (22.12 vs 29.53) and writes half the
+production lines (27 vs 54): the reviewer pushed toward the focused attribution
+fix instead of a broader rewrite.
+
+### am_1e7cb3da16: 0/4 -> 3/5
+
+| config | after |
+|---|---|
+| aimee (review on) | **pass, 48.50** |
+| aimee (review off) | **pass, 43.09** |
+| ponytail-addon | pass, 39.72 |
+| baseline | FAIL, 38.72 |
+| ponytail-instructions | FAIL, 22.48 |
+
+All four arms now emit slices_running, so the naming lottery is gone and the task
+discriminates on the AUTO-RESUME behaviour it was always meant to test. Two arms
+still get that wrong. aimee passes in both configurations.
+
+### Corrections to the record
+
+Two of the three tasks previously reported as aimee failures were ticket defects:
+
+  - am_b84c9294aa was reported as "aimee deleted a safety guard". True, but so
+    did ponytail-addon, independently, and the ticket never stated its
+    deliverable. Now 5/5.
+  - am_1e7cb3da16 was reported as 0/4 with no arm passing. It was an unguessable
+    identifier. Now 3/5.
+  - am_270b3483d5 REMAINS a genuine aimee failure: over-validation with review
+    on, passing with review off (Finding 26). That one stands.
+
+### The methodological point
+
+A benchmark ticket has to state the deliverable the grader checks, or it measures
+guessing. The tell is cheap to compute and should be checked BEFORE running a
+corpus: if the graded test asserts something no reading of the ticket entails --
+a behaviour never mentioned, an identifier never named -- the task is unwinnable
+and the 0/N result says nothing about any arm.
+
+Cells before and after the repair are not comparable, and the pre-repair cells
+are archived under pre-ticket-repair-<task>/ rather than discarded.
+
 ## Caveats for anything published from this
 
 - 6 of 8 tasks, **one replicate**, no confidence intervals. Per-task spread is
