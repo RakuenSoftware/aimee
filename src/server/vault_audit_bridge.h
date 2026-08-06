@@ -14,4 +14,14 @@
  * emit and drains at graceful exit. */
 void vault_audit_bridge_install(void);
 
+/* Publish a server-principal credential WRITE onto the same audit bus stream.
+ * Unlike the access ops above there is no vault_service hook to install — the
+ * server-principal write is driven from the HTTP layer, so the call site invokes
+ * this directly. Kept here, beside the access hook, so this file remains the
+ * SINGLE object depending on both the vault surface and the audit bus.
+ *
+ * NON-SECRET arguments only: `fingerprint` is a key fingerprint, never the key. */
+void vault_audit_bridge_server_write(const char *principal, const char *agent, const char *cred,
+                                     const char *fingerprint, const char *transport);
+
 #endif /* AIMEE_VAULT_AUDIT_BRIDGE_H */

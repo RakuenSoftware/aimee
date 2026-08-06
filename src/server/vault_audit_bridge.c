@@ -46,17 +46,22 @@ static const char *verdict_of(vault_status_t st)
    return "deny";
 }
 
-/* vault_audit_hook_fn: publish one credential-access audit row over the bus
- * (KIND_AUDIT_ACTION -> the audit ledger + capture/replay). NON-SECRET only:
- * principal (actor), op (tool), the (agent, cred) identity (command), the
- * transport (mode), and the outcome (verdict + the precise status as reason). No
- * task association -> task_id 0 (the "no task" sentinel). */
-static void on_vault_access(const char *op, const char *principal, const char *agent,
-                            const char *cred, attested_transport_t transport, vault_status_t st)
+/* Publish one vault audit row over the bus (KIND_AUDIT_ACTION -> the audit ledger
+ * + capture/replay). NON-SECRET only: principal (actor), op (tool), the
+ * (agent, cred) identity (command), the transport (mode), and the outcome
+ * (verdict + reason). No task association -> task_id 0 (the "no task" sentinel). */
+static void emit_vault_row(const char *principal, const char *op, const char *agent,
+                           const char *cred, const char *transport, const char *reason,
+                           const char *verdict)
 {
+   if (!agent)
+      agent = "";
+   if (!cred)
+      cred = "";
+
    /* The (agent, cred) identity is non-secret and rides HUMAN-READABLE in the
-    * command field — this is the correlation key for vault-access rows (query the
-    * ledger by actor+tool+command). It is never the secret value. */
+    * command field — this is the correlation key for vault rows (query the ledger
+    * by actor+tool+command). It is never the secret value. */
    char command[256];
    if (agent[0] || cred[0])
       snprintf(command, sizeof command, "%s/%s", agent, cred);
@@ -72,8 +77,35 @@ static void on_vault_access(const char *op, const char *principal, const char *a
    snprintf(args_hash, sizeof args_hash, "v1-");
    audit_args_hash(op, NULL, args_hash, sizeof args_hash);
 
-   obs_bus_emit(principal, op, args_hash, command, transport_label(transport), vault_status_str(st),
-                verdict_of(st), /*task_id=*/0);
+   obs_bus_emit(principal, op, args_hash, command, transport, reason, verdict, /*task_id=*/0);
+}
+
+/* vault_audit_hook_fn: publish one credential-ACCESS audit row over the bus. */
+static void on_vault_access(const char *op, const char *principal, const char *agent,
+                            const char *cred, attested_transport_t transport, vault_status_t st)
+{
+   emit_vault_row(principal, op, agent, cred, transport_label(transport), vault_status_str(st),
+                  verdict_of(st));
+}
+
+/* Server-principal credential WRITE (POST /v1/vault/set_server and the agent
+ * API-key writes). These do not pass through vault_service's access hook — they
+ * are a distinct, higher-privilege op: a CLIENT-SUPPLIED secret stored under the
+ * server-owned principal for autonomous decrypt. Without this they reached only
+ * the local audit_log file and never the ordered tap, capture/replay, or the WORM
+ * ledger that every other vault row lands in.
+ *
+ * `fingerprint` is the caller's non-secret key fingerprint and rides in the
+ * reason field; the plaintext secret is never in scope here. Reaching this
+ * function means the write was authorized and performed, so the verdict is
+ * "allow" — denials are rejected upstream before any write occurs. */
+void vault_audit_bridge_server_write(const char *principal, const char *agent, const char *cred,
+                                     const char *fingerprint, const char *transport)
+{
+   char reason[64];
+   snprintf(reason, sizeof reason, "fp=%s", fingerprint ? fingerprint : "?");
+   emit_vault_row(principal, "vault.set_server", agent, cred, transport ? transport : "unknown",
+                  reason, "allow");
 }
 
 void vault_audit_bridge_install(void)
