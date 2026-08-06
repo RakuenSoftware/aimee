@@ -6,13 +6,13 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DELEGATES_EVENT_INVOKE    6657u
-#define AIMEE_DELEGATES_STAGE_INVOKE    1u
-#define AIMEE_DELEGATES_REQUEST_MAGIC   0x4c4f5244u /* "DROL" */
-#define AIMEE_DELEGATES_RESPONSE_MAGIC  0x4e414344u /* "DCAN" */
-#define AIMEE_DELEGATES_WIRE_VERSION    1u
-#define AIMEE_DELEGATES_ROLE_MAX        63u
-#define AIMEE_DELEGATES_MESSAGE_LEN     72u
+#define AIMEE_DELEGATES_EVENT_INVOKE   6657u
+#define AIMEE_DELEGATES_STAGE_INVOKE   1u
+#define AIMEE_DELEGATES_REQUEST_MAGIC  0x4c4f5244u /* "DROL" */
+#define AIMEE_DELEGATES_RESPONSE_MAGIC 0x4e414344u /* "DCAN" */
+#define AIMEE_DELEGATES_WIRE_VERSION   1u
+#define AIMEE_DELEGATES_ROLE_MAX       63u
+#define AIMEE_DELEGATES_MESSAGE_LEN    72u
 
 /* The role alias -> canonical role map: THE single source of truth.
  *
@@ -65,7 +65,7 @@ static inline uint32_t aimee_delegates_get_u32(const uint8_t *p)
 }
 
 static inline int aimee_delegates_message_encode(uint32_t magic, const char *role, uint8_t *out,
-                                                  size_t cap)
+                                                 size_t cap)
 {
    size_t len = role ? strlen(role) : 0;
    if (!out || cap < AIMEE_DELEGATES_MESSAGE_LEN || len == 0 || len > AIMEE_DELEGATES_ROLE_MAX)
@@ -79,7 +79,7 @@ static inline int aimee_delegates_message_encode(uint32_t magic, const char *rol
 }
 
 static inline int aimee_delegates_message_decode(const uint8_t *in, size_t len, uint32_t magic,
-                                                  char *role, size_t role_cap)
+                                                 char *role, size_t role_cap)
 {
    if (!in || len != AIMEE_DELEGATES_MESSAGE_LEN || !role || role_cap == 0 ||
        aimee_delegates_get_u32(in) != magic || in[4] != AIMEE_DELEGATES_WIRE_VERSION ||

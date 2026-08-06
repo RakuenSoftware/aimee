@@ -122,8 +122,8 @@ static void test_delegates(void)
     * re-introduced private copy that drifts on any alias fails this test rather
     * than silently canonicalizing a role differently depending on the binary. */
    static const char *const aliases[] = {
-       "implement", "build",  "reviewer",  "verifier",       "test",           "check",
-       "evaluate",  "inspect", "research", "enforce",        "recall",         "synthesize",
+       "implement", "build",   "reviewer", "verifier",          "test",          "check",
+       "evaluate",  "inspect", "research", "enforce",           "recall",        "synthesize",
        "rank-fuse", "planner", "planning", "evaluate-optimize", "classify-score"};
    for (size_t i = 0; i < sizeof(aliases) / sizeof(aliases[0]); ++i)
    {

@@ -3,10 +3,10 @@
 
 #include <string.h>
 
-aimee_module_status_t aimee_module_handler(
-    const aimee_module_invocation_t *invocation, const uint8_t *request_body,
-    uint32_t request_len, uint8_t *response_body, uint32_t response_capacity,
-    uint32_t *response_len, void *user_data)
+aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
+                                           const uint8_t *request_body, uint32_t request_len,
+                                           uint8_t *response_body, uint32_t response_capacity,
+                                           uint32_t *response_len, void *user_data)
 {
    (void)user_data;
    char role[AIMEE_DELEGATES_ROLE_MAX + 1];
