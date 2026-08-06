@@ -288,6 +288,11 @@
           "id": 2,
           "name": "workflow-control",
           "event_kind": 9218
+        },
+        {
+          "id": 3,
+          "name": "workflow-gate-decision",
+          "event_kind": 9219
         }
       ]
     },

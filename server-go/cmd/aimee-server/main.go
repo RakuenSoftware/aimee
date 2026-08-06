@@ -252,6 +252,7 @@ func main() {
 				Stages: []bus.ModuleStage{
 					{EventKind: workflows.EventAdvance, StageID: workflows.StageAdvance},
 					{EventKind: workflows.EventControl, StageID: workflows.StageControl},
+					{EventKind: workflows.EventGateDecide, StageID: workflows.StageGateDecide},
 				},
 				Handler: workflows.NewHandler(handler),
 			})

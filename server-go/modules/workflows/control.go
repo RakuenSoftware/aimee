@@ -27,6 +27,12 @@ const (
 	// kind taken from the top of the range.
 	EventControl uint32 = 9218
 	StageControl uint32 = 2
+
+	// EventGateDecide serves the fail-closed roundtable gate ruling. JSON, not
+	// the fixed framing StageAdvance uses: a panel is a variable number of
+	// verdicts, and it is one call per gate rather than per verdict.
+	EventGateDecide uint32 = 9219
+	StageGateDecide uint32 = 3
 )
 
 // ControlRequest is what the C resource plane used to write as an HTTP head. It
@@ -102,6 +108,8 @@ func NewHandler(mux http.Handler) bus.ModuleHandler {
 			return Handle(invocation, request)
 		case StageControl:
 			return control(invocation, request)
+		case StageGateDecide:
+			return handleGateDecide(invocation, request)
 		default:
 			return nil, bus.ModuleStatusInvalidRequest
 		}
