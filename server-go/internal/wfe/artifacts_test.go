@@ -2,6 +2,8 @@ package wfe
 
 import (
 	"errors"
+	"io/fs"
+	"os"
 	"strings"
 	"testing"
 )
@@ -94,5 +96,33 @@ func TestArtifactPathsRejectTraversal(t *testing.T) {
 	}
 	if err := store.PutProposal("../escape", []byte("x")); !errors.Is(err, ErrInvalidWorkItem) {
 		t.Fatalf("path traversal error = %v, want ErrInvalidWorkItem", err)
+	}
+}
+
+// TestNodeArtifactMissingSignalsFileNotExist locks down the missing-artifact
+// contract that freeze_collision.go and other callers rely on: a NodeArtifact
+// read of an absent node artifact must surface both fs.ErrNotExist
+// (equivalently os.ErrNotExist) and the package's exported ErrArtifactNotExist
+// sentinel through errors.Is. Any future read helper that loses this chain
+// would cause the sibling-collision branch to misclassify a simply-absent
+// freeze artifact as a generic I/O error and reject the current slice.
+func TestNodeArtifactMissingSignalsFileNotExist(t *testing.T) {
+	store, err := NewArtifactStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.NodeArtifact("wi_absent", "freeze")
+	if err == nil {
+		t.Fatal("expected an error from NodeArtifact on a missing work-item")
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("missing NodeArtifact error does not match fs.ErrNotExist: %v", err)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing NodeArtifact error does not match os.ErrNotExist: %v", err)
+	}
+	if !errors.Is(err, ErrArtifactNotExist) {
+		t.Fatalf("missing NodeArtifact error does not match ErrArtifactNotExist: %v", err)
 	}
 }
