@@ -275,14 +275,7 @@ func TestFreezeRejectsDivergentSiblingCreateCreateCollision(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(secondDir, "collision.txt"), []byte("second\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, secondDir, "add", "collision.txt")
 	gitRun(t, secondDir, "commit", "-m", "second")
-	secondBase, err := freezeBase(ctx, second, secondDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	secondBase = strings.TrimSpace(gitRun(t, secondDir, "rev-parse", secondBase))
-	secondHead := strings.TrimSpace(gitRun(t, secondDir, "rev-parse", "HEAD"))
 	if err := store.Move(ctx, "wi_s0", "freeze", "review", "advance", "", firstResult.ContentHash, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -1276,5 +1269,21 @@ func TestDocumentPartialNoChangeAdvancesUnchangedHead(t *testing.T) {
 	}
 	if got := strings.TrimSpace(gitRun(t, workdir, "status", "--porcelain")); got != "" {
 		t.Fatalf("document no-op dirtied the worktree: %q", got)
+	}
+}
+// assertFreezeSiblingUncomparable verifies that err is a freezeSiblingUncomparableError:
+// it carries the freeze_create_create_collision prefix (so callers matching on the
+// prefix catch both genuine and un-comparable shapes), names the requested path, and
+// names both the current slice and the frozen sibling slice.
+func assertFreezeSiblingUncomparable(t *testing.T, err error, path, currentSlice, siblingSlice string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected freezeSiblingUncomparableError, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{freezeCreateCreateCollision, path, currentSlice, siblingSlice} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("expected un-comparable error containing %q, got: %v", want, err)
+		}
 	}
 }
