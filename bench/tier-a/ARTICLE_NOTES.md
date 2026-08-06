@@ -1847,3 +1847,54 @@ gemma-4, the only family here that publishes an MTP draft". That is no longer
 true: Qwen3.6 ships MTP layers in the model file rather than as a separate draft,
 and 12B, 26B-A4B and 31B gemma-4 builds all publish drafts. The rented arms
 running tonight extend this beyond E2B and E4B for the first time.
+
+## 36. QAT is genuinely faster, and the rented 1.7x was mostly the host
+
+Both gemma-4-12B builds on ONE card (RTX 5080, LXC 140), same binary, same
+context, same cache setting, same probe text, same MTP draft family, six identical
+requests each. Quant scheme is the only difference.
+
+| build | file | tok/s median | spread | draft acceptance |
+|---|---:|---:|---|---:|
+| QAT UD-Q4_K_XL | 6.26 GiB | **285.7** | 294 285 285 286 285 286 | 85.4% |
+| non-QAT UD-Q4_K_XL | 6.86 GiB | **233.1** | 234 234 233 232 233 233 | 84.2% |
+
+**QAT is 22.6% faster.** Not the 1.7x seen across rented machines, and not zero.
+
+### What this settles
+
+The rented comparison gave QAT ~232 against non-QAT ~137 tok/s, a 1.7x gap. On one
+card the gap is 1.23x. **So roughly two thirds of the rented difference was the
+machine and one third was the model.** Either number alone would have been wrong:
+reporting 1.7x would have credited the quant with the host's contribution, and
+dismissing it as "host variance" (which is what I did at 21:43) would have thrown
+away a real 22.6%.
+
+The mechanism is not speculation. Acceptance is 85.4% against 84.2%, a 1.2 point
+difference in the wrong direction to explain a 22.6% speed gap. It is also not
+purely file size: 6.26 against 6.86 GiB is 8.7% less data per token, which
+predicts roughly 8.7% more throughput for bandwidth-bound decode, not 22.6%.
+
+The residual is consistent with a different tensor-type mix under the same
+UD-Q4_K_XL label. unsloth assigns bit widths per tensor by sensitivity, and
+sensitivity analysis on QAT weights can select cheaper types; i-quant tensors
+dequantise more slowly than K-quants. **That is consistent-with, not measured.**
+Confirming it needs a tensor-type dump of both files, which nothing here has done.
+
+### Why the numbers are trustworthy this time
+
+Six probes per build, spread under 3% on both. Every earlier throughput comparison
+in this project came from rented boxes where the same arm varied 84 to 232 tok/s
+across placements. A dedicated card removes that entirely, and the tightness of
+the spread is the evidence that it did.
+
+### For the articles
+
+articles/v2/02 currently recommends QAT on accuracy alone (+0.0389 F1 on E2B, 95%
+CI [+0.0152, +0.0635]). It now has a second, independent reason: on gemma-4-12B
+the QAT build is **22.6% faster on identical hardware**, and it is smaller on disk.
+Better, faster and smaller is rare enough to state plainly.
+
+The caveat that stays: this is one model at one size. E2B showed +0.0389 accuracy
+and E4B showed none, so the accuracy benefit does not generalise across sizes, and
+there is no reason yet to think the speed benefit does either.

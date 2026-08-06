@@ -2,3 +2,5 @@
 [00:05:00Z] --- qat
    QAT   5080  tok/s median=285.7  (294 285 285 286 285 286)
    QAT   5080  draft accepted 2516/2946 = 85.4%
+   nonQAT 5080 tok/s median=233.1  (234 234 233 232 233 233)
+   nonQAT 5080 draft accepted 2570/3054 = 84.2%
