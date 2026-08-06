@@ -89,20 +89,54 @@ static void test_learning(void)
    assert(learning_mask("unknown") == 0);
 }
 
-static void test_delegates(void)
+/* Canonicalize `in` by going through the REAL bus module handler (encode ->
+ * handler -> decode), writing the result into `out`. */
+static void delegates_canonicalize_over_handler(const char *in, char *out, size_t out_cap)
 {
    uint8_t request[AIMEE_DELEGATES_MESSAGE_LEN], response[AIMEE_DELEGATES_MESSAGE_LEN];
    uint32_t response_len = 0;
    char role[AIMEE_DELEGATES_ROLE_MAX + 1];
    aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_INVOKE};
-   assert(aimee_delegates_message_encode(AIMEE_DELEGATES_REQUEST_MAGIC, "implement", request,
+   assert(aimee_delegates_message_encode(AIMEE_DELEGATES_REQUEST_MAGIC, in, request,
                                          sizeof(request)) == 0);
    assert(aimee_delegates_module_handler(&invocation, request, sizeof(request), response,
                                          sizeof(response), &response_len,
                                          NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_delegates_message_decode(response, response_len, AIMEE_DELEGATES_RESPONSE_MAGIC,
                                          role, sizeof(role)) == 0);
+   assert(strlen(role) < out_cap);
+   snprintf(out, out_cap, "%s", role);
+}
+
+static void test_delegates(void)
+{
+   char role[AIMEE_DELEGATES_ROLE_MAX + 1];
+
+   delegates_canonicalize_over_handler("implement", role, sizeof(role));
    assert(strcmp(role, "code") == 0);
+
+   /* The handler must canonicalize via aimee_delegates_role_canonical() — the
+    * single shared table — for EVERY alias, not just the one spot-check above.
+    * The handler and delegate_role.c's local (bus-free binary) path each used to
+    * carry their own byte-identical copy; pinning the whole table here means a
+    * re-introduced private copy that drifts on any alias fails this test rather
+    * than silently canonicalizing a role differently depending on the binary. */
+   static const char *const aliases[] = {
+       "implement", "build",  "reviewer",  "verifier",       "test",           "check",
+       "evaluate",  "inspect", "research", "enforce",        "recall",         "synthesize",
+       "rank-fuse", "planner", "planning", "evaluate-optimize", "classify-score"};
+   for (size_t i = 0; i < sizeof(aliases) / sizeof(aliases[0]); ++i)
+   {
+      delegates_canonicalize_over_handler(aliases[i], role, sizeof(role));
+      assert(strcmp(role, aimee_delegates_role_canonical(aliases[i])) == 0);
+      assert(strcmp(role, aliases[i]) != 0); /* every entry really is an alias */
+   }
+
+   /* An already-canonical or unknown role passes through untouched. */
+   delegates_canonicalize_over_handler("code", role, sizeof(role));
+   assert(strcmp(role, "code") == 0);
+   delegates_canonicalize_over_handler("no-such-role", role, sizeof(role));
+   assert(strcmp(role, "no-such-role") == 0);
 }
 
 static aimee_tool_class_t tool_class(const char *name)

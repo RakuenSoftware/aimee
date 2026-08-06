@@ -14,6 +14,42 @@
 #define AIMEE_DELEGATES_ROLE_MAX        63u
 #define AIMEE_DELEGATES_MESSAGE_LEN     72u
 
+/* The role alias -> canonical role map: THE single source of truth.
+ *
+ * Two callers need it and must never disagree: the module handler that answers
+ * AIMEE_DELEGATES_STAGE_INVOKE over the event bus, and delegate_role.c's local
+ * path for binaries that host no bus (the thin client) and so have no module to
+ * call. Both previously carried their own byte-identical copy of this table with
+ * nothing keeping them in sync — a silent drift would have made the same role
+ * canonicalize differently depending on which binary ran it. Adding an alias
+ * here now changes both by construction.
+ *
+ * Returns `role` itself when it is already canonical or unknown. */
+static inline const char *aimee_delegates_role_canonical(const char *role)
+{
+   static const struct
+   {
+      const char *alias;
+      const char *canonical;
+   } aliases[] = {
+       {"implement", "code"},        {"build", "code"},
+       {"reviewer", "review"},       {"verifier", "validate"},
+       {"test", "validate"},         {"check", "validate"},
+       {"evaluate", "validate"},     {"evaluate-optimize", "validate"},
+       {"inspect", "diagnose"},      {"research", "execute"},
+       {"enforce", "execute"},       {"recall", "search"},
+       {"synthesize", "summarize"},  {"rank-fuse", "reason"},
+       {"classify-score", "reason"}, {"planner", "plan"},
+       {"planning", "plan"},         {NULL, NULL},
+   };
+   if (!role)
+      return role;
+   for (size_t i = 0; aliases[i].alias; ++i)
+      if (strcmp(role, aliases[i].alias) == 0)
+         return aliases[i].canonical;
+   return role;
+}
+
 static inline void aimee_delegates_put_u32(uint8_t *p, uint32_t v)
 {
    for (unsigned i = 0; i < 4; ++i)

@@ -4,23 +4,9 @@
 
 #include <string.h>
 
-/* Known role aliases: map non-canonical names to the canonical role that
- * agents.json registers.  Extend this table as new planner roles appear. */
-static const struct
-{
-   const char *alias;
-   const char *canonical;
-} g_role_aliases[] = {
-    {"implement", "code"},        {"build", "code"},
-    {"reviewer", "review"},       {"verifier", "validate"},
-    {"test", "validate"},         {"check", "validate"},
-    {"evaluate", "validate"},     {"evaluate-optimize", "validate"},
-    {"inspect", "diagnose"},      {"research", "execute"},
-    {"enforce", "execute"},       {"recall", "search"},
-    {"synthesize", "summarize"},  {"rank-fuse", "reason"},
-    {"classify-score", "reason"}, {"planner", "plan"},
-    {"planning", "plan"},         {NULL, NULL},
-};
+/* The alias table lives in <aimee/delegates/module_api.h> as
+ * aimee_delegates_role_canonical() — shared with the bus module handler so the
+ * two can never disagree. Add new aliases there, not here. */
 
 static delegate_role_canonicalizer_fn g_canonicalizer;
 
@@ -105,12 +91,7 @@ const char *delegate_role_canonicalize(const char *role)
          return canonical;
       return ""; /* required module failed: unknown role paths fail closed */
    }
-   for (int i = 0; g_role_aliases[i].alias; i++)
-   {
-      if (strcmp(role, g_role_aliases[i].alias) == 0)
-         return g_role_aliases[i].canonical;
-   }
-   return role;
+   return aimee_delegates_role_canonical(role);
 }
 
 int delegate_role_is_write(const char *role)
