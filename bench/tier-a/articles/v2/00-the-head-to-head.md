@@ -1,4 +1,4 @@
-# Twenty-two arms, one corpus, and a fifteen-fold parameter increase worth 0.047
+# Twenty-three arms, one corpus, and a fifteen-fold parameter increase worth 0.047
 
 DRAFT. Every arm is 1,001 notes on corpus v5 with prompt v8, scored by the
 unmodified scorer. Metric columns are recomputed from the prediction files in one
@@ -35,6 +35,7 @@ including negation, multi-fact, implicit and deliberately ambiguous.
 | model | quant | F1 | prec | rec | parse | abstain | spurious | reasons |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | Qwen3.6-35B-A3B | UD-Q4, MoE | **0.7257** | 0.6841 | 0.7727 | 1.00 | 0.699 | 99 | 1.00 |
+| Qwen3.6-27B dense | UD-Q4 | 0.7152 | 0.6550 | 0.7875 | 1.00 | 0.547 | 148 | 1.00 |
 | gemma-4-31B | QAT UD-Q4 | 0.6872 | 0.6022 | **0.8000** | 1.00 | 0.463 | 180 | 1.00 |
 | gemma-4-12B | QAT UD-Q4 | 0.6854 | 0.6437 | 0.7330 | 0.92 | 0.702 | 97 | 1.00 |
 | gemma-4-26B-A4B | QAT UD-Q4, unsloth | 0.6804 | 0.6501 | 0.7136 | 0.96 | 0.680 | 106 | 1.00 |
@@ -61,14 +62,15 @@ including negation, multi-fact, implicit and deliberately ambiguous.
 notes. `spurious` counts the triples it invents on them instead. `reasons` is the
 fraction of rows carrying a reasoning pass.
 
-## Six steps down the leaderboard, none of them real
+## The top is a tie, and six of the steps below it are not real
 
 A paired bootstrap on every adjacent pair, because an adjacent pair is exactly the
 ordering claim a ranked table makes.
 
 | step | delta | 95% CI | |
 |---|---:|---|---|
-| 35B-A3B → 31B QAT | −0.0386 | [−0.0577, −0.0194] | **separable** |
+| 35B-A3B → 27B dense | −0.0106 | [−0.0294, +0.0088] | indistinguishable |
+| 27B dense → 31B QAT | −0.0280 | [−0.0456, −0.0106] | **separable** |
 | 31B QAT → 12B QAT | −0.0017 | [−0.0202, +0.0162] | indistinguishable |
 | 12B QAT → 26B unsloth | −0.0051 | [−0.0256, +0.0154] | indistinguishable |
 | 26B unsloth → 31B non-QAT | −0.0041 | [−0.0258, +0.0176] | indistinguishable |
@@ -77,10 +79,15 @@ ordering claim a ranked table makes.
 | 26B google → E2B QAT | −0.0168 | [−0.0406, +0.0070] | indistinguishable |
 
 Six consecutive steps, 2B to 31B, and this corpus cannot order any neighbouring
-pair. Only the 35B breaks out.
+pair. The break is one rung higher than the ranking suggests: two models sit above
+it, and they cannot be ordered against each other either.
 
-I nearly published that as "2B through 31B is one flat band". Then I tested the
-ends against each other.
+That second fact cost me the claim I had written first. I had the 35B down as the
+only separably best model in the field, on a table where the 27B had no F1 yet.
+It has one now, and the two are a tie.
+
+I nearly published the rest as "2B through 31B is one flat band". Then I tested
+the ends against each other.
 
 | span | delta | 95% CI | |
 |---|---:|---|---|
@@ -97,11 +104,18 @@ the default way people run them.
 ## What size actually bought
 
 Fifteen times the parameters: **+0.0465**. Changing architecture at the top:
-**+0.0386** more, from a model with roughly 3B active parameters.
+**+0.0280** more, from a model with roughly 3B active parameters.
 
 Qwen3.6-35B-A3B is a mixture of experts. 35B resident, about 3B working per token.
 It beat a dense 31B by more than the dense 31B beat a 2B, reading roughly a tenth
 as much memory to do it.
+
+The sharper version of that is inside one family. The 35B and the dense 27B are
+the same lineage at the same quant on the same card class, and on accuracy they
+are a tie: −0.0106, CI [−0.0294, +0.0088]. The MoE reaches that score at 3.5 times
+the throughput. Sparsity did not buy points here. It bought the same points for a
+tenth of the memory read per token, which is the better deal and the harder one to
+see from a leaderboard.
 
 Throughput follows the same line:
 
@@ -113,10 +127,10 @@ Throughput follows the same line:
 | gemma-4-12B QAT | 142.4 | RTX 3090 |
 | gemma-4-31B non-QAT | 80.5 | RTX 5090 |
 | gemma-4-31B QAT | 67.3 | RX 7900 XTX |
-| Qwen3.6-27B dense, partial | 67.8 | RTX 5090 |
+| Qwen3.6-27B dense | 67.8 | RTX 5090 |
 
 The 35B is **3.5 times faster than the 27B from its own family**, and the two write
-almost the same amount: median 1,100 completion tokens against 1,272. So the gap is
+almost the same amount: median 1,100 completion tokens against 1,256. So the gap is
 per-token cost. A dense 27B at Q4 reads about 16.4 GiB of weights per token against
 roughly 1.5 GiB for a 3B-active MoE.
 
@@ -142,12 +156,12 @@ not the quant. Scaling to 31B bought recall and spent restraint. The aggregate h
 the whole trade.
 
 At the other end, **granite-4.1-3b abstains on 93% of factless notes and invents
-24 triples.** Thirteenth on F1, first on discipline, by a distance.
+24 triples.** Fourteenth on F1, first on discipline, by a distance.
 
 So the decision is about what your pipeline does with a wrong fact. Caught by a
 write gate and costs a review: buy recall, take the 31B. Lands in a graph where
-nothing will ever find it again: buy restraint, and granite-4.1-3b beats seven
-models scoring above it.
+nothing will ever find it again: buy restraint, and granite-4.1-3b invents fewer
+triples than all thirteen models scoring above it.
 
 ## Read the parse column first
 
@@ -170,7 +184,7 @@ is not evidence of a working model.
 
 | reasons on ~0% of rows | reasons on ~100% |
 |---|---|
-| granite-4.1-3b, granite-4.0-1b, gemma-3n-E4B, SmolLM3-3B, LFM2.5-VL-1.6B, LFM2.5-1.2B, LFM2.5-230M | every dense gemma-4, Qwen3.6-35B-A3B, LFM2.5-2.6B, LFM2.5-8B-A1B, Qwen3-1.7B, MiniCPM5-1B |
+| granite-4.1-3b, granite-4.0-1b, gemma-3n-E4B, SmolLM3-3B, LFM2.5-VL-1.6B, LFM2.5-1.2B, LFM2.5-230M | every dense gemma-4, both Qwen3.6 arms, LFM2.5-2.6B, LFM2.5-8B-A1B, Qwen3-1.7B, MiniCPM5-1B |
 
 On gemma-4-E4B I know why. One sentence in my prompt, `No prose, no markdown.`,
 suppressed reasoning across 10,000 notes while every row still recorded
@@ -211,16 +225,23 @@ on which corpus they ran inside, with 47% of output text differing.
 processes: Q4_K_M is 5.16 GB and three copies exceed a 16 GiB card. Process count
 alone is worth about 0.0105 F1 here.
 
-**One arm is unfinished.** Qwen3.6-27B dense is two thirds through. Its throughput
-is settled: 67.8 tok/s median over 658 notes, and every hundred-note slice of that
-run sits between 67.7 and 68.0, so the speed claim holds. An earlier reading of
-64.7 came from three samples and was 4.6% low; the figure here supersedes it. It
-has no F1 in this table and I have not written one in.
+**One throughput figure was corrected.** The 27B dense arm was two thirds through
+when this table was first written, and I read its speed as 64.7 tok/s off three
+samples. The finished run says 67.8 across 1,001 notes, with every hundred-note
+slice between 67.7 and 68.0. The earlier figure was 4.6% low and every ratio here
+uses the new one.
 
 ## What I would run today
 
-**If it fits: Qwen3.6-35B-A3B.** The only separably best model in the field, parses
-everything, 0.699 abstention, 234 tok/s. 16.4 GiB at UD-Q4, so a 24 GB card.
+**If it fits: Qwen3.6-35B-A3B.** Tied at the top with the dense 27B and separable
+from everything below it, parses everything, 0.699 abstention, 234 tok/s. 16.4 GiB
+at UD-Q4, so a 24 GB card.
+
+Take it over the 27B on the tie-break rather than the score. Same family, same
+quant, statistically the same F1, and the MoE runs 3.5 times faster while
+abstaining on 0.699 of the factless notes against the 27B's 0.547. The dense 27B
+invents 148 triples where the 35B invents 99. There is no accuracy argument
+between them and two practical ones, both pointing the same way.
 
 **On a 16 GB card: gemma-4-26B-A4B at QAT UD-Q4.** 0.6804, indistinguishable from
 models three rows above it, and **323 tok/s, the fastest arm in this project.** It

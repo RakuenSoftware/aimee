@@ -132,10 +132,12 @@ dense sibling makes the point without any speculation involved on either side:
 | Qwen3.6, same family, same quant, same card class | tok/s | median completion |
 |---|---:|---:|
 | 35B-A3B, mixture of experts | **234.0** | 1,100 tok |
-| 27B dense | 67.8 | 1,272 tok |
+| 27B dense | 67.8 | 1,256 tok |
 
 **3.5 times faster, writing the same amount of text.** A dense 27B at Q4 reads
-about 16.4 GiB per token; the MoE reads roughly a tenth of that.
+about 16.4 GiB per token; the MoE reads roughly a tenth of that. It costs nothing
+in accuracy: the two are a tie on this corpus, −0.0106 with a CI of [−0.0294,
++0.0088].
 
 So the ranking is: speculation is worth about 2x, and picking a sparse
 architecture is worth 3.5x. If you are optimising throughput and you can choose

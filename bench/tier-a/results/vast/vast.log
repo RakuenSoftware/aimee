@@ -727,3 +727,6 @@ run_llamacpp.py: error: one of the arguments --thinking --no-thinking is require
 [09:46:14Z] OK   gemma-4-12B-it.qat-UD-Q4_K_XL/live rows=1001 reasoned=1001/1001 parse_ok=918
 [09:46:14Z] DONE gemma-4-12B-it.qat-UD-Q4_K_XL wall=184m cost=$0.401
 [09:46:14Z] === pool drained
+[14:16:31Z] OK   Qwen3.6-27B.UD-Q4_K_XL/live rows=1001 reasoned=1001/1001 parse_ok=1001
+[14:16:31Z] DONE Qwen3.6-27B.UD-Q4_K_XL wall=473m cost=$2.631
+[14:16:32Z] === pool drained

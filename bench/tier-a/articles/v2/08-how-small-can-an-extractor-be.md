@@ -87,7 +87,7 @@ And on throughput the same architecture choice dominates everything:
 | Qwen3.6-27B dense | 27B | 67.8 |
 
 **3.5 times faster, same family, same quant, same card class, writing the same
-amount of text.**
+amount of text, and tied on accuracy** at −0.0106, CI [−0.0294, +0.0088].
 
 So the size question splits in two. Total parameters decide what fits on your card.
 Active parameters decide what it costs to run. A 26B MoE ran at 323 tok/s on a 16 GB
