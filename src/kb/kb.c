@@ -21,6 +21,7 @@
 #include "db2/bandit.h"
 #endif
 #include "headers/sketch.h"
+#include <strings.h>
 #include "kb.h"
 #include "kb_fusion.h"
 #include "kb_neardup.h"
@@ -888,6 +889,54 @@ static int kb_embed_file_chunks(kb_build_file_ctx_t *c, int n_chunks, float *out
    return dim;
 }
 
+/* Does this file's TEXT deserve a dense vector, or only lexical indexing?
+ *
+ * Source files are embedded twice today. kb_build treats every indexable file as
+ * a prose document and embeds its chunks, and kb_code_embed_refresh separately
+ * embeds the same files as code. Measured on the am_ corpus, the prose pass over
+ * source is 82% of the doc-embedding token budget:
+ *
+ *     non-prose  5333 chunks / 749 files / 1,985,386 tokens
+ *     prose      1862 chunks / 137 files /   445,519 tokens
+ *
+ * and at the host's measured 532 tok/s that is the difference between ~76 and
+ * ~14 minutes for a pass. Semantic search over code is what code_embeddings is
+ * for; a second, prose-shaped vector of the same bytes buys little and costs
+ * five times the ingest.
+ *
+ * Chunk rows are still written for every file, so lexical/FTS search over source
+ * is unchanged -- only the dense vector is skipped. Set
+ * AIMEE_KB_EMBED_ALL_FILES=1 to restore the previous behaviour.
+ */
+/* Test seam: the policy is pure, so it is exercised directly. */
+int kb_path_wants_dense_vector_for_test(const char *rel_path);
+static int kb_path_wants_dense_vector(const char *rel_path);
+int kb_path_wants_dense_vector_for_test(const char *rel_path)
+{
+   return kb_path_wants_dense_vector(rel_path);
+}
+
+static int kb_path_wants_dense_vector(const char *rel_path)
+{
+   if (!rel_path || !rel_path[0])
+      return 1;
+   const char *env = getenv("AIMEE_KB_EMBED_ALL_FILES");
+   if (env && env[0] == '1')
+      return 1;
+   static const char *prose_ext[] = {".md",  ".mdx", ".markdown", ".txt",
+                                     ".rst", ".adoc", ".org",     NULL};
+   size_t n = strlen(rel_path);
+   for (int i = 0; prose_ext[i]; i++)
+   {
+      size_t m = strlen(prose_ext[i]);
+      if (n >= m && strcasecmp(rel_path + n - m, prose_ext[i]) == 0)
+         return 1;
+   }
+   /* Extensionless files at a repo root are conventionally prose (README,
+    * LICENSE, CHANGELOG, NOTICE) and are cheap, so keep embedding them. */
+   return strrchr(rel_path, '.') == NULL;
+}
+
 static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
 {
    if (fi > 0 && fi % c->kb_progress_every == 0)
@@ -1069,9 +1118,22 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
     *
     * One batched call for the whole file, then each chunk reads its own vector
     * out of it. The buffer is per-call: ingest is multi-threaded. */
-   float *batch_vecs = calloc((size_t)(n_chunks > 0 ? n_chunks : 1) * EMBED_MAX_DIM,
-                              sizeof(*batch_vecs));
-   int batch_dim = batch_vecs ? kb_embed_file_chunks(c, n_chunks, batch_vecs) : 0;
+   /* Chunk rows are already committed above, so lexical/FTS search covers this
+    * file either way. Only the dense vector is conditional. */
+   int wants_vector = kb_path_wants_dense_vector(c->files[fi].rel_path);
+   float *batch_vecs = NULL;
+   int batch_dim = 0;
+   if (wants_vector)
+   {
+      batch_vecs = calloc((size_t)(n_chunks > 0 ? n_chunks : 1) * EMBED_MAX_DIM,
+                          sizeof(*batch_vecs));
+      batch_dim = batch_vecs ? kb_embed_file_chunks(c, n_chunks, batch_vecs) : 0;
+   }
+   if (!wants_vector)
+   {
+      free(doc_ids);
+      return;
+   }
 
    for (int ci = 0; ci < n_chunks; ci++)
    {
