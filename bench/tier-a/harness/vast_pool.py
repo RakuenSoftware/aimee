@@ -305,6 +305,22 @@ def claim_arm(label):
             return claim_arm(label)
 
 
+def live_rows(pred):
+    """STALE FILE GUARD.
+
+    A prediction file on disk proves nothing about whether an arm is running. A
+    46-row leftover from a previous attempt was read and reported as a live
+    throughput figure with no process attached to it. Callers that report rates
+    must confirm a client exists; this helper exists so the check has a name.
+    """
+    import subprocess
+    if not os.path.exists(pred):
+        return 0, False
+    n = sum(1 for _ in open(pred))
+    ps = subprocess.run(["ps", "-eo", "args"], capture_output=True, text=True).stdout
+    return n, (os.path.basename(pred).replace(".pred.jsonl", "") in ps)
+
+
 def run_arm(job, gpu, maxprice, outdir, log):
     """One instance, one model, and every prompt variant the job asks for.
 
