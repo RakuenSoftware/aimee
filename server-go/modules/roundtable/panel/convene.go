@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -28,6 +29,27 @@ func Convene(ctx context.Context, delegates Delegates, run Run, panel Panel, foc
 	for i, seat := range panel.Seats {
 		seats = append(seats, Seat{Persona: seat.Persona, Selector: seat.Selector, Ordinal: i})
 	}
+	// A review with no original request cannot do the one job this panel exists
+	// for. Every scope rule below -- "adding work the request did not ask for is
+	// drift", requirement_coverage, the enumerate-each-ask instruction -- is
+	// stated relative to the request, so an empty ORIGINAL_REQUEST_DATA block
+	// silently turns all of them off and leaves the seat grading the diff on its
+	// own merits. That is generic code review, and generic code review REWARDS
+	// thoroughness: it approves work the ticket never asked for.
+	//
+	// Measured on am_270b3483d5, where the agent moved trust-bundle CONTENT
+	// validation into a preflight the codebase documents as presence-only,
+	// rewrote the header comment that says so, and was approved twice.
+	//
+	// Refusing is the only safe answer. Silently approving a review that could
+	// not detect drift is worse than not reviewing at all, because the caller
+	// records an approval it did not earn.
+	if strings.TrimSpace(run.OriginalRequest) == "" {
+		return RunResult{}, ValidationError{
+			Message: "roundtable review requires original_request: without it the panel " +
+				"cannot detect goal drift or unrequested work, and an approval would be unearned"}
+	}
+
 	stage, ok := normalizeRoundtableStage(reviewed.Stage)
 	if !ok {
 		// A stage no reviewer covers is a bad request, not an internal fault:

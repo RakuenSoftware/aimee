@@ -697,8 +697,12 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
               cJSON_Parse("{\"type\":\"object\",\"properties\":{"
                           "\"diff\":{\"type\":\"string\",\"description\":\"Unified diff or code "
                           "under review.\",\"minLength\":20},"
-                          "\"original_request\":{\"type\":\"string\",\"description\":\"Complete "
-                          "original request used to detect goal drift.\"},"
+                          "\"original_request\":{\"type\":\"string\",\"description\":\"REQUIRED. The "
+                          "complete original ticket or task, verbatim. Every scope "
+                          "rule the panel applies is relative to this, so omitting it "
+                          "turns drift detection off and the review degrades to "
+                          "generic code review, which approves unrequested work. Do "
+                          "not paraphrase it into your own plan.\",\"minLength\":1},"
                           "\"artifact_stage\":{\"type\":\"string\",\"enum\":[\"intent\",\"plan\","
                           "\"frozen_diff\"],\"description\":\"Lifecycle stage of the supplied "
                           "artifact; defaults to frozen_diff.\"},"
@@ -714,7 +718,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                           "\"string\"}}}}]},"
                           "\"roundtable\":{\"type\":\"string\",\"description\":\"Saved "
                           "roundtable preset to use. Omit to use the configured default.\"}},"
-                          "\"required\":[\"diff\"]}")));
+                          "\"required\":[\"diff\",\"original_request\"]}")));
    }
 
    /* No roundtable_status: roundtable_review blocks and returns the verdict. */
