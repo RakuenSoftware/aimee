@@ -272,6 +272,39 @@ def remaining_gold(gold_path, pred_path, scratch, tag):
     return out, len(done), len(rows)
 
 
+RUNNING = set()
+RUNNING_LOCK = threading.Lock()
+
+
+def claim_arm(label):
+    """One client per arm, ever, across every pool on this machine.
+
+    run_llamacpp.py opens its output with "w". Two clients on one arm therefore
+    truncate each other continuously and the row count stops advancing while both
+    burn rented GPU time. Four arms spent an hour doing this before it was
+    noticed, because every endpoint was healthy and every client was alive; the
+    only symptom was a counter that would not move.
+
+    Duplicates arise two ways: a second pool whose job list overlaps the first,
+    and a requeue that hands a job out while a worker still holds it. A lockfile
+    keyed on the arm label covers both, including across separate pool processes.
+    """
+    lf = os.path.join(SCRATCH, "arm.%s.lock" % label.replace("/", "_"))
+    try:
+        fd = os.open(lf, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return lf
+    except FileExistsError:
+        try:
+            owner = int(open(lf).read().strip() or 0)
+            os.kill(owner, 0)            # owner alive: genuinely taken
+            return None
+        except (ValueError, ProcessLookupError, PermissionError, OSError):
+            os.remove(lf)                # stale lock from a dead pool
+            return claim_arm(label)
+
+
 def run_arm(job, gpu, maxprice, outdir, log):
     """One instance, one model, and every prompt variant the job asks for.
 
@@ -288,6 +321,9 @@ def run_arm(job, gpu, maxprice, outdir, log):
                     and sum(1 for _ in open(os.path.join(outdir, "%s.%s.pred.jsonl" % (label, v)))) >= want)]
     if not todo:
         log("SKIP %s (all variants banked)" % label); return
+    lock = claim_arm(label)
+    if lock is None:
+        log("SKIP %s (another client already holds this arm)" % label); return
     cid = None
     t0 = time.time()
     try:
@@ -409,6 +445,10 @@ def run_arm(job, gpu, maxprice, outdir, log):
     finally:
         if cid:
             destroy(cid)
+        try:
+            os.remove(lock)
+        except Exception:
+            pass
 
 
 def main():

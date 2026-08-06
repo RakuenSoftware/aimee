@@ -489,3 +489,15 @@ run_llamacpp.py: error: one of the arguments --thinking --no-thinking is require
 [00:19:11Z]     healthy, loaded Qwen3.6-27B-UD-Q4_K_XL.gguf; 1 variant(s): live
 [00:28:22Z] OK   gemma-4-12B-it.qat-UD-Q4_K_XL.mtp/live rows=355 reasoned=355/355 parse_ok=334
 [00:28:22Z] DONE gemma-4-12B-it.qat-UD-Q4_K_XL.mtp wall=137m cost=$0.262
+[00:54:42Z]     discarded partial Qwen3.6-27B.UD-Q4_K_XL.mtp.live.pred.jsonl (job is not resumable)
+[00:54:42Z] FAIL Qwen3.6-27B.UD-Q4_K_XL.mtp/live
+[00:54:42Z] DONE Qwen3.6-27B.UD-Q4_K_XL.mtp wall=164m cost=$0.931
+[00:54:44Z]     discarded partial Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp.live.pred.jsonl (job is not resumable)
+[00:54:44Z] FAIL Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp/live
+[00:54:44Z] DONE Qwen3.6-35B-A3B.UD-Q4_K_XL.mtp wall=194m cost=$0.499
+[00:54:48Z]     discarded partial gemma-4-31B-it.qat-UD-Q4_K_XL.mtp.live.pred.jsonl (job is not resumable)
+[00:54:48Z] FAIL gemma-4-31B-it.qat-UD-Q4_K_XL.mtp/live
+[00:54:48Z] DONE gemma-4-31B-it.qat-UD-Q4_K_XL.mtp wall=164m cost=$1.075
+[00:54:49Z]     discarded partial gemma-4-12B-it.UD-Q4_K_XL.mtp.live.pred.jsonl (job is not resumable)
+[00:54:49Z] FAIL gemma-4-12B-it.UD-Q4_K_XL.mtp/live
+[00:54:49Z] DONE gemma-4-12B-it.UD-Q4_K_XL.mtp wall=168m cost=$0.503
