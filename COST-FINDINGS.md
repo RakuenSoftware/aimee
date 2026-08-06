@@ -1134,6 +1134,71 @@ Re-scored across all four task 3 cells it flags aimee alone and leaves the three
 passing controls clean, which is the discrimination that matters: it does not
 punish touching a test file, only removing what that file used to prove.
 
+## Finding 26 — the roundtable CAUSED the task 3 failure
+
+Controlled A/B on am_270b3483d5. Same image (aimee-server:rt49), same corpus,
+same ticket, same agent. The only variable is whether a review is served.
+
+| | roundtable ON | roundtable OFF |
+|---|---|---|
+| hidden_ok | FALSE | **true** |
+| tests_ok | true (re-scored false) | true — catches_defect |
+| calls the secure loader | yes | **0** |
+| credits | 67.59 | **33.30** |
+| wall | 585s | **248s** |
+| prod / test LOC | 22 / 20 | 13 / 13 |
+
+With no reviewer aimee produced the minimal correct fix -- access(R_OK) + stat +
+S_ISREG, materially the same three lines baseline used to pass -- for HALF the
+credits and 2.4x faster. With the reviewer it moved trust-bundle CONTENT
+validation into a preflight the codebase documents as presence-only, invented a
+new enum state for it, and failed.
+
+The control is sound. A live probe returned
+{"status":"error","message":"roundtable review module is not attached to the
+event bus","http_status":502}; the supervisor's module list omits roundtable; no
+review was served during the cell; and the cell records exactly 2 errors against
+its 2 roundtable_review calls. The module still prints one startup line naming
+its bus address before exiting on the disable flag, which reads like it is
+serving and is worth silencing.
+
+### What this means
+
+The review step is not a neutral safety net on this task. It is an AMPLIFIER of
+scope creep. A qa seat handed a stricter validator approves it -- "more
+validation" reads as better engineering to a reviewer with no stake in the
+ticket's boundaries -- so the panel pushed aimee past the spec rather than
+holding it to it.
+
+That inverts the assumption behind Findings 20 and 23, which treated review
+failures as the panel being too PERMISSIVE (rubber-stamping, certifying a
+rewritten test). This is the opposite failure: the panel is too DEMANDING, and
+its demands are unmoored from the request.
+
+It also explains the regression the operator reported -- aimee used to lead this
+task. The agent's own instinct is right; the review talks it out of it.
+
+### What it does NOT show
+
+  - ONE replicate per condition. The contrast is large (pass/fail, 2x cost) and
+    the mechanism is identified in the diff, but it is n=1.
+  - It does not exonerate the review generally. On am_312e901904 the same panel
+    coincided with aimee being the only arm to fix both defects.
+  - Requiring original_request (Finding 25's fix) did NOT help: the ON condition
+    above already had it required at both boundaries. The panel had the ticket
+    and still approved the over-validation, so the defect is in what the seat
+    optimises for, not in what it was given.
+  - aimee at 33.30 is still above the controls (17.51-24.42) for the same
+    deliverable on this task.
+
+### The open question
+
+If a single qa seat reliably rewards thoroughness over scope, the fix is in the
+seat, not the plumbing: a reviewer whose only question is "does this do what the
+ticket asked, and nothing else" rather than a general quality reviewer. That is
+testable the same way this was -- A/B one persona against another on a task with
+a known-minimal correct answer.
+
 ## Caveats for anything published from this
 
 - 6 of 8 tasks, **one replicate**, no confidence intervals. Per-task spread is
