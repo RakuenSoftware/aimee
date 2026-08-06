@@ -1,7 +1,7 @@
 # One sentence in my prompt turned a model's reasoning off
 
-ROUGH DRAFT. The +0.116 figure below has no interval, and that is stated where it
-appears rather than at the end.
+DRAFT. The +0.116 figure below has no interval, and that is stated where it appears
+rather than at the end.
 
 A 10,000 note extraction run finished in 34 minutes. I read that as a fact about the
 hardware and moved on.
@@ -189,6 +189,23 @@ I have since split the speculative-decoding pairs the same way and there the nul
 survives, no category exceeding its own interval. That contrast is the useful part.
 Aggregate nulls are not all the same kind, and you cannot tell which you have
 without splitting.
+
+## Every large model in the field reasons, and that proves less than it looks like
+
+The six large arms I have since run all emit a reasoning pass on 100% of rows:
+gemma-4 at 12B, 26B and 31B in both quants, and Qwen3.6-35B-A3B. Seven models in the
+small field emit one on none.
+
+The tempting reading is that reasoning is a capability that arrives with scale. My own
+diagnostic says do not take it. On gemma-4-E4B the pass was suppressed by a sentence
+in my prompt and restored by deleting it, with no change to the model at all, and the
+same prompt is in front of every arm above. A model that silently loses its reasoning
+pass scores as a worse model, and the correlation between size and reasoning in my
+table is as consistent with larger models resisting a bad clause as it is with smaller
+ones lacking the capability.
+
+I have run the diagnostic on four of twenty-two. Until it runs on the rest, the split
+in that column is a hypothesis about my prompt as much as about the models.
 
 ## What to do
 

@@ -1,6 +1,6 @@
 # The corpus decides what your benchmark can find
 
-ROUGH DRAFT.
+DRAFT.
 
 I spent most of this project measuring models and most of my mistakes were in the
 corpus. Three of the five worst were properties of how the notes were assembled

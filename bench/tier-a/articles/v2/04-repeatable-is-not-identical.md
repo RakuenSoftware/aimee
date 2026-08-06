@@ -1,6 +1,6 @@
 # Every configuration reproduces itself exactly and no two agree
 
-ROUGH DRAFT. The discriminating run for the last mechanism is in flight.
+DRAFT. The discriminating run for the last mechanism is in flight.
 
 A benchmark arm that takes 44 minutes is one you run once a night. I wanted a
 six-arm ladder over 10,000 notes, which at that rate is 44 hours, so I went looking
@@ -185,6 +185,28 @@ which I can say because I measured it rather than reasoned about it.
 
 **Do not read output churn as accuracy movement.** Everything above moved 21% to 47%
 of the text and none of it moved the score outside its interval.
+
+## The bound I now have, and the one I still do not
+
+Identity is a property of a configuration, and hardware is part of the configuration.
+I measured one crossing: a rented RTX 3090 against my local RTX 5080, identical
+settings, same corpus, same prompt.
+
+| | |
+|---|---:|
+| delta | **+0.0057 F1** |
+| 95% CI | [−0.0136, +0.0251] |
+| byte-identical completions | 640/1001 |
+
+So two CUDA cards running the same build agree to within about **±0.019 at n=1001**
+and disagree on a third of their output text. That is the same pattern as every other
+mechanism in this piece: repeatable within a configuration, not identical across one.
+
+The crossing I have never measured is my own two cards. The XTX runs Vulkan on a
+different llama.cpp build, and nothing in this project has ever put the same arm on
+both and compared. Every cross-card number I have published carries an unquantified
+term because of it, which is why the two quant pairs now running keep each pair on a
+single card rather than splitting halves across the field.
 
 ## What I have not measured
 

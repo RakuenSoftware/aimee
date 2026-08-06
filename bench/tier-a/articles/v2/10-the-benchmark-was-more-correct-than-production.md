@@ -1,7 +1,7 @@
 # I built a benchmark to rank models and it audited my production system
 
-ROUGH DRAFT. The sample sizes here are the smallest in the series. Most of the
-defects are structural, which is why I am willing to write them at this n.
+DRAFT. The sample sizes here are the smallest in the series. Most of the defects are
+structural, which is why I am willing to write them at this n.
 
 The benchmark ranked the models. It also encoded a specification of how a knowledge
 graph should behave, and my production path disagreed with it in four places.
