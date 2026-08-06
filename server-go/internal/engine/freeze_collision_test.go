@@ -222,7 +222,18 @@ func TestRejectDivergentSiblingCreatesAllowsIdenticalCreateWithoutWorktree(t *te
 	}
 }
 
-func TestRejectDivergentSiblingCreatesAllowsEditOnlyChange(t *testing.T) {
+// TestRejectDivergentSiblingCreatesAllowsCurrentSliceEditingExistingFile
+// pins the no-collision contract for the case where the *current* slice only
+// edits a file that already existed in the feature base (the README), while
+// the *sibling*'s frozen diff still carries a non-empty create set (frozen.txt,
+// supplied by the harness). The current slice therefore contributes zero
+// creates to the comparison, so there is nothing for the sibling's create set
+// to collide with and rejectDivergentSiblingCreates must return nil. The test
+// name reflects exactly that: the current side is the edit-only side; the
+// sibling still has creates. The separate
+// TestRejectDivergentSiblingCreatesAllowsSiblingWithEmptyCreateSet covers the
+// inverse case where the sibling's frozen diff has an empty create set.
+func TestRejectDivergentSiblingCreatesAllowsCurrentSliceEditingExistingFile(t *testing.T) {
 	ctx, store, artifacts, registry, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
 
 	if err := store.SetWorktree(ctx, "wi_s0", ""); err != nil {
@@ -243,6 +254,56 @@ func TestRejectDivergentSiblingCreatesAllowsEditOnlyChange(t *testing.T) {
 	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
 	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
 		t.Fatalf("edit-only current slice should pass, got: %v", err)
+	}
+}
+
+// TestRejectDivergentSiblingCreatesAllowsSiblingWithEmptyCreateSet guards the
+// pure-edit-only sibling collision contract: when the sibling's frozen diff
+// has an empty create set (every change in the sibling's freeze is a
+// modification to a pre-existing file) and the current slice creates an
+// unrelated new file, the comparison produces zero overlapping paths and
+// rejectDivergentSiblingCreates must take the no-collision path (return nil).
+// The sibling's freeze-head is rewritten to a commit whose diff against
+// freeze-base only edits README (no creates), the durable frozen_diff artifact
+// is rewritten to match that diff, and the sibling's worktree is cleared so
+// the sibling cannot influence the comparison via on-disk state. The current
+// slice then commits a brand new file (current.txt) that does not overlap
+// with any sibling change, asserting the no-collision path explicitly.
+func TestRejectDivergentSiblingCreatesAllowsSiblingWithEmptyCreateSet(t *testing.T) {
+	ctx, store, artifacts, registry, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
+
+	gitRun(t, slicedir, "checkout", "-q", "-B", "aimee/wi/wi_child", base)
+	if err := os.WriteFile(filepath.Join(slicedir, "README"), []byte("x\nsibling edit\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "README")
+	gitRun(t, slicedir, "commit", "-m", "sibling edit existing")
+	siblingEditHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+	if _, err := artifacts.PutNodeArtifact("wi_s0", "freeze-head", "commit", []byte(siblingEditHead)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := artifacts.PutNodeArtifact("wi_s0", "freeze", "frozen_diff", []byte("README\n-x\n+x\n+sibling edit\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetWorktree(ctx, "wi_s0", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	gitRun(t, slicedir, "checkout", "-q", "-B", "aimee/wi/wi_s1_child", base)
+	if err := os.WriteFile(filepath.Join(slicedir, "current.txt"), []byte("current slice create\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "current.txt")
+	gitRun(t, slicedir, "commit", "-m", "current create")
+	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+
+	item, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
+		t.Fatalf("sibling with empty frozen create set should not collide with current slice create, got: %v", err)
 	}
 }
 
