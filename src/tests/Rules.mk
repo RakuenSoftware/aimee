@@ -4986,8 +4986,10 @@ $(TESTPREFIX)/unit-test-evidence-replay: $(OBJDIR)/tests/test_evidence_replay.o 
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # Live forge: the pure check-runs/combined-status -> CI verdict aggregation.
+$(OBJDIR)/tests/test_git_pr_ci_grade.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-git-pr-ci-grade: $(OBJDIR)/tests/test_git_pr_ci_grade.o \
-                              $(OBJDIR)/modules/git/git_pr_ci_grade.o $(OBJDIR)/cJSON.o
+                              $(OBJDIR)/modules/git/git_pr_ci_grade.o \
+                              $(OBJDIR)/module_json_call.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-roundtable-verify: $(OBJDIR)/tests/test_roundtable_verify.o \

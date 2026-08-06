@@ -8,8 +8,13 @@
 
 #define AIMEE_GIT_EVENT_OPERATION    7425u
 #define AIMEE_GIT_EVENT_REF_VALIDATE 7426u
+#define AIMEE_GIT_EVENT_CI_GRADE     7427u
 #define AIMEE_GIT_STAGE_OPERATION    1u
 #define AIMEE_GIT_STAGE_REF_VALIDATE 2u
+/* CI grading carries JSON rather than the fixed binary framing the other two
+ * stages use: a forge's check-runs payload is arbitrarily large and its shape is
+ * the forge's, not ours. */
+#define AIMEE_GIT_STAGE_CI_GRADE     3u
 #define AIMEE_GIT_REQUEST_MAGIC      0x53504f47u /* "GOPS" */
 #define AIMEE_GIT_RESPONSE_MAGIC     0x534c4347u /* "GCLS" */
 #define AIMEE_GIT_REF_REQUEST_MAGIC  0x46455247u /* "GREF" */
