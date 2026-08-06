@@ -33,8 +33,7 @@
     "src/modules/delegates/include/aimee/delegates/delegate_xml_fallback.h",
     "src/modules/delegates/include/aimee/delegates/gw_orch_delegates.h",
     "src/modules/delegates/include/aimee/delegates/module_api.h",
-    "src/modules/delegates/include/aimee/delegates/panel_provider.h",
-    "src/modules/delegates/include/aimee/delegates/panel_roster.h"
+    "src/modules/delegates/include/aimee/delegates/panel_provider.h"
   ],
   "runtime_toggle": {
     "supported": false
@@ -58,7 +57,6 @@
     "src/modules/delegates/delegate_patch_coordinator.c",
     "src/modules/delegates/delegate_plan.c",
     "src/modules/delegates/delegate_prompt.c",
-    "src/modules/delegates/delegate_prompt_stdin.c",
     "src/modules/delegates/delegate_role.c",
     "src/modules/delegates/delegate_routing.c",
     "src/modules/delegates/delegate_run_phases.c",
@@ -68,7 +66,6 @@
     "src/modules/delegates/delegate_xml_fallback.c",
     "src/modules/delegates/gw_orch_delegates.c",
     "src/modules/delegates/panel_provider.c",
-    "src/modules/delegates/panel_roster.c",
     "src/modules/delegates/module_adapter.c"
   ],
   "go_sources": [

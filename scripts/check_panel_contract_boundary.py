@@ -17,7 +17,8 @@ ENSEMBLE_HEADER = "delegate_ensemble.h"
 # the provider ABI is linked into shipping binaries; no new consumer may join it.
 TEMPORARY_TYPE_CONSUMERS = {
     "src/modules/delegates/include/aimee/delegates/panel_provider.h",
-    "src/modules/delegates/include/aimee/delegates/panel_roster.h",
+    # panel_roster.h left with panel_roster.c: neither reached a shipped binary
+    # (`./aimee` has no such command path) and nothing live referenced them.
 }
 TEMPORARY_ENSEMBLE_CONSUMERS = {
     "src/cmd_agent_delegate.c",

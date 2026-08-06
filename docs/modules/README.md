@@ -33,8 +33,8 @@ See the [technical reference](../../src/README.md) for the process and source ma
 
 The canonical inventory splits modules into **required** and **optional**
 (`tests/baselines/modules/canonical-inventory.yaml`). Required modules always
-run — a deployment without `memory` or `routing` is not a smaller deployment,
-it is a broken one — so only the optional set is operator-controlled.
+run: a deployment without `memory` or `routing` is not a smaller deployment, it
+is a broken one, so only the optional set is operator-controlled.
 
 Set `AIMEE_MODULE_<ID>`, where `<ID>` is the module id uppercased with `-`
 replaced by `_`:
@@ -53,8 +53,8 @@ AIMEE_MODULE_KB_SYNTHESIS=1   # kb-placed module
 
 Optional modules by placement:
 
-- **server** — `governance`, `roundtable`, `benchmarks`, `sandbox`, `runtime-web`
-- **kb** — `kb-synthesis`, `control-web`, `benchmarks`
+- **server**: `governance`, `roundtable`, `benchmarks`, `sandbox`, `runtime-web`
+- **kb**: `kb-synthesis`, `control-web`, `benchmarks`
 
 The setting is read at container start by `deploy/container/optional-modules-lib.sh`,
 which rewrites a copy of the shipped module manifest before
@@ -68,8 +68,8 @@ Two specifics worth knowing:
   binary, and is governed by `AIMEE_WFE_ENGINE`. `AIMEE_MODULE_WORKFLOWS` would
   silently do nothing, so it is deliberately not accepted.
 - **`runtime-web` follows the browser UI.** If `AIMEE_RUNTIME_WEB_ENABLED=0` and
-  you say nothing about the module, the module is turned off too — it would have
-  nothing to serve. An explicit `AIMEE_MODULE_RUNTIME_WEB` overrides that.
+  you say nothing about the module, the module is turned off too, because it would
+  have nothing to serve. An explicit `AIMEE_MODULE_RUNTIME_WEB` overrides that.
 
 Asking for a module that is not present in the image logs a warning and changes
 nothing, rather than failing the start.

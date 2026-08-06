@@ -848,7 +848,6 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/cmd_agent_trace.c
     ${AIMEE_SRC_DIR}/cmd_agent_delegate.c
     ${AIMEE_SRC_DIR}/cmd_agent_delegate_toolset.c
-    ${AIMEE_SRC_DIR}/modules/delegates/delegate_prompt_stdin.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_depth.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_plan.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_prompt.c
