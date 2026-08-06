@@ -75,12 +75,12 @@ OIDC.
 
 - `runtime_toggle.supported`: `false`; the descriptor is `enabled_by_default: false`, so governance is selected before startup and omitted/disabled surfaces are not advertised.
 
-The current `modules.governance` response-stage gate conflicts with the descriptor: legacy
-`AIMEE_STAGE_GOVERNANCE` falls back default-on and controls only response tool-policing, while OIDC has
-separate environment/file/DB2 routes. The target module selection must gate all organizational
-governance surfaces and leave core fail-closed enforcement intact. Issuer profiles are configurable from
-Control Plane UI and equivalent CLI, environment/config-file, and non-web API surfaces; secrets are vault
-references. With governance absent, OIDC and organizational settings are absent from advertised catalogs.
+The `modules.governance` response-stage gate follows the descriptor's default-off selection. The legacy
+`AIMEE_STAGE_GOVERNANCE` fallback is also opt-in and controls only response tool-policing, while OIDC has
+separate environment/file/DB2 routes. The target module selection must gate all organizational governance
+surfaces and leave core fail-closed enforcement intact. Issuer profiles are configurable from Control Plane
+UI and equivalent CLI, environment/config-file, and non-web API surfaces; secrets are vault references.
+With governance absent, OIDC and organizational settings are absent from advertised catalogs.
 
 ## Surfaces
 

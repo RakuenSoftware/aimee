@@ -302,6 +302,14 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       AIMEE_GIT_REF_REQUEST_LEN, response, sizeof(response),
                                       &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_git_ref_response_decode(response, response_len, &allowed) == 0 && allowed);
+      assert(aimee_git_ref_request_encode(
+                 "aimee/wi/wi_57186250728b511961573e5afb37cc93.s4263a4834d.g0.0", request,
+                 sizeof(request)) == 0);
+      assert(aimee_module_client_call(client, AIMEE_GIT_EVENT_REF_VALIDATE,
+                                      AIMEE_GIT_STAGE_REF_VALIDATE, 2017, 0, request,
+                                      AIMEE_GIT_REF_REQUEST_LEN, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_git_ref_response_decode(response, response_len, &allowed) == 0 && allowed);
    }
    else if (strcmp(name, "skills") == 0)
    {

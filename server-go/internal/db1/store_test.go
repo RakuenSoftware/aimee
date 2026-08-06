@@ -445,6 +445,21 @@ func TestReplayUnrecoverableCanBeResumedByOperator(t *testing.T) {
 	}
 }
 
+func TestBaseIntegrationConflictCanBeResumedAfterOperatorRepair(t *testing.T) {
+	store := newTestStore(t)
+	createTestItem(t, store, "wi_base_conflict")
+	if err := store.Park(context.Background(), "wi_base_conflict", "plan_gate", "base_integration_conflict", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Resume(context.Background(), "wi_base_conflict"); err != nil {
+		t.Fatalf("resume repaired base integration conflict: %v", err)
+	}
+	item, err := store.WorkItem(context.Background(), "wi_base_conflict")
+	if err != nil || item.PauseReason != "" || item.State != "active" || item.Stage != "plan_gate" {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+}
+
 func TestStopTerminalizesActiveWorkflowTree(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

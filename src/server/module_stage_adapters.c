@@ -57,11 +57,9 @@ static int call_module(uint32_t event_kind, uint32_t stage_id, const void *reque
    uint64_t trace = atomic_fetch_add_explicit(&next_trace, 1, memory_order_relaxed);
    if (trace == 0)
       trace = atomic_fetch_add_explicit(&next_trace, 1, memory_order_relaxed);
-   return obs_bus_module_call(event_kind, stage_id, trace, now + MODULE_STAGE_DEADLINE_NS, request,
-                              request_len, response, response_capacity, response_len, NULL,
-                              NULL) == AIMEE_MODULE_CALL_OK
-              ? 0
-              : -1;
+   return (int)obs_bus_module_call(event_kind, stage_id, trace, now + MODULE_STAGE_DEADLINE_NS,
+                                   request, request_len, response, response_capacity, response_len,
+                                   NULL, NULL);
 }
 
 static int memory_confidence(double score, const char **confidence)
@@ -150,11 +148,13 @@ static int git_validate_ref(const char *ref, int *allowed)
 {
    uint8_t request[AIMEE_GIT_REF_REQUEST_LEN], response[AIMEE_GIT_REF_RESPONSE_LEN];
    uint32_t response_len = 0;
-   return allowed && aimee_git_ref_request_encode(ref, request, sizeof(request)) == 0 &&
-                  call_module(AIMEE_GIT_EVENT_REF_VALIDATE, AIMEE_GIT_STAGE_REF_VALIDATE, request,
-                              sizeof(request), response, sizeof(response), &response_len) == 0
+   if (!allowed || aimee_git_ref_request_encode(ref, request, sizeof(request)) != 0)
+      return -1;
+   int result = call_module(AIMEE_GIT_EVENT_REF_VALIDATE, AIMEE_GIT_STAGE_REF_VALIDATE, request,
+                            sizeof(request), response, sizeof(response), &response_len);
+   return result == AIMEE_MODULE_CALL_OK
               ? aimee_git_ref_response_decode(response, response_len, allowed)
-              : -1;
+              : result;
 }
 
 static int governance_evaluate(int policy_active, const char *const *tool_names,
