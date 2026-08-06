@@ -143,6 +143,19 @@ start_embedder() {
 
 set -e
 
+# Operator control over which optional modules attach to the kb bus. Installed
+# path first, then alongside this script for a source checkout.
+optional_modules_lib=/usr/local/bin/optional-modules-lib.sh
+if [ ! -r "$optional_modules_lib" ]; then
+    kb_entrypoint_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+    optional_modules_lib="$kb_entrypoint_dir/optional-modules-lib.sh"
+fi
+[ -r "$optional_modules_lib" ] || {
+    printf '[aimee-kb-entrypoint] fatal: optional-module helper is unavailable\n' >&2
+    exit 2
+}
+. "$optional_modules_lib"
+
 # Kubernetes/Docker credential environment is first-boot transport only. Record
 # the non-secret external-DB decision, seal every credential-shaped value into
 # Vault, and scrub this PID's inherited copy before any unrelated child process.
@@ -215,6 +228,8 @@ start_modules() {
     done
     chmod 0700 "$AIMEE_HOME/modules.d" "$AIMEE_HOME/modules.d/kb" 2>/dev/null || true
     chmod 0600 "$AIMEE_HOME/modules.d/kb/"*.grant 2>/dev/null || true
+    # Apply the operator's AIMEE_MODULE_<ID> choices over the shipped manifest.
+    MODULE_MANIFEST="$(apply_optional_modules kb "$MODULE_MANIFEST" "$AIMEE_HOME")"
     module-supervisor.sh kb "$AIMEE_MODULE_BUS_SOCKET" "$MODULE_MANIFEST" &
     module_supervisor_pid=$!
 }
