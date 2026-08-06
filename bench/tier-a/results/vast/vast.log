@@ -723,3 +723,7 @@ run_llamacpp.py: error: one of the arguments --thinking --no-thinking is require
 [08:49:17Z] --- Qwen3.6-27B.UD-Q4_K_XL on RTX 5090 36850400 contract 46962270 (offer $0.3241/hr; billed rate read after start)
 [08:53:25Z]     billed $0.3338/hr (offer said $0.3241)
 [08:53:25Z]     healthy, loaded Qwen3.6-27B-UD-Q4_K_XL.gguf; 1 variant(s): live
+[09:46:14Z]     gemma-4-12B-it.qat-UD-Q4_K_XL/live stitched with an earlier fragment (MIXED HARDWARE)
+[09:46:14Z] OK   gemma-4-12B-it.qat-UD-Q4_K_XL/live rows=1001 reasoned=1001/1001 parse_ok=918
+[09:46:14Z] DONE gemma-4-12B-it.qat-UD-Q4_K_XL wall=184m cost=$0.401
+[09:46:14Z] === pool drained
