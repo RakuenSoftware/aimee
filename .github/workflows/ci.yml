@@ -6,7 +6,13 @@ on:
   push:
     branches: [main, testing, feature/core-modularization]
   pull_request:
-    branches: [main, testing, feature/core-modularization, 'aimee/feat/**']
+    branches: [main, testing, feature/core-modularization, 'aimee/feat/**', 'agent/**']
+    # NOTE this filter matches the BASE branch. A base missing from it does not
+    # get a weaker gate — it gets NO gate: the workflow never triggers, so the PR
+    # merges with zero checks recorded and nothing shows pending to block it.
+    # PR #2372 merged that way and broke this branch's unit-test build.
+    # agent/<topic> branches are integration bases like aimee/feat/<id>, so their
+    # sub-PRs must pass the same gate.
     # Slice sub-PRs target aimee/feat/<work-item-id>; include them so each slice
     # must pass the same complete gate as the final feature PR.
     # `edited` re-runs the gate when a PR title/body is edited after open, so
