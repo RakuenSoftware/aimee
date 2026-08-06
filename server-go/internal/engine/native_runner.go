@@ -1011,6 +1011,11 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 	if err != nil {
 		return StepResult{}, err
 	}
+	// Empty diff vs base: the worktree has nothing to freeze, so skip the
+	// collision check (rejectDivergentSiblingCreates) and the frozen_diff /
+	// head / base artifact writes entirely. Returning StepAccepted here is what
+	// turns freeze into a no-op that still finishes the slice instead of
+	// looping review -> convergence_no_progress on a zero-effect attempt.
 	if strings.TrimSpace(diff) == "" {
 		return StepResult{Status: StepAccepted, Detail: "no-op: empty diff vs base"}, nil
 	}
