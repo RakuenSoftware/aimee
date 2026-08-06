@@ -1607,14 +1607,27 @@ func TestFreezeCollisionSentinelSurvivesHTTPRunnerJSONBoundary(t *testing.T) {
 	definition := []byte(`name: slice
 start: freeze
 nodes:
+  - id: source
+    block: understand
   - id: impl
     block: implement
+    in: {plan: source.out}
   - id: freeze
     block: freeze
     in: {branch: impl.out}
-    next: merge
+    next: pr
+  - id: pr
+    block: pr.open
+    in: {src: freeze.out}
+    next: ci
+  - id: ci
+    block: gate.ci
+    in: {pr: pr.out}
+    on_pass: merge
+    on_fail: impl
   - id: merge
     block: merge
+    in: {pr: pr.out}
 `)
 	if err := os.WriteFile(filepath.Join(workflowDir, "slice.yaml"), definition, 0o600); err != nil {
 		t.Fatal(err)
