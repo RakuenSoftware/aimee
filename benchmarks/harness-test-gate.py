@@ -118,6 +118,54 @@ def _test_function_names(text):
     return names
 
 
+def _assertions(text):
+    """Assertion statements in a test file, normalised for whitespace.
+
+    Deliberately shallow. The question is not "is this the same assertion" but
+    "did an assertion that used to be here stop being here", which a normalised
+    literal comparison answers without needing to parse four languages.
+    """
+    out = set()
+    for pat in (r"\\bassert\\s*\\(.*?\\)\\s*;",          # C / C++
+                r"\\bassert\\s+[^\\n]+",                  # python bare assert
+                r"\\bself\\.assert\\w+\\s*\\(.*?\\)",     # unittest
+                r"\\bexpect\\s*\\(.*?\\)\\s*\\.[^\\n;]+"):  # jest / vitest
+        for m in re.findall(pat, text, re.S):
+            out.add(" ".join(m.split()))
+    return out
+
+
+def weakened_existing_assertions(workspace, seed, written):
+    """Assertions that existed in the PRISTINE test and are gone from the agent's.
+
+    removed_existing_tests() only sees DELETED test functions. On am_270b3483d5
+    the agent instead inverted assertions inside an existing test that has no
+    named test functions at all -- it is a bare main() -- so nothing was
+    "removed" and the check could not fire. It flipped
+
+        assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_READY);
+
+    to expect NO_TRUST_BUNDLE, matching its own stricter behaviour, and scored
+    catches_defect for it.
+
+    Editing an existing test to agree with your change is not evidence that a
+    defect was caught. Adding NEW assertions is untouched by this: only
+    assertions that DISAPPEARED are reported.
+    """
+    lost = {}
+    for rel in written:
+        before, after = seed / rel, Path(workspace) / rel
+        if not before.is_file() or not after.is_file():
+            continue
+        try:
+            gone = _assertions(before.read_text()) - _assertions(after.read_text())
+        except (OSError, UnicodeDecodeError):
+            continue
+        if gone:
+            lost[rel] = sorted(gone)[:5]
+    return lost
+
+
 def removed_existing_tests(workspace, seed, written):
     """Test entry points that existed in the PRISTINE tree and are gone now.
 
@@ -214,6 +262,10 @@ def agent_test_gate(workspace, task, changed):
     lost = removed_existing_tests(workspace, seed, written)
     if lost:
         return {"ok": False, "reason": "removed_existing_test:%s" % json.dumps(lost),
+                "files": written, "red_passed": False, "green_passed": True}
+    weakened = weakened_existing_assertions(workspace, seed, written)
+    if weakened:
+        return {"ok": False, "reason": "changed_existing_assertions:%s" % json.dumps(weakened),
                 "files": written, "red_passed": False, "green_passed": True}
     return {"ok": True, "reason": "catches_defect", "files": written,
             "red_passed": False, "green_passed": True}

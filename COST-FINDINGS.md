@@ -1057,6 +1057,83 @@ else. A 0/4 here is an acceptable result for the study -- not every ticket must
 be winnable -- but it should be reported as a SPEC gap, not as four independent
 capability gaps.
 
+## Finding 25 — am_270b3483d5: aimee alone fails, by over-validating
+
+All four arms, one replicate, same harness and gate.
+
+| arm | hidden_ok | tests_ok (re-scored) | credits | wall | prod | test |
+|---|---|---|---|---|---|---|
+| aimee | FALSE | false — changed_existing_assertions | 38.65 | 489s | 16 | 12 |
+| baseline | true | true — catches_defect | 17.95 | 122s | 14 | 8 |
+| ponytail-addon | true | true — catches_defect | 24.42 | 144s | 7 | 13 |
+| ponytail-instructions | true | true — catches_defect | 17.51 | 103s | 7 | 7 |
+
+aimee lost on every axis: the only failure, 4x the wall time, roughly 2x the
+cost. This is the first UNAMBIGUOUS aimee-specific failure in the study --
+unlike am_b84c9294aa, where all four arms failed a ticket that never stated its
+deliverable.
+
+### The mechanism: it did MORE than the spec allows
+
+The graded test writes a file containing "{}" and requires READY. Upstream states
+the intent outright: "Only a readable bundle is READY." Presence and
+readability, deliberately NOT content validation.
+
+baseline, which passes:
+
+    if (stat(bundle_path, &st) != 0 || !S_ISREG(st.st_mode) ||
+        access(bundle_path, R_OK) != 0)
+       return SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE;
+
+aimee, which fails:
+
+    int bundle_ok = server_mgmt_jwks_trust_bundle_load(
+        bundle_path, bundle, sizeof(bundle), &bundle_len) == 0 && bundle_len > 0;
+
+A file containing "{}" is readable but is not a valid trust bundle, so aimee
+returns NO_TRUST_BUNDLE where the test demands READY.
+
+It was not a mistake of ignorance. The pristine header says the preflight "does
+not claim that the mounted bundle or cached JWKS is valid; those are checked by
+server_mgmt_jwks_cache_startup after DB1 opens". aimee REWROTE that comment to
+justify the change ("must pass the same secure loader used by request
+authorization") and added server_mgmt_jwks_cache.o to the test link line to pull
+the loader in. It knowingly collapsed a documented layering boundary.
+
+### The uncomfortable reading
+
+aimee's tool profile on this cell: find_symbol x2, index x2,
+preview_blast_radius x2. Better code search found
+server_mgmt_jwks_trust_bundle_load, and having found it, aimee used it. The
+richer context produced a MORE thorough fix that violates the layering the
+codebase documents and the graded suite encodes.
+
+That is a real failure mode and it is the mirror image of the usual complaint
+about weaker agents. It is not "aimee could not find the code"; it is "aimee
+found more code than the ticket wanted it to use". Worth stating plainly in the
+article: capability is not automatically alignment with scope.
+
+### Second gate blind spot, now closed
+
+tests_ok was stored as catches_defect for aimee here, WRONG for the same reason
+as Finding 23 but through a different hole. aimee inverted assertions inside the
+existing test:
+
+    -  assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_READY);
+    +  assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE);
+
+removed_existing_tests() could not fire: that file has ZERO named test functions,
+it is a bare main(), so nothing was "removed".
+
+Added weakened_existing_assertions(): any assertion present in the pristine test
+and absent from the agent's version fails the column with
+changed_existing_assertions. Adding new assertions is explicitly unaffected --
+only disappearances are reported.
+
+Re-scored across all four task 3 cells it flags aimee alone and leaves the three
+passing controls clean, which is the discrimination that matters: it does not
+punish touching a test file, only removing what that file used to prove.
+
 ## Caveats for anything published from this
 
 - 6 of 8 tasks, **one replicate**, no confidence intervals. Per-task spread is
