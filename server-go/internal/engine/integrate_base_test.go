@@ -275,6 +275,7 @@ func TestFreezeRejectsDivergentSiblingCreateCreateCollision(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(secondDir, "collision.txt"), []byte("second\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	gitRun(t, secondDir, "add", "collision.txt")
 	gitRun(t, secondDir, "commit", "-m", "second")
 	if err := store.Move(ctx, "wi_s0", "freeze", "review", "advance", "", firstResult.ContentHash, 0); err != nil {
 		t.Fatal(err)
