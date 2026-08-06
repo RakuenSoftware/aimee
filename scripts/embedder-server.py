@@ -43,6 +43,7 @@ import json
 import os
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # ---- the embedder registry ----
@@ -364,22 +365,127 @@ def embed(text: str, input_type=INPUT_TYPE_DEFAULT):
     prefixed = prefix_for(input_type) + text
     if EMBEDDER_STUB:
         return _stub_embed(prefixed)
-    vec = _model.encode(prefixed, normalize_embeddings=True)
-    return vec.tolist()
+    if EMBEDDER_BATCH_WINDOW_MS <= 0:
+        vec = _model.encode(prefixed, normalize_embeddings=True)
+        return vec.tolist()
+    # n=1 is the case the coalescer exists for: a lone text costs 58.7 ms on its
+    # own and 11.7 ms as part of a full batch. Joining whatever else is in flight
+    # is worth a bounded wait of a few milliseconds.
+    return _encode_coalesced([prefixed])[0]
+
+
+# --- dynamic batching -------------------------------------------------------
+#
+# Callers do not control how much work arrives per request, and the kb's document
+# ingest cannot: it embeds one file at a time, and a source file is usually 1-5
+# chunks. Measured on this model, batch size dominates everything else --
+#
+#     n=1   58.7 ms/text        n=32   13.0 ms/text
+#     n=8   15.3 ms/text        n=128  11.7 ms/text
+#
+# -- so a fleet of ingest workers each sending its own small batch pays a ~5x
+# penalty on nearly every chunk while the server sits underused. Coalescing here
+# fixes it for every caller at once, without each of them having to restructure
+# to accumulate work: several concurrent small requests become one large
+# model.encode(), which is what the GPU/CPU wants anyway.
+#
+# The window is short (default 15 ms) because it is pure added latency for a
+# request that arrives when the queue is empty -- an interactive query embed must
+# not wait meaningfully. Set EMBEDDER_BATCH_WINDOW_MS=0 to disable coalescing.
+EMBEDDER_BATCH_WINDOW_MS = int(os.environ.get("EMBEDDER_BATCH_WINDOW_MS", "15"))
+EMBEDDER_BATCH_MAX = int(os.environ.get("EMBEDDER_BATCH_MAX", "128"))
+
+_batch_lock = threading.Lock()
+_batch_cv = threading.Condition(_batch_lock)
+_batch_pending = []          # [_BatchItem]
+_batch_worker_started = False
+
+
+class _BatchItem:
+    __slots__ = ("prefixed", "vec", "error", "done")
+
+    def __init__(self, prefixed):
+        self.prefixed = prefixed
+        self.vec = None
+        self.error = None
+        self.done = threading.Event()
+
+
+def _run_encode(items):
+    """One model call for a group of items; distribute or fail them together."""
+    try:
+        vecs = _model.encode([i.prefixed for i in items], normalize_embeddings=True)
+        for item, vec in zip(items, vecs):
+            item.vec = vec.tolist()
+    except Exception as exc:  # noqa: BLE001 - surfaced per waiting request
+        for item in items:
+            item.error = exc
+    finally:
+        for item in items:
+            item.done.set()
+
+
+def _batch_loop():
+    """Collect whatever arrived within the window, then encode it as one batch."""
+    while True:
+        with _batch_cv:
+            while not _batch_pending:
+                _batch_cv.wait()
+            # A short settle so sibling requests in flight join this batch. Bounded
+            # by EMBEDDER_BATCH_MAX so a burst cannot grow one call without limit.
+            deadline = time.monotonic() + (EMBEDDER_BATCH_WINDOW_MS / 1000.0)
+            while len(_batch_pending) < EMBEDDER_BATCH_MAX:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                _batch_cv.wait(remaining)
+            items = _batch_pending[:EMBEDDER_BATCH_MAX]
+            del _batch_pending[:len(items)]
+        _run_encode(items)
+
+
+def _ensure_batch_worker():
+    global _batch_worker_started
+    with _batch_lock:
+        if _batch_worker_started:
+            return
+        _batch_worker_started = True
+        threading.Thread(target=_batch_loop, name="embed-batcher", daemon=True).start()
+
+
+def _encode_coalesced(prefixed_list):
+    """Encode via the shared batcher so concurrent callers share one model call."""
+    _ensure_batch_worker()
+    items = [_BatchItem(p) for p in prefixed_list]
+    with _batch_cv:
+        _batch_pending.extend(items)
+        _batch_cv.notify()
+    out = []
+    for item in items:
+        item.done.wait()
+        if item.error is not None:
+            raise item.error
+        out.append(item.vec)
+    return out
 
 
 def embed_batch(texts, input_type=INPUT_TYPE_DEFAULT):
-    """Embed a list of texts in one batched model.encode() call — one HTTP
-    round-trip and one batched inference instead of N separate /embed calls.
-    Returns a list of float vectors aligned 1:1 with `texts`."""
+    """Embed a list of texts and return vectors aligned 1:1 with `texts`.
+
+    The caller's list is a lower bound on batch size, not the batch: requests in
+    flight from other callers are coalesced into the same model call. A caller
+    that can batch well still should -- it saves HTTP round trips -- but one that
+    cannot is no longer penalised for it."""
     prefix = prefix_for(input_type)
     prefixed = [prefix + t for t in texts]
     if EMBEDDER_STUB:
         return [_stub_embed(t) for t in prefixed]
     if not prefixed:
         return []
-    vecs = _model.encode(prefixed, normalize_embeddings=True)
-    return [v.tolist() for v in vecs]
+    if EMBEDDER_BATCH_WINDOW_MS <= 0:
+        vecs = _model.encode(prefixed, normalize_embeddings=True)
+        return [v.tolist() for v in vecs]
+    return _encode_coalesced(prefixed)
 
 
 class Handler(BaseHTTPRequestHandler):
