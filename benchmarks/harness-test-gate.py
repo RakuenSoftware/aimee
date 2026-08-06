@@ -37,6 +37,7 @@ Deliberately NOT part of this gate: whether the agent's test resembles the
 reference. Converging on the upstream approach is worth measuring and is
 reported separately, but requiring it would grade style rather than behaviour.
 """
+import py_compile
 import re
 import shutil
 import sys
@@ -147,13 +148,21 @@ def main():
     anchor = "def hidden_test(workspace: Path, task: str) -> dict:"
     text = text.replace(anchor, GATE.strip() + "\n\n\n" + anchor, 1)
 
-    # call it next to the hidden test, and surface it in the summary
+    # Call it AFTER collect_patch, which is what binds `changed`. Anchoring on
+    # hidden_test instead put the call one line above that binding, so every
+    # cell died with "cannot access local variable 'changed'" -- after the agent
+    # had already run, so the whole cell's credits were spent and thrown away.
+    #
+    # The gate reads the agent's own copy from `workspace`, the untouched
+    # execution workspace, so moving it below collect_patch does not expose it
+    # to the graded test file that hidden_test swaps into graded_ws.
+    anchor_changed = "    changed, loc = collect_patch(graded_ws, artifact)"
+    if anchor_changed not in text:
+        print("FATAL: collect_patch anchor not found; refusing to patch blind")
+        return 2
     text = text.replace(
-        "    hidden = hidden_test(graded_ws, task)",
-        "    hidden = hidden_test(graded_ws, task)\n"
-        "    # Scored BEFORE the graded test file overwrites whatever the agent\n"
-        "    # wrote in that path -- hidden_test restores it, but read the agent's\n"
-        "    # own copy from the untouched execution workspace regardless.\n"
+        anchor_changed,
+        anchor_changed + "\n"
         "    tests = agent_test_gate(workspace, task, changed)", 1)
 
     text = text.replace(
@@ -164,6 +173,33 @@ def main():
         '        "tests_files": tests.get("files", []),', 1)
 
     RUNNER.write_text(text)
+
+    # Verify before anyone spends a cell on it. The ordering bug that motivated
+    # this cost a full agent run: the cell executed, then grading raised
+    # "cannot access local variable 'changed'" and the whole thing was binned.
+    # py_compile would not have caught that one (it is a runtime unbound-local),
+    # so check the ordering explicitly as well.
+    problems = []
+    try:
+        py_compile.compile(str(RUNNER), doraise=True)
+    except py_compile.PyCompileError as exc:
+        problems.append("does not compile: %s" % exc)
+
+    body = RUNNER.read_text()
+    bind = body.find("changed, loc = collect_patch")
+    use = body.find("tests = agent_test_gate(")
+    if bind < 0 or use < 0:
+        problems.append("expected both collect_patch and agent_test_gate call sites")
+    elif use < bind:
+        problems.append("agent_test_gate is called before `changed` is bound")
+
+    if problems:
+        RUNNER.write_text(RUNNER.with_suffix(".py.pre-testgate.bak").read_text())
+        for p in problems:
+            print("FATAL:", p)
+        print("reverted:", RUNNER)
+        return 3
+
     print("patched:", RUNNER)
     return 0
 
