@@ -607,11 +607,6 @@ func TestRejectDivergentSiblingCreatesReportsDeterministicCollisionAcrossRuns(t 
 				t.Fatal(err)
 			}
 
-			// Overwrite the sibling's frozen creates AND add a fresh one so
-			// every current-slice create collides with the sibling. Each
-			// colliding file carries distinct content so every entry in the
-			// collision set is a real divergence; the smallest path must
-			// therefore be reported.
 			// Overwrite the sibling's frozen creates with divergent content so
 			// every current-slice create that the sibling ALSO created
 			// (frozen.txt, m.txt, z.txt) collides. The smallest colliding path
@@ -628,15 +623,6 @@ func TestRejectDivergentSiblingCreatesReportsDeterministicCollisionAcrossRuns(t 
 			}
 			gitRun(t, slicedir, "add", "frozen.txt", "m.txt", "a.txt", "z.txt")
 			gitRun(t, slicedir, "commit", "-m", "divergent creates")
-				if err := os.WriteFile(filepath.Join(slicedir, name), []byte("conflicting "+name+"\n"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := os.WriteFile(filepath.Join(slicedir, "a.txt"), []byte("current a\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			gitRun(t, slicedir, "add", "m.txt", "a.txt", "z.txt")
-			gitRun(t, slicedir, "commit", "-m", "divergent creates")
 			currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
 
 			item, err := store.WorkItem(ctx, "wi_s1")
@@ -645,7 +631,7 @@ func TestRejectDivergentSiblingCreatesReportsDeterministicCollisionAcrossRuns(t 
 			}
 			runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
 			err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
-			assertFreezeCreateCollision(t, err, "a.txt", item.ID, "wi_s0")
+			assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
 			seen = append(seen, err.Error())
 		})
 	}
