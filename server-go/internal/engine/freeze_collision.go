@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
@@ -42,7 +43,7 @@ func freezeCreatedFiles(ctx context.Context, workdir, base, head string) (map[st
 	return creates, nil
 }
 
-func frozenSiblingCreatedFiles(ctx context.Context, siblingWorkdir, base, siblingBase, head string) (map[string]freezeCreate, error) {
+func frozenSiblingCreatedFiles(ctx context.Context, workdir, base, siblingBase, head string) (map[string]freezeCreate, error) {
 	head = strings.TrimSpace(head)
 	siblingBase = strings.TrimSpace(siblingBase)
 	base = strings.TrimSpace(base)
@@ -52,14 +53,14 @@ func frozenSiblingCreatedFiles(ctx context.Context, siblingWorkdir, base, siblin
 	if siblingBase != base {
 		return nil, nil
 	}
-	mergeBase, err := gitText(ctx, siblingWorkdir, "merge-base", base, head)
+	mergeBase, err := gitText(ctx, workdir, "merge-base", base, head)
 	if err != nil {
 		return nil, fmt.Errorf("resolve frozen sibling merge base: %w", err)
 	}
 	if strings.TrimSpace(mergeBase) != base {
 		return nil, fmt.Errorf("frozen sibling head %s is not based on recorded base %s", head, base)
 	}
-	return freezeCreatedFiles(ctx, siblingWorkdir, base, head)
+	return freezeCreatedFiles(ctx, workdir, base, head)
 }
 
 // siblingStageHasFrozenDiff distinguishes a durable freeze from both an orphan
@@ -106,6 +107,22 @@ func (r *NativeRunner) siblingStageHasFrozenDiff(sibling db1.WorkItem) (bool, er
 	return false, nil
 }
 
+func firstFreezeCreatePath(creates map[string]freezeCreate) string {
+	paths := make([]string, 0, len(creates))
+	for path := range creates {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	if len(paths) == 0 {
+		return ""
+	}
+	return paths[0]
+}
+
+func freezeCreateCreateCollisionError(path, currentSlice, siblingSlice string) error {
+	return fmt.Errorf("%s: path %s current slice %s conflicts with already frozen sibling slice %s", freezeCreateCreateCollision, path, currentSlice, siblingSlice)
+}
+
 func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item db1.WorkItem, workdir, base, head string) error {
 	if item.ParentID == "" {
 		return nil
@@ -134,13 +151,6 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 		if sibling.ID == item.ID || sibling.State != "active" {
 			continue
 		}
-		if !siblingWorktreeUsable(sibling.Worktree) {
-			// A sibling whose recorded worktree is empty or whose directory is
-			// absent is GC'd or transiently absent; there is no basis for
-			// comparison, so skip it rather than raising a spurious freeze
-			// failure.
-			continue
-		}
 		frozen, err := r.siblingStageHasFrozenDiff(sibling)
 		if err != nil {
 			return err
@@ -150,53 +160,44 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 		}
 		artifact, err := r.artifacts.NodeArtifact(sibling.ID, "freeze")
 		if errors.Is(err, os.ErrNotExist) {
-			continue
+			return freezeCreateCreateCollisionError(firstFreezeCreatePath(creates), item.ID, sibling.ID)
 		}
 		if err != nil {
 			return fmt.Errorf("read sibling freeze artifact: %w", err)
 		}
 		if artifact.Type != "frozen_diff" || strings.TrimSpace(string(artifact.Content)) == "" {
-			return errors.New("sibling freeze artifact has invalid type or empty content")
+			return freezeCreateCreateCollisionError(firstFreezeCreatePath(creates), item.ID, sibling.ID)
 		}
 		headArtifact, err := r.artifacts.NodeArtifact(sibling.ID, "freeze-head")
+		if errors.Is(err, os.ErrNotExist) {
+			return freezeCreateCreateCollisionError(firstFreezeCreatePath(creates), item.ID, sibling.ID)
+		}
 		if err != nil {
 			return fmt.Errorf("read sibling freeze head: %w", err)
 		}
 		if headArtifact.Type != "commit" {
-			return errors.New("sibling freeze head has invalid type")
+			return freezeCreateCreateCollisionError(firstFreezeCreatePath(creates), item.ID, sibling.ID)
 		}
 		baseArtifact, err := r.artifacts.NodeArtifact(sibling.ID, "freeze-base")
+		if errors.Is(err, os.ErrNotExist) {
+			return freezeCreateCreateCollisionError(firstFreezeCreatePath(creates), item.ID, sibling.ID)
+		}
 		if err != nil {
 			return fmt.Errorf("read sibling freeze base: %w", err)
 		}
 		if baseArtifact.Type != "commit" {
-			return errors.New("sibling freeze base has invalid type")
+			return freezeCreateCreateCollisionError(firstFreezeCreatePath(creates), item.ID, sibling.ID)
 		}
-		siblingCreates, err := frozenSiblingCreatedFiles(ctx, sibling.Worktree, base,
+		siblingCreates, err := frozenSiblingCreatedFiles(ctx, workdir, base,
 			string(baseArtifact.Content), string(headArtifact.Content))
 		if err != nil {
-			return err
+			return freezeCreateCreateCollisionError(firstFreezeCreatePath(creates), item.ID, sibling.ID)
 		}
 		for path, create := range creates {
 			if other, ok := siblingCreates[path]; ok && other.Blob != create.Blob {
-				return fmt.Errorf("%s: path %s current slice %s conflicts with already frozen sibling slice %s", freezeCreateCreateCollision, path, item.ID, sibling.ID)
+				return freezeCreateCreateCollisionError(path, item.ID, sibling.ID)
 			}
 		}
 	}
 	return nil
-}
-
-// siblingWorktreeUsable reports whether the recorded sibling worktree path is
-// present on disk. A missing directory means the worktree is GC'd or transiently
-// absent; in either case the sibling cannot be compared and must be skipped
-// rather than surfaced as a freeze failure.
-func siblingWorktreeUsable(path string) bool {
-	if path == "" {
-		return false
-	}
-	info, err := os.Stat(path)
-	if err != nil || !info.IsDir() {
-		return false
-	}
-	return true
 }
