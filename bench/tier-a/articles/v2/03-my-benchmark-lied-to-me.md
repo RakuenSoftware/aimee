@@ -1,10 +1,11 @@
-# My benchmark lied to me six times and the evidence was always already on disk
+# My benchmark lied to me nine times and the evidence was always already on disk
 
-ROUGH DRAFT.
+DRAFT.
 
 Every wrong answer I published in this project came from an instrument biased in
-the direction I wanted. In five of the six, the data that would have caught it was
-already sitting in my own output. The sixth is worse, and it is last.
+the direction I wanted. In eight of the nine, the data that would have caught it was
+already sitting in my own output. The one that had no such column is the cheapest to
+prevent and the most expensive to find.
 
 That is the finding. Not "measure carefully". The repeatable failure is that a
 benchmark computes more than it prints, and the discarded column is the one that
@@ -14,8 +15,9 @@ You are watching the model. Sixteen of them, a ladder of quants, an accuracy col
 What is moving your numbers is a process count, a startup timer, and a threshold you
 borrowed from an unrelated experiment.
 
-Six instances, each with its correction, because a defect list without fixes is a
-confession rather than a method.
+Nine instances, each with its correction, because a defect list without fixes is a
+confession rather than a method. The last three came from renting hardware, which
+did not introduce a new failure mode. It gave the existing ones a meter.
 
 ## One: throughput that grew with the variable under test
 
@@ -139,16 +141,85 @@ your own house theme is faster than the checks that catch it.
 along, under `over_extraction`. I rediscovered a number that was already there,
 which is the fourth time in this project.
 
+## Seven: a successful response that said I owned nothing
+
+`GET /api/v0/instances/` returned `{"instances": []}`. Not an error. A parseable,
+200-status, empty fleet.
+
+I recorded that in my own operational notes as "intermittently returns empty while
+instances are demonstrably running" and moved on, because I had rentals I could see
+working and a list endpoint that disagreed with them.
+
+Ask the same endpoint with a query string and it stops lying:
+
+    {"success":false,"error":"deprecated_endpoint",
+     "msg":"/api/v0/instances/ is deprecated. Use /api/v1/instances/ instead."}
+
+The v1 endpoint reported **25 running instances billing $2.68 an hour, two of which
+were doing work.** The rest were overnight leaks: containers that failed to start,
+hosts that had exited, and one still serving a model whose arm had finished and been
+committed hours earlier.
+
+**Fix:** the check that finds a leak does not need the provider to cooperate. An
+instance whose `start_date` precedes the start time of the oldest running
+orchestrator process cannot be owned by one. That is a comparison between two facts,
+not a timeout, and it identified four ten-hour-old instances immediately.
+
+**Already on disk:** the deprecation notice, behind a query string, in the same
+endpoint I was already calling. I diagnosed the symptom, wrote the symptom into my
+notes as if it were the cause, and then trusted my own note for eleven hours.
+
+## Eight: four timeouts, each wrong in the same direction
+
+I decided a rented host was stuck four separate times, at 420 seconds, then 900, then
+600 from container start, then a 3,600 second cap. Every one of them abandoned hosts
+that were working.
+
+The bias has a shape. Download time scales with model size and my deadline did not,
+so **the false-positive rate grew with the variable under test.** That is the same
+defect as the throughput timer in section one, one layer up and with a bill attached:
+because the pool re-places on timeout, each large arm burned a full deadline of
+billing and then restarted the download somewhere else, forever.
+
+**Fix:** none of the signals that actually distinguish a dead host from a slow one is
+a duration. The instance reports `exited`. The container reports a docker daemon
+error. The instance disappears from the API. Or `disk_util` sits at −1 with no status
+message while a sibling placed thirty minutes later is already reporting progress.
+Those are categorical, and the last one is a comparison rather than a clock.
+
+**Already on disk:** every one of those fields, in the same API response I was
+timing.
+
+## Nine: I inferred a mechanism from a number
+
+Qwen3.6-35B-A3B ran at 234 tok/s. I decided a 35B model could not do that without
+speculative decoding, labelled both Qwen arms "native MTP" in my notes, and reported
+it that way three times.
+
+`/props` says `speculative: null`. No row in either prediction file carries a
+`draft_n` counter. Qwen3.6 publishes no MTP draft in that repository at all. The real
+mechanism is that roughly 3B of its 35B parameters are active per token, so it reads
+about a tenth as much memory as a dense model of its size.
+
+**Fix:** I had already added `draft_n` and `draft_n_accepted` to every prediction row,
+specifically because wall clock confounds the feature with the host and the model.
+Then I read the throughput column anyway and explained it with a feature the model
+does not have. Recording a mechanism is not the same as consulting it.
+
+**Already on disk:** in every row of both files, in the field I added for this exact
+purpose.
+
 ## What survives
 
 A benchmark computes more than it prints. The discarded column is the one that
-catches you, and in five of the six cases here it was already being computed. The sixth had no
-interval to discard, which is worse.
+catches you, and in eight of the nine cases here it was already being computed. The
+one exception had no interval to discard, which is worse.
 
 So the practice is not "be careful". It is:
 
 **Print the denominators.** Process count, startup time, sample size, client count,
-slot count. Five of my six were a number the harness had and did not show.
+slot count, draft acceptance. Most of these were a number the harness had and did not
+show.
 
 **Never share a threshold across experiments.** A number that was an effect size
 in one place is not a significance bound in another, however similar its
@@ -160,5 +231,13 @@ saying why.
 
 **A subset is not a run**, unless you have turned the cache off and checked.
 
-Each of those is one line of output or one hour of work. I spent about a week on
-the six errors they would have prevented.
+**Never encode a duration as a diagnosis.** Four times I turned "this is taking a
+while" into a constant. A clock cannot tell a slow host from a dead one, and the
+signals that can are all categorical.
+
+**When a response says you own nothing, prove it before believing it.** A successful
+empty answer is the most expensive failure mode available, because nothing about it
+looks like a failure.
+
+Each of those is one line of output or one hour of work. I spent about a week, and
+roughly forty dollars of rented GPU time, on the errors they would have prevented.

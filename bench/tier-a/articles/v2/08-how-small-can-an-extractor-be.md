@@ -1,133 +1,169 @@
 # How small can a fact extractor be
 
-ROUGH DRAFT. The full field table lives in the head-to-head piece; this one asks
-only the size question. The original ranking behind it ran on 69 notes, and the
-corpus-backed rebuild has not been done, so read any ordering here as a hypothesis.
+DRAFT. The full field table lives in the head-to-head piece. This one asks only the
+size question.
 
 If you want a local model to turn a note into structured facts, the first question is
-how much model you have to buy. I measured sixteen, from 230M to 8B.
+how much model you have to buy. I measured twenty-two arms, from 230M to 35B.
 
-The answer is smaller than I expected, and why it is unreliable is more interesting
-than the answer.
+The answer is smaller than I expected, and the reason it took me three attempts to
+state correctly is worth more than the answer.
 
-## The field does not sort by size A 2B model and its 4B sibling, where the smaller
-is architecturally a nested submodel of the larger, land within 0.005 F1 of each
-other at 3,002 notes. A 3B model gains **+0.0352** from a quant change, which is
-larger than most of the size gaps I care about.
+## Fifteen times the parameters is worth 0.047
 
-What binds is not how many parameters. It is whether the model reasons, whether
-your prompt lets it, whether the quant you picked suits it, and whether it knows
-when to say nothing.
+Every arm below is 1,001 notes on the same corpus with the same prompt.
 
-## The 69-note table and what it could resolve
+| model | params | F1 |
+|---|---|---:|
+| gemma-4-E2B | 2B | 0.6406 |
+| gemma-4-26B-A4B | 26B total, ~4B active | 0.6804 |
+| gemma-4-12B | 12B | 0.6854 |
+| gemma-4-31B | 31B | 0.6872 |
 
-The original ranking spanned 0.000 to 0.748 across sixteen models. At n=69 the
-interval is near ±0.12, derived from the ±0.03 measured at 1,001 notes and scaled
-by the square root of n.
+> gemma-4-E2B → gemma-4-31B: **+0.0465, 95% CI [+0.0220, +0.0712]**
 
-Resolvable at that size: the gap between models producing no usable output (0.00 to
-0.21) and models above 0.55; the schema-rate failures, which are categorical; and
-the CPU cost spread, which is throughput rather than accuracy.
+Real, and small. Going from 2B to 31B is worth less than half of what a *prompt
+clause* was worth on one model in this same project, and about the same as what a
+quant change was worth on another.
 
-Not resolvable: any ordering among the five models between 0.50 and 0.65, and both
-apparent size inversions.
+## The measurement that nearly said the opposite
 
-I know that limit is real rather than theoretical because I walked into it. A
-separate claim on this benchmark, that the reasoning pass is worth +0.084 F1, came
-from a 70-note measurement with no interval. It became a constant quoted in three
-source files and shaped a design decision. Re-measured at 955 notes it was +0.0103,
-interval spanning zero.
+I first tested it the obvious way: bootstrap each adjacent pair down the ranking.
 
-## What I can defend right now
+| step | delta | 95% CI | |
+|---|---:|---|---|
+| 31B QAT → 12B QAT | −0.0017 | [−0.0202, +0.0162] | indistinguishable |
+| 12B QAT → 26B unsloth | −0.0051 | [−0.0256, +0.0154] | indistinguishable |
+| 26B unsloth → 31B non-QAT | −0.0041 | [−0.0258, +0.0176] | indistinguishable |
+| 31B non-QAT → 12B non-QAT | −0.0009 | [−0.0197, +0.0180] | indistinguishable |
+| 12B non-QAT → 26B google | −0.0179 | [−0.0434, +0.0071] | indistinguishable |
+| 26B google → E2B QAT | −0.0168 | [−0.0406, +0.0070] | indistinguishable |
 
-**Small works.** Models in the 2B to 4B range do this task at a level that is
-useful, and the gap to anything larger in my field is smaller than the gap between
-two quants of the same model.
+Six consecutive steps, 2B to 31B, not one of them separable. I wrote "size does
+nothing on this task" in my notes and I was about to publish it.
 
-**A mixture of experts is not a small model operationally.** 8B total with about
-1B active still resides in full: 5.16 GB at Q4, three copies of which do not fit a
-16 GiB card. It runs at a different process count from the rest of the field,
-which makes it incomparable to the ranking by construction, and process count is
+Then I tested the ends against each other and got +0.0465 with the interval well
+clear of zero.
+
+Both results are correct. Each step carries an interval of roughly ±0.020, and six
+of those stacked end to end have room to hide a real 0.047 with none of the
+individual steps noticing.
+
+**A size ladder compared rung by rung will always tell you size does nothing.** That
+is the shape of the experiment, not a fact about models, and it is the default way
+people run this comparison.
+
+## What size actually changes is not the score
+
+The 31B and the 12B are statistically identical on F1. They are not the same model.
+
+| | F1 | recall | abstains on factless | invented triples |
+|---|---:|---:|---:|---:|
+| gemma-4-31B QAT | 0.6872 | **0.8000** | **0.463** | **180** |
+| gemma-4-12B QAT | 0.6854 | 0.7330 | 0.702 | 97 |
+
+The 31B finds the most facts in the entire field and invents nearly twice as many on
+the 322 notes that assert nothing. Both 31B arms do this, so it is the model and not
+the quant.
+
+Scaling up bought recall and spent restraint. If your pipeline reviews what it
+writes, that is a good trade. If it writes into a graph nothing will audit, it is a
+bad one, and the F1 column shows neither.
+
+## Architecture beat size, twice
+
+The largest jump in the whole field is not a size step.
+
+> gemma-4-31B QAT → Qwen3.6-35B-A3B: **+0.0386, 95% CI [+0.0194, +0.0577]**
+
+That is a mixture of experts with roughly 3B active parameters beating a dense 31B by
+more than the dense 31B beat a 2B.
+
+And on throughput the same architecture choice dominates everything:
+
+| model | active | tok/s |
+|---|---|---:|
+| Qwen3.6-35B-A3B | ~3B of 35B | **234.0** |
+| Qwen3.6-27B dense | 27B | 64.7 |
+
+**3.6 times faster, same family, same quant, same card class, writing the same
+amount of text.**
+
+So the size question splits in two. Total parameters decide what fits on your card.
+Active parameters decide what it costs to run. A 26B MoE ran at 323 tok/s on a 16 GB
+consumer card, faster than a 12B dense model on the same card.
+
+## A mixture of experts is not a small model on disk
+
+All experts stay resident. LFM2.5-8B-A1B at Q4_K_M is 5.16 GB and three copies do not
+fit a 16 GiB card, so that arm ran at a different process count from the rest of the
+field, which makes it incomparable to the ranking by construction. Process count is
 worth about 0.0105 F1 here.
 
-**Sub-1B needs a matched prompt before it needs a verdict.** One 350M extraction
-model scored 0.070 at a 0.14 JSON parse rate against my schema. That is a format
-disagreement, not a capability measurement, and I have not re-run it with a matched
-prompt. Until I do it has no place in a ranking.
+Sparsity buys bandwidth, not VRAM. Plan memory by total parameters and speed by
+active ones.
 
-**One family inversion survived and I cannot explain it.** Qwen3.5 at 0.8B scores
-0.438 and at 2B scores 0.324, inside a single family at identical settings. It
-appeared consistently across the conditions I ran. It is also well inside the ±0.12
-that 69 notes supports, so it is reported rather than claimed.
+## Below 2B, stop measuring capability and check the format
 
-Two nearby comparisons look like the same finding and are not, and separating them
-matters more than the headline. granite-4.0-1b at 0.592 against granite-4.0-h-1b at
-0.507 is not a size result: both are 1B and the `h` is an architecture variant, so
-that gap answers which 1B to pick. And granite-4.0-1b against granite-4.1-3b inverts
-**only under the confidence floor**, which discarded 13 of the 3B's facts against
-the 1B's 2. That pair measures the gate.
+Four arms in my field score under 0.20, and they get there in different ways.
 
-## Why the order is a hypothesis
+**LFM2.5-1.2B parses 0.73 and MiniCPM5-1B parses 0.87.** A quarter and an eighth of
+their output is unreadable, with **zero** rows hitting the context limit, so this is
+malformed JSON rather than truncation. Those scores are floors on models I have never
+measured properly. That is a format disagreement, not a capability result, and until
+I re-run them with a matched prompt they have no place in a ranking.
 
-Three separate problems, and I would not publish the table without fixing all
-three.
+**LFM2.5-230M parses 1.00 and scores 0.1309.** Nothing is wrong with its format. It is
+answering fluently and incorrectly.
 
-**The sample size.** The original ranking is 69 notes. The interval at that size
-swallows most of the field. I now have arms at 1,001 and 10,000 notes, and the
-rebuild is analysis rather than GPU time.
+A clean parse rate is not evidence of a working model, and a poor one is not evidence
+of a broken one. Check which you have before you conclude anything about size.
 
-**The threshold.** I spent a campaign using 0.0105 to decide whether a gap was
-real. That number is a measured effect of process count from an unrelated
-experiment, not an interval. The real interval at n=1,001 is near ±0.024. Every
-ranking gap between those two figures is unsupported until it gets its own paired
-bootstrap.
+## Half the field never reasons, and I only know why for one of them
 
-**The comparison class.** Some arms were run natively at 1,001 notes and ranked
-against a field extracted from 10,000-note runs. Those are not the same
-measurement: the same notes score −0.0079 differently depending on which corpus
-they ran inside, with 47% of the output text differing. The effect is inside the
-interval, so nothing moved. That was luck.
+Seven arms emit no reasoning pass at all in this harness. On gemma-4-E4B I traced it:
+one sentence in my prompt, `No prose, no markdown.`, suppressed reasoning across
+10,000 notes while every row still recorded `thinking: true`. Removing it restored
+reasoning on 770 of 770 notes and was worth +0.116 relation-agnostic recall.
 
-## The part of the table I trust least
+I have run that diagnostic on four models. Eighteen are unchecked. A model that
+silently loses its reasoning pass scores as a worse model, so some unknown fraction
+of the small end of my field is a prompt problem wearing the costume of a size
+problem.
 
-Every number here predates fixes to the benchmark itself. A corpus template that
-mislabelled a deployment relation. An ontology that did not define 19% of its own
-gold's predicates. A prompt clause that suppressed one model's reasoning pass
-entirely, worth +0.116 recall on that model.
+That is the largest open item in this piece, and it points the same way every time:
+**before concluding a small model cannot do the task, check that your prompt let it
+try.**
 
-Each of those changed scores. None of them changed scores uniformly across models,
-which is the problem: a fix that helps reasoning models and not others reorders
-the field.
+## What I would do
 
-## What to do until the rebuild lands
+**Shortlist at 2B to 4B, then check what a bigger card would buy.** In my field that
+is +0.047 for fifteen times the parameters, and I would rather spend the VRAM on a
+sparse 26B that runs at 323 tok/s.
 
-**Shortlist on size, decide on your own corpus.** Two to four billion parameters
-is where to look. Which one is not a question my table can answer for you yet, and
-possibly not at all, because the quant and prompt effects here are larger than the
-model effects.
+**Decide on restraint, not on F1.** The size step changed invention rate by 1.9x and
+F1 by 0.002.
 
-**Budget for the ladder, not the model.** The cheapest real gain I found was a
-quant change, and it does not transfer between models in the same family.
+**Budget for the ladder, not the model.** The cheapest real gains I found were a
+quant change and a prompt clause, both larger than several size steps, and neither
+transfers between models.
 
-**Check parse rate and the unfloored score before you believe a low score.** Four of
-my sixteen scored zero, and they did it in three different ways: two emit valid JSON
-that is never the right shape, and two extracted correctly and were emptied by a
-confidence gate.
+**Check parse rate and the unfloored score before believing a low one.** Four of my
+arms scored near zero in three different ways: two emit valid JSON that is never the
+right shape, and two extracted correctly and were emptied by a confidence gate.
 
-**Cost is the other axis, and it spans a factor of 16.** CPU time per note runs from
-2,233 ms at 230M to 35,230 ms at E4B. granite-4.0-1b reaches 0.592 at 13,568 ms and
-gemma-4-E4B reaches 0.748 at 35,230 ms: 2.6 times the CPU for 0.156 more F1, and the
-0.156 is the number in that sentence with a wide interval on it. A second cost
-appears in no accuracy column at all, and on GPU the largest E4B quant took 420
-seconds to load before serving its first note.
+**Cost spans a factor of 16 and is a separate axis.** CPU time per note runs from
+2,233 ms at 230M to 35,230 ms at E4B. On GPU the largest E4B quant took 420 seconds
+to load before serving its first note, and that appears in no accuracy column
+anywhere.
 
-## What this piece needs before publication
+## What this piece still needs
 
-1. Rebuild the ranking on 1,001 notes minimum, with a paired bootstrap on every
-   claimed gap.
-2. Re-run the 350M model with a matched prompt or drop it.
-3. Report load time per model as a column. I have observed it only in passing and
-   it is a real deployment cost.
-4. Confirm or withdraw the one family inversion I saw, where a smaller sibling
-   outscored a larger one. At n=1,001 that pattern already dissolved once under a
-   proper interval.
+1. **The sub-2B models re-run with matched prompts.** Two are floors and one is
+   untested against its own format.
+2. **The reasoning clause tested against the other eighteen.**
+3. **Load time as a column.** I have observed it in passing and it is a real
+   deployment cost.
+4. **A second corpus from a different generator.** Every number here inherits one
+   lineage, and a model trained on data resembling my generator has an advantage I
+   cannot detect from inside.
