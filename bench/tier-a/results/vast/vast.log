@@ -473,3 +473,11 @@ run_llamacpp.py: error: one of the arguments --thinking --no-thinking is require
 [23:07:15Z] --- gemma-4-31B-it.UD-Q4_K_XL.mtp on RTX 5090 45669263 contract 46924571 (offer $0.3370/hr; billed rate read after start)
 [23:21:23Z]     billed $0.3611/hr (offer said $0.3370)
 [23:21:24Z]     healthy, loaded gemma-4-31B-it-UD-Q4_K_XL.gguf; 1 variant(s): live
+[23:37:39Z]     host 42093969 unusable (instance exited: success, running ghcr.io/ggml-org/llama.cpp:server-cuda); destroying and re-placing
+[23:37:40Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 46854550 contract 46926477 (offer $0.0956/hr; billed rate read after start)
+[23:38:01Z]     host 46854550 unusable (container failed: Error response from daemon: failed to create task for container: failed to create shim tas); destroying and re-placing
+[23:38:03Z] --- gemma-4-26B-A4B.qat-unsloth-UDQ4.mtp on RTX 3090 46756224 contract 46926500 (offer $0.1119/hr; billed rate read after start)
+[23:52:19Z]     billed $0.3922/hr (offer said $0.3296)
+[23:52:20Z]     healthy, loaded gemma-4-31B-it-qat-UD-Q4_K_XL.gguf; 1 variant(s): live
+[23:59:48Z]     billed $0.1456/hr (offer said $0.1119)
+[23:59:50Z]     healthy, loaded gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf; 1 variant(s): live
