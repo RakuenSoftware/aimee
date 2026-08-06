@@ -65,8 +65,8 @@ type StepResult struct {
 	// boundary. Runners populate ErrKind with a stable identifier (e.g.
 	// freezeCreateCreateCollision) and engine.Advance rehydrates the typed
 	// sentinel from it before downstream errors.Is matching.
-	ErrKind      string              `json:"err_kind,omitempty"`
-	CostUSD      float64             `json:"cost_usd,omitempty"`
+	ErrKind string  `json:"err_kind,omitempty"`
+	CostUSD float64 `json:"cost_usd,omitempty"`
 	// CostUnknown means at least one billable call in this step produced no
 	// measurement. CostUSD is then a lower bound, so the engine must charge the
 	// authorized reservation instead of under-committing measured spend.

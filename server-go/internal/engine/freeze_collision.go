@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
@@ -269,7 +270,19 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 		if err != nil {
 			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), err)
 		}
-		for path, create := range creates {
+		// Iterate the candidate creates in a sorted order so the named colliding
+		// path is stable across runs: Go map iteration is randomized, and a
+		// collision check that reports the first path it finds would otherwise
+		// surface a different colliding path on each invocation for identical
+		// input. This matches the deterministic ordering already established by
+		// freezeUncomparablePathIdentifier for fail-closed diagnostics.
+		paths := make([]string, 0, len(creates))
+		for path := range creates {
+			paths = append(paths, path)
+		}
+		sort.Strings(paths)
+		for _, path := range paths {
+			create := creates[path]
 			if other, ok := siblingCreates[path]; ok && other.Blob != create.Blob {
 				return freezeCreateCreateCollisionError(path, item.ID, sibling.ID)
 			}
