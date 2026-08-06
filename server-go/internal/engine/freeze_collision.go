@@ -45,7 +45,12 @@ func freezeCreatedFiles(ctx context.Context, workdir, base, head string) (map[st
 			return nil, fmt.Errorf("unexpected created-file status %q for %s", fields[i], fields[i+1])
 		}
 		path := fields[i+1]
-		blob, err := gitText(ctx, workdir, "rev-parse", head+":"+path)
+		// Resolve the canonical blob byte-for-byte via gitTextRaw so the
+		// comparison against the sibling's canonical blob does not silently
+		// absorb trailing whitespace. Trimming here would let two creates
+		// whose contents differ only by trailing whitespace be treated as
+		// identical and suppress a genuine freeze_create_create_collision.
+		blob, err := gitTextRaw(ctx, workdir, "rev-parse", head+":"+path)
 		if err != nil {
 			return nil, fmt.Errorf("resolve created blob %s: %w", path, err)
 		}

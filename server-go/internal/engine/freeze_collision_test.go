@@ -706,3 +706,35 @@ func TestRejectDivergentSiblingCreatesReportsDeterministicCollisionAcrossRuns(t 
 		}
 	}
 }
+
+// TestRejectDivergentSiblingCreatesRejectsTrailingWhitespaceDivergence
+// guards the byte-exact comparison contract: when the current slice and the
+// frozen sibling create the same path with contents that differ only by
+// trailing whitespace, the canonical blobs must still be treated as distinct
+// and the freeze_create_create_collision must surface. Previously the blob
+// resolution path applied strings.TrimSpace to the canonical blob, which
+// silently collapsed two distinct trailing-whitespace creates into identical
+// strings and suppressed a genuine collision.
+func TestRejectDivergentSiblingCreatesRejectsTrailingWhitespaceDivergence(t *testing.T) {
+	ctx, store, artifacts, registry, _, slicedir, base, _ := setupFreezeCollisionHarness(t)
+
+	if err := store.SetWorktree(ctx, "wi_s0", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	gitRun(t, slicedir, "checkout", "-q", "-B", "aimee/wi/wi_child", base)
+	if err := os.WriteFile(filepath.Join(slicedir, "frozen.txt"), []byte("frozen sibling blob   \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, slicedir, "add", "frozen.txt")
+	gitRun(t, slicedir, "commit", "-m", "frozen create with trailing whitespace")
+	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
+
+	item, err := store.WorkItem(ctx, "wi_s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{db: store, artifacts: artifacts, workflows: registry}
+	err = runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead)
+	assertFreezeCreateCollision(t, err, "frozen.txt", item.ID, "wi_s0")
+}

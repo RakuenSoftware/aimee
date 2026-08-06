@@ -232,6 +232,12 @@ func repoIntegrationBranch(ctx context.Context, repo string) (string, error) {
 	return branch, nil
 }
 
+// gitText runs git and returns its stdout trimmed of leading/trailing
+// whitespace. Most callers consume git output that is followed by a single
+// newline (commit IDs, branch names, porcelain status), so trimming is the
+// safe default there. Callers that need byte-exact preservation of the
+// command output (for example a blob resolved via rev-parse, where trailing
+// whitespace is part of the content) must use gitTextRaw instead.
 func gitText(ctx context.Context, repo string, args ...string) (string, error) {
 	commandArgs := append([]string{"-C", repo}, args...)
 	cmd := exec.CommandContext(ctx, "git", commandArgs...)
@@ -240,4 +246,17 @@ func gitText(ctx context.Context, repo string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(output)))
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+// gitTextRaw runs git and returns its stdout without any whitespace trimming.
+// Use this when the caller needs byte-exact git output (for example a blob
+// resolved via rev-parse, where trailing whitespace is meaningful content).
+func gitTextRaw(ctx context.Context, repo string, args ...string) (string, error) {
+	commandArgs := append([]string{"-C", repo}, args...)
+	cmd := exec.CommandContext(ctx, "git", commandArgs...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(output)))
+	}
+	return string(output), nil
 }
