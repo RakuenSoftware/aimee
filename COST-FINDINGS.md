@@ -1199,6 +1199,56 @@ ticket asked, and nothing else" rather than a general quality reviewer. That is
 testable the same way this was -- A/B one persona against another on a task with
 a known-minimal correct answer.
 
+## Finding 27 — the roundtable is a scope PUSH, and the ticket decides if that helps
+
+The complement to Finding 26. Same A/B, on the opposite ticket shape.
+
+am_312e901904 names TWO defects. am_270b3483d5 wants a three-line presence check.
+
+| ticket | | roundtable ON | roundtable OFF |
+|---|---|---|---|
+| am_312e901904 | hidden_ok | true | true |
+| (two defects) | **defect 2 fixed** | **YES** | **NO** |
+| | test files | 2 (C + TS) | 1 (C only) |
+| | credits | **67.05** | 74.25 |
+| | wall | 611s | 376s |
+| am_270b3483d5 | hidden_ok | **FALSE** | **true** |
+| (minimal fix) | credits | 67.59 | **33.30** |
+| | wall | 585s | **248s** |
+
+On the two-defect ticket the reviewer was cheaper AND better: 67.05 credits for
+the whole ticket against 74.25 for half of it. Without the panel aimee fixed
+defect 1, wrote one test instead of two, and never touched
+frontend/src/setup/ownerUrl -- the clone-reconciliation half -- at all.
+
+On the minimal-fix ticket the same panel cost twice as much and FAILED.
+
+### One mechanism, two outcomes
+
+The panel does exactly one thing: it pushes for MORE. requirement_coverage
+enumerates the asks and blocks on anything unaddressed, which is precisely right
+when a ticket names two defects and the agent fixed one. The identical pressure,
+applied to a ticket that wants presence-not-content, produces a stricter
+validator that breaks a layering boundary the codebase documents.
+
+So neither "keep it" nor "turn it off" is the answer. The prompt already
+contains the counterweight -- "adding work the request did not ask for is drift
+... even when it would be an improvement" -- and it is losing to a qa persona's
+instinct that more validation is better engineering. The pressure needs to be
+DIRECTIONAL: block on unmet requirements, and treat work with no antecedent in
+the request as a finding with the same force.
+
+### Caveats
+
+  - ONE replicate per cell. Four cells total across the two tasks.
+  - The LOC columns are NOT comparable between ON and OFF on am_312e901904. The
+    ON cell's stored 82/0 predates the classifier fix (that test_added=0 is the
+    bug Finding 22 records; re-derived it is 38/44), while the OFF cell's 12/28
+    uses the corrected classifier. The defect-2 presence check -- does the patch
+    touch ownerUrl at all -- is the reliable signal, not the line counts.
+  - Both OFF cells still spent 2 roundtable_review calls that errored, so the
+    OFF credits include the cost of trying and failing to get a review.
+
 ## Caveats for anything published from this
 
 - 6 of 8 tasks, **one replicate**, no confidence intervals. Per-task spread is
