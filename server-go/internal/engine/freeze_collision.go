@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
 const freezeCreateCreateCollision = "freeze_create_create_collision"
@@ -109,50 +110,6 @@ func resolveSiblingCompareDir(ctx context.Context, sibling db1.WorkItem, workdir
 	return "", errors.New("sibling freeze commits are not reachable from the sibling's worktree or the current workdir")
 }
 
-// siblingStageHasFrozenDiff distinguishes a durable freeze from both an orphan
-// marker (process death after writing the artifact but before Move) and a stale
-// marker after a review/CI loop returned the sibling to implementation.
-func (r *NativeRunner) siblingStageHasFrozenDiff(sibling db1.WorkItem) (bool, error) {
-	if sibling.Stage == "freeze" {
-		return false, nil
-	}
-	if r.workflows == nil {
-		return false, errors.New("workflow registry is required for sibling freeze collision inspection")
-	}
-	def, err := r.workflows.LoadVersion(sibling.WorkflowName, sibling.WorkflowVersion)
-	if err != nil {
-		return false, fmt.Errorf("load sibling workflow: %w", err)
-	}
-	start, ok := def.Node("freeze")
-	if !ok {
-		return false, errors.New("sibling workflow has no freeze node")
-	}
-	queue := []string{start.Next, start.OnPass, start.OnFail}
-	seen := map[string]bool{"freeze": true}
-	for len(queue) > 0 {
-		id := queue[0]
-		queue = queue[1:]
-		if id == "" || seen[id] {
-			continue
-		}
-		seen[id] = true
-		node, ok := def.Node(id)
-		if !ok {
-			return false, fmt.Errorf("sibling workflow stage %q is unavailable", id)
-		}
-		// Crossing a mutation node invalidates the previous frozen snapshot. A
-		// later successful freeze starts a new traversal and replaces artifacts.
-		if node.Block == "implement" || node.Block == "document" || node.Block == "freeze" {
-			continue
-		}
-		if id == sibling.Stage {
-			return true, nil
-		}
-		queue = append(queue, node.Next, node.OnPass, node.OnFail)
-	}
-	return false, nil
-}
-
 // freezeCreateCreateCollisionError reports a genuine create/create collision
 // on path between currentSlice and siblingSlice.
 func freezeCreateCreateCollisionError(path, currentSlice, siblingSlice string) error {
@@ -196,18 +153,78 @@ func freezeSiblingUncomparableError(currentSlice, siblingSlice, path string, cau
 	return fmt.Errorf("%s: %w", msg, cause)
 }
 
+// frozenSiblingArtifacts captures the three durable NodeArtifacts that
+// together mark a sibling as having a durable frozen diff: the freeze node's
+// frozen_diff content and the freeze-head/freeze-base commit SHAs. Anchoring
+// the collision check to this triple (rather than the sibling's current
+// workflow stage) keeps the answer independent of any post-freeze routing --
+// including a review/CI loop that returned the sibling to implement for
+// revisions, where the current stage is implement but the frozen diff is still
+// on disk.
+//
+// frozenSiblingArtifacts distinguishes three failure modes:
+//   - A genuine read error from the artifact store (decoding failure, I/O
+//     error, integrity mismatch) surfaces as a non-nil err so the caller can
+//     fail closed with freeze_create_create_collision -- the runner cannot
+//     tell whether a sibling's freeze is competing, so it must not silently
+//     allow it through on a transient store error. Integrity-validation
+//     failures (NodeArtifact wrapping "node artifact failed integrity
+//     validation") are explicitly propagated here, not silently skipped.
+//   - A missing artifact (os.ErrNotExist) returns ok=false with a nil err.
+//     The sibling simply is not frozen (per the durable-triple definition),
+//     so the caller skips it as the previous siblingStageHasFrozenDiff
+//     continue path did.
+//   - A wrong-typed artifact (type does not match the expected frozen_diff
+//     or commit) also returns ok=false with a nil err. Wrong-typed artifacts
+//     are treated the same as missing ones: the durable triple is not
+//     present, so the sibling is not frozen and the caller skips it. This
+//     matches the acceptance criterion that only the durable triple marks
+//     a sibling as frozen, and prevents the collision check from spuriously
+//     rejecting slices whose active sibling carries a partial freeze-artifact
+//     set.
+func frozenSiblingArtifacts(siblingID string, store *wfe.ArtifactStore) (head, base string, ok bool, err error) {
+	if store == nil {
+		return "", "", false, nil
+	}
+	diff, err := store.NodeArtifact(siblingID, "freeze")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", "", false, nil
+		}
+		return "", "", false, err
+	}
+	if diff.Type != "frozen_diff" || strings.TrimSpace(string(diff.Content)) == "" {
+		return "", "", false, nil
+	}
+	headArt, err := store.NodeArtifact(siblingID, "freeze-head")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", "", false, nil
+		}
+		return "", "", false, err
+	}
+	if headArt.Type != "commit" {
+		return "", "", false, nil
+	}
+	baseArt, err := store.NodeArtifact(siblingID, "freeze-base")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", "", false, nil
+		}
+		return "", "", false, err
+	}
+	if baseArt.Type != "commit" {
+		return "", "", false, nil
+	}
+	return string(headArt.Content), string(baseArt.Content), true, nil
+}
+
 func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item db1.WorkItem, workdir, base, head string) error {
 	if item.ParentID == "" {
 		return nil
 	}
 	if r.db == nil || r.artifacts == nil {
 		return nil
-	}
-	if r.workflows == nil {
-		// A workflow-less runner cannot determine which sibling stages are
-		// frozen vs. transient, so sibling collision detection cannot run.
-		// Fail closed: a colliding create must not be silently allowed.
-		return errors.New("workflow registry is required for sibling freeze collision inspection")
 	}
 	creates, err := freezeCreatedFiles(ctx, workdir, base, head)
 	if err != nil {
@@ -224,50 +241,18 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 		if sibling.ID == item.ID || sibling.State != "active" {
 			continue
 		}
-		frozen, err := r.siblingStageHasFrozenDiff(sibling)
-		if err != nil {
-			return err
+		siblingHead, siblingBase, frozen, readErr := frozenSiblingArtifacts(sibling.ID, r.artifacts)
+		if readErr != nil {
+			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), readErr)
 		}
 		if !frozen {
 			continue
 		}
-		artifact, err := r.artifacts.NodeArtifact(sibling.ID, "freeze")
-		if errors.Is(err, os.ErrNotExist) {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), nil)
-		}
-		if err != nil {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), fmt.Errorf("read sibling freeze artifact: %w", err))
-		}
-		if artifact.Type != "frozen_diff" || strings.TrimSpace(string(artifact.Content)) == "" {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), nil)
-		}
-		headArtifact, err := r.artifacts.NodeArtifact(sibling.ID, "freeze-head")
-		if errors.Is(err, os.ErrNotExist) {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), nil)
-		}
-		if err != nil {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), fmt.Errorf("read sibling freeze head: %w", err))
-		}
-		if headArtifact.Type != "commit" {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), nil)
-		}
-		baseArtifact, err := r.artifacts.NodeArtifact(sibling.ID, "freeze-base")
-		if errors.Is(err, os.ErrNotExist) {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), nil)
-		}
-		if err != nil {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), fmt.Errorf("read sibling freeze base: %w", err))
-		}
-		if baseArtifact.Type != "commit" {
-			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), nil)
-		}
-		siblingDir, err := resolveSiblingCompareDir(ctx, sibling, workdir,
-			string(baseArtifact.Content), string(headArtifact.Content))
+		siblingDir, err := resolveSiblingCompareDir(ctx, sibling, workdir, siblingBase, siblingHead)
 		if err != nil {
 			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), err)
 		}
-		siblingCreates, err := frozenSiblingCreatedFiles(ctx, siblingDir,
-			string(baseArtifact.Content), string(headArtifact.Content))
+		siblingCreates, err := frozenSiblingCreatedFiles(ctx, siblingDir, siblingBase, siblingHead)
 		if err != nil {
 			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), err)
 		}
