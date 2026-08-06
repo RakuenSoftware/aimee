@@ -626,6 +626,11 @@ func retryDetailForPrompt(detail string) string {
 	return string(runes[:headRunes]) + "\n...[retry diagnostic truncated]...\n" + string(runes[len(runes)-(maxRunes-headRunes):])
 }
 
+func implementationDelegatePrompt() string {
+	return "Implement the complete approved task in this worktree, run the repository verification, fix failures, and leave the accepted changes in the worktree. " +
+		"If the current branch already fully satisfies the task (including work merged by a sibling), leave the worktree unchanged and report that it is complete; do not manufacture cosmetic changes."
+}
+
 func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (StepResult, error) {
 	workdir, branch, err := r.worktrees.Ensure(ctx, req.WorkItem, req.WorkItem.ParentID == "")
 	if err != nil {
@@ -691,7 +696,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 				ContentHash: head, Detail: detail}, nil
 		}
 	}
-	prompt := "Implement the complete approved task in this worktree, run the repository verification, fix failures, and leave the accepted changes in the worktree."
+	prompt := implementationDelegatePrompt()
 	if docs {
 		prompt, err = documentDelegatePrompt(ctx, req, workdir)
 		if err != nil {

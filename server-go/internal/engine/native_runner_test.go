@@ -140,6 +140,20 @@ func TestDelegateDeadlineCapPreservesShortReviewPhase(t *testing.T) {
 	}
 }
 
+func TestImplementationPromptUsesNoOpForSiblingSatisfiedTask(t *testing.T) {
+	prompt := implementationDelegatePrompt()
+	for _, want := range []string{
+		"already fully satisfies the task",
+		"work merged by a sibling",
+		"leave the worktree unchanged",
+		"do not manufacture cosmetic changes",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("implementation prompt missing %q: %q", want, prompt)
+		}
+	}
+}
+
 func TestRoundtableDeadlineRequiresEveryConfiguredPhase(t *testing.T) {
 	panel := roundtablecfg.Panel{DeadlineMS: 100, ChairmanEnabled: true}
 	short, cancelShort := context.WithTimeout(t.Context(), 150*time.Millisecond)
