@@ -1038,14 +1038,23 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 		}
 		return res, nil
 	}
-	if r.artifacts != nil && req.Node.ID != "" {
-		if _, err := r.artifacts.PutNodeArtifact(item.ID, req.Node.ID, "frozen_diff", []byte(diff)); err != nil {
+	// Publish durable frozen_diff / freeze-head / freeze-base artifacts. Downstream
+	// review stages key on the literal node id "freeze" to find frozen_diff; if the
+	// workflow node id is missing here (e.g. a caller that constructs a StepRequest
+	// without populating Node), fall back to that literal so the artifact is still
+	// published under the conventional key instead of being silently skipped.
+	nodeID := req.Node.ID
+	if nodeID == "" {
+		nodeID = "freeze"
+	}
+	if r.artifacts != nil {
+		if _, err := r.artifacts.PutNodeArtifact(item.ID, nodeID, "frozen_diff", []byte(diff)); err != nil {
 			return StepResult{}, err
 		}
-		if _, err := r.artifacts.PutNodeArtifact(item.ID, req.Node.ID+"-head", "commit", []byte(head)); err != nil {
+		if _, err := r.artifacts.PutNodeArtifact(item.ID, nodeID+"-head", "commit", []byte(head)); err != nil {
 			return StepResult{}, err
 		}
-		if _, err := r.artifacts.PutNodeArtifact(item.ID, req.Node.ID+"-base", "commit", []byte(resolvedBase)); err != nil {
+		if _, err := r.artifacts.PutNodeArtifact(item.ID, nodeID+"-base", "commit", []byte(resolvedBase)); err != nil {
 			return StepResult{}, err
 		}
 	}
