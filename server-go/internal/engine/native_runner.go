@@ -1043,7 +1043,7 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 	if strings.TrimSpace(diff) == "" {
 		return StepResult{Status: StepAccepted, Detail: "no-op: empty diff vs base"}, nil
 	}
-	if err := r.rejectDivergentSiblingCreates(ctx, item, workdir, resolvedBase, head); err != nil {
+	if err := r.rejectDivergentSiblingCreates(ctx, item, freezeArtifactKey(req), workdir, resolvedBase, head); err != nil {
 		// rejectDivergentSiblingCreates wraps ErrFreezeCreateCreateCollision, but
 		// StepResult.Err is tagged `json:"-"` so the sentinel does not survive an
 		// HTTP-runner round trip. Tag ErrKind so engine.Advance can rehydrate the
@@ -1054,15 +1054,13 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 		}
 		return res, nil
 	}
-	// Publish durable frozen_diff / freeze-head / freeze-base artifacts. Downstream
-	// review stages key on the literal node id "freeze" to find frozen_diff; if the
-	// workflow node id is missing here (e.g. a caller that constructs a StepRequest
-	// without populating Node), fall back to that literal so the artifact is still
-	// published under the conventional key instead of being silently skipped.
-	nodeID := req.Node.ID
-	if nodeID == "" {
-		nodeID = "freeze"
-	}
+	// Publish durable frozen_diff / freeze-head / freeze-base artifacts under the
+	// node id freezeArtifactKey derives from req.Node.ID. The same helper
+	// drives the read side in frozenSiblingArtifacts, so a single source of
+	// truth guarantees the publish and read paths land on the same key for
+	// every freeze block (no hardcoded "freeze" on one side and req.Node.ID
+	// on the other).
+	nodeID := freezeArtifactKey(req)
 	if r.artifacts != nil {
 		if _, err := r.artifacts.PutNodeArtifact(item.ID, nodeID, "frozen_diff", []byte(diff)); err != nil {
 			return StepResult{}, err

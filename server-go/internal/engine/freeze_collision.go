@@ -171,6 +171,25 @@ func freezeSiblingUncomparableError(currentSlice, siblingSlice, path string, cau
 	return fmt.Errorf("%w: cannot compare path %s: already frozen sibling slice %s while processing current slice %s: %w", ErrFreezeCreateCreateCollision, path, siblingSlice, currentSlice, cause)
 }
 
+// freezeArtifactKey is the single source of truth for the node id under which
+// freeze publishes the durable (frozen_diff, freeze-head, freeze-base) triple
+// AND under which frozenSiblingArtifacts reads it. Both publish and read must
+// derive the key from req.Node.ID so a freeze block whose node id is not the
+// literal "freeze" still round-trips, and so the mismatch that the previous
+// hardcoded read side caused (read used "freeze", write used req.Node.ID ||
+// "freeze") cannot reappear. When req.Node.ID is empty the helper resolves to
+// the conventional "freeze" key -- this is the single fallback that keeps the
+// no-Node-id caller (e.g. an HTTP runner constructing a partial StepRequest)
+// publishing and reading under the same conventional key instead of silently
+// mismatching, and it is regression-tested so neither side can reintroduce its
+// own private fallback.
+func freezeArtifactKey(req StepRequest) string {
+	if req.Node.ID != "" {
+		return req.Node.ID
+	}
+	return "freeze"
+}
+
 // frozenSiblingArtifacts captures the three durable NodeArtifacts that
 // together mark a sibling as having a durable frozen diff: the freeze node's
 // frozen_diff content and the freeze-head/freeze-base commit SHAs. Anchoring
@@ -201,11 +220,11 @@ func freezeSiblingUncomparableError(currentSlice, siblingSlice, path string, cau
 //     a sibling as frozen, and prevents the collision check from spuriously
 //     rejecting slices whose active sibling carries a partial freeze-artifact
 //     set.
-func frozenSiblingArtifacts(siblingID string, store *wfe.ArtifactStore) (head, base string, ok bool, err error) {
+func frozenSiblingArtifacts(siblingID, freezeKey string, store *wfe.ArtifactStore) (head, base string, ok bool, err error) {
 	if store == nil {
 		return "", "", false, nil
 	}
-	diff, err := store.NodeArtifact(siblingID, "freeze")
+	diff, err := store.NodeArtifact(siblingID, freezeKey)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, wfe.ErrArtifactNotExist) {
 			return "", "", false, nil
@@ -215,7 +234,7 @@ func frozenSiblingArtifacts(siblingID string, store *wfe.ArtifactStore) (head, b
 	if diff.Type != "frozen_diff" || strings.TrimSpace(string(diff.Content)) == "" {
 		return "", "", false, nil
 	}
-	headArt, err := store.NodeArtifact(siblingID, "freeze-head")
+	headArt, err := store.NodeArtifact(siblingID, freezeKey+"-head")
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, wfe.ErrArtifactNotExist) {
 			return "", "", false, nil
@@ -225,7 +244,7 @@ func frozenSiblingArtifacts(siblingID string, store *wfe.ArtifactStore) (head, b
 	if headArt.Type != "commit" {
 		return "", "", false, nil
 	}
-	baseArt, err := store.NodeArtifact(siblingID, "freeze-base")
+	baseArt, err := store.NodeArtifact(siblingID, freezeKey+"-base")
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, wfe.ErrArtifactNotExist) {
 			return "", "", false, nil
@@ -238,7 +257,7 @@ func frozenSiblingArtifacts(siblingID string, store *wfe.ArtifactStore) (head, b
 	return string(headArt.Content), string(baseArt.Content), true, nil
 }
 
-func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item db1.WorkItem, workdir, base, head string) error {
+func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item db1.WorkItem, freezeKey, workdir, base, head string) error {
 	if item.ParentID == "" {
 		return nil
 	}
@@ -260,7 +279,7 @@ func (r *NativeRunner) rejectDivergentSiblingCreates(ctx context.Context, item d
 		if sibling.ID == item.ID || sibling.State != "active" {
 			continue
 		}
-		siblingHead, siblingBase, frozen, readErr := frozenSiblingArtifacts(sibling.ID, r.artifacts)
+		siblingHead, siblingBase, frozen, readErr := frozenSiblingArtifacts(sibling.ID, freezeKey, r.artifacts)
 		if readErr != nil {
 			return freezeSiblingUncomparableError(item.ID, sibling.ID, freezeUncomparablePathIdentifier(creates), readErr)
 		}

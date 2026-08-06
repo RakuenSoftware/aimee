@@ -947,7 +947,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, head); err != nil {
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, head); err != nil {
 		t.Fatalf("identical create rejected: %v", err)
 	}
 
@@ -970,7 +970,7 @@ nodes:
 	gitRun(t, slicedir, "add", "README")
 	gitRun(t, slicedir, "commit", "-m", "current existing edit")
 	currentHead := strings.TrimSpace(gitRun(t, slicedir, "rev-parse", "HEAD"))
-	if err := runner.rejectDivergentSiblingCreates(ctx, item, slicedir, base, currentHead); err != nil {
+	if err := runner.rejectDivergentSiblingCreates(ctx, item, "freeze", slicedir, base, currentHead); err != nil {
 		t.Fatalf("existing-file edit rejected: %v", err)
 	}
 }
