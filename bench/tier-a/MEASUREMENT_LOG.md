@@ -2170,3 +2170,22 @@ parse failure rather than capability measurements, and they are reported that wa
 **The rule this earns:** a failure that repeats across independent hosts is a
 property of the thing being placed. Count failures per JOB, not per host, and
 stop after the second.
+
+## Defect 42: a finished arm's server keeps the card
+
+`arm_26b_unsloth_5080.sh` started a server on port 8992 and never stopped it. When
+the 3k pair launched on the same card, `shard_run.sh` cleared its own port range
+(8300-8307), found it clean, and started a server that immediately failed with
+`cudaMalloc failed: out of memory`: 6390 MiB requested, 14828 of 16303 MiB still
+held by the finished 26B.
+
+The launcher reported `sizing: starting one server to measure resident VRAM` and
+sat there. Nothing in the local logs said OOM; the message was inside the
+container, in a file named after the port. Cost was about 12 minutes.
+
+**Symptom to recognise:** a card at high VRAM and 0% utilisation with no client
+running. That is the same signature I used on the rented fleet to identify
+abandoned instances, and it means the same thing locally.
+
+**Rule:** whatever starts a server stops it, in the script that started it.
+Clearing a port range proves nothing about a card.

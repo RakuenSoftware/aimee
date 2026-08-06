@@ -98,3 +98,13 @@ python3 harness/bootstrap_ci.py --gold "$GOLD" \
   --pred "google_q4_0=results/vast/gemma-4-26B-A4B.qat-google-q4_0.live.pred.jsonl" \
   --pred "unsloth_UD=$PRED" --boot 20000 2>&1 | tee -a "$OUT/arms.log"
 say "=== 26B QUANT-SCHEME PAIR COMPLETE ==="
+
+# Stop the server. Leaving it resident cost 12 minutes: the next arm queued on this
+# card asked for 6390 MiB, the 26B still held 14828 of 16303, and llama-server died
+# with `cudaMalloc failed: out of memory` while the launcher reported "sizing".
+# shard_run.sh kills by listening socket within its OWN port range, which is right
+# for isolation and useless against a server another script started on 8992.
+# A script that starts a server owns stopping it.
+ssh -n -o ConnectTimeout=25 $HOST \
+  "pct exec 140 -- bash -lc 'for p in \$(pgrep -f \"port $PORT\"); do kill \$p; done; sleep 4; true'" >/dev/null 2>&1
+say "server stopped, card released"
