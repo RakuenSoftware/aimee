@@ -971,12 +971,12 @@ lean:
 # Dynamic linking policy check: enforce DB ownership boundaries and verify
 # daemon system libraries are dynamically linked. Only runs on Linux (ldd) and
 # macOS (otool). Skipped on Windows where MinGW runtime is intentionally static.
-check-linking: $(BINARY) $(RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY)
+check-linking: $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY)
 ifeq ($(OS),Windows_NT)
 	@echo "check-linking: skipped on Windows (MinGW runtime is intentionally static)"
 else ifeq ($(UNAME_S),Darwin)
 	@fail=0; \
-	for bin in $(BINARY) $(RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
+	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
 		echo "check-linking: $$bin"; \
 		deps=$$(otool -L "$$bin" | tail -n+2); \
 		if [ "$$bin" = "$(BINARY)" ]; then \
@@ -1055,7 +1055,7 @@ else ifeq ($(UNAME_S),Darwin)
 	echo "check-linking: ok"
 else
 	@fail=0; \
-	for bin in $(BINARY) $(RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
+	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
 		echo "check-linking: $$bin"; \
 		deps=$$(ldd "$$bin"); \
 		if [ "$$bin" = "$(BINARY)" ]; then \
