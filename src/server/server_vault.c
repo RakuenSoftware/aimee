@@ -324,6 +324,11 @@ int handle_vault_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                           (int)(sizeof(entries) / sizeof(entries[0])), &count);
    if (st != VAULT_OK)
       return vault_send_status_error(conn, st);
+   /* As with delete: the underlying row is attributed to the server vault, so the
+    * human who enumerated the shared credential names would otherwise appear in no
+    * audit record at all. Enumeration of credential names is a real disclosure
+    * event, so it gets an attributed row like the mutations do. */
+   vault_audit_bridge_server_list(conn->vault_principal, count);
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
@@ -360,6 +365,11 @@ int handle_vault_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return vault_send_status_error(conn, st);
    audit_log("VAULT_SERVER_DELETE", "by=%s agent=%s cred=%s", conn->vault_principal,
              ja->valuestring, jc->valuestring);
+   /* ...and onto the bus. The vault_service row for this delete is attributed to
+    * VAULT_SERVER_PRINCIPAL (the vault the credential lives in), so it cannot answer
+    * WHO deleted it — that identity existed only in the audit_log line above, i.e.
+    * in a local file with no ordered tap, capture/replay, or WORM ledger. */
+   vault_audit_bridge_server_delete(conn->vault_principal, ja->valuestring, jc->valuestring);
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)

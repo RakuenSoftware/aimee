@@ -105,6 +105,12 @@ int main(void)
     * Only the non-secret fingerprint crosses; `so` stays out of scope entirely. */
    vault_audit_bridge_server_write(p, "openai", "api_key", "a1b2c3d4", "webchat");
 
+   /* The other two shared-vault ops whose vault_service row is attributed to
+    * VAULT_SERVER_PRINCIPAL, and so cannot say WHO acted: delete and enumerate.
+    * Both publish the human principal separately. */
+   vault_audit_bridge_server_delete(p, "openai", "api_key");
+   vault_audit_bridge_server_list(p, 3);
+
    obs_bus_stop(); /* drains every in-flight row into the ledger */
 
    cJSON *rows = audit_ledger_read(NULL, NULL);
@@ -149,6 +155,19 @@ int main(void)
    assert(strcmp(sval(set_server, "verdict"), "allow") == 0);
    assert(strcmp(sval(set_server, "mode"), "webchat") == 0);
    assert(strcmp(sval(set_server, "reason_code"), "fp=a1b2c3d4") == 0);
+
+   /* Shared-credential DELETE carries the HUMAN principal as actor — the whole
+    * point, since vault_service's own row names the server vault instead. */
+   cJSON *del_server = find_row(rows, "vault.delete_server", "openai/api_key");
+   assert(del_server);
+   assert(strcmp(sval(del_server, "actor"), p) == 0);
+   assert(strcmp(sval(del_server, "verdict"), "allow") == 0);
+
+   /* Enumeration: attributed, counted, and it must NOT name any credential. */
+   cJSON *list_server = find_row(rows, "vault.list_server", "");
+   assert(list_server);
+   assert(strcmp(sval(list_server, "actor"), p) == 0);
+   assert(strcmp(sval(list_server, "reason_code"), "count=3") == 0);
 
    /* THE invariant: no secret plaintext leaked into ANY field of ANY row. */
    char *dump = cJSON_PrintUnformatted(rows);

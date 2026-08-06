@@ -24,4 +24,13 @@ void vault_audit_bridge_install(void);
 void vault_audit_bridge_server_write(const char *principal, const char *agent, const char *cred,
                                      const char *fingerprint, const char *transport);
 
+/* Publish a shared-credential DELETE, attributed to the human principal rather
+ * than to the server vault the credential lived in. Same reason as above: the
+ * actor must reach the ordered tap and the ledger, not just a local file. */
+void vault_audit_bridge_server_delete(const char *principal, const char *agent, const char *cred);
+
+/* Publish a shared-credential enumeration, attributed to the human principal.
+ * `count` is how many names were returned; no credential names enter the row. */
+void vault_audit_bridge_server_list(const char *principal, int count);
+
 #endif /* AIMEE_VAULT_AUDIT_BRIDGE_H */

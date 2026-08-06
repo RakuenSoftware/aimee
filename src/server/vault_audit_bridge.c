@@ -108,6 +108,30 @@ void vault_audit_bridge_server_write(const char *principal, const char *agent, c
                   reason, "allow");
 }
 
+/* Server-principal credential DELETE (POST /v1/vault/delete). vault_service's own
+ * row for this op is attributed to VAULT_SERVER_PRINCIPAL — the vault the
+ * credential lives in — so it records WHAT was removed but not WHO removed it.
+ * This publishes the human principal for the same (agent, cred), which is the
+ * attribution an operator actually needs when a shared credential disappears.
+ *
+ * Reaching this function means the capability check passed and the delete
+ * succeeded, so the verdict is "allow". */
+void vault_audit_bridge_server_delete(const char *principal, const char *agent, const char *cred)
+{
+   emit_vault_row(principal, "vault.delete_server", agent, cred, "n/a", "deleted", "allow");
+}
+
+/* Shared-credential ENUMERATION (POST /v1/vault/list). No single (agent, cred)
+ * identity applies, so the command field stays empty and the returned count rides
+ * in the reason — enough to see who enumerated the shared vault and how much they
+ * saw, without naming the credentials in the audit row. */
+void vault_audit_bridge_server_list(const char *principal, int count)
+{
+   char reason[32];
+   snprintf(reason, sizeof reason, "count=%d", count);
+   emit_vault_row(principal, "vault.list_server", "", "", "n/a", reason, "allow");
+}
+
 void vault_audit_bridge_install(void)
 {
    vault_service_set_audit_hook(on_vault_access);
