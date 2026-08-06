@@ -28,12 +28,38 @@ type panelAlignment struct {
 // about different bytes, or about a different run, is detectable rather than
 // merely unlikely.
 type panelResponse struct {
-	RunID                    string         `json:"run_id"`
-	ArtifactHash             string         `json:"artifact_hash"`
-	ArtifactStage            string         `json:"artifact_stage"`
-	OriginalRequestAlignment panelAlignment `json:"original_request_alignment"`
-	Verdict                  string         `json:"verdict"`
-	Findings                 []panelFinding `json:"findings"`
+	RunID                    string             `json:"run_id"`
+	ArtifactHash             string             `json:"artifact_hash"`
+	ArtifactStage            string             `json:"artifact_stage"`
+	OriginalRequestAlignment panelAlignment     `json:"original_request_alignment"`
+	Coverage                 []panelRequirement `json:"requirement_coverage"`
+	Verdict                  string             `json:"verdict"`
+	Findings                 []panelFinding     `json:"findings"`
+}
+
+// panelRequirement is one discrete thing the original request asked for, and
+// whether this artifact actually does it.
+//
+// Alignment answers "is this the right direction", which a partial fix passes
+// honestly: an artifact that repairs one of a ticket's two defects IS aligned.
+// Nothing in the contract previously forced a seat to enumerate what was asked
+// and account for each item, so a request naming two defects could be approved
+// having addressed one. Observed on am_312e901904: the ticket opened "Two
+// defects behind the same report", the artifact fixed the rc=127 exec ordering
+// and misdiagnosed the second, and the seat returned aligned/approve with no
+// findings while its own brief asked it to verify both were fixed.
+//
+// Enumerating is the whole mechanism. A reviewer that must write down "defect 2:
+// the Projects view still disagrees" cannot also write "no findings".
+type panelRequirement struct {
+	// Requirement is the asked-for item, quoted or closely paraphrased from the
+	// original request so it can be checked against it.
+	Requirement string `json:"requirement"`
+	// Addressed is whether the ARTIFACT does it -- not whether it could, or
+	// whether a follow-up would.
+	Addressed bool `json:"addressed"`
+	// Evidence points at what in the artifact does it (or names what is absent).
+	Evidence string `json:"evidence"`
 }
 
 // extractJSONObject returns the exact bytes of the first parseable top-level
