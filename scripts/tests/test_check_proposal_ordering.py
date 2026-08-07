@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -649,13 +650,79 @@ class ProposalOrderingTests(unittest.TestCase):
             "GITHUB_EVENT_NAME": "pull_request",
             "GITHUB_REF": "refs/pull/123/merge",
             "GITHUB_SHA": head,
-            "GITHUB_BASE_REF": "main",
+            "GITHUB_BASE_REF": "release/1.0",
             "GITHUB_HEAD_REF": "slice/example",
         }
         with mock.patch.dict(os.environ, wrong_base, clear=True), self.assertRaisesRegex(
             ordering.OrderingError, "event-base"
         ):
             ordering.validate_event(head)
+
+    def test_every_gated_base_is_accepted(self) -> None:
+        """The accepted set must cover every base the workflow triggers on.
+
+        `main` used to be this test's rejected example. It is a gated base now,
+        which is the point: the checker rejected a pull request into `testing`
+        with rule=event-base, so widening the workflow trigger alone left the
+        gate failing every run.
+        """
+        head = "a" * 40
+        for base in ("main", "testing", "feature/core-modularization",
+                     "aimee/feat/1234", "agent/some-topic"):
+            with self.subTest(base=base), mock.patch.dict(
+                os.environ,
+                {
+                    "GITHUB_EVENT_NAME": "pull_request",
+                    "GITHUB_REF": "refs/pull/123/merge",
+                    "GITHUB_SHA": head,
+                    "GITHUB_BASE_REF": base,
+                    "GITHUB_HEAD_REF": "slice/example",
+                },
+                clear=True,
+            ):
+                ordering.validate_event(head)
+            with self.subTest(base=base, event="push"), mock.patch.dict(
+                os.environ,
+                {
+                    "GITHUB_EVENT_NAME": "push",
+                    "GITHUB_REF": f"refs/heads/{base}",
+                    "GITHUB_SHA": head,
+                },
+                clear=True,
+            ):
+                ordering.validate_event(head)
+
+    def test_an_ungated_base_is_still_rejected(self) -> None:
+        head = "a" * 40
+        for base in ("release/1.0", "aimee/feat", "agent", "wip"):
+            with self.subTest(base=base), mock.patch.dict(
+                os.environ,
+                {
+                    "GITHUB_EVENT_NAME": "push",
+                    "GITHUB_REF": f"refs/heads/{base}",
+                    "GITHUB_SHA": head,
+                },
+                clear=True,
+            ), self.assertRaisesRegex(ordering.OrderingError, "event-ref"):
+                ordering.validate_event(head)
+
+    def test_gated_bases_match_the_workflow_triggers(self) -> None:
+        """A base the workflow fires on but this rejects fails every run."""
+        workflow = (REPO_ROOT / ".github/workflows/module-inventory.yml").read_text(
+            encoding="utf-8"
+        )
+        triggers = re.findall(r"^\s*branches: \[(.+)\]$", workflow, re.MULTILINE)
+        self.assertTrue(triggers)
+        for line in triggers:
+            for raw in line.split(","):
+                base = raw.strip().strip("'\"")
+                if base.endswith("/**"):
+                    base = base[: -len("**")] + "example"
+                with self.subTest(base=base):
+                    self.assertTrue(
+                        ordering.is_gated_base(base),
+                        f"{base!r} triggers the workflow but validate_event rejects it",
+                    )
 
     def test_live_input_rejects_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

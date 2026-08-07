@@ -5,11 +5,15 @@ name: Module inventory
 # classic Team-plan check, their workflow/script definitions are reviewable PR
 # content. Do not present proposal-ordering as an isolated trusted executor; a
 # stronger guarantee requires Enterprise required workflows or an external app.
+# These filters match the BASE branch. `feature/core-modularization` alone meant
+# every gate below ran on nothing for a PR into `testing` -- not a weaker gate, no
+# gate at all, which is the exact failure ci.yml warns about in its own filter.
+# Module work now merges to `testing`, so this list tracks ci.yml's.
 on:
   pull_request:
-    branches: [feature/core-modularization]
+    branches: [main, testing, feature/core-modularization, 'aimee/feat/**', 'agent/**']
   push:
-    branches: [feature/core-modularization]
+    branches: [main, testing, feature/core-modularization]
   workflow_dispatch:
 
 concurrency:

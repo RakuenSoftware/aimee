@@ -223,7 +223,7 @@
         },
         {
           "path": "src/headers/agent_types.h",
-          "sha256": "4931e10e410795ac6801314bc53f45e233518f64988f753a4922ab83e2aa5e08"
+          "sha256": "3350abb2b336236c03a021737364e2614afe66fcf676e99048e1baa5aa7fec0c"
         },
         {
           "path": "src/headers/aimee.h",
@@ -1600,7 +1600,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "4c760795476358fcd21db69a78559a83100e19bb1a2e6507604e95e55926ffdb",
+      "sha256": "33f34840527983a46602000a26b3ed584b27c329f03b80e0ad35be536dea17f4",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
