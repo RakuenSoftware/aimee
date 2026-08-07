@@ -793,6 +793,7 @@ static const struct
     {"wm.set", "POST", "/v1/wm/set"},
     {"workspace.context", "POST", "/v1/workspaces/context"},
     {"workspace.list", "GET", "/v1/workspaces"},
+    {"workspace.mirror-sync", "POST", "/v1/workspace/mirror-sync"},
     {"worktree.gc", "POST", "/v1/worktree/gc"},
 };
 
@@ -847,6 +848,10 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
       const char *path;
    } bespoke[] = {
        {"workspace.add", "POST", "/v1/workspaces"},
+       /* The mirror tier's client-diff upload. Without this mapping the client
+        * resolves no route and ships nothing, so a remote server reconstructs a
+        * clean checkout at head and silently drops every uncommitted change. */
+       {"workspace.mirror-sync", "POST", "/v1/workspace/mirror-sync"},
        /* Detached-workspace runner reverse channel (aimee workspace serve); the
         * REST twins return the same {ok, have_op, op?} / {ok} as the NDJSON ops. */
        {"runner.poll", "POST", "/v1/runner/poll"},

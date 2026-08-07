@@ -2282,6 +2282,13 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/workspaces", NULL, RM_EXACT, "workspace.add", 0, rh_workspaces_register},
     {"POST", "/v1/workspace/clone", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_clone},
     {"POST", "/v1/workspace/git", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_git},
+    /* The client of a REMOTE server ships its working-tree patch here, so the
+     * mirror reconstructs the tree it actually has rather than a clean checkout
+     * at head. The NDJSON method existed from the start but had no /v1 twin,
+     * which made it reachable only over the local socket — i.e. never from the
+     * remote clients the mirror tier exists for. */
+    {"POST", "/v1/workspace/mirror-sync", NULL, RM_EXACT, "workspace.mirror-sync", 0,
+     rh_dispatch_op},
     /* Local mechanical forge bridge for the Go-owned WFE. The handler additionally
      * requires a kernel-attested uid: principal, making this route UDS-only. */
     {"POST", "/v1/internal/forge/execute", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
