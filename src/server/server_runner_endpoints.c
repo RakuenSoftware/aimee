@@ -316,6 +316,24 @@ int handle_workspace_mirror_sync(server_ctx_t *ctx, server_conn_t *conn, cJSON *
       return server_send_error(
           conn, "workspace: mirror-sync requires a registered `mirror` workspace", NULL);
 
+   /* The patch and the commit it applies to arrive together, and the registry is
+    * updated from the same request. A client's base moves whenever the developer
+    * commits or pushes, so accepting the patch while keeping an older head would
+    * store a pair that cannot be applied — and the failure would surface later,
+    * during a reconstruct, far from the request that caused it. */
+   const char *client_head = jo_str(req, "head", "");
+   if (client_head && client_head[0])
+   {
+      (void)config_workspace_add(root, "mirror", NULL, client_head);
+      /* Republish the live snapshot, for the same reason workspace.add does:
+       * config_load() serves the snapshot rather than disk in the server, so
+       * without this the head sits correct on disk while every reader — the
+       * reconstruct included — keeps using the previous one until the server
+       * loop's next tick. Measured: the patch shipped against the right base and
+       * the checkout still used the stale head, so nothing reconstructed. */
+      (void)config_reload_if_changed();
+   }
+
    char base[MAX_PATH_LEN], diff_path[MAX_PATH_LEN];
    if (workspace_mirror_base(base, sizeof(base)) != 0)
       return server_send_error(conn, "workspace: cannot resolve workspaces dir", NULL);

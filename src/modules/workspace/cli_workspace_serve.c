@@ -336,14 +336,13 @@ static int rc_mirror_coords(const char *root, char *remote, size_t rcap, char *h
       rc_chomp(remote);
    }
    free(out);
-   out = NULL;
-   const char *rp[] = {"git", "-C", root, "rev-parse", "HEAD", NULL};
-   if (safe_exec_capture(rp, &out, 128) == 0 && out)
-   {
-      snprintf(head, hcap, "%s", out);
-      rc_chomp(head);
-   }
-   free(out);
+   /* The head we register is the mirror BASE — the newest ancestor of HEAD that
+    * a remote already has — not HEAD itself. The server reconstructs by fetching
+    * this commit, so registering an unpushed HEAD would name something it can
+    * never resolve. Local commits are not lost: they ride along in the patch
+    * shipped below, which is computed against this same base. */
+   if (workspace_client_mirror_base(root, head, hcap) != 0)
+      head[0] = '\0';
    return remote[0] && head[0];
 }
 #else
@@ -358,15 +357,23 @@ static int rc_mirror_coords(const char *root, char *remote, size_t rcap, char *h
 }
 #endif
 
-/* Ship the client's uncommitted working-tree patch for `root` so the server's
- * reconstruct matches what the client actually has. Without it the reconstruct
- * is a clean checkout at head and every uncommitted change is silently missing
- * from the tree the agent works in — the failure this whole path exists to
- * avoid. Best-effort: a failure here is reported, never fatal, because a tree at
- * head is still a usable (if stale) sandbox and the drift report will say so. */
-static void rc_ship_client_diff(const char *endpoint, const char *bearer, const char *root)
+/* Ship the client's working-tree patch for `root` so the server's reconstruct
+ * matches what the client actually has: everything between `base` and the
+ * working tree, which is unpushed commits AND uncommitted edits AND untracked
+ * files. Without it the reconstruct is a clean checkout at base and all of that
+ * is silently missing from the tree the agent works in — the failure this whole
+ * path exists to avoid.
+ *
+ * `base` is the commit just registered as the workspace head. Passed in rather
+ * than re-resolved so the patch cannot be computed against a different commit
+ * than the one the server will check out; a patch and its base are one fact.
+ *
+ * Best-effort: a failure is reported, never fatal, because a tree at base is
+ * still a usable (if stale) sandbox and the drift report will say so. */
+static void rc_ship_client_diff(const char *endpoint, const char *bearer, const char *root,
+                                const char *base)
 {
-   char *patch = workspace_client_diff_compute(root);
+   char *patch = workspace_client_diff_compute(root, base);
    cJSON *req = cJSON_CreateObject();
    if (!req)
    {
@@ -377,6 +384,7 @@ static void rc_ship_client_diff(const char *endpoint, const char *bearer, const 
    cJSON *args = cJSON_CreateArray();
    cJSON_AddItemToArray(args, cJSON_CreateString(root));
    cJSON_AddItemToObject(req, "args", args);
+   cJSON_AddStringToObject(req, "head", base ? base : "");
    cJSON_AddStringToObject(req, "diff", patch ? patch : "");
    free(patch);
    char *body = cJSON_PrintUnformatted(req);
@@ -499,7 +507,7 @@ int cli_workspace_reverse_channel_start(void)
     * and an absent one is a silent clean checkout at head. Runs on the attach
     * path too ("already registered"), because a re-attaching client's tree has
     * usually moved on since the registration that created it. */
-   rc_ship_client_diff(endpoint, bearer, cwd);
+   rc_ship_client_diff(endpoint, bearer, cwd, ws_head);
 
    struct rc_args *a = calloc(1, sizeof(*a));
    if (!a)

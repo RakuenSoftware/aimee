@@ -488,17 +488,29 @@ static cJSON *marshal_workspace_mirror_sync(int argc, char **argv)
       return NULL;
    }
    const char *root = argv[0];
-   char *patch = workspace_client_diff_compute(root);
+   /* The patch and the commit it applies to are one fact, so both are sent. The
+    * base is the newest ancestor of HEAD that a remote has: unpushed commits
+    * cannot be fetched server-side, so they travel inside the patch instead. */
+   char base[64] = "";
+   if (workspace_client_mirror_base(root, base, sizeof(base)) != 0)
+   {
+      fprintf(stderr,
+              "aimee: %s has no commit that exists on a remote, so the server has nothing to "
+              "reconstruct from. Push a commit (even an old one) and retry.\n",
+              root);
+      return NULL;
+   }
+   char *patch = workspace_client_diff_compute(root, base);
    if (!patch)
       fprintf(stderr,
-              "warning: could not compute a diff for %s (not a git repo / no HEAD?); "
-              "shipping an empty diff\n",
-              root);
+              "warning: could not compute a diff for %s against %.10s; shipping an empty diff\n",
+              root, base);
 
    cJSON *req = marshal_no_args("workspace.mirror-sync");
    cJSON *args = cJSON_CreateArray();
    cJSON_AddItemToArray(args, cJSON_CreateString(root));
    cJSON_AddItemToObject(req, "args", args);
+   cJSON_AddStringToObject(req, "head", base);
    cJSON_AddStringToObject(req, "diff", patch ? patch : "");
    free(patch);
    return req;
