@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -47,6 +48,21 @@ class ProposalOrderingTests(unittest.TestCase):
         )
         return self.git(repo, "rev-parse", "HEAD")
 
+    def merge(self, repo: Path, branch: str, message: str) -> str:
+        self.git(
+            repo,
+            "-c",
+            "user.name=Aimee Test",
+            "-c",
+            "user.email=aimee@example.invalid",
+            "merge",
+            "--no-ff",
+            "-m",
+            message,
+            branch,
+        )
+        return self.git(repo, "rev-parse", "HEAD")
+
     def make_repo(self) -> tuple[tempfile.TemporaryDirectory[str], Path, str]:
         tmp = tempfile.TemporaryDirectory()
         repo = Path(tmp.name)
@@ -56,9 +72,13 @@ class ProposalOrderingTests(unittest.TestCase):
         return tmp, repo, cutoff
 
     def test_current_repository_passes(self) -> None:
+        # Gated on ancestry, matching the rule itself. Gating on first-parent
+        # membership skipped this on every ordinary checkout -- including the
+        # integration branch -- so the one test that exercises the real history
+        # never ran.
         head = ordering.git_text(REPO_ROOT, "rev-parse", "HEAD")
-        if not ordering.on_first_parent_chain(REPO_ROOT, ordering.SLICE2_ANCHOR, head):
-            self.skipTest("checkout is not on the feature/core-modularization first-parent line")
+        if not ordering.descends_from(REPO_ROOT, ordering.SLICE2_ANCHOR, head):
+            self.skipTest("checkout does not descend from the approved Slice 2 anchor")
         signal_count = ordering.validate_ordering(REPO_ROOT)
         self.assertIsInstance(signal_count, int)
         self.assertGreaterEqual(signal_count, 1)
@@ -493,6 +513,74 @@ class ProposalOrderingTests(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def test_a_signal_is_accepted_when_the_anchor_arrived_by_merge(self) -> None:
+        """The integration branch's actual shape must pass.
+
+        The approval lands on its own branch and the integration branch merges
+        it, so the anchor is a second parent and is on no commit's first-parent
+        ancestry there. Requiring first-parent membership therefore rejected
+        every post-approval Git-module change on `testing` -- 91 of 95 signals
+        -- while passing on the branch the anchor happened to sit on.
+        """
+        tmp, repo, cutoff = self.make_repo()
+        try:
+            integration = self.git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+            self.git(repo, "checkout", "-b", "approval")
+            (repo / "contract.md").write_text("approved\n", encoding="utf-8")
+            anchor = self.commit(repo, "anchor")
+            self.git(repo, "checkout", integration)
+            self.merge(repo, "approval", "merge approval")
+            source = repo / "src/modules/git/example.c"
+            source.parent.mkdir(parents=True)
+            source.write_text("signal\n", encoding="utf-8")
+            self.commit(repo, "signal after approval")
+            head = self.git(repo, "rev-parse", "HEAD")
+
+            signals = ordering.scan_history(
+                repo, cutoff, head, exact_paths=set(), root_claims=[]
+            )
+            self.assertTrue(signals)
+            # Red before green: the retired rule rejects exactly this shape.
+            for _, parent, _ in signals:
+                self.assertFalse(ordering.on_first_parent_chain(repo, anchor, parent))
+            ordering.enforce_signal_precedence(repo, anchor, signals)
+        finally:
+            tmp.cleanup()
+
+    def test_a_signal_that_predates_the_anchor_is_still_rejected(self) -> None:
+        """Waiving the frozen ones must not stop the rule catching new ones."""
+        tmp, repo, cutoff = self.make_repo()
+        try:
+            source = repo / "src/modules/git/example.c"
+            source.parent.mkdir(parents=True)
+            source.write_text("pre-approval\n", encoding="utf-8")
+            offender = self.commit(repo, "signal before approval")
+            (repo / "contract.md").write_text("approved\n", encoding="utf-8")
+            anchor = self.commit(repo, "anchor")
+            head = self.git(repo, "rev-parse", "HEAD")
+            signals = ordering.scan_history(
+                repo, cutoff, head, exact_paths=set(), root_claims=[]
+            )
+            self.assertTrue(any(commit == offender for commit, _, _ in signals))
+            with self.assertRaisesRegex(ordering.OrderingError, "git-contract-ordering"):
+                ordering.enforce_signal_precedence(repo, anchor, signals)
+        finally:
+            tmp.cleanup()
+
+    def test_a_waived_commit_that_stops_being_a_signal_must_be_deleted(self) -> None:
+        waived = next(iter(ordering.PRE_APPROVAL_SIGNALS))
+        with self.assertRaisesRegex(ordering.OrderingError, "pre-approval-waiver"):
+            ordering.enforce_waiver_is_live([])
+        ordering.enforce_waiver_is_live(
+            [(commit, commit, []) for commit in ordering.PRE_APPROVAL_SIGNALS]
+        )
+        self.assertIn(waived, ordering.PRE_APPROVAL_SIGNALS)
+
+    def test_every_waived_commit_is_a_full_sha(self) -> None:
+        for commit in ordering.PRE_APPROVAL_SIGNALS:
+            with self.subTest(commit=commit):
+                self.assertRegex(commit, r"^[0-9a-f]{40}$")
+
     def test_all_signal_evidence_is_rendered_on_failure(self) -> None:
         tmp, repo, cutoff = self.make_repo()
         try:
@@ -562,13 +650,79 @@ class ProposalOrderingTests(unittest.TestCase):
             "GITHUB_EVENT_NAME": "pull_request",
             "GITHUB_REF": "refs/pull/123/merge",
             "GITHUB_SHA": head,
-            "GITHUB_BASE_REF": "main",
+            "GITHUB_BASE_REF": "release/1.0",
             "GITHUB_HEAD_REF": "slice/example",
         }
         with mock.patch.dict(os.environ, wrong_base, clear=True), self.assertRaisesRegex(
             ordering.OrderingError, "event-base"
         ):
             ordering.validate_event(head)
+
+    def test_every_gated_base_is_accepted(self) -> None:
+        """The accepted set must cover every base the workflow triggers on.
+
+        `main` used to be this test's rejected example. It is a gated base now,
+        which is the point: the checker rejected a pull request into `testing`
+        with rule=event-base, so widening the workflow trigger alone left the
+        gate failing every run.
+        """
+        head = "a" * 40
+        for base in ("main", "testing", "feature/core-modularization",
+                     "aimee/feat/1234", "agent/some-topic"):
+            with self.subTest(base=base), mock.patch.dict(
+                os.environ,
+                {
+                    "GITHUB_EVENT_NAME": "pull_request",
+                    "GITHUB_REF": "refs/pull/123/merge",
+                    "GITHUB_SHA": head,
+                    "GITHUB_BASE_REF": base,
+                    "GITHUB_HEAD_REF": "slice/example",
+                },
+                clear=True,
+            ):
+                ordering.validate_event(head)
+            with self.subTest(base=base, event="push"), mock.patch.dict(
+                os.environ,
+                {
+                    "GITHUB_EVENT_NAME": "push",
+                    "GITHUB_REF": f"refs/heads/{base}",
+                    "GITHUB_SHA": head,
+                },
+                clear=True,
+            ):
+                ordering.validate_event(head)
+
+    def test_an_ungated_base_is_still_rejected(self) -> None:
+        head = "a" * 40
+        for base in ("release/1.0", "aimee/feat", "agent", "wip"):
+            with self.subTest(base=base), mock.patch.dict(
+                os.environ,
+                {
+                    "GITHUB_EVENT_NAME": "push",
+                    "GITHUB_REF": f"refs/heads/{base}",
+                    "GITHUB_SHA": head,
+                },
+                clear=True,
+            ), self.assertRaisesRegex(ordering.OrderingError, "event-ref"):
+                ordering.validate_event(head)
+
+    def test_gated_bases_match_the_workflow_triggers(self) -> None:
+        """A base the workflow fires on but this rejects fails every run."""
+        workflow = (REPO_ROOT / ".github/workflows/module-inventory.yml").read_text(
+            encoding="utf-8"
+        )
+        triggers = re.findall(r"^\s*branches: \[(.+)\]$", workflow, re.MULTILINE)
+        self.assertTrue(triggers)
+        for line in triggers:
+            for raw in line.split(","):
+                base = raw.strip().strip("'\"")
+                if base.endswith("/**"):
+                    base = base[: -len("**")] + "example"
+                with self.subTest(base=base):
+                    self.assertTrue(
+                        ordering.is_gated_base(base),
+                        f"{base!r} triggers the workflow but validate_event rejects it",
+                    )
 
     def test_live_input_rejects_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
