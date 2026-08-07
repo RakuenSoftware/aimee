@@ -772,12 +772,16 @@ static const char *gh_check_word(const char *status, const char *conclusion)
    return "pending";
 }
 
-/* By name, as gh listed them. A repository can run two checks under ONE name
- * (observed: `pins` twice on the same commit), and qsort is not stable, so ties
- * break on the details url to keep the output identical between two calls on
- * unchanged data. gh's own ordering for a duplicate pair is undefined, so that
- * one case may differ from it -- deterministic here is worth more than matching
- * an order gh does not guarantee either. */
+/* By name, then by url.
+ *
+ * This is OUR order, not a reproduction of gh's. gh was observed grouping skipped
+ * checks ahead of passing ones on one PR, sorting plain alphabetically on another,
+ * and doing neither on a third whose CI was still running -- so there is no stable
+ * order to copy. Callers read these rows by field, and two calls on unchanged data
+ * returning the same order matters more than matching something gh does not hold
+ * still. The url tiebreak is what makes that true: a repository can run two checks
+ * under ONE name (observed: `pins` twice on the same commit) and qsort is not
+ * stable, so without it the duplicate pair could swap between calls. */
 static int gh_check_cmp(const void *a, const void *b)
 {
    const git_pr_check_t *x = a, *y = b;

@@ -99,7 +99,13 @@ int git_pr_edit_via_api_slug(const char *principal, const char *slug, int number
 
 /* One CI check for a PR's head commit, in the shape `gh pr checks` printed it.
  * The field values and their spelling were derived from gh's actual output rather
- * than from its source: 85 rows across three PRs render byte-identically. */
+ * than from its source: 85 rows across three PRs matched field-for-field.
+ *
+ * Row CONTENTS match; row ORDER is ours, not gh's. gh's ordering could not be
+ * reproduced and does not look reproducible: for one PR it grouped skipped checks
+ * ahead of passing ones, for another it was plain alphabetical, and for a third
+ * with CI in flight it was neither. Consumers parse these by field, so a stable
+ * order is worth more than chasing one gh does not itself hold still. */
 typedef struct
 {
    char name[256];
@@ -109,7 +115,7 @@ typedef struct
 } git_pr_check_t;
 
 /* Checks for PR `number`'s head commit into out[], at most `max`, count in
- * *count, sorted by name as gh sorted them. Returns 0 on success (including no
+ * *count, sorted by name (see above: ours, not gh's). Returns 0 on success (including no
  * checks at all), -1 with `err` set otherwise. Caller supplies the array. */
 int git_pr_checks_via_api_slug(const char *principal, const char *slug, int number, int max,
                                git_pr_check_t *out, int *count, char *err, size_t errlen);
