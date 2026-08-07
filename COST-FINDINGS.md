@@ -1590,6 +1590,43 @@ Note what this does NOT license: the aimee failure on am_270b3483d5 was checked
 the same way and is real -- the ticket entails the presence check, the graded
 test asserts the presence check, and aimee did content validation instead.
 
+## Finding 34 — Finding 33 WITHDRAWN: am_67e9b0449a is hard, not unwinnable
+
+Finding 33 proposed repairing am_67e9b0449a's ticket because aimee (review off)
+fixed the server layer while the graded test exercises the KB parser, and the
+ticket names neither. That was argued from ONE failing cell. With all five arms
+now measured it does not hold:
+
+| arm | verdict | credits |
+|---|---|---|
+| aimee (review on) | pass | **24.34** |
+| ponytail-instructions | pass | 31.75 |
+| ponytail-addon | pass | 34.87 |
+| aimee (review off) | FAIL | 28.98 |
+| baseline | FAIL | 21.34 |
+
+Three of five arms find the right layer, so the ticket is navigable. Two do not,
+which is a task discriminating on difficulty -- exactly what a benchmark ticket
+should do. No repair is warranted and the proposal is withdrawn.
+
+Note baseline fails it as well, so the review-off failure is not aimee-specific.
+
+The contrast with the genuine gap is now sharp and gives the test a threshold:
+
+    am_842ff35656   0 of 5 arms pass   ticket names the CLI, grader checks the
+                                       server dispatch table   -> SPEC GAP
+    am_67e9b0449a   3 of 5 arms pass   ticket names neither layer, most arms
+                                       still find it           -> HARD TASK
+
+One failing arm is not evidence a ticket is broken. A ticket no arm can pass,
+where the graded diff touches something the ticket never mentions, is.
+
+Also worth recording: aimee with review ON is the CHEAPEST passing arm here, and
+review is what redirected it from server_mgmt_endpoint.c to
+kb_management_action.c. This is the clearest case in the study of the panel
+earning its cost -- Finding 26 showed it causing a failure, this shows it
+preventing one, for less money than the arms that needed no help.
+
 ## Caveats for anything published from this
 
 - 6 of 8 tasks, **one replicate**, no confidence intervals. Per-task spread is
