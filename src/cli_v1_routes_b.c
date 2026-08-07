@@ -465,6 +465,20 @@ static cJSON *marshal_workspace_add(int argc, char **argv)
    const char *prov = rpc_get(&opts, "provider");
    if (prov)
       cJSON_AddStringToObject(req, "provider", prov);
+   /* The mirror coordinates need surfacing for the same reason root and provider
+    * do. This body reaches the server through POST /v1/workspaces -- including
+    * locally, over the HTTP UDS -- and that route reads top-level fields, not
+    * `args`. Left in args only, they were silently dropped, so
+    * `aimee workspace add <path> --provider mirror --remote <url>` came back with
+    * "--provider mirror requires --remote <url>" while staring at the flag the
+    * user had just typed. The socket dispatch still parses argv, so both paths
+    * now carry them. */
+   const char *rem = rpc_get(&opts, "remote");
+   if (rem)
+      cJSON_AddStringToObject(req, "remote", rem);
+   const char *hd = rpc_get(&opts, "head");
+   if (hd)
+      cJSON_AddStringToObject(req, "head", hd);
    /* --no-scan registers the workspace and returns instead of walking every
     * discovered project first. On a large tree the eager scan makes this RPC
     * take minutes, so a caller with a timeout abandons a registration that
