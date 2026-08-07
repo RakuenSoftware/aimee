@@ -64,8 +64,13 @@ static int fd_token(int fd, char *out, size_t cap)
    return out[0] != '\0';
 }
 
+/* webuser_runtime fails closed until a name validator is registered; the askpass
+ * socket lives under its runtime dir. See tests/support/webuser_name_validator.c. */
+void webuser_test_install_name_validator(void);
+
 int main(void)
 {
+   webuser_test_install_name_validator();
    int fdX = -1;
    char tokbuf[4096];
    char home[256];
