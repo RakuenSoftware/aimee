@@ -292,6 +292,102 @@ static void test_detector_and_parser_agree(void)
    printf("  detector/parser agree: ok\n");
 }
 
+/* ---- 11. bare-JSON rescue, which is gated on the tool registry ---- */
+static void test_bare_json_rescue(void)
+{
+   parsed_response_t r;
+   memset(&r, 0, sizeof(r));
+   int n = delegate_rescue_parse_tool_calls(
+       "{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}", &r, 1);
+   assert(n == 1 && r.call_count == 1);
+   assert(strcmp(r.calls[0].name, "bash") == 0);
+   assert_object_args(&r.calls[0], "bare json");
+   agent_free_parsed_response(&r);
+
+   /* An UNKNOWN tool name is not rescued: bare JSON is ambiguous with ordinary
+    * prose containing an object, so the registry is what makes it a call. */
+   memset(&r, 0, sizeof(r));
+   assert(delegate_rescue_parse_tool_calls("{\"name\": \"nope\", \"arguments\": {}}", &r, 1) == 0);
+   assert(delegate_rescue_has_tool_calls_with_json("{\"name\": \"nope\", \"arguments\": {}}", 1) ==
+          0);
+   agent_free_parsed_response(&r);
+
+   /* allow_json=0 turns the whole rescue off, even for a known tool. */
+   memset(&r, 0, sizeof(r));
+   assert(delegate_rescue_parse_tool_calls("{\"name\": \"bash\", \"arguments\": {\"a\":1}}", &r,
+                                           0) == 0);
+   agent_free_parsed_response(&r);
+
+   /* An array of calls is rescued as several. */
+   memset(&r, 0, sizeof(r));
+   n = delegate_rescue_parse_tool_calls("[{\"name\": \"bash\", \"arguments\": {\"a\":1}}, "
+                                        "{\"name\": \"read\", \"arguments\": {\"b\":2}}]",
+                                        &r, 1);
+   assert(n == 2 && r.call_count == 2);
+   assert(strcmp(r.calls[0].name, "bash") == 0 && strcmp(r.calls[1].name, "read") == 0);
+   agent_free_parsed_response(&r);
+   printf("  bare json rescue: ok\n");
+}
+
+/* ---- 12. REGRESSION: the tool/parameters spelling must carry its arguments ----
+ * The name is accepted as either "tool" or "name", so the tool/parameters
+ * convention is deliberately supported -- but arguments were read only from
+ * "args"/"arguments". A model emitting {"tool": ..., "parameters": {...}} had its
+ * call invoked with an EMPTY argument object, which is worse than not invoking
+ * it: a bash call arrives with no command rather than being left alone. */
+static void test_tool_parameters_spelling(void)
+{
+   parsed_response_t r;
+   memset(&r, 0, sizeof(r));
+   int n = delegate_rescue_parse_tool_calls(
+       "{\"tool\": \"bash\", \"parameters\": {\"command\": \"ls -la\"}}", &r, 1);
+   assert(n == 1 && r.call_count == 1);
+   assert(strcmp(r.calls[0].name, "bash") == 0);
+   assert_object_args(&r.calls[0], "tool/parameters");
+
+   cJSON *args = cJSON_Parse(r.calls[0].arguments);
+   const cJSON *command = cJSON_GetObjectItemCaseSensitive(args, "command");
+   assert(cJSON_IsString(command) && strcmp(command->valuestring, "ls -la") == 0);
+   cJSON_Delete(args);
+   agent_free_parsed_response(&r);
+
+   /* The established spellings keep working. */
+   memset(&r, 0, sizeof(r));
+   assert(delegate_rescue_parse_tool_calls("{\"name\": \"bash\", \"args\": {\"command\": \"x\"}}",
+                                           &r, 1) == 1);
+   assert(strstr(r.calls[0].arguments, "\"x\"") != NULL);
+   agent_free_parsed_response(&r);
+   printf("  tool/parameters spelling: ok\n");
+}
+
+/* ---- 13. reasoning blocks and content extraction ---- */
+static void test_reasoning_and_content(void)
+{
+   parsed_response_t r;
+   memset(&r, 0, sizeof(r));
+   /* <think> is stripped before parsing, so a call after it is still found and
+    * the reasoning does not leak into content. */
+   int n = xml_parse_tool_calls("<think>I should list files</think>"
+                                "<tool_call><name>bash</name><arguments>{\"command\":\"ls\"}"
+                                "</arguments></tool_call>",
+                                &r);
+   assert(n == 1 && r.call_count == 1);
+   assert(r.content == NULL || strstr(r.content, "should list files") == NULL);
+   agent_free_parsed_response(&r);
+
+   /* Text before the first block becomes content; text between blocks does not
+    * resurface as a second content value. */
+   memset(&r, 0, sizeof(r));
+   n = xml_parse_tool_calls(
+       "first<tool_call><name>bash</name><arguments>{\"a\":1}</arguments></tool_call>"
+       "middle<tool_call><name>read</name><arguments>{\"b\":2}</arguments></tool_call>",
+       &r);
+   assert(n == 2 && r.call_count == 2);
+   assert(r.content && strcmp(r.content, "first") == 0);
+   agent_free_parsed_response(&r);
+   printf("  reasoning and content: ok\n");
+}
+
 int main(void)
 {
    printf("delegate_xml_fallback:\n");
@@ -307,6 +403,9 @@ int main(void)
    test_mistral_format();
    test_channel_arguments_are_an_object();
    test_detector_and_parser_agree();
+   test_bare_json_rescue();
+   test_tool_parameters_spelling();
+   test_reasoning_and_content();
    printf("All delegate_xml_fallback tests passed.\n");
    return 0;
 }

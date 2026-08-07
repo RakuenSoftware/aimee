@@ -836,9 +836,16 @@ static int parse_json_tool_object(const char *start, size_t len, parsed_response
       return 0;
    }
 
+   /* Accept every spelling whose NAME key is accepted above. "tool" exists to
+    * support the tool/parameters convention, but "parameters" was not read, so a
+    * model using it had its call invoked with an EMPTY argument object -- worse
+    * than declining the call, because a bash invocation then arrives with no
+    * command instead of being left alone. */
    cJSON *jargs = cJSON_GetObjectItemCaseSensitive(root, "args");
    if (!jargs)
       jargs = cJSON_GetObjectItemCaseSensitive(root, "arguments");
+   if (!jargs)
+      jargs = cJSON_GetObjectItemCaseSensitive(root, "parameters");
 
    parsed_tool_call_t *tc = &out->calls[out->call_count++];
    memset(tc, 0, sizeof(*tc));
