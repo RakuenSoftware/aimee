@@ -165,13 +165,19 @@ static void vault_cred_fingerprint(const char *secret, char *out, size_t out_len
 }
 
 /* True iff the connection is an attested transport — local UDS, trusted webchat,
- * or native-TLS+bearer — never a plaintext TCP bearer. The D2b precondition for
- * any server-principal write. */
+ * native-TLS+bearer, or a verified mTLS client — never a plaintext TCP bearer.
+ * The D2b precondition for any server-principal write: TLS on the connection is
+ * mandatory for every network path here, and mTLS is the stronger form of it.
+ *
+ * Must stay in step with vault_capability_server_write_allowed(); omitting
+ * ATTEST_MTLS_CLIENT here made this function report "unattested" for the strongest
+ * identity the server accepts, so the refusal named the wrong reason. */
 static int vault_conn_is_attested(const server_conn_t *conn)
 {
    return conn && (conn->attested_transport == ATTEST_UDS_PEERCRED ||
                    conn->attested_transport == ATTEST_WEBCHAT_TRUSTED ||
-                   conn->attested_transport == ATTEST_TLS_BEARER);
+                   conn->attested_transport == ATTEST_TLS_BEARER ||
+                   conn->attested_transport == ATTEST_MTLS_CLIENT);
 }
 
 void vault_audit_server_write(const server_conn_t *conn, const char *agent, const char *cred,
@@ -230,7 +236,9 @@ int handle_vault_set_server(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       if (!vault_conn_is_attested(conn))
          return server_send_error(
-             conn, "vault: server-principal write requires an attested (UDS/webchat) connection",
+             conn,
+             "vault: server-principal write requires an attested connection (local UDS, trusted "
+             "webchat, or TLS/mTLS) — a plaintext TCP bearer is never accepted",
              NULL);
       /* Name the caller's resolved principal so the operator grants the RIGHT one
        * — a UDS peer is `uid:<N>`, not the unix username, which is a common
@@ -317,6 +325,32 @@ int handle_vault_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
+   /* Enumeration previously took no gate beyond the route capability, and
+    * CAP_DELEGATE is inside CAPS_AUTHENTICATED — the LOWER of the two mTLS tiers —
+    * so any unrevoked client cert listed every server credential name.
+    *
+    * The read gate, not the write one: host-local authority (UDS, the root-owned
+    * webchat hop, the operator's own TLS bearer) enumerates without a grant, so the
+    * browser GUI's credential page keeps working with no operator action. A client
+    * cert — a network credential on arbitrary remote machines — still needs the
+    * grant. See vault_capability_server_read_allowed. */
+   if (!vault_capability_server_read_allowed(conn->attested_transport, conn->vault_principal))
+   {
+      if (!vault_conn_is_attested(conn))
+         return server_send_error(
+             conn,
+             "vault: listing shared credentials requires an attested connection (local UDS, "
+             "trusted webchat, or TLS/mTLS) — a plaintext TCP bearer is never accepted",
+             NULL);
+      char msg[256];
+      const char *who = (conn && conn->vault_principal[0]) ? conn->vault_principal : "(unknown)";
+      snprintf(msg, sizeof(msg),
+               "vault: listing shared credentials requires vault:write:server for %s — an "
+               "operator grants it locally with `aimee vault capability grant %s`",
+               who, who);
+      return server_send_error(conn, msg, NULL);
+   }
+
    vault_store_entry_t entries[64];
    int count = 0;
    vault_status_t st = vault_service_list(VAULT_SERVER_PRINCIPAL, entries,

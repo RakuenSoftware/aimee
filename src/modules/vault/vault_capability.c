@@ -246,8 +246,42 @@ int vault_capability_server_write_allowed(attested_transport_t transport, const 
     * contrast, must hold an explicitly granted vault:write:server capability. */
    if (transport == ATTEST_TLS_BEARER)
       return 1;
-   int attested = (transport == ATTEST_UDS_PEERCRED || transport == ATTEST_WEBCHAT_TRUSTED);
+
+   /* A verified mTLS client is ATTESTED -- its cert chain verifies against aimee's
+    * client CA and yields a real cert:<CN> principal -- but attestation is not
+    * authority. It was previously absent from BOTH sets, so on an mTLS-REQUIRED
+    * server (where vault_principal_resolve's mTLS branch wins first, and no remote
+    * conn is ever TLS_BEARER) the server-principal path was unreachable by
+    * construction: no grant could open it, because the store was never consulted.
+    *
+    * It belongs with UDS/webchat rather than with the bearer above. Possessing an
+    * enrolled client cert is the ordinary state of every thin client; it is what
+    * gets you ONTO /v1, not what should get you into the credential store. Holding
+    * cert:<CN> makes the grant expressible per client, which a bearer -- carrying no
+    * principal at all -- cannot be.
+    *
+    * ATTEST_TCP_BEARER remains refused: D2b, a server credential is never minted
+    * over an unencrypted channel. */
+   int attested = (transport == ATTEST_UDS_PEERCRED || transport == ATTEST_WEBCHAT_TRUSTED ||
+                   transport == ATTEST_MTLS_CLIENT);
    return attested && vault_capability_has(principal);
+}
+
+int vault_capability_server_read_allowed(attested_transport_t transport, const char *principal)
+{
+   /* Host-local authority enumerates without a grant. The browser GUI lists
+    * credentials on an ordinary page load over the root-owned webchat hop; gating
+    * that on a per-user capability -- mintable only over UDS -- would make an
+    * operator shell into the host once per webuser before the page renders. That
+    * cost buys nothing: the webchat hop is already kernel-attested, and a local UDS
+    * peer could read the store directly regardless. */
+   if (transport == ATTEST_UDS_PEERCRED || transport == ATTEST_WEBCHAT_TRUSTED ||
+       transport == ATTEST_TLS_BEARER)
+      return 1;
+   /* A client cert is a NETWORK credential handed to arbitrary remote machines, so
+    * it enumerates only with an explicit grant -- the same one the write gate wants.
+    * Everything else (plaintext bearer, un-attested) is refused. */
+   return transport == ATTEST_MTLS_CLIENT && vault_capability_has(principal);
 }
 
 int vault_agent_key_server_seal_allowed(attested_transport_t transport)

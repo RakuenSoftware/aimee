@@ -67,17 +67,23 @@ static void test_distinct_uids_distinct_principals(void)
    printf("  PASS: test_distinct_uids_distinct_principals\n");
 }
 
-/* uid 0 (root) and unknown uid (-1) get NO principal: a zeroed/un-attested conn
- * reads as uid 0, so it must never collapse to acting as root. Fail-closed. */
-static void test_uid_zero_and_unknown_refused(void)
+/* uid 0 is a real kernel attestation and gets uid:0. The missed-hop sentinel is
+ * -1, NOT 0 -- server_http_identity_capture initialises to -1 and overwrites only
+ * on a successful peer-cred lookup -- and a zeroed conn is caught by ATTEST_NONE
+ * being the enum's zero value, so it never reaches this branch as UDS_PEERCRED.
+ * Excluding root left `vault set-server` refusing every root caller, the ordinary
+ * case inside the server container, while offering "grant (unknown)" as the fix.
+ *
+ * An unknown uid still gets NO principal and still fails closed. */
+static void test_uid_zero_named_unknown_refused(void)
 {
    char p[VAULT_PRINCIPAL_MAX];
    assert(resolve(0, 0, NULL, 0, p) == ATTEST_UDS_PEERCRED);
-   assert(p[0] == '\0'); /* no "uid:0" */
+   assert(strcmp(p, "uid:0") == 0);
 
    assert(resolve(0, -1, NULL, 0, p) == ATTEST_UDS_PEERCRED);
    assert(p[0] == '\0');
-   printf("  PASS: test_uid_zero_and_unknown_refused\n");
+   printf("  PASS: test_uid_zero_named_unknown_refused\n");
 }
 
 /* Plain TCP is bearer-authorized but has no OS-user attestation -> no vault. */
@@ -267,7 +273,7 @@ int main(void)
 {
    test_uds_peer_uid_gets_principal();
    test_distinct_uids_distinct_principals();
-   test_uid_zero_and_unknown_refused();
+   test_uid_zero_named_unknown_refused();
    test_tcp_gets_no_principal();
    test_webuser_with_token_honored();
    test_webuser_without_token_refused();

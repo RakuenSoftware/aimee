@@ -473,6 +473,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-capability \
                $(TESTPREFIX)/unit-test-agent-key-import \
                $(TESTPREFIX)/unit-test-vault-audit \
+               $(TESTPREFIX)/unit-test-server-vault-gate \
                $(TESTPREFIX)/unit-test-prompts \
                $(TESTPREFIX)/unit-test-cmd-session \
                $(TESTPREFIX)/unit-test-model-registry \
@@ -5463,6 +5464,7 @@ $(TESTPREFIX)/unit-test-vault-bootstrap: $(OBJDIR)/tests/test_vault_bootstrap.o 
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_capability.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -5506,6 +5508,14 @@ $(TESTPREFIX)/unit-test-vault-capability: $(OBJDIR)/tests/test_vault_capability.
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-vault-audit: $(OBJDIR)/tests/test_vault_audit.o \
+                              $(OBJDIR)/server/server_vault.o \
+                              $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o $(OBJDIR)/modules/vault/vault_capability.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-vault-gate: $(OBJDIR)/tests/test_server_vault_gate.o \
                               $(OBJDIR)/server/server_vault.o \
                               $(OBJDIR)/modules/vault/vault_service.o $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/modules/vault/vault_kek_cache.o \
