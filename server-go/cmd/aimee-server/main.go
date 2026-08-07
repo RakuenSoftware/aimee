@@ -15,12 +15,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/internal/api"
 	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/engine"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
+	"github.com/JBailes/aimee/server-go/modules/workflows"
 )
 
 func main() {
@@ -258,6 +260,38 @@ func main() {
 		log.Fatal(err)
 	}
 	defer listener.Close()
+
+	// Serve the workflow control stage over the event bus.
+	//
+	// This is the same mux the private AF_UNIX socket above serves; what changes
+	// is that the C resource plane no longer needs a second transport to reach
+	// it. The engine and its stores stay here -- only the way in moves -- so this
+	// deletes src/server/wfe_http_proxy.c without relocating any state.
+	//
+	// A missing bus socket is not fatal: this process still serves its own
+	// listener, and reporting the stage as unserved is more honest than exiting.
+	if busSocket := os.Getenv("AIMEE_MODULE_BUS_SOCKET"); busSocket != "" {
+		go func() {
+			err := bus.RunModuleProcess(rootCtx, bus.ModuleProcessConfig{
+				SocketPath:     busSocket,
+				ModuleName:     "workflows",
+				PrincipalClass: 1,
+				PrincipalRef:   20,
+				Stages: []bus.ModuleStage{
+					{EventKind: workflows.EventAdvance, StageID: workflows.StageAdvance},
+					{EventKind: workflows.EventControl, StageID: workflows.StageControl},
+					{EventKind: workflows.EventGateDecide, StageID: workflows.StageGateDecide},
+					{EventKind: workflows.EventAutonomousRoute, StageID: workflows.StageAutonomousRoute},
+				},
+				Handler: workflows.NewHandler(handler),
+			})
+			if err != nil && rootCtx.Err() == nil {
+				log.Printf("workflow control stage stopped: %v", err)
+			}
+		}()
+	} else {
+		log.Print("AIMEE_MODULE_BUS_SOCKET is unset; the workflow control stage is not served")
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)

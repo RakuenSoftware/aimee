@@ -14,7 +14,6 @@
 #include "db1.h"
 #include "db2/tool_registry.h"
 #include "agent.h"
-#include <aimee/tools/agent_tools.h>
 #include "kb_client.h"
 #include "headers/memory.h"
 #include "headers/agent_exec.h"
@@ -28,7 +27,6 @@
 #include "otel.h"
 #include "platform_path.h"
 #include "cJSON.h"
-#include "modules/git/git_verify.h"
 #include "headers/agent_policy_intercept.h"
 #include <ctype.h>
 #include <errno.h>

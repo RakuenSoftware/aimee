@@ -496,6 +496,7 @@ COPY scripts/embed-remote.py scripts/llm-chat.py \
 # the entrypoint seeds it into $AIMEE_HOME/.config/aimee on first start.
 COPY deploy/container/aimee.yaml /opt/aimee/defaults/aimee.yaml
 COPY deploy/container/aimee-kb-entrypoint.sh /usr/local/bin/aimee-kb-entrypoint.sh
+COPY deploy/container/optional-modules-lib.sh /usr/local/bin/optional-modules-lib.sh
 COPY deploy/container/module-supervisor.sh /usr/local/bin/module-supervisor.sh
 COPY deploy/container/aimee-kb-db-export.sh /usr/local/bin/aimee-kb-db-export
 RUN chmod +x /usr/local/bin/aimee-kb-entrypoint.sh /usr/local/bin/aimee-kb-db-export \

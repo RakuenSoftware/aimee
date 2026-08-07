@@ -263,6 +263,20 @@ func (documentedNoopAgents) DelegateGroup(_ context.Context, requests []Delegate
 	return make([]DelegateGroupResult, len(requests))
 }
 
+type implementationSatisfiedNoopAgents struct{}
+
+func (implementationSatisfiedNoopAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{
+		Response: "Partial result; delegate ended with error: delegate code: no owned files changed; " +
+			"result treated as incomplete\n\nTask already complete on the current branch. No changes made.",
+		Partial: true,
+	}, nil
+}
+
+func (implementationSatisfiedNoopAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return make([]DelegateGroupResult, len(requests))
+}
+
 func (a partialNoCommitAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
 	out := make([]DelegateGroupResult, len(requests))
 	for i := range requests {
@@ -492,6 +506,24 @@ func TestPartialImplementWithNoCommitDoesNotAdvance(t *testing.T) {
 		t.Fatalf("delegate's own diagnosis must survive into the step detail: %q", out.Detail)
 	}
 
+	// The write-role guard also reports a legitimate sibling-satisfied no-op as
+	// partial. The implementation prompt requires the delegate to state that the
+	// task is already complete; accept only that explicit report, and still run
+	// the mechanical verifier before advancing the unchanged HEAD.
+	verifier := &recordingVerifier{}
+	satisfiedRunner := &NativeRunner{agents: implementationSatisfiedNoopAgents{},
+		worktrees: manager, db: store, verifier: verifier}
+	out, err = satisfiedRunner.mutate(ctx, StepRequest{WorkItem: child, Node: wfe.Node{ID: "impl"}}, false)
+	if err != nil {
+		t.Fatalf("sibling-satisfied mutate: %v", err)
+	}
+	if out.Status != StepAdvanced {
+		t.Fatalf("explicit completed no-op status=%q detail=%q, want advanced", out.Status, out.Detail)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("explicit completed no-op verifier calls=%d, want 1", verifier.calls)
+	}
+
 	// Existing branch work must not excuse a later partial correction attempt
 	// when the exact reviewed artifact still carries blocking feedback. Without
 	// this check the old commit made branchHasWorkOverBase true, so the unchanged
@@ -511,7 +543,7 @@ func TestPartialImplementWithNoCommitDoesNotAdvance(t *testing.T) {
 		t.Fatal(err)
 	}
 	reviewedHash := wfe.Hash([]byte(reviewedDiff))
-	verifier := &recordingVerifier{}
+	verifier = &recordingVerifier{}
 	runner.verifier = verifier
 	blockingFeedback := &wfe.ReviewFeedback{ArtifactHash: reviewedHash, Findings: []wfe.Finding{{
 		ID: "still-broken", Severity: "blocking", Summary: "the reviewed implementation is still broken",

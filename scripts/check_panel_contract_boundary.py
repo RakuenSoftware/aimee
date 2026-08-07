@@ -17,13 +17,16 @@ ENSEMBLE_HEADER = "delegate_ensemble.h"
 # the provider ABI is linked into shipping binaries; no new consumer may join it.
 TEMPORARY_TYPE_CONSUMERS = {
     "src/modules/delegates/include/aimee/delegates/panel_provider.h",
-    "src/modules/delegates/include/aimee/delegates/panel_roster.h",
+    # panel_roster.h left with panel_roster.c: neither reached a shipped binary
+    # (`./aimee` has no such command path) and nothing live referenced them.
 }
 TEMPORARY_ENSEMBLE_CONSUMERS = {
     "src/cmd_agent_delegate.c",
     "src/headers/evidence_replay.h",
     "src/headers/server_compute_internal.h",
-    "src/modules/workflows/wfe_live_panel.c",
+    # wfe_live_panel.c paid this debt off: its delegate_ensemble.h include was
+    # dead (the compiler builds the TU without it), so it was deleted rather
+    # than migrated. The list only ever shrinks.
     "src/modules/workflows/wfe_panel_roundtable.h",
     "src/server/server_compute.c",
     "src/server/server_compute_roundtable.c",

@@ -110,8 +110,37 @@ func TestDelegateDeadlineRefusesWriteWithoutVerificationReserve(t *testing.T) {
 	request := DelegateRequest{Role: "code", Tools: true}
 	err := applyDelegateDeadlineCap(ctx, &request)
 	if !errors.Is(err, context.DeadlineExceeded) ||
-		!strings.Contains(err.Error(), "remaining=") || !strings.Contains(err.Error(), "reserve=5m0s") {
+		!strings.Contains(err.Error(), "remaining=") || !strings.Contains(err.Error(), "reserve=5m0s") ||
+		!strings.Contains(err.Error(), "minimum_run=1m0s") {
 		t.Fatalf("deadline error=%v", err)
+	}
+}
+
+func TestDelegateDeadlineRefusesWriteWithTooLittleViableRunBudget(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute+45*time.Second)
+	defer cancel()
+	request := DelegateRequest{Role: "code", Tools: true}
+	err := applyDelegateDeadlineCap(ctx, &request)
+	if !errors.Is(err, context.DeadlineExceeded) ||
+		!strings.Contains(err.Error(), "minimum_run=1m0s") {
+		t.Fatalf("deadline error=%v, want refusal before a zero-call delegate dispatch", err)
+	}
+}
+
+func TestDelegateDeadlineRefusalDoesNotDispatchAgentJob(t *testing.T) {
+	agents := &recordingAgents{}
+	runner := &NativeRunner{agents: agents}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute+45*time.Second)
+	defer cancel()
+
+	_, err := runner.delegate(ctx, StepRequest{}, DelegateRequest{Role: "code", Tools: true})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("delegate error=%v, want deadline refusal", err)
+	}
+	agents.mu.Lock()
+	defer agents.mu.Unlock()
+	if len(agents.requests) != 0 {
+		t.Fatalf("agent dispatch count=%d, want zero", len(agents.requests))
 	}
 }
 
@@ -124,6 +153,20 @@ func TestDelegateDeadlineCapPreservesShortReviewPhase(t *testing.T) {
 	}
 	if request.ToolLoopTimeoutMSCap < 80 || request.ToolLoopTimeoutMSCap > 100 {
 		t.Fatalf("short review phase cap=%dms, want most of its 100ms deadline", request.ToolLoopTimeoutMSCap)
+	}
+}
+
+func TestImplementationPromptUsesNoOpForSiblingSatisfiedTask(t *testing.T) {
+	prompt := implementationDelegatePrompt()
+	for _, want := range []string{
+		"already fully satisfies the task",
+		"work merged by a sibling",
+		"leave the worktree unchanged",
+		"do not manufacture cosmetic changes",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("implementation prompt missing %q: %q", want, prompt)
+		}
 	}
 }
 

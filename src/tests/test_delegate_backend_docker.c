@@ -5,7 +5,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include "aimee_home.h"
@@ -17,6 +19,26 @@
 static const char *write_fake_docker_fixture(void);
 static void teardown_fake_docker(void);
 static int fake_container_exists(const char *container_name);
+
+static void test_translate_named_volume_socket_path(void)
+{
+   char out[512];
+   const char *mounts = "/var/lib/aimee\t/var/lib/docker/volumes/aimee_home/_data\n"
+                        "/var/lib/aimee-workspaces\t/srv/aimee/workspaces\n";
+   assert(delegate_backend_docker_translate_mount_path("/var/lib/aimee/aimee-http.sock", mounts,
+                                                       out, sizeof(out)) == 1);
+   assert(strcmp(out, "/var/lib/docker/volumes/aimee_home/_data/aimee-http.sock") == 0);
+   assert(delegate_backend_docker_translate_mount_path("/opt/aimee/aimee-http.sock", mounts, out,
+                                                       sizeof(out)) == 0);
+   assert(strcmp(out, "/opt/aimee/aimee-http.sock") == 0);
+   assert(delegate_backend_docker_translate_mount_path("/var/lib/aimee-other/socket", mounts, out,
+                                                       sizeof(out)) == 0);
+   assert(strcmp(out, "/var/lib/aimee-other/socket") == 0);
+   assert(delegate_backend_docker_translate_mount_path("/opt/aimee/socket", "/\t/srv/root\n", out,
+                                                       sizeof(out)) == 1);
+   assert(strcmp(out, "/srv/root/opt/aimee/socket") == 0);
+   printf("  PASS: test_translate_named_volume_socket_path\n");
+}
 
 static void test_register_puts_docker_in_registry(void)
 {
@@ -225,6 +247,9 @@ static const char *write_fake_docker_fixture(void)
            "    ;;\n"
            "  create)\n"
            "    printf '%%s\\n' \"$@\" > \"$STATE_DIR/create.argv\"\n"
+           "    count=0; [ -f \"$STATE_DIR/create.count\" ] && read -r count < "
+           "\"$STATE_DIR/create.count\"\n"
+           "    printf '%%s\\n' \"$((count + 1))\" > \"$STATE_DIR/create.count\"\n"
            "    shift\n"
            "    name=\"\"\n"
            "    while [ $# -gt 0 ]; do\n"
@@ -249,6 +274,18 @@ static const char *write_fake_docker_fixture(void)
            "  rm)\n"
            "    name=\"${@: -1}\"\n"
            "    rm -f \"$STATE_DIR/$name.exists\"\n"
+           "    exit 0\n"
+           "    ;;\n"
+           "  inspect)\n"
+           "    name=\"${@: -1}\"\n"
+           "    if [[ \"$name\" = aimee-delegate-* ]] && "
+           "[ -n \"$AIMEE_FAKE_DOCKER_SANDBOX_MOUNTS\" ]; then\n"
+           "      printf '%%b' \"$AIMEE_FAKE_DOCKER_SANDBOX_MOUNTS\"\n"
+           "    elif [ -n \"$AIMEE_FAKE_DOCKER_INSPECT_MOUNTS\" ]; then\n"
+           "      printf '%%b' \"$AIMEE_FAKE_DOCKER_INSPECT_MOUNTS\"\n"
+           "    else\n"
+           "      printf 'none=;\\n'\n"
+           "    fi\n"
            "    exit 0\n"
            "    ;;\n"
            "  exec)\n"
@@ -337,6 +374,19 @@ static int create_argv_has(const char *needle)
    return strstr(buf, needle) != NULL;
 }
 
+static int fake_create_count(void)
+{
+   char p[512];
+   snprintf(p, sizeof(p), "/tmp/aimee-fake-docker-state-%d/create.count", (int)getpid());
+   FILE *f = fopen(p, "r");
+   if (!f)
+      return 0;
+   int count = 0;
+   (void)fscanf(f, "%d", &count);
+   fclose(f);
+   return count;
+}
+
 static void test_acquire_creates_and_starts_container(void)
 {
    delegate_backend_reset_for_test();
@@ -345,18 +395,24 @@ static void test_acquire_creates_and_starts_container(void)
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
 
-   /* Slice 6: the backend binds aimee-server's UDS only when it exists on disk.
-    * Point aimee_home at a temp dir and plant a socket file there so the create
-    * argv includes the socket channel. (stat() only checks existence — a plain
-    * file stands in for the UDS.) */
+   /* Slice 6: the backend binds aimee-server's UDS only when it is a socket.
+    * Point aimee_home at a temp dir and plant a real UDS there. The fake inspect
+    * then models aimee_home living in a named volume: Docker must receive the
+    * daemon-side volume source, never the in-container path. */
    char tmphome[] = "/tmp/aimee-deleg-sock-XXXXXX";
    char sockpath[512] = "";
    assert(mkdtemp(tmphome) != NULL);
    setenv("AIMEE_HOME", tmphome, 1);
    snprintf(sockpath, sizeof(sockpath), "%s/aimee-http.sock", tmphome);
-   FILE *sf = fopen(sockpath, "w");
-   assert(sf != NULL);
-   fclose(sf);
+   int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+   assert(sockfd >= 0);
+   struct sockaddr_un addr = {0};
+   addr.sun_family = AF_UNIX;
+   assert(strlen(sockpath) < sizeof(addr.sun_path));
+   snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", sockpath);
+   assert(bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)) == 0);
+   setenv("AIMEE_FAKE_DOCKER_INSPECT_MOUNTS", "/tmp\t/var/lib/docker/volumes/aimee_home/_data\\n",
+          1);
 
    delegate_backend_config_t cfg = {0};
    cfg.image = "ubuntu:22.04";
@@ -374,8 +430,25 @@ static void test_acquire_creates_and_starts_container(void)
    /* The delegate's ONE outward channel: aimee-server's UDS is bound in and the
     * in-container `aimee` CLI is pointed at it (so `aimee git_commit` etc. work). */
    assert(create_argv_has("aimee-http.sock"));
+   assert(create_argv_has("/var/lib/docker/volumes/aimee_home/_data"));
+   assert(!create_argv_has(tmphome));
    assert(create_argv_has("AIMEE_API_ENDPOINT=unix:/run/aimee/aimee-http.sock"));
+
+   /* A hibernated sandbox from before this fix may still exist with the broken
+    * in-container source. Re-acquire must reject that stale bind and recreate the
+    * container, rather than resume another round of guaranteed tool timeouts. */
+   b->release(b, state, 1);
+   assert(fake_create_count() == 1);
+   setenv("AIMEE_FAKE_DOCKER_SANDBOX_MOUNTS",
+          "/run/aimee/aimee-http.sock\t/var/lib/aimee/aimee-http.sock\\n", 1);
+   state = NULL;
+   assert(b->acquire(b, "task-acq-1", &cfg, &state) == 0);
+   assert(fake_create_count() == 2);
+
+   close(sockfd);
    unlink(sockpath);
+   unsetenv("AIMEE_FAKE_DOCKER_SANDBOX_MOUNTS");
+   unsetenv("AIMEE_FAKE_DOCKER_INSPECT_MOUNTS");
    unsetenv("AIMEE_HOME");
    rmdir(tmphome);
 
@@ -395,6 +468,9 @@ static void test_release_hibernate_keeps_container(void)
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
+   char tmphome[] = "/tmp/aimee-deleg-hib-XXXXXX";
+   assert(mkdtemp(tmphome) != NULL);
+   setenv("AIMEE_HOME", tmphome, 1);
 
    delegate_backend_config_t cfg = {0};
    void *state = NULL;
@@ -413,6 +489,8 @@ static void test_release_hibernate_keeps_container(void)
    assert(!fake_container_exists("aimee-delegate-task-hib-1"));
 
    teardown_fake_docker();
+   unsetenv("AIMEE_HOME");
+   rmdir(tmphome);
    unsetenv("AIMEE_DOCKER_BIN");
    printf("  PASS: test_release_hibernate_keeps_container\n");
 }
@@ -964,6 +1042,7 @@ int main(void)
    test_container_name_basic();
    test_container_name_sanitises_invalid_chars();
    test_container_name_rejects_invalid();
+   test_translate_named_volume_socket_path();
    test_build_exec_command_basic();
    test_build_exec_command_handles_special_chars();
    test_build_exec_command_rejects_invalid();
