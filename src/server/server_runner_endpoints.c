@@ -159,12 +159,22 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    /* Mirror workspaces carry the client VCS coordinates the lifecycle seeds from. */
    int add_rc = config_workspace_add(abs, provider, is_mirror ? remote : NULL,
                                      (is_mirror && head) ? head : NULL);
-   if (add_rc == -2)
-      return server_send_error(conn, "workspace: already registered", NULL);
+   /* Already registered is the state the caller asked for, so it is not an
+    * error: workspace.add is idempotent. Rejecting the second call made every
+    * re-run of any automation that registers its workspace fail at setup,
+    * before doing any work -- a benchmark cell re-executed after a harness
+    * fault died here in under 90 seconds having accomplished nothing, and the
+    * only way to proceed was to hand-edit the registry.
+    *
+    * Callers cannot avoid this by checking first: between a `workspace list`
+    * and the add, another session can register the same path. Idempotence is
+    * the only race-free contract. Discovery below still runs, so a repeat call
+    * re-discovers projects, which is the useful half on a second call. */
    if (add_rc == -3)
       return server_send_error(conn, "workspace: maximum workspace count reached (64)", NULL);
-   if (add_rc != 0)
+   if (add_rc != 0 && add_rc != -2)
       return server_send_error(conn, "workspace: failed to save config", NULL);
+   int already_registered = (add_rc == -2);
 
    /* Republish the live snapshot now instead of waiting for the server loop's
     * config_reload_if_changed() tick. In the server, config_load() returns the
@@ -213,6 +223,9 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int kb_live = eager_scan && kb_client_is_live();
    cJSON *resp = jo_ok();
    jo_add_str(resp, "path", abs);
+   /* Idempotent success still tells the caller which it was, so a UI can say
+    * "already registered" without having to treat it as a failure. */
+   cJSON_AddBoolToObject(resp, "already_registered", already_registered);
    cJSON *arr = cJSON_AddArrayToObject(resp, "projects");
    for (int i = 0; i < count; i++)
    {

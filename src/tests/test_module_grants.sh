@@ -15,6 +15,8 @@
 #      installs come under management instead of staying stuck forever
 #   5. a grant pinning an executable the image no longer ships is reconciled
 #      (the upgrade that took a live server down)
+#   6. exact historical defaults from before seed records are refreshable, but
+#      a nearby operator edit is not
 #
 # Runs the REAL block out of the entrypoint rather than a copy of its logic:
 # the region between the module-grant-seeding sentinels is extracted verbatim.
@@ -61,6 +63,34 @@ publish=
 subscribe=
 request=
 serve=$3
+EOF
+}
+
+write_git_grant() { # <path> <executable> <serve> [subscribe]
+    cat > "$1" <<EOF
+version=1
+principal_class=1
+principal_ref=13
+uid=self
+executable=$2
+publish=
+subscribe=${4:-}
+request=
+serve=$3
+EOF
+}
+
+write_module_grant() { # <path> <principal-ref> <executable> <serve>
+    cat > "$1" <<EOF
+version=1
+principal_class=1
+principal_ref=$2
+uid=self
+executable=$3
+publish=
+subscribe=
+request=
+serve=$4
 EOF
 }
 
@@ -122,6 +152,39 @@ target="$AIMEE_HOME/modules.d/server/gone.grant"
 write_grant "$target" "$tmp/removed-by-this-image" "9999"
 run_seeding
 [ -f "$target" ] && bad "grant for a removed module survived" || ok "stale grant removed"
+
+echo "7. exact pre-record defaults adopt their added stages"
+for transition in \
+    "git 13 7425 7425,7426" \
+    "skills 14 7681 7681,7682" \
+    "roundtable 21 9473 9473,9474" \
+    "benchmarks 25 10497 10497,10498"
+do
+    set -- $transition
+    setup
+    write_module_grant "$AIMEE_MODULE_GRANT_SRC/$1.grant" "$2" "$real_exe" "$4"
+    target="$AIMEE_HOME/modules.d/server/$1.grant"
+    write_module_grant "$target" "$2" "$real_exe" "$3"
+    run_seeding
+    if [ "$(serve_of "$target")" = "$4" ]; then ok "$1 historical default refreshed"
+    else bad "$1 historical default stayed stale (serve=$(serve_of "$target"))"; fi
+    [ -f "$AIMEE_HOME/modules.d/server/.seeded/$1.grant" ] && ok "$1 default recorded" \
+        || bad "$1 historical default was not recorded"
+done
+
+echo "8. a nearby pre-record operator edit is preserved"
+setup
+write_git_grant "$AIMEE_MODULE_GRANT_SRC/git.grant" "$real_exe" "7425,7426"
+target="$AIMEE_HOME/modules.d/server/git.grant"
+write_git_grant "$target" "$real_exe" "7425" "7001"
+run_seeding
+if [ "$(serve_of "$target")" = "7425" ] && grep -q '^subscribe=7001$' "$target"; then
+    ok "nearby operator policy preserved"
+else
+    bad "nearby operator policy was overwritten"
+fi
+if grep -q 'treated as operator policy' "$tmp/err$caseno"; then ok "nearby edit warned"
+else bad "nearby edit produced no policy warning"; fi
 
 [ "$fail" -eq 0 ] && echo "test_module_grants: ok"
 exit "$fail"

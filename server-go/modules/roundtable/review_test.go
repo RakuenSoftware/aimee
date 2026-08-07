@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -77,11 +78,19 @@ func TestReviewHandlerRejectsMalformedBody(t *testing.T) {
 // A failing review is reported as a module failure, never as an empty success:
 // a caller that reads an empty result as "approved, no findings" would ship
 // unreviewed work.
+//
+// The reason rides back with the failure. The runtime drops it before replying,
+// so nothing reaches the caller but the status -- but it logs it on the way
+// past, and without that every distinct failure here is the same bare number to
+// whoever has to work out why reviews stopped.
 func TestReviewHandlerReportsReviewerFailure(t *testing.T) {
 	handler := NewReviewHandler(&stubReviewer{err: errors.New("panel unavailable")})
 	body, status := handler(bus.ModuleInvocation{StageID: StageReview}, []byte(`{}`))
-	if status != bus.ModuleStatusInternal || body != nil {
-		t.Fatalf("status = %v body = %q, want Internal and no body", status, body)
+	if status != bus.ModuleStatusInternal {
+		t.Fatalf("status = %v, want Internal", status)
+	}
+	if string(body) != "panel unavailable" {
+		t.Fatalf("body = %q, want the reviewer's reason", body)
 	}
 }
 
@@ -138,5 +147,21 @@ func TestHandlerRoutesEachStageToItsOwnContract(t *testing.T) {
 	}
 	if stub.calls != 1 {
 		t.Fatalf("reviewer ran %d times across all stages", stub.calls)
+	}
+}
+
+// A stage no reviewer covers will be refused identically on every attempt. It
+// has to be reported as an invalid request, not an internal fault: the caller
+// uses that distinction to stop, and reporting it as internal made a workflow
+// park and resubmit the same rejected review every few seconds forever.
+func TestReviewHandlerReportsAPermanentlyBadRequestAsInvalid(t *testing.T) {
+	handler := NewReviewHandler(&stubReviewer{
+		err: panel.ValidationError{Message: `roundtable unsupported artifact stage "proposal"`}})
+	body, status := handler(bus.ModuleInvocation{StageID: StageReview}, []byte(`{}`))
+	if status != bus.ModuleStatusInvalidRequest {
+		t.Fatalf("status = %v, want InvalidRequest so the caller stops retrying", status)
+	}
+	if !strings.Contains(string(body), "unsupported artifact stage") {
+		t.Fatalf("body = %q, want the reason for the log", body)
 	}
 }

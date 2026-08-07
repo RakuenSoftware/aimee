@@ -79,6 +79,20 @@ fi
 . "$runtime_web_lib"
 webchat_migrate_legacy_credentials
 
+# Operator control over which optional modules attach to the bus. Resolved the
+# same way as the runtime-web helper: installed path first, then alongside this
+# script for a source checkout.
+optional_modules_lib=/usr/local/bin/optional-modules-lib.sh
+if [ ! -r "$optional_modules_lib" ]; then
+    entrypoint_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+    optional_modules_lib="$entrypoint_dir/optional-modules-lib.sh"
+fi
+[ -r "$optional_modules_lib" ] || {
+    printf '[server-entrypoint] fatal: optional-module helper is unavailable\n' >&2
+    exit 2
+}
+. "$optional_modules_lib"
+
 # An explicit Docker command is unrelated to normal server startup. It still
 # follows Vault ingestion above and receives a credential-free environment.
 if [ "$#" -gt 0 ]; then
@@ -220,9 +234,10 @@ AIMEE_MODULE_GRANT_SRC="${AIMEE_MODULE_GRANT_SRC:-/opt/aimee/module-grants/serve
 # operator, so replacing it restores an image default rather than overriding a
 # decision. Anything else keeps the warning and waits for a human.
 #
-# Note this is only knowable going forward. A grant seeded by an older image has
-# no record, so it is treated as operator-owned (warn, do not touch) — the
-# conservative side of the ambiguity.
+# For pre-record installations, exact historical image defaults are also
+# recognisable: the module name, old stage list, and every non-stage policy line
+# must match a known transition. A nearby operator edit still fails that match
+# and remains untouched.
 # Recorded under .seeded/<name>, the same convention seed_managed_defaults uses
 # above. The policy loader selects entries by a ".grant" suffix, so this
 # subdirectory is skipped rather than parsed -- worth stating, because the loader
@@ -242,6 +257,21 @@ grant_untouched_since_seed() {
     _rec=$(grant_seed_record "$1")
     [ -f "$_rec" ] || return 1
     [ "$(sha256sum "$1" | cut -d' ' -f1)" = "$(cat "$_rec" 2>/dev/null)" ]
+}
+
+grant_known_historical_default() { # <persisted> <shipped>
+    _persisted=$1
+    _shipped=$2
+    # These modules originally shipped with one stage and later gained a second.
+    # Match the entire remaining policy so an operator change to identity,
+    # executable, or any other capability is never mistaken for an old image
+    # default.
+    _historical="$(basename "$_persisted"):$(grep '^serve=' "$_persisted" 2>/dev/null || true)"
+    case "$_historical" in
+        git.grant:serve=7425|skills.grant:serve=7681|roundtable.grant:serve=9473|benchmarks.grant:serve=10497) ;;
+        *) return 1 ;;
+    esac
+    [ "$(sed '/^serve=/d' "$_persisted")" = "$(sed '/^serve=/d' "$_shipped")" ]
 }
 
 for module_grant in "$AIMEE_MODULE_GRANT_SRC"/*.grant; do
@@ -267,10 +297,11 @@ for module_grant in "$AIMEE_MODULE_GRANT_SRC"/*.grant; do
     persisted_serve=$(grep '^serve=' "$grant_target" 2>/dev/null || true)
     if [ "$shipped_serve" != "$persisted_serve" ]; then
         # log() is not defined this early in the script, so match its format.
-        if grant_untouched_since_seed "$grant_target"; then
+        if grant_untouched_since_seed "$grant_target" ||
+           grant_known_historical_default "$grant_target" "$module_grant"; then
             # Still exactly what this installation seeded, so the difference is
             # image drift and adopting it overrides nobody.
-            printf '[server-entrypoint] %s grant is an unmodified image default and this image ships %s; adopting it\n' \
+            printf '[server-entrypoint] %s grant is a known unmodified image default and this image ships %s; adopting it\n' \
                 "$(basename "$module_grant" .grant)" "${shipped_serve:-<none>}" >&2
             cp "$module_grant" "$grant_target"
             grant_record_seed "$grant_target"
@@ -493,33 +524,17 @@ server_pid=$!
 # time, so without this the stage is simply never offered.
 export AIMEE_AGENT_SERVICE_SOCKET="${AIMEE_AGENT_SERVICE_SOCKET:-$AIMEE_HOME/aimee-http.sock}"
 
-# An optional module is left out of the shipped manifest, which is decided when
-# the image is built and cannot know what this operator turned on. roundtable is
-# the case that matters: the daemon has no other implementation of
-# roundtable.review since the proxy was deleted, so with the module absent the
-# review route reports the module as not attached however the operator has
-# configured the feature.
+# The shipped manifest is decided when the image is built and cannot know what
+# this operator wants running, so apply the operator's AIMEE_MODULE_<ID> choices
+# over it. This replaces a hard-coded roundtable-only branch that could enable a
+# module but never disable one; AIMEE_MODULE_ROUNDTABLE keeps working exactly as
+# before, and every other optional module now has the same control.
 #
-# modules.roundtable / AIMEE_MODULE_ROUNDTABLE is already the canonical
-# activation control for roundtable. Honour that same control here, at startup,
-# so one switch governs both the feature and the process that serves it.
-case "$(printf '%s' "${AIMEE_MODULE_ROUNDTABLE:-}" | tr '[:upper:]' '[:lower:]')" in
-    1|true|on|yes)
-        if ! grep -q '^roundtable[[:space:]]' "$MODULE_MANIFEST" 2>/dev/null; then
-            _rt_bin=/usr/local/libexec/aimee-modules/aimee-module-roundtable
-            if [ -x "$_rt_bin" ]; then
-                _effective_manifest="$AIMEE_HOME/server.modules"
-                cp "$MODULE_MANIFEST" "$_effective_manifest"
-                printf 'roundtable\t%s\n' "$_rt_bin" >> "$_effective_manifest"
-                chown aimee:aimee "$_effective_manifest" 2>/dev/null || true
-                MODULE_MANIFEST="$_effective_manifest"
-                log "roundtable module enabled by configuration; serving review over the bus"
-            else
-                log "warning: AIMEE_MODULE_ROUNDTABLE is set but $_rt_bin is not in this image"
-            fi
-        fi
-        ;;
-esac
+# roundtable remains the case that matters most: the daemon has no other
+# implementation of roundtable.review since the proxy was deleted, so with the
+# module absent the review route reports the module as not attached however the
+# operator configured the feature.
+MODULE_MANIFEST="$(apply_optional_modules server "$MODULE_MANIFEST" "$AIMEE_HOME")"
 runuser -u aimee -- env AIMEE_HOME="$AIMEE_HOME" \
     AIMEE_AGENT_SERVICE_SOCKET="$AIMEE_AGENT_SERVICE_SOCKET" \
     module-supervisor.sh server "$AIMEE_MODULE_BUS_SOCKET" "$MODULE_MANIFEST" &

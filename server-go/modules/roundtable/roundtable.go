@@ -60,8 +60,14 @@ func cappedSeverity(claimed string) string {
 	return normalizedSeverity(claimed)
 }
 
-// Handle applies the deterministic evidence-verification rubric used after deliberation.
+// Handle serves the stages that need nothing but their arguments, so they are
+// available whether or not this process can reach the delegate plane: the
+// deliberation rubric and chunk planning. Review is added on top by NewHandler
+// only when a reviewer exists.
 func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+	if invocation.StageID == StageChunkPlan {
+		return handleChunkPlan(invocation, request)
+	}
 	if invocation.StageID != StageDeliberate || len(request) != requestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion ||

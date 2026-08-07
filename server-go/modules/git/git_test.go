@@ -51,6 +51,7 @@ func TestGitOperationParity(t *testing.T) {
 func TestGitRefValidation(t *testing.T) {
 	tests := map[string]bool{
 		"main": true, "feature/topic-1": true, "release_1.2": true,
+		"aimee/wi/wi_57186250728b511961573e5afb37cc93.s4263a4834d.g0.0": true,
 		"-evil": false, "feature/../main": false, "has space": false,
 		"unicode-é": false, "colon:ref": false,
 	}

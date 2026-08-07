@@ -15,7 +15,7 @@
         },
         {
           "path": "src/kb/kb_main.c",
-          "sha256": "38afd0e9447569cc17dc69d521104f2002f46b6ffd8da1b2ef47e67b3933735d"
+          "sha256": "e20663ffd5d18261f348e0cab7c31defe6347a1b328fbacc78734490f5554db2"
         },
         {
           "path": "src/server/server_main.c",
@@ -27,7 +27,7 @@
       "files": [
         {
           "path": "docs/gen/configuration.md",
-          "sha256": "a289b194534b3425c651d843998a4532dcc0d721647e131d4b6af6325a0f62f7"
+          "sha256": "aa791003f83020731774c9829e84832c82246542940f90e6a9d517adf901f4b6"
         }
       ]
     },
@@ -79,7 +79,7 @@
       "files": [
         {
           "path": "Dockerfile",
-          "sha256": "73318249458bc4c6582e5d85e163473c78b74c39a6bc8f0f6342466e246574ba"
+          "sha256": "df8a238fd300ad231bbe76a92c604576921c547a79aad53bd80335c5918455a3"
         },
         {
           "path": "Dockerfile.authority-bootstrap",
@@ -107,7 +107,7 @@
         },
         {
           "path": "Dockerfile.server",
-          "sha256": "f61f077631bcb40446ef3995c87ceb4b28f65b6145e7cfc4be102da1393884f2"
+          "sha256": "39d54732d065b10c1290800c9c6eaa73b47345e08d266c1d142e85f000694e7c"
         },
         {
           "path": "Dockerfile.status-authority",
@@ -159,7 +159,7 @@
         },
         {
           "path": "src/headers/agent_code_capabilities.h",
-          "sha256": "741b16e7c416ea718e0b130a3eb08b9a89da5ea474c7e95f0d738cdb6bd3d617"
+          "sha256": "e5cdfe5693b96905c7140cb6b6985bbe886295f20f94a985b026565c07be93c4"
         },
         {
           "path": "src/headers/agent_config.h",
@@ -175,7 +175,7 @@
         },
         {
           "path": "src/headers/agent_exec.h",
-          "sha256": "9e8a10cd7b4103b247c791e396fd66d23461de49bdbf1faee647e2e753fbfee4"
+          "sha256": "6edc1a5d3f2cc25875aeaaee3657ae0b0dae27e473009439d81e8c0340e2a0e9"
         },
         {
           "path": "src/headers/agent_pipeline.h",
@@ -199,7 +199,7 @@
         },
         {
           "path": "src/headers/agent_runtime_messages.h",
-          "sha256": "a8461f7387a74a225380a75f910568787ee97f3e770332b6a0e08f9211f46e3c"
+          "sha256": "929b5771e6988ac22afef121358ae5e525d5ddff7c1b7fbeec9cf07b3e5a25fa"
         },
         {
           "path": "src/headers/agent_shell.h",
@@ -223,7 +223,7 @@
         },
         {
           "path": "src/headers/agent_types.h",
-          "sha256": "4a48eb1dd0108ad41e0a88e0ef094fa3f955b6cb8ba8466498fdc6f6a81b3b0e"
+          "sha256": "4931e10e410795ac6801314bc53f45e233518f64988f753a4922ab83e2aa5e08"
         },
         {
           "path": "src/headers/aimee.h",
@@ -252,6 +252,10 @@
         {
           "path": "src/headers/aimee_ir_shadow.h",
           "sha256": "dcc59ee8d19bb39cac1658e8fbc0c241fbbd6e97335d4755a4ae02b3d0870c56"
+        },
+        {
+          "path": "src/headers/aimee_sha256.h",
+          "sha256": "84d9d1aa6ee3a32ce2858d540840e1875621a0a861aab6bb2c5c55c530418a9b"
         },
         {
           "path": "src/headers/aimee_tls.h",
@@ -591,7 +595,7 @@
         },
         {
           "path": "src/headers/ingress_preinject.h",
-          "sha256": "d7c5daf65e2c85aeeb115062e99d97fcfec6129c7e2b82cb992fc1078dc667cc"
+          "sha256": "1914d7e970ecdf317303b9eed348f82a10e29f902a2263fbc6b78329317ff2f2"
         },
         {
           "path": "src/headers/integrity.h",
@@ -671,7 +675,7 @@
         },
         {
           "path": "src/headers/kb_http_console.h",
-          "sha256": "f80efddb9d66646af2f08905cc9dccb80c45b6fc5baf18dd05a60a963602bb08"
+          "sha256": "8fb05465dd6f75b8f3e63cf0776646cab5d3fbb7bb8408ed557984989619958c"
         },
         {
           "path": "src/headers/kb_http_governance.h",
@@ -743,7 +747,7 @@
         },
         {
           "path": "src/headers/kb_ingest_workers.h",
-          "sha256": "50d23eb12053b112666782339e83754539f5eacf3ea9bd40d6d109d6ff03bfb7"
+          "sha256": "d87ab6909299b38fb18d129a6e1cda2894a73cd5e6f463be3ceaf3edb2c276ac"
         },
         {
           "path": "src/headers/kb_ingress.h",
@@ -827,7 +831,7 @@
         },
         {
           "path": "src/headers/kb_route_acl.h",
-          "sha256": "d33256218a2e2d3208d788abaebc550ae3cf38da335d9bc961bf015e5278c307"
+          "sha256": "8a8a07e4eac8d8c96b2f14711bd88b93ef63122cc79f4707fcae9b46c12ec066"
         },
         {
           "path": "src/headers/kb_rrf.h",
@@ -887,7 +891,7 @@
         },
         {
           "path": "src/headers/memory.h",
-          "sha256": "2396f928aad5f3cc1b9baf22f77a470a78c7528a3476378f695519637c4eb4b9"
+          "sha256": "0918bfe6ca76f6b1d86c313fb8fda70def9fdd205052abf15c73e86cc5b8578e"
         },
         {
           "path": "src/headers/middleware.h",
@@ -906,8 +910,12 @@
           "sha256": "58f004d88e62246a593007abcee996c61e1e4523b0ba5d924f1f1a1a23b01c78"
         },
         {
+          "path": "src/headers/module_json_call.h",
+          "sha256": "b616f636cd48d88790fe806b6b902e791c9120b7bdc71079de88df7f309dded1"
+        },
+        {
           "path": "src/headers/module_stage_adapters.h",
-          "sha256": "9575e2d70ced0d3c569216fe12f6308a4b99127b4d596bc8ce40b4ce169be8d6"
+          "sha256": "3074166650c9dd722c22f1d04ab99eb38e960e03556f44d8bc4184744050db9e"
         },
         {
           "path": "src/headers/msg_session_disable.h",
@@ -955,7 +963,7 @@
         },
         {
           "path": "src/headers/persona.h",
-          "sha256": "a7c3ca50e5354ac004a9dffe8599ed02fbd19d14ceae2830c85ade0009b16e65"
+          "sha256": "bc4f520e65cbbe2cc897474b50a98f15872640e84f44e5a59424ced4561d0e29"
         },
         {
           "path": "src/headers/pki.h",
@@ -1047,7 +1055,7 @@
         },
         {
           "path": "src/headers/response_dedup.h",
-          "sha256": "c5039e1371f7af1747b9ad16d24d014ab6906dda0ee1ae8c183606017081df8b"
+          "sha256": "34f3f0972c21a14cdecb90b2d49888e631c89acf025a91731529b43d727368a6"
         },
         {
           "path": "src/headers/role_templates.h",
@@ -1075,7 +1083,7 @@
         },
         {
           "path": "src/headers/server.h",
-          "sha256": "a653d05174cf47d06705472762bf2837761fe595a5b44b33e27b3919d3981234"
+          "sha256": "eaa64f4727529c6c9ac5989bb6c4bcae02994f9265ef5e4fea4bfe0eecf4325a"
         },
         {
           "path": "src/headers/server_cli_oauth.h",
@@ -1155,7 +1163,7 @@
         },
         {
           "path": "src/headers/server_mcp_roundtable.h",
-          "sha256": "877dbd2a261c2869057816dfe16b2b85f6f50259881f9d3fd6c8baf8aed8028f"
+          "sha256": "a8e5a27d331cf988337d2b610d788f729966ceaa30b67b6576e12a3b53d1dde5"
         },
         {
           "path": "src/headers/server_mcp_skill.h",
@@ -1279,7 +1287,7 @@
         },
         {
           "path": "src/headers/util.h",
-          "sha256": "6c150ea0f08a723227636f61c700d6d377cf18bf1506fb1f4e55a7a4ed004412"
+          "sha256": "a19df88c6bb09954a5e834449129b7c625fce9baa762a2bcfd667bc42350ec9b"
         },
         {
           "path": "src/headers/util_url.h",
@@ -1359,11 +1367,11 @@
         },
         {
           "path": "src/modules/audit/include/aimee/audit/obs_bus.h",
-          "sha256": "d53d922424e740ebf53964b5c51eee303a9025c5404232392a65a985f1249782"
+          "sha256": "3d4449caf79ca2c0042f580d44f6e9c347fce1a87ac3bfd1517e21a9d22167de"
         },
         {
           "path": "src/modules/benchmarks/include/aimee/benchmarks/module_api.h",
-          "sha256": "ab7da5f3a00b1201e5d4ceb1d3537690896c2a08efce18c8c68a460cf5aee29c"
+          "sha256": "0d57a11235075b23623a758ba4599c27dc1f98455fb92fa6911d4e0174e3780a"
         },
         {
           "path": "src/modules/control-web/include/aimee/control-web/module_api.h",
@@ -1379,7 +1387,7 @@
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_backend_docker.h",
-          "sha256": "810d43b52361fe665cf1871deb836e75f5f087d67efe7816d4db93887ca487c6"
+          "sha256": "4c8d7e8cb8d4e5bf75dfb8863d712de5423298b0dd97a9423c9f21b9c711855e"
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_backend_local.h",
@@ -1454,10 +1462,6 @@
           "sha256": "c610461287185660a00a24afbbe3bc34ceffcf0c80248ddd3456e9a4f2f5c029"
         },
         {
-          "path": "src/modules/delegates/include/aimee/delegates/panel_roster.h",
-          "sha256": "3866719c298c172d004e828a7e3d2d4ed6f9c7f0f92f1fffed156039bfdc0f81"
-        },
-        {
           "path": "src/modules/gateway/include/aimee/gateway/gateway_delegate.h",
           "sha256": "81ffea4b320cf0df93e7e67fee923161089f247c67c4a3a5d6a10e2dbd733c6b"
         },
@@ -1471,11 +1475,11 @@
         },
         {
           "path": "src/modules/git/include/aimee/git/git_ops.h",
-          "sha256": "f17ff5f7eaffde2ad6d8af1326e5e9e699163bd48a414c1208fa28de6d4519ef"
+          "sha256": "da227a163c7a05d7ca0c1a5ff377fc35422547e56b02da54786f6cb85f371199"
         },
         {
           "path": "src/modules/git/include/aimee/git/module_api.h",
-          "sha256": "86437680811fc064b476f342b3c74acfe48f3acdd6481d249f5a908fe7d63564"
+          "sha256": "e049765d6007235c1b0fedf2e34624af0c143eaa75f500e219039f508b35d36b"
         },
         {
           "path": "src/modules/governance/include/aimee/governance/module_api.h",
@@ -1499,7 +1503,7 @@
         },
         {
           "path": "src/modules/learning/include/aimee/learning/learning.h",
-          "sha256": "b450202f0664947f6cb9324ffb13f1ae9ef3096b24539870cace3827316b1c23"
+          "sha256": "5a838ee1bc3f51c82033ca795b28bc99f936966d2be1380d066b5e582aec37f9"
         },
         {
           "path": "src/modules/learning/include/aimee/learning/module_api.h",
@@ -1535,7 +1539,11 @@
         },
         {
           "path": "src/modules/roundtable/include/aimee/roundtable/module_api.h",
-          "sha256": "e3cf8afa85e52f9b72bc85721508d8f2288b3914b58fc28c56e5113e0946e0c1"
+          "sha256": "f1760e7f6e0e1b7955220bc630ec148bdd5ce3f0beb4640275159b1080be37e1"
+        },
+        {
+          "path": "src/modules/roundtable/include/aimee/roundtable/review_panel.h",
+          "sha256": "23e0dc510dda6bec815fb5abe94ae6223d1d26bc113e2034bbf9d37b3b2096ea"
         },
         {
           "path": "src/modules/routing/include/aimee/routing/module_api.h",
@@ -1546,20 +1554,20 @@
           "sha256": "a62acc48d27dd8b8cbb91522b4de28be3f6457878e73ef8cf6ec7ae356630e9b"
         },
         {
+          "path": "src/modules/sandbox/include/aimee/sandbox/module_api.h",
+          "sha256": "bd6bb5eb012ffc9acd484dd2969f32f83204653ca4d5f834f272d2ffce0fc3b7"
+        },
+        {
           "path": "src/modules/skills/include/aimee/skills/module_api.h",
-          "sha256": "7f092075a8d617dff6b7c5fce68d4601b5079bc5362ff5cf82642da15df52413"
+          "sha256": "dd793e64cb30d74000590accc5144d40c40c81b0a3ef58b1fb9f613fc8522ecb"
         },
         {
           "path": "src/modules/skills/include/aimee/skills/skill.h",
-          "sha256": "150a123e2dbb8af9bdb73891470f7ef3c995d727b27b4d5358d32bc7256abeeb"
-        },
-        {
-          "path": "src/modules/skills/include/aimee/skills/skill_review.h",
-          "sha256": "42e78899b0eb072007e2747034501cdc66e3920de063ea1abd0a6df2723b6bb7"
+          "sha256": "dd23c233acabe0025f0da61824b431c47beebbe4872da9bba8b5e2da8441e9dd"
         },
         {
           "path": "src/modules/tools/include/aimee/tools/agent_tools.h",
-          "sha256": "eaa911c12db350669baf8c90494b254d314ffc387f38d866c0c4e1fb5ed56bad"
+          "sha256": "44ab4c7baa38fa50d58d5bd67f4f979643a816d80df66e0cb9c629df00250f9a"
         },
         {
           "path": "src/modules/tools/include/aimee/tools/module_api.h",
@@ -1579,7 +1587,7 @@
         },
         {
           "path": "src/modules/workflows/include/aimee/workflows/module_api.h",
-          "sha256": "5b59c1ace45086f6023fd61b39a1544cac94cb02fb81047673d2b1806bef006c"
+          "sha256": "7ac281504ed73bc26f61c1f7aa5313eec6c77e4abaa36de4aec77a665f183706"
         },
         {
           "path": "src/modules/workspace/include/aimee/workspace/module_api.h",
@@ -1592,14 +1600,14 @@
       ]
     },
     "public-symbols": {
-      "sha256": "91d4448ef6c9f0824ef43885ee0d4e1db4a0203530edac15cbf9bfdf4ef49b19",
+      "sha256": "4c760795476358fcd21db69a78559a83100e19bb1a2e6507604e95e55926ffdb",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
       "files": [
         {
           "path": "docs/gen/v1-route-descriptor.json",
-          "sha256": "367f6eba293a791028d6ce20f84205c4d312beaa6bd9abeee97e7d91ee20c73f"
+          "sha256": "b2d94319df6d999dca093afb22ea8cff7595b1f6ea9dc9e6c90b9151ab3a6c3b"
         }
       ]
     }

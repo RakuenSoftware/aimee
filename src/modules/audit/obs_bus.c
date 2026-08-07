@@ -32,7 +32,7 @@
 #include <errno.h>
 #include "config.h"     /* config_default_dir */
 #include "log.h"
-#include "wfe_def.h" /* wfe_sha256_raw — obs_bus_key_fingerprint */
+#include "headers/aimee_sha256.h" /* aimee_sha256_raw — obs_bus_key_fingerprint */
 
 #define KIND_AUDIT_ACTION    OBS_BUS_KIND_ACTION
 #define KIND_GUARDRAIL_EVENT OBS_BUS_KIND_GUARDRAIL
@@ -1048,7 +1048,7 @@ void obs_bus_key_fingerprint(const char *kind, const char *key, char *out, size_
    int n = snprintf(buf, sizeof buf, "%s\x1f%s", kind ? kind : "", key ? key : "");
    size_t len = (n < 0) ? 0 : ((size_t)n < sizeof buf ? (size_t)n : sizeof buf);
    unsigned char dig[32];
-   if (wfe_sha256_raw(buf, len, dig) != 0)
+   if (aimee_sha256_raw(buf, len, dig) != 0)
    {
       snprintf(out, out_len, "mk:?");
       return;

@@ -482,6 +482,11 @@ int db1_agent_job_cancel_unassigned(int job_id, const char *reason, int min_age_
       return -1;
 
    sqlite3_stmt *stmt = NULL;
+   /* RETURNING for the same reason db1_agent_job_take_lease uses it: this is the
+    * other half of that race. sqlite3_changes(db) is connection-global, so a
+    * worker claiming the lease between this sqlite3_step() and the count would
+    * make a cancellation that did happen report that it did not -- leaving the
+    * caller to believe a job it just cancelled is still someone else's to run. */
    static const char *sql =
        "UPDATE agent_jobs SET status = 'cancelled', cancelled_at = datetime('now'),"
        " cancel_reason = ?, updated_at = datetime('now')"

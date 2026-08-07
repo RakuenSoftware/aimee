@@ -4,6 +4,7 @@ package git
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -12,8 +13,10 @@ import (
 const (
 	EventKind        uint32 = 7425
 	EventRefValidate uint32 = 7426
+	EventCIGrade     uint32 = 7427
 	StageOperation   uint32 = 1
 	StageRefValidate uint32 = 2
+	StageCIGrade     uint32 = 3
 	requestMagic     uint32 = 0x53504f47
 	responseMagic    uint32 = 0x534c4347
 	refRequestMagic  uint32 = 0x46455247
@@ -65,6 +68,23 @@ func validRef(ref string) bool {
 // Handle classifies Git operations and validates refs without repository I/O.
 func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	switch invocation.StageID {
+	case StageCIGrade:
+		// JSON, not the fixed binary framing the other two stages use: a forge
+		// payload is arbitrarily large and its shape is the forge's, not ours.
+		var decoded CIGradeRequest
+		if err := json.Unmarshal(request, &decoded); err != nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		if invocation.Cancelled() {
+			return nil, bus.ModuleStatusCancelled
+		}
+		encoded, err := json.Marshal(CIGradeResponse{
+			Verdict: GradeCI(decoded.CheckRuns, decoded.CombinedStatus),
+		})
+		if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
+			return nil, bus.ModuleStatusInternal
+		}
+		return encoded, bus.ModuleStatusOK
 	case StageOperation:
 		if len(request) != requestLen || binary.LittleEndian.Uint32(request[0:4]) != requestMagic ||
 			request[4] != wireVersion || request[5] != 0 || request[7] != 0 ||

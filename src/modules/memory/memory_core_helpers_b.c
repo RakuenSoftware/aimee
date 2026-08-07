@@ -412,8 +412,37 @@ enum
    MEMORY_QEMBED_CAP = 32,
    MEMORY_QEMBED_TEXT_MAX = 1024,
    MEMORY_QEMBED_CMD_MAX = 512,
-   MEMORY_EMBED_HTTP_TIMEOUT_MS = 30000
+   /* Fallback only; use memory_embed_http_timeout_ms(). */
+   MEMORY_EMBED_HTTP_TIMEOUT_MS_DEFAULT = 180000
 };
+
+/* Bound on one embed round trip.
+ *
+ * This was hardcoded at 30 s, which is ~20x an UNLOADED 128-text batch (1.5 s
+ * measured against bekko-a25m). It is not 20x a loaded one: the kb embeds from
+ * up to KB_WORKER_MAX threads, the embedder is a ThreadingHTTPServer, and each
+ * request runs torch with EMBEDDER_THREADS threads. On a 4-CPU container that
+ * oversubscribes the machine several times over, every in-flight batch slows
+ * together, and the first to cross 30 s makes the kb drop the connection --
+ * which the embedder then reports as BrokenPipeError and `kb build` reports as
+ * "knowledge service /v1/code/build did not respond".
+ *
+ * The cost is a property of batch size and host load, not of the service being
+ * healthy, so default generously and let an operator tune it. The correct
+ * companion fix is to stop oversubscribing (EMBEDDER_THREADS), not to wait
+ * longer -- but a bound below the real cost turns a slow build into a failed
+ * one, and that is the failure this removes. */
+int memory_embed_http_timeout_ms(void)
+{
+   const char *env = getenv("AIMEE_EMBED_HTTP_TIMEOUT_MS");
+   if (env && env[0])
+   {
+      long v = strtol(env, NULL, 10);
+      if (v > 0 && v <= 24L * 60 * 60 * 1000)
+         return (int)v;
+   }
+   return MEMORY_EMBED_HTTP_TIMEOUT_MS_DEFAULT;
+}
 
 /* In-process HTTP embedding. When embedding_command is an http(s):// URL we POST
  * to the embedder directly instead of forking an interpreter, so a query embed is
@@ -474,7 +503,7 @@ int memory_embed_http_post_status(const char *base, const char *path, const char
    }
    memory_embed_http_url(base, path, url, sizeof(url));
    *resp = NULL;
-   int status = agent_http_post(url, auth_header, body, resp, MEMORY_EMBED_HTTP_TIMEOUT_MS, NULL);
+   int status = agent_http_post(url, auth_header, body, resp, memory_embed_http_timeout_ms(), NULL);
    if (status_out)
       *status_out = status;
    runtime_secret_wipe(token, sizeof(token));
@@ -555,7 +584,7 @@ int memory_embed_serving_id(const char *command, char *out, size_t out_len)
    }
 
    char *body = NULL;
-   int status = agent_http_get(url, auth_header, &body, MEMORY_EMBED_HTTP_TIMEOUT_MS);
+   int status = agent_http_get(url, auth_header, &body, memory_embed_http_timeout_ms());
    /* 503 is expected while the embedder warms up and still carries the payload —
     * serving_id is registry data, not a measurement, so it is readable before the
     * child can embed. Anything else with no body is a transport failure. */

@@ -15,6 +15,8 @@
 #include <stdarg.h>
 #include <stddef.h> /* offsetof */
 #include <stdlib.h> /* getenv — EMBEDDER_URL default */
+#include "log.h"
+#include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -1711,6 +1713,42 @@ int config_workspace_add(const char *path, const char *provider, const char *rem
          if (strcmp(cfg->workspaces[i], path) == 0)
             rc = -2;
       int cap = (int)(sizeof(cfg->workspaces) / sizeof(cfg->workspaces[0]));
+      /* PRUNE THE DEAD BEFORE REFUSING. A workspace whose directory no longer
+       * exists cannot be used for anything: it is a corpse holding a slot. The
+       * registry had no removal path other than an explicit `workspace remove`,
+       * so any workflow that creates short-lived checkouts -- CI, benchmark
+       * cells, ephemeral worktrees -- eventually filled all 64 and then every
+       * `workspace add` failed with "maximum workspace count reached", on a
+       * machine where none of the 64 still existed on disk.
+       *
+       * Only entries whose path is gone are dropped, so a workspace on an
+       * unmounted volume is NOT collected -- stat failing for any reason other
+       * than ENOENT leaves the entry alone. */
+      if (rc == 0 && cfg->workspace_count >= cap)
+      {
+         int kept = 0;
+         for (int i = 0; i < cfg->workspace_count; i++)
+         {
+            struct stat st;
+            if (stat(cfg->workspaces[i], &st) != 0 && errno == ENOENT)
+               continue; /* gone: drop it */
+            if (kept != i)
+            {
+               memcpy(cfg->workspaces[kept], cfg->workspaces[i], sizeof(cfg->workspaces[0]));
+               memcpy(cfg->workspace_providers[kept], cfg->workspace_providers[i],
+                      sizeof(cfg->workspace_providers[0]));
+               memcpy(cfg->workspace_vcs_remote[kept], cfg->workspace_vcs_remote[i],
+                      sizeof(cfg->workspace_vcs_remote[0]));
+               memcpy(cfg->workspace_vcs_head[kept], cfg->workspace_vcs_head[i],
+                      sizeof(cfg->workspace_vcs_head[0]));
+            }
+            kept++;
+         }
+         if (kept < cfg->workspace_count)
+            aimee_log(LOG_INFO, "workspace", "pruned %d registered workspace(s) whose path is gone",
+                      cfg->workspace_count - kept);
+         cfg->workspace_count = kept;
+      }
       if (rc == 0 && cfg->workspace_count >= cap)
          rc = -3;
       if (rc == 0)

@@ -121,7 +121,7 @@ func runExactShippedWorkflow(t *testing.T, workflowName, wantState, wantPause st
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner.SetRoundtableStore(shippedRoundtableStore(t))
+	withPanel(runner, shippedRoundtableStore(t))
 	engine, err := New(store, artifacts, workflowDir, runner)
 	if err != nil {
 		t.Fatal(err)

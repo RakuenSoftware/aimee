@@ -397,11 +397,19 @@ int liveness_circuit_breaker_tripped(int total_triggers)
 liveness_final_response_mode_t
 liveness_final_response_mode(int turn, int max_turns, int total_tool_calls, int final_after_turns)
 {
-   if (total_tool_calls <= 0)
-      return LIVENESS_FINAL_RESPONSE_NONE;
-
+   /* The hard boundary does not depend on prior tool use. The budget is ending
+    * either way, and total_tool_calls counts calls that LANDED: a delegate
+    * whose every attempt was denied by policy or emptied by compaction has done
+    * nothing but call tools while this count stayed at zero. Gating the hard
+    * turn on it let exactly that delegate spend all its turns and return
+    * nothing, which is what "max turns exhausted without final response" is. */
    if (max_turns > 1 && turn >= max_turns - 1)
       return LIVENESS_FINAL_RESPONSE_HARD;
+
+   /* The soft, role-policy threshold still does: nudging an agent that has not
+    * done anything yet, while turns remain, is just noise. */
+   if (total_tool_calls <= 0)
+      return LIVENESS_FINAL_RESPONSE_NONE;
 
    if (final_after_turns > 0 && turn >= final_after_turns)
       return LIVENESS_FINAL_RESPONSE_SOFT;

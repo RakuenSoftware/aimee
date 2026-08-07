@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/JBailes/aimee/server-go/bus"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -124,23 +125,37 @@ func (v CommandVerifier) acquire(ctx context.Context) (func(), error) {
 }
 
 type NativeRunner struct {
-	db          *db1.Store
-	worktrees   *WorktreeManager
-	agents      AgentClient
-	verifier    Verifier
-	artifacts   *wfe.ArtifactStore
-	workflows   *wfe.Registry
-	forge       Forge
-	roundtables *roundtablecfg.Store
+	db        *db1.Store
+	worktrees *WorktreeManager
+	agents    AgentClient
+	verifier  Verifier
+	artifacts *wfe.ArtifactStore
+	workflows *wfe.Registry
+	forge     Forge
+	// reviews convenes a roundtable. The runner does not host a panel: the
+	// module does, over the bus, so this is the whole of the runner's coupling
+	// to reviewing.
+	reviews RoundtableReviewer
 }
 
-func (r *NativeRunner) SetRoundtableStore(store *roundtablecfg.Store) { r.roundtables = store }
+// RoundtableReviewer convenes one review. Narrow on purpose: the runner depends
+// on the capability, not on whatever transport reaches it.
+type RoundtableReviewer interface {
+	Review(context.Context, roundtablecfg.ReviewRequest) (roundtablecfg.RunResult, error)
+}
+
+func (r *NativeRunner) SetRoundtableReviewer(reviewer RoundtableReviewer) { r.reviews = reviewer }
 
 const (
 	roundtableDelegateRole        = "review"
 	roundtableDelegateMaxTurnsCap = 24
 	delegateDeadlineGraceReserve  = 5 * time.Second
 	delegateWriteVerifyReserve    = 5 * time.Minute
+	// Keep the Go admission boundary aligned with AGENT_LOOP_MIN_CALL_MS in
+	// agent_types.h. Dispatching a write delegate with less than one viable
+	// model-call window only creates a zero-call failed job before the C runtime
+	// reports that its tool-loop budget is exhausted.
+	delegateWriteMinRunBudget = time.Minute
 )
 
 func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request DelegateRequest) (DelegateResult, error) {
@@ -206,9 +221,10 @@ func applyDelegateDeadlineCap(ctx context.Context, request *DelegateRequest) err
 	}
 	if request.Role == "code" && request.Tools {
 		reserve = delegateWriteVerifyReserve
-		if remaining <= reserve {
-			return fmt.Errorf("delegate stage wall budget exhausted: remaining=%s reserve=%s: %w",
-				remaining.Round(time.Millisecond), reserve, context.DeadlineExceeded)
+		if remaining < reserve+delegateWriteMinRunBudget {
+			return fmt.Errorf("delegate stage wall budget exhausted: remaining=%s reserve=%s minimum_run=%s: %w",
+				remaining.Round(time.Millisecond), reserve, delegateWriteMinRunBudget,
+				context.DeadlineExceeded)
 		}
 	}
 	capMillis := (remaining - reserve).Milliseconds()
@@ -609,6 +625,16 @@ func delegatePartialIsNoChange(response string) bool {
 			strings.Contains(response, "no file changes detected"))
 }
 
+// implementationPartialIsSatisfiedNoChange distinguishes an explicit
+// completion report from a delegate that merely failed to edit anything. The
+// implementation prompt requires this exact claim when sibling/base work
+// already satisfies the packet; mechanical verification still runs before the
+// unchanged HEAD can advance. Other partial no-change results remain failures.
+func implementationPartialIsSatisfiedNoChange(response string) bool {
+	return delegatePartialIsNoChange(response) &&
+		strings.Contains(strings.ToLower(response), "task already complete")
+}
+
 func retryDetailForPrompt(detail string) string {
 	detail = strings.TrimSpace(safeDiagnostic(detail))
 	const maxRunes = 24_000
@@ -618,6 +644,11 @@ func retryDetailForPrompt(detail string) string {
 	}
 	const headRunes = 8_000
 	return string(runes[:headRunes]) + "\n...[retry diagnostic truncated]...\n" + string(runes[len(runes)-(maxRunes-headRunes):])
+}
+
+func implementationDelegatePrompt() string {
+	return "Implement the complete approved task in this worktree, run the repository verification, fix failures, and leave the accepted changes in the worktree. " +
+		"If the current branch already fully satisfies the task (including work merged by a sibling), leave the worktree unchanged and report that it is complete; do not manufacture cosmetic changes."
 }
 
 func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (StepResult, error) {
@@ -685,7 +716,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 				ContentHash: head, Detail: detail}, nil
 		}
 	}
-	prompt := "Implement the complete approved task in this worktree, run the repository verification, fix failures, and leave the accepted changes in the worktree."
+	prompt := implementationDelegatePrompt()
 	if docs {
 		prompt, err = documentDelegatePrompt(ctx, req, workdir)
 		if err != nil {
@@ -767,7 +798,8 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		// A document no-op is the requested outcome when the accepted diff is
 		// already documented. Freeze the exact unchanged HEAD so doc_freeze and
 		// doc_gate still review it; blocking review feedback overrides that exemption.
-		documentedNoop := docs && delegatePartialIsNoChange(result.Response)
+		satisfiedNoop := (docs && delegatePartialIsNoChange(result.Response)) ||
+			(!docs && implementationPartialIsSatisfiedNoChange(result.Response))
 		blockingReviewUnchanged := false
 		if headErr == nil && head == baseHead && feedbackHasBlockingFinding(req.Feedback) &&
 			req.Feedback.ArtifactHash != "" {
@@ -778,7 +810,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 			blockingReviewUnchanged = wfe.Hash([]byte(diff)) == req.Feedback.ArtifactHash
 		}
 		if headErr == nil && head == baseHead &&
-			(blockingReviewUnchanged || (!documentedNoop &&
+			(blockingReviewUnchanged || (!satisfiedNoop &&
 				!branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID))) {
 			detail := strings.TrimSpace(result.Response)
 			if detail == "" {
@@ -1228,19 +1260,12 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	for _, lens := range lenses {
 		lensNames = append(lensNames, lens.persona)
 	}
-	// Without a roundtable store there is nothing to resolve a name against, so
-	// there is no panel to convene. Park instead of substituting an implicit one:
-	// a review that never had a configured panel must be visible as a park, not
-	// pass through as a verdict.
-	if r.roundtables == nil {
-		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: "no roundtable store configured; a roundtable review requires a saved roundtable"}, nil
-	}
-	convened, err := r.roundtables.Resolve(paramString(req.Node, "roundtable", ""), lensNames, panelPins(req.Node))
-	if err != nil {
-		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: err.Error()}, nil
-	}
-	if err := ensureRoundtableDeadlineFits(ctx, convened); err != nil {
-		return StepResult{}, err
+	// Reviews are convened by the roundtable module over the bus. Without a
+	// reviewer there is no path to one, so park rather than pass through: a
+	// review that never happened must be visible as a park, not as a verdict.
+	if r.reviews == nil {
+		return StepResult{Status: StepPending, PauseReason: "panel_unreachable",
+			Detail: "no roundtable reviewer configured; reviews run in the roundtable module over the event bus"}, nil
 	}
 	reviewed, ok := req.Inputs["src"]
 	if !ok {
@@ -1264,18 +1289,42 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	}
 	req.WorkItem.Worktree = workdir
 
-	run := roundtablecfg.Run{ID: req.WorkItem.ID, Stage: req.Node.ID,
-		ExecutionVersion: req.WorkItem.UpdatedAt, Workdir: workdir, ReplayOnly: req.ReplayOnly,
-		CostLimitUSD: req.CostLimitUSD, OriginalRequest: req.Proposal,
-		Reviewed: roundtablecfg.Artifact{Stage: reviewed.Type, Content: string(reviewed.Content), Hash: reviewed.Hash}}
-	result, err := roundtablecfg.Convene(ctx, panelDelegates{runner: r}, run, convened,
-		paramString(req.Node, "focus", ""))
+	// The saved panel is named, not resolved here: the module owns its preset
+	// store, and resolving a second time in the control plane is how the two
+	// sides previously ended up with different notions of the same panel.
+	result, err := r.reviews.Review(ctx, roundtablecfg.ReviewRequest{
+		Artifact:         string(reviewed.Content),
+		OriginalRequest:  req.Proposal,
+		ArtifactStage:    reviewed.Type,
+		Roundtable:       paramString(req.Node, "roundtable", ""),
+		Workdir:          workdir,
+		RunID:            req.WorkItem.ID,
+		Stage:            req.Node.ID,
+		ExecutionVersion: req.WorkItem.UpdatedAt,
+		ReplayOnly:       req.ReplayOnly,
+		CostLimitUSD:     req.CostLimitUSD,
+		Focus:            paramString(req.Node, "focus", ""),
+		Lenses:           lensNames,
+		Pins:             panelPins(req.Node),
+	})
 	if err != nil {
 		// A lost replay is not a park: retrying reproduces the same absence, and
 		// only the engine's reservation recovery can resolve it.
 		if errors.Is(err, roundtablecfg.ErrReplayUnavailable) {
 			return StepResult{CostUSD: result.CostUSD, CostUnknown: result.CostUnknown},
 				fmt.Errorf("%w: %w", ErrDelegateReplayUnavailable, err)
+		}
+		// A review the panel rejects as invalid fails the step rather than
+		// parking it. Parking exists for a runner that might come back; this
+		// request will be refused identically every time, so retrying it just
+		// resubmits the same rejection every few seconds until someone notices.
+		// The panel logs which part it refused; the status is all that crosses
+		// the wire.
+		var status *bus.ModuleCallStatusError
+		if errors.As(err, &status) && status.Status == bus.ModuleStatusInvalidRequest {
+			return StepResult{Status: StepFailed, CostUSD: result.CostUSD,
+				CostUnknown: result.CostUnknown,
+				Detail:      "roundtable rejected the review request as invalid; see the module log for which part"}, nil
 		}
 		return StepResult{}, err
 	}

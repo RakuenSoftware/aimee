@@ -288,7 +288,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 223 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 227 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -391,10 +391,12 @@ The binaries read 223 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_CODE_INDEX_SOURCE` | Source label recorded for code-index ingestion. |
 | `AIMEE_EMBEDDERS_FILE` | Path to the embedder registry the server reads for GET /v1/embedders (the setup wizard's embedder picker). Defaults to /opt/aimee/embedders.json, then scripts/embedders.json in a source checkout. The same file the in-container embedder reads, so one declaration drives the picker, the loading and the serving flags. |
 | `AIMEE_EMBEDDER_HOST` | DNS name of the embedder sidecar container (aimee-embedder-a25m or aimee-embedder-nomic). Setting it makes aimee-kb issue the mTLS identities for the kb -> embedder hop into $AIMEE_HOME/embedder-tls at startup, independently of the synthesis hop. Unset for an external embedder reached over plain HTTPS, or when no embedder is deployed. The sidecar refuses to start without this material. |
+| `AIMEE_EMBED_HTTP_TIMEOUT_MS` | Deadline for one embedding HTTP call, default 180000. The previous hardcoded 30s was shorter than a cold model load plus a large batch, so the first request of a run could fail on a healthy embedder. |
 | `AIMEE_KB_API_CA_BUNDLE` | CA bundle path for verifying the aimee-kb TLS certificate. |
 | `AIMEE_KB_API_URL` | aimee-kb HTTP API base URL. |
 | `AIMEE_KB_CACHE_TTL_S` | KB client cache TTL (seconds). |
 | `AIMEE_KB_CONN` | First-boot KB connection string; sealed into the server Vault before long-lived startup. |
+| `AIMEE_KB_EMBED_ALL_FILES` | Set to 1 to give EVERY indexed file a dense document vector, including source. Off by default because source files are already embedded by the code path, and embedding them a second time as prose was 82% of the doc-embedding token budget on a real corpus. Chunk rows are written either way, so lexical and FTS search over source is unaffected by this setting; only the redundant vector is skipped. |
 | `AIMEE_KB_EMIT_ENROLL` | Emit a client enrollment token on KB start. |
 | `AIMEE_KB_EMIT_SCOPE` | Scope for the emitted enrollment token. |
 | `AIMEE_KB_HARDENED` | Require the hardened KB custody and transport posture at startup. |
@@ -416,7 +418,9 @@ The binaries read 223 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_OIDC_MAX_TOKEN_AGE` | Maximum accepted age in seconds for a KB OIDC token. |
 | `AIMEE_KB_OIDC_SCOPE_CLAIM` | OIDC claim carrying the scope. |
 | `AIMEE_KB_OIDC_SCOPE_KIND` | OIDC scope-kind interpretation. |
+| `AIMEE_KB_READ_TIMEOUT_MS` | Deadline for a single KB read issued by the client, in milliseconds. |
 | `AIMEE_KB_RUNTIME_UID` | Numeric runtime user allowed to receive the management token-authority socket. |
+| `AIMEE_KB_SCAN_TIMEOUT_MS` | Deadline for a code-index scan request, in milliseconds. Scans are queued and drained by the ingest workers, so this bounds the REQUEST rather than the work. |
 | `AIMEE_KB_STATUS_BIND` | Bind address for the management-status authority. |
 | `AIMEE_KB_STATUS_DSN` | Runtime database URL used by the management-status authority; secret. |
 | `AIMEE_KB_STATUS_PORT` | Listen port for the management-status authority. |

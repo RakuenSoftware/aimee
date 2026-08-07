@@ -4,10 +4,11 @@
  * the response. All policy + crypto lives below in vault_service. */
 #include "server.h" /* server_conn_t, server_send_*, handle_vault_* decls */
 #include "vault_service.h"
-#include "vault_store.h"      /* legacy actor-vault existence check */
-#include "vault_crypto.h"     /* VAULT_ROOT_KEY_LEN */
-#include "vault_capability.h" /* vault:write:server gate (D2c) */
-#include "log.h"              /* audit_log dedicated 0600 audit sink (D2/D2c) */
+#include "vault_store.h"        /* legacy actor-vault existence check */
+#include "vault_crypto.h"       /* VAULT_ROOT_KEY_LEN */
+#include "vault_capability.h"   /* vault:write:server gate (D2c) */
+#include "log.h"                /* audit_log dedicated 0600 audit sink (D2/D2c) */
+#include "vault_audit_bridge.h" /* publish server-principal writes onto the audit bus */
 #include "cJSON.h"
 #include <openssl/crypto.h>
 #include <openssl/sha.h>
@@ -196,12 +197,19 @@ void vault_audit_server_write(const server_conn_t *conn, const char *agent, cons
       transport = "unknown";
       break;
    }
+   const char *principal = (conn && conn->vault_principal[0]) ? conn->vault_principal : "(server)";
+
    /* D2/D2c: server-principal writes go to the dedicated append-only 0600 audit
     * sink (audit_log), NOT the operator-readable general server log — preserving
     * tamper-evidence + access separation. Never logs the key (fingerprint only). */
-   audit_log("VAULT_SERVER_WRITE", "by=%s transport=%s agent=%s cred=%s fp=%s",
-             (conn && conn->vault_principal[0]) ? conn->vault_principal : "(server)", transport,
-             agent ? agent : "?", cred ? cred : "?", fp);
+   audit_log("VAULT_SERVER_WRITE", "by=%s transport=%s agent=%s cred=%s fp=%s", principal,
+             transport, agent ? agent : "?", cred ? cred : "?", fp);
+
+   /* ...and onto the audit event bus, so this write joins the same ordered tap,
+    * capture/replay stream, and WORM ledger as every vault ACCESS row. Without
+    * this the highest-privilege vault op — storing a client-supplied secret under
+    * the server principal — was the only one absent from the replayable trail. */
+   vault_audit_bridge_server_write(principal, agent, cred, fp, transport);
 }
 
 /* POST /v1/vault/set_server — store a CLIENT-SUPPLIED credential under the
@@ -315,6 +323,11 @@ int handle_vault_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                           (int)(sizeof(entries) / sizeof(entries[0])), &count);
    if (st != VAULT_OK)
       return vault_send_status_error(conn, st);
+   /* As with delete: the underlying row is attributed to the server vault, so the
+    * human who enumerated the shared credential names would otherwise appear in no
+    * audit record at all. Enumeration of credential names is a real disclosure
+    * event, so it gets an attributed row like the mutations do. */
+   vault_audit_bridge_server_list(conn->vault_principal, count);
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
@@ -351,6 +364,11 @@ int handle_vault_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return vault_send_status_error(conn, st);
    audit_log("VAULT_SERVER_DELETE", "by=%s agent=%s cred=%s", conn->vault_principal,
              ja->valuestring, jc->valuestring);
+   /* ...and onto the bus. The vault_service row for this delete is attributed to
+    * VAULT_SERVER_PRINCIPAL (the vault the credential lives in), so it cannot answer
+    * WHO deleted it — that identity existed only in the audit_log line above, i.e.
+    * in a local file with no ordered tap, capture/replay, or WORM ledger. */
+   vault_audit_bridge_server_delete(conn->vault_principal, ja->valuestring, jc->valuestring);
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)

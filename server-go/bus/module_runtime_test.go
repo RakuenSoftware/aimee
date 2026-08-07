@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -226,5 +227,24 @@ func TestStandaloneModuleInvocationUsesDeadlineWithoutSyntheticCancellation(t *t
 	}
 	if !(ModuleInvocation{StageID: 1, DeadlineNS: 1}).Cancelled() {
 		t.Fatal("expired standalone invocation was not cancelled")
+	}
+}
+
+// A failing handler's reason is logged before the non-OK reply drops it, so the
+// rendering has to survive whatever a handler returns -- including a truncated
+// or non-UTF8 body.
+func TestModuleDetailRendersAnyHandlerBody(t *testing.T) {
+	if got := moduleDetail(nil); got != "no detail" {
+		t.Fatalf("empty body rendered %q", got)
+	}
+	if got := moduleDetail([]byte("workdir does not exist")); got != "workdir does not exist" {
+		t.Fatalf("short body rendered %q", got)
+	}
+	long := moduleDetail([]byte(strings.Repeat("x", 400)))
+	if len(long) != 303 || !strings.HasSuffix(long, "...") {
+		t.Fatalf("long body rendered %d chars: %q", len(long), long)
+	}
+	if got := moduleDetail([]byte{'o', 'k', 0xff}); got != "ok" {
+		t.Fatalf("invalid utf8 rendered %q", got)
 	}
 }

@@ -74,17 +74,40 @@ static void seed_call(parsed_response_t *parsed, int index, const char *name)
 
 int main(void)
 {
-   /* toggle logic: default-ON; explicit disable tokens; full-token match (not first byte). */
+   /* The stage and separately supervised process must share the descriptor's
+    * default-OFF posture. Otherwise an unspecified config enables this stage
+    * without starting the module, and the fail-closed provider path drops every
+    * ordinary tool call. Legacy env activation remains an explicit opt-in. */
    unsetenv("AIMEE_STAGE_GOVERNANCE");
-   assert(gw_response_governance_enabled() == 1);
+   assert(gw_response_governance_enabled() == 0);
    setenv("AIMEE_STAGE_GOVERNANCE", "0", 1);
    assert(gw_response_governance_enabled() == 0);
    setenv("AIMEE_STAGE_GOVERNANCE", "off", 1);
    assert(gw_response_governance_enabled() == 0);
    setenv("AIMEE_STAGE_GOVERNANCE", "false", 1);
    assert(gw_response_governance_enabled() == 0);
+   setenv("AIMEE_STAGE_GOVERNANCE", "1", 1);
+   assert(gw_response_governance_enabled() == 1);
+   setenv("AIMEE_STAGE_GOVERNANCE", "yes", 1);
+   assert(gw_response_governance_enabled() == 1);
    setenv("AIMEE_STAGE_GOVERNANCE", "nope", 1);
-   assert(gw_response_governance_enabled() == 1); /* full-token, not first byte */
+   assert(gw_response_governance_enabled() == 0); /* invalid values do not opt in */
+
+   /* Regression: the exact unspecified/default path used by delegate responses
+    * must bypass governance when no process/provider is present. This is the
+    * production failure that previously became synthetic timeout results. */
+   unsetenv("AIMEE_STAGE_GOVERNANCE");
+   gw_response_governance_register_provider(NULL);
+   {
+      parsed_response_t pr;
+      memset(&pr, 0, sizeof(pr));
+      pr.call_count = 1;
+      seed_call(&pr, 0, "read_file");
+      assert(gw_response_run_governance(&pr, gw_response_governance_enabled(), 1) == 0);
+      assert(pr.call_count == 1);
+      assert(strcmp(pr.calls[0].name, "read_file") == 0);
+      free(pr.calls[0].arguments);
+   }
 
    gw_response_governance_register_provider(fake_event_bus_provider);
 

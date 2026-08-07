@@ -343,6 +343,19 @@ else
     fail "server plane supervisor can deadlock on an exited zombie child"
 fi
 
+# The optional-module gate decides which processes attach to the bus. Both
+# entrypoints must ship it, and it must honour AIMEE_MODULE_<ID> in BOTH
+# directions -- an enable-only gate cannot turn anything off.
+if sh tests/test_optional_modules.sh > /dev/null 2>&1 &&
+   grep -qF 'apply_optional_modules server' ../deploy/container/server-entrypoint.sh &&
+   grep -qF 'apply_optional_modules kb' ../deploy/container/aimee-kb-entrypoint.sh &&
+   grep -qF 'optional-modules-lib.sh' ../Dockerfile.server &&
+   grep -qF 'optional-modules-lib.sh' ../Dockerfile; then
+    pass "operator can enable and disable optional modules in both placements"
+else
+    fail "optional-module gate is missing, one-directional, or not shipped in an image"
+fi
+
 if grep -q 'go|c' ../deploy/container/server-entrypoint.sh ||
    grep -q 'wfe_autonomy_register();' server/server.c ||
    grep -q 'wfe_scheduler_init();' server/server.c; then
@@ -419,6 +432,13 @@ else
     fail "verify-local can race lint against a partial shipping build"
 fi
 
+if sed -n '/^verify-local:/,/^[^[:space:]#].*:/p' Makefile |
+   grep -qF 'python3 -I scripts/check_c_repository_lock.py'; then
+    pass "verify-local rejects stale extracted-repository source pins"
+else
+    fail "verify-local can pass with stale extracted-repository source pins"
+fi
+
 # Verification runs inside the server image, whose deployment posture is
 # expressed through AIMEE_* environment overrides. Those values are correct for
 # the live daemon but must not override config fixtures in repository unit tests.
@@ -427,7 +447,9 @@ if sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
    sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
        grep -qF 'AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL' &&
    sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
-       grep -qF 'AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'; then
+       grep -qF 'AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET' &&
+   sed -n '/^go-unit-tests:/,/^verify-local:/p' Makefile |
+       grep -qF 'unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'; then
     pass "unit verification removes server deployment overrides"
 else
     fail "unit verification inherits server deployment overrides"

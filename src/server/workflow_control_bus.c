@@ -19,6 +19,8 @@
 
 #include "cJSON.h"
 
+#include "headers/module_json_call.h"
+
 #include <aimee/audit/obs_bus.h>
 #include <aimee/core/event_bus/module_protocol.h>
 #include <stdio.h>
@@ -32,17 +34,6 @@
 /* The private socket used a 30s I/O timeout. Keeping it means a hung control
  * plane still fails in the time operators already expect. */
 #define WORKFLOW_CONTROL_TIMEOUT_MS 30000
-
-static uint64_t monotonic_deadline_ns(int timeout_ms)
-{
-   if (timeout_ms <= 0)
-      return 0;
-   struct timespec ts;
-   if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
-      return 0;
-   return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec +
-          (uint64_t)timeout_ms * 1000000ull;
-}
 
 static int control_error(char *resp, int cap, int status, const char *message)
 {
@@ -115,17 +106,10 @@ int workflow_control_request(const char *method, const char *path, const char *q
       return control_error(resp, resp_cap, 413, "workflow request exceeds the module body limit");
    }
 
-   char *response = malloc(WORKFLOW_CONTROL_MAX_BODY);
-   if (!response)
-   {
-      free(wire);
-      return control_error(resp, resp_cap, 500, "out of memory reading workflow response");
-   }
-   uint32_t response_len = 0;
-   aimee_module_call_result_t result = obs_bus_module_call(
-       AIMEE_WORKFLOWS_EVENT_CONTROL, AIMEE_WORKFLOWS_STAGE_CONTROL, 0,
-       monotonic_deadline_ns(WORKFLOW_CONTROL_TIMEOUT_MS), wire, (uint32_t)wire_len, response,
-       WORKFLOW_CONTROL_MAX_BODY, &response_len, NULL, NULL);
+   aimee_module_call_result_t result = AIMEE_MODULE_CALL_OK;
+   cJSON *parsed = aimee_module_json_call_raw(
+       AIMEE_WORKFLOWS_EVENT_CONTROL, AIMEE_WORKFLOWS_STAGE_CONTROL, wire, wire_len,
+       WORKFLOW_CONTROL_MAX_BODY, WORKFLOW_CONTROL_TIMEOUT_MS, &result);
    free(wire);
 
    if (result != AIMEE_MODULE_CALL_OK)
@@ -136,12 +120,9 @@ int workflow_control_request(const char *method, const char *path, const char *q
       char reason[160];
       snprintf(reason, sizeof(reason), "workflow control failed: %s",
                aimee_module_call_result_name(result));
-      free(response);
       return control_error(resp, resp_cap, 502, reason);
    }
 
-   cJSON *parsed = cJSON_ParseWithLength(response, response_len);
-   free(response);
    if (!parsed)
       return control_error(resp, resp_cap, 502, "workflow control returned an unparseable result");
    const cJSON *status = cJSON_GetObjectItemCaseSensitive(parsed, "status");

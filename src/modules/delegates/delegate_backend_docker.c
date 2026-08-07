@@ -160,8 +160,9 @@ typedef struct
    int mount_count;
 } docker_state_t;
 
-#define DOCKER_DEFAULT_IMAGE   "ubuntu:22.04"
-#define DOCKER_WORKDIR_DEFAULT "/workspace"
+#define DOCKER_DEFAULT_IMAGE    "ubuntu:22.04"
+#define DOCKER_WORKDIR_DEFAULT  "/workspace"
+#define DOCKER_PROBE_TIMEOUT_MS 15000
 
 /* Test seam: production workdir is /workspace inside the container.
  * Unit tests substitute AIMEE_DOCKER_WORKDIR so file ops + mkdir
@@ -183,6 +184,102 @@ static const char *resolve_docker_bin(void)
    if (override && override[0])
       return override;
    return "docker";
+}
+
+int delegate_backend_docker_translate_mount_path(const char *container_path,
+                                                 const char *mount_table, char *out, size_t outsz)
+{
+   if (!container_path || container_path[0] != '/' || !mount_table || !out || outsz == 0)
+      return -1;
+
+   size_t best_len = 0;
+   const char *best_source = NULL;
+   size_t best_source_len = 0;
+   const char *line = mount_table;
+   while (*line)
+   {
+      const char *end = strchr(line, '\n');
+      if (!end)
+         end = line + strlen(line);
+      const char *tab = memchr(line, '\t', (size_t)(end - line));
+      if (tab)
+      {
+         size_t destination_len = (size_t)(tab - line);
+         const char *source = tab + 1;
+         size_t source_len = (size_t)(end - source);
+         if (source_len && source[source_len - 1] == '\r')
+            source_len--;
+         if (destination_len > 0 && source_len > 0 && line[0] == '/' && source[0] == '/' &&
+             destination_len > best_len && strncmp(container_path, line, destination_len) == 0 &&
+             (destination_len == 1 || container_path[destination_len] == '\0' ||
+              container_path[destination_len] == '/'))
+         {
+            best_len = destination_len;
+            best_source = source;
+            best_source_len = source_len;
+         }
+      }
+      line = *end ? end + 1 : end;
+   }
+
+   if (!best_source)
+   {
+      int n = snprintf(out, outsz, "%s", container_path);
+      return n < 0 || (size_t)n >= outsz ? -1 : 0;
+   }
+   const char *suffix = best_len == 1 ? container_path : container_path + best_len;
+   int n = snprintf(out, outsz, "%.*s%s", (int)best_source_len, best_source, suffix);
+   return n < 0 || (size_t)n >= outsz ? -1 : 1;
+}
+
+/* Docker bind sources are resolved in the daemon's filesystem namespace. When
+ * aimee-server itself runs in Docker, aimee_home() names the path INSIDE this
+ * container; passing it straight back to the daemon makes a named-volume path
+ * look absent, and Docker silently creates a directory at the requested socket
+ * source. Inspect this container's mounts and translate the socket to its host
+ * source. A host-native server has no inspectable self container, so it keeps the
+ * original path. */
+static int docker_host_path_for_container(const char *container, const char *container_path,
+                                          char *out, size_t outsz)
+{
+   if (!container || !container[0])
+   {
+      int n = snprintf(out, outsz, "%s", container_path);
+      return n < 0 || (size_t)n >= outsz ? -1 : 0;
+   }
+
+   const char *argv[] = {resolve_docker_bin(),
+                         "inspect",
+                         "--format",
+                         "{{range .Mounts}}{{printf \"%s\\t%s\\n\" .Destination .Source}}{{end}}",
+                         container,
+                         NULL};
+   char *mounts = NULL;
+   if (safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &mounts, 1 << 20,
+                                         DOCKER_PROBE_TIMEOUT_MS) != 0)
+   {
+      free(mounts);
+      int n = snprintf(out, outsz, "%s", container_path);
+      return n < 0 || (size_t)n >= outsz ? -1 : 0;
+   }
+   int rc = delegate_backend_docker_translate_mount_path(container_path, mounts ? mounts : "", out,
+                                                         outsz);
+   free(mounts);
+   return rc;
+}
+
+static int docker_host_path_for_self(const char *container_path, char *out, size_t outsz)
+{
+   char self[128];
+   if (gethostname(self, sizeof(self)) != 0)
+      self[0] = '\0';
+   self[sizeof(self) - 1] = '\0';
+   return docker_host_path_for_container(self, container_path, out, outsz);
+}
+
+static int server_runs_in_container(void)
+{
+   return access("/.dockerenv", F_OK) == 0 || access("/run/.containerenv", F_OK) == 0;
 }
 
 /* Build the host-side workspace path: $XDG_CACHE_HOME/aimee/delegate/
@@ -248,8 +345,6 @@ static int run_docker(const char *const argv[])
       return -1;
    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
-
-#define DOCKER_PROBE_TIMEOUT_MS 15000
 
 /* True when `name` is one of ours. The container-name prefix is matched HERE
  * rather than with `docker ps --filter name=^aimee-delegate-`: the anchored regex
@@ -869,11 +964,60 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
     * config-agnostic. */
    int pkg_proxy = cfg && cfg->pkg_proxy;
 
+   /* The server UDS is the delegate's only outward channel (see the
+    * DELEGATE_SOCK_PATH note). Docker resolves bind sources in the daemon's
+    * namespace, so translate the path when aimee-server itself is containerized. */
+   char container_sock[MAX_PATH_LEN + 32] = "";
+   char host_sock[MAX_PATH_LEN + 32] = "";
+   char sock_bind[MAX_PATH_LEN + 96] = "";
+   const char *aimee_h = aimee_home();
+   if (aimee_h && aimee_h[0])
+      snprintf(container_sock, sizeof(container_sock), "%s/aimee-http.sock", aimee_h);
+   struct stat sock_st;
+   int socket_path_result = -1;
+   const int socket_exists =
+       container_sock[0] && stat(container_sock, &sock_st) == 0 && S_ISSOCK(sock_st.st_mode);
+   if (socket_exists)
+      socket_path_result = docker_host_path_for_self(container_sock, host_sock, sizeof(host_sock));
+
+   /* In a container the daemon cannot use an un-translated in-container path.
+    * Fail here instead of asking Docker to create a directory at that path and
+    * starting a sandbox whose every aimee tool call will time out. A host-native
+    * server legitimately has no self container to inspect, so result 0 is valid. */
+   if (socket_exists && server_runs_in_container() && socket_path_result != 1)
+   {
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "cannot map server socket %s into the Docker daemon namespace; refusing "
+                "to start a sandbox with a broken tool channel",
+                container_sock);
+      free(st);
+      return -1;
+   }
+   const int have_sock = socket_exists && socket_path_result >= 0;
+   if (have_sock)
+      snprintf(sock_bind, sizeof(sock_bind), "%s:%s", host_sock, DELEGATE_SOCK_PATH);
+
    /* Try `docker start` first — if a container with this name already
     * exists (operator opted hibernate=1 last release), starting it
     * resumes the same workspace. If start fails, create + start. */
    const char *start_argv[] = {"docker", "start", st->container_name, NULL};
-   if (run_docker(start_argv) != 0)
+   int started = run_docker(start_argv) == 0;
+   if (started && have_sock)
+   {
+      char resumed_socket[MAX_PATH_LEN + 32] = "";
+      int resumed_socket_result = docker_host_path_for_container(
+          st->container_name, DELEGATE_SOCK_PATH, resumed_socket, sizeof(resumed_socket));
+      if (resumed_socket_result != 1 || strcmp(resumed_socket, host_sock) != 0)
+      {
+         aimee_log(LOG_WARN, "delegate-sandbox",
+                   "container %s has a stale or missing server socket bind; recreating it",
+                   st->container_name);
+         const char *rm_argv[] = {"docker", "rm", "-f", st->container_name, NULL};
+         (void)run_docker(rm_argv);
+         started = 0;
+      }
+   }
+   if (!started)
    {
       /* Run as the server's uid:gid when the mount is the caller's real tree.
        * Containers run as root by default, so every file the delegate creates in
@@ -884,20 +1028,6 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
       char userflag[64] = "";
       if (st->mount_host_tree)
          snprintf(userflag, sizeof(userflag), "%u:%u", (unsigned)getuid(), (unsigned)getgid());
-
-      /* The aimee-server UDS is the delegate's only outward channel (see the
-       * DELEGATE_SOCK_PATH note). Resolve + bind it; if the server has no socket
-       * yet (should not happen for a running server) we still create the container
-       * so file/exec isolation holds — the delegate just cannot call `aimee`. */
-      char host_sock[MAX_PATH_LEN + 32] = "";
-      char sock_bind[MAX_PATH_LEN + 96] = "";
-      const char *aimee_h = aimee_home();
-      if (aimee_h && aimee_h[0])
-         snprintf(host_sock, sizeof(host_sock), "%s/aimee-http.sock", aimee_h);
-      struct stat sock_st;
-      const int have_sock = host_sock[0] && stat(host_sock, &sock_st) == 0;
-      if (have_sock)
-         snprintf(sock_bind, sizeof(sock_bind), "%s:%s", host_sock, DELEGATE_SOCK_PATH);
 
       /* Sized from the mount array itself: a hand-counted bound silently overflows
        * the day a fourth mount is added. Fixed slots cover docker/create/--name/

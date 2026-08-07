@@ -794,9 +794,9 @@ int main(void)
 }
 
 /* anthropic_http.c now asks config_present() + per-field accessors instead of
- * loading a config_t. These reproduce exactly what the config_load stub they
- * replaced produced: config readable, modules unspecified (-1) so the env
- * default decides, economizer on, and the P5 anthropic-inject opt-in off. */
+ * loading a config_t. This policing integration fixture explicitly enables
+ * the governance module; the module's unspecified production default is
+ * covered by test_response_governance_stage.c. */
 int config_present(void)
 {
    return 1;
@@ -804,7 +804,7 @@ int config_present(void)
 
 int config_module_governance(void)
 {
-   return -1;
+   return 1;
 }
 
 int config_ingress_preinject_anthropic_enabled(void)

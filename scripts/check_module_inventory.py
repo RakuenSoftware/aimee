@@ -22,7 +22,11 @@ MODULE_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 DEFAULT_INVENTORY = Path("tests/baselines/modules/canonical-inventory.yaml")
 ALLOWED_KEYS = {"schema_version", "required", "optional"}
 REQUIRED_COUNT = 18
-OPTIONAL_COUNT = 7
+# 8, not 7: dropping plugin-loader took this 8 -> 7 (e545e14dbc), then migrating
+# the learned sandbox toolchain to a Go module added `sandbox` back (1b0187e3de)
+# without updating the constant. The guard has been failing on testing ever since
+# — and because it is not wired into `make lint`, nothing surfaced it.
+OPTIONAL_COUNT = 8
 PINNED_REQUIRED = {"git"}
 
 

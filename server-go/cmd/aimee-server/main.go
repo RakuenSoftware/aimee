@@ -21,7 +21,7 @@ import (
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/engine"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
-	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
+	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
 	"github.com/JBailes/aimee/server-go/modules/workflows"
 )
 
@@ -46,6 +46,8 @@ func main() {
 	agentSocket := flag.String("agent-service-socket", os.Getenv("AIMEE_AGENT_SERVICE_SOCKET"),
 		"agent resource-plane Unix socket used by the native Go WFE runner")
 	workflowDir := flag.String("workflow-dir", "", "workflow definition directory")
+	moduleBusSocket := flag.String("module-bus-socket", os.Getenv("AIMEE_MODULE_BUS_SOCKET"),
+		"daemon module bus socket; reviews are requested over it")
 	configPath := flag.String("config", "", "aimee.yaml path")
 	concurrency := flag.Int("workflow-concurrency", envInt("AIMEE_AUTONOMY_CONCURRENCY", 5),
 		"maximum concurrent work items across the whole WFE (total agent budget)")
@@ -130,14 +132,41 @@ func main() {
 		if runnerErr != nil {
 			log.Fatal(runnerErr)
 		}
-		// No configured-default source: a roundtable review names its roundtable
-		// in the workflow, which validation requires. roundtable.default no longer
-		// selects a panel for the Go control plane.
-		roundtables, roundtableErr := roundtablecfg.NewStore(filepath.Join(*home, "roundtables"))
-		if roundtableErr != nil {
-			log.Fatal(roundtableErr)
+		// Reviews run in the roundtable module over the daemon's bus. This process
+		// attaches as a requesting principal under its generated grant; it does
+		// not host a panel, so there is one implementation and one place that
+		// spends money convening seats.
+		//
+		// A gate whose reviewer never attached parks with that reason rather than
+		// failing the run, so a bus that is not up yet delays reviews instead of
+		// losing work.
+		if *moduleBusSocket != "" {
+			reviewer, reviewerErr := engine.NewBusReviewer(rootCtx, *moduleBusSocket,
+				engine.BusPrincipalClass, engine.WFEBusPrincipalRef, 0)
+			if reviewerErr != nil {
+				log.Printf("roundtable reviews unavailable: %v", reviewerErr)
+			} else {
+				// Say so on success too. A control plane that attached and one that
+				// silently did not look identical from outside until a gate hangs
+				// waiting for a reply that was never routed.
+				//
+				// Word it as the REQUESTER attaching, which is all this proves.
+				// The previous text -- "roundtable reviews over the event bus" --
+				// reads as "reviews are available", and it printed identically with
+				// the roundtable module disabled, because attaching as a requester
+				// does not depend on anyone serving. Diagnosing a run where the
+				// module was deliberately off, that line was the single strongest
+				// piece of evidence that it was actually on.
+				log.Printf("roundtable review requests will be sent over the event bus "+
+					"(socket=%s principal=%d/%d kind=%d); a roundtable module must be "+
+					"attached to answer them",
+					*moduleBusSocket, engine.BusPrincipalClass, engine.WFEBusPrincipalRef,
+					roundtablemod.EventReview)
+				nativeRunner.SetRoundtableReviewer(reviewer)
+			}
+		} else {
+			log.Printf("roundtable reviews unavailable: no module bus socket configured")
 		}
-		nativeRunner.SetRoundtableStore(roundtables)
 		runner = nativeRunner
 	}
 	if runner != nil {
@@ -197,7 +226,6 @@ func main() {
 		handler.SetSchedulerCancel(scheduler.Cancel)
 		if worktreeManager != nil {
 			handler.SetWorktreeCleanup(worktreeManager.Cleanup)
-			scheduler.SetTerminalCleanup(worktreeManager.Cleanup)
 		}
 		go scheduler.Run(rootCtx)
 		// Trigger definitions are live UI/config state. Re-read them every scan so
@@ -252,6 +280,8 @@ func main() {
 				Stages: []bus.ModuleStage{
 					{EventKind: workflows.EventAdvance, StageID: workflows.StageAdvance},
 					{EventKind: workflows.EventControl, StageID: workflows.StageControl},
+					{EventKind: workflows.EventGateDecide, StageID: workflows.StageGateDecide},
+					{EventKind: workflows.EventAutonomousRoute, StageID: workflows.StageAutonomousRoute},
 				},
 				Handler: workflows.NewHandler(handler),
 			})

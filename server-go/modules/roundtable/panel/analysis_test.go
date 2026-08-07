@@ -333,3 +333,79 @@ func concurrentSeats(ctx context.Context, run Run, requests []SeatRequest,
 	wg.Wait()
 	return out
 }
+
+// The am_312e901904 shape, reduced to its essentials: a ticket that names two
+// defects, an artifact that fixes one, and a single seat that calls it aligned
+// and approves. That is exactly what shipped -- the review was briefed to
+// "verify both distinct defects in the ticket are actually fixed" and returned
+// "approved with no findings" over a patch that had misdiagnosed the second.
+//
+// A reviewer forced to enumerate what was asked writes the unaddressed item
+// down, and once it is written down it must block. One seat is enough for that;
+// the mechanism is enumeration, not headcount.
+func TestUnaddressedRequirementBlocksEvenWhenTheSeatApproves(t *testing.T) {
+	agents := &recordingAgents{reviewResponse: `{"artifact_stage":"frozen_diff",` +
+		`"original_request_alignment":{"status":"aligned","summary":"the direction follows the ticket"},` +
+		`"requirement_coverage":[` +
+		`{"requirement":"bulk clone fails rc=127","addressed":true,"evidence":"chdir moved before the fd remap"},` +
+		`{"requirement":"Projects view disagrees with what was cloned","addressed":false,"evidence":"no change derives the owner from clone_url"}],` +
+		`"verdict":"approve","findings":[]}`}
+	req := Run{ID: "wi", Stage: "gate", Workdir: "/worktree"}
+	analysis := RunAnalysis(context.Background(), agents, req,
+		[]Seat{{Persona: "qa", Selector: "$random", Ordinal: 0}}, "review", "hash", "frozen_diff", 1)
+
+	// The seat said approve; the unaddressed requirement overrides it.
+	if analysis.Approvals != 0 {
+		t.Fatalf("an approval carrying an unaddressed requirement must not count toward quorum, got %d",
+			analysis.Approvals)
+	}
+	var blocking *Finding
+	for i := range analysis.Feedback.Findings {
+		if analysis.Feedback.Findings[i].Severity == "blocking" {
+			blocking = &analysis.Feedback.Findings[i]
+			break
+		}
+	}
+	if blocking == nil {
+		t.Fatalf("expected a blocking finding for the unaddressed requirement, got %+v",
+			analysis.Feedback.Findings)
+	}
+	if !strings.Contains(blocking.Summary, "Projects view") {
+		t.Fatalf("the blocking finding must name the requirement that was missed, got %q", blocking.Summary)
+	}
+}
+
+// The counterpart: full coverage must still approve, or the gate is unpassable.
+func TestFullRequirementCoverageStillApproves(t *testing.T) {
+	agents := &recordingAgents{reviewResponse: `{"artifact_stage":"frozen_diff",` +
+		`"original_request_alignment":{"status":"aligned","summary":"implements the ticket"},` +
+		`"requirement_coverage":[` +
+		`{"requirement":"bulk clone fails rc=127","addressed":true,"evidence":"chdir before dup2"},` +
+		`{"requirement":"Projects view disagrees","addressed":true,"evidence":"owner derived from clone_url"}],` +
+		`"verdict":"approve","findings":[]}`}
+	req := Run{ID: "wi", Stage: "gate", Workdir: "/worktree"}
+	analysis := RunAnalysis(context.Background(), agents, req,
+		[]Seat{{Persona: "qa", Selector: "$random", Ordinal: 0}}, "review", "hash", "frozen_diff", 1)
+	if analysis.Approvals != 1 {
+		t.Fatalf("fully covered request must approve, got %d approvals", analysis.Approvals)
+	}
+	if len(analysis.Feedback.Findings) != 0 {
+		t.Fatalf("no findings expected, got %+v", analysis.Feedback.Findings)
+	}
+}
+
+// Absent coverage must not silently pass: a seat that omits the field entirely
+// is the pre-fix behaviour, and the point is that it cannot be the way through.
+func TestMissingRequirementCoverageDoesNotFabricateApproval(t *testing.T) {
+	agents := &recordingAgents{reviewResponse: `{"artifact_stage":"frozen_diff",` +
+		`"original_request_alignment":{"status":"aligned","summary":"looks right"},` +
+		`"verdict":"approve","findings":[]}`}
+	req := Run{ID: "wi", Stage: "gate", Workdir: "/worktree"}
+	analysis := RunAnalysis(context.Background(), agents, req,
+		[]Seat{{Persona: "qa", Selector: "$random", Ordinal: 0}}, "review", "hash", "frozen_diff", 1)
+	// Documents today's behaviour so a later change to REQUIRE the field is a
+	// deliberate, visible decision rather than an accident.
+	if analysis.Approvals != 1 {
+		t.Fatalf("absent coverage currently approves; got %d", analysis.Approvals)
+	}
+}

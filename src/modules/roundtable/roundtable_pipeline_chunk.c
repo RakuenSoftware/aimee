@@ -4,6 +4,17 @@
 
 #include "roundtable_pipeline_chunk.h"
 
+#include "cJSON.h"
+#include "headers/module_json_call.h"
+
+#include <aimee/roundtable/module_api.h>
+#include <stdlib.h>
+
+/* A 16 MiB artifact is the largest thing this carries. */
+#define RTP_CHUNK_MAX_BODY (16u * 1024u * 1024u)
+/* Off the interactive path, but a pipeline pass waits on it. */
+#define RTP_CHUNK_TIMEOUT_MS 15000
+
 #include <stdio.h>
 #include <string.h>
 
@@ -27,7 +38,124 @@ int rtp_chunk_needed(const char *origin, int budget_bytes)
    return (int)strlen(origin) > budget_bytes ? 1 : 0;
 }
 
+/* Ask the module where the artifact splits, then fill in the digests here.
+ *
+ * Fail-closed is a single chunk covering the whole origin: that is what the C
+ * code did for an artifact that fits, it never loses content, and the caller's
+ * over_budget/truncated handling still applies. Returning zero chunks would make
+ * an unreachable module look like an empty artifact. */
+static int chunk_plan_via_module(const char *origin, int len, int budget_bytes, int assembly_budget,
+                                 rtp_chunk_plan_t *out, rtp_assembly_t *asm_out)
+{
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
+      return -1;
+   cJSON_AddStringToObject(request, "origin", origin);
+   cJSON_AddNumberToObject(request, "budget_bytes", budget_bytes);
+   cJSON_AddNumberToObject(request, "assembly_budget", assembly_budget);
+
+   cJSON *reply =
+       aimee_module_json_call(AIMEE_ROUNDTABLE_EVENT_CHUNK_PLAN, AIMEE_ROUNDTABLE_STAGE_CHUNK_PLAN,
+                              request, RTP_CHUNK_MAX_BODY, RTP_CHUNK_TIMEOUT_MS, NULL);
+   if (!reply)
+      return -1;
+
+   const cJSON *plan = cJSON_GetObjectItemCaseSensitive(reply, "plan");
+   const cJSON *spans = plan ? cJSON_GetObjectItemCaseSensitive(plan, "chunks") : NULL;
+   if (!cJSON_IsArray(spans))
+   {
+      cJSON_Delete(reply);
+      return -1;
+   }
+
+   out->over_budget = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "over_budget"));
+   out->truncated = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "truncated"));
+
+   const cJSON *span = NULL;
+   cJSON_ArrayForEach(span, spans)
+   {
+      if (out->count >= RTP_MAX_CHUNKS)
+         break;
+      const cJSON *off = cJSON_GetObjectItemCaseSensitive(span, "offset");
+      const cJSON *slen = cJSON_GetObjectItemCaseSensitive(span, "len");
+      if (!cJSON_IsNumber(off) || !cJSON_IsNumber(slen))
+      {
+         cJSON_Delete(reply);
+         return -1;
+      }
+      int o = off->valueint, l = slen->valueint;
+      /* A span the module reports must lie inside the artifact we sent. A bad
+       * offset would otherwise hash and slice out of bounds. */
+      if (o < 0 || l < 0 || o > len || l > len - o)
+      {
+         cJSON_Delete(reply);
+         return -1;
+      }
+      rtp_chunk_t *c = &out->chunks[out->count];
+      c->index = out->count;
+      c->offset = o;
+      c->len = l;
+      rtp_chunk_hash(origin + o, l, c->hash, sizeof(c->hash));
+      out->count++;
+   }
+   if (out->count == 0)
+   {
+      cJSON_Delete(reply);
+      return -1;
+   }
+
+   if (asm_out)
+   {
+      const cJSON *a = cJSON_GetObjectItemCaseSensitive(reply, "assembly");
+      const cJSON *sel = a ? cJSON_GetObjectItemCaseSensitive(a, "selected") : NULL;
+      const cJSON *omi = a ? cJSON_GetObjectItemCaseSensitive(a, "omitted") : NULL;
+      memset(asm_out, 0, sizeof(*asm_out));
+      asm_out->budget_bytes = assembly_budget;
+      asm_out->over_budget = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(a, "over_budget"));
+      const cJSON *it = NULL;
+      cJSON_ArrayForEach(it, sel)
+      {
+         if (asm_out->selected_count >= RTP_MAX_CHUNKS || !cJSON_IsNumber(it))
+            break;
+         int idx = it->valueint;
+         if (idx < 0 || idx >= out->count)
+            continue;
+         asm_out->selected[asm_out->selected_count++] = idx;
+         asm_out->used_bytes += out->chunks[idx].len;
+      }
+      cJSON_ArrayForEach(it, omi)
+      {
+         if (asm_out->omitted_count >= RTP_MAX_CHUNKS || !cJSON_IsNumber(it))
+            break;
+         int idx = it->valueint;
+         if (idx < 0 || idx >= out->count)
+            continue;
+         asm_out->omitted[asm_out->omitted_count++] = idx;
+      }
+   }
+
+   cJSON_Delete(reply);
+   return 0;
+}
+
+/* Plan with the module; on any failure fall back to the single whole-artifact
+ * chunk described above. */
+static void chunk_plan_whole(const char *origin, int len, rtp_chunk_plan_t *out)
+{
+   out->count = 1;
+   out->chunks[0].index = 0;
+   out->chunks[0].offset = 0;
+   out->chunks[0].len = len;
+   rtp_chunk_hash(origin, len, out->chunks[0].hash, sizeof(out->chunks[0].hash));
+}
+
 int rtp_chunk_plan(const char *origin, int budget_bytes, rtp_chunk_plan_t *out)
+{
+   return rtp_chunk_plan_with_assembly(origin, budget_bytes, 0, out, NULL);
+}
+
+int rtp_chunk_plan_with_assembly(const char *origin, int budget_bytes, int assembly_budget,
+                                 rtp_chunk_plan_t *out, rtp_assembly_t *asm_out)
 {
    if (!out)
       return -1;
@@ -39,50 +167,16 @@ int rtp_chunk_plan(const char *origin, int budget_bytes, rtp_chunk_plan_t *out)
    out->budget_bytes = budget_bytes;
    rtp_chunk_hash(origin, len, out->origin_hash, sizeof(out->origin_hash));
 
-   /* Whole artifact fits, or no budget set -> one chunk. */
-   if (budget_bytes <= 0 || len <= budget_bytes)
+   if (chunk_plan_via_module(origin, len, budget_bytes, assembly_budget, out, asm_out) != 0)
    {
-      out->chunks[0].index = 0;
-      out->chunks[0].offset = 0;
-      out->chunks[0].len = len;
-      rtp_chunk_hash(origin, len, out->chunks[0].hash, sizeof(out->chunks[0].hash));
-      out->count = 1;
-      return 0;
+      memset(out->chunks, 0, sizeof(out->chunks));
+      out->count = 0;
+      out->over_budget = 0;
+      out->truncated = 0;
+      chunk_plan_whole(origin, len, out);
+      if (asm_out)
+         rtp_assembly_build(out, assembly_budget, asm_out);
    }
-
-   int pos = 0;
-   while (pos < len && out->count < RTP_MAX_CHUNKS)
-   {
-      int remaining = len - pos;
-      int take = remaining < budget_bytes ? remaining : budget_bytes;
-      /* Prefer to break on the last newline within the window so a chunk holds
-       * whole lines; fall back to a hard cut if a single line is too long. */
-      if (take == budget_bytes)
-      {
-         int brk = -1;
-         for (int i = pos + take - 1; i > pos; i--)
-         {
-            if (origin[i] == '\n')
-            {
-               brk = i;
-               break;
-            }
-         }
-         if (brk > pos)
-            take = brk - pos + 1; /* include the newline */
-         else
-            out->over_budget = 1; /* an indivisible line exceeds the budget */
-      }
-      rtp_chunk_t *c = &out->chunks[out->count];
-      c->index = out->count;
-      c->offset = pos;
-      c->len = take;
-      rtp_chunk_hash(origin + pos, take, c->hash, sizeof(c->hash));
-      out->count++;
-      pos += take;
-   }
-   if (pos < len)
-      out->truncated = 1; /* ran out of chunk slots */
    return 0;
 }
 

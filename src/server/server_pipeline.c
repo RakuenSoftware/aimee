@@ -1305,8 +1305,11 @@ static int maybe_ttl_abandon(int id, rtp_run_t *run)
 static int submit_chunked_review(server_conn_t *conn, rtp_run_t *run, const char *phase,
                                  const char *artifact, int budget_bytes)
 {
+   /* Plan and select in one module round trip: the artifact can be 16 MiB and
+    * asking twice would carry it twice. */
    rtp_chunk_plan_t plan;
-   rtp_chunk_plan(artifact, budget_bytes, &plan);
+   rtp_assembly_t asm_unit;
+   rtp_chunk_plan_with_assembly(artifact, budget_bytes, budget_bytes, &plan, &asm_unit);
    int group = rtp_pass_max_group(run->id, phase) + 1;
 
    /* Record the whole origin for chunk re-derivation (#34). For the PR phase the
@@ -1342,8 +1345,7 @@ static int submit_chunked_review(server_conn_t *conn, rtp_run_t *run, const char
     * RETRIEVES the selected spans from the retained origin and concatenates them
     * into a self-contained inline unit (#32/#37), bounded by the smallest panel
     * budget. */
-   rtp_assembly_t asm_unit;
-   rtp_assembly_build(&plan, budget_bytes, &asm_unit);
+   /* asm_unit was filled by the same call that produced the plan. */
    size_t cap = (size_t)(budget_bytes > 0 ? budget_bytes : 4096) + 1024;
    char *synth = (char *)malloc(cap);
    int spass = -1;

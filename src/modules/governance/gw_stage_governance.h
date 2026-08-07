@@ -17,11 +17,13 @@ typedef int (*gw_governance_decision_provider_fn)(int policy_active, const char 
 
 void gw_response_governance_register_provider(gw_governance_decision_provider_fn provider);
 
-/* The DEPRECATED env default: 1 unless AIMEE_STAGE_GOVERNANCE is an explicit disable token
- * (0/off/false/no). DEFAULT-ON: governance (response tool-policing) must run unless deliberately
- * disabled. The config-store `modules.governance` toggle is now canonical; the wire site resolves
- * it via config_module_enabled() with this as the fallback and passes the result to
- * gw_response_run_governance() as `enabled`. Kept pure so the module stays config-free. */
+/* The DEPRECATED env fallback is opt-in: AIMEE_STAGE_GOVERNANCE accepts
+ * 1/on/true/yes and otherwise resolves off. This must agree with the process
+ * descriptor's enabled_by_default=false; enabling the response stage while the
+ * separately supervised module is absent makes its intentional fail-closed path
+ * reject every ordinary tool call. The config-store `modules.governance` toggle
+ * is canonical; wire sites resolve it via config_module_enabled() with this as
+ * the fallback. Kept pure so the module stays config-free. */
 int gw_response_governance_enabled(void);
 
 /* Run the (togglable) governance response stage over `parsed` via the response registry +
