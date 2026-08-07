@@ -4,8 +4,6 @@
 #include "config.h"
 #include "guardrails.h"
 #include "git_verify.h"
-#include "git_pr_api.h"   /* git_pr_create_via_api_ex */
-#include "agent_config.h" /* agent_get_request_vault_principal */
 #include "mcp_git.h"
 #include "util.h"
 #include "branch_ownership.h"
@@ -467,45 +465,78 @@ cJSON *handle_git_pr(cJSON *args)
       if (cJSON_IsString(jbody))
          strip_ai_attribution(jbody->valuestring);
 
+      char *esc_title = shell_escape(jtitle->valuestring);
+      char *esc_body = shell_escape(cJSON_IsString(jbody) ? jbody->valuestring : "");
       const char *base = cJSON_IsString(jbase) ? jbase->valuestring : "main";
+      char *esc_base = shell_escape(base);
 
-      /* In worktree mode HEAD is the session branch (aimee/session/<id>), not the
-       * branch the work belongs to, so name the owned branch explicitly instead of
-       * letting the forge infer it from HEAD. */
-      const char *head = NULL;
-      char owned_branch[256];
+      /* In worktree mode, gh pr create infers the branch from HEAD, which is the
+       * session branch (aimee/session/<id>). Pass --head explicitly with the owned branch. */
+      /* Size the command buffer to the escaped fields (see the edit path above):
+       * a fixed buffer silently truncates a long PR body, corrupting the created
+       * PR's description (and risks the same accumulation overflow). */
+      char *esc_head = NULL;
       if (mcp_git_get_worktree())
       {
+         char owned_branch[256];
          if (branch_own_get_session_branch(owned_branch, sizeof(owned_branch)) != 0)
+         {
+            free(esc_title);
+            free(esc_body);
+            free(esc_base);
             return mcp_text("error: in worktree mode but no owned branch found. "
                             "Use git_branch action=create to create and register a branch first.");
-         head = owned_branch;
+         }
+         esc_head = shell_escape(owned_branch);
+      }
+      size_t cmdcap = 160 + strlen(esc_title) + strlen(esc_body) + strlen(esc_base) +
+                      (esc_head ? strlen(esc_head) : 0);
+      char *cmd = malloc(cmdcap);
+      if (!cmd)
+      {
+         free(esc_title);
+         free(esc_body);
+         free(esc_base);
+         free(esc_head);
+         return mcp_text("error: out of memory building gh command");
+      }
+      if (esc_head)
+         snprintf(cmd, cmdcap, "gh pr create --title '%s' --body '%s' --base '%s' --head '%s' 2>&1",
+                  esc_title, esc_body, esc_base, esc_head);
+      else
+         snprintf(cmd, cmdcap, "gh pr create --title '%s' --body '%s' --base '%s' 2>&1", esc_title,
+                  esc_body, esc_base);
+      free(esc_head);
+      free(esc_title);
+      free(esc_body);
+      free(esc_base);
+
+      int rc;
+      char *out = mcp_git_run(cmd, &rc);
+      free(cmd);
+      if (rc != 0)
+      {
+         cJSON *r = mcp_error("error: gh pr create failed: %s", out ? out : "unknown");
+         free(out);
+         return r;
       }
 
-      /* Open the PR in-process, the same path webchat (server_http_routes_git.c)
-       * and the workflow forge (wfe_live_forge.c) already take. The vaulted forge
-       * token rides the Authorization header in server memory and never reaches a
-       * child's argv or /proc/<pid>/environ.
-       *
-       * This used to shell out to `gh pr create`, which authenticated as whatever
-       * ambient credential the workstation happened to expose rather than the
-       * token this module vaults. That is a token-exposure seam, and it is also
-       * why a correctly vaulted token could still come back 403: the request was
-       * never made with it. git_forge_vault_token() reads without a client
-       * unlock precisely so this works unattended -- see git_forge_vault.h. */
-      char url[1024];
-      char err[512];
-      url[0] = '\0';
-      err[0] = '\0';
-      if (git_pr_create_via_api_ex(agent_get_request_vault_principal(), run_cmd_get_cwd(), head,
-                                   base, jtitle->valuestring,
-                                   cJSON_IsString(jbody) ? jbody->valuestring : "", url,
-                                   sizeof(url), err, sizeof(err)) != 0)
-         return mcp_error("error: pr create failed: %s", err[0] ? err : "unknown");
-
-      char result[1280];
-      snprintf(result, sizeof(result), "created: \"%s\"\nurl: %s\nbase: %s", jtitle->valuestring,
-               url, base);
+      /* Output from gh pr create is typically just the URL */
+      char result[1024];
+      if (out)
+      {
+         /* Trim trailing newline */
+         size_t len = strlen(out);
+         while (len > 0 && (out[len - 1] == '\n' || out[len - 1] == '\r'))
+            out[--len] = '\0';
+         snprintf(result, sizeof(result), "created: \"%s\"\nurl: %s\nbase: %s", jtitle->valuestring,
+                  out, base);
+      }
+      else
+      {
+         snprintf(result, sizeof(result), "created: \"%s\" (base: %s)", jtitle->valuestring, base);
+      }
+      free(out);
       return mcp_text(result);
    }
 
