@@ -169,7 +169,31 @@ def parse_input_type(value):
     if value is None or value == "":
         return INPUT_TYPE_DEFAULT
     return value if value in INPUT_TYPES else None
-PORT = int(os.environ.get("EMBEDDER_PORT", "8080"))
+def _env_int(name, default, fallback=None):
+    """Integer from the environment, treating EMPTY as unset.
+
+    Compose passes an unset variable through as an EMPTY STRING --
+    `EMBEDDER_THREADS: "${EMBEDDER_THREADS:-}"` yields "", not absence -- so
+    os.environ.get(name, "0") returns "" and int("") raises. That killed the
+    embedder at import on every deployment that did not explicitly set the
+    variable: the KB never bound its port, its health check failed forever, and
+    the wizard reported a KB that would not come up. The traceback named this
+    line, but the value looked unset, which is what made it puzzling.
+
+    A junk value is treated the same way. An embedder that refuses to start is
+    worse than one that ignores EMBEDDER_THREADS=banana and logs the default.
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            print("embedder-server: %s=%r is not an integer; using the default"
+                  % (name, raw), file=sys.stderr, flush=True)
+    return default() if callable(default) else default
+
+
+PORT = _env_int("EMBEDDER_PORT", 8080)
 # CPU serving tuning. A single short embed does not scale past ~8 intra-op
 # threads — on a 32-core host pplx-embed-0.6b is 269ms at 32 threads but 189ms at
 # 8 (per-call thread overhead dominates the tiny workload). Cap to a sane default;
@@ -193,7 +217,7 @@ def _usable_cpus():
         return os.cpu_count() or 1
 
 
-EMBEDDER_THREADS = int(os.environ.get("EMBEDDER_THREADS", "0")) or min(8, _usable_cpus())
+EMBEDDER_THREADS = _env_int("EMBEDDER_THREADS", lambda: min(8, _usable_cpus()))
 # onnx | torch | auto. "auto" prefers onnx and falls back; "onnx" refuses to serve
 # on the slow path, which is what a benchmark host wants -- silently serving fp32
 # torch is how a 50x regression went unnoticed.
@@ -392,8 +416,8 @@ def embed(text: str, input_type=INPUT_TYPE_DEFAULT):
 # The window is short (default 15 ms) because it is pure added latency for a
 # request that arrives when the queue is empty -- an interactive query embed must
 # not wait meaningfully. Set EMBEDDER_BATCH_WINDOW_MS=0 to disable coalescing.
-EMBEDDER_BATCH_WINDOW_MS = int(os.environ.get("EMBEDDER_BATCH_WINDOW_MS", "15"))
-EMBEDDER_BATCH_MAX = int(os.environ.get("EMBEDDER_BATCH_MAX", "128"))
+EMBEDDER_BATCH_WINDOW_MS = _env_int("EMBEDDER_BATCH_WINDOW_MS", 15)
+EMBEDDER_BATCH_MAX = _env_int("EMBEDDER_BATCH_MAX", 128)
 
 _batch_lock = threading.Lock()
 _batch_cv = threading.Condition(_batch_lock)
