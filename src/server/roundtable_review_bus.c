@@ -100,9 +100,31 @@ static char *build_review_body(const cJSON *request, const char *resolved_panel)
 int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *request)
 {
    (void)ctx;
+   /* "No server for kind 9474" has two very different causes, and reporting the
+    * wrong one costs an operator the whole diagnosis.
+    *
+    * The module declares deliberate and chunk-plan unconditionally, but declares
+    * REVIEW only when its process can actually convene a panel -- it needs
+    * AIMEE_HOME for the saved roundtables and an agent resource plane
+    * (AIMEE_AGENT_SERVICE_SOCKET or AIMEE_AGENT_SERVICE_URL) to seat them. When it
+    * cannot, it deliberately leaves the kind undeclared and logs why to its own
+    * stdout, so the daemon reports the module as not serving review, which is
+    * true. Saying "not attached to the event bus" then names a cause that is
+    * false and sends the operator looking at the supervisor instead of at the
+    * module's environment.
+    *
+    * Deliberate (9473) separates the two: if it is served, the module is up. */
    if (!obs_bus_module_available(AIMEE_ROUNDTABLE_EVENT_REVIEW))
-      return server_send_error(conn, "roundtable review module is not attached to the event bus",
-                               NULL);
+      return server_send_error(
+          conn,
+          obs_bus_module_available(AIMEE_ROUNDTABLE_EVENT_DELIBERATE)
+              ? "roundtable module is attached but is not serving review: its process could not "
+                "convene a panel. Check AIMEE_HOME and AIMEE_AGENT_SERVICE_SOCKET / "
+                "AIMEE_AGENT_SERVICE_URL on the module process, and its log for "
+                "\"roundtable review stage unavailable\""
+              : "roundtable module is not attached to the event bus (it is optional and off by "
+                "default; start the server with AIMEE_MODULE_ROUNDTABLE=1)",
+          NULL);
 
    const cJSON *preset = cJSON_GetObjectItemCaseSensitive(request, "roundtable");
    char resolved[ROUNDTABLE_REVIEW_PANEL_NAME_MAX] = "";
