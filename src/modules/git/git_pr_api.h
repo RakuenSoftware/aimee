@@ -76,6 +76,16 @@ int git_pr_create_via_api_slug(const char *principal, const char *slug, const ch
                                const char *base, const char *title, const char *body, int draft,
                                char *out, size_t out_cap, char *err, size_t errlen);
 
+/* The read/merge ops in the same shape, for the same reason. Each repo_dir entry
+ * point below now resolves the slug and delegates to its _slug sibling, so the
+ * request bodies and the credential ladder have one copy and a caller with no
+ * server-visible checkout has a way in. See git_pr_create_via_api_slug above. */
+int git_pr_find_open_via_api_slug(const char *principal, const char *slug, const char *head,
+                                  const char *base, char *out, size_t out_cap, int *number_out,
+                                  char *err, size_t errlen);
+int git_pr_update_via_api_slug(const char *principal, const char *slug, int number,
+                               const char *title, const char *body, char *err, size_t errlen);
+
 /* Find the existing open PR for an exact head/base pair. Returns 1 + URL,
  * 0 when absent, or -1 on API/validation failure. */
 int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const char *head,
@@ -101,6 +111,8 @@ typedef struct
 
 int git_pr_info_via_api(const char *principal, const char *repo_dir, int number, git_pr_info_t *out,
                         char *err, size_t errlen);
+int git_pr_info_via_api_slug(const char *principal, const char *slug, int number,
+                             git_pr_info_t *out, char *err, size_t errlen);
 
 /* Aggregate CI verdict for the PR's head commit, from the Checks API
  * (GET /commits/<sha>/check-runs) falling back to the legacy combined status
@@ -116,6 +128,8 @@ typedef enum
 
 git_pr_ci_t git_pr_ci_via_api(const char *principal, const char *repo_dir, int number, char *err,
                               size_t errlen);
+git_pr_ci_t git_pr_ci_via_api_slug(const char *principal, const char *slug, int number, char *err,
+                                   size_t errlen);
 
 /* Pure aggregation of the two API payloads (exposed for unit tests): check-runs
  * JSON first; when it lists zero runs, the combined-status JSON decides; both
@@ -157,5 +171,7 @@ int git_pr_ci_permits_merge(git_pr_ci_t ci);
 int git_pr_merge_err_is_conflict(const char *err);
 int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number, char *err,
                          size_t errlen);
+int git_pr_merge_via_api_slug(const char *principal, const char *slug, int number, char *err,
+                              size_t errlen);
 
 #endif /* GIT_PR_API_H */
