@@ -208,10 +208,13 @@ cJSON *handle_git_pr(cJSON *args)
             mflag = "--rebase";
       }
       char match[160] = {0};
+      char expected_head[72] = {0};
       cJSON *jhead = cJSON_GetObjectItemCaseSensitive(args, "expected_head_sha");
       if (cJSON_IsString(jhead) && jhead->valuestring[0])
       {
-         /* only allow a hex SHA to flow into the shell command. */
+         /* only allow a hex SHA to flow into the shell command. The same validation
+          * guards the API path: it goes into a JSON body rather than a command line,
+          * but a caller handing us a non-SHA is a caller bug either way. */
          const char *h = jhead->valuestring;
          int ok = 1;
          for (const char *p = h; *p; p++)
@@ -220,98 +223,119 @@ cJSON *handle_git_pr(cJSON *args)
                ok = 0;
                break;
             }
-         if (ok && h[0])
+         if (ok && h[0] && strlen(h) < sizeof(expected_head))
+         {
             snprintf(match, sizeof(match), " --match-head-commit %s", h);
+            snprintf(expected_head, sizeof(expected_head), "%s", h);
+         }
       }
 
-      /* CI must be fully green before the merge (operator ruling 2026-07-15). Still
-       * its own `gh pr checks` read, relying on that command's 0/1/8 tri-state exit
-       * code. action=checks NO LONGER shares this path -- it reads the Checks API
-       * in-process -- so the two are now independent and this one inherits the `gh`
-       * problem: `gh` in the aimee-server image has no credential, and mcp_git_run
-       * hands children the token on a memfd rather than as GH_TOKEN, so this gate
-       * only works from a DETACHED workspace where the client holds its own creds.
-       * Migrating it means replacing the exit-code verdict with git_pr_ci_permits_merge
-       * over git_pr_ci_via_api_slug, which is a change to a MERGE gate and wants its
-       * own review rather than riding along with the read migrations.
+      /* CI must be fully green before the merge (operator ruling 2026-07-15). Now read
+       * through the Checks API in-process, so the verdict comes from the vaulted token
+       * and the gate works from any workspace -- `gh` in the aimee-server image has no
+       * credential at all, which left this gate dead for a SHARED or CONTAINER
+       * session.
        *
-       * Fails CLOSED on anything it cannot positively classify. In particular the
-       * verdict is taken from gh's EXIT CODE, never inferred from parsed counters:
-       * a zero count means "no rows parsed", which is equally true of genuinely
-       * zero checks and of output we failed to understand (or a NULL from an alloc
-       * failure) — merging on that would be a fail-open. Only gh's own explicit
-       * "no checks reported" is accepted as genuinely zero, which the operator
-       * ruling says may merge (nothing to fail). */
+       * Still fails CLOSED, and the mapping preserves that exactly. Where the gh
+       * version read an exit code, this reads git_pr_ci_permits_merge:
+       *
+       *   gh exit 0  (all passed)          -> SUCCESS  merges
+       *   "no checks reported"             -> NONE     merges: nothing to fail
+       *   gh exit 8  (pending)             -> PENDING  refuses, unless auto_merge
+       *   gh exit 1  (a check failed)      -> FAILURE  refuses
+       *   anything unclassifiable         -> ERROR    refuses
+       *
+       * The last line is the important one: "unknown" is never "pass". The old comment
+       * warned against inferring a verdict from parsed counters because a zero count
+       * is equally "no rows" and "no checks"; git_pr_ci_via_api_slug removes that
+       * ambiguity by reporting NONE and ERROR as distinct values rather than both as
+       * an absence. */
+      char merge_slug[264];
+      if (get_origin_repo_slug(merge_slug, sizeof(merge_slug)) != 0)
+         return mcp_text("error: cannot resolve a github.com origin for this checkout");
+      const char *principal = agent_get_request_vault_principal();
+
       {
-         char ccmd[128];
-         snprintf(ccmd, sizeof(ccmd), "gh pr checks %d 2>&1", pr_num);
-         int crc = 0;
-         char *cout = mcp_git_run(ccmd, &crc);
+         char cerr[512];
+         cerr[0] = '\0';
+         git_pr_ci_t ci = git_pr_ci_via_api_slug(principal, merge_slug, pr_num, cerr, sizeof(cerr));
          const char *why = NULL;
-         if (!cout)
-            why = "could not read CI status (no output)";
-         else if (strstr(cout, "no checks reported"))
-            why = NULL; /* genuinely zero checks -> nothing to fail -> merge */
-         else if (crc == 0)
-            why = NULL; /* gh: every check passed */
-         else if (crc == 8 && auto_merge)
+         if (ci == GIT_PR_CI_PENDING && auto_merge)
             why = NULL; /* branch protection keeps an auto-merge pending until green */
-         else if (crc == 8)
-            why = "CI has not finished; re-try once checks settle";
-         else if (crc == 1)
-            why = "CI is not green (at least one check failed)";
-         else
-            why = "could not read CI status";
+         else if (!git_pr_ci_permits_merge(ci))
+            why = ci == GIT_PR_CI_PENDING   ? "CI has not finished; re-try once checks settle"
+                  : ci == GIT_PR_CI_FAILURE ? "CI is not green (at least one check failed)"
+                                            : "could not read CI status";
+         /* GIT_PR_CI_NONE permits: no CI reported has nothing to fail (operator
+          * ruling). GIT_PR_CI_ERROR does not -- "unknown" is never "pass", which is
+          * the same fail-closed rule the gh exit-code version enforced. */
          if (why)
          {
-            char msg[320];
+            char msg[512];
             snprintf(msg, sizeof(msg),
-                     "error: merge blocked — %s. A merge requires fully green CI.", why);
-            free(cout);
+                     "error: merge blocked — %s. A merge requires fully green CI.%s%s", why,
+                     cerr[0] ? " detail: " : "", cerr[0] ? cerr : "");
             return mcp_text(msg);
          }
-         free(cout);
       }
 
-      char cmd[512];
-      snprintf(cmd, sizeof(cmd), "gh pr merge %d %s%s%s 2>&1", pr_num, mflag, match,
-               auto_merge ? " --auto" : "");
-      int rc = 0;
-      char *out = mcp_git_run(cmd, &rc);
       cJSON *res = cJSON_CreateObject();
       cJSON_AddStringToObject(res, "executor", "git_pr");
-      cJSON_AddStringToObject(res, "command", cmd);
-      cJSON_AddNumberToObject(res, "exit_code", rc);
-      cJSON_AddStringToObject(res, "output", out ? out : "");
-      free(out);
-      if (rc == 0 && auto_merge)
+
+      if (auto_merge)
       {
-         /* Success means the request was accepted, not necessarily that GitHub merged
-          * it synchronously. Do not manufacture merge evidence for a queued PR. */
-         cJSON_AddBoolToObject(res, "auto_merge_enabled", 1);
+         /* Auto-merge stays on `gh` for now. Enabling it is a GraphQL mutation
+          * (enablePullRequestAutoMerge) and this module speaks only REST, so moving
+          * it means new transport rather than a swapped call. Keeping it here is not
+          * a regression -- it is how auto-merge already worked -- but it inherits the
+          * `gh` credential problem: no GH_TOKEN reaches the child (FD mode), so this
+          * branch only works from a DETACHED workspace where the client holds its own
+          * creds. Direct merges below no longer have that limitation. */
+         char cmd[512];
+         snprintf(cmd, sizeof(cmd), "gh pr merge %d %s%s --auto 2>&1", pr_num, mflag, match);
+         int rc = 0;
+         char *out = mcp_git_run(cmd, &rc);
+         cJSON_AddStringToObject(res, "command", cmd);
+         cJSON_AddNumberToObject(res, "exit_code", rc);
+         cJSON_AddStringToObject(res, "output", out ? out : "");
+         free(out);
+         /* Accepted is not merged. Do not manufacture merge evidence for a queued PR. */
+         cJSON_AddBoolToObject(res, "auto_merge_enabled", rc == 0 ? 1 : 0);
          cJSON_AddBoolToObject(res, "merged", 0);
-      }
-      else if (rc == 0)
-      {
-         /* recover the merge commit SHA for the ledger. */
-         char vcmd[128];
-         snprintf(vcmd, sizeof(vcmd), "gh pr view %d --json mergeCommit -q .mergeCommit.oid 2>&1",
-                  pr_num);
-         int vrc = 0;
-         char *vout = mcp_git_run(vcmd, &vrc);
-         if (vout)
-         {
-            char *nl = strchr(vout, '\n');
-            if (nl)
-               *nl = '\0';
-            cJSON_AddStringToObject(res, "merge_sha", vrc == 0 ? vout : "");
-            free(vout);
-         }
-         cJSON_AddBoolToObject(res, "merged", 1);
       }
       else
       {
-         cJSON_AddBoolToObject(res, "merged", 0);
+         const char *method = strcmp(mflag, "--squash") == 0   ? "squash"
+                              : strcmp(mflag, "--rebase") == 0 ? "rebase"
+                                                               : "merge";
+         char merge_sha[72];
+         char merr[512];
+         merge_sha[0] = '\0';
+         merr[0] = '\0';
+         int rc = git_pr_merge_via_api_slug_ex(principal, merge_slug, pr_num, method,
+                                               expected_head[0] ? expected_head : NULL, merge_sha,
+                                               sizeof(merge_sha), merr, sizeof(merr));
+
+         /* The ledger records the request that was made. There is no shell command
+          * now, so state the API call instead of leaving the field empty. */
+         char desc[256];
+         snprintf(desc, sizeof(desc), "PUT /repos/%s/pulls/%d/merge merge_method=%s%s%s",
+                  merge_slug, pr_num, method, expected_head[0] ? " sha=" : "",
+                  expected_head[0] ? expected_head : "");
+         cJSON_AddStringToObject(res, "command", desc);
+         cJSON_AddNumberToObject(res, "exit_code", rc);
+         cJSON_AddStringToObject(res, "output", merr);
+         cJSON_AddBoolToObject(res, "merged", rc == 0 || rc == 1);
+         if (rc == 0 || rc == 1)
+            cJSON_AddStringToObject(res, "merge_sha", merge_sha);
+         if (rc == 1)
+            cJSON_AddBoolToObject(res, "already_merged", 1);
+         /* 3 is a content conflict and identical on every retry; 2 is a lost race
+          * that a retry wins. Callers that loop must not treat them alike. */
+         if (rc == 3)
+            cJSON_AddBoolToObject(res, "conflict", 1);
+         else if (rc == 2)
+            cJSON_AddBoolToObject(res, "retryable", 1);
       }
       char *s = cJSON_PrintUnformatted(res);
       cJSON_Delete(res);
