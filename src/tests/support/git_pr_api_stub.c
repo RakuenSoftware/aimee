@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 /* The no-checkout variant mcp_git_pr.c's create action calls after resolving the
  * slug through the workspace runner. Refuses like the wrapper below: these
@@ -24,6 +25,20 @@ int git_pr_create_via_api_slug(const char *principal, const char *slug, const ch
    (void)draft;
    if (out && out_cap)
       out[0] = '\0';
+   if (err && errlen)
+      snprintf(err, errlen, "pr api unavailable (stub)");
+   return -1;
+}
+
+/* The view action's read, for the same reason: routing and validation only. */
+int git_pr_info_via_api_slug(const char *principal, const char *slug, int number,
+                             git_pr_info_t *out, char *err, size_t errlen)
+{
+   (void)principal;
+   (void)slug;
+   (void)number;
+   if (out)
+      memset(out, 0, sizeof(*out));
    if (err && errlen)
       snprintf(err, errlen, "pr api unavailable (stub)");
    return -1;
