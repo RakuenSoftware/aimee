@@ -764,6 +764,15 @@ int git_pr_info_via_api_slug(const char *principal, const char *slug, int number
       snprintf(out->html_url, sizeof(out->html_url), "%s", hurl->valuestring);
    if (cJSON_IsString(mat) && mat->valuestring) /* null when never merged */
       snprintf(out->merged_at, sizeof(out->merged_at), "%s", mat->valuestring);
+   const cJSON *mstate = cJSON_GetObjectItem(j, "mergeable_state");
+   if (cJSON_IsString(mstate) && mstate->valuestring)
+   {
+      /* REST spells it lowercase; gh reported the same values upper-cased as
+       * mergeStateStatus, and callers render that spelling. */
+      snprintf(out->merge_state, sizeof(out->merge_state), "%s", mstate->valuestring);
+      for (char *p = out->merge_state; *p; p++)
+         *p = (char)toupper((unsigned char)*p);
+   }
 
    if (cJSON_IsBool(mergeable))
       out->mergeable = cJSON_IsTrue(mergeable) ? 1 : 0; /* null stays -1 (computing) */

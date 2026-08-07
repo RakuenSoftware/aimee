@@ -114,6 +114,10 @@ typedef struct
    char title[512];    /* PR title */
    char html_url[512]; /* browser URL */
    char merged_at[32]; /* ISO8601 merge timestamp; empty when not merged */
+   /* REST `mergeable_state`, upper-cased to match the value gh reported as
+    * mergeStateStatus: CLEAN / DIRTY / BLOCKED / BEHIND / UNSTABLE / DRAFT /
+    * UNKNOWN. Empty when GitHub did not supply one; render that as UNKNOWN. */
+   char merge_state[24];
 } git_pr_info_t;
 
 int git_pr_info_via_api(const char *principal, const char *repo_dir, int number, git_pr_info_t *out,
