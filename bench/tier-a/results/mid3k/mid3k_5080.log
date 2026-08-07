@@ -1,0 +1,5 @@
+[10:43:27Z] === 3k QAT pair on the 5080
+[10:43:27Z] --- gemma-4-12B-it.qat.mid3k on 5080, nproc=1, MTP, 3002 notes
+[10:54:51Z] === 3k QAT pair on the 5080
+[10:54:51Z] --- gemma-4-12B-it.qat.mid3k on 5080, nproc=1, MTP, 3002 notes
+[22:39:16Z] FAIL gemma-4-12B-it.qat.mid3k

@@ -1,0 +1,80 @@
+[07:03:48Z] === XTX-only finish: 4 arms, 10000 notes each
+[07:03:48Z] --- E4B.UD-Q8_K_XL.10k  nproc=3  port=8300
+[07:03:53Z] sizing: starting one server to measure resident VRAM
+[07:04:55Z]   one instance uses  MiB of 24560 MiB
+[07:04:55Z]   -> running 3 processes
+[07:04:58Z]   all 3 servers up; VRAM now  MiB
+[07:04:58Z] START E4B.UD-Q8_K_XL.10k across 3 shards
+merged 10000 rows, 0 missing
+[10:41:06Z] DONE E4B.UD-Q8_K_XL.10k rows=10000/10000 wall=216m8s procs=3
+[10:41:13Z] OK   E4B.UD-Q8_K_XL.10k strictF1=0.6321
+[10:41:13Z] --- E2B.UD-Q4_K_XL.10k  nproc=4  port=8400
+[10:41:19Z] sizing: starting one server to measure resident VRAM
+[10:43:36Z]   one instance uses  MiB of 24560 MiB
+[10:43:36Z]   -> running 4 processes
+[10:44:25Z]   all 4 servers up; VRAM now  MiB
+[10:44:25Z] START E2B.UD-Q4_K_XL.10k across 4 shards
+merged 10000 rows, 0 missing
+[12:46:37Z] FAIL E2B.UD-Q4_K_XL.10k: 1644 errored rows (16%), discarding
+[12:46:37Z] FAIL E2B.UD-Q4_K_XL.10k (rc=1) -- continuing to next arm
+[12:46:37Z] --- E2B.UD-Q6_K_XL.10k  nproc=4  port=8400
+[12:46:42Z] sizing: starting one server to measure resident VRAM
+[12:47:14Z]   one instance uses  MiB of 24560 MiB
+[12:47:14Z]   -> running 4 processes
+[12:48:03Z]   all 4 servers up; VRAM now  MiB
+[12:48:04Z] START E2B.UD-Q6_K_XL.10k across 4 shards
+harness/shard_run.sh: line 203: 2272277 Killed                  python3 harness/run_llamacpp.py --model "$LABEL" --gold "$SHARD_DIR/shard$i.jsonl" --thinking --max-tokens 8192 --concurrency 1 --out "$SHARD_DIR/out$i.jsonl" --base-url "http://$EP:$p" >> "$OUT/shard_$LABEL.run.log" 2>&1
+harness/shard_run.sh: line 203: 2272279 Killed                  python3 harness/run_llamacpp.py --model "$LABEL" --gold "$SHARD_DIR/shard$i.jsonl" --thinking --max-tokens 8192 --concurrency 1 --out "$SHARD_DIR/out$i.jsonl" --base-url "http://$EP:$p" >> "$OUT/shard_$LABEL.run.log" 2>&1
+harness/shard_run.sh: line 203: 2272281 Killed                  python3 harness/run_llamacpp.py --model "$LABEL" --gold "$SHARD_DIR/shard$i.jsonl" --thinking --max-tokens 8192 --concurrency 1 --out "$SHARD_DIR/out$i.jsonl" --base-url "http://$EP:$p" >> "$OUT/shard_$LABEL.run.log" 2>&1
+harness/shard_run.sh: line 203: 2272280 Killed                  python3 harness/run_llamacpp.py --model "$LABEL" --gold "$SHARD_DIR/shard$i.jsonl" --thinking --max-tokens 8192 --concurrency 1 --out "$SHARD_DIR/out$i.jsonl" --base-url "http://$EP:$p" >> "$OUT/shard_$LABEL.run.log" 2>&1
+Traceback (most recent call last):
+  File "<stdin>", line 5, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'results/10k-sharded/.shards-E2B.UD-Q6_K_XL.10k/out0.jsonl'
+EMPTY: no rows were produced
+[13:07:45Z] FAIL E2B.UD-Q6_K_XL.10k: merge rejected (see above), discarding
+[14:41:50Z] === XTX-only finish: 4 arms, 10000 notes each
+[14:41:50Z] SKIP E4B.UD-Q8_K_XL.10k (banked)
+[14:41:50Z] --- E2B.UD-Q4_K_XL.10k  nproc=3  port=8400
+[14:41:55Z] sizing: starting one server to measure resident VRAM
+[14:42:12Z]   one instance uses  MiB of 24560 MiB
+[14:42:12Z]   -> running 3 processes
+[14:42:45Z]   all 3 servers up; VRAM now  MiB
+[14:42:45Z] START E2B.UD-Q4_K_XL.10k across 3 shards
+[15:45:05Z] === XTX-only finish: 4 arms, 10000 notes each
+[15:45:05Z] SKIP E4B.UD-Q8_K_XL.10k (banked)
+[15:45:05Z] --- E2B.UD-Q4_K_XL.10k  nproc=3  port=8400
+[15:45:10Z] sizing: starting one server to measure resident VRAM
+[15:45:42Z]   one instance uses  MiB of 24560 MiB
+[15:45:42Z]   -> running 3 processes, cache-ram 512 MiB each
+[15:46:14Z]   all 3 servers up; VRAM now  MiB
+[15:46:14Z] START E2B.UD-Q4_K_XL.10k across 3 shards
+[16:02:54Z] === XTX-only finish: 4 arms, 10000 notes each
+[16:02:54Z] SKIP E4B.UD-Q8_K_XL.10k (banked)
+[16:02:54Z] --- E2B.UD-Q4_K_XL.10k  nproc=3  port=8400
+[16:02:59Z] sizing: starting one server to measure resident VRAM
+[16:03:15Z]   one instance uses  MiB of 24560 MiB
+[16:03:15Z]   -> running 3 processes, cache-ram 1024 MiB each
+[16:03:48Z]   all 3 servers up; VRAM now  MiB
+[16:03:48Z] START E2B.UD-Q4_K_XL.10k across 3 shards
+merged 10000 rows, 0 missing
+[18:30:00Z] DONE E2B.UD-Q4_K_XL.10k rows=10000/10000 wall=146m11s procs=3 retries=0
+[18:30:07Z] OK   E2B.UD-Q4_K_XL.10k strictF1=0.6246
+[18:30:07Z] --- E2B.UD-Q6_K_XL.10k  nproc=3  port=8400
+[18:30:12Z] sizing: starting one server to measure resident VRAM
+[18:30:29Z]   one instance uses  MiB of 24560 MiB
+[18:30:29Z]   -> running 3 processes, cache-ram 1024 MiB each
+[18:31:02Z]   all 3 servers up; VRAM now  MiB
+[18:31:02Z] START E2B.UD-Q6_K_XL.10k across 3 shards
+merged 10000 rows, 0 missing
+[21:19:17Z] DONE E2B.UD-Q6_K_XL.10k rows=10000/10000 wall=168m15s procs=3 retries=0
+[21:19:24Z] OK   E2B.UD-Q6_K_XL.10k strictF1=0.6344
+[21:19:24Z] --- E2B.UD-Q8_K_XL.10k  nproc=3  port=8400
+[21:19:30Z] sizing: starting one server to measure resident VRAM
+[21:31:51Z]   one instance uses  MiB of 24560 MiB
+[21:31:51Z]   -> running 3 processes, cache-ram 1024 MiB each
+[21:32:24Z]   all 3 servers up; VRAM now  MiB
+[21:32:24Z] START E2B.UD-Q8_K_XL.10k across 3 shards
+merged 10000 rows, 0 missing
+[00:41:00Z] DONE E2B.UD-Q8_K_XL.10k rows=10000/10000 wall=188m36s procs=3 retries=0
+[00:41:07Z] OK   E2B.UD-Q8_K_XL.10k strictF1=0.6329
+[00:41:07Z] === XTX FINISH COMPLETE ===

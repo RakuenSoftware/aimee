@@ -1,0 +1,36 @@
+[21:03:30Z] sizing: starting one server to measure resident VRAM
+[21:04:01Z]   one instance uses  MiB of 24560 MiB
+[21:04:01Z]   -> running 3 processes
+[21:04:34Z]   all 3 servers up; VRAM now  MiB
+[21:04:34Z] START E4B.UD-Q4_K_XL.10k across 3 shards
+merged 10000 rows, 0 missing
+[23:56:36Z] DONE E4B.UD-Q4_K_XL.10k rows=10000/10000 wall=172m2s procs=3
+[23:56:48Z] sizing: starting one server to measure resident VRAM
+[00:00:51Z]   one instance uses  MiB of 24560 MiB
+[00:00:51Z]   -> running 3 processes
+[00:01:24Z]   all 3 servers up; VRAM now  MiB
+[00:01:24Z] START E4B.UD-Q6_K_XL.10k across 3 shards
+merged 10000 rows, 0 missing
+[02:45:10Z] DONE E4B.UD-Q6_K_XL.10k rows=10000/10000 wall=163m46s procs=3
+[02:45:23Z] sizing: starting one server to measure resident VRAM
+[02:46:40Z]   one instance uses  MiB of 24560 MiB
+[02:46:40Z]   -> running 3 processes
+[02:47:58Z]   all 3 servers up; VRAM now  MiB
+[02:47:58Z] START E4B.UD-Q8_K_XL.10k across 3 shards
+[06:15:28Z] sizing: starting one server to measure resident VRAM
+[06:16:30Z]   one instance uses  MiB of 24560 MiB
+[06:16:30Z]   -> running 3 processes
+[06:17:03Z]   all 3 servers up; VRAM now  MiB
+[06:17:03Z] START E4B.UD-Q8_K_XL.10k across 3 shards
+Traceback (most recent call last):
+  File "<stdin>", line 5, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: '/home/virant/dev/aimee/.aimee/worktrees/b94c9263-317c099512d045a7/main/bench/tier-a/results/10k-sharded/.shards-E4B.UD-Q8_K_XL.10k/out0.jsonl'
+Traceback (most recent call last):
+  File "<stdin>", line 2, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: '/home/virant/dev/aimee/.aimee/worktrees/b94c9263-317c099512d045a7/main/bench/tier-a/results/10k-sharded/E4B.UD-Q8_K_XL.10k.pred.jsonl'
+[06:17:03Z] FAIL E4B.UD-Q8_K_XL.10k: contaminated merge, discarding
+[06:19:55Z] sizing: starting one server to measure resident VRAM
+[06:20:12Z]   one instance uses  MiB of 24560 MiB
+[06:20:12Z]   -> running 3 processes
+[06:20:44Z]   all 3 servers up; VRAM now  MiB
+[06:20:45Z] START E4B.UD-Q8_K_XL.10k across 3 shards

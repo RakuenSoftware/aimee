@@ -1,0 +1,18 @@
+[19:38:21Z] === SOLO: one server, idle card
+[19:42:14Z]   solo1: 214s
+[19:42:14Z] === SOLO2: same config again, to prove the reference is stable
+[19:46:05Z]   solo2: 215s
+[19:46:05Z] === CONTENDED: same server, second isolated process hammering the card
+[19:51:46Z]   contended: 291s
+
+60 notes, -np 1 throughout
+
+  solo   vs solo (control)      : 60/60
+  solo   vs CONTENDED           : 60/60
+
+  ISOLATION IS SUFFICIENT. A second process saturating the same GPU does
+  not change the answers. The enemy is a SHARED FORWARD PASS, not
+  parallelism on a GPU.
+  => N single-slot server processes on one card would give parallelism
+     WITH repeatability. That is worth measuring for throughput next.
+[19:51:51Z] === ISOLATION TEST DONE ===

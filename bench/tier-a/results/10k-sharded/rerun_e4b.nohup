@@ -1,0 +1,36 @@
+[17:19:34Z] === waiting for the E2B ladder to release the XTX
+[00:41:36Z] === ladder finished; starting E4B re-run at cache-ram 1024
+[00:41:36Z]   quarantined E4B.UD-Q4_K_XL.10k.pred.jsonl
+[00:41:36Z]   quarantined E4B.UD-Q4_K_XL.10k.score.json
+[00:41:36Z]   quarantined E4B.UD-Q6_K_XL.10k.pred.jsonl
+[00:41:36Z]   quarantined E4B.UD-Q6_K_XL.10k.score.json
+[00:41:36Z]   quarantined E4B.UD-Q8_K_XL.10k.pred.jsonl
+[00:41:36Z]   quarantined E4B.UD-Q8_K_XL.10k.score.json
+[00:41:36Z] --- E4B.UD-Q4_K_XL.10k  unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL  nproc=3 cache-ram=1024
+[00:41:41Z] sizing: starting one server to measure resident VRAM
+[00:42:13Z]   one instance uses  MiB of 24560 MiB
+[00:42:13Z]   -> running 3 processes, cache-ram 1024 MiB each
+[00:42:45Z]   all 3 servers up; VRAM now  MiB
+[00:42:45Z] START E4B.UD-Q4_K_XL.10k across 3 shards
+merged 10000 rows, 0 missing
+[03:21:22Z] DONE E4B.UD-Q4_K_XL.10k rows=10000/10000 wall=158m36s procs=3 retries=0
+[03:21:30Z] OK   E4B.UD-Q4_K_XL.10k strictF1=0.6301 wall=159m
+[03:21:30Z] --- E4B.UD-Q6_K_XL.10k  unsloth/gemma-4-E4B-it-GGUF:UD-Q6_K_XL  nproc=3 cache-ram=1024
+[03:21:35Z] sizing: starting one server to measure resident VRAM
+[03:21:51Z]   one instance uses  MiB of 24560 MiB
+[03:21:51Z]   -> running 3 processes, cache-ram 1024 MiB each
+[03:22:24Z]   all 3 servers up; VRAM now  MiB
+[03:22:24Z] START E4B.UD-Q6_K_XL.10k across 3 shards
+merged 10000 rows, 0 missing
+[06:05:44Z] DONE E4B.UD-Q6_K_XL.10k rows=10000/10000 wall=163m20s procs=3 retries=0
+[06:05:51Z] OK   E4B.UD-Q6_K_XL.10k strictF1=0.6452 wall=164m
+[06:05:51Z] --- E4B.UD-Q8_K_XL.10k  unsloth/gemma-4-E4B-it-GGUF:UD-Q8_K_XL  nproc=3 cache-ram=1024
+[06:05:56Z] sizing: starting one server to measure resident VRAM
+[06:06:28Z]   one instance uses  MiB of 24560 MiB
+[06:06:28Z]   -> running 3 processes, cache-ram 1024 MiB each
+[06:07:01Z]   all 3 servers up; VRAM now  MiB
+[06:07:01Z] START E4B.UD-Q8_K_XL.10k across 3 shards
+merged 10000 rows, 0 missing
+[09:33:26Z] DONE E4B.UD-Q8_K_XL.10k rows=10000/10000 wall=206m24s procs=3 retries=0
+[09:33:33Z] OK   E4B.UD-Q8_K_XL.10k strictF1=0.6337 wall=207m
+[09:33:33Z] === E4B RERUN COMPLETE ===

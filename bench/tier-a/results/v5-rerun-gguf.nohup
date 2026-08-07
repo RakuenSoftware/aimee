@@ -1,0 +1,43 @@
+[17:16:26Z] === v5 re-run (GGUF, 5080): 6 models, 1001 notes, 1 proc, no MTP, UD-Q4_K_XL
+[17:16:26Z] --- gemma-4-E2B-it  unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL
+[17:16:32Z] sizing: starting one server to measure resident VRAM
+[17:16:48Z]   one instance uses 1972 MiB of 16303 MiB
+[17:16:48Z]   -> running 1 processes, cache-ram 1024 MiB each
+[17:16:49Z]   all 1 servers up; VRAM now 1972 MiB
+[17:16:49Z] START gemma-4-E2B-it across 1 shards
+merged 1001 rows, 0 missing
+[17:51:44Z] DONE gemma-4-E2B-it rows=1001/1001 wall=34m55s procs=1 retries=0
+[17:51:50Z] OK   gemma-4-E2B-it floored=0.6017 nofloor=0.6010 wall=35m
+[17:51:50Z] --- granite-4.0-1b  unsloth/granite-4.0-1b-GGUF:UD-Q4_K_XL
+[17:51:56Z] sizing: starting one server to measure resident VRAM
+[17:54:44Z]   one instance uses 1986 MiB of 16303 MiB
+[17:54:44Z]   -> running 1 processes, cache-ram 1024 MiB each
+[17:54:44Z]   all 1 servers up; VRAM now 1986 MiB
+[17:54:44Z] START granite-4.0-1b across 1 shards
+merged 1001 rows, 0 missing
+[17:56:24Z] DONE granite-4.0-1b rows=1001/1001 wall=1m40s procs=1 retries=0
+[17:56:30Z] OK   granite-4.0-1b floored=? nofloor=? wall=4m
+[17:56:30Z] --- gemma-4-E4B-it  unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL
+[17:56:36Z] sizing: starting one server to measure resident VRAM
+[17:56:52Z]   one instance uses 3614 MiB of 16303 MiB
+[17:56:52Z]   -> running 1 processes, cache-ram 1024 MiB each
+[17:56:52Z]   all 1 servers up; VRAM now 3614 MiB
+[17:56:52Z] START gemma-4-E4B-it across 1 shards
+merged 1001 rows, 0 missing
+[18:39:32Z] DONE gemma-4-E4B-it rows=1001/1001 wall=42m40s procs=1 retries=0
+[18:39:39Z] OK   gemma-4-E4B-it floored=0.6166 nofloor=0.6143 wall=43m
+[18:39:39Z] --- granite-4.1-3b  unsloth/granite-4.1-3b-GGUF:UD-Q4_K_XL
+[18:39:45Z] sizing: starting one server to measure resident VRAM
+[18:40:46Z]   one instance uses 3070 MiB of 16303 MiB
+[18:40:46Z]   -> running 1 processes, cache-ram 1024 MiB each
+[18:40:47Z]   all 1 servers up; VRAM now 3070 MiB
+[18:40:47Z] START granite-4.1-3b across 1 shards
+merged 1001 rows, 0 missing
+[18:42:58Z] DONE granite-4.1-3b rows=1001/1001 wall=2m11s procs=1 retries=0
+[18:43:04Z] OK   granite-4.1-3b floored=? nofloor=? wall=3m
+[18:43:04Z] --- gemma-3n-E4B-it  unsloth/gemma-3n-E4B-it-GGUF:UD-Q4_K_XL
+[18:43:10Z] sizing: starting one server to measure resident VRAM
+[18:50:30Z]   one instance uses 3414 MiB of 16303 MiB
+[18:50:30Z]   -> running 1 processes, cache-ram 1024 MiB each
+[18:50:30Z]   all 1 servers up; VRAM now 3414 MiB
+[18:50:30Z] START gemma-3n-E4B-it across 1 shards

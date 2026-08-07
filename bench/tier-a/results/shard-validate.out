@@ -1,0 +1,16 @@
+[20:08:20Z]   n=1: 203s
+[20:11:17Z]   n=2: 137s
+[20:14:07Z]   n=3: 114s
+[20:17:09Z]   n=4: 110s
+
+EQUIVALENCE: merged N-shard output vs single process
+
+  shards    identical    wall  speedup
+       1      120/120    203s    1.00x
+       2       96/120    137s    1.48x
+       3       93/120    114s    1.78x
+       4       89/120    110s    1.85x
+
+SHARDING CHANGES OUTPUT: sharded arms are a separate configuration and can
+only be compared to each other, not to today's single-process arms.
+[20:17:14Z] === VALIDATION DONE ===

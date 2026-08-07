@@ -20,11 +20,32 @@
 # notes it is roughly +/- 0.03.
 #
 # Runs on the 5080 in CT 140, which is idle while the XTX works the 10k quant
-# ladder. Deliberately uses run_hf.py with stock defaults -- bfloat16, greedy,
-# max_new_tokens 512, thinking left to the model's own chat template -- because
-# that is exactly how the original table was produced. A faster runtime would be
-# a different configuration, and configuration changes move this benchmark by
-# more than the effects it is measuring.
+# ladder. Uses run_hf.py at bfloat16, greedy -- the runtime the original table
+# used, because a faster runtime is a different configuration and this benchmark
+# moves more between configurations than between the models it compares.
+#
+# THINKING IS SENT EXPLICITLY, and this is not a preference.
+#
+# The first attempt at this sweep left --thinking unset and produced
+# gemma-4-E2B at 0.4841 unfloored, against 0.6138 for the same model on the same
+# 1001 notes through llama.cpp. bf16 scoring 0.13 BELOW Q4 is backwards, and the
+# cause was in every row: reasoning_chars > 0 in 0 of 1001, median completion 32
+# tokens.
+#
+# Both families default thinking OFF in the chat template -- gemma-4 resolves
+# `enable_thinking | default(false)` -- so an unset flag is a choice, not a
+# neutral position. Production sends the field explicitly and defaults it ON
+# (src/provider_client.c:71, asserted in test_provider_client.c:45), and every
+# llama.cpp arm in this campaign passes --thinking. Leaving it unset measures a
+# configuration nobody ships and nothing else in the series uses.
+#
+# max_new_tokens rises to 8192 with it. 512 was "ample for this schema" when
+# the median completion was 32 tokens; with reasoning restored the median is
+# nearer 390 and 512 would truncate the tail. 8192 is the production cap.
+# Truncation is checked below rather than assumed away.
+#
+# The thinking-off attempt is kept under results/v5-rerun/quarantine-thinking-off
+# rather than deleted. It is a valid measurement of the wrong configuration.
 #
 # Model order front-loads the claims most at risk: the E2B / granite-4.0-1b
 # near-tie first, then the incumbent, then the rest.
@@ -57,7 +78,8 @@ for M in $MODELS; do
   if [ -s "$PRED" ] && [ "$(wc -l < "$PRED")" -ge "$EXPECT" ]; then say "SKIP $M (banked)"; continue; fi
   say "--- $M"
   t0=$(date +%s)
-  if ! $PY harness/run_hf.py --model "$M" --gold "$GOLD" --out "$PRED" >"$LOG" 2>&1; then
+  if ! $PY harness/run_hf.py --model "$M" --gold "$GOLD" --out "$PRED" \
+         --thinking --max-new-tokens 8192 >"$LOG" 2>&1; then
     say "FAIL $M -> $(tail -3 "$LOG" | tr '\n' ' ' | cut -c1-160)"
     # A partial file would be silently treated as banked by the SKIP above.
     mv -f "$PRED" "$PRED.failed.$(date -u +%Y%m%dT%H%M%SZ)" 2>/dev/null
@@ -76,6 +98,20 @@ print(sum(1 for l in open(sys.argv[1]) if json.loads(l).get('error')))" "$PRED" 
     continue
   fi
 
+  # Thinking was requested. Whether it happened is a separate fact, and the
+  # whole campaign exists because nobody checked it for 10,000 notes. Not every
+  # model here has a reasoning channel, so zero is reported loudly rather than
+  # treated as failure -- but no number leaves this loop without its reasoning
+  # and truncation counts attached.
+  reasoned=$($PY -c "
+import json,sys
+print(sum(1 for l in open(sys.argv[1]) if (json.loads(l).get('reasoning_chars') or 0) > 0))" "$PRED" 2>/dev/null || echo 0)
+  trunc=$($PY -c "
+import json,sys
+print(sum(1 for l in open(sys.argv[1]) if json.loads(l).get('truncated')))" "$PRED" 2>/dev/null || echo 0)
+  [ "${reasoned:-0}" -eq 0 ] && say "  WARNING $M: --thinking sent, 0/$got rows reasoned. Either this model has no reasoning channel or the flag did not take. Do not compare it to a run that reasoned."
+  [ "${trunc:-0}" -gt $(( got / 100 )) ] && say "  WARNING $M: $trunc/$got truncated at 8192 tokens; the tail is being cut."
+
   # Two views of one run, as the original sweep did: what production commits,
   # and the same extraction with the confidence floor lifted. Article 1 quotes
   # the unfloored figure, because the floor zeroed four models that were not
@@ -88,6 +124,6 @@ print(sum(1 for l in open(sys.argv[1]) if json.loads(l).get('error')))" "$PRED" 
 import json;print('%.4f'%json.load(open('$OUT/$SLUG.score.json'))['strict']['f1'])" 2>/dev/null || echo "?")
   nf=$($PY -c "
 import json;print('%.4f'%json.load(open('$OUT/$SLUG.score.nofloor.json'))['strict']['f1'])" 2>/dev/null || echo "?")
-  say "OK   $M floored=$f1 nofloor=$nf wall=$(( (t1-t0)/60 ))m"
+  say "OK   $M floored=$f1 nofloor=$nf reasoned=$reasoned/$got trunc=$trunc wall=$(( (t1-t0)/60 ))m"
 done
 say "=== V5 RERUN COMPLETE ==="

@@ -1,0 +1,6 @@
+[18:29:31Z] sizing: starting one server to measure resident VRAM
+[18:54:28Z]   one instance uses  MiB of 24560 MiB
+[18:54:28Z]   -> running 1 processes, cache-ram 1024 MiB each
+[18:54:28Z]   all 1 servers up; VRAM now  MiB
+[18:54:28Z] START gemma-4-31B-it.nonqat.mid3k across 1 shards
+[02:46:24Z] DONE gemma-4-31B-it.nonqat.mid3k rows=3002/3002 wall=471m56s procs=1 retries=0

@@ -1,0 +1,30 @@
+[21:03:24Z] overnight 10k: E2B x4 on the 5080, E4B x3 on the XTX, in parallel
+[21:03:24Z] [5080] START E2B.UD-Q4_K_XL.10k (4 shards)
+[21:03:24Z] [xtx] START E4B.UD-Q4_K_XL.10k (3 shards)
+[21:43:51Z] [5080] FAIL E2B.UD-Q4_K_XL.10k rows=0
+[21:43:51Z] [5080] START E2B.UD-Q6_K_XL.10k (4 shards)
+[22:24:18Z] [5080] FAIL E2B.UD-Q6_K_XL.10k rows=0
+[22:24:18Z] [5080] START E2B.UD-Q8_K_XL.10k (4 shards)
+[23:04:45Z] [5080] FAIL E2B.UD-Q8_K_XL.10k rows=0
+[23:04:45Z] [5080] === DONE ===
+[23:56:43Z] [xtx] OK E4B.UD-Q4_K_XL.10k rows=10000 strictF1=0.6324
+[23:56:43Z] [xtx] START E4B.UD-Q6_K_XL.10k (3 shards)
+[02:45:17Z] [xtx] OK E4B.UD-Q6_K_XL.10k rows=10000 strictF1=0.6450
+[02:45:17Z] [xtx] START E4B.UD-Q8_K_XL.10k (3 shards)
+[05:25:29Z] [5080] START E2B.UD-Q4_K_XL.10k (4 shards)
+[06:15:23Z] overnight 10k: E2B x4 on the 5080, E4B x3 on the XTX, in parallel
+[06:15:23Z] [5080] START E2B.UD-Q4_K_XL.10k (4 shards)
+[06:15:23Z] [xtx] SKIP E4B.UD-Q4_K_XL.10k
+[06:15:23Z] [xtx] SKIP E4B.UD-Q6_K_XL.10k
+[06:15:23Z] [xtx] START E4B.UD-Q8_K_XL.10k (3 shards)
+[06:17:03Z] [xtx] FAIL E4B.UD-Q8_K_XL.10k rows=0
+[06:17:03Z] [xtx] === DONE ===
+[06:17:33Z] [5080] FAIL E2B.UD-Q4_K_XL.10k rows=0
+[06:17:33Z] [5080] START E2B.UD-Q6_K_XL.10k (4 shards)
+[06:19:50Z] overnight 10k: E2B x4 on the 5080, E4B x3 on the XTX, in parallel
+[06:19:50Z] [5080] START E2B.UD-Q4_K_XL.10k (4 shards)
+[06:19:50Z] [xtx] SKIP E4B.UD-Q4_K_XL.10k
+[06:19:50Z] [xtx] SKIP E4B.UD-Q6_K_XL.10k
+[06:19:50Z] [xtx] START E4B.UD-Q8_K_XL.10k (3 shards)
+[06:29:30Z] [5080] OK E2B.UD-Q4_K_XL.10k rows=10000 strictF1=scorer-refused
+[06:29:30Z] [5080] START E2B.UD-Q6_K_XL.10k (4 shards)

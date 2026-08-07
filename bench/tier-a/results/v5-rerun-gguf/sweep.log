@@ -1,0 +1,10 @@
+[17:16:26Z] === v5 re-run (GGUF, 5080): 6 models, 1001 notes, 1 proc, no MTP, UD-Q4_K_XL
+[17:16:26Z] --- gemma-4-E2B-it  unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL
+[17:51:50Z] OK   gemma-4-E2B-it floored=0.6017 nofloor=0.6010 wall=35m
+[17:51:50Z] --- granite-4.0-1b  unsloth/granite-4.0-1b-GGUF:UD-Q4_K_XL
+[17:56:30Z] OK   granite-4.0-1b floored=? nofloor=? wall=4m
+[17:56:30Z] --- gemma-4-E4B-it  unsloth/gemma-4-E4B-it-GGUF:UD-Q4_K_XL
+[18:39:39Z] OK   gemma-4-E4B-it floored=0.6166 nofloor=0.6143 wall=43m
+[18:39:39Z] --- granite-4.1-3b  unsloth/granite-4.1-3b-GGUF:UD-Q4_K_XL
+[18:43:04Z] OK   granite-4.1-3b floored=? nofloor=? wall=3m
+[18:43:04Z] --- gemma-3n-E4B-it  unsloth/gemma-3n-E4B-it-GGUF:UD-Q4_K_XL

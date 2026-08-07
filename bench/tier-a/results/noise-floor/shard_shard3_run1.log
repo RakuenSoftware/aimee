@@ -1,0 +1,6 @@
+[13:08:17Z] sizing: starting one server to measure resident VRAM
+[13:08:48Z]   one instance uses 2082 MiB of 16303 MiB
+[13:08:48Z]   -> running 3 processes
+[13:09:51Z]   all 3 servers up; VRAM now 6236 MiB
+[13:09:51Z] START shard3_run1 across 3 shards
+[13:28:39Z] DONE shard3_run1 rows=1001/1001 wall=18m48s procs=3

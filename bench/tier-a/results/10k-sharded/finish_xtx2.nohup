@@ -1,0 +1,8 @@
+[13:10:48Z] === XTX-only finish: 4 arms, 10000 notes each
+[13:10:48Z] SKIP E4B.UD-Q8_K_XL.10k (banked)
+[13:10:48Z] --- E2B.UD-Q4_K_XL.10k  nproc=4  port=8400
+[13:10:53Z] sizing: starting one server to measure resident VRAM
+[13:11:09Z]   one instance uses  MiB of 24560 MiB
+[13:11:09Z]   -> running 4 processes
+[13:11:59Z]   all 4 servers up; VRAM now  MiB
+[13:11:59Z] START E2B.UD-Q4_K_XL.10k across 4 shards

@@ -1,0 +1,13 @@
+[20:23:03Z]   mtp_a: 109s
+[20:26:03Z]   mtp_b: 109s
+[20:31:11Z]   plain_a: 238s
+[20:36:18Z]   plain_b: 237s
+
+4 shards, run vs run (the bar that matters)
+
+  with MTP    : 120/120
+  without MTP : 120/120
+
+Both repeatable. Sharding is usable as its own configuration, and MTP
+composes with it.
+[20:36:24Z] === SHARD REPEATABILITY DONE ===

@@ -1,0 +1,12 @@
+[10:43:33Z] sizing: starting one server to measure resident VRAM
+[10:54:57Z] sizing: starting one server to measure resident VRAM
+[10:55:09Z]   one instance uses 7744 MiB of 16303 MiB
+[10:55:09Z]   -> running 1 processes, cache-ram 1024 MiB each
+[10:55:09Z]   all 1 servers up; VRAM now 7744 MiB
+[10:55:09Z] START gemma-4-12B-it.qat.mid3k across 1 shards
+[10:55:13Z]   one instance uses 7758 MiB of 16303 MiB
+[10:55:13Z]   -> running 1 processes, cache-ram 1024 MiB each
+[10:55:13Z]   all 1 servers up; VRAM now 7758 MiB
+[10:55:13Z] START gemma-4-12B-it.qat.mid3k across 1 shards
+[22:38:09Z] FAIL gemma-4-12B-it.qat.mid3k: merge rejected (see above), discarding
+[22:39:10Z] FAIL gemma-4-12B-it.qat.mid3k: merge rejected (see above), discarding

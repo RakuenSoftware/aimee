@@ -1,0 +1,223 @@
+[10:02:23Z] waiting for noise_floor to finish
+[10:02:23Z] noise_floor done
+[10:02:23Z] starting quant ledger rebuild
+[10:02:23Z] === quant ledger rebuild on the 5080
+[10:02:23Z] --- gold70.E2B.UD-Q4_K_XL  (70 notes, 3 procs)
+[10:02:29Z] sizing: starting one server to measure resident VRAM
+[10:03:00Z]   one instance uses 2082 MiB of 16303 MiB
+[10:03:00Z]   -> running 3 processes
+[10:04:03Z]   all 3 servers up; VRAM now 6236 MiB
+[10:04:03Z] START gold70.E2B.UD-Q4_K_XL across 3 shards
+merged 70 rows, 0 missing
+[10:05:11Z] DONE gold70.E2B.UD-Q4_K_XL rows=70/70 wall=1m8s procs=3
+[10:05:17Z] OK   gold70.E2B.UD-Q4_K_XL strictF1=0.6714
+[10:05:17Z]   committed gold70.E2B.UD-Q4_K_XL
+[10:05:17Z] --- gold70.E2B.UD-Q6_K_XL  (70 notes, 3 procs)
+[10:05:23Z] sizing: starting one server to measure resident VRAM
+[10:05:55Z]   one instance uses 2698 MiB of 16303 MiB
+[10:05:55Z]   -> running 3 processes
+[10:06:57Z]   all 3 servers up; VRAM now 8084 MiB
+[10:06:57Z] START gold70.E2B.UD-Q6_K_XL across 3 shards
+merged 70 rows, 0 missing
+[10:08:15Z] DONE gold70.E2B.UD-Q6_K_XL rows=70/70 wall=1m18s procs=3
+[10:08:21Z] OK   gold70.E2B.UD-Q6_K_XL strictF1=0.6569
+[10:08:21Z]   committed gold70.E2B.UD-Q6_K_XL
+[10:08:21Z] --- gold70.E2B.UD-Q8_K_XL  (70 notes, 3 procs)
+[10:08:27Z] sizing: starting one server to measure resident VRAM
+[10:08:59Z]   one instance uses 3244 MiB of 16303 MiB
+[10:08:59Z]   -> running 3 processes
+[10:10:01Z]   all 3 servers up; VRAM now 9722 MiB
+[10:10:01Z] START gold70.E2B.UD-Q8_K_XL across 3 shards
+merged 70 rows, 0 missing
+[10:11:33Z] DONE gold70.E2B.UD-Q8_K_XL rows=70/70 wall=1m31s procs=3
+[10:11:39Z] OK   gold70.E2B.UD-Q8_K_XL strictF1=0.6475
+[10:11:39Z]   committed gold70.E2B.UD-Q8_K_XL
+[10:11:39Z] --- gold70.E4B.UD-Q4_K_XL  (70 notes, 2 procs)
+[10:11:45Z] sizing: starting one server to measure resident VRAM
+[10:12:16Z]   one instance uses 3726 MiB of 16303 MiB
+[10:12:16Z]   -> running 2 processes
+[10:12:47Z]   all 2 servers up; VRAM now 7447 MiB
+[10:12:47Z] START gold70.E4B.UD-Q4_K_XL across 2 shards
+merged 70 rows, 0 missing
+[10:13:59Z] DONE gold70.E4B.UD-Q4_K_XL rows=70/70 wall=1m12s procs=2
+[10:14:05Z] OK   gold70.E4B.UD-Q4_K_XL strictF1=0.7083
+[10:14:05Z]   committed gold70.E4B.UD-Q4_K_XL
+[10:14:05Z] --- gold70.E4B.UD-Q6_K_XL  (70 notes, 2 procs)
+[10:14:11Z] sizing: starting one server to measure resident VRAM
+[10:14:42Z]   one instance uses 4942 MiB of 16303 MiB
+[10:14:42Z]   -> running 2 processes
+[10:15:14Z]   all 2 servers up; VRAM now 9879 MiB
+[10:15:14Z] START gold70.E4B.UD-Q6_K_XL across 2 shards
+merged 70 rows, 0 missing
+[10:16:18Z] DONE gold70.E4B.UD-Q6_K_XL rows=70/70 wall=1m4s procs=2
+[10:16:24Z] OK   gold70.E4B.UD-Q6_K_XL strictF1=0.7660
+[10:16:24Z]   committed gold70.E4B.UD-Q6_K_XL
+[10:16:24Z] --- gold70.E4B.UD-Q8_K_XL  (70 notes, 2 procs)
+[10:16:30Z] sizing: starting one server to measure resident VRAM
+[10:17:01Z]   one instance uses 6138 MiB of 16303 MiB
+[10:17:01Z]   -> running 2 processes
+[10:17:32Z]   all 2 servers up; VRAM now 12271 MiB
+[10:17:32Z] START gold70.E4B.UD-Q8_K_XL across 2 shards
+merged 70 rows, 0 missing
+[10:18:59Z] DONE gold70.E4B.UD-Q8_K_XL rows=70/70 wall=1m27s procs=2
+[10:19:05Z] OK   gold70.E4B.UD-Q8_K_XL strictF1=0.7324
+[10:19:05Z]   committed gold70.E4B.UD-Q8_K_XL
+[10:19:05Z] --- v5small.E2B.UD-Q4_K_XL  (1001 notes, 3 procs)
+[10:19:11Z] sizing: starting one server to measure resident VRAM
+[10:19:43Z]   one instance uses 2082 MiB of 16303 MiB
+[10:19:43Z]   -> running 3 processes
+[10:20:45Z]   all 3 servers up; VRAM now 6236 MiB
+[10:20:45Z] START v5small.E2B.UD-Q4_K_XL across 3 shards
+merged 1001 rows, 0 missing
+[10:39:33Z] DONE v5small.E2B.UD-Q4_K_XL rows=1001/1001 wall=18m48s procs=3
+[10:39:39Z] OK   v5small.E2B.UD-Q4_K_XL strictF1=0.6138
+[10:39:39Z]   committed v5small.E2B.UD-Q4_K_XL
+[10:39:39Z] --- v5small.E2B.UD-Q6_K_XL  (1001 notes, 3 procs)
+[10:39:45Z] sizing: starting one server to measure resident VRAM
+[10:40:16Z]   one instance uses 2698 MiB of 16303 MiB
+[10:40:16Z]   -> running 3 processes
+[10:41:19Z]   all 3 servers up; VRAM now 8084 MiB
+[10:41:19Z] START v5small.E2B.UD-Q6_K_XL across 3 shards
+merged 1001 rows, 0 missing
+[11:02:31Z] DONE v5small.E2B.UD-Q6_K_XL rows=1001/1001 wall=21m12s procs=3
+[11:02:37Z] OK   v5small.E2B.UD-Q6_K_XL strictF1=0.6138
+[11:02:38Z]   committed v5small.E2B.UD-Q6_K_XL
+[11:02:38Z] --- v5small.E4B.UD-Q4_K_XL  (1001 notes, 2 procs)
+[11:02:43Z] sizing: starting one server to measure resident VRAM
+[11:03:15Z]   one instance uses 3726 MiB of 16303 MiB
+[11:03:15Z]   -> running 2 processes
+[11:03:46Z]   all 2 servers up; VRAM now 7447 MiB
+[11:03:46Z] START v5small.E4B.UD-Q4_K_XL across 2 shards
+merged 1001 rows, 0 missing
+[11:22:50Z] DONE v5small.E4B.UD-Q4_K_XL rows=1001/1001 wall=19m3s procs=2
+[11:22:56Z] OK   v5small.E4B.UD-Q4_K_XL strictF1=0.6202
+[11:22:56Z]   committed v5small.E4B.UD-Q4_K_XL
+[11:22:56Z] --- v5small.E4B.UD-Q6_K_XL  (1001 notes, 2 procs)
+[11:23:02Z] sizing: starting one server to measure resident VRAM
+[11:23:33Z]   one instance uses 4942 MiB of 16303 MiB
+[11:23:33Z]   -> running 2 processes
+[11:24:04Z]   all 2 servers up; VRAM now 9879 MiB
+[11:24:04Z] START v5small.E4B.UD-Q6_K_XL across 2 shards
+merged 1001 rows, 0 missing
+[11:42:00Z] DONE v5small.E4B.UD-Q6_K_XL rows=1001/1001 wall=17m55s procs=2
+[11:42:06Z] OK   v5small.E4B.UD-Q6_K_XL strictF1=0.6396
+[11:42:06Z]   committed v5small.E4B.UD-Q6_K_XL
+[11:42:06Z] --- v3small.E2B.UD-Q4_K_XL  (1001 notes, 3 procs)
+[11:42:12Z] sizing: starting one server to measure resident VRAM
+[11:42:43Z]   one instance uses 2082 MiB of 16303 MiB
+[11:42:43Z]   -> running 3 processes
+[11:43:46Z]   all 3 servers up; VRAM now 6236 MiB
+[11:43:46Z] START v3small.E2B.UD-Q4_K_XL across 3 shards
+merged 1001 rows, 0 missing
+[12:02:56Z] DONE v3small.E2B.UD-Q4_K_XL rows=1001/1001 wall=19m9s procs=3
+[12:03:02Z] OK   v3small.E2B.UD-Q4_K_XL strictF1=0.5530
+[12:03:02Z]   committed v3small.E2B.UD-Q4_K_XL
+[12:03:02Z] --- v3small.E2B.UD-Q6_K_XL  (1001 notes, 3 procs)
+[12:03:08Z] sizing: starting one server to measure resident VRAM
+[12:03:39Z]   one instance uses 2698 MiB of 16303 MiB
+[12:03:39Z]   -> running 3 processes
+[12:04:42Z]   all 3 servers up; VRAM now 8084 MiB
+[12:04:42Z] START v3small.E2B.UD-Q6_K_XL across 3 shards
+merged 1001 rows, 0 missing
+[12:26:27Z] DONE v3small.E2B.UD-Q6_K_XL rows=1001/1001 wall=21m45s procs=3
+[12:26:33Z] OK   v3small.E2B.UD-Q6_K_XL strictF1=0.5832
+[12:26:34Z]   committed v3small.E2B.UD-Q6_K_XL
+[12:26:34Z] --- v3small.E4B.UD-Q4_K_XL  (1001 notes, 2 procs)
+[12:26:40Z] sizing: starting one server to measure resident VRAM
+[12:27:11Z]   one instance uses 3726 MiB of 16303 MiB
+[12:27:11Z]   -> running 2 processes
+[12:27:42Z]   all 2 servers up; VRAM now 7447 MiB
+[12:27:42Z] START v3small.E4B.UD-Q4_K_XL across 2 shards
+merged 1001 rows, 0 missing
+[12:47:48Z] DONE v3small.E4B.UD-Q4_K_XL rows=1001/1001 wall=20m6s procs=2
+[12:47:54Z] OK   v3small.E4B.UD-Q4_K_XL strictF1=0.5770
+[12:47:54Z]   committed v3small.E4B.UD-Q4_K_XL
+[12:47:54Z] --- v3small.E4B.UD-Q6_K_XL  (1001 notes, 2 procs)
+[12:48:00Z] sizing: starting one server to measure resident VRAM
+[12:48:32Z]   one instance uses 4942 MiB of 16303 MiB
+[12:48:32Z]   -> running 2 processes
+[12:49:03Z]   all 2 servers up; VRAM now 9879 MiB
+[12:49:03Z] START v3small.E4B.UD-Q6_K_XL across 2 shards
+merged 1001 rows, 0 missing
+[13:08:05Z] DONE v3small.E4B.UD-Q6_K_XL rows=1001/1001 wall=19m2s procs=2
+[13:08:11Z] OK   v3small.E4B.UD-Q6_K_XL strictF1=0.5815
+[13:08:11Z]   committed v3small.E4B.UD-Q6_K_XL
+[13:08:11Z] === ledger: every pair that now has BOTH halves under one config
+  gold70    E2B  Q4=0.6714 Q6=0.6569  delta=-0.0145  -
+  gold70    E4B  Q4=0.7083 Q6=0.7660  delta=+0.0577  +
+  v3small   E2B  Q4=0.5530 Q6=0.5832  delta=+0.0302  +
+  v3small   E4B  Q4=0.5770 Q6=0.5815  delta=+0.0045  +
+  v5small   E2B  Q4=0.6138 Q6=0.6138  delta=+0.0000  -
+  v5small   E4B  Q4=0.6202 Q6=0.6396  delta=+0.0194  +
+
+  4/6 pairs positive, from THIS run alone
+[13:08:11Z] === REBUILD COMPLETE ===
+[13:08:11Z] chain complete
+[13:08:11Z] starting noise floor
+[13:08:11Z] === noise floor: same arm, repeated
+[13:08:11Z] --- shard3_run1 (3 proc)
+[13:08:17Z] sizing: starting one server to measure resident VRAM
+[13:08:48Z]   one instance uses 2082 MiB of 16303 MiB
+[13:08:48Z]   -> running 3 processes
+[13:09:51Z]   all 3 servers up; VRAM now 6236 MiB
+[13:09:51Z] START shard3_run1 across 3 shards
+merged 1001 rows, 0 missing
+[13:28:39Z] DONE shard3_run1 rows=1001/1001 wall=18m48s procs=3
+[13:28:46Z] OK   shard3_run1 strictF1=0.6138
+[13:28:46Z]   committed shard3_run1
+[13:28:46Z] --- shard3_run2 (3 proc)
+[13:28:52Z] sizing: starting one server to measure resident VRAM
+[13:29:23Z]   one instance uses 2082 MiB of 16303 MiB
+[13:29:23Z]   -> running 3 processes
+[13:30:26Z]   all 3 servers up; VRAM now 6236 MiB
+[13:30:26Z] START shard3_run2 across 3 shards
+merged 1001 rows, 0 missing
+[13:49:14Z] DONE shard3_run2 rows=1001/1001 wall=18m48s procs=3
+[13:49:20Z] OK   shard3_run2 strictF1=0.6138
+[13:49:20Z]   committed shard3_run2
+[13:49:20Z] --- single_run1 (1 proc)
+[13:49:26Z] sizing: starting one server to measure resident VRAM
+[13:49:57Z]   one instance uses 2082 MiB of 16303 MiB
+[13:49:57Z]   -> running 1 processes
+[13:49:57Z]   all 1 servers up; VRAM now 2082 MiB
+[13:49:57Z] START single_run1 across 1 shards
+merged 1001 rows, 0 missing
+[14:12:27Z] DONE single_run1 rows=1001/1001 wall=22m30s procs=1
+[14:12:34Z] OK   single_run1 strictF1=0.6033
+[14:12:34Z]   committed single_run1
+[14:12:34Z] --- single_run2 (1 proc)
+[14:12:40Z] sizing: starting one server to measure resident VRAM
+[14:13:11Z]   one instance uses 2082 MiB of 16303 MiB
+[14:13:11Z]   -> running 1 processes
+[14:13:11Z]   all 1 servers up; VRAM now 2082 MiB
+[14:13:11Z] START single_run2 across 1 shards
+merged 1001 rows, 0 missing
+[14:35:34Z] DONE single_run2 rows=1001/1001 wall=22m22s procs=1
+[14:35:40Z] OK   single_run2 strictF1=0.6033
+[14:35:40Z]   committed single_run2
+[14:35:40Z] === comparison
+
+  strict F1 per run:
+    shard3_run1      0.6138
+    shard3_run2      0.6138
+    single_run1      0.6033
+    single_run2      0.6033
+
+  pairwise raw identity:
+    ledger_3srv      vs shard3_run1       raw 1001/1001  facts 1001/1001
+    ledger_3srv      vs shard3_run2       raw 1001/1001  facts 1001/1001
+    ledger_3srv      vs single_run1       raw  652/1001  facts  794/1001
+    ledger_3srv      vs single_run2       raw  652/1001  facts  794/1001
+    ledger_3srv      vs v8baseline_1srv   raw  645/1001  facts  794/1001
+    shard3_run1      vs shard3_run2       raw 1001/1001  facts 1001/1001
+    shard3_run1      vs single_run1       raw  652/1001  facts  794/1001
+    shard3_run1      vs single_run2       raw  652/1001  facts  794/1001
+    shard3_run1      vs v8baseline_1srv   raw  645/1001  facts  794/1001
+    shard3_run2      vs single_run1       raw  652/1001  facts  794/1001
+    shard3_run2      vs single_run2       raw  652/1001  facts  794/1001
+    shard3_run2      vs v8baseline_1srv   raw  645/1001  facts  794/1001
+    single_run1      vs single_run2       raw 1001/1001  facts 1001/1001
+    single_run1      vs v8baseline_1srv   raw  688/1001  facts  805/1001
+    single_run2      vs v8baseline_1srv   raw  688/1001  facts  805/1001
+[14:35:40Z] === NOISE FLOOR DONE ===
+[14:35:40Z] noise floor complete

@@ -1,0 +1,80 @@
+[08:47:57Z] === quant ledger rebuild on the 5080
+[08:47:57Z] SKIP gold70.E2B.UD-Q4_K_XL
+[08:47:57Z] --- gold70.E2B.UD-Q6_K_XL  (70 notes, 3 procs)
+[08:48:03Z] sizing: starting one server to measure resident VRAM
+[08:48:34Z]   one instance uses 9786 MiB of 16303 MiB
+[08:48:34Z]   -> running 3 processes
+[08:48:36Z]   all 3 servers up; VRAM now 9786 MiB
+[08:48:36Z] START gold70.E2B.UD-Q6_K_XL across 3 shards
+merged 70 rows, 0 missing
+[08:49:48Z] DONE gold70.E2B.UD-Q6_K_XL rows=70/70 wall=1m12s procs=3
+[08:49:54Z] OK   gold70.E2B.UD-Q6_K_XL strictF1=0.6667
+[08:49:54Z]   committed gold70.E2B.UD-Q6_K_XL
+[08:49:54Z] --- gold70.E2B.UD-Q8_K_XL  (70 notes, 3 procs)
+[08:50:00Z] sizing: starting one server to measure resident VRAM
+[08:50:31Z]   one instance uses 7558 MiB of 16303 MiB
+[08:50:31Z]   -> running 3 processes
+[08:50:32Z]   all 3 servers up; VRAM now 7558 MiB
+[08:50:32Z] START gold70.E2B.UD-Q8_K_XL across 3 shards
+merged 70 rows, 0 missing
+[08:51:50Z] DONE gold70.E2B.UD-Q8_K_XL rows=70/70 wall=1m18s procs=3
+[08:51:56Z] OK   gold70.E2B.UD-Q8_K_XL strictF1=0.6619
+[08:51:56Z]   committed gold70.E2B.UD-Q8_K_XL
+[08:51:56Z] --- gold70.E4B.UD-Q4_K_XL  (70 notes, 2 procs)
+[08:52:02Z] sizing: starting one server to measure resident VRAM
+[08:52:34Z]   one instance uses 8040 MiB of 16303 MiB
+[08:52:34Z]   -> running 2 processes
+[08:52:35Z]   all 2 servers up; VRAM now 8040 MiB
+[08:52:35Z] START gold70.E4B.UD-Q4_K_XL across 2 shards
+merged 70 rows, 0 missing
+[08:53:44Z] DONE gold70.E4B.UD-Q4_K_XL rows=70/70 wall=1m9s procs=2
+[08:53:50Z] OK   gold70.E4B.UD-Q4_K_XL strictF1=0.6429
+[08:53:50Z]   committed gold70.E4B.UD-Q4_K_XL
+[08:53:50Z] --- gold70.E4B.UD-Q6_K_XL  (70 notes, 2 procs)
+[08:53:56Z] sizing: starting one server to measure resident VRAM
+[08:54:27Z]   one instance uses 9256 MiB of 16303 MiB
+[08:54:27Z]   -> running 2 processes
+[08:54:28Z]   all 2 servers up; VRAM now 9256 MiB
+[08:54:28Z] START gold70.E4B.UD-Q6_K_XL across 2 shards
+merged 70 rows, 0 missing
+[08:55:36Z] DONE gold70.E4B.UD-Q6_K_XL rows=70/70 wall=1m8s procs=2
+[08:55:42Z] OK   gold70.E4B.UD-Q6_K_XL strictF1=0.7101
+[08:55:42Z]   committed gold70.E4B.UD-Q6_K_XL
+[08:55:42Z] --- gold70.E4B.UD-Q8_K_XL  (70 notes, 2 procs)
+[08:55:48Z] sizing: starting one server to measure resident VRAM
+[08:56:19Z]   one instance uses 10452 MiB of 16303 MiB
+[08:56:19Z]   -> running 2 processes
+[08:56:20Z]   all 2 servers up; VRAM now 10452 MiB
+[08:56:20Z] START gold70.E4B.UD-Q8_K_XL across 2 shards
+merged 70 rows, 0 missing
+[08:57:38Z] DONE gold70.E4B.UD-Q8_K_XL rows=70/70 wall=1m18s procs=2
+[08:57:43Z] OK   gold70.E4B.UD-Q8_K_XL strictF1=0.6957
+[08:57:44Z]   committed gold70.E4B.UD-Q8_K_XL
+[08:57:44Z] --- v5small.E2B.UD-Q4_K_XL  (1001 notes, 3 procs)
+[08:57:49Z] sizing: starting one server to measure resident VRAM
+[08:58:21Z]   one instance uses 6396 MiB of 16303 MiB
+[08:58:21Z]   -> running 3 processes
+[08:58:22Z]   all 3 servers up; VRAM now 6396 MiB
+[08:58:22Z] START v5small.E2B.UD-Q4_K_XL across 3 shards
+merged 1001 rows, 0 missing
+[09:17:04Z] DONE v5small.E2B.UD-Q4_K_XL rows=1001/1001 wall=18m42s procs=3
+[09:17:10Z] OK   v5small.E2B.UD-Q4_K_XL strictF1=0.6213
+[09:17:10Z]   committed v5small.E2B.UD-Q4_K_XL
+[09:17:10Z] --- v5small.E2B.UD-Q6_K_XL  (1001 notes, 3 procs)
+[09:17:16Z] sizing: starting one server to measure resident VRAM
+[09:17:47Z]   one instance uses 7016 MiB of 16303 MiB
+[09:17:47Z]   -> running 3 processes
+[09:17:49Z]   all 3 servers up; VRAM now 7016 MiB
+[09:17:49Z] START v5small.E2B.UD-Q6_K_XL across 3 shards
+merged 1001 rows, 0 missing
+[09:37:24Z] DONE v5small.E2B.UD-Q6_K_XL rows=1001/1001 wall=19m35s procs=3
+[09:37:30Z] OK   v5small.E2B.UD-Q6_K_XL strictF1=0.6174
+[09:37:30Z]   committed v5small.E2B.UD-Q6_K_XL
+[09:37:30Z] --- v5small.E4B.UD-Q4_K_XL  (1001 notes, 2 procs)
+[09:37:36Z] sizing: starting one server to measure resident VRAM
+[09:38:07Z]   one instance uses 8044 MiB of 16303 MiB
+[09:38:07Z]   -> running 2 processes
+[09:38:08Z]   all 2 servers up; VRAM now 8044 MiB
+[09:38:08Z] START v5small.E4B.UD-Q4_K_XL across 2 shards
+merged 1001 rows, 0 missing
+[09:54:24Z] FAIL v5small.E4B.UD-Q4_K_XL: 114 errored rows (11%), discarding

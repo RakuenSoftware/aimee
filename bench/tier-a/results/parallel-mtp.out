@@ -1,0 +1,68 @@
+[15:44:57Z] serving /opt/hf/e4b-q4.gguf with -np 32 -c 98304 and MTP mtp-gemma-4-E4B-it-Q8_0.gguf
+[15:45:14Z] server config + VRAM -> E4B.UD-Q4_K_XL.v8.np32mtp.device.txt
+  total_slots granted: 32
+[15:45:14Z] running 1001 notes at concurrency 32
+[15:55:33Z] wall clock: 10m 19s for 1001 notes
+
+comparing 1001 notes present in both runs (A=1001, B=1001)
+
+sequential (1 in flight)
+   median latency/request     2548 ms
+   median gen tokens           370
+   sum of request time        43.8 min
+32 slots + MTP
+   median latency/request    18715 ms
+   median gen tokens           370
+   sum of request time       322.7 min
+
+   per-request latency ratio  7.35x (slower per request)
+
+fidelity
+   identical raw completions 665/1001  (66.4%)
+   differing token counts    881/1001
+   identical extracted triples 804/1001  (80.3%)
+
+   DIFF g000013
+     sequential (1 in flight): {"facts":[{"subject":"Oakhaven Interactive","relation":"located_in","object":"Leeds","confidence":1.0,"negated":false}]}
+     32 slots + MTP: ```json
+{
+  "facts": [
+    {
+      "subject": "Oakhaven Interactive",
+      "relation": "located_in",
+      "object": "Leeds",
+      "confidence": 1.0
+
+   DIFF g000017
+     sequential (1 in flight): {"facts":[{"subject":"Idris Sorensen","relation":"mentors","object":"junior staff","confidence":1.0,"negated":false}]}
+     32 slots + MTP: ```json
+{
+  "facts": [
+    {
+      "subject": "Idris Sorensen",
+      "relation": "mentors",
+      "object": "junior staff",
+      "confidence": 1.0,
+
+
+   DIFF g000085
+     sequential (1 in flight): ```json
+{
+  "facts": [
+    {
+      "subject": "user",
+      "relation": "works_for",
+      "object": "Cranfield Systems",
+      "confidence": 1.0,
+   
+     32 slots + MTP: ```json
+{
+  "facts": [
+    {
+      "subject": "user",
+      "relation": "works_for",
+      "object": "Cranfield Systems",
+      "confidence": 1.0,
+   
+
+VERDICT: 197 note(s) extract DIFFERENT facts. Runs using this configuration are not comparable to runs that do not.

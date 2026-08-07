@@ -1,0 +1,9 @@
+[13:01:31Z] keeper up for: 8400 8401 8402 8403 -> admin@192.168.1.254
+[14:10:25Z] port 8403 DOWN, remote server alive, rebuilding forward
+[14:10:58Z] port 8403 restored
+[14:37:07Z] port 8400 DOWN, remote server alive, rebuilding forward
+[14:37:39Z] port 8400 restored
+[15:45:17Z] port 8400 DOWN, remote server alive, rebuilding forward
+[15:45:33Z] port 8400 restored
+[18:30:17Z] port 8400 DOWN, remote server alive, rebuilding forward
+[18:30:34Z] port 8400 restored

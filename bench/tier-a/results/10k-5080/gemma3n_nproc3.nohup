@@ -1,0 +1,14 @@
+[07:25:40Z]   quarantined gemma-3n-E4B-it.10k.pred.jsonl
+[07:25:40Z]   quarantined gemma-3n-E4B-it.10k.score.json
+[07:25:40Z] === gemma-3n re-take at NPROC=3 (correcting the nproc=4 arm)
+[07:25:40Z] --- gemma-3n-E4B-it.10k  unsloth/gemma-3n-E4B-it-GGUF:UD-Q4_K_XL  nproc=3  port=8600
+[07:25:46Z] sizing: starting one server to measure resident VRAM
+[07:26:02Z]   one instance uses 3414 MiB of 16303 MiB
+[07:26:02Z]   -> running 3 processes, cache-ram 1024 MiB each
+[07:26:34Z]   all 3 servers up; VRAM now 10232 MiB
+[07:26:34Z] START gemma-3n-E4B-it.10k across 3 shards
+merged 10000 rows, 0 missing
+[08:12:35Z] DONE gemma-3n-E4B-it.10k rows=10000/10000 wall=46m0s procs=3 retries=0
+[08:12:41Z]   thinking guard fired; scoring with --allow-thinking-off
+[08:12:42Z] OK   gemma-3n-E4B-it.10k strictF1=0.5424 wall=47m  nproc=3
+[08:12:42Z] === GEMMA-3N NPROC=3 COMPLETE ===

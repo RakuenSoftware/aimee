@@ -1,0 +1,16 @@
+[10:43:24Z] === 3k QAT pair on the xtx
+[10:43:24Z] --- gemma-4-31B-it.qat.mid3k on xtx, nproc=1, MTP, 3002 notes
+[18:29:25Z] OK gemma-4-31B-it.qat.mid3k F1=0.6867 P=0.5939 R=0.8138 wall=466m
+[18:29:25Z] --- gemma-4-31B-it.nonqat.mid3k on xtx, nproc=1, MTP, 3002 notes
+[02:46:30Z] OK gemma-4-31B-it.nonqat.mid3k F1=0.6857 P=0.5960 R=0.8073 wall=497m
+[02:46:30Z] === paired bootstrap, QAT against non-QAT, n=3002, same card ===
+run                                 F1            95% CI   tp  fp  fn
+nonQAT                          0.6857  [0.6714,0.6998]  2133 1446 509
+QAT                             0.6867  [0.6721,0.7011]  2150 1470 492
+
+Paired deltas vs nonQAT (same notes resampled for both):
+comparison                                  delta              95% CI  verdict
+QAT - nonQAT                               0.0009  [-0.0064,+0.0082]  INDISTINGUISHABLE
+
+n = 3002 notes resampled, 20000 bootstrap replicates.
+[02:47:04Z] === xtx 3k PAIR COMPLETE ===

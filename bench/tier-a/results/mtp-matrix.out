@@ -1,0 +1,41 @@
+[17:58:29Z] waiting for the XTX determinism sweep to finish
+[18:34:29Z] sweep done; starting the speed matrix
+[18:40:10Z]   nomtp_c1: slots=4 speculative=False
+[18:43:46Z]     r1: 216s
+[18:47:44Z]     r2: 217s
+[18:51:41Z]     r3: 216s
+[18:52:03Z]   mtp_c1: slots=4 speculative=True
+[18:53:52Z]     r1: 109s
+[18:56:03Z]     r2: 110s
+[18:58:13Z]     r3: 109s
+      1.59.296.460 I slot print_timing: id  3 | task 7561 | draft acceptance = 0.75325 (  348 accepted /   462 generated), mean len =  3.26
+      2.01.832.821 I slot print_timing: id  3 | task 7720 | draft acceptance = 0.67014 (  386 accepted /   576 generated), mean len =  3.01
+      2.02.909.844 I slot print_timing: id  3 | task 7916 | draft acceptance = 0.76995 (  164 accepted /   213 generated), mean len =  3.31
+      2.05.010.936 I slot print_timing: id  3 | task 7991 | draft acceptance = 0.50932 (  246 accepted /   483 generated), mean len =  2.53
+[18:58:35Z]   nomtp_c32: slots=32 speculative=False
+[18:59:56Z]     r1: 81s
+[19:01:33Z]     r2: 76s
+[19:03:17Z]     r3: 82s
+[19:03:38Z]   mtp_c32: slots=32 speculative=True
+[19:04:50Z]     r1: 72s
+[19:06:22Z]     r2: 71s
+[19:07:51Z]     r3: 68s
+      1.26.163.257 I slot print_timing: id 17 | task 186 | draft acceptance = 0.63531 (  385 accepted /   606 generated), mean len =  2.91
+      1.26.522.405 I slot print_timing: id 13 | task 193 | draft acceptance = 0.79739 (  488 accepted /   612 generated), mean len =  3.39
+      1.27.180.057 I slot print_timing: id 22 | task 217 | draft acceptance = 0.64563 (  399 accepted /   618 generated), mean len =  2.94
+      1.27.706.026 I slot print_timing: id  9 | task 24 | draft acceptance = 0.64750 (  777 accepted /  1200 generated), mean len =  2.94
+
+wall seconds per cell (lower is better)
+
+  cell                             runs   median   spread
+  nomtp_c1              [216, 217, 216]      216       0%
+  mtp_c1                [109, 110, 109]      109       1%
+  nomtp_c32                [81, 76, 82]       81       7%
+  mtp_c32                  [72, 71, 68]       71       6%
+
+  MTP at concurrency 1  : 1.98x
+  MTP at concurrency 32 : 1.14x
+  32 slots, no MTP      : 2.67x
+
+  Speculation still pays at 32 slots. The earlier 'slower' claim was noise.
+[19:07:51Z] === MATRIX DONE ===

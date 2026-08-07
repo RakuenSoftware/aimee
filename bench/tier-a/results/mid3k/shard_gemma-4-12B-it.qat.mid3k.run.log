@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "/home/virant/dev/aimee/.aimee/worktrees/b94c9263-317c099512d045a7/main/bench/tier-a/harness/run_llamacpp.py", line 241, in <module>
+    main()
+    ~~~~^^
+  File "/home/virant/dev/aimee/.aimee/worktrees/b94c9263-317c099512d045a7/main/bench/tier-a/harness/run_llamacpp.py", line 228, in main
+    pending[i] = run_one(r)
+                 ~~~~~~~^^^
+  File "/home/virant/dev/aimee/.aimee/worktrees/b94c9263-317c099512d045a7/main/bench/tier-a/harness/run_llamacpp.py", line 190, in run_one
+    "draft_n": (resp.get("timings") or {}).get("draft_n"),
+                ^^^^
+UnboundLocalError: cannot access local variable 'resp' where it is not associated with a value

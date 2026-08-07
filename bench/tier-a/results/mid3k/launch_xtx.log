@@ -1,0 +1,502 @@
+[10:43:24Z] === 3k QAT pair on the xtx
+[10:43:24Z] --- gemma-4-31B-it.qat.mid3k on xtx, nproc=1, MTP, 3002 notes
+[10:43:29Z] sizing: starting one server to measure resident VRAM
+[10:46:02Z]   one instance uses  MiB of 24560 MiB
+[10:46:02Z]   -> running 1 processes, cache-ram 1024 MiB each
+[10:46:02Z]   all 1 servers up; VRAM now  MiB
+[10:46:02Z] START gemma-4-31B-it.qat.mid3k across 1 shards
+merged 3002 rows, 0 missing
+[18:29:20Z] DONE gemma-4-31B-it.qat.mid3k rows=3002/3002 wall=463m18s procs=1 retries=0
+{
+  "strict": {
+    "precision": 0.5939,
+    "recall": 0.8138,
+    "f1": 0.6867,
+    "tp": 2150,
+    "fp": 1470,
+    "fn": 492,
+    "by_category": {
+      "ambiguous": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 98,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      },
+      "first_person": {
+        "precision": 0.7242,
+        "recall": 0.7539,
+        "f1": 0.7388,
+        "tp": 239,
+        "fp": 91,
+        "fn": 78
+      },
+      "governance": {
+        "precision": 0.5988,
+        "recall": 0.8016,
+        "f1": 0.6855,
+        "tp": 206,
+        "fp": 138,
+        "fn": 51
+      },
+      "implicit": {
+        "precision": 0.4327,
+        "recall": 0.4147,
+        "f1": 0.4235,
+        "tp": 90,
+        "fp": 118,
+        "fn": 127
+      },
+      "infra": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 304,
+        "fp": 0,
+        "fn": 0
+      },
+      "multi_fact": {
+        "precision": 0.6603,
+        "recall": 0.8395,
+        "f1": 0.7392,
+        "tp": 795,
+        "fp": 409,
+        "fn": 152
+      },
+      "negation": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 379,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      },
+      "novel_pred": {
+        "precision": 0.7217,
+        "recall": 0.8646,
+        "f1": 0.7867,
+        "tp": 83,
+        "fp": 32,
+        "fn": 13
+      },
+      "third_person": {
+        "precision": 0.8263,
+        "recall": 0.8591,
+        "f1": 0.8424,
+        "tp": 433,
+        "fp": 91,
+        "fn": 71
+      },
+      "transient": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 114,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      }
+    }
+  },
+  "lenient": {
+    "precision": 0.6146,
+    "recall": 0.8422,
+    "f1": 0.7106,
+    "tp": 2225,
+    "fp": 1395,
+    "fn": 417,
+    "by_category": {
+      "ambiguous": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 98,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      },
+      "first_person": {
+        "precision": 0.7242,
+        "recall": 0.7539,
+        "f1": 0.7388,
+        "tp": 239,
+        "fp": 91,
+        "fn": 78
+      },
+      "governance": {
+        "precision": 0.5988,
+        "recall": 0.8016,
+        "f1": 0.6855,
+        "tp": 206,
+        "fp": 138,
+        "fn": 51
+      },
+      "implicit": {
+        "precision": 0.4327,
+        "recall": 0.4147,
+        "f1": 0.4235,
+        "tp": 90,
+        "fp": 118,
+        "fn": 127
+      },
+      "infra": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 304,
+        "fp": 0,
+        "fn": 0
+      },
+      "multi_fact": {
+        "precision": 0.6653,
+        "recall": 0.8458,
+        "f1": 0.7448,
+        "tp": 801,
+        "fp": 403,
+        "fn": 146
+      },
+      "negation": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 379,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      },
+      "novel_pred": {
+        "precision": 0.7217,
+        "recall": 0.8646,
+        "f1": 0.7867,
+        "tp": 83,
+        "fp": 32,
+        "fn": 13
+      },
+      "third_person": {
+        "precision": 0.958,
+        "recall": 0.996,
+        "f1": 0.9767,
+        "tp": 502,
+        "fp": 22,
+        "fn": 2
+      },
+      "transient": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 114,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      }
+    }
+  },
+  "fabrication": {
+    "_note": "a triple is counted here when a subject or object cannot be traced to the source note. Gold-independent: it measures invented entities, not disagreement with my labels. The write gate cannot catch these \u2014 a well-formed triple about someone never mentioned looks valid.",
+    "predicted_triples": 3620,
+    "ungrounded_triples": 0,
+    "fabrication_rate": 0.0,
+    "examples": []
+  },
+  "relation_agnostic": {
+    "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
+    "precision": 0.6511,
+    "recall": 0.8921,
+    "f1": 0.7528,
+    "tp": 2357,
+    "fp": 1263,
+    "fn": 285
+  },
+  "over_extraction": {
+    "empty_gold_notes": 965,
+    "on_schema_empty_gold_notes": 965,
+    "notes_correctly_empty": 412,
+    "abstention_rate_on_schema": 0.4269,
+    "spurious_triples": 591
+  },
+  "output_health": {
+    "notes": 3002,
+    "json_parse_ok": 3001,
+    "json_parse_rate": 0.9997,
+    "schema_ok": 3002,
+    "schema_rate": 1.0,
+    "malformed_facts": 0,
+    "dropped_by_conf_floor": 2,
+    "predicted_triples": 3620,
+    "in_seed_ontology": 0.889,
+    "catch_all_relations": 0
+  },
+  "latency_ms": {
+    "median": 6012.7,
+    "p90": 17453.5,
+    "mean": 9259.6
+  },
+  "completion_tokens": {
+    "median": 408,
+    "mean": 641.9,
+    "max": 7623
+  },
+  "model": "gemma-4-31B-it.qat.mid3k",
+  "scored_key": "pred_grounded",
+  "alias_folding": true
+}
+[18:29:25Z] OK gemma-4-31B-it.qat.mid3k F1=0.6867 P=0.5939 R=0.8138 wall=466m
+[18:29:25Z] --- gemma-4-31B-it.nonqat.mid3k on xtx, nproc=1, MTP, 3002 notes
+[18:29:31Z] sizing: starting one server to measure resident VRAM
+[18:54:28Z]   one instance uses  MiB of 24560 MiB
+[18:54:28Z]   -> running 1 processes, cache-ram 1024 MiB each
+[18:54:28Z]   all 1 servers up; VRAM now  MiB
+[18:54:28Z] START gemma-4-31B-it.nonqat.mid3k across 1 shards
+merged 3002 rows, 0 missing
+[02:46:24Z] DONE gemma-4-31B-it.nonqat.mid3k rows=3002/3002 wall=471m56s procs=1 retries=0
+{
+  "strict": {
+    "precision": 0.596,
+    "recall": 0.8073,
+    "f1": 0.6857,
+    "tp": 2133,
+    "fp": 1446,
+    "fn": 509,
+    "by_category": {
+      "ambiguous": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 86,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      },
+      "first_person": {
+        "precision": 0.7267,
+        "recall": 0.7382,
+        "f1": 0.7324,
+        "tp": 234,
+        "fp": 88,
+        "fn": 83
+      },
+      "governance": {
+        "precision": 0.6066,
+        "recall": 0.8521,
+        "f1": 0.7087,
+        "tp": 219,
+        "fp": 142,
+        "fn": 38
+      },
+      "implicit": {
+        "precision": 0.4327,
+        "recall": 0.4147,
+        "f1": 0.4235,
+        "tp": 90,
+        "fp": 118,
+        "fn": 127
+      },
+      "infra": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 304,
+        "fp": 0,
+        "fn": 0
+      },
+      "multi_fact": {
+        "precision": 0.6473,
+        "recall": 0.8215,
+        "f1": 0.7241,
+        "tp": 778,
+        "fp": 424,
+        "fn": 169
+      },
+      "negation": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 326,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      },
+      "novel_pred": {
+        "precision": 0.632,
+        "recall": 0.8229,
+        "f1": 0.7149,
+        "tp": 79,
+        "fp": 46,
+        "fn": 17
+      },
+      "third_person": {
+        "precision": 0.7886,
+        "recall": 0.8512,
+        "f1": 0.8187,
+        "tp": 429,
+        "fp": 115,
+        "fn": 75
+      },
+      "transient": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 101,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      }
+    }
+  },
+  "lenient": {
+    "precision": 0.618,
+    "recall": 0.8372,
+    "f1": 0.7111,
+    "tp": 2212,
+    "fp": 1367,
+    "fn": 430,
+    "by_category": {
+      "ambiguous": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 86,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      },
+      "first_person": {
+        "precision": 0.7267,
+        "recall": 0.7382,
+        "f1": 0.7324,
+        "tp": 234,
+        "fp": 88,
+        "fn": 83
+      },
+      "governance": {
+        "precision": 0.6066,
+        "recall": 0.8521,
+        "f1": 0.7087,
+        "tp": 219,
+        "fp": 142,
+        "fn": 38
+      },
+      "implicit": {
+        "precision": 0.4327,
+        "recall": 0.4147,
+        "f1": 0.4235,
+        "tp": 90,
+        "fp": 118,
+        "fn": 127
+      },
+      "infra": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "tp": 304,
+        "fp": 0,
+        "fn": 0
+      },
+      "multi_fact": {
+        "precision": 0.6564,
+        "recall": 0.8332,
+        "f1": 0.7343,
+        "tp": 789,
+        "fp": 413,
+        "fn": 158
+      },
+      "negation": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 326,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      },
+      "novel_pred": {
+        "precision": 0.632,
+        "recall": 0.8229,
+        "f1": 0.7149,
+        "tp": 79,
+        "fp": 46,
+        "fn": 17
+      },
+      "third_person": {
+        "precision": 0.9136,
+        "recall": 0.9861,
+        "f1": 0.9485,
+        "tp": 497,
+        "fp": 47,
+        "fn": 7
+      },
+      "transient": {
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "tp": 0,
+        "fp": 101,
+        "fn": 0,
+        "_note": "no gold triples in this category; see abstention_rate_on_schema"
+      }
+    }
+  },
+  "fabrication": {
+    "_note": "a triple is counted here when a subject or object cannot be traced to the source note. Gold-independent: it measures invented entities, not disagreement with my labels. The write gate cannot catch these \u2014 a well-formed triple about someone never mentioned looks valid.",
+    "predicted_triples": 3579,
+    "ungrounded_triples": 0,
+    "fabrication_rate": 0.0,
+    "examples": []
+  },
+  "relation_agnostic": {
+    "_note": "diagnostic, not a quality score: subject+object matched, relation ignored. The gap to lenient F1 is the share of error that is edge labelling rather than a missed fact.",
+    "precision": 0.6594,
+    "recall": 0.8933,
+    "f1": 0.7587,
+    "tp": 2360,
+    "fp": 1219,
+    "fn": 282
+  },
+  "over_extraction": {
+    "empty_gold_notes": 965,
+    "on_schema_empty_gold_notes": 965,
+    "notes_correctly_empty": 482,
+    "abstention_rate_on_schema": 0.4995,
+    "spurious_triples": 513
+  },
+  "output_health": {
+    "notes": 3002,
+    "json_parse_ok": 3000,
+    "json_parse_rate": 0.9993,
+    "schema_ok": 3002,
+    "schema_rate": 1.0,
+    "malformed_facts": 0,
+    "dropped_by_conf_floor": 2,
+    "predicted_triples": 3579,
+    "in_seed_ontology": 0.8838,
+    "catch_all_relations": 0
+  },
+  "latency_ms": {
+    "median": 5991.8,
+    "p90": 17686.3,
+    "mean": 9432.2
+  },
+  "completion_tokens": {
+    "median": 417,
+    "mean": 674.3,
+    "max": 7620
+  },
+  "model": "gemma-4-31B-it.nonqat.mid3k",
+  "scored_key": "pred_grounded",
+  "alias_folding": true
+}
+[02:46:30Z] OK gemma-4-31B-it.nonqat.mid3k F1=0.6857 P=0.5960 R=0.8073 wall=497m
+[02:46:30Z] === paired bootstrap, QAT against non-QAT, n=3002, same card ===
+run                                 F1            95% CI   tp  fp  fn
+nonQAT                          0.6857  [0.6714,0.6998]  2133 1446 509
+QAT                             0.6867  [0.6721,0.7011]  2150 1470 492
+
+Paired deltas vs nonQAT (same notes resampled for both):
+comparison                                  delta              95% CI  verdict
+QAT - nonQAT                               0.0009  [-0.0064,+0.0082]  INDISTINGUISHABLE
+
+n = 3002 notes resampled, 20000 bootstrap replicates.
+[02:47:04Z] === xtx 3k PAIR COMPLETE ===

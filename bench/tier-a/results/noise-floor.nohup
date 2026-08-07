@@ -1,0 +1,2 @@
+[09:59:37Z] === noise floor: same arm, repeated
+harness/noise_floor.sh: line 45: label: unbound variable

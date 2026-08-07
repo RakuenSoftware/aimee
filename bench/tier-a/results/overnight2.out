@@ -1,0 +1,9 @@
+[06:15:23Z] overnight 10k: E2B x4 on the 5080, E4B x3 on the XTX, in parallel
+[06:15:23Z] [5080] START E2B.UD-Q4_K_XL.10k (4 shards)
+[06:15:23Z] [xtx] SKIP E4B.UD-Q4_K_XL.10k
+[06:15:23Z] [xtx] SKIP E4B.UD-Q6_K_XL.10k
+[06:15:23Z] [xtx] START E4B.UD-Q8_K_XL.10k (3 shards)
+[06:17:03Z] [xtx] FAIL E4B.UD-Q8_K_XL.10k rows=0
+[06:17:03Z] [xtx] === DONE ===
+[06:17:33Z] [5080] FAIL E2B.UD-Q4_K_XL.10k rows=0
+[06:17:33Z] [5080] START E2B.UD-Q6_K_XL.10k (4 shards)

@@ -1,0 +1,21 @@
+[17:58:24Z] === XTX (Vulkan1), llama-b10210, E4B UD-Q4, no MTP, 60 notes, 2 passes each
+[17:58:24Z] A. slot count alone
+[17:58:43Z]   np32_conc1: serving [gemma-4-E4B-it-UD-Q4_K_XL.gguf 32]
+  np32_conc1                   raw  60/60  facts  60/60  -> REPEATABLE
+[18:06:11Z] B. concurrency sweep
+[18:06:28Z]   np32_conc2: serving [gemma-4-E4B-it-UD-Q4_K_XL.gguf 32]
+  np32_conc2                   raw  43/60  facts  50/60  -> NOT repeatable
+[18:11:08Z]   np32_conc8: serving [gemma-4-E4B-it-UD-Q4_K_XL.gguf 32]
+  np32_conc8                   raw  40/60  facts  49/60  -> NOT repeatable
+[18:13:50Z]   np32_conc32: serving [gemma-4-E4B-it-UD-Q4_K_XL.gguf 32]
+  np32_conc32                  raw  44/60  facts  51/60  -> NOT repeatable
+[18:16:50Z] C. continuous batching off
+[18:17:06Z]   np32_c32_nocb: serving [gemma-4-E4B-it-UD-Q4_K_XL.gguf 32]
+  np32_c32_nocb                raw  44/60  facts  46/60  -> NOT repeatable
+[18:22:27Z] D. unified KV
+[18:22:44Z]   np32_c32_kvu: serving [gemma-4-E4B-it-UD-Q4_K_XL.gguf 32]
+  np32_c32_kvu                 raw  41/60  facts  48/60  -> NOT repeatable
+[18:26:09Z] control: 4 slots, one in flight (the ladder's own config)
+[18:26:26Z]   np4_conc1: serving [gemma-4-E4B-it-UD-Q4_K_XL.gguf 4]
+  np4_conc1                    raw  60/60  facts  60/60  -> REPEATABLE
+[18:33:39Z] === XTX SWEEP DONE ===

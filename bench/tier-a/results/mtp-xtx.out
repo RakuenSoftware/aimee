@@ -1,0 +1,18 @@
+[15:54:55Z] fetching the E4B MTP head to .254 (once)
+-rw-r--r-- 1 admin admin 98653280 Aug  2 15:54 mtp-gemma-4-E4B-it-Q8_0.gguf
+[15:54:58Z] devices visible on .254:
+Available devices:
+  Vulkan0: AMD Radeon Graphics (RADV PHOENIX) (16222 MiB, 16139 MiB free)
+  Vulkan1: AMD Radeon RX 7900 XTX (RADV NAVI31) (24560 MiB, 24533 MiB free)
+[15:54:58Z] --- starting with -np 1, draft head on, pinned to Vulkan1
+[15:55:13Z]   -np 1 -> slots=1 speculative=False types=None
+      0.00.676.608 W srv    load_model: [spec] failed to measure draft model memory: failed to create llama_context from model
+      0.01.578.111 W load: special_eog_ids contains '<|tool_response>', removing '</s>' token from EOG list
+      0.07.891.999 I common_speculative_init_result: loading draft model '/mnt/media/storage/models/gguf/mtp-gemma-4-E4B-it-Q8_0.gguf'
+      0.08.275.381 W load: special_eog_ids contains '<|tool_response>', removing '</s>' token from EOG list
+[15:55:13Z] --- starting with -np 4, draft head on, pinned to Vulkan1
+[15:55:17Z]   -np 4 -> slots=1 speculative=False types=None
+[15:55:17Z] --- starting with -np 32, draft head on, pinned to Vulkan1
+[15:55:22Z]   -np 32 -> slots=1 speculative=False types=None
+[15:55:22Z] cleaning up the probe server
+[15:55:22Z] === MTP PROBE DONE ===

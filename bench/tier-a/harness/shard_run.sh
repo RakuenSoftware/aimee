@@ -74,7 +74,13 @@ RESERVE_MIB=${RESERVE_MIB:-1800}  # headroom for fragmentation + the draft ctx
 CACHE_RAM_MIB=${CACHE_RAM_MIB:-1024}
 
 case "$CARD" in
-  5080) HOST=root@192.168.1.253; RUN="pct exec 140 -- bash -lc"; EP=192.168.0.5
+  # CT 140's address is asked for, not assumed. It was hardcoded to 192.168.0.5,
+  # and when the container was rebuilt it came up on 192.168.0.119; the waiter
+  # then polled a dead address for 110 minutes while the server was healthy the
+  # whole time. A container's IP is a fact about the running system, so read it.
+  5080) HOST=root@192.168.1.253; RUN="pct exec 140 -- bash -lc"
+        EP=$(ssh -n -o ConnectTimeout=15 root@192.168.1.253 "pct exec 140 -- hostname -I" 2>/dev/null | awk '{print $1}')
+        [ -z "$EP" ] && { echo "could not resolve CT140 address"; exit 1; }
         BIN=/opt/llama.cpp/build-cuda/bin/llama-server; HFH=/opt/hf; DEV=""
         TOTAL=$(ssh -n -o ConnectTimeout=15 $HOST "nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits" 2>/dev/null) ;;
   xtx)  HOST=admin@192.168.1.254; RUN="bash -lc"; EP=127.0.0.1

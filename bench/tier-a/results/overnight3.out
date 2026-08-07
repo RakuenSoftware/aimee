@@ -1,0 +1,7 @@
+[06:19:50Z] overnight 10k: E2B x4 on the 5080, E4B x3 on the XTX, in parallel
+[06:19:50Z] [5080] START E2B.UD-Q4_K_XL.10k (4 shards)
+[06:19:50Z] [xtx] SKIP E4B.UD-Q4_K_XL.10k
+[06:19:50Z] [xtx] SKIP E4B.UD-Q6_K_XL.10k
+[06:19:50Z] [xtx] START E4B.UD-Q8_K_XL.10k (3 shards)
+[06:29:30Z] [5080] OK E2B.UD-Q4_K_XL.10k rows=10000 strictF1=scorer-refused
+[06:29:30Z] [5080] START E2B.UD-Q6_K_XL.10k (4 shards)

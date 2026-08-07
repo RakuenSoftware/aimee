@@ -1,0 +1,29 @@
+[19:44:19Z] === missing 10k arms on the 5080: 3 models, 10000 notes each, nproc=3, no MTP
+[19:44:19Z] --- granite-4.0-1b.10k  unsloth/granite-4.0-1b-GGUF:UD-Q4_K_XL  nproc=3  port=8600
+[19:44:25Z] sizing: starting one server to measure resident VRAM
+[19:44:41Z]   one instance uses 1986 MiB of 16303 MiB
+[19:44:41Z]   -> running 3 processes, cache-ram 1024 MiB each
+[19:45:13Z]   all 3 servers up; VRAM now 5948 MiB
+[19:45:13Z] START granite-4.0-1b.10k across 3 shards
+merged 10000 rows, 0 missing
+[20:01:11Z] DONE granite-4.0-1b.10k rows=10000/10000 wall=15m58s procs=3 retries=0
+[20:01:17Z] OK   granite-4.0-1b.10k strictF1=scorer-refused wall=16m
+[20:01:17Z] --- granite-4.1-3b.10k  unsloth/granite-4.1-3b-GGUF:UD-Q4_K_XL  nproc=3  port=8600
+[20:01:23Z] sizing: starting one server to measure resident VRAM
+[20:01:39Z]   one instance uses 3070 MiB of 16303 MiB
+[20:01:39Z]   -> running 3 processes, cache-ram 1024 MiB each
+[20:02:11Z]   all 3 servers up; VRAM now 9200 MiB
+[20:02:11Z] START granite-4.1-3b.10k across 3 shards
+merged 10000 rows, 0 missing
+[20:22:38Z] DONE granite-4.1-3b.10k rows=10000/10000 wall=20m26s procs=3 retries=0
+[20:22:44Z] OK   granite-4.1-3b.10k strictF1=scorer-refused wall=21m
+[20:22:44Z] --- Qwen3-1.7B.10k  unsloth/Qwen3-1.7B-GGUF:UD-Q4_K_XL  nproc=3  port=8600
+[20:22:50Z] sizing: starting one server to measure resident VRAM
+[20:23:06Z]   one instance uses 2334 MiB of 16303 MiB
+[20:23:06Z]   -> running 3 processes, cache-ram 1024 MiB each
+[20:23:39Z]   all 3 servers up; VRAM now 6992 MiB
+[20:23:39Z] START Qwen3-1.7B.10k across 3 shards
+merged 10000 rows, 0 missing
+[02:24:26Z] DONE Qwen3-1.7B.10k rows=10000/10000 wall=360m46s procs=3 retries=0
+[02:24:33Z] OK   Qwen3-1.7B.10k strictF1=0.4591 wall=361m
+[02:24:33Z] === MISSING 10K COMPLETE ===

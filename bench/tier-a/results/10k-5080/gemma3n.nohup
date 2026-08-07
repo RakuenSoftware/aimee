@@ -1,0 +1,12 @@
+[19:53:37Z] === gemma-3n chained: waiting for the 5080 to release
+[02:24:40Z] === 5080 free; starting gemma-3n-E4B
+[02:24:40Z] --- gemma-3n-E4B-it.10k  unsloth/gemma-3n-E4B-it-GGUF:UD-Q4_K_XL  nproc=auto  port=8600
+[02:24:46Z] sizing: starting one server to measure resident VRAM
+[02:25:02Z]   one instance uses 3414 MiB of 16303 MiB
+[02:25:02Z]   -> running 4 processes, cache-ram 1024 MiB each
+[02:25:51Z]   all 4 servers up; VRAM now 13642 MiB
+[02:25:51Z] START gemma-3n-E4B-it.10k across 4 shards
+merged 10000 rows, 0 missing
+[03:11:55Z] DONE gemma-3n-E4B-it.10k rows=10000/10000 wall=46m4s procs=4 retries=0
+[03:12:01Z] OK   gemma-3n-E4B-it.10k strictF1=scorer-refused wall=47m
+[03:12:01Z] === GEMMA-3N COMPLETE ===

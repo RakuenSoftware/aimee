@@ -11,3 +11,29 @@
 [14:12:34Z]   committed single_run1
 [14:12:34Z] --- single_run2 (1 proc)
 [14:35:40Z] OK   single_run2 strictF1=0.6033
+[14:35:40Z]   committed single_run2
+[14:35:40Z] === comparison
+
+  strict F1 per run:
+    shard3_run1      0.6138
+    shard3_run2      0.6138
+    single_run1      0.6033
+    single_run2      0.6033
+
+  pairwise raw identity:
+    ledger_3srv      vs shard3_run1       raw 1001/1001  facts 1001/1001
+    ledger_3srv      vs shard3_run2       raw 1001/1001  facts 1001/1001
+    ledger_3srv      vs single_run1       raw  652/1001  facts  794/1001
+    ledger_3srv      vs single_run2       raw  652/1001  facts  794/1001
+    ledger_3srv      vs v8baseline_1srv   raw  645/1001  facts  794/1001
+    shard3_run1      vs shard3_run2       raw 1001/1001  facts 1001/1001
+    shard3_run1      vs single_run1       raw  652/1001  facts  794/1001
+    shard3_run1      vs single_run2       raw  652/1001  facts  794/1001
+    shard3_run1      vs v8baseline_1srv   raw  645/1001  facts  794/1001
+    shard3_run2      vs single_run1       raw  652/1001  facts  794/1001
+    shard3_run2      vs single_run2       raw  652/1001  facts  794/1001
+    shard3_run2      vs v8baseline_1srv   raw  645/1001  facts  794/1001
+    single_run1      vs single_run2       raw 1001/1001  facts 1001/1001
+    single_run1      vs v8baseline_1srv   raw  688/1001  facts  805/1001
+    single_run2      vs v8baseline_1srv   raw  688/1001  facts  805/1001
+[14:35:40Z] === NOISE FLOOR DONE ===
