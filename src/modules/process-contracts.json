@@ -293,6 +293,11 @@
           "id": 3,
           "name": "workflow-gate-decision",
           "event_kind": 9219
+        },
+        {
+          "id": 4,
+          "name": "workflow-autonomous-route",
+          "event_kind": 9220
         }
       ]
     },

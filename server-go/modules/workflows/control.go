@@ -33,6 +33,12 @@ const (
 	// verdicts, and it is one call per gate rather than per verdict.
 	EventGateDecide uint32 = 9219
 	StageGateDecide uint32 = 3
+
+	// EventAutonomousRoute serves the S4 autonomous-parity routing policy: which
+	// workflows an autonomous run may auto-select, and the floor everything else
+	// is lifted to.
+	EventAutonomousRoute uint32 = 9220
+	StageAutonomousRoute uint32 = 4
 )
 
 // ControlRequest is what the C resource plane used to write as an HTTP head. It
@@ -110,6 +116,8 @@ func NewHandler(mux http.Handler) bus.ModuleHandler {
 			return control(invocation, request)
 		case StageGateDecide:
 			return handleGateDecide(invocation, request)
+		case StageAutonomousRoute:
+			return handleAutonomousRoute(invocation, request)
 		default:
 			return nil, bus.ModuleStatusInvalidRequest
 		}

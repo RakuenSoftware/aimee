@@ -11,8 +11,12 @@
 /* The roundtable gate ruling. JSON rather than the fixed framing the advance
  * stage uses: a panel is a variable number of verdicts. Stage 2 (control) is
  * declared in server/workflow_control_bus.h, beside its only caller. */
-#define AIMEE_WORKFLOWS_EVENT_GATE_DECIDE          9219u
-#define AIMEE_WORKFLOWS_STAGE_GATE_DECIDE          3u
+#define AIMEE_WORKFLOWS_EVENT_GATE_DECIDE 9219u
+#define AIMEE_WORKFLOWS_STAGE_GATE_DECIDE 3u
+/* S4 autonomous-parity routing: which workflows an autonomous run may
+ * auto-select. JSON, like the gate ruling. */
+#define AIMEE_WORKFLOWS_EVENT_AUTONOMOUS_ROUTE     9220u
+#define AIMEE_WORKFLOWS_STAGE_AUTONOMOUS_ROUTE     4u
 #define AIMEE_WORKFLOWS_REQUEST_MAGIC              0x51414657u /* "WFAQ" */
 #define AIMEE_WORKFLOWS_RESPONSE_MAGIC             0x52414657u /* "WFAR" */
 #define AIMEE_WORKFLOWS_WIRE_VERSION               1u

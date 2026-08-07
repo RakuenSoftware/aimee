@@ -2076,8 +2076,11 @@ $(TESTPREFIX)/unit-test-wfe-router: $(OBJDIR)/tests/test_wfe_router.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S4 autonomous-parity routing policy (pure; no engine/DB deps).
+$(OBJDIR)/tests/test_wfe_autonomous_route.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-wfe-autonomous-route: $(OBJDIR)/tests/test_wfe_autonomous_route.o \
-                                    $(OBJDIR)/modules/workflows/wfe_autonomous_route.o
+                                    $(OBJDIR)/modules/workflows/wfe_autonomous_route.o \
+                                    $(OBJDIR)/module_json_call.o \
+                                    $(OBJDIR)/tests/support/module_bus_stub.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S2 enforcement pure cores (no engine/DB deps).

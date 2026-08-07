@@ -253,6 +253,7 @@ func main() {
 					{EventKind: workflows.EventAdvance, StageID: workflows.StageAdvance},
 					{EventKind: workflows.EventControl, StageID: workflows.StageControl},
 					{EventKind: workflows.EventGateDecide, StageID: workflows.StageGateDecide},
+					{EventKind: workflows.EventAutonomousRoute, StageID: workflows.StageAutonomousRoute},
 				},
 				Handler: workflows.NewHandler(handler),
 			})
