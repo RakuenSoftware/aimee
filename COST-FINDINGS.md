@@ -1480,6 +1480,69 @@ and the 0/N result says nothing about any arm.
 Cells before and after the repair are not comparable, and the pre-repair cells
 are archived under pre-ticket-repair-<task>/ rather than discarded.
 
+## Finding 32 — am_842ff35656 is a THIRD spec gap (proposed repair, NOT applied)
+
+Flagged for review, not acted on: ticket edits change what the corpus measures
+and should not be made unattended.
+
+aimee fails this task in the review-off pass (hidden_ok false, tests_ok
+does_not_catch_defect) despite writing 68 lines of test -- the most test code in
+any cell of the sweep, none of which exercises the graded defect.
+
+### The mismatch
+
+The graded test adds test_large_roundtable_payload_within_limit to
+src/tests/test_server_dispatch.c. It builds a roundtable.review message of
+LIMIT_DEFAULT + 64 bytes, pushes it through dispatch_json, and requires
+status ok. So the deliverable is SERVER-SIDE: roundtable.review must join the
+per-route exemption table.
+
+That table already exists, at src/server/server.c method_size_limit():
+
+    {"memory.", LIMIT_MEMORY},
+    {"tool.", LIMIT_TOOL},
+    {"delegate", LIMIT_DELEGATE},
+    {"mcp.call", LIMIT_DELEGATE},
+    {"chat.", LIMIT_CHAT},
+    ...
+
+roundtable.review is absent, so it falls through to LIMIT_DEFAULT and is
+rejected. The fix is one row.
+
+The ticket points somewhere else:
+
+    "The CLI capped what it would marshal from a file or from standard input at
+     a fixed 2 MB"
+
+Word counts across the whole ticket: CLI 1, transport 1, marshal 1, dispatch 0,
+server 0. aimee changed src/cli_v1_routes.c and its test -- exactly the layer
+named. It fixed what it was told to fix.
+
+### Proposed repair
+
+Append to the ticket, matching the level of detail used by the two tickets
+repaired in Finding 31:
+
+    "The same conflation exists at the server's per-route payload table, where
+     roundtable.review is missing from the exemptions delegate and mcp.call
+     already have, so a large artifact is refused before dispatch."
+
+That names the layer and the symptom without handing over the row.
+
+### Why this matters beyond one task
+
+Three of fourteen tickets have now shown the same defect: the graded test
+asserts something no reading of the ticket entails. am_b84c9294aa (a behaviour
+never mentioned), am_1e7cb3da16 (an identifier never named), am_842ff35656 (the
+wrong layer named). Each produced a failure that looks like a capability gap and
+is not.
+
+The check is static and cheap: for every task, read the graded diff and ask
+whether the ticket entails it. That should run BEFORE a corpus is used, not
+after three sweeps of misattributed failures.
+
+Not yet checked the same way: am_67e9b0449a, the other review-off failure.
+
 ## Caveats for anything published from this
 
 - 6 of 8 tasks, **one replicate**, no confidence intervals. Per-task spread is
