@@ -308,6 +308,14 @@ static void *rc_thread_main(void *arg)
 }
 #endif
 
+/* The VCS coordinates the mirror tier seeds from: the fetch URL of `origin` and
+ * the current HEAD commit. BOTH are required — the server reconstructs the tree
+ * by fetching THIS head from THIS remote — so a directory that is not a repo,
+ * has no `origin`, or has no commit yet cannot be mirrored. Returns 1 only when
+ * both resolved. POSIX-only: the thin Windows client cannot fork git, so the
+ * helper below lives inside the guard too — outside it, it is an unused static
+ * and this tree builds with -Werror. */
+#if !defined(_WIN32) && !defined(_WIN64)
 /* Strip trailing whitespace/newline from a captured git one-liner in place. */
 static void rc_chomp(char *s)
 {
@@ -316,12 +324,6 @@ static void rc_chomp(char *s)
       s[--n] = '\0';
 }
 
-/* The VCS coordinates the mirror tier seeds from: the fetch URL of `origin` and
- * the current HEAD commit. BOTH are required — the server reconstructs the tree
- * by fetching THIS head from THIS remote — so a directory that is not a repo,
- * has no `origin`, or has no commit yet cannot be mirrored. Returns 1 only when
- * both resolved. POSIX-only: the thin Windows client cannot fork git. */
-#if !defined(_WIN32) && !defined(_WIN64)
 static int rc_mirror_coords(const char *root, char *remote, size_t rcap, char *head, size_t hcap)
 {
    remote[0] = '\0';
