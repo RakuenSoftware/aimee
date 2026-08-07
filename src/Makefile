@@ -301,7 +301,7 @@ MCP_GIT_SRCS = modules/git/mcp_git_query.c modules/git/mcp_git_write.c modules/g
 MCP_GIT_OBJS = $(MCP_GIT_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 0: Foundation (db, config, util, text, render, log, platform, cJSON) ---
-CORE_SRCS = db1/db.c db1/db_schema.c modules/config/config.c modules/config/config_sections.c modules/config/config_database.c modules/config/config_learning.c modules/config/config_memory.c modules/config/config_charter.c modules/config/config_trigger.c modules/config/config_kb_maintenance.c modules/config/config_kb_curator.c modules/config/config_server_api.c modules/config/config_skills.c modules/config/config_save.c modules/config/config_elements.c modules/config/config_econ.c modules/config/config_mode.c modules/config/config_fields.c modules/config/config_accessors_0.c modules/config/config_accessors_1.c modules/config/config_accessors_2.c modules/config/config_accessors_3.c modules/config/config_accessors_4.c modules/config/config_accessors_5.c modules/config/config_accessors_6.c modules/config/config_accessors_7.c toolset.c util.c util_url.c kb/kb_identity.c modules/git/forge_credentials.c forge_app_token.c modules/vault/runtime_secret.c modules/workspace/workspace_mirror.c report_enrichment.c modules/audit/audit_action.c modules/audit/audit_worm.c modules/audit/audit_worm_chain.c modules/audit/audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c rrf.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
+CORE_SRCS = db1/db.c db1/db_schema.c modules/config/config.c modules/config/config_sections.c modules/config/config_database.c modules/config/config_learning.c modules/config/config_memory.c modules/config/config_charter.c modules/config/config_trigger.c modules/config/config_kb_maintenance.c modules/config/config_kb_curator.c modules/config/config_server_api.c modules/config/config_skills.c modules/config/config_save.c modules/config/config_elements.c modules/config/config_econ.c modules/config/config_mode.c modules/config/config_fields.c modules/config/config_accessors_0.c modules/config/config_accessors_1.c modules/config/config_accessors_2.c modules/config/config_accessors_3.c modules/config/config_accessors_4.c modules/config/config_accessors_5.c modules/config/config_accessors_6.c modules/config/config_accessors_7.c toolset.c util.c util_url.c aimee_sha256.c module_json_call.c kb/kb_identity.c modules/git/forge_credentials.c forge_app_token.c modules/vault/runtime_secret.c modules/workspace/workspace_mirror.c report_enrichment.c modules/audit/audit_action.c modules/audit/audit_worm.c modules/audit/audit_worm_chain.c modules/audit/audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c rrf.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
             aimee_home.c shared/kb_paths.c provider_client.c kb_curator_provider.c \
             compact.c modules/economizer/economizer_proof.c modules/economizer/economizer_wire_snapshot.c modules/economizer/economizer_openai.c modules/economizer/economizer_anthropic.c modules/economizer/economizer_json.c modules/economizer/economizer_provenance.c modules/economizer/economizer_dispatch_lease.c modules/economizer/coord_closet.c modules/economizer/fold_budget.c modules/economizer/context_fold.c modules/economizer/context_reduce.c modules/economizer/tool_condense.c modules/economizer/fold_register.c modules/economizer/fold_recall.c modules/economizer/task_rail.c modules/economizer/episode_seal.c platform_random.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
             client_integrations.c modules/protocols/mcp/mcp_tools.c modules/protocols/mcp/mcp_tool_profile.c modules/protocols/mcp/mcp_tools_extended.c modules/protocols/mcp/mcp_skill_tools.c modules/protocols/mcp/mcp_tools_gateway.c events.c \
@@ -458,11 +458,11 @@ AGENT_OBJS = $(AGENT_SRCS:%.c=$(OBJDIR)/%.o) $(PLATFORM_AGENT_OBJS)
 # --- Layer 3: Commands + UI (cmd_*, webchat, dashboard) ---
 CMD_SRCS = prompts.c persona.c hardware_probe.c curator_profile.c modules/delegates/delegate_source_authority.c \
            cmd_core.c cmd_init.c cmd_data.c cmd_infra.c cmd_session_history.c cmd_memory.c cmd_memory_core.c cmd_memory_curiosity.c cmd_memory_embed.c cmd_memory_op.c cmd_memory_pack.c cmd_memory_lint.c cmd_wiki.c cmd_memory_vector.c cmd_index.c cmd_graph.c cmd_rules.c cmd_roadmap.c cmd_auto.c cmd_learning.c cmd_review.c cmd_dogfood.c cmd_identity.c cmd_onboard.c cmd_diagnose.c \
-           cmd_hooks.c modules/memory/memory_redirect.c cmd_hooks_scope.c cmd_capabilities.c cmd_session_lifecycle.c cmd_agent.c cmd_agent_setup.c cmd_agent_trace.c cmd_agent_delegate.c cmd_agent_delegate_toolset.c cmd_agent_delegate_status.c modules/delegates/delegate_checkout.c modules/delegates/delegate_prompt_stdin.c \
+           cmd_hooks.c modules/memory/memory_redirect.c cmd_hooks_scope.c cmd_capabilities.c cmd_session_lifecycle.c cmd_agent.c cmd_agent_setup.c cmd_agent_trace.c cmd_agent_delegate.c cmd_agent_delegate_toolset.c cmd_agent_delegate_status.c modules/delegates/delegate_checkout.c \
            cmd_wm.c cmd_sweep.c cmd_cancel.c cmd_rewind.c cmd_branch.c cmd_mcp.c cmd_util.c cmd_table.c cmd_doctor.c cmd_toolset.c \
            \
            cmd_trajectory.c \
-           cmd_slop.c modules/guardrails/cmd_guardrails.c cmd_job.c cmd_roles.c cmd_skill.c cmd_autopilot.c cmd_trigger.c cmd_run.c cmd_kb.c cmd_kb_export.c kb_export_json.c kb_export_obsidian.c kb/kb_lab.c modules/kb_client/kb_client.c modules/kb_client/kb_client_cache.c modules/kb_client/kb_client_ws.c modules/kb_client/kb_client_docs.c kb/kb_doc_hash.c modules/kb_client/kb_client_index.c modules/kb_client/kb_client_index_parse.c modules/kb_client/kb_client_pdf.c modules/kb_client/kb_client_code_embed.c modules/kb_client/kb_client_memory.c modules/kb_client/kb_client_memory_mutations.c modules/kb_client/kb_client_agent.c modules/kb_client/kb_client_dashboard.c modules/kb_client/kb_client_tasks.c modules/kb_client/kb_client_data.c modules/kb_client/kb_client_tool_registry.c modules/kb_client/kb_client_prospective.c modules/kb_client/kb_client_roadmap.c hud.c modules/delegates/delegate_depth.c modules/delegates/delegate_role.c modules/delegates/delegate_verify.c modules/delegates/delegate_prompt.c modules/delegates/delegate_routing.c modules/delegates/delegate_plan.c modules/delegates/delegate_launch.c modules/delegates/delegate_economics.c modules/delegates/delegate_patch_coordinator.c modules/roundtable/delegate_ensemble.c modules/roundtable/delegate_ensemble_review.c server/evidence_replay.c modules/roundtable/roundtable_activation.c modules/roundtable/roundtable_verify.c server/sweep_exclude.c server/sweep_score.c server/sweep_scope.c server/sweep_parse.c \
+           cmd_slop.c cmd_job.c cmd_roles.c cmd_skill.c cmd_autopilot.c cmd_trigger.c cmd_run.c cmd_kb.c cmd_kb_export.c kb_export_json.c kb_export_obsidian.c kb/kb_lab.c modules/kb_client/kb_client.c modules/kb_client/kb_client_cache.c modules/kb_client/kb_client_ws.c modules/kb_client/kb_client_docs.c kb/kb_doc_hash.c modules/kb_client/kb_client_index.c modules/kb_client/kb_client_index_parse.c modules/kb_client/kb_client_pdf.c modules/kb_client/kb_client_code_embed.c modules/kb_client/kb_client_memory.c modules/kb_client/kb_client_memory_mutations.c modules/kb_client/kb_client_agent.c modules/kb_client/kb_client_dashboard.c modules/kb_client/kb_client_tasks.c modules/kb_client/kb_client_data.c modules/kb_client/kb_client_tool_registry.c modules/kb_client/kb_client_prospective.c modules/kb_client/kb_client_roadmap.c hud.c modules/delegates/delegate_depth.c modules/delegates/delegate_role.c modules/delegates/delegate_verify.c modules/delegates/delegate_prompt.c modules/delegates/delegate_routing.c modules/delegates/delegate_plan.c modules/delegates/delegate_launch.c modules/delegates/delegate_economics.c modules/delegates/delegate_patch_coordinator.c modules/roundtable/delegate_ensemble.c modules/roundtable/delegate_ensemble_review.c server/evidence_replay.c modules/roundtable/roundtable_activation.c modules/roundtable/roundtable_verify.c server/sweep_exclude.c server/sweep_score.c server/sweep_scope.c server/sweep_parse.c \
            turn_narration.c dashboard.c dashboard_kb.c trace_analysis.c cmd_ensemble.c \
            cmd_provider.c cmd_aux.c cmd_audit.c
 CMD_OBJS = $(CMD_SRCS:%.c=$(OBJDIR)/%.o)
@@ -471,7 +471,7 @@ CMD_OBJS = $(CMD_SRCS:%.c=$(OBJDIR)/%.o)
 # panel_roster.c has had no build rule since it landed in #1845; panel_provider.c
 # is reached only by unit-test-panel-provider. Compiled here so they cannot rot
 # unnoticed the way four CMD_SRCS files did.
-ORPHAN_SRCS = modules/delegates/panel_roster.c modules/roundtable/roundtable_provider.c
+ORPHAN_SRCS = 
 ORPHAN_OBJS = $(ORPHAN_SRCS:%.c=$(OBJDIR)/%.o)
 
 # CMD_SRCS is linked into NO shipping binary and no test target, so nothing ever
@@ -860,7 +860,7 @@ ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS) $(STATUS_AUTHORIT
 # nothing is stale when nothing exists.
 DEPS = $(ALL_OBJS:.o=.d) $(shell find $(OBJDIR) -name '*.d' 2>/dev/null)
 
-.PHONY: all clean install inc-check forge-cred-integration forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check config-schema-drift-check config-uninitialized-check cmd-srcs-compile-check charter-tables-check tier-deps-check module-boundary-check background-skill-curator-absence-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check deployed-image-check gen-sdks sdk-parity-check v1-ws-test format unit-tests go-unit-tests verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb
+.PHONY: all clean install inc-check forge-cred-integration forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check config-schema-drift-check config-uninitialized-check cmd-srcs-compile-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check deployed-image-check gen-sdks sdk-parity-check v1-ws-test format unit-tests go-unit-tests verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb
 
 all: retire-obsolete-binaries $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)
 
@@ -971,12 +971,12 @@ lean:
 # Dynamic linking policy check: enforce DB ownership boundaries and verify
 # daemon system libraries are dynamically linked. Only runs on Linux (ldd) and
 # macOS (otool). Skipped on Windows where MinGW runtime is intentionally static.
-check-linking: $(BINARY) $(RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY)
+check-linking: $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY)
 ifeq ($(OS),Windows_NT)
 	@echo "check-linking: skipped on Windows (MinGW runtime is intentionally static)"
 else ifeq ($(UNAME_S),Darwin)
 	@fail=0; \
-	for bin in $(BINARY) $(RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
+	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
 		echo "check-linking: $$bin"; \
 		deps=$$(otool -L "$$bin" | tail -n+2); \
 		if [ "$$bin" = "$(BINARY)" ]; then \
@@ -1055,7 +1055,7 @@ else ifeq ($(UNAME_S),Darwin)
 	echo "check-linking: ok"
 else
 	@fail=0; \
-	for bin in $(BINARY) $(RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
+	for bin in $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
 		echo "check-linking: $$bin"; \
 		deps=$$(ldd "$$bin"); \
 		if [ "$$bin" = "$(BINARY)" ]; then \
@@ -1848,7 +1848,7 @@ lint: BUS_BLAST_RADIUS_FLAGS := --allow-unbuilt
 # target-specific variable on `lint`, and target-specific variables do NOT cross
 # a recursive make, so bus-blast-radius-check would otherwise lose
 # --allow-unbuilt and start demanding the whole shipping set.
-LINT_CHECKS = subject-corpus-check native-tool-parity-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check background-skill-curator-absence-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check p1-tenant-guard-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check config-encapsulation-check deployed-image-check
+LINT_CHECKS = subject-corpus-check native-tool-parity-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check p1-tenant-guard-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check config-encapsulation-check deployed-image-check
 
 lint:
 	@fail=""; n=0; \
@@ -1873,6 +1873,13 @@ capability-ownership-check:
 
 panel-contract-boundary-check:
 	@python3 -I -S ../scripts/check_panel_contract_boundary.py
+
+# The canonical required/optional module inventory. This guard existed but was
+# never wired into lint, so it sat failing on testing (OPTIONAL_COUNT stale at 7
+# after `sandbox` was added) with nothing to surface it. A guard nothing runs is
+# not a guard.
+module-inventory-check:
+	@python3 -I -S ../scripts/check_module_inventory.py
 
 published-compose-images-check:
 	@python3 -I -S ../scripts/check-published-compose-images.py

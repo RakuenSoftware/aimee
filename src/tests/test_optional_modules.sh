@@ -1,0 +1,117 @@
+#!/bin/sh
+# Operator control over optional modules (deploy/container/optional-modules-lib.sh).
+#
+# The gate decides which processes attach to the bus, so the cases that matter
+# are: an unset variable must not change the shipped default, "off" must remove a
+# module the image shipped on, "on" must add one it shipped off, required modules
+# must be untouchable, and the read-only shipped manifest must never be edited in
+# place.
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+lib="$root/deploy/container/optional-modules-lib.sh"
+tmp=$(mktemp -d)
+cleanup() { rm -rf "$tmp"; }
+trap 'cleanup' EXIT HUP INT TERM
+
+[ -r "$lib" ] || { echo "optional-modules: missing $lib" >&2; exit 1; }
+# shellcheck source=/dev/null
+. "$lib"
+
+fails=0
+check() { # check <label> <expected> <actual>
+    if [ "$2" = "$3" ]; then
+        printf '  ok    %s\n' "$1"
+    else
+        printf '  FAIL  %s\n     expected: %s\n     actual:   %s\n' "$1" "$2" "$3" >&2
+        fails=$((fails + 1))
+    fi
+}
+
+# A stand-in for the shipped manifest: two required modules and one optional one
+# that the image ships ON (sandbox), mirroring the real server.modules.
+shipped="$tmp/shipped.modules"
+{
+    printf 'memory\t/usr/local/libexec/aimee-modules/aimee-module-memory\n'
+    printf 'routing\t/usr/local/libexec/aimee-modules/aimee-module-routing\n'
+    printf 'sandbox\t/usr/local/libexec/aimee-modules/aimee-module-sandbox\n'
+} > "$shipped"
+chmod 0444 "$shipped"          # read-only, as in the image
+shipped_before=$(cat "$shipped")
+
+ids() { cut -f1 "$1" | tr '\n' ' ' | sed 's/ $//'; }
+
+# 1. Nothing set: the shipped manifest is used as-is, not copied or rewritten.
+unset AIMEE_MODULE_SANDBOX AIMEE_MODULE_GOVERNANCE AIMEE_RUNTIME_WEB_ENABLED 2>/dev/null || true
+out=$(apply_optional_modules server "$shipped" "$tmp")
+check "unset leaves the shipped manifest untouched" "$shipped" "$out"
+
+# 2. "off" drops a module the image shipped on.
+AIMEE_MODULE_SANDBOX=0
+export AIMEE_MODULE_SANDBOX
+out=$(apply_optional_modules server "$shipped" "$tmp")
+[ "$out" != "$shipped" ] || { echo "  FAIL  off did not produce an effective manifest" >&2; fails=$((fails + 1)); }
+check "off removes sandbox" "memory routing" "$(ids "$out")"
+unset AIMEE_MODULE_SANDBOX
+
+# 3. Truthy spellings all mean the same thing.
+for word in 0 false off no; do
+    AIMEE_MODULE_SANDBOX="$word"; export AIMEE_MODULE_SANDBOX
+    out=$(apply_optional_modules server "$shipped" "$tmp")
+    check "off spelling '$word'" "memory routing" "$(ids "$out")"
+    unset AIMEE_MODULE_SANDBOX
+done
+
+# 4. A required module is never gated, even if someone sets the variable.
+AIMEE_MODULE_MEMORY=0; export AIMEE_MODULE_MEMORY
+out=$(apply_optional_modules server "$shipped" "$tmp")
+check "required memory survives AIMEE_MODULE_MEMORY=0" "memory routing sandbox" "$(ids "$out")"
+unset AIMEE_MODULE_MEMORY
+
+# 5. "on" for a module whose binary is absent must not fabricate an entry.
+AIMEE_MODULE_GOVERNANCE=1; export AIMEE_MODULE_GOVERNANCE
+out=$(apply_optional_modules server "$shipped" "$tmp" 2>/dev/null)
+check "on with no binary present does not add governance" "memory routing sandbox" "$(ids "$out")"
+unset AIMEE_MODULE_GOVERNANCE
+
+# 6. "on" adds the module when the binary exists. Point the lookup at a fake
+#    libexec by creating the expected path under a sandboxed root is not possible
+#    (the lib hardcodes /usr/local/libexec), so assert the observable contract:
+#    when the real binary happens to exist the id appears, otherwise it does not.
+if [ -x /usr/local/libexec/aimee-modules/aimee-module-governance ]; then
+    AIMEE_MODULE_GOVERNANCE=1; export AIMEE_MODULE_GOVERNANCE
+    out=$(apply_optional_modules server "$shipped" "$tmp")
+    check "on adds governance when installed" "memory routing sandbox governance" "$(ids "$out")"
+    unset AIMEE_MODULE_GOVERNANCE
+else
+    printf '  skip  on-adds-governance (module binary not installed on this host)\n'
+fi
+
+# 7. runtime-web follows the browser-UI switch when not named explicitly.
+rw="$tmp/rw.modules"
+printf 'runtime-web\t/usr/local/libexec/aimee-modules/aimee-module-runtime-web\n' > "$rw"
+AIMEE_RUNTIME_WEB_ENABLED=0; export AIMEE_RUNTIME_WEB_ENABLED
+out=$(apply_optional_modules server "$rw" "$tmp")
+check "runtime-web module follows AIMEE_RUNTIME_WEB_ENABLED=0" "" "$(ids "$out")"
+# An explicit module setting wins over the UI switch.
+AIMEE_MODULE_RUNTIME_WEB=1; export AIMEE_MODULE_RUNTIME_WEB
+out=$(apply_optional_modules server "$rw" "$tmp")
+check "explicit AIMEE_MODULE_RUNTIME_WEB=1 overrides the UI switch" "runtime-web" "$(ids "$out")"
+unset AIMEE_RUNTIME_WEB_ENABLED AIMEE_MODULE_RUNTIME_WEB
+
+# 8. kb placement gates its own set, and does not accept a server-only module.
+kb="$tmp/kb.modules"
+printf 'control-web\t/usr/local/libexec/aimee-modules/aimee-module-control-web\n' > "$kb"
+AIMEE_MODULE_CONTROL_WEB=0; export AIMEE_MODULE_CONTROL_WEB
+out=$(apply_optional_modules kb "$kb" "$tmp")
+check "kb: off removes control-web" "" "$(ids "$out")"
+unset AIMEE_MODULE_CONTROL_WEB
+
+# 9. The shipped manifest itself is never modified.
+check "shipped manifest is unmodified" "$shipped_before" "$(cat "$shipped")"
+
+if [ "$fails" -ne 0 ]; then
+    echo "test_optional_modules: $fails failure(s)" >&2
+    exit 1
+fi
+echo "test_optional_modules: ok"

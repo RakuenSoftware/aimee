@@ -343,6 +343,19 @@ else
     fail "server plane supervisor can deadlock on an exited zombie child"
 fi
 
+# The optional-module gate decides which processes attach to the bus. Both
+# entrypoints must ship it, and it must honour AIMEE_MODULE_<ID> in BOTH
+# directions -- an enable-only gate cannot turn anything off.
+if sh tests/test_optional_modules.sh > /dev/null 2>&1 &&
+   grep -qF 'apply_optional_modules server' ../deploy/container/server-entrypoint.sh &&
+   grep -qF 'apply_optional_modules kb' ../deploy/container/aimee-kb-entrypoint.sh &&
+   grep -qF 'optional-modules-lib.sh' ../Dockerfile.server &&
+   grep -qF 'optional-modules-lib.sh' ../Dockerfile; then
+    pass "operator can enable and disable optional modules in both placements"
+else
+    fail "optional-module gate is missing, one-directional, or not shipped in an image"
+fi
+
 if grep -q 'go|c' ../deploy/container/server-entrypoint.sh ||
    grep -q 'wfe_autonomy_register();' server/server.c ||
    grep -q 'wfe_scheduler_init();' server/server.c; then

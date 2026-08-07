@@ -104,7 +104,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "779e09b7843ba778baaa2c400e7370f7d5bb02e462aa9736c06165841e0eb98d",
+      "source_sha256": "b3ffc55d579c23375e3afd254c803889e09e68bec589d650da94776c96db177f",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 7,
@@ -165,7 +165,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "47800a6ac53b890e9e880a3d6364d1280ce5da1647575020f143f8f8095baa65",
+      "source_sha256": "711a7e82f900e1a61c7bc72acc87a4c89770b603227e12af08412a1954a524bf",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 10,
@@ -222,13 +222,14 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "e0cf0ce36a099e5247a79809dae1fdfb357b9ae49a8d8280e74e8d4e383c1ae6",
+      "source_sha256": "421f519c6c88a4819c3cce28d364b5b1643218efb1805d1fb9e3ec4bef720d82",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 13,
       "serve": [
         7425,
-        7426
+        7426,
+        7427
       ]
     },
     {
@@ -296,7 +297,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "f6107c00cf18595eae40abd3fd10842c154c3c5047cdeae469bb5b12207245c6"
+      "source_sha256": "4191ec2d4c77106b6cbd5aabb3f28904951c55b919cf2201b003a497de140701"
     },
     {
       "id": "audit",
@@ -310,7 +311,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "0cb9238d98034d8d41066dadb0e3e006e6abf6d9d8501e736100c07508b2e604"
+      "source_sha256": "bbb3d7145bb1fe4176be3add75beeaa7d493d16dd95f8e6d8d4c8a537b5bb880"
     },
     {
       "id": "governance",
@@ -342,13 +343,15 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "4afeb337286f663717411ee3fd30bea3f6fcf669cdd5874b2b069b52b4f2e457",
+      "source_sha256": "a84905b7f5ee3fec31f69caa6225ec03b8496896153b773407aaf5e047fc41c1",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 20,
       "serve": [
         9217,
-        9218
+        9218,
+        9219,
+        9220
       ]
     },
     {
@@ -362,7 +365,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "6f83b9ff5b8897ba1e723923a7e835ce11bd91e2798e079505be3d4265a4c3f3",
+      "source_sha256": "cf5cfde7267797eeb189184d8848b21ff12e0d366016507e49972822c76482f4",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 21,
@@ -460,7 +463,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "f38da8a33d0b999bf5e0134280f6552bfcd15ffc7dc71b88b1dca616176525a0",
+      "source_sha256": "af1b1a8674025f65fc52ee69d8ec85aab44086c2f84caaec694bc32ac5a7ff47",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 26,

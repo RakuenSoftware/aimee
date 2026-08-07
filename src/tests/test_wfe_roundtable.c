@@ -15,6 +15,10 @@
 #include "wfe_roundtable.h"
 #include "wfe_verdict.h"
 
+#include "support/module_bus_stub.h"
+
+#include <aimee/workflows/module_api.h>
+
 static wfe_verdict_t mk(const char *persona, wfe_verdict_kind_t k, const char *hash, int hs)
 {
    wfe_verdict_t v;
@@ -101,7 +105,6 @@ static void setup_home(void)
 int main(void)
 {
    printf("wfe-roundtable: ");
-   const char *req2[] = {"security", "architect"};
 
    /* --- effective quorum (single-lens floor) --- */
    assert(wfe_gate_effective_quorum(0, 4) == 4);
@@ -109,61 +112,47 @@ int main(void)
    assert(wfe_gate_effective_quorum(3, 2) == 3);
    assert(wfe_gate_effective_quorum(5, 4) == 5);
 
-   /* --- decision matrix (pure) --- */
+   /* --- the ruling crosses the bus now ---
+    * The DECISION RULE moved to the workflows module
+    * (server-go/modules/workflows/gate.go) and its matrix is pinned there, by
+    * cases ported one-for-one from the block this replaces. What C still owns,
+    * and what is covered here, is shaping the request, mapping the ruling back,
+    * and failing closed when no usable ruling arrives. */
    {
       char rs[160];
-      /* both approve, quorum 2, no high-sev -> APPROVE */
-      wfe_verdict_t a[] = {mk("security", WFE_V_APPROVE, "H", 0),
-                           mk("architect", WFE_V_APPROVE, "H", 0)};
-      assert(wfe_gate_decide(a, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_APPROVE);
-
-      /* missing a required persona -> DEGRADED */
-      wfe_verdict_t b[] = {mk("security", WFE_V_APPROVE, "H", 0)};
-      assert(wfe_gate_decide(b, 1, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_DEGRADED);
-
-      /* high-sev blocker present -> CHANGES even if quorum met */
-      wfe_verdict_t c[] = {mk("security", WFE_V_APPROVE, "H", 0),
-                           mk("architect", WFE_V_APPROVE, "H", 1)};
-      assert(wfe_gate_decide(c, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
-
-      /* COMMENT is non-blocking: approve + comment meets quorum 2 -> APPROVE */
-      wfe_verdict_t d[] = {mk("security", WFE_V_APPROVE, "H", 0),
-                           mk("architect", WFE_V_COMMENT, "H", 0)};
-      assert(wfe_gate_decide(d, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_APPROVE);
-
-      /* ...but comments alone never pass: at least one explicit approve. */
-      wfe_verdict_t d2[] = {mk("security", WFE_V_COMMENT, "H", 0),
-                            mk("architect", WFE_V_COMMENT, "H", 0)};
-      assert(wfe_gate_decide(d2, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
-
-      /* ...and ANY request_changes loops, even with quorum-many non-blocking. */
-      wfe_verdict_t d3[] = {mk("security", WFE_V_APPROVE, "H", 0),
-                            mk("architect", WFE_V_COMMENT, "H", 0),
-                            mk("qa", WFE_V_REQUEST_CHANGES, "H", 0)};
-      assert(wfe_gate_decide(d3, 3, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
-
-      /* tampered hash on a REQUIRED persona: it never validly reviewed THIS
-       * artifact -> integrity failure -> DEGRADED (not a definitive CHANGES). */
-      wfe_verdict_t e[] = {mk("security", WFE_V_APPROVE, "WRONG", 0),
-                           mk("architect", WFE_V_APPROVE, "H", 0)};
-      assert(wfe_gate_decide(e, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_DEGRADED);
-
-      /* malformed REQUIRED persona -> integrity failure -> DEGRADED */
-      wfe_verdict_t g[] = {mk("security", WFE_V_APPROVE, "H", 0),
-                           mk("architect", WFE_V_MALFORMED, "H", 0)};
-      assert(wfe_gate_decide(g, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_DEGRADED);
-
-      /* REGRESSION: an untrustworthy REQUIRED verdict must NOT be papered over by
-       * other panelists meeting quorum. required=[security] returns malformed
-       * while architect+qa validly approve (quorum 2 met): the required lens never
-       * reviewed the artifact, so the gate DEGRADES rather than APPROVES. */
       const char *req1[] = {"security"};
-      wfe_verdict_t h[] = {mk("security", WFE_V_MALFORMED, "H", 0),
-                           mk("architect", WFE_V_APPROVE, "H", 0), mk("qa", WFE_V_APPROVE, "H", 0)};
-      assert(wfe_gate_decide(h, 3, req1, 1, 2, "H", rs, sizeof rs) == WFE_GATE_DEGRADED);
+      wfe_verdict_t v[] = {mk("security", WFE_V_APPROVE, "H", 0)};
+
+      module_bus_stub_reply("{\"decision\":\"approve\",\"reason\":\"ok\"}");
+      assert(wfe_gate_decide(v, 1, req1, 1, 2, "H", rs, sizeof rs) == WFE_GATE_APPROVE);
+      assert(strcmp(rs, "ok") == 0); /* the module's reason reaches the caller */
+      assert(module_bus_stub_last_event() == AIMEE_WORKFLOWS_EVENT_GATE_DECIDE);
+      assert(module_bus_stub_last_stage() == AIMEE_WORKFLOWS_STAGE_GATE_DECIDE);
+
+      module_bus_stub_reply("{\"decision\":\"changes\",\"reason\":\"r\"}");
+      assert(wfe_gate_decide(v, 1, req1, 1, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
+      module_bus_stub_reply("{\"decision\":\"degraded\",\"reason\":\"r\"}");
+      assert(wfe_gate_decide(v, 1, req1, 1, 2, "H", rs, sizeof rs) == WFE_GATE_DEGRADED);
+
+      /* Fail closed to DEGRADED -- never APPROVE -- for anything that is not a
+       * ruling we understand. An approve invented here would advance a workflow
+       * on a gate that never ran. */
+      module_bus_stub_reply("{\"decision\":\"something-new\"}");
+      assert(wfe_gate_decide(v, 1, req1, 1, 2, "H", rs, sizeof rs) == WFE_GATE_DEGRADED);
+      module_bus_stub_reply("{}");
+      assert(wfe_gate_decide(v, 1, req1, 1, 2, "H", rs, sizeof rs) == WFE_GATE_DEGRADED);
+      module_bus_stub_reply("not json");
+      assert(wfe_gate_decide(v, 1, req1, 1, 2, "H", rs, sizeof rs) == WFE_GATE_DEGRADED);
+      module_bus_stub_absent();
+      assert(wfe_gate_decide(v, 1, req1, 1, 2, "H", rs, sizeof rs) == WFE_GATE_DEGRADED);
+      module_bus_stub_fail(AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
+      assert(wfe_gate_decide(v, 1, req1, 1, 2, "H", rs, sizeof rs) == WFE_GATE_DEGRADED);
    }
 
    /* --- engine integration via mock provider --- */
+   /* The gate rule lives in the module now; answer approve so what this
+    * section exercises is the engine's advance path, as before. */
+   module_bus_stub_reply("{\"decision\":\"approve\",\"reason\":\"panel approved\"}");
    setup_home();
    assert(db1_init(":memory:") == 0);
 
@@ -203,6 +192,9 @@ int main(void)
    /* mode 1: panel requests changes -> gate loops -> max_attempts -> pending_human */
    {
       g_mode = 1;
+      /* The ruling comes from the module now, so the mock panel's verdicts no
+       * longer decide it in-process: say what this phase is about. */
+      module_bus_stub_reply("{\"decision\":\"changes\",\"reason\":\"reviewer requested changes\"}");
       char id[80] = "", err[256] = "";
       assert(wfe_work_item_create("rt", "r1", "p1", "interactive", id, err, sizeof err) == 0);
       assert(wfe_engine_run(id, err, sizeof err) == 0);

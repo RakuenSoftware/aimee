@@ -79,6 +79,20 @@ fi
 . "$runtime_web_lib"
 webchat_migrate_legacy_credentials
 
+# Operator control over which optional modules attach to the bus. Resolved the
+# same way as the runtime-web helper: installed path first, then alongside this
+# script for a source checkout.
+optional_modules_lib=/usr/local/bin/optional-modules-lib.sh
+if [ ! -r "$optional_modules_lib" ]; then
+    entrypoint_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+    optional_modules_lib="$entrypoint_dir/optional-modules-lib.sh"
+fi
+[ -r "$optional_modules_lib" ] || {
+    printf '[server-entrypoint] fatal: optional-module helper is unavailable\n' >&2
+    exit 2
+}
+. "$optional_modules_lib"
+
 # An explicit Docker command is unrelated to normal server startup. It still
 # follows Vault ingestion above and receives a credential-free environment.
 if [ "$#" -gt 0 ]; then
@@ -510,33 +524,17 @@ server_pid=$!
 # time, so without this the stage is simply never offered.
 export AIMEE_AGENT_SERVICE_SOCKET="${AIMEE_AGENT_SERVICE_SOCKET:-$AIMEE_HOME/aimee-http.sock}"
 
-# An optional module is left out of the shipped manifest, which is decided when
-# the image is built and cannot know what this operator turned on. roundtable is
-# the case that matters: the daemon has no other implementation of
-# roundtable.review since the proxy was deleted, so with the module absent the
-# review route reports the module as not attached however the operator has
-# configured the feature.
+# The shipped manifest is decided when the image is built and cannot know what
+# this operator wants running, so apply the operator's AIMEE_MODULE_<ID> choices
+# over it. This replaces a hard-coded roundtable-only branch that could enable a
+# module but never disable one; AIMEE_MODULE_ROUNDTABLE keeps working exactly as
+# before, and every other optional module now has the same control.
 #
-# modules.roundtable / AIMEE_MODULE_ROUNDTABLE is already the canonical
-# activation control for roundtable. Honour that same control here, at startup,
-# so one switch governs both the feature and the process that serves it.
-case "$(printf '%s' "${AIMEE_MODULE_ROUNDTABLE:-}" | tr '[:upper:]' '[:lower:]')" in
-    1|true|on|yes)
-        if ! grep -q '^roundtable[[:space:]]' "$MODULE_MANIFEST" 2>/dev/null; then
-            _rt_bin=/usr/local/libexec/aimee-modules/aimee-module-roundtable
-            if [ -x "$_rt_bin" ]; then
-                _effective_manifest="$AIMEE_HOME/server.modules"
-                cp "$MODULE_MANIFEST" "$_effective_manifest"
-                printf 'roundtable\t%s\n' "$_rt_bin" >> "$_effective_manifest"
-                chown aimee:aimee "$_effective_manifest" 2>/dev/null || true
-                MODULE_MANIFEST="$_effective_manifest"
-                log "roundtable module enabled by configuration; serving review over the bus"
-            else
-                log "warning: AIMEE_MODULE_ROUNDTABLE is set but $_rt_bin is not in this image"
-            fi
-        fi
-        ;;
-esac
+# roundtable remains the case that matters most: the daemon has no other
+# implementation of roundtable.review since the proxy was deleted, so with the
+# module absent the review route reports the module as not attached however the
+# operator configured the feature.
+MODULE_MANIFEST="$(apply_optional_modules server "$MODULE_MANIFEST" "$AIMEE_HOME")"
 runuser -u aimee -- env AIMEE_HOME="$AIMEE_HOME" \
     AIMEE_AGENT_SERVICE_SOCKET="$AIMEE_AGENT_SERVICE_SOCKET" \
     module-supervisor.sh server "$AIMEE_MODULE_BUS_SOCKET" "$MODULE_MANIFEST" &

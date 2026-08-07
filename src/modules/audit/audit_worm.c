@@ -18,7 +18,7 @@
 #include "cJSON.h"
 #include "dstr.h"
 #include "log.h"
-#include "wfe_def.h" /* wfe_sha256_raw */
+#include "headers/aimee_sha256.h" /* aimee_sha256_raw */
 
 /* Single-writer serialization: every append allocates seq + chains + commits
  * under this mutex, so the chain is total-ordered and seq is gap-free. The cached

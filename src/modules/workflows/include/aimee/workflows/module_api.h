@@ -8,26 +8,35 @@
 
 #define AIMEE_WORKFLOWS_EVENT_ADVANCE 9217u
 #define AIMEE_WORKFLOWS_STAGE_ADVANCE 1u
-#define AIMEE_WORKFLOWS_REQUEST_MAGIC 0x51414657u /* "WFAQ" */
-#define AIMEE_WORKFLOWS_RESPONSE_MAGIC 0x52414657u /* "WFAR" */
-#define AIMEE_WORKFLOWS_WIRE_VERSION 1u
-#define AIMEE_WORKFLOWS_WORK_ITEM_MAX 79u
-#define AIMEE_WORKFLOWS_WORK_ITEM_SLOT 80u
-#define AIMEE_WORKFLOWS_STAGE_MAX 63u
-#define AIMEE_WORKFLOWS_STAGE_SLOT 64u
-#define AIMEE_WORKFLOWS_STATE_MAX 31u
-#define AIMEE_WORKFLOWS_STATE_SLOT 32u
-#define AIMEE_WORKFLOWS_NONCE_MAX 63u
-#define AIMEE_WORKFLOWS_NONCE_SLOT 64u
-#define AIMEE_WORKFLOWS_REQUEST_BOUND_OFF 44u
-#define AIMEE_WORKFLOWS_REQUEST_WORK_ITEM_OFF 124u
+/* The roundtable gate ruling. JSON rather than the fixed framing the advance
+ * stage uses: a panel is a variable number of verdicts. Stage 2 (control) is
+ * declared in server/workflow_control_bus.h, beside its only caller. */
+#define AIMEE_WORKFLOWS_EVENT_GATE_DECIDE 9219u
+#define AIMEE_WORKFLOWS_STAGE_GATE_DECIDE 3u
+/* S4 autonomous-parity routing: which workflows an autonomous run may
+ * auto-select. JSON, like the gate ruling. */
+#define AIMEE_WORKFLOWS_EVENT_AUTONOMOUS_ROUTE     9220u
+#define AIMEE_WORKFLOWS_STAGE_AUTONOMOUS_ROUTE     4u
+#define AIMEE_WORKFLOWS_REQUEST_MAGIC              0x51414657u /* "WFAQ" */
+#define AIMEE_WORKFLOWS_RESPONSE_MAGIC             0x52414657u /* "WFAR" */
+#define AIMEE_WORKFLOWS_WIRE_VERSION               1u
+#define AIMEE_WORKFLOWS_WORK_ITEM_MAX              79u
+#define AIMEE_WORKFLOWS_WORK_ITEM_SLOT             80u
+#define AIMEE_WORKFLOWS_STAGE_MAX                  63u
+#define AIMEE_WORKFLOWS_STAGE_SLOT                 64u
+#define AIMEE_WORKFLOWS_STATE_MAX                  31u
+#define AIMEE_WORKFLOWS_STATE_SLOT                 32u
+#define AIMEE_WORKFLOWS_NONCE_MAX                  63u
+#define AIMEE_WORKFLOWS_NONCE_SLOT                 64u
+#define AIMEE_WORKFLOWS_REQUEST_BOUND_OFF          44u
+#define AIMEE_WORKFLOWS_REQUEST_WORK_ITEM_OFF      124u
 #define AIMEE_WORKFLOWS_REQUEST_OBSERVED_STAGE_OFF 204u
-#define AIMEE_WORKFLOWS_REQUEST_ACTUAL_STAGE_OFF 268u
-#define AIMEE_WORKFLOWS_REQUEST_ACTUAL_STATE_OFF 332u
-#define AIMEE_WORKFLOWS_REQUEST_NONCE_OFF 364u
-#define AIMEE_WORKFLOWS_REQUEST_LAST_NONCE_OFF 428u
-#define AIMEE_WORKFLOWS_REQUEST_LEN 492u
-#define AIMEE_WORKFLOWS_RESPONSE_LEN 16u
+#define AIMEE_WORKFLOWS_REQUEST_ACTUAL_STAGE_OFF   268u
+#define AIMEE_WORKFLOWS_REQUEST_ACTUAL_STATE_OFF   332u
+#define AIMEE_WORKFLOWS_REQUEST_NONCE_OFF          364u
+#define AIMEE_WORKFLOWS_REQUEST_LAST_NONCE_OFF     428u
+#define AIMEE_WORKFLOWS_REQUEST_LEN                492u
+#define AIMEE_WORKFLOWS_RESPONSE_LEN               16u
 
 typedef enum
 {
@@ -82,7 +91,7 @@ static inline int aimee_workflows_nonzero_text(const uint8_t *p, size_t len)
 }
 
 static inline int aimee_workflows_decode_slot(const uint8_t *slot, uint32_t length,
-                                               uint32_t slot_size, char *out)
+                                              uint32_t slot_size, char *out)
 {
    if (length >= slot_size || !aimee_workflows_nonzero_text(slot, length) ||
        !aimee_workflows_zero_padding(slot + length, slot_size - length))
@@ -93,29 +102,31 @@ static inline int aimee_workflows_decode_slot(const uint8_t *slot, uint32_t leng
    return 0;
 }
 
-static inline int aimee_workflows_request_encode(
-    const char *bound_work_item, const char *work_item, const char *observed_stage,
-    const char *actual_stage, const char *actual_state, int have_nonce, const char *nonce,
-    const char *last_nonce, uint8_t *out, size_t capacity)
+static inline int aimee_workflows_request_encode(const char *bound_work_item, const char *work_item,
+                                                 const char *observed_stage,
+                                                 const char *actual_stage, const char *actual_state,
+                                                 int have_nonce, const char *nonce,
+                                                 const char *last_nonce, uint8_t *out,
+                                                 size_t capacity)
 {
-   const char *values[] = {bound_work_item ? bound_work_item : "", work_item ? work_item : "",
+   const char *values[] = {bound_work_item ? bound_work_item : "",
+                           work_item ? work_item : "",
                            observed_stage ? observed_stage : "",
-                           actual_stage ? actual_stage : "", actual_state ? actual_state : "",
-                           nonce ? nonce : "", last_nonce ? last_nonce : ""};
+                           actual_stage ? actual_stage : "",
+                           actual_state ? actual_state : "",
+                           nonce ? nonce : "",
+                           last_nonce ? last_nonce : ""};
    const uint32_t maxima[] = {AIMEE_WORKFLOWS_WORK_ITEM_MAX, AIMEE_WORKFLOWS_WORK_ITEM_MAX,
-                              AIMEE_WORKFLOWS_STAGE_MAX, AIMEE_WORKFLOWS_STAGE_MAX,
-                              AIMEE_WORKFLOWS_STATE_MAX, AIMEE_WORKFLOWS_NONCE_MAX,
+                              AIMEE_WORKFLOWS_STAGE_MAX,     AIMEE_WORKFLOWS_STAGE_MAX,
+                              AIMEE_WORKFLOWS_STATE_MAX,     AIMEE_WORKFLOWS_NONCE_MAX,
                               AIMEE_WORKFLOWS_NONCE_MAX};
-   const uint32_t offsets[] = {AIMEE_WORKFLOWS_REQUEST_BOUND_OFF,
-                               AIMEE_WORKFLOWS_REQUEST_WORK_ITEM_OFF,
-                               AIMEE_WORKFLOWS_REQUEST_OBSERVED_STAGE_OFF,
-                               AIMEE_WORKFLOWS_REQUEST_ACTUAL_STAGE_OFF,
-                               AIMEE_WORKFLOWS_REQUEST_ACTUAL_STATE_OFF,
-                               AIMEE_WORKFLOWS_REQUEST_NONCE_OFF,
-                               AIMEE_WORKFLOWS_REQUEST_LAST_NONCE_OFF};
+   const uint32_t offsets[] = {
+       AIMEE_WORKFLOWS_REQUEST_BOUND_OFF,          AIMEE_WORKFLOWS_REQUEST_WORK_ITEM_OFF,
+       AIMEE_WORKFLOWS_REQUEST_OBSERVED_STAGE_OFF, AIMEE_WORKFLOWS_REQUEST_ACTUAL_STAGE_OFF,
+       AIMEE_WORKFLOWS_REQUEST_ACTUAL_STATE_OFF,   AIMEE_WORKFLOWS_REQUEST_NONCE_OFF,
+       AIMEE_WORKFLOWS_REQUEST_LAST_NONCE_OFF};
    size_t lengths[7];
-   if (!out || capacity < AIMEE_WORKFLOWS_REQUEST_LEN ||
-       (have_nonce != 0 && have_nonce != 1))
+   if (!out || capacity < AIMEE_WORKFLOWS_REQUEST_LEN || (have_nonce != 0 && have_nonce != 1))
       return -1;
    for (size_t i = 0; i < 7; ++i)
    {
@@ -139,31 +150,27 @@ static inline int aimee_workflows_request_encode(
    return 0;
 }
 
-static inline int aimee_workflows_request_decode(
-    const uint8_t *in, size_t len, aimee_workflows_advance_request_t *request)
+static inline int aimee_workflows_request_decode(const uint8_t *in, size_t len,
+                                                 aimee_workflows_advance_request_t *request)
 {
    const uint32_t maxima[] = {AIMEE_WORKFLOWS_WORK_ITEM_MAX, AIMEE_WORKFLOWS_WORK_ITEM_MAX,
-                              AIMEE_WORKFLOWS_STAGE_MAX, AIMEE_WORKFLOWS_STAGE_MAX,
-                              AIMEE_WORKFLOWS_STATE_MAX, AIMEE_WORKFLOWS_NONCE_MAX,
+                              AIMEE_WORKFLOWS_STAGE_MAX,     AIMEE_WORKFLOWS_STAGE_MAX,
+                              AIMEE_WORKFLOWS_STATE_MAX,     AIMEE_WORKFLOWS_NONCE_MAX,
                               AIMEE_WORKFLOWS_NONCE_MAX};
    const uint32_t slots[] = {AIMEE_WORKFLOWS_WORK_ITEM_SLOT, AIMEE_WORKFLOWS_WORK_ITEM_SLOT,
-                             AIMEE_WORKFLOWS_STAGE_SLOT, AIMEE_WORKFLOWS_STAGE_SLOT,
-                             AIMEE_WORKFLOWS_STATE_SLOT, AIMEE_WORKFLOWS_NONCE_SLOT,
+                             AIMEE_WORKFLOWS_STAGE_SLOT,     AIMEE_WORKFLOWS_STAGE_SLOT,
+                             AIMEE_WORKFLOWS_STATE_SLOT,     AIMEE_WORKFLOWS_NONCE_SLOT,
                              AIMEE_WORKFLOWS_NONCE_SLOT};
-   const uint32_t offsets[] = {AIMEE_WORKFLOWS_REQUEST_BOUND_OFF,
-                               AIMEE_WORKFLOWS_REQUEST_WORK_ITEM_OFF,
-                               AIMEE_WORKFLOWS_REQUEST_OBSERVED_STAGE_OFF,
-                               AIMEE_WORKFLOWS_REQUEST_ACTUAL_STAGE_OFF,
-                               AIMEE_WORKFLOWS_REQUEST_ACTUAL_STATE_OFF,
-                               AIMEE_WORKFLOWS_REQUEST_NONCE_OFF,
-                               AIMEE_WORKFLOWS_REQUEST_LAST_NONCE_OFF};
-   char *outputs[] = {request ? request->bound_work_item : NULL,
-                      request ? request->work_item : NULL,
-                      request ? request->observed_stage : NULL,
-                      request ? request->actual_stage : NULL,
-                      request ? request->actual_state : NULL,
-                      request ? request->nonce : NULL,
-                      request ? request->last_nonce : NULL};
+   const uint32_t offsets[] = {
+       AIMEE_WORKFLOWS_REQUEST_BOUND_OFF,          AIMEE_WORKFLOWS_REQUEST_WORK_ITEM_OFF,
+       AIMEE_WORKFLOWS_REQUEST_OBSERVED_STAGE_OFF, AIMEE_WORKFLOWS_REQUEST_ACTUAL_STAGE_OFF,
+       AIMEE_WORKFLOWS_REQUEST_ACTUAL_STATE_OFF,   AIMEE_WORKFLOWS_REQUEST_NONCE_OFF,
+       AIMEE_WORKFLOWS_REQUEST_LAST_NONCE_OFF};
+   char *outputs[] = {
+       request ? request->bound_work_item : NULL, request ? request->work_item : NULL,
+       request ? request->observed_stage : NULL,  request ? request->actual_stage : NULL,
+       request ? request->actual_state : NULL,    request ? request->nonce : NULL,
+       request ? request->last_nonce : NULL};
    if (!in || len != AIMEE_WORKFLOWS_REQUEST_LEN || !request ||
        aimee_workflows_get_u32(in) != AIMEE_WORKFLOWS_REQUEST_MAGIC ||
        aimee_workflows_get_u32(in + 4) != AIMEE_WORKFLOWS_WIRE_VERSION ||
@@ -178,17 +185,16 @@ static inline int aimee_workflows_request_decode(
          return -1;
    }
    request->have_nonce = (int)aimee_workflows_get_u32(in + 8);
-   if ((request->have_nonce && !request->nonce[0]) ||
-       (!request->have_nonce && request->nonce[0]))
+   if ((request->have_nonce && !request->nonce[0]) || (!request->have_nonce && request->nonce[0]))
       return -1;
    return 0;
 }
 
 static inline int aimee_workflows_response_encode(aimee_workflows_advance_outcome_t outcome,
-                                                   uint8_t *out, size_t capacity)
+                                                  uint8_t *out, size_t capacity)
 {
-   if (!out || capacity < AIMEE_WORKFLOWS_RESPONSE_LEN ||
-       outcome < AIMEE_WORKFLOWS_ADVANCE_OK || outcome > AIMEE_WORKFLOWS_ADVANCE_BADARGS)
+   if (!out || capacity < AIMEE_WORKFLOWS_RESPONSE_LEN || outcome < AIMEE_WORKFLOWS_ADVANCE_OK ||
+       outcome > AIMEE_WORKFLOWS_ADVANCE_BADARGS)
       return -1;
    memset(out, 0, AIMEE_WORKFLOWS_RESPONSE_LEN);
    aimee_workflows_put_u32(out, AIMEE_WORKFLOWS_RESPONSE_MAGIC);
@@ -198,7 +204,7 @@ static inline int aimee_workflows_response_encode(aimee_workflows_advance_outcom
 }
 
 static inline int aimee_workflows_response_decode(const uint8_t *in, size_t len,
-                                                   aimee_workflows_advance_outcome_t *outcome)
+                                                  aimee_workflows_advance_outcome_t *outcome)
 {
    if (!in || len != AIMEE_WORKFLOWS_RESPONSE_LEN || !outcome ||
        aimee_workflows_get_u32(in) != AIMEE_WORKFLOWS_RESPONSE_MAGIC ||

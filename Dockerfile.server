@@ -376,6 +376,7 @@ RUN if command -v code-server >/dev/null 2>&1; then echo "aimee: code-server bun
 # "authentication unavailable".
 COPY deploy/container/pam.d-aimee /etc/pam.d/aimee
 COPY deploy/container/runtime-web-lib.sh /usr/local/bin/runtime-web-lib.sh
+COPY deploy/container/optional-modules-lib.sh /usr/local/bin/optional-modules-lib.sh
 COPY deploy/container/plane-supervisor.sh /usr/local/bin/plane-supervisor.sh
 COPY deploy/container/module-supervisor.sh /usr/local/bin/module-supervisor.sh
 COPY deploy/container/core-storage.sh /usr/local/bin/core-storage.sh
