@@ -209,8 +209,8 @@ int kb_client_index_blast_response_valid(const void *resp_v, char *why, size_t w
       BLAST_REJECT("freshness");
    if (!cJSON_IsTrue(resolved))
       BLAST_REJECT("resolved");
-   if (!kb_client_index_blast_edges_valid(cJSON_GetObjectItemCaseSensitive(resp, "dependency_edges"),
-                                          "identity"))
+   if (!kb_client_index_blast_edges_valid(
+           cJSON_GetObjectItemCaseSensitive(resp, "dependency_edges"), "identity"))
       BLAST_REJECT("dependency_edges");
    if (!kb_client_index_blast_edges_valid(cJSON_GetObjectItemCaseSensitive(resp, "dependent_edges"),
                                           "path"))

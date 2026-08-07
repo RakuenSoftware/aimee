@@ -62,8 +62,8 @@ __attribute__((weak)) char *kb_client_mtls_request(const char *method, const cha
  * process-wide. That is what happened -- ingest scans tripped the single
  * breaker and every unrelated KB call was refused with a 503 that never left
  * this process, while the KB was healthy and answering. */
-static dependency_breaker_t g_kb_dependency[KB_DEP_CLASS_COUNT] = {
-    DEPENDENCY_BREAKER_INITIALIZER, DEPENDENCY_BREAKER_INITIALIZER};
+static dependency_breaker_t g_kb_dependency[KB_DEP_CLASS_COUNT] = {DEPENDENCY_BREAKER_INITIALIZER,
+                                                                   DEPENDENCY_BREAKER_INITIALIZER};
 static int64_t (*g_kb_dependency_clock)(void);
 #if defined(_MSC_VER)
 static __declspec(thread) kb_client_result_status_t g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
@@ -110,7 +110,6 @@ kb_dependency_class_t kb_dependency_class_for_path(const char *path)
    return KB_DEP_INTERACTIVE;
 }
 
-
 kb_client_result_status_t kb_client_last_result_status(void)
 {
    return g_kb_last_result;
@@ -149,8 +148,7 @@ void kb_client_dependency_health(kb_client_dependency_health_t *out)
    /* Interactive is what an operator means by "is the KB answering". A bulk
     * ingest budget that is open does not make the service unreachable, and
     * reporting it here is what made status contradict the next command. */
-   dependency_breaker_snapshot(&g_kb_dependency[KB_DEP_INTERACTIVE], kb_dependency_now_ms(),
-                               &snap);
+   dependency_breaker_snapshot(&g_kb_dependency[KB_DEP_INTERACTIVE], kb_dependency_now_ms(), &snap);
    const char *state =
        !snap.open ? "closed"
                   : (snap.probe_inflight || snap.retry_after_ms == 0 ? "half_open" : "open");
@@ -434,10 +432,9 @@ static void kb_transport_complete_timed(const char *path, const char *response, 
    kb_dependency_class_t fail_cls = kb_dependency_class_for_path(path);
    dependency_breaker_snapshot_t before;
    dependency_breaker_snapshot(&g_kb_dependency[fail_cls], now_ms, &before);
-   dependency_breaker_report_failure(&g_kb_dependency[fail_cls], now_ms,
-                                     DEPENDENCY_BREAKER_DEFAULT_THRESHOLD,
-                                     DEPENDENCY_BREAKER_DEFAULT_BASE_MS,
-                                     DEPENDENCY_BREAKER_DEFAULT_MAX_MS);
+   dependency_breaker_report_failure(
+       &g_kb_dependency[fail_cls], now_ms, DEPENDENCY_BREAKER_DEFAULT_THRESHOLD,
+       DEPENDENCY_BREAKER_DEFAULT_BASE_MS, DEPENDENCY_BREAKER_DEFAULT_MAX_MS);
    dependency_breaker_snapshot_t after;
    dependency_breaker_snapshot(&g_kb_dependency[fail_cls], now_ms, &after);
    if (after.open && !before.open)

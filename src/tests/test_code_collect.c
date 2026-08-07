@@ -456,7 +456,6 @@ static void test_cpp_headers_collected(void)
    printf("  test_cpp_headers_collected: ok\n");
 }
 
-
 /* A git checkout with no resolvable default branch -- a detached checkout at a
  * commit, a CI clone, a git worktree -- indexes its WORKING TREE rather than
  * nothing.

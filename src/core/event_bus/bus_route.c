@@ -554,9 +554,10 @@ static int route_arena_request(bus_host_t *h, uint32_t src, bus_frame_t *f, uint
    /* Resolved on every attempt, not just the first: a blocked delivery is
     * retried against the unmodified frame and must rewrite the same way. */
    bus_pending_t *out_pending = pending_find_requester(h, f->correlation_id, src);
-   bus_frame_t out = frame_with_correlation(
-       f, out_pending ? out_pending->server_correlation_id : f->correlation_id);
-   arena_dest_t r = arena_deliver_one(h, &out, lease, generation, s, k ? k->policy : BUS_KIND_BLOCK);
+   bus_frame_t out = frame_with_correlation(f, out_pending ? out_pending->server_correlation_id
+                                                           : f->correlation_id);
+   arena_dest_t r =
+       arena_deliver_one(h, &out, lease, generation, s, k ? k->policy : BUS_KIND_BLOCK);
    if (r == ARENA_DEST_BLOCKED)
       return 0;
    if (r == ARENA_DEST_SHED)
@@ -617,8 +618,8 @@ static int route_arena_reply(bus_host_t *h, uint32_t src, bus_frame_t *f, uint64
    if (s == UINT32_MAX || obs_test(delivered, s))
       return 1;
    bus_pending_t *out_pending = pending_find_server(h, f->correlation_id, src);
-   bus_frame_t out = frame_with_correlation(
-       f, out_pending ? out_pending->correlation_id : f->correlation_id);
+   bus_frame_t out =
+       frame_with_correlation(f, out_pending ? out_pending->correlation_id : f->correlation_id);
    arena_dest_t r = arena_deliver_one(h, &out, lease, generation, s, BUS_KIND_BLOCK);
    if (r == ARENA_DEST_BLOCKED)
       return 0;

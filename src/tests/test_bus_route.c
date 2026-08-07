@@ -897,7 +897,6 @@ static void test_arena_reply_forged_dropped(void)
    printf("  arena: a forged (non-server) reply is dropped and its lease reclaimed\n");
 }
 
-
 /* Correlation ids are chosen by each client independently, so two clients
  * calling the same server will pick the same number sooner or later. Each
  * requester's reply must still come back to it: before the pending table was

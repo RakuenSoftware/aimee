@@ -5196,15 +5196,12 @@ static void test_code_scan_db_unavailable(void)
    g_db_initialized = 1;
 }
 
-
-
 /* test_code_build_ok, test_code_build_rejects_partial_project_embedding and
- * test_maintenance_repair_ok were REMOVED, not ported: they asserted that /v1/code/build did the work inline
- * (kb_build called with the caller's path, a 503 when inline code embedding came
- * back partial). That contract is gone -- the route commits the work to the
- * queue and answers immediately, and embedding completes when it completes.
- * Keeping them adapted would have pinned the shape that made a long build report
- * itself as a failure. The replacements are
+ * test_maintenance_repair_ok were REMOVED, not ported: they asserted that /v1/code/build did the
+ * work inline (kb_build called with the caller's path, a 503 when inline code embedding came back
+ * partial). That contract is gone -- the route commits the work to the queue and answers
+ * immediately, and embedding completes when it completes. Keeping them adapted would have pinned
+ * the shape that made a long build report itself as a failure. The replacements are
  * test_code_build_queues_instead_of_embedding_inline and
  * test_maintenance_repair_queues_too. */
 
@@ -5540,7 +5537,6 @@ static void test_maintenance_routes_are_owner_gated(void)
        "scope:project:proj-alpha:secret", body, (int)strlen(body), buf, sizeof(buf));
    assert(s == 403);
 }
-
 
 static void test_maintenance_repair_missing_project(void)
 {

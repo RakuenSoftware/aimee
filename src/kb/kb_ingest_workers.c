@@ -240,8 +240,8 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
    kb_background_clear("ingest");
 
    aimee_log(LOG_INFO, "kb.ingest.worker",
-             "done: project='%s' files=%d chunks=%d embeddings=%d code_vectors=%lld",
-             job->project, stats.files_indexed, stats.chunks_added, stats.embeddings_added,
+             "done: project='%s' files=%d chunks=%d embeddings=%d code_vectors=%lld", job->project,
+             stats.files_indexed, stats.chunks_added, stats.embeddings_added,
              (long long)code_embed.embedded);
 }
 

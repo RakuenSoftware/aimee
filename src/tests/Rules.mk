@@ -6355,6 +6355,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o $(
                      $(OBJDIR)/kb/kb_intel_payload.o \
                      $(OBJDIR)/kb/kb_bandit_registry.o \
                      $(OBJDIR)/kb/http/kb_http_code.o \
+                     $(OBJDIR)/kb/http/kb_http_code_lifecycle.o \
                      $(OBJDIR)/kb/http/kb_http_code_context.o \
                      $(OBJDIR)/kb/http/kb_http_code_graphfb.o $(OBJDIR)/kb/lessons_reflect.o \
                                     $(OBJDIR)/kb/lessons_session_capture.o $(OBJDIR)/kb/lessons_cite_tracker.o \

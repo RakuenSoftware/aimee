@@ -563,7 +563,8 @@ static void test_osv_offline_cache_miss_allows(void)
    "recall {block_type,command,cwd,limit,limit_tokens,project,query,scope,since,workspace} "       \
    "req:command\n"                                                                                 \
    "roadmap {command,roadmap_id} req:command\n"                                                    \
-   "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} req:diff\n"  \
+   "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} "            \
+   "req:diff,original_request\n"                                                                   \
    "rules {command,reason,text} req:command\n"                                                     \
    "search_docs {cwd,max_results,project,query,scope} req:query\n"                                 \
    "search_memory {cwd,filter,project,query,scope,workspace} req:query\n"                          \

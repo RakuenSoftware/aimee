@@ -29,12 +29,30 @@
 
 /* The other tool families are irrelevant to this contract and drag in most of
  * the server; stub them so the test links against the schema alone. */
-void mcp_add_discovery_tools(cJSON *tools) { (void)tools; }
-void mcp_add_extended_tools(cJSON *tools) { (void)tools; }
-void mcp_add_skill_tools(cJSON *tools) { (void)tools; }
-void mcp_add_gateway_tools(cJSON *tools) { (void)tools; }
-cJSON *session_search_mcp_tool(void) { return NULL; }
-cJSON *mcp_client_registry_build_namespaced_tools(void) { return NULL; }
+void mcp_add_discovery_tools(cJSON *tools)
+{
+   (void)tools;
+}
+void mcp_add_extended_tools(cJSON *tools)
+{
+   (void)tools;
+}
+void mcp_add_skill_tools(cJSON *tools)
+{
+   (void)tools;
+}
+void mcp_add_gateway_tools(cJSON *tools)
+{
+   (void)tools;
+}
+cJSON *session_search_mcp_tool(void)
+{
+   return NULL;
+}
+cJSON *mcp_client_registry_build_namespaced_tools(void)
+{
+   return NULL;
+}
 
 static cJSON *schema_for(const char *tool_name)
 {

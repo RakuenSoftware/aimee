@@ -14,7 +14,6 @@
  * otherwise tunnel the same /v1 route over the local UDS transport. */
 #define KB_CLIENT_INDEX_SCAN_TIMEOUT_DEFAULT_MS (5 * 60 * 1000)
 
-
 static int kb_index_find_parse(cJSON *resp, term_hit_t *out, int max)
 {
    if (!resp)
@@ -476,9 +475,8 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
     * that was never reached. Name which boundary refused. */
    if (!json || status < 200 || status >= 300)
    {
-      aimee_log(LOG_ERROR, "kb_client",
-                "blast_radius '%s' '%s': fetch failed (http=%d, body=%s)", project, file_path,
-                status, json ? "present" : "none");
+      aimee_log(LOG_ERROR, "kb_client", "blast_radius '%s' '%s': fetch failed (http=%d, body=%s)",
+                project, file_path, status, json ? "present" : "none");
       free(json);
       return -1;
    }

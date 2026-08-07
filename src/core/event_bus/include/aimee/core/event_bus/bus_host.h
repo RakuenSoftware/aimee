@@ -163,7 +163,7 @@ typedef struct bus_host
 
    bus_kind_t kinds[BUS_HOST_MAX_KINDS];
    bus_pending_t pending[BUS_HOST_MAX_PENDING];
-   uint64_t seq; /* host-assigned monotonic dispatch order */
+   uint64_t seq;                     /* host-assigned monotonic dispatch order */
    uint64_t next_server_correlation; /* host-unique ids handed to servers */
 
    bus_tap_fn tap;

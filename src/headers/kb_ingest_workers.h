@@ -20,7 +20,6 @@ void kb_ingest_workers_start(kb_service_ctx_t *ctx);
 /* Stop and join all ingest threads on ctx. */
 void kb_ingest_workers_stop(kb_service_ctx_t *ctx);
 
-
 /* Effective ingest-worker count for a configured value on a host with `ncpu`
  * online CPUs. Ingest work is embedding and is CPU-bound, so it never takes the
  * whole machine: at least one core is always left for the interactive path.

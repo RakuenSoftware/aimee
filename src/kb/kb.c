@@ -615,7 +615,6 @@ int accept_generated_embedding(int64_t doc_id, const float *vec, int dim)
    return 0;
 }
 
-
 /* ── Purge-fence write discipline (webchat-project-lifecycle slice 2) ──
  * EVERY project-scoped ingest write runs inside an explicit transaction that
  * takes the project advisory guard and re-checks the generation fence before
@@ -923,8 +922,8 @@ static int kb_path_wants_dense_vector(const char *rel_path)
    const char *env = getenv("AIMEE_KB_EMBED_ALL_FILES");
    if (env && env[0] == '1')
       return 1;
-   static const char *prose_ext[] = {".md",  ".mdx", ".markdown", ".txt",
-                                     ".rst", ".adoc", ".org",     NULL};
+   static const char *prose_ext[] = {".md",  ".mdx",  ".markdown", ".txt",
+                                     ".rst", ".adoc", ".org",      NULL};
    size_t n = strlen(rel_path);
    for (int i = 0; prose_ext[i]; i++)
    {
@@ -1125,8 +1124,8 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    int batch_dim = 0;
    if (wants_vector)
    {
-      batch_vecs = calloc((size_t)(n_chunks > 0 ? n_chunks : 1) * EMBED_MAX_DIM,
-                          sizeof(*batch_vecs));
+      batch_vecs =
+          calloc((size_t)(n_chunks > 0 ? n_chunks : 1) * EMBED_MAX_DIM, sizeof(*batch_vecs));
       batch_dim = batch_vecs ? kb_embed_file_chunks(c, n_chunks, batch_vecs) : 0;
    }
    /* Gate the embed loop, NOT the rest of the function. Returning early here
@@ -1166,8 +1165,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
          int dim = 0;
          if (batch_dim > 0)
          {
-            memcpy(vec, batch_vecs + (size_t)ci * EMBED_MAX_DIM,
-                   (size_t)batch_dim * sizeof(float));
+            memcpy(vec, batch_vecs + (size_t)ci * EMBED_MAX_DIM, (size_t)batch_dim * sizeof(float));
             dim = batch_dim;
          }
          else

@@ -1619,8 +1619,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
        * build request jumps the periodic sweep instead of sitting behind it.
        * Starvation behind the global backlog is what made someone inline this
        * work in the first place; priority is the fix for that, not blocking. */
-      int queued = db2_kb_ingest_queue_enqueue(project, kb_path, "", force,
-                                               DB2_KB_INGEST_PRIO_INTERACTIVE);
+      int queued =
+          db2_kb_ingest_queue_enqueue(project, kb_path, "", force, DB2_KB_INGEST_PRIO_INTERACTIVE);
       if (queued < 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"could not queue build\"}");
@@ -1994,8 +1994,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
        * the chain expires. force=1 is preserved as the queued job's force flag. */
       kb_stats_t stats;
       memset(&stats, 0, sizeof(stats));
-      if (db2_kb_ingest_queue_enqueue(project, kb_path, "", 1,
-                                      DB2_KB_INGEST_PRIO_INTERACTIVE) < 0)
+      if (db2_kb_ingest_queue_enqueue(project, kb_path, "", 1, DB2_KB_INGEST_PRIO_INTERACTIVE) < 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"could not queue knowledge repair\"}");
          return 503;

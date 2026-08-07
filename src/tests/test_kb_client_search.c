@@ -1394,7 +1394,6 @@ static void test_index_scan_uses_v1_api_when_configured(void)
    g_route_case = 0;
 }
 
-
 /* A call that burned its whole budget and got nothing timed out; one that failed
  * immediately did not. Only the latter is evidence the KB is unreachable, and
  * only the latter may open the shared breaker -- a slow ingest scan opening it
@@ -1415,7 +1414,6 @@ static void test_timeout_is_distinguished_from_unreachable(void)
    /* No budget declared: cannot claim a timeout. */
    assert(kb_transport_call_timed_out(-1, NULL, 300000, 0) == 0);
 }
-
 
 /* Bulk ingestion and interactive reads keep separate failure budgets. A corpus
  * ingest that is failing says nothing about whether a symbol lookup will work,

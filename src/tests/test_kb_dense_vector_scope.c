@@ -22,7 +22,7 @@ int kb_path_wants_dense_vector_for_test(const char *rel_path);
 static void test_prose_is_embedded(void)
 {
    assert(kb_path_wants_dense_vector_for_test("docs/architecture.md"));
-   assert(kb_path_wants_dense_vector_for_test("README.MD"));      /* case-insensitive */
+   assert(kb_path_wants_dense_vector_for_test("README.MD")); /* case-insensitive */
    assert(kb_path_wants_dense_vector_for_test("notes.txt"));
    assert(kb_path_wants_dense_vector_for_test("guide.rst"));
    assert(kb_path_wants_dense_vector_for_test("book.adoc"));

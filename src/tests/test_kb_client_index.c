@@ -243,7 +243,6 @@ static void test_format_skipped_cooldown(void)
    cJSON_Delete(resp);
 }
 
-
 /* A scan that outruns its timeout is not an unavailable service. The bound is
  * tunable because "large tree" has no fixed size, and a bad value must not be
  * able to disable it. */

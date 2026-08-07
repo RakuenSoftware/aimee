@@ -336,7 +336,6 @@ static void test_gc_audit(void)
    puts("  PASS: retention GC is manifest-fenced, audited, and fail-closed");
 }
 
-
 /* A checkout claimed by another project is a RE-INDEX under a new name, not an
  * error. This used to roll the whole upsert back and return -1, which the HTTP
  * route rendered as "canonical index scan failed" with nothing logged -- and it
