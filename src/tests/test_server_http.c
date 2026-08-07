@@ -1526,6 +1526,23 @@ int main(void)
          assert(server_http_route_allowed(0, NULL, "POST", exec_paths[i],
                                           SERVER_REMOTE_WRITES_OFF) == 1); /* UDS always */
       }
+      /* The mirror tier's client-diff upload is the workspace resource plane,
+       * driven by a remote fs authority exactly like workspace.add and the
+       * runner channel, so it is TCP-exempt. It needs tool:execute, so WITHOUT
+       * the exemption the gate would demand remote_writes=full: at the default a
+       * thin client could never upload, and the server would reconstruct a clean
+       * checkout at head with the client's uncommitted work silently missing.
+       *
+       * The cap is derived from the row's op (the row passes 0, and
+       * v1_route_caps_lookup prefers the op), which is why it reads as
+       * tool:execute here despite the literal 0 in the table. */
+      assert(server_http_route_caps("POST", "/v1/workspace/mirror-sync") == CAP_TOOL_EXECUTE);
+      assert(server_http_route_allowed(1, "plain", "POST", "/v1/workspace/mirror-sync",
+                                       SERVER_REMOTE_WRITES_OFF) == 1);
+      /* The sibling it shares a plane with, for contrast. */
+      assert(server_http_route_allowed(1, "plain", "POST", "/v1/workspaces",
+                                       SERVER_REMOTE_WRITES_OFF) == 1);
+
       assert(server_http_route_caps("POST", "/v1/roundtable/review") == CAP_DELEGATE);
       assert(server_http_route_allowed(1, "scope:project:alpha:s3cr3t", "POST",
                                        "/v1/roundtable/review", SERVER_REMOTE_WRITES_FULL) == 0);
