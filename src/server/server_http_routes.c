@@ -1562,6 +1562,32 @@ static int ws_dispatch_args(const char *method, const char *arg0, const char *co
 }
 
 /* POST /v1/workspaces — register {root_hint|root|path, provider?}. */
+/* Build the `workspace.add` flag arguments for a REST registration. `remote` and
+ * `head` are emitted only when non-empty; a `mirror` registration REQUIRES both
+ * (the server seeds its bare mirror by fetching that head from that remote), so
+ * dropping them turns a mirror registration into a rejection. Pure: borrows the
+ * caller's strings, returns the count written. */
+int workspace_add_flag_args(const char *provider, const char *remote, const char *head,
+                            const char *out[], int out_cap)
+{
+   int n = 0;
+   if (!out || out_cap < 2 || !provider || !provider[0])
+      return 0;
+   out[n++] = "--provider";
+   out[n++] = provider;
+   if (remote && remote[0] && n + 2 <= out_cap)
+   {
+      out[n++] = "--remote";
+      out[n++] = remote;
+   }
+   if (head && head[0] && n + 2 <= out_cap)
+   {
+      out[n++] = "--head";
+      out[n++] = head;
+   }
+   return n;
+}
+
 static int rh_workspaces_register(const route_req_t *rq, char *resp, int cap)
 {
    cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : cJSON_CreateObject();
@@ -1578,6 +1604,15 @@ static int rh_workspaces_register(const route_req_t *rq, char *resp, int cap)
    const char *root = (cJSON_IsString(jroot) && jroot->valuestring) ? jroot->valuestring : "";
    const cJSON *jprov = cJSON_GetObjectItemCaseSensitive(body, "provider");
    const char *provider = (cJSON_IsString(jprov) && jprov->valuestring) ? jprov->valuestring : "";
+   /* A `mirror` workspace is seeded by fetching the client's head from its
+    * remote, so workspace.add requires both. Dropping them here (as this route
+    * did) meant a mirror registration over REST was rejected for a missing
+    * --remote, leaving the reverse channel no route to the sandboxed tier. */
+   const cJSON *jremote = cJSON_GetObjectItemCaseSensitive(body, "remote");
+   const char *remote =
+       (cJSON_IsString(jremote) && jremote->valuestring) ? jremote->valuestring : "";
+   const cJSON *jhead = cJSON_GetObjectItemCaseSensitive(body, "head");
+   const char *head = (cJSON_IsString(jhead) && jhead->valuestring) ? jhead->valuestring : "";
    int rc;
    if (!root[0])
    {
@@ -1586,8 +1621,9 @@ static int rh_workspaces_register(const route_req_t *rq, char *resp, int cap)
    }
    if (provider[0])
    {
-      const char *extra[2] = {"--provider", provider};
-      rc = ws_dispatch_args("workspace.add", root, extra, 2, resp, cap);
+      const char *extra[WS_ADD_FLAG_ARGS_MAX];
+      int extra_n = workspace_add_flag_args(provider, remote, head, extra, WS_ADD_FLAG_ARGS_MAX);
+      rc = ws_dispatch_args("workspace.add", root, extra, extra_n, resp, cap);
    }
    else
    {

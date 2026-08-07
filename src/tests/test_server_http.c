@@ -1398,6 +1398,30 @@ int main(void)
       assert(server_http_route_caps("POST", "/v1/workspaces") == CAP_TOOL_EXECUTE);
       assert(server_http_route_caps("DELETE", "/v1/workspaces/%2Fhome%2Fme%2Fp") ==
              CAP_TOOL_EXECUTE);
+
+      /* A `mirror` registration is seeded by fetching the client's head from its
+       * remote, so BOTH must survive the REST hop. This route forwarded only
+       * --provider, so a mirror registration over REST was refused for a missing
+       * --remote — and the reverse channel, which registers this way, had no
+       * route to the sandboxed tier at all. */
+      {
+         const char *args[WS_ADD_FLAG_ARGS_MAX];
+         int n = workspace_add_flag_args("mirror", "git@github.com:o/r.git", "abc123", args,
+                                         WS_ADD_FLAG_ARGS_MAX);
+         assert(n == 6);
+         assert(strcmp(args[0], "--provider") == 0 && strcmp(args[1], "mirror") == 0);
+         assert(strcmp(args[2], "--remote") == 0 && strcmp(args[3], "git@github.com:o/r.git") == 0);
+         assert(strcmp(args[4], "--head") == 0 && strcmp(args[5], "abc123") == 0);
+
+         /* Absent coordinates stay absent — `detached`/`shared` take neither, and
+          * an empty --remote would be a worse error than no flag. */
+         n = workspace_add_flag_args("detached", "", "", args, WS_ADD_FLAG_ARGS_MAX);
+         assert(n == 2);
+         assert(strcmp(args[0], "--provider") == 0 && strcmp(args[1], "detached") == 0);
+
+         /* No provider, nothing to say. */
+         assert(workspace_add_flag_args("", "r", "h", args, WS_ADD_FLAG_ARGS_MAX) == 0);
+      }
       /* A read-scoped bearer (index:read only) satisfies the GETs but is denied
        * the writes; a write bearer (tool:execute) is allowed. The route gate is
        * (route_caps & conn_caps) == route_caps. */

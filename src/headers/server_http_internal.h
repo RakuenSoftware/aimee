@@ -148,7 +148,6 @@ int server_http_gzip_peek(void);
 /* PC2: CI webhook route handler (defined in server_ci_route.c). */
 int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap);
 
-
 /* Workflow Actions lifecycle + project-file-browser route adapters + the shared
  * unsigned-long query-param helper — defined in server_http_config_routes.c
  * (relocated out of server_http_routes.c to stay under the line-check ceiling).
@@ -194,5 +193,13 @@ int rh_workspace_session_dir(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_editor(const route_req_t *rq, char *resp, int cap);
 int rh_git_credentials(const route_req_t *rq, char *resp, int cap);
 int rh_git_sshkey(const route_req_t *rq, char *resp, int cap);
+
+/* Max flag arguments workspace_add_flag_args can write: --provider/--remote/--head. */
+#define WS_ADD_FLAG_ARGS_MAX 6
+
+/* Build the `workspace.add` flag arguments for a REST workspace registration.
+ * See the definition in server_http_routes.c. Returns the count written. */
+int workspace_add_flag_args(const char *provider, const char *remote, const char *head,
+                            const char *out[], int out_cap);
 
 #endif /* SERVER_HTTP_INTERNAL_H */
