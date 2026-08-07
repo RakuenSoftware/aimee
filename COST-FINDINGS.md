@@ -460,10 +460,358 @@ generalisable finding about agent frameworks, and it is falsifiable: each fix ha
 a before/after transcript.
 
 **Accounting note for the roundtable path.** A review seat is a delegate, and
-delegate tokens never appear in the codex transcript the harness meters. The
-polling turns (`roundtable_status`) DO appear and are billed to the primary.
-Report seat cost separately rather than letting review work vanish into an
-unmetered channel — the same discipline as Finding 14.
+delegate tokens never appear in the codex transcript the harness meters. Report
+seat cost separately rather than letting review work vanish into an unmetered
+channel — the same discipline as Finding 14. (Until Finding 16 the polling turns
+DID appear and were billed to the primary; the review is synchronous now, so the
+only metered turn is the single blocking call.)
+
+## Finding 16 — the roundtable poll contract, and why polling is never cheap
+
+**Counting note, and a correction.** `summary.json`'s `codex.tool_calls` counts
+`item.started` AND `item.completed` for the same item, so every call type that
+emits both (command_execution, mcp_tool_call, file_change) is DOUBLED there.
+This finding originally quoted those doubled figures. Count distinct item ids
+from `item.completed` instead. Token usage is NOT affected: exactly one event
+per run carries `usage` (`turn.completed`), so every credit figure below and
+elsewhere in this document stands.
+
+`aimee__am_1f0f1ab528__r1` (CT403), distinct tool calls:
+
+```
+shell (command_execution)      19
+mcp:aimee:roundtable_status    16   <--
+mcp:aimee:index                 2
+mcp:aimee:preview_blast_radius  2
+mcp:aimee:find_symbol           1
+mcp:aimee:roundtable_review     1
+file_change                     1
+                            -----
+                               42   (baseline: 10)
+```
+
+**16 of 42 calls were polling one review to completion.** Actual retrieval — the
+thing aimee is supposed to be paying for — was 5 calls.
+
+Measured, not inferred:
+
+| | baseline | aimee |
+|---|---|---|
+| uncached input | 68,295 | 94,458 (1.38x) |
+| cached input | 423,168 | 2,705,152 (6.39x) |
+| credits | 16.52 | 53.49 |
+| — cached component | 5.29 | **33.81 (63% of the bill)** |
+
+The retrieval context aimee pulls in is cheap: uncached input is only 1.38x
+baseline. The cost is cached input, and cached input scales with TURN COUNT,
+because every turn re-sends the whole accumulated conversation. Across all four
+arms, credits are monotonic in call count (10/16/22/42 calls →
+16.52/24.61/30.84/53.49 credits).
+
+**The mechanism.** A poll costs microseconds server-side and an entire model
+turn on the client. The tool description said, in as many words:
+
+> "Returns a run_id immediately; poll roundtable_status until synthesis completes."
+
+and the submit path attached `poll_after_ms: 1000` to every non-terminal
+snapshot. A one-second poll interval, advertised on a job whose own header
+comment says it can run twenty minutes. The agent was following instructions.
+
+**The part that makes this a design finding rather than a tuning one.** The
+layer below was already synchronous: `handle_roundtable_review` calls
+`obs_bus_module_call` and blocks on the bus until the verdict arrives. The
+asynchronous op-run wrapper on top of it made nothing concurrent that was not
+already concurrent — it only moved completion-detection to the one place where
+waiting is expensive, the model's turn loop.
+
+Fixed by deleting the wrapper: `roundtable_review` dispatches inline and returns
+the verdict. Each layer blocks on the one below —
+
+```
+thin client -> aimee-server -> event bus -> roundtable -> model
+```
+
+— and none of it is provider-specific. `roundtable_status` is gone from the tool
+surface entirely; a status tool is an invitation to poll even when the call
+already blocks.
+
+**Not yet measured.** The post-fix cost is a rerun, not an arithmetic exercise:
+polls land late in a run when context is fattest, so 16/42 calls is not 38% of
+the bill, and the blocking call's wall time is a real (if unbilled) change.
+Report the new cell, do not project this one.
+
+**What the fix does NOT address.** Removing the polls takes the cell from 42
+calls to 26, against baseline's 10. The remaining +16 is Finding 17.
+
+## Finding 17 — WITHDRAWN, and replaced by Finding 19
+
+**This finding was wrong and its correction matters more than the original.**
+
+It claimed aimee "paid for the index and still grepped" -- retrieval additive
+rather than substitutive, 12 exploration shell calls against baseline's 5. The
+mechanism was not additive retrieval. `index command=investigate` ABSTAINED:
+
+```json
+{"results":[], "status":"abstained", "item_count":0,
+ "answerability":{"decision":"no_answer","reason":"no_evidence_above_floor",
+                  "candidate_count":0, "top_confidence":0, "vector_floor":0.7}}
+```
+
+`code_embeddings` held **zero rows, globally, for every project that has ever
+existed in this deployment**. The agent asked semantic search the right
+question, got "no answer", and fell back to grep. It behaved correctly; the
+capability was absent.
+
+Retained below as the original text, because the numbers in it are real and the
+conclusion drawn from them was not. See Finding 19 for the cause.
+
+### Original text (conclusion withdrawn)
+
+### Finding 17 — the rest of the turns: retrieval was additive, not substitutive
+
+Same cell, with the 16 polls removed: **26 calls against baseline's 10.** Where
+the remaining +16 sits, by category:
+
+| category | baseline | aimee | delta |
+|---|---|---|---|
+| MCP retrieval (index/find_symbol/blast_radius) | 0 | 5 | +5 |
+| roundtable_review (blocking verdict) | 0 | 1 | +1 |
+| exploration shell (search, read, search+read) | 5 | 12 | **+7** |
+| git inspection | 1 | 3 | +2 |
+| build/test | 3 | 3 | 0 |
+| file write | 1 | 1 | 0 |
+| read own SKILL.md from the plugin cache | 0 | 1 | +1 |
+
+**The finding is the third row.** aimee spent 5 calls on the index — and then did
+**12 exploration shell calls to baseline's 5**, on the same task. It grepped the
+tree *more* than the arm with no index at all. Retrieval did not replace search;
+it was added on top of it. That is 7 turns, and it is the largest remaining
+block after polling.
+
+This is the same shape as Finding 7 but a different mechanism. Finding 7 was
+about *batching* (span reads one range per call where the shell form chained
+several). Here the shell calls ARE well batched — five of the twelve chain two
+or three reads with `&&`, and the three build/test calls exactly match
+baseline's. The waste is not in how the calls are formed; it is that the
+retrieval and the searching answer the same question and both get asked.
+
+Two calls bought nothing at all:
+
+- **#1** reads `…/plugins/cache/local/aimee/0.3.0/skills/…` — the agent reading
+  its own skill file. `client_integrations.c` tells it not to, in those words
+  ("Do not read this file, or anything else under the plugin cache"), and it did
+  anyway. This same call appears in Finding 7's waste table on a different task,
+  so it is not a one-off.
+- **#18** re-reads `TICKET.txt` at the end of the run, after **#2** had already
+  read all 240 lines of it.
+
+**What this does not say.** n=1 cell, one task, index-only mode. The exploration
+gap needs to hold across the corpus before it is a claim; a single task where
+the index answers badly would produce this pattern honestly. Check it against
+the other 13 before publishing.
+
+## Finding 18 — "no arm wrote tests" is a harness bug, not a result
+
+`codex_matrix_runner.py:672`:
+
+```python
+bucket = "test" if rel.startswith("tests/") else "production"
+```
+
+The am_ corpus keeps its tests at **`src/tests/`**, not `tests/`. The prefix never
+matches, so every test file in every arm is bucketed as production and
+`test_added` is structurally 0.
+
+`aimee__am_1f0f1ab528__r1` is the proof — its own `per_file` contradicts its
+totals:
+
+```
+{'added': 40, 'deleted': 5, 'kind': 'production', 'path': 'src/tests/test_bus_capture.c'}
+...
+'production_added': 71,  'test_added': 0
+```
+
+40 of those 71 "production" lines are test code. Real production is ~31.
+
+**Two published claims die here.** "No arm wrote tests on a corpus built from
+real fix commits" was my statement and it is wrong. And every
+`production_added` figure in this document is inflated by whatever test code
+that cell wrote — which is exactly the axis the article wants to compare.
+
+**Do not fix the runner mid-experiment**; changing the metric between cells makes
+early and late cells incomparable. Recompute post-hoc from each cell's retained
+`patch.diff` instead, bucketing on `"/tests/" in path or basename.startswith("test_")`,
+and restate the LOC table from that.
+
+### Recomputed from patch.diff — every arm wrote tests
+
+Harness said `test_added: 0` for all 25 cells. Recomputed:
+
+| arm | cells | prod+ | test+ | cells that wrote tests |
+|---|---|---|---|---|
+| baseline (CT403) | 4 | 199 | 166 | **4/4** |
+| ponytail-addon (CT403) | 4 | 85 | 72 | **4/4** |
+| ponytail-instructions (CT403) | 4 | 72 | 66 | **4/4** |
+| aimee | 1 | 31 | 40 | **1/1** |
+| baseline (CT401) | 4 | 81 | 17 | 1/4 |
+| ponytail-addon (CT401) | 4 | 44 | 13 | 1/4 |
+| ponytail-instructions (CT401) | 4 | 53 | 13 | 1/4 |
+
+**`am_1f0f1ab528` — the one task with all four arms, and the one this document
+dissects throughout:**
+
+| arm | prod+ | test+ |
+|---|---|---|
+| baseline | 30 | 0 |
+| ponytail-addon | 17 | 0 |
+| ponytail-instructions | 16 | 0 |
+| **aimee** | **31** | **40** |
+
+aimee is the only arm that wrote a test on this task, at production parity with
+baseline (31 vs 30). Under the broken metric this read as "aimee wrote 71
+production lines to baseline's 30" — 2.4x the code for the same fix, which
+sounds like bloat. Corrected, it is 31 lines of production plus a test the other
+three arms did not write.
+
+**This is the single largest correction in this document.** The quality axis the
+article was built to measure was reading zero for everyone, and the one arm-level
+difference visible in it points the opposite way from the cost story. n=1 on the
+four-arm comparison; check it across the corpus before publishing.
+
+## Finding 19 — the aimee arm has never had a code vector
+
+`SELECT count(*) FROM code_embeddings` returns **0**. Not for the cell under
+test -- for every project, across the whole deployment, for the life of this
+study.
+
+The cause is a gap between two paths that were supposed to do the same build:
+
+| | doc vectors | canonical code index | code vectors |
+|---|---|---|---|
+| async worker (`kbiw_process_job`) | yes (`kb_build`) | yes | **never** |
+| sync HTTP (`/v1/code/build`) | yes | yes | yes |
+
+`kb_code_embed_refresh` appeared zero times in the worker. Every project arrives
+through the queue, so no project ever got code vectors. The benchmark then ran
+with `PT_SKIP_KB_BUILD=1`, so the one path that did build them was never called
+either.
+
+**What this contaminates.** Every aimee cell in this study ran with semantic
+code search disabled. The arm's measured turn count and credit cost are the cost
+of an agent falling back to grep, not the cost of the retrieval design. Finding
+17's exploration gap, and any share of Findings 5/6/7 attributable to discovery
+turns, are affected. Findings that do not depend on semantic search -- the
+roundtable polling (Finding 16), the LOC classifier (Finding 18), the credit
+arithmetic (Findings 1-3) -- stand.
+
+**What it does NOT explain.** The 16 roundtable polls were a real defect of
+their own. So were the plugin-cache read and a blast-radius query 139x slower
+than necessary. "Embeddings were empty" is not a universal excuse, and the
+temptation to treat it as one should be resisted.
+
+**Unmeasured.** Whether working semantic search actually reduces turns is a
+hypothesis, not a result. It could plausibly increase follow-up reads instead.
+The honest position is that the comparison has not been run yet: no aimee cell
+to date is a valid measurement of aimee's retrieval, and the first one that will
+be is the rerun on the build that fixes this.
+
+
+## Finding 20 — the review was asked exactly the right question and rubber-stamped it
+
+On am_312e901904 the agent invoked `roundtable_review` correctly and with a
+better brief than most humans would write:
+
+```json
+"original_request": "...TICKET.txt: Two defects behind the same report..."
+"brief": {"focus": [
+   "Verify both distinct defects in the ticket are actually fixed",
+   "Check fd remapping/chdir ordering for regressions",
+   "Check bulk-clone selection and inventory reconciliation in both UIs"]}
+"artifact_stage": "frozen_diff"
+```
+
+The first focus item names the exact failure. The patch under review fixed
+defect 1 and misdiagnosed defect 2 (it guessed stale client selection state; the
+real bug was repos filed under the browsed owner instead of their own
+clone_url, in server_http_routes_git.c, which the patch never touches).
+
+The panel returned:
+
+```json
+"approved": true,
+"artifact": "Roundtable approved the artifact with no findings.",
+"participants_total": 1, "participants_used": 1, "cost_usd": 0
+```
+
+**The configured default panel is one seat.**
+
+```json
+"seats": [{"model": "$random", "persona": "qa"}],
+"chairman": "$random", "chairman_enabled": true,
+"min_successful": 1, "max_cost_usd": 0
+```
+
+A roundtable of one is a reviewer, not a roundtable, and the chairman has
+nothing to synthesise. `cost_usd: 0` is unexplained: a real model review is not
+free, and no delegate or convene line appears in the server log for the run id.
+Whether the seat ran a model and missed the omission, or never ran, is NOT yet
+established -- and the two have very different fixes.
+
+**Why this is the most actionable finding in the document.** Every other defect
+found in this study was in plumbing. This one is in the mechanism that is
+supposed to be aimee's advantage. The agent did its part: it froze the diff,
+passed the full ticket as original_request (which the tool documents as
+goal-drift detection -- "the change is reasonable but is not the change that was
+asked for"), and briefed the panel to check both defects. The review failed open.
+
+Fixing it is the difference between an arm that ships half a ticket and an arm
+that catches its own omission, and it costs nothing in agent turns because the
+call is already being made.
+
+## Finding 21 — for the identical deliverable, aimee is 27-39% cheaper
+
+am_312e901904 is the cleanest cost comparison in the study, because three of the
+four arms produced the SAME artifact. Counted with benchmarks/loc_real.py, which
+excludes comments, includes and relocated code:
+
+| arm | files | new code | test code | credits |
+|---|---|---|---|---|
+| baseline | 1 | 0 | 0 | 75.82 |
+| ponytail-instructions | 1 | 0 | 0 | 63.66 |
+| ponytail-addon | 2 | 1 | 0 | 66.43 |
+| aimee | 4 | 27 | 19 | **46.25** |
+
+The graded fix is an ORDERING change: move two statements in src/posix/util.c so
+chdir runs before the fd remap. All four arms made exactly that change, and it
+is zero net lines of new code in every one of them. baseline and
+ponytail-instructions produced nothing else at all; ponytail-addon added a single
+Cache-Control header.
+
+So for the identical shared deliverable -- the only thing the grader scores --
+
+    aimee 46.25 vs 63.66 (p-instructions)  =  0.73x, 27% cheaper
+    aimee 46.25 vs 66.43 (p-addon)         =  0.70x, 30% cheaper
+    aimee 46.25 vs 75.82 (baseline)        =  0.61x, 39% cheaper
+
+and aimee ALSO shipped a 19-line regression test that is empirically verified to
+catch the defect (replayed on the pristine corpus it aborts on the rc=127
+assertion), plus 27 lines attempting the ticket's second defect. The other three
+shipped no test at all.
+
+**Why this is the comparison worth publishing.** Elsewhere in this document
+aimee's cost is confounded: it does more work, so "more expensive" and "more
+output" are entangled and 1.11x aggregate means little. Here the common
+deliverable is byte-comparable across arms, so the cost difference is not paid
+for by doing less. It is cheaper for the same work AND does more with the
+remainder.
+
+**The caveats that must travel with it.** n=1 task, one replicate. Delegate seat
+tokens do not appear in the codex transcript the harness meters, so aimee's
+roundtable review is real work that is NOT in the 46.25 (see the accounting note
+under Finding 15) -- the number is an undercount of aimee's true spend, and the
+comparison should say so rather than bank the gap. And the spread among the
+three non-aimee arms for identical output (63.66 to 75.82, a 19% range) is a
+useful reminder of how much run-to-run noise a single replicate carries.
 
 ## Methodology traps hit in this work
 
@@ -515,10 +863,795 @@ Record these; several produced wrong published numbers first.
    `len(json.dumps(item))` found mean 2,545 chars, max 12,201. **Do not cite MCP
    result sizes from the call-sequence dump.**
 
+## Finding 22 — two operating points, and aimee wins at both
+
+Re-run of am_312e901904 on the aimee arm (aimee-kb:rt47 / aimee-server:rt48,
+2026-08-06), with the corpus indexed once and the test gate live for the first
+time. Graded result:
+
+    hidden_ok    true
+    tests_ok     true      reason: catches_defect
+    tests_files  frontend/src/setup/ownerUrl.test.ts, src/tests/test_git_cred_inject.c
+    credits      67.05     wall 611s
+    LOC          38 production added, 44 test added, 6 files
+
+`catches_defect` is verified, not asserted: the gate copies the agent's test
+files onto the PRISTINE corpus, requires them to FAIL there, then requires them
+to PASS against the agent's own fix. A test that passes on broken code, or fails
+on its own fix, does not earn it.
+
+This run fixed BOTH defects in the ticket. The earlier run fixed only the first.
+That gives two measurements of the same arm on the same task, and they support
+two different claims. Keep them apart:
+
+| | deliverable | aimee | field | result |
+|---|---|---|---|---|
+| same work | defect 1 only, as all three controls | **46.25** | 63.66 - 75.82 | **27-39% cheaper** (Finding 21) |
+| full work | both defects + two verified tests | **67.05** | 63.66 - 75.82 | **same price, only arm that finishes** |
+
+So the honest framing is a CHOICE, not a single number:
+
+  - Hold the deliverable fixed and aimee is significantly cheaper than every
+    control -- 46-ish credits for what the others spend 64-76 on.
+  - Hold the SPEND fixed and aimee completes the whole ticket and writes tests
+    that provably catch the defects, while every control delivers half the
+    ticket and no tests at all.
+
+What the controls actually shipped on this ticket: baseline and
+ponytail-instructions produced zero new code beyond the shared ordering fix;
+ponytail-addon added one line. None of the three wrote a single test line. All
+three still score hidden_ok=true, because the graded test only covers defect 1 --
+which is why the TESTS column exists (Finding 18).
+
+The ordering fix itself is worth noting for the writeup: src/posix/util.c scores
+ZERO real code lines -- 7 raw '+' lines, of which 5 are comment and 2 are the
+same statements relocated. The entire defect was ordering. aimee's own comment
+names the mechanism: cwd may reach the directory through /proc/self/fd/<n>, and
+when n equals the target fd, dup2 replaces the directory handle with the
+credential memfd, so chdir fails and the child exits 127.
+
+What this does NOT support:
+
+  - One replicate. No confidence interval on either 46.25 or 67.05.
+  - The control numbers are from the earlier run (valid -- controls do not
+    exercise aimee -- but not simultaneous).
+  - The controls' TESTS verdict is INFERRED from their recorded diffs (they
+    changed zero test files, so no_test is certain) rather than produced by a
+    gate run; their cells predate the gate and record tests_ok=N/A.
+  - 46.25 and 67.05 come from different aimee builds. The delta is not a clean
+    measurement of "second defect costs 21 credits" -- it is two runs that
+    happened to deliver different scopes.
+
+## Finding 23 — am_b84c9294aa: a wrong fix, and a gate that certified its test
+
+Task 2 of the am_ corpus, aimee arm, same build as Finding 22.
+
+    hidden_ok    FALSE  (1 graded test failed)
+    tests_ok     true   reason: catches_defect      <-- WRONG, see below
+    credits      54.01  wall 585s
+    LOC          13 production, 13 test, 2 files
+
+The ticket is a LEASE LEAK: 16 pool members held ~15 hours and never returned.
+aimee did not fix the leak. It loosened the starvation DETECTOR, deleting the
+waiters prerequisite:
+
+    -  int starved = (g_size > 0 && stuck == g_size && stuck == live && waiters > 0);
+    +  int starved = (g_size > 0 && stuck == g_size && stuck == live);
+
+The self-heal action behind that flag is a PROCESS RESTART, and the prerequisite
+is what stops it firing on a healthy pool. The upstream comment says so outright:
+"a fully-leased pool with nobody queued is a busy kb, not a stuck one". aimee's
+version restarts a busy kb underneath its users.
+
+It then rewrote the test guarding that invariant --
+test_busy_pool_is_not_treated_as_starved (asserts starved_calls == 0) became
+test_stuck_pool_without_waiters_gives_up (asserts == 1). The graded suite still
+contains the original, and that is the test that failed.
+
+The reasoning was not stupid: a starved pool starves the HTTP worker pool, so
+requests can block before ever reaching db2_pool_lease() to become waiters. That
+is a real observation about the waiter signal. It is not a licence to delete the
+guard. The roundtable ran TWICE and approved it.
+
+### The gate defect this exposed
+
+Red-green CANNOT distinguish "wrote a test that catches a defect" from "inverted
+an existing assertion". A flipped assertion fails on pristine code and passes on
+the changed code -- satisfying both halves -- so the gate awarded catches_defect
+to a test whose only content was agreeing with the agent's own regression.
+
+Fixed by an integrity check: any test entry point present in the PRISTINE tree
+and absent from the agent's version yields
+
+    tests_ok = false, reason = removed_existing_test:{file: [names]}
+
+Re-scored from the stored artifacts, task 2 now returns exactly that, naming
+test_busy_pool_is_not_treated_as_starved. Detection covers C, Python and JS/TS
+test declarations. Deleting a test is a legitimate engineering act; it is simply
+not evidence that a defect was caught, which is the only thing this column
+claims.
+
+Cells graded before this check (task 1, am_312e901904) are unaffected in
+substance -- both of its test files were NEW, so nothing could have been removed
+-- but any tests_ok=true produced before it should be re-derived, not trusted.
+
+## Finding 24 — am_b84c9294aa: 0 of 4, and the fix was already in the tree
+
+All four arms run on task 2, same corpus and build. Nobody passed.
+
+| arm | hidden_ok | tests_ok | reason | credits | prod | test |
+|---|---|---|---|---|---|---|
+| aimee | false | false | removed_existing_test | 54.01 | 13 | 13 |
+| baseline | false | false | does_not_catch_defect | 69.59 | 41 | 35 |
+| ponytail-addon | false | false | removed_existing_test | 43.88 | 10 | 7 |
+| ponytail-instructions | false | false | no_test | 84.64 | 5 | 0 |
+
+aimee's row is RE-SCORED. Its cell was graded before the removed_existing_test
+check existed and stored tests_ok=true/catches_defect; the summary carries both
+values (tests_ok_as_graded, tests_ok_rescored) rather than an overwrite.
+
+### Three different failure modes, three different gate verdicts
+
+no_test              wrote 5 production lines and nothing else, at the highest
+                     cost on the board
+does_not_catch_defect wrote the most of anything (41/35) and its test PASSES on
+                     the unfixed corpus
+removed_existing_test deleted the guard test, twice, independently
+
+This is the first task where the TESTS column separated four arms into distinct
+diagnoses. It is measuring something.
+
+### The wrong fix was not idiosyncratic
+
+aimee AND ponytail-addon both deleted the waiters prerequisite from the
+starvation detector and both removed the SAME guard,
+test_busy_pool_is_not_treated_as_starved. Two independent arms, one with aimee
+and one without. The trap is real: a starved pool starves the HTTP worker pool,
+so requests block before they can queue as waiters, which makes the prerequisite
+look like the bug.
+
+### What the real fix is
+
+The graded artifact is ONLY src/tests/test_db2_pool.c, and against pristine it
+adds six lines:
+
+    +   db2_pool_note_lease_site(a, "leaky_worker.c:123");
+    ...
+    +   assert(strstr(g_starved_reason, "leaky_worker.c:123") != NULL);
+
+So the deliverable is: when the pool gives up, the fatal line must NAME THE
+HOLDER, not just count members. The detector condition is untouched -- the
+graded suite keeps test_busy_pool_is_not_treated_as_starved exactly as it was,
+which is why every arm that loosened the condition failed.
+
+The capability was ALREADY THERE, unused by that path:
+
+    src/db2/db2_pool.h:103   void db2_pool_note_lease_site(void *conn, const char *site);
+    src/db2/db2_pool.c:426   implementation
+    src/db2/db2_init.c:534   already records g_lease_site on every lease
+    src/tests/test_db2_pool.c:393  a pristine test already exercises it
+
+The pool already knows who took every lease. The starvation message just never
+included it, reporting counts only. This is Finding 15's pattern again: the
+capability existed and nothing pointed at it.
+
+Operationally that is the whole ticket. The condition is "unrecoverable
+in-process" -- the only remedy is a restart -- so the single line emitted before
+giving up is the only forensic evidence an operator ever gets. Without a holder
+name you restart, the leak returns, and you are back in the same 15 hours.
+
+### Why 0/4 is explainable by the ticket, not by four capability failures
+
+The ticket is 265 bytes and was delivered correctly to every cell. It states the
+DIAGNOSIS -- "it was a lease taken and never returned" -- and never states the
+DELIVERABLE. Nothing in it mentions attribution, call sites, or which code
+leaked; grepped, there is no such word. Read plainly it says "the detector
+missed this", which is exactly what all four arms tried to fix.
+
+Contrast task 1, whose ticket names both defects outright ("...and the Projects
+view then disagreed with what had actually been cloned"). That one scored 1/4.
+
+This is Finding 14's under-scoped-patch failure in its sharpest form: a solvable
+ticket, a small fix, existing infrastructure, and a spec that points somewhere
+else. A 0/4 here is an acceptable result for the study -- not every ticket must
+be winnable -- but it should be reported as a SPEC gap, not as four independent
+capability gaps.
+
+## Finding 25 — am_270b3483d5: aimee alone fails, by over-validating
+
+All four arms, one replicate, same harness and gate.
+
+| arm | hidden_ok | tests_ok (re-scored) | credits | wall | prod | test |
+|---|---|---|---|---|---|---|
+| aimee | FALSE | false — changed_existing_assertions | 38.65 | 489s | 16 | 12 |
+| baseline | true | true — catches_defect | 17.95 | 122s | 14 | 8 |
+| ponytail-addon | true | true — catches_defect | 24.42 | 144s | 7 | 13 |
+| ponytail-instructions | true | true — catches_defect | 17.51 | 103s | 7 | 7 |
+
+aimee lost on every axis: the only failure, 4x the wall time, roughly 2x the
+cost. This is the first UNAMBIGUOUS aimee-specific failure in the study --
+unlike am_b84c9294aa, where all four arms failed a ticket that never stated its
+deliverable.
+
+### The mechanism: it did MORE than the spec allows
+
+The graded test writes a file containing "{}" and requires READY. Upstream states
+the intent outright: "Only a readable bundle is READY." Presence and
+readability, deliberately NOT content validation.
+
+baseline, which passes:
+
+    if (stat(bundle_path, &st) != 0 || !S_ISREG(st.st_mode) ||
+        access(bundle_path, R_OK) != 0)
+       return SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE;
+
+aimee, which fails:
+
+    int bundle_ok = server_mgmt_jwks_trust_bundle_load(
+        bundle_path, bundle, sizeof(bundle), &bundle_len) == 0 && bundle_len > 0;
+
+A file containing "{}" is readable but is not a valid trust bundle, so aimee
+returns NO_TRUST_BUNDLE where the test demands READY.
+
+It was not a mistake of ignorance. The pristine header says the preflight "does
+not claim that the mounted bundle or cached JWKS is valid; those are checked by
+server_mgmt_jwks_cache_startup after DB1 opens". aimee REWROTE that comment to
+justify the change ("must pass the same secure loader used by request
+authorization") and added server_mgmt_jwks_cache.o to the test link line to pull
+the loader in. It knowingly collapsed a documented layering boundary.
+
+### The uncomfortable reading
+
+aimee's tool profile on this cell: find_symbol x2, index x2,
+preview_blast_radius x2. Better code search found
+server_mgmt_jwks_trust_bundle_load, and having found it, aimee used it. The
+richer context produced a MORE thorough fix that violates the layering the
+codebase documents and the graded suite encodes.
+
+That is a real failure mode and it is the mirror image of the usual complaint
+about weaker agents. It is not "aimee could not find the code"; it is "aimee
+found more code than the ticket wanted it to use". Worth stating plainly in the
+article: capability is not automatically alignment with scope.
+
+### Second gate blind spot, now closed
+
+tests_ok was stored as catches_defect for aimee here, WRONG for the same reason
+as Finding 23 but through a different hole. aimee inverted assertions inside the
+existing test:
+
+    -  assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_READY);
+    +  assert(server_write_tier_config_state() == SERVER_WRITE_TIER_CONFIG_NO_TRUST_BUNDLE);
+
+removed_existing_tests() could not fire: that file has ZERO named test functions,
+it is a bare main(), so nothing was "removed".
+
+Added weakened_existing_assertions(): any assertion present in the pristine test
+and absent from the agent's version fails the column with
+changed_existing_assertions. Adding new assertions is explicitly unaffected --
+only disappearances are reported.
+
+Re-scored across all four task 3 cells it flags aimee alone and leaves the three
+passing controls clean, which is the discrimination that matters: it does not
+punish touching a test file, only removing what that file used to prove.
+
+## Finding 26 — the roundtable CAUSED the task 3 failure
+
+Controlled A/B on am_270b3483d5. Same image (aimee-server:rt49), same corpus,
+same ticket, same agent. The only variable is whether a review is served.
+
+| | roundtable ON | roundtable OFF |
+|---|---|---|
+| hidden_ok | FALSE | **true** |
+| tests_ok | true (re-scored false) | true — catches_defect |
+| calls the secure loader | yes | **0** |
+| credits | 67.59 | **33.30** |
+| wall | 585s | **248s** |
+| prod / test LOC | 22 / 20 | 13 / 13 |
+
+With no reviewer aimee produced the minimal correct fix -- access(R_OK) + stat +
+S_ISREG, materially the same three lines baseline used to pass -- for HALF the
+credits and 2.4x faster. With the reviewer it moved trust-bundle CONTENT
+validation into a preflight the codebase documents as presence-only, invented a
+new enum state for it, and failed.
+
+The control is sound. A live probe returned
+{"status":"error","message":"roundtable review module is not attached to the
+event bus","http_status":502}; the supervisor's module list omits roundtable; no
+review was served during the cell; and the cell records exactly 2 errors against
+its 2 roundtable_review calls. The module still prints one startup line naming
+its bus address before exiting on the disable flag, which reads like it is
+serving and is worth silencing.
+
+### What this means
+
+The review step is not a neutral safety net on this task. It is an AMPLIFIER of
+scope creep. A qa seat handed a stricter validator approves it -- "more
+validation" reads as better engineering to a reviewer with no stake in the
+ticket's boundaries -- so the panel pushed aimee past the spec rather than
+holding it to it.
+
+That inverts the assumption behind Findings 20 and 23, which treated review
+failures as the panel being too PERMISSIVE (rubber-stamping, certifying a
+rewritten test). This is the opposite failure: the panel is too DEMANDING, and
+its demands are unmoored from the request.
+
+It also explains the regression the operator reported -- aimee used to lead this
+task. The agent's own instinct is right; the review talks it out of it.
+
+### What it does NOT show
+
+  - ONE replicate per condition. The contrast is large (pass/fail, 2x cost) and
+    the mechanism is identified in the diff, but it is n=1.
+  - It does not exonerate the review generally. On am_312e901904 the same panel
+    coincided with aimee being the only arm to fix both defects.
+  - Requiring original_request (Finding 25's fix) did NOT help: the ON condition
+    above already had it required at both boundaries. The panel had the ticket
+    and still approved the over-validation, so the defect is in what the seat
+    optimises for, not in what it was given.
+  - aimee at 33.30 is still above the controls (17.51-24.42) for the same
+    deliverable on this task.
+
+### The open question
+
+If a single qa seat reliably rewards thoroughness over scope, the fix is in the
+seat, not the plumbing: a reviewer whose only question is "does this do what the
+ticket asked, and nothing else" rather than a general quality reviewer. That is
+testable the same way this was -- A/B one persona against another on a task with
+a known-minimal correct answer.
+
+## Finding 27 — the roundtable is a scope PUSH, and the ticket decides if that helps
+
+The complement to Finding 26. Same A/B, on the opposite ticket shape.
+
+am_312e901904 names TWO defects. am_270b3483d5 wants a three-line presence check.
+
+| ticket | | roundtable ON | roundtable OFF |
+|---|---|---|---|
+| am_312e901904 | hidden_ok | true | true |
+| (two defects) | **defect 2 fixed** | **YES** | **NO** |
+| | test files | 2 (C + TS) | 1 (C only) |
+| | credits | **67.05** | 74.25 |
+| | wall | 611s | 376s |
+| am_270b3483d5 | hidden_ok | **FALSE** | **true** |
+| (minimal fix) | credits | 67.59 | **33.30** |
+| | wall | 585s | **248s** |
+
+On the two-defect ticket the reviewer was cheaper AND better: 67.05 credits for
+the whole ticket against 74.25 for half of it. Without the panel aimee fixed
+defect 1, wrote one test instead of two, and never touched
+frontend/src/setup/ownerUrl -- the clone-reconciliation half -- at all.
+
+On the minimal-fix ticket the same panel cost twice as much and FAILED.
+
+### One mechanism, two outcomes
+
+The panel does exactly one thing: it pushes for MORE. requirement_coverage
+enumerates the asks and blocks on anything unaddressed, which is precisely right
+when a ticket names two defects and the agent fixed one. The identical pressure,
+applied to a ticket that wants presence-not-content, produces a stricter
+validator that breaks a layering boundary the codebase documents.
+
+So neither "keep it" nor "turn it off" is the answer. The prompt already
+contains the counterweight -- "adding work the request did not ask for is drift
+... even when it would be an improvement" -- and it is losing to a qa persona's
+instinct that more validation is better engineering. The pressure needs to be
+DIRECTIONAL: block on unmet requirements, and treat work with no antecedent in
+the request as a finding with the same force.
+
+### Caveats
+
+  - ONE replicate per cell. Four cells total across the two tasks.
+  - The LOC columns are NOT comparable between ON and OFF on am_312e901904. The
+    ON cell's stored 82/0 predates the classifier fix (that test_added=0 is the
+    bug Finding 22 records; re-derived it is 38/44), while the OFF cell's 12/28
+    uses the corrected classifier. The defect-2 presence check -- does the patch
+    touch ownerUrl at all -- is the reliable signal, not the line counts.
+  - Both OFF cells still spent 2 roundtable_review calls that errored, so the
+    OFF credits include the cost of trying and failing to get a review.
+
+## Finding 28 — the full ON/OFF set: the panel helps, hurts, or is irrelevant, by ticket shape
+
+Third and last cell of the A/B. am_b84c9294aa is the under-specified ticket
+(Finding 24): it states a diagnosis, never a deliverable.
+
+| | roundtable ON | roundtable OFF |
+|---|---|---|
+| hidden_ok | false | false |
+| deletes the waiters guard | yes | **yes** |
+| finds note_lease_site (the real fix) | no | **no** |
+| tests_ok | true (re-scored false) | **false — removed_existing_test** |
+| credits | 54.01 | 49.56 |
+| wall | 585s | 345s |
+
+aimee makes the SAME wrong fix with or without a reviewer, deleting the same
+guard and missing the same existing helper. The panel is not the cause here; the
+ticket is.
+
+### The complete picture across three ticket shapes
+
+| task | shape | ON | OFF | panel's effect |
+|---|---|---|---|---|
+| am_312e901904 | two defects | both fixed, 67.05 | one fixed, 74.25 | **helps** — cheaper and more complete |
+| am_270b3483d5 | minimal fix | FAILS, 67.59 | passes, 33.30 | **hurts** — doubles cost, causes failure |
+| am_b84c9294aa | under-specified | fails, 54.01 | fails, 49.56 | **irrelevant** — same wrong fix |
+
+One mechanism -- push for more -- and three outcomes decided entirely by whether
+the ticket actually wants more. That is a property of the REQUEST, which the
+panel is given, so it is in principle detectable by the panel itself.
+
+### Consequences for the article
+
+The honest headline is not "review helps" or "review is overhead". It is that an
+unconditional scope PUSH is right about a third of the time, wrong a third, and
+irrelevant a third, on this corpus. A reviewer that could tell which ticket it is
+holding would be strictly better than either always-on or always-off.
+
+### Also confirmed here
+
+removed_existing_test fired LIVE for the first time (previous instances were
+re-scored from stored artifacts), correctly failing a cell whose only test change
+was inverting an existing guard.
+
+## Finding 29 — the integrity check needed an arbiter, and the graded suite is it
+
+am_e4c4afa194 failed the TESTS column in ALL FOUR arms with
+changed_existing_assertions, while all four PASSED the graded suite. A check that
+fires on 100% of arms when every one of them satisfies the upstream contract is
+measuring itself.
+
+Every arm removed the identical assertion:
+
+    assert(strcmp(sval(ins, "command"), "fact/ReleasePlan") == 0);
+
+which pins the ledger command field to the RAW memory key. The ticket requires
+exactly that to stop: "the bridge now emits a one-way FINGERPRINT ('mk:'+hash of
+kind\x1fkey) in the command field, never the raw identity". Keeping that
+assertion means not fixing the bug. All four arms were right and the gate called
+all four wrong.
+
+### The rule
+
+Editing or deleting an existing test is only evidence of gaming when the GRADED
+suite also fails. hidden_ok now arbitrates:
+
+    hidden_ok false + test edited  -> fail (the agent changed the test to agree
+                                      with a change upstream rejects)
+    hidden_ok true  + test edited  -> pass, annotated
+                                      ";edited_existing_tests_but_graded_ok"
+
+Re-scored across every stored cell, this keeps both genuine catches --
+am_b84c9294aa aimee and ponytail-addon, which deleted
+test_busy_pool_is_not_treated_as_starved AND failed grading -- and clears all
+four am_e4c4afa194 arms. No cell was re-run; the verdicts are re-derived from
+stored artifacts.
+
+### Why this kept happening
+
+This is the third correction to the same column (Findings 23, 25, 29). The
+pattern in all three: I wrote a rule from ONE cell's failure and shipped it as
+general. Two were under-strict and let gaming through; this one was over-strict
+and punished the correct fix. The check only became trustworthy once it had an
+independent authority to defer to rather than judging on its own.
+
+Worth stating in the article: a test-quality gate is itself a measuring
+instrument, and it needs calibrating against known-good and known-bad cells
+before its output means anything. Every number this column produced before this
+finding was re-derived, not re-run -- which is only possible because the cells
+keep their full artifacts.
+
+## Finding 30 — tasks 4-6, four arms, and the review on/off pair
+
+First tasks graded by the corrected gate from the start: both integrity checks
+live, arbitrated by the graded suite (Finding 29), and the LOC classifier fixed.
+Nothing here needed re-scoring.
+
+### am_1f0f1ab528 — 4/4, the cleanest cost comparison in the corpus
+
+| arm | hidden_ok | tests_ok | credits | wall | prod | test |
+|---|---|---|---|---|---|---|
+| aimee | true | catches_defect | 44.66 | 464s | 27 | 36 |
+| baseline | true | catches_defect | 30.51 | 315s | 40 | 40 |
+| ponytail-addon | true | catches_defect | **26.61** | 162s | 19 | 30 |
+| ponytail-instructions | true | catches_defect | 32.79 | 192s | 25 | 25 |
+
+Every arm solves it and every arm writes a test that genuinely catches the
+defect. Capability does not separate them, so this is a pure cost row -- and
+aimee is the most expensive, at 1.68x the cheapest arm.
+
+### am_e4c4afa194 — 4/4
+
+| arm | hidden_ok | tests_ok | credits | wall |
+|---|---|---|---|---|
+| aimee | true | catches_defect (edited, graded ok) | 37.05 | 487s |
+| baseline | true | catches_defect | 28.46 | 147s |
+| ponytail-addon | true | catches_defect | **22.95** | 141s |
+| ponytail-instructions | true | catches_defect | 26.89 | 152s |
+
+The tests_ok=false this task first reported for ALL FOUR arms was the gate's own
+bug; see Finding 29.
+
+### am_1e7cb3da16 — 0/4, an unguessable identifier
+
+| arm | hidden_ok | tests_ok | credits | chosen pause_reason |
+|---|---|---|---|---|
+| aimee | false | catches_defect | 43.13 | children_pending |
+| baseline | false | catches_defect | 43.79 | (not slices_running) |
+| ponytail-addon | false | changed_existing_assertions | 39.48 | (not slices_running) |
+| ponytail-instructions | false | changed_existing_assertions | 38.18 | (not slices_running) |
+
+The graded test asserts strcmp(wi.pause_reason, "slices_running") == 0 in FOUR
+places. The ticket says pending_human is wrong and never names the replacement.
+Zero of four arms guessed it. aimee and baseline still earned catches_defect --
+they implemented the right BEHAVIOUR (a self-resolving wait the sweep re-drives)
+under a different name.
+
+### The review on/off pair, all six tasks measured
+
+| task | ON | OFF | effect |
+|---|---|---|---|
+| am_312e901904 | both defects, 67.05 | one defect, 74.25 | helps |
+| am_270b3483d5 | FAILS, 67.59 | passes, 33.30 | hurts |
+| am_b84c9294aa | fails, 54.01 | fails, 49.56 | irrelevant |
+| am_1f0f1ab528 | passes, 44.66 | passes, 37.74 | neutral, cheaper off |
+| am_e4c4afa194 | passes, 37.05 | passes, 28.60 | neutral, cheaper off |
+| am_1e7cb3da16 | fails, 43.13 | fails, 44.86 | irrelevant |
+
+Review changed the OUTCOME on two of six tasks -- helping once, hurting once. On
+the four where the outcome was unchanged it cost 6-13 credits per task for
+nothing. That is the case for making it optional per run, which is how aimee
+ships it.
+
+### The corpus caveat that has to be published
+
+Two of six tickets were unwinnable as written: am_b84c9294aa stated a diagnosis
+and never its deliverable, am_1e7cb3da16 required an identifier it never named.
+Both have since been repaired to the level of detail am_e4c4afa194 already used,
+and cells before and after that repair ARE NOT COMPARABLE. Pass rates quoted
+from the pre-repair corpus understate every arm equally, but they understate.
+
+## Finding 31 — repairing two tickets turned 0/8 into 8/10, and made everyone cheaper
+
+Findings 24 and 30 identified two tickets as unwinnable as written. Both were
+repaired with ONE sentence naming the deliverable the graded test asserts, at the
+level of detail am_e4c4afa194's ticket already used. Neither addition hands over
+an implementation.
+
+am_b84c9294aa gained: "The pool already records a lease site for every member,
+but the line it emits before giving up reports only counts. It must name the
+holders, so the operator restarting the process knows which code leaked."
+
+am_1e7cb3da16 gained: "Park the parent under a distinct self-resolving pause
+reason, `slices_running`, which the autonomy sweep re-drives once every child has
+merged; `pending_human` stays reserved for genuine human gates." The identifier
+had to be named because the graded test does strcmp on it in four places.
+
+### am_b84c9294aa: 0/4 -> 5/5
+
+| config | before | after |
+|---|---|---|
+| aimee (review on) | fail, 54.01 | **pass, 22.12** |
+| aimee (review off) | fail, 49.56 | **pass, 29.53** |
+| baseline | fail, 69.59 | pass, 19.04 |
+| ponytail-instructions | fail, 84.64 | pass, 19.83 |
+| ponytail-addon | fail, 43.88 | pass, 25.20 |
+
+Every arm got CHEAPER as well as correct -- ponytail-instructions by 4.3x. A
+ticket that makes agents hunt for the deliverable costs real money: they explore
+hard, converge on a plausible wrong fix, and fail anyway.
+
+Review-on is cheaper here than review-off (22.12 vs 29.53) and writes half the
+production lines (27 vs 54): the reviewer pushed toward the focused attribution
+fix instead of a broader rewrite.
+
+### am_1e7cb3da16: 0/4 -> 3/5
+
+| config | after |
+|---|---|
+| aimee (review on) | **pass, 48.50** |
+| aimee (review off) | **pass, 43.09** |
+| ponytail-addon | pass, 39.72 |
+| baseline | FAIL, 38.72 |
+| ponytail-instructions | FAIL, 22.48 |
+
+All four arms now emit slices_running, so the naming lottery is gone and the task
+discriminates on the AUTO-RESUME behaviour it was always meant to test. Two arms
+still get that wrong. aimee passes in both configurations.
+
+### Corrections to the record
+
+Two of the three tasks previously reported as aimee failures were ticket defects:
+
+  - am_b84c9294aa was reported as "aimee deleted a safety guard". True, but so
+    did ponytail-addon, independently, and the ticket never stated its
+    deliverable. Now 5/5.
+  - am_1e7cb3da16 was reported as 0/4 with no arm passing. It was an unguessable
+    identifier. Now 3/5.
+  - am_270b3483d5 REMAINS a genuine aimee failure: over-validation with review
+    on, passing with review off (Finding 26). That one stands.
+
+### The methodological point
+
+A benchmark ticket has to state the deliverable the grader checks, or it measures
+guessing. The tell is cheap to compute and should be checked BEFORE running a
+corpus: if the graded test asserts something no reading of the ticket entails --
+a behaviour never mentioned, an identifier never named -- the task is unwinnable
+and the 0/N result says nothing about any arm.
+
+Cells before and after the repair are not comparable, and the pre-repair cells
+are archived under pre-ticket-repair-<task>/ rather than discarded.
+
+## Finding 32 — am_842ff35656 is a THIRD spec gap (proposed repair, NOT applied)
+
+Flagged for review, not acted on: ticket edits change what the corpus measures
+and should not be made unattended.
+
+aimee fails this task in the review-off pass (hidden_ok false, tests_ok
+does_not_catch_defect) despite writing 68 lines of test -- the most test code in
+any cell of the sweep, none of which exercises the graded defect.
+
+### The mismatch
+
+The graded test adds test_large_roundtable_payload_within_limit to
+src/tests/test_server_dispatch.c. It builds a roundtable.review message of
+LIMIT_DEFAULT + 64 bytes, pushes it through dispatch_json, and requires
+status ok. So the deliverable is SERVER-SIDE: roundtable.review must join the
+per-route exemption table.
+
+That table already exists, at src/server/server.c method_size_limit():
+
+    {"memory.", LIMIT_MEMORY},
+    {"tool.", LIMIT_TOOL},
+    {"delegate", LIMIT_DELEGATE},
+    {"mcp.call", LIMIT_DELEGATE},
+    {"chat.", LIMIT_CHAT},
+    ...
+
+roundtable.review is absent, so it falls through to LIMIT_DEFAULT and is
+rejected. The fix is one row.
+
+The ticket points somewhere else:
+
+    "The CLI capped what it would marshal from a file or from standard input at
+     a fixed 2 MB"
+
+Word counts across the whole ticket: CLI 1, transport 1, marshal 1, dispatch 0,
+server 0. aimee changed src/cli_v1_routes.c and its test -- exactly the layer
+named. It fixed what it was told to fix.
+
+### Proposed repair
+
+Append to the ticket, matching the level of detail used by the two tickets
+repaired in Finding 31:
+
+    "The same conflation exists at the server's per-route payload table, where
+     roundtable.review is missing from the exemptions delegate and mcp.call
+     already have, so a large artifact is refused before dispatch."
+
+That names the layer and the symptom without handing over the row.
+
+### CONFIRMED at 0/5 (all arms now measured)
+
+| arm | verdict | credits | prod / test |
+|---|---|---|---|
+| ponytail-instructions | FAIL does_not_catch_defect | 26.60 | 13 / 24 |
+| ponytail-addon | FAIL does_not_catch_defect | 34.92 | 2 / 42 |
+| aimee (review off) | FAIL does_not_catch_defect | 36.56 | 11 / 68 |
+| baseline | FAIL does_not_catch_defect | 43.45 | 16 / 49 |
+| aimee (review on) | FAIL does_not_catch_defect | 66.74 | 30 / 51 |
+
+234 lines of test across five arms and not one catches the defect, because every
+arm tested the CLI marshalling layer the ticket names while the grader checks the
+server dispatch table. Five independent agents across four scaffolds all landed
+on the same layer and all were wrong by the grader. The ticket steered every one
+of them, which is what distinguishes this from a task that is merely hard
+(compare Finding 34: am_67e9b0449a, 3/5 pass).
+
+### Why this matters beyond one task
+
+Three of fourteen tickets have now shown the same defect: the graded test
+asserts something no reading of the ticket entails. am_b84c9294aa (a behaviour
+never mentioned), am_1e7cb3da16 (an identifier never named), am_842ff35656 (the
+wrong layer named). Each produced a failure that looks like a capability gap and
+is not.
+
+The check is static and cheap: for every task, read the graded diff and ask
+whether the ticket entails it. That should run BEFORE a corpus is used, not
+after three sweeps of misattributed failures.
+
+Not yet checked the same way: am_67e9b0449a, the other review-off failure.
+
+## Finding 33 — am_67e9b0449a: the ticket names neither layer (proposed repair, NOT applied)
+
+The other review-off failure, checked the same way as Finding 32. Same family,
+weaker case: the ticket does not name the WRONG layer, it names NEITHER.
+
+The graded test exercises kb_management_action_body_parse, declared in
+src/kb/kb_management_action.h:98 and implemented in src/kb/kb_management_action.c
+-- the KB layer. It feeds three inputs: an escaped NUL in the action value, an
+escaped NUL in the agent value, and a LITERAL backslash-u0000 that must be
+treated differently from the escape.
+
+aimee changed src/server/server_mgmt_endpoint.c and its test -- the server layer.
+
+Ticket word counts, whole text: management 1, parser 1, request 1, kb 0,
+server 0. "A management request" is genuinely ambiguous: both surfaces are
+management, and nothing in the ticket selects between them. Unlike am_842ff35656,
+where the ticket actively named the CLI and the grader checked the server, this
+one simply never says.
+
+### Proposed repair
+
+    "The check belongs in the KB's management action body parser
+     (kb_management_action_body_parse), where the decoded value is produced,
+     rather than at an individual endpoint."
+
+Names the layer and the reason without giving the implementation.
+
+### Where the corpus stands
+
+Four of fourteen tickets now show a gap between what the ticket entails and what
+the graded test asserts:
+
+| task | gap |
+|---|---|
+| am_b84c9294aa | deliverable never stated | REPAIRED, 0/4 -> 5/5 |
+| am_1e7cb3da16 | identifier never named | REPAIRED, 0/4 -> 3/5 |
+| am_842ff35656 | wrong layer named | proposed |
+| am_67e9b0449a | neither layer named | proposed |
+
+The two repaired cases both went from total failure to majority pass on one
+sentence, which is the reason to take the other two seriously rather than
+recording them as capability gaps.
+
+Note what this does NOT license: the aimee failure on am_270b3483d5 was checked
+the same way and is real -- the ticket entails the presence check, the graded
+test asserts the presence check, and aimee did content validation instead.
+
+## Finding 34 — Finding 33 WITHDRAWN: am_67e9b0449a is hard, not unwinnable
+
+Finding 33 proposed repairing am_67e9b0449a's ticket because aimee (review off)
+fixed the server layer while the graded test exercises the KB parser, and the
+ticket names neither. That was argued from ONE failing cell. With all five arms
+now measured it does not hold:
+
+| arm | verdict | credits |
+|---|---|---|
+| aimee (review on) | pass | **24.34** |
+| ponytail-instructions | pass | 31.75 |
+| ponytail-addon | pass | 34.87 |
+| aimee (review off) | FAIL | 28.98 |
+| baseline | FAIL | 21.34 |
+
+Three of five arms find the right layer, so the ticket is navigable. Two do not,
+which is a task discriminating on difficulty -- exactly what a benchmark ticket
+should do. No repair is warranted and the proposal is withdrawn.
+
+Note baseline fails it as well, so the review-off failure is not aimee-specific.
+
+The contrast with the genuine gap is now sharp and gives the test a threshold:
+
+    am_842ff35656   0 of 5 arms pass   ticket names the CLI, grader checks the
+                                       server dispatch table   -> SPEC GAP
+    am_67e9b0449a   3 of 5 arms pass   ticket names neither layer, most arms
+                                       still find it           -> HARD TASK
+
+One failing arm is not evidence a ticket is broken. A ticket no arm can pass,
+where the graded diff touches something the ticket never mentions, is.
+
+Also worth recording: aimee with review ON is the CHEAPEST passing arm here, and
+review is what redirected it from server_mgmt_endpoint.c to
+kb_management_action.c. This is the clearest case in the study of the panel
+earning its cost -- Finding 26 showed it causing a failure, this shows it
+preventing one, for less money than the arms that needed no help.
+
 ## Caveats for anything published from this
 
 - 6 of 8 tasks, **one replicate**, no confidence intervals. Per-task spread is
   2.61× to 0.84×.
+- Finding 21's LOC figures (27/19) predate the classifier fix and were counted
+  with `loc_real.py`; Finding 22's (38/44) are raw diff lines from the harness
+  after that fix. **Do not compare them directly** — one excludes comments,
+  includes and moved code, the other does not.
 - Control arms are from an earlier run than the aimee arm. Valid because controls
   do not exercise aimee, but it is not a simultaneous comparison.
 - USD rests on the published Sol card; credits and all ratios are card-independent.

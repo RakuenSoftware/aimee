@@ -6,7 +6,7 @@
     "ref": "v0.3.0",
     "version": "0.3.0",
     "commit": "1d267da96e1e976d0334bce1694b8f34ba7eade2",
-    "source_sha256": "3285a30c944b4f0bc05a7a24b3d1ceddc61b65f1d79df6b75b117183eb76ba53"
+    "source_sha256": "158da47ab9c74e1accbc847efdc2741643f10a54fd71ee58e39889c8d7c1a4d5"
   },
   "modules": [
     {
@@ -35,7 +35,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "f5c8d2dd716f58d34260e63aba7d7ff2dc957c3e56b322bfdca60af35f39919d"
+      "source_sha256": "fd6a1c7ec567386847c9d6ba6468dda2cda5aa6763635b3e92f079af686a65f3"
     },
     {
       "id": "ir",
@@ -77,7 +77,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "9e18edb3567bde0eba542017ed0594f8eb242fa6506ae73eb5fe00852f5aec29"
+      "source_sha256": "23cefc02f3c592495e8e142a3078d7cf0d36475806b9f12e7ab3730d003b5357"
     },
     {
       "id": "gateway",
@@ -104,7 +104,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "b3ffc55d579c23375e3afd254c803889e09e68bec589d650da94776c96db177f",
+      "source_sha256": "fa5fe6655d8abd3181a917ea04b14848fc2eaf58858be3336b67c72d963286b6",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 7,
@@ -365,7 +365,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "cf5cfde7267797eeb189184d8848b21ff12e0d366016507e49972822c76482f4",
+      "source_sha256": "aa5b1e7785075365060492464193e73f3b472e9942a628436448cc52b2b7ba3c",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 21,

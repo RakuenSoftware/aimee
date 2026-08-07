@@ -778,6 +778,29 @@ ENV_DESC = {
         "synthesis hop. Unset for an external embedder reached over plain HTTPS, or when no "
         "embedder is deployed. The sidecar refuses to start without this material.",
     ),
+    "AIMEE_KB_EMBED_ALL_FILES": (
+        "Knowledge base (aimee-kb)",
+        "Set to 1 to give EVERY indexed file a dense document vector, including source. "
+        "Off by default because source files are already embedded by the code path, and "
+        "embedding them a second time as prose was 82% of the doc-embedding token budget "
+        "on a real corpus. Chunk rows are written either way, so lexical and FTS search "
+        "over source is unaffected by this setting; only the redundant vector is skipped.",
+    ),
+    "AIMEE_EMBED_HTTP_TIMEOUT_MS": (
+        "Knowledge base (aimee-kb)",
+        "Deadline for one embedding HTTP call, default 180000. The previous hardcoded 30s "
+        "was shorter than a cold model load plus a large batch, so the first request of a "
+        "run could fail on a healthy embedder.",
+    ),
+    "AIMEE_KB_READ_TIMEOUT_MS": (
+        "Knowledge base (aimee-kb)",
+        "Deadline for a single KB read issued by the client, in milliseconds.",
+    ),
+    "AIMEE_KB_SCAN_TIMEOUT_MS": (
+        "Knowledge base (aimee-kb)",
+        "Deadline for a code-index scan request, in milliseconds. Scans are queued and "
+        "drained by the ingest workers, so this bounds the REQUEST rather than the work.",
+    ),
     "AIMEE_KB_EMIT_ENROLL": ("Knowledge base (aimee-kb)", "Emit a client enrollment token on KB start."),
     "AIMEE_KB_EMIT_SCOPE": ("Knowledge base (aimee-kb)", "Scope for the emitted enrollment token."),
     "AIMEE_KB_OIDC_ISSUER": ("Knowledge base (aimee-kb)", "OIDC issuer for KB API auth."),

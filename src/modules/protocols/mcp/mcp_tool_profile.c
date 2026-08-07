@@ -66,17 +66,15 @@ static const char *const MCP_CORE_TOOLS[] = {
      *
      * That looked like guidance being ignored. It was the tool not being visible.
      * A tool the agent cannot afford to reach is a tool it does not have. */
-    "roundtable_review",
-    "roundtable_status", /* the verdict is async; without the poller the review is unreadable */
+    "roundtable_review", /* blocks and returns the verdict; there is no poller to pair with it */
     /* An MCP delegate call returns a job_id and runs in the background, so its
      * poller is not optional: without delegate_status in the floor, an agent
      * that follows our own instruction to delegate cannot read the result
      * without a find_tools -> describe_tool -> call_tool detour. Measured on a
      * real cell, five of fourteen tool calls went on exactly that. This is the
-     * same reasoning that already puts roundtable_status here. */
+     * same reasoning that puts roundtable_review here. */
     "delegate_status",
     "roundtable_review", /* multi-agent */
-    "roundtable_status", /* poll asynchronous roundtable_review */
     "ask_user",
     "send_message", /* interaction */
     "note",         /* capture (note family: create/list/search) */

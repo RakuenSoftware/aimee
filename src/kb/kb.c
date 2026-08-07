@@ -21,6 +21,7 @@
 #include "db2/bandit.h"
 #endif
 #include "headers/sketch.h"
+#include <strings.h>
 #include "kb.h"
 #include "kb_fusion.h"
 #include "kb_neardup.h"
@@ -844,6 +845,97 @@ typedef struct
  * LSH near-duplicate handling, chunk insertion, and synchronous-or-async
  * embedding with batched pgvector upserts. Mutates the shared sketches, batch
  * buffer, and stats counters through `c`. */
+/* Embed every chunk of one file in a single call, into a caller-owned buffer.
+ *
+ * Ingest used to call the single-text memory_embed_text() once per chunk, so a
+ * ~3000 file project paid one embedder round trip per chunk -- measured at
+ * ~190ms each, which is the round trip, not the model. memory_embed_texts()
+ * has always existed (memory search embeds a query and its sub-questions in ONE
+ * call) and the bundled embedder serves /embed_batch.
+ *
+ * The buffer is caller-owned rather than cached in a static: ingest runs up to
+ * KB_WORKER_MAX worker threads, and a shared cache here would hand one file's
+ * vectors to another file being embedded concurrently.
+ *
+ * Returns the vector dimension, or <= 0 if the batch could not be produced --
+ * the caller then falls back to the per-text path, which computes the same
+ * vectors more slowly. */
+static int kb_embed_file_chunks(kb_build_file_ctx_t *c, int n_chunks, float *out)
+{
+   if (!c || !out || n_chunks <= 1 || !c->effective_cmd[0])
+      return 0;
+
+   char **texts = calloc((size_t)n_chunks, sizeof(*texts));
+   if (!texts)
+      return 0;
+   int built = 1;
+   for (int i = 0; i < n_chunks; i++)
+   {
+      texts[i] = malloc(4096);
+      if (!texts[i])
+      {
+         built = 0;
+         break;
+      }
+      kb_async_make_embed_text(c->chunks[i].heading_path, c->chunks[i].content, texts[i], 4096);
+   }
+   int dim = built ? memory_embed_texts((const char *const *)texts, n_chunks, c->effective_cmd,
+                                        EMBED_INPUT_DOCUMENT, out, EMBED_MAX_DIM)
+                   : 0;
+   for (int i = 0; i < n_chunks; i++)
+      free(texts[i]);
+   free(texts);
+   return dim;
+}
+
+/* Does this file's TEXT deserve a dense vector, or only lexical indexing?
+ *
+ * Source files are embedded twice today. kb_build treats every indexable file as
+ * a prose document and embeds its chunks, and kb_code_embed_refresh separately
+ * embeds the same files as code. Measured on the am_ corpus, the prose pass over
+ * source is 82% of the doc-embedding token budget:
+ *
+ *     non-prose  5333 chunks / 749 files / 1,985,386 tokens
+ *     prose      1862 chunks / 137 files /   445,519 tokens
+ *
+ * and at the host's measured 532 tok/s that is the difference between ~76 and
+ * ~14 minutes for a pass. Semantic search over code is what code_embeddings is
+ * for; a second, prose-shaped vector of the same bytes buys little and costs
+ * five times the ingest.
+ *
+ * Chunk rows are still written for every file, so lexical/FTS search over source
+ * is unchanged -- only the dense vector is skipped. Set
+ * AIMEE_KB_EMBED_ALL_FILES=1 to restore the previous behaviour.
+ */
+/* Test seam: the policy is pure, so it is exercised directly. */
+int kb_path_wants_dense_vector_for_test(const char *rel_path);
+static int kb_path_wants_dense_vector(const char *rel_path);
+int kb_path_wants_dense_vector_for_test(const char *rel_path)
+{
+   return kb_path_wants_dense_vector(rel_path);
+}
+
+static int kb_path_wants_dense_vector(const char *rel_path)
+{
+   if (!rel_path || !rel_path[0])
+      return 1;
+   const char *env = getenv("AIMEE_KB_EMBED_ALL_FILES");
+   if (env && env[0] == '1')
+      return 1;
+   static const char *prose_ext[] = {".md",  ".mdx",  ".markdown", ".txt",
+                                     ".rst", ".adoc", ".org",      NULL};
+   size_t n = strlen(rel_path);
+   for (int i = 0; prose_ext[i]; i++)
+   {
+      size_t m = strlen(prose_ext[i]);
+      if (n >= m && strcasecmp(rel_path + n - m, prose_ext[i]) == 0)
+         return 1;
+   }
+   /* Extensionless files at a repo root are conventionally prose (README,
+    * LICENSE, CHANGELOG, NOTICE) and are cheap, so keep embedding them. */
+   return strrchr(rel_path, '.') == NULL;
+}
+
 static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
 {
    if (fi > 0 && fi % c->kb_progress_every == 0)
@@ -1021,8 +1113,28 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    }
    c->stats->chunks_added += inserted;
 
-   /* Phase 2: embed each committed chunk (sync or async). */
-   for (int ci = 0; ci < n_chunks; ci++)
+   /* Phase 2: embed each committed chunk (sync or async).
+    *
+    * One batched call for the whole file, then each chunk reads its own vector
+    * out of it. The buffer is per-call: ingest is multi-threaded. */
+   /* Chunk rows are already committed above, so lexical/FTS search covers this
+    * file either way. Only the dense vector is conditional. */
+   int wants_vector = kb_path_wants_dense_vector(c->files[fi].rel_path);
+   float *batch_vecs = NULL;
+   int batch_dim = 0;
+   if (wants_vector)
+   {
+      batch_vecs =
+          calloc((size_t)(n_chunks > 0 ? n_chunks : 1) * EMBED_MAX_DIM, sizeof(*batch_vecs));
+      batch_dim = batch_vecs ? kb_embed_file_chunks(c, n_chunks, batch_vecs) : 0;
+   }
+   /* Gate the embed loop, NOT the rest of the function. Returning early here
+    * skipped the per-file bookkeeping at the bottom -- the dedup sketches, the
+    * minhash signature, and above all kb_file_index_store_from_path. A file
+    * with no file-index row is never skippable, so every non-prose file was
+    * re-chunked on every build; and files_indexed stopped counting, which is
+    * why a pass reported "0 indexed" while adding 7683 chunks. */
+   for (int ci = 0; wants_vector && ci < n_chunks; ci++)
    {
       int64_t doc_id = doc_ids[ci];
       if (doc_id < 0)
@@ -1036,14 +1148,31 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       }
       if (c->effective_cmd[0])
       {
-         /* Embed heading_path + content */
+         /* Embed heading_path + content.
+          *
+          * One call per chunk is the whole reason a corpus ingest took hours:
+          * the cost here is the round trip, not the model. bekko-a25m is a 25M
+          * parameter embedder that batches hundreds of texts per call, and
+          * memory_embed_texts() -- which memory search already uses to embed a
+          * query and its sub-questions in ONE call -- takes an array. Ingest
+          * kept calling the single-text entry point in a loop, so a ~3000 file
+          * project paid one request per chunk. */
          char embed_text[4096];
          kb_async_make_embed_text(c->chunks[ci].heading_path, c->chunks[ci].content, embed_text,
                                   sizeof(embed_text));
 
          float vec[EMBED_MAX_DIM];
-         int dim = memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec,
-                                     EMBED_MAX_DIM);
+         int dim = 0;
+         if (batch_dim > 0)
+         {
+            memcpy(vec, batch_vecs + (size_t)ci * EMBED_MAX_DIM, (size_t)batch_dim * sizeof(float));
+            dim = batch_dim;
+         }
+         else
+         {
+            dim = memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec,
+                                    EMBED_MAX_DIM);
+         }
          if (dim > 0)
          {
             accept_generated_embedding(doc_id, vec, dim);
@@ -1079,6 +1208,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
          }
       }
    }
+   free(batch_vecs);
    free(doc_ids);
 
    sketch_bloom_add_hash(c->bloom, h64);

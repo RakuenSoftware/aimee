@@ -294,7 +294,8 @@ static void test_namespaced_tools_and_dispatch(void)
    int saw_delegate_background_absent = 0;
    int saw_delegate_cwd = 0;
    int saw_delegate_status = 0;
-   int saw_roundtable_status = 0;
+   int saw_roundtable_review = 0;
+   int saw_roundtable_status_absent = 1;
    int saw_job_family = 0;
    int saw_skill_manage = 0;
    int saw_skill_manage_cwd = 0;
@@ -307,8 +308,13 @@ static void test_namespaced_tools_and_dispatch(void)
          saw_namespaced = 1;
       if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "delegate_status") == 0)
          saw_delegate_status = 1;
+      if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "roundtable_review") == 0)
+         saw_roundtable_review = 1;
+      /* roundtable_review blocks and returns the verdict, so there is no poller
+       * to advertise -- and advertising one is what taught agents to spend a
+       * model turn per poll on a job that runs for minutes. */
       if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "roundtable_status") == 0)
-         saw_roundtable_status = 1;
+         saw_roundtable_status_absent = 0;
       /* job_start/job_status were collapsed into the `job` family (P4b); the
        * member description no longer appears standalone. Verify the family tool. */
       if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "job") == 0)
@@ -358,7 +364,8 @@ static void test_namespaced_tools_and_dispatch(void)
    assert(saw_delegate_background_absent);
    assert(saw_delegate_cwd);
    assert(saw_delegate_status);
-   assert(saw_roundtable_status);
+   assert(saw_roundtable_review);
+   assert(saw_roundtable_status_absent);
    assert(saw_job_family);
    assert(saw_skill_manage);
    assert(saw_skill_manage_cwd);
@@ -492,7 +499,7 @@ static void test_osv_offline_cache_miss_allows(void)
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 54
+#define MCP_TOOLS_GOLDEN_COUNT 53
 #define MCP_TOOLS_GOLDEN                                                                           \
    "ask_user {choices,question} req:question\n"                                                    \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n"                                        \
@@ -556,8 +563,8 @@ static void test_osv_offline_cache_miss_allows(void)
    "recall {block_type,command,cwd,limit,limit_tokens,project,query,scope,since,workspace} "       \
    "req:command\n"                                                                                 \
    "roadmap {command,roadmap_id} req:command\n"                                                    \
-   "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} req:diff\n"  \
-   "roundtable_status {run_id} req:run_id\n"                                                       \
+   "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} "            \
+   "req:diff,original_request\n"                                                                   \
    "rules {command,reason,text} req:command\n"                                                     \
    "search_docs {cwd,max_results,project,query,scope} req:query\n"                                 \
    "search_memory {cwd,filter,project,query,scope,workspace} req:query\n"                          \
@@ -672,7 +679,6 @@ static void test_tool_profile_filter(void)
                                       "delegate",
                                       "delegate_status",
                                       "roundtable_review",
-                                      "roundtable_status",
                                       "ask_user",
                                       "send_message",
                                       "note",
@@ -685,7 +691,7 @@ static void test_tool_profile_filter(void)
 
    /* THE MIRROR ABOVE LISTED THESE BEFORE THE REAL FLOOR DID.
     *
-    * roundtable_review/roundtable_status were in this array but NOT in
+    * roundtable_review was in this array but NOT in
     * MCP_CORE_TOOLS, and nothing compared the two, so the drift went unnoticed.
     * Measured consequence on am_b84c9294aa: 74 tool calls, the skill telling the
     * agent to get a review before reporting done, and roundtable never invoked --
@@ -707,16 +713,20 @@ static void test_tool_profile_filter(void)
             have_status = 1;
       }
       cJSON_Delete(served);
-      assert(have_review && have_status);
+      assert(have_review);
+      /* roundtable_review blocks and returns the verdict; a status tool on the
+       * surface is an invitation to poll a call that has already finished. */
+      assert(!have_status);
    }
 
    /* An asynchronous tool whose poller is NOT core costs the agent a
     * find_tools -> describe_tool -> call_tool detour before it can read the
     * result of a call it was told to make. Measured on a real cell: five of
-    * fourteen tool calls went on reaching delegate_status. roundtable_review
-    * already ships roundtable_status for exactly this reason; delegate must
-    * ship delegate_status on the same grounds. */
-   assert(profile_core_has("roundtable_status", core));
+    * fourteen tool calls went on reaching delegate_status. delegate must ship
+    * delegate_status on those grounds for as long as delegate stays
+    * asynchronous. roundtable took the other road: the review itself now
+    * blocks, so it needs no poller in the floor at all. */
+   assert(profile_core_has("delegate_status", core));
 
    /* The retrieval an agent reaches for when the question is NOT a symbol name.
     * Withholding `index` did not reduce retrieval; it moved it to a recursive

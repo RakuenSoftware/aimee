@@ -690,44 +690,39 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
           tools,
           mcp_tool_new(
               "roundtable_review",
-              "Start an asynchronous review of a supplied artifact with the configured Go "
-              "roundtable. Every seat is an ordinary delegate request. Returns a run_id "
-              "immediately; poll roundtable_status until synthesis completes.",
-              cJSON_Parse("{\"type\":\"object\",\"properties\":{"
-                          "\"diff\":{\"type\":\"string\",\"description\":\"Unified diff or code "
-                          "under review.\",\"minLength\":20},"
-                          "\"original_request\":{\"type\":\"string\",\"description\":\"Complete "
-                          "original request used to detect goal drift.\"},"
-                          "\"artifact_stage\":{\"type\":\"string\",\"enum\":[\"intent\",\"plan\","
-                          "\"frozen_diff\"],\"description\":\"Lifecycle stage of the supplied "
-                          "artifact; defaults to frozen_diff.\"},"
-                          "\"workdir\":{\"type\":\"string\",\"description\":\"Optional checkout "
-                          "available to delegate tools.\"},"
-                          "\"brief\":{\"description\":\"Optional directed review brief as a string "
-                          "or object with focus/fixes/invariants/questions string arrays.\","
-                          "\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\","
-                          "\"properties\":{\"focus\":{\"type\":\"array\",\"items\":{\"type\":"
-                          "\"string\"}},\"fixes\":{\"type\":\"array\",\"items\":{\"type\":"
-                          "\"string\"}},\"invariants\":{\"type\":\"array\",\"items\":{\"type\":"
-                          "\"string\"}},\"questions\":{\"type\":\"array\",\"items\":{\"type\":"
-                          "\"string\"}}}}]},"
-                          "\"roundtable\":{\"type\":\"string\",\"description\":\"Saved "
-                          "roundtable preset to use. Omit to use the configured default.\"}},"
-                          "\"required\":[\"diff\"]}")));
+              "Review a supplied artifact with the configured roundtable. Every seat is an "
+              "ordinary delegate request. Returns the synthesized verdict. This call blocks "
+              "until the review is finished -- a full panel and chair can take many minutes, "
+              "and that is expected. There is nothing to poll and no run id to follow up on.",
+              cJSON_Parse(
+                  "{\"type\":\"object\",\"properties\":{"
+                  "\"diff\":{\"type\":\"string\",\"description\":\"Unified diff or code "
+                  "under review.\",\"minLength\":20},"
+                  "\"original_request\":{\"type\":\"string\",\"description\":\"REQUIRED. The "
+                  "complete original ticket or task, verbatim. Every scope "
+                  "rule the panel applies is relative to this, so omitting it "
+                  "turns drift detection off and the review degrades to "
+                  "generic code review, which approves unrequested work. Do "
+                  "not paraphrase it into your own plan.\",\"minLength\":1},"
+                  "\"artifact_stage\":{\"type\":\"string\",\"enum\":[\"intent\",\"plan\","
+                  "\"frozen_diff\"],\"description\":\"Lifecycle stage of the supplied "
+                  "artifact; defaults to frozen_diff.\"},"
+                  "\"workdir\":{\"type\":\"string\",\"description\":\"Optional checkout "
+                  "available to delegate tools.\"},"
+                  "\"brief\":{\"description\":\"Optional directed review brief as a string "
+                  "or object with focus/fixes/invariants/questions string arrays.\","
+                  "\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\","
+                  "\"properties\":{\"focus\":{\"type\":\"array\",\"items\":{\"type\":"
+                  "\"string\"}},\"fixes\":{\"type\":\"array\",\"items\":{\"type\":"
+                  "\"string\"}},\"invariants\":{\"type\":\"array\",\"items\":{\"type\":"
+                  "\"string\"}},\"questions\":{\"type\":\"array\",\"items\":{\"type\":"
+                  "\"string\"}}}}]},"
+                  "\"roundtable\":{\"type\":\"string\",\"description\":\"Saved "
+                  "roundtable preset to use. Omit to use the configured default.\"}},"
+                  "\"required\":[\"diff\",\"original_request\"]}")));
    }
 
-   /* roundtable_status */
-   {
-      cJSON_AddItemToArray(
-          tools,
-          mcp_tool_new(
-              "roundtable_status",
-              "Get an asynchronous roundtable review by run_id. Poll until status is completed, "
-              "failed, or cancelled; a completed snapshot contains the synthesized result.",
-              cJSON_Parse("{\"type\":\"object\",\"properties\":{\"run_id\":{\"type\":"
-                          "\"string\",\"description\":\"Run id returned by roundtable_review.\"}},"
-                          "\"required\":[\"run_id\"]}")));
-   }
+   /* No roundtable_status: roundtable_review blocks and returns the verdict. */
 
    /* mcp_tools_pipeline.inc: roundtable authoring pipeline (pipeline_*) MCP tool
     * definitions, #included by mcp_build_tools_list() in mcp_tools.c (kept as an

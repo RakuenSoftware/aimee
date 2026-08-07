@@ -6,11 +6,13 @@ inside a `RUN ... <<'PYBAKE'`, which cost a build failure the first time someone
 parsed as an instruction: "unknown instruction: fi") and could not be tested without
 building an image. Here it is importable and its retry logic has a unit test.
 
-FETCH ONLY WHAT THE LOADER READS. snapshot_download takes the whole repo by default,
-and a repo may publish the same weights several times over: bekko ships an onnx/ tree
-(nine variants, ~2.2GB) and an openvino/ tree beside its safetensors, none of which
-sentence-transformers touches. Excluding the alternate runtimes and the legacy .bin
-duplicates keeps this to the safetensors and tokenizer the loader actually opens.
+FETCH ONLY WHAT THE LOADER READS -- WHICH INCLUDES onnx/model.onnx. snapshot_download
+takes the whole repo by default, and a repo may publish the same weights several times
+over: bekko ships an onnx/ tree (nine variants, ~2.2GB) and an openvino/ tree beside its
+safetensors. Excluding the *variants* and the legacy .bin duplicates keeps this small,
+but the BASE onnx graph is not dead weight: it is the runtime this embedder was
+characterised on. Excluding it left the server on fp32 torch, at ~2000 ms for a single
+~512-token text on 4 CPU cores.
 """
 import json
 import os
@@ -21,8 +23,19 @@ from huggingface_hub import snapshot_download
 
 REGISTRY = os.environ.get("EMBEDDERS_FILE", "/opt/aimee/embedders.json")
 
+# KEEP onnx/model.onnx. The rest of the alternate-runtime trees are still dead
+# weight, but the base ONNX graph is what the server actually serves with: on 4
+# CPU cores fp32 torch costs ~2000 ms for one ~512-token text on a 25M-parameter
+# model, which made a single source file take 66s to embed and the corpus take
+# ~20s/file. onnxruntime is the runtime this embedder was characterised on.
+#
+# Only the BASE graph: bekko publishes nine onnx variants (fp16, int8, quantized,
+# O1-O4). model_*.onnx stay excluded -- the quantized ones drift the vectors and
+# the optimized ones are redundant with ORT's own graph optimisation. onnx_data
+# is the external-weights sidecar for models too large for a single protobuf;
+# a25m is not, so it stays excluded too.
 SKIP = [
-    "onnx/*", "openvino/*", "*.onnx", "*.onnx_data",      # alternate runtimes
+    "onnx/model_*.onnx", "openvino/*", "*.onnx_data",     # variants we do not serve
     "*.bin", "*.h5", "*.msgpack", "*.tflite", "*.ckpt",   # duplicate/legacy formats
     "*.gguf",                                             # not this runtime either
 ]

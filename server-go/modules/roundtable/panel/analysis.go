@@ -200,11 +200,43 @@ func RunAnalysis(ctx context.Context, delegates Delegates, run Run, seats []Seat
 				Recommendation: "revise the direction so it directly serves the original request, then rerun the panel",
 			})
 		}
+		// An enumerated requirement the artifact does NOT address is blocking,
+		// whatever verdict the seat attached. This is the "nope, that is still a
+		// defect" step: a reviewer that writes down the unaddressed item cannot
+		// also approve past it, and a seat that returns approve alongside an
+		// unaddressed requirement has contradicted itself rather than judged.
+		//
+		// The finding is raised here rather than trusted to the seat because the
+		// failure being fixed is precisely a seat that saw the whole request and
+		// still said "no findings": on am_312e901904 the ticket named two defects,
+		// the artifact fixed one, and the review approved it.
+		coverageGap := false
+		for _, req := range o.result.Coverage {
+			if req.Addressed {
+				continue
+			}
+			coverageGap = true
+			summary := strings.TrimSpace(req.Requirement)
+			if summary == "" {
+				summary = "a requirement of the original request"
+			}
+			detail := strings.TrimSpace(req.Evidence)
+			if detail == "" {
+				detail = "the artifact does not address it"
+			}
+			feedback.Findings = append(feedback.Findings, Finding{
+				ID:             o.seat.Persona + "-requirement-unaddressed",
+				Persona:        o.seat.Persona,
+				Severity:       "blocking",
+				Summary:        "original request not fully addressed: " + summary,
+				Recommendation: "address it in the artifact, or record it explicitly as out of scope: " + detail,
+			})
+		}
 		defaultSeverity := "blocking"
 		if panelVerdict(o.result) == "approve" {
 			// The alignment finding above already prevents advancement; also exclude
 			// this vote from quorum so the fail-closed invariant is local and explicit.
-			if alignmentOK {
+			if alignmentOK && !coverageGap {
 				approvals++
 			}
 			// An approval may carry non-blocking deficiencies. They are debt to
