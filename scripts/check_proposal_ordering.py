@@ -474,7 +474,26 @@ def commit_signals(
         commit,
         "--",
     )
-    records = parse_name_status(raw)
+    return records_signals(
+        repo,
+        parent,
+        commit,
+        parse_name_status(raw),
+        exact_paths=exact_paths,
+        root_claims=root_claims,
+    )
+
+
+def records_signals(
+    repo: Path,
+    parent: str,
+    commit: str,
+    records: list[tuple[str, tuple[str, ...]]],
+    *,
+    exact_paths: set[str],
+    root_claims: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """The signal rules, over name-status records from whichever git command."""
     signals: list[tuple[str, str]] = []
     for status, paths in records:
         if any(source_or_exact_signal(path, exact_paths) for path in paths):
@@ -509,6 +528,51 @@ def first_parent(repo: Path, commit: str) -> str:
     return line[1]
 
 
+def batched_history(repo: Path, cutoff: str, head: str) -> dict[str, tuple[str, list]]:
+    """Every commit's first parent and first-parent diff, in one git process.
+
+    Asking per commit costs two processes each, and the range is thousands of
+    commits: ~2 minutes per run, times the several runs this gate performs. One
+    `git log` answers all of it. `--diff-merges=first-parent` is exactly the
+    `diff <first parent> <commit>` the per-commit form took, so a merge still
+    reports what it brought to its target branch.
+
+    The stream is `\\x1e<sha> <parents>\\0\\n` followed by the commit's -z
+    name-status records, so the record separator cannot collide with a pathname
+    (git forbids \\x1e in neither, but it cannot appear unescaped in the header
+    the format emits, and paths are consumed positionally by parse_name_status).
+    """
+    raw = git(
+        repo,
+        "log",
+        "-z",
+        "--format=%x1e%H %P",
+        "--name-status",
+        "--diff-merges=first-parent",
+        "-M",
+        "-C",
+        "--find-copies-harder",
+        f"{cutoff}..{head}",
+    )
+    history: dict[str, tuple[str, list]] = {}
+    for chunk in raw.split(b"\x1e")[1:]:
+        header, separator, rest = chunk.partition(b"\0")
+        if not separator:
+            fail("git-history", "batched log record has no header terminator")
+        try:
+            fields = header.decode("ascii").split()
+        except UnicodeDecodeError as exc:
+            fail("git-history", f"non-ASCII commit header: {exc}")
+        if not fields:
+            fail("git-history", "batched log record has an empty header")
+        commit, parents = fields[0], fields[1:]
+        # Strip exactly the newline the format line ends with. lstrip would eat a
+        # pathname that legitimately begins with one.
+        body = rest[1:] if rest.startswith(b"\n") else rest
+        history[commit] = (parents[0] if parents else "", parse_name_status(body))
+    return history
+
+
 def scan_history(
     repo: Path,
     cutoff: str,
@@ -519,13 +583,21 @@ def scan_history(
 ) -> list[tuple[str, str, list[tuple[str, str]]]]:
     commits_text = git_text(repo, "rev-list", "--topo-order", "--reverse", f"{cutoff}..{head}")
     commits = commits_text.splitlines() if commits_text else []
+    history = batched_history(repo, cutoff, head)
     found: list[tuple[str, str, list[tuple[str, str]]]] = []
     for commit in commits:
-        parent = first_parent(repo, commit)
-        signals = commit_signals(
+        parent, records = history.get(commit, (None, None))
+        if records is None:
+            # A commit rev-list yielded but the batched log did not describe is a
+            # disagreement between two git commands, not something to skip past.
+            fail("git-history", f"commit {commit} is missing from the batched log")
+        if not parent:
+            parent = first_parent(repo, commit)
+        signals = records_signals(
             repo,
             parent,
             commit,
+            records,
             exact_paths=exact_paths,
             root_claims=root_claims,
         )

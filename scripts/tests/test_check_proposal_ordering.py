@@ -513,6 +513,47 @@ class ProposalOrderingTests(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def test_batched_history_agrees_with_the_per_commit_diff(self) -> None:
+        """The one-pass log must report what per-commit diffing reported.
+
+        commit_signals is still the reference: it asks git the direct question.
+        batched_history is an optimisation, so the two must not drift -- a merge,
+        a rename, a copy and a delete all take different paths through the -z
+        stream, so the fixture exercises each.
+        """
+        tmp, repo, cutoff = self.make_repo()
+        try:
+            source = repo / "src/modules/git/example.c"
+            source.parent.mkdir(parents=True)
+            source.write_text("one\n", encoding="utf-8")
+            (repo / "doomed.txt").write_text("delete me\n", encoding="utf-8")
+            self.commit(repo, "add sources")
+            self.git(repo, "checkout", "-b", "side")
+            source.write_text("two\n", encoding="utf-8")
+            self.commit(repo, "edit on a side branch")
+            self.git(repo, "checkout", "-")
+            self.git(repo, "mv", "src/modules/git/example.c", "src/modules/git/renamed.c")
+            self.commit(repo, "rename")
+            (repo / "doomed.txt").unlink()
+            self.commit(repo, "delete")
+            self.merge(repo, "side", "merge side")
+            head = self.git(repo, "rev-parse", "HEAD")
+
+            batched = ordering.batched_history(repo, cutoff, head)
+            self.assertTrue(batched)
+            for commit, (parent, records) in batched.items():
+                with self.subTest(commit=commit[:10]):
+                    self.assertEqual(parent, ordering.first_parent(repo, commit))
+                    reference = ordering.parse_name_status(
+                        ordering.git(
+                            repo, "diff", "--name-status", "-z", "-M", "-C",
+                            "--find-copies-harder", parent, commit, "--",
+                        )
+                    )
+                    self.assertEqual(records, reference)
+        finally:
+            tmp.cleanup()
+
     def test_a_signal_is_accepted_when_the_anchor_arrived_by_merge(self) -> None:
         """The integration branch's actual shape must pass.
 
