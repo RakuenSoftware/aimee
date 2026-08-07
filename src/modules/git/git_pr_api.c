@@ -751,6 +751,20 @@ int git_pr_info_via_api_slug(const char *principal, const char *slug, int number
    out->open =
        cJSON_IsString(state) && state->valuestring && strcmp(state->valuestring, "open") == 0;
    out->merged = cJSON_IsTrue(merged) ? 1 : 0;
+
+   /* Reviewer-facing fields, best-effort: a PR is still usable without them, so a
+    * missing or over-long value is left empty rather than failing the whole call
+    * the way a missing ref does above. */
+   const cJSON *title = cJSON_GetObjectItem(j, "title");
+   const cJSON *hurl = cJSON_GetObjectItem(j, "html_url");
+   const cJSON *mat = cJSON_GetObjectItem(j, "merged_at");
+   if (cJSON_IsString(title) && title->valuestring)
+      snprintf(out->title, sizeof(out->title), "%s", title->valuestring);
+   if (cJSON_IsString(hurl) && hurl->valuestring)
+      snprintf(out->html_url, sizeof(out->html_url), "%s", hurl->valuestring);
+   if (cJSON_IsString(mat) && mat->valuestring) /* null when never merged */
+      snprintf(out->merged_at, sizeof(out->merged_at), "%s", mat->valuestring);
+
    if (cJSON_IsBool(mergeable))
       out->mergeable = cJSON_IsTrue(mergeable) ? 1 : 0; /* null stays -1 (computing) */
    if (strlen(sha_s) >= sizeof(out->head_sha) || strlen(head_s) >= sizeof(out->head) ||

@@ -297,25 +297,27 @@ cJSON *handle_git_pr(cJSON *args)
       if (!cJSON_IsNumber(jnum))
          return mcp_text("error: 'number' parameter is required for view");
 
-      char cmd[256];
-      snprintf(cmd, sizeof(cmd),
-               "gh pr view %d --json title,state,url,baseRefName,headRefName,mergedAt "
-               "--template 'PR #%d: {{.state}}\\ntitle: {{.title}}\\n"
-               "base: {{.baseRefName}} <- {{.headRefName}}\\nurl: {{.url}}"
-               "{{if .mergedAt}}\\nmerged: {{.mergedAt}}{{end}}' 2>&1",
-               jnum->valueint, jnum->valueint);
+      char slug[264];
+      if (get_origin_repo_slug(slug, sizeof(slug)) != 0)
+         return mcp_text("error: cannot resolve a github.com origin for this checkout");
 
-      int rc;
-      char *out = mcp_git_run(cmd, &rc);
-      if (rc != 0)
-      {
-         cJSON *r = mcp_error("error: gh pr view failed: %s", out ? out : "unknown");
-         free(out);
-         return r;
-      }
-      cJSON *r = mcp_text(out ? out : "unknown");
-      free(out);
-      return r;
+      git_pr_info_t info;
+      char err[512];
+      err[0] = '\0';
+      if (git_pr_info_via_api_slug(agent_get_request_vault_principal(), slug, jnum->valueint, &info,
+                                   err, sizeof(err)) != 0)
+         return mcp_error("error: pr view failed: %s", err[0] ? err : "unknown");
+
+      /* gh reported OPEN/CLOSED/MERGED; the REST API splits that into state plus a
+       * merged flag. Reassemble it so the rendered output is unchanged. */
+      const char *state = info.merged ? "MERGED" : (info.open ? "OPEN" : "CLOSED");
+
+      char result[1600];
+      int pos = snprintf(result, sizeof(result), "PR #%d: %s\ntitle: %s\nbase: %s <- %s\nurl: %s",
+                         jnum->valueint, state, info.title, info.base, info.head, info.html_url);
+      if (info.merged_at[0] && pos > 0 && (size_t)pos < sizeof(result))
+         snprintf(result + pos, sizeof(result) - (size_t)pos, "\nmerged: %s", info.merged_at);
+      return mcp_text(result);
    }
 
    if (strcmp(action, "edit") == 0)
