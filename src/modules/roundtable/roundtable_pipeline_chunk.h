@@ -46,6 +46,14 @@ extern "C"
     * gap rather than crash). budget_bytes <= 0 -> a single chunk. */
    int rtp_chunk_plan(const char *origin, int budget_bytes, rtp_chunk_plan_t *out);
 
+   struct rtp_assembly; /* defined below; the prototype only needs the tag */
+
+   /* Plan and select in ONE module round trip. The pipeline does both back to
+    * back on the same artifact, and the artifact can be 16 MiB, so asking twice
+    * would carry it twice. `asm_out` may be NULL. */
+   int rtp_chunk_plan_with_assembly(const char *origin, int budget_bytes, int assembly_budget,
+                                    rtp_chunk_plan_t *out, struct rtp_assembly *asm_out);
+
    /* Re-verify that every chunk in `plan` still hashes back to the current
     * `origin` (no stale span served from an earlier revision, #34/#42).
     * Returns 1 if all match, 0 otherwise. */
@@ -55,7 +63,7 @@ extern "C"
     * (by index) whose cumulative size fits budget_bytes; the remainder are
     * omitted and recorded as a coverage gap. A single chunk larger than the
     * budget sets over_budget. */
-   typedef struct
+   typedef struct rtp_assembly
    {
       int selected[RTP_MAX_CHUNKS];
       int selected_count;

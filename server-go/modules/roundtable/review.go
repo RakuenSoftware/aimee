@@ -27,6 +27,11 @@ const (
 	// kind taken from the top of the range.
 	EventReview uint32 = 9474
 	StageReview uint32 = 2
+
+	// EventChunkPlan serves budget-sized chunk planning and the synthesis
+	// assembly. Same allocation rule: 4096 + 21*256 + stage.
+	EventChunkPlan uint32 = 9475
+	StageChunkPlan uint32 = 3
 )
 
 // Reviewer convenes one roundtable. Narrow on purpose: the stage depends on the
@@ -106,6 +111,8 @@ func NewHandler(reviewer Reviewer) bus.ModuleHandler {
 			return Handle(invocation, request)
 		case StageReview:
 			return review(invocation, request)
+		case StageChunkPlan:
+			return handleChunkPlan(invocation, request)
 		default:
 			return nil, bus.ModuleStatusInvalidRequest
 		}
