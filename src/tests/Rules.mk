@@ -3536,6 +3536,32 @@ unit-test-bus-wire: $(TESTPREFIX)/unit-test-bus-wire
 unit-test-module-protocol: $(TESTPREFIX)/unit-test-module-protocol
 	$<
 
+# The bus tests are deliberately NOT in TEST_TARGETS -- each needs a special bus
+# link set the standard unit-tests build does not assemble, so the bench gate
+# (check_bus_perf_gate.sh) force-builds them via their .PHONY targets. That also
+# means none of them inherited the blanket `$(TEST_TARGETS): | $(CORE_CONNECTION_LIB)`
+# earlier in this file, so the ones that pull the archive through L_CORE died on a
+# clean tree with "cannot find build/obj/libaimee-core-connection.a" -- exactly the
+# gap already fixed for unit-test-code-treesitter below and for the auxiliary
+# drivers in src/Makefile. Listing all of them keeps the guarantee independent of
+# which ones happen to link L_CORE today.
+#
+# Order-only: the archive must EXIST before these link, but relinking it must not
+# force every bus test to relink.
+BUS_TEST_TARGETS := $(addprefix $(TESTPREFIX)/, \
+   unit-test-bus-endpoint unit-test-bus-runtime unit-test-bus-memory-recall \
+   unit-test-bus-memory-upsert unit-test-bus-config-autonomy \
+   unit-test-bus-audit-durability unit-test-bus-audit-replay \
+   unit-test-bus-audit-retention unit-test-bus-audit-replay-tool \
+   unit-test-bus-guardrail-durability unit-test-bus-vault-audit \
+   unit-test-bus-sandbox-audit unit-test-bus-tool-completion \
+   unit-test-bus-memory-audit unit-test-bus-shutdown-race unit-test-bus-capture \
+   unit-test-bus-client unit-test-bus-flow unit-test-bus-route unit-test-bus-host \
+   unit-test-bus-arena unit-test-bus-region unit-test-bus-ring unit-test-bus-wire)
+
+$(BUS_TEST_TARGETS): | $(CORE_CONNECTION_LIB)
+
+
 # Render-boundary prompt sanitizer (graph-feedback §4 / P0). Pure: no DB.
 $(TESTPREFIX)/unit-test-prompt-sanitizer: $(OBJDIR)/tests/test_prompt_sanitizer.o \
                                           $(OBJDIR)/kb/prompt_sanitizer.o

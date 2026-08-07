@@ -419,6 +419,13 @@ else
     fail "verify-local can race lint against a partial shipping build"
 fi
 
+if sed -n '/^verify-local:/,/^[^[:space:]#].*:/p' Makefile |
+   grep -qF 'python3 -I scripts/check_c_repository_lock.py'; then
+    pass "verify-local rejects stale extracted-repository source pins"
+else
+    fail "verify-local can pass with stale extracted-repository source pins"
+fi
+
 # Verification runs inside the server image, whose deployment posture is
 # expressed through AIMEE_* environment overrides. Those values are correct for
 # the live daemon but must not override config fixtures in repository unit tests.
@@ -427,7 +434,9 @@ if sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
    sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
        grep -qF 'AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL' &&
    sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
-       grep -qF 'AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'; then
+       grep -qF 'AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET' &&
+   sed -n '/^go-unit-tests:/,/^verify-local:/p' Makefile |
+       grep -qF 'unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'; then
     pass "unit verification removes server deployment overrides"
 else
     fail "unit verification inherits server deployment overrides"

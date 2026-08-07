@@ -151,6 +151,11 @@ const (
 	roundtableDelegateMaxTurnsCap = 24
 	delegateDeadlineGraceReserve  = 5 * time.Second
 	delegateWriteVerifyReserve    = 5 * time.Minute
+	// Keep the Go admission boundary aligned with AGENT_LOOP_MIN_CALL_MS in
+	// agent_types.h. Dispatching a write delegate with less than one viable
+	// model-call window only creates a zero-call failed job before the C runtime
+	// reports that its tool-loop budget is exhausted.
+	delegateWriteMinRunBudget = time.Minute
 )
 
 func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request DelegateRequest) (DelegateResult, error) {
@@ -216,9 +221,10 @@ func applyDelegateDeadlineCap(ctx context.Context, request *DelegateRequest) err
 	}
 	if request.Role == "code" && request.Tools {
 		reserve = delegateWriteVerifyReserve
-		if remaining <= reserve {
-			return fmt.Errorf("delegate stage wall budget exhausted: remaining=%s reserve=%s: %w",
-				remaining.Round(time.Millisecond), reserve, context.DeadlineExceeded)
+		if remaining < reserve+delegateWriteMinRunBudget {
+			return fmt.Errorf("delegate stage wall budget exhausted: remaining=%s reserve=%s minimum_run=%s: %w",
+				remaining.Round(time.Millisecond), reserve, delegateWriteMinRunBudget,
+				context.DeadlineExceeded)
 		}
 	}
 	capMillis := (remaining - reserve).Milliseconds()
@@ -619,6 +625,16 @@ func delegatePartialIsNoChange(response string) bool {
 			strings.Contains(response, "no file changes detected"))
 }
 
+// implementationPartialIsSatisfiedNoChange distinguishes an explicit
+// completion report from a delegate that merely failed to edit anything. The
+// implementation prompt requires this exact claim when sibling/base work
+// already satisfies the packet; mechanical verification still runs before the
+// unchanged HEAD can advance. Other partial no-change results remain failures.
+func implementationPartialIsSatisfiedNoChange(response string) bool {
+	return delegatePartialIsNoChange(response) &&
+		strings.Contains(strings.ToLower(response), "task already complete")
+}
+
 func retryDetailForPrompt(detail string) string {
 	detail = strings.TrimSpace(safeDiagnostic(detail))
 	const maxRunes = 24_000
@@ -628,6 +644,11 @@ func retryDetailForPrompt(detail string) string {
 	}
 	const headRunes = 8_000
 	return string(runes[:headRunes]) + "\n...[retry diagnostic truncated]...\n" + string(runes[len(runes)-(maxRunes-headRunes):])
+}
+
+func implementationDelegatePrompt() string {
+	return "Implement the complete approved task in this worktree, run the repository verification, fix failures, and leave the accepted changes in the worktree. " +
+		"If the current branch already fully satisfies the task (including work merged by a sibling), leave the worktree unchanged and report that it is complete; do not manufacture cosmetic changes."
 }
 
 func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (StepResult, error) {
@@ -695,7 +716,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 				ContentHash: head, Detail: detail}, nil
 		}
 	}
-	prompt := "Implement the complete approved task in this worktree, run the repository verification, fix failures, and leave the accepted changes in the worktree."
+	prompt := implementationDelegatePrompt()
 	if docs {
 		prompt, err = documentDelegatePrompt(ctx, req, workdir)
 		if err != nil {
@@ -777,7 +798,8 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		// A document no-op is the requested outcome when the accepted diff is
 		// already documented. Freeze the exact unchanged HEAD so doc_freeze and
 		// doc_gate still review it; blocking review feedback overrides that exemption.
-		documentedNoop := docs && delegatePartialIsNoChange(result.Response)
+		satisfiedNoop := (docs && delegatePartialIsNoChange(result.Response)) ||
+			(!docs && implementationPartialIsSatisfiedNoChange(result.Response))
 		blockingReviewUnchanged := false
 		if headErr == nil && head == baseHead && feedbackHasBlockingFinding(req.Feedback) &&
 			req.Feedback.ArtifactHash != "" {
@@ -788,7 +810,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 			blockingReviewUnchanged = wfe.Hash([]byte(diff)) == req.Feedback.ArtifactHash
 		}
 		if headErr == nil && head == baseHead &&
-			(blockingReviewUnchanged || (!documentedNoop &&
+			(blockingReviewUnchanged || (!satisfiedNoop &&
 				!branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID))) {
 			detail := strings.TrimSpace(result.Response)
 			if detail == "" {
