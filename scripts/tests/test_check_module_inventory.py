@@ -223,24 +223,29 @@ class ModuleInventoryTest(unittest.TestCase):
         raw = BASELINE.read_text(encoding="utf-8")
         self.assertEqual(json.loads(raw), yaml.safe_load(raw))
 
+    # The expected counts come from the checker rather than a literal. A literal
+    # here is a second copy of the constant that nothing keeps in step: adding
+    # `sandbox` as an eighth optional module broke this test, not the checker.
     def test_required_count_drift(self):
         data = self.changed()
         data["required"].append("unexpected-module")
+        expected = CHECKER_MODULE.REQUIRED_COUNT
         self.assert_failed(
             self.run_checker(data),
             "rule=required-count",
-            "REQUIRED_COUNT=18",
-            "actual 19",
+            f"REQUIRED_COUNT={expected}",
+            f"actual {expected + 1}",
         )
 
     def test_optional_count_drift(self):
         data = self.changed()
         data["optional"].pop()
+        expected = CHECKER_MODULE.OPTIONAL_COUNT
         self.assert_failed(
             self.run_checker(data),
             "rule=optional-count",
-            "OPTIONAL_COUNT=7",
-            "actual 6",
+            f"OPTIONAL_COUNT={expected}",
+            f"actual {expected - 1}",
         )
 
     def test_duplicate_id(self):

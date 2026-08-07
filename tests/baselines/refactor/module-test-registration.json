@@ -640,6 +640,12 @@
     {
       "ctest": false,
       "make": true,
+      "module": "sandbox",
+      "test": "src/tests/test_sandbox_pkg_proxy.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
       "module": "skills",
       "test": "src/tests/test_skill.c"
     },
