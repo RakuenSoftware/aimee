@@ -61,6 +61,14 @@ EVIDENCE_PATH = "docs/validation/roundtable/git-core-contract.json"
 HANDOFF_PATH = "docs/validation/core-modularization-slice-2.md"
 CHECKER_PATH = "scripts/check_git_core_contract.py"
 FEATURE_BRANCH = "feature/core-modularization"
+# The branches this gate is allowed to run against. It must stay equal to the
+# base-branch filters in .github/workflows/module-inventory.yml: a branch the
+# workflow triggers on but this rejects fails every run with rule=event-base,
+# and a branch this accepts but the workflow never triggers on is dead weight.
+# Git-contract work now merges to testing, so testing is gated; the integration
+# bases are here because sub-PRs stack onto them before reaching it.
+GATED_BASES = ("main", "testing", FEATURE_BRANCH)
+GATED_BASE_PREFIXES = ("aimee/feat/", "agent/")
 GIT = shutil.which("git", path="/usr/bin:/bin") or "/usr/bin/git"
 PYTHON = shutil.which("python3", path="/usr/bin:/bin") or "/usr/bin/python3"
 TRIGGER_GROUPS = (
@@ -602,6 +610,14 @@ def enforce_signal_precedence(
             )
 
 
+def is_gated_base(name: str) -> bool:
+    """Whether this branch is one the module gates run against."""
+    return name in GATED_BASES or any(
+        name.startswith(prefix) and len(name) > len(prefix)
+        for prefix in GATED_BASE_PREFIXES
+    )
+
+
 def validate_event(head: str) -> None:
     keys = (
         "GITHUB_EVENT_NAME",
@@ -625,13 +641,14 @@ def validate_event(head: str) -> None:
     if event == "pull_request":
         if not re.fullmatch(r"refs/pull/[0-9]+/merge", ref):
             fail("event-ref", f"unsupported pull_request ref {ref!r}")
-        if context["GITHUB_BASE_REF"] != FEATURE_BRANCH:
-            fail("event-base", f"pull request must target {FEATURE_BRANCH}")
+        if not is_gated_base(context["GITHUB_BASE_REF"]):
+            fail("event-base", f"pull request must target a gated base, not {context['GITHUB_BASE_REF']!r}")
         if not context["GITHUB_HEAD_REF"]:
             fail("event-head-ref", "GITHUB_HEAD_REF is required for pull requests")
         return
-    if event in {"push", "workflow_dispatch"} and ref == f"refs/heads/{FEATURE_BRANCH}":
-        return
+    if event in {"push", "workflow_dispatch"} and ref.startswith("refs/heads/"):
+        if is_gated_base(ref[len("refs/heads/"):]):
+            return
     fail("event-ref", f"unsupported GitHub event/ref pair {event!r}/{ref!r}")
 
 
