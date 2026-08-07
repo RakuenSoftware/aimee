@@ -48,9 +48,17 @@ class SignModuleDocsTests(unittest.TestCase):
             callback()
 
     def test_committed_inventory_is_the_only_signing_inventory(self) -> None:
+        # Sizes come from the committed inventory, not literals. A literal here is
+        # a second copy of a number nothing keeps in step: adding `sandbox` as an
+        # eighth optional module broke this test rather than the signer.
+        baseline = json.loads(
+            (REPO_ROOT / "tests/baselines/modules/canonical-inventory.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
         required, optional = signer._inventory(REPO_ROOT)
-        self.assertEqual(len(required), 18)
-        self.assertEqual(len(optional), 7)
+        self.assertEqual(len(required), len(baseline["required"]))
+        self.assertEqual(len(optional), len(baseline["optional"]))
         self.assertFalse(required & optional)
 
     def test_public_key_input_cannot_be_a_private_key(self) -> None:
