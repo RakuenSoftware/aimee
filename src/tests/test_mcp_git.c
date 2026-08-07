@@ -723,6 +723,51 @@ static void test_git_pr_create_missing_title(void)
    system(cmd);
 }
 
+/* create must resolve the repository through the workspace runner and refuse
+ * cleanly when there is no github.com origin.
+ *
+ * #2386 instead let the API resolve `origin` in aimee-server's own process. That
+ * looks identical on a co-located checkout and fails on every remote one -- a
+ * DETACHED workspace keeps the filesystem on the client, so the server saw no
+ * such path and reported "no origin remote" for repositories that have one. This
+ * pins the refusal to the runner-resolved path: the message is about THIS
+ * checkout's origin, and it arrives before any API call. */
+static void test_git_pr_create_without_github_origin(void)
+{
+   char tmpdir[] = "/tmp/aimee-test-pr-noorigin-XXXXXX";
+   assert(mkdtemp(tmpdir) != NULL);
+
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd),
+            "cd '%s' && git init -q && git config user.email test@test && "
+            "git config user.name test && echo x > f.txt && "
+            "git add f.txt && git commit -q -m 'init'",
+            tmpdir);
+   assert(system(cmd) == 0);
+
+   char saved_cwd[4096];
+   assert(getcwd(saved_cwd, sizeof(saved_cwd)) != NULL);
+   assert(chdir(tmpdir) == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "create");
+   cJSON_AddStringToObject(args, "title", "a title");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") != NULL);
+   /* Not "no origin remote": that string is the API's in-process lookup, which
+    * this path must no longer reach. */
+   assert(strstr(text, "origin") != NULL);
+   assert(strstr(text, "no origin remote") == NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   assert(chdir(saved_cwd) == 0);
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
+   system(cmd);
+}
+
 static void test_git_pr_edit_missing_number(void)
 {
    cJSON *args = cJSON_CreateObject();
@@ -2601,6 +2646,7 @@ int main(void)
    test_git_pr_missing_action();
    test_git_pr_unknown_action();
    test_git_pr_create_missing_title();
+   test_git_pr_create_without_github_origin();
    test_git_pr_edit_missing_number();
    test_git_pr_edit_requires_fields();
    test_git_pr_checks_missing_number();

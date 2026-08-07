@@ -55,6 +55,27 @@ int git_pr_create_via_api_ex_draft(const char *principal, const char *repo_dir, 
                                    const char *base, const char *title, const char *body, int draft,
                                    char *out, size_t out_cap, char *err, size_t errlen);
 
+/* Open a PR for an owner/repo slug ("owner/repo") with NO local checkout.
+ *
+ * Every function above resolves the repository by running git in `repo_dir`, in
+ * aimee-server's own process. That is right for webchat and the workflow forge,
+ * whose repo_dir is a path the server holds. It is WRONG for the MCP git tools:
+ * those run against the caller's checkout through the workspace provider, and a
+ * DETACHED workspace keeps the filesystem on the client, so the server cannot see
+ * that path at all -- `git config --get remote.origin.url` there reports "no
+ * origin remote" and the create fails outright (regression #2386, reverted).
+ *
+ * Such a caller resolves owner/repo through the same runner it runs every other
+ * git command with, and hands the slug here. head, base and title are REQUIRED:
+ * there is no checkout to infer a current branch, an origin/HEAD or a last commit
+ * subject from, and guessing them is how a PR lands on the wrong base.
+ *
+ * The credential ladder is unchanged -- the token is resolved for the slug's host
+ * and rides the Authorization header in this process only. */
+int git_pr_create_via_api_slug(const char *principal, const char *slug, const char *head,
+                               const char *base, const char *title, const char *body, int draft,
+                               char *out, size_t out_cap, char *err, size_t errlen);
+
 /* Find the existing open PR for an exact head/base pair. Returns 1 + URL,
  * 0 when absent, or -1 on API/validation failure. */
 int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const char *head,
