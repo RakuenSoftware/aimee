@@ -22,7 +22,7 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		{"skills", 14, []uint32{7681, 7682}},
 		{"response-composition", 15, []uint32{7937}},
 		{"governance", 19, []uint32{8961}},
-		{"roundtable", 21, []uint32{9473}},
+		{"roundtable", 21, []uint32{9473, 9475}},
 		{"kb-synthesis", 22, []uint32{9729}},
 		{"runtime-web", 23, []uint32{9985}},
 		{"control-web", 24, []uint32{10241}},
@@ -36,9 +36,15 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 			config.Handler == nil {
 			t.Fatalf("%s config = %#v, ok=%v", test.name, config, ok)
 		}
+		// The stage id is derived from the event kind rather than the position:
+		// a module may declare a non-contiguous set when one of its stages is
+		// registered conditionally. roundtable serves 1 and 3 here because review
+		// (stage 2) is only declared when this process can convene one.
 		for index, event := range test.events {
-			if config.Stages[index].EventKind != event || config.Stages[index].StageID != uint32(index+1) {
-				t.Fatalf("%s stage %d = %#v", test.name, index+1, config.Stages[index])
+			wantStage := event - (4096 + test.principal*256)
+			if config.Stages[index].EventKind != event || config.Stages[index].StageID != wantStage {
+				t.Fatalf("%s stage %d = %#v, want event %d / stage %d", test.name, index,
+					config.Stages[index], event, wantStage)
 			}
 		}
 	}

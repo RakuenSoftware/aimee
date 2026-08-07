@@ -365,13 +365,14 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "cf5cfde7267797eeb189184d8848b21ff12e0d366016507e49972822c76482f4",
+      "source_sha256": "2968fe431e818027ff0de02d03ad7deb21c2ed20c681554b949843c82290d9c5",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 21,
       "serve": [
         9473,
-        9474
+        9474,
+        9475
       ]
     },
     {

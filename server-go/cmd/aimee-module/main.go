@@ -143,7 +143,13 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 	case "roundtable":
 		config.ModuleName = name
 		config.PrincipalRef = 21
-		config.Stages = []bus.ModuleStage{{EventKind: roundtable.EventDeliberate, StageID: roundtable.StageDeliberate}}
+		// Deliberate and chunk planning need nothing but their arguments, so both
+		// are declared unconditionally. Review is appended below only when this
+		// process can actually convene one.
+		config.Stages = []bus.ModuleStage{
+			{EventKind: roundtable.EventDeliberate, StageID: roundtable.StageDeliberate},
+			{EventKind: roundtable.EventChunkPlan, StageID: roundtable.StageChunkPlan},
+		}
 		config.Handler = roundtable.Handle
 		// Deliberate is a pure rubric and always available. Review convenes real
 		// agents, so it is served only when this process can actually reach the

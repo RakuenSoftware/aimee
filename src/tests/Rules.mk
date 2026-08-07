@@ -4793,7 +4793,7 @@ $(TESTPREFIX)/unit-test-roundtable-pipeline-eval: \
 
 $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk: \
                                        $(OBJDIR)/tests/test_roundtable_pipeline_chunk.o \
-                                       $(OBJDIR)/modules/roundtable/roundtable_pipeline_chunk.o \
+                                       $(OBJDIR)/modules/roundtable/roundtable_pipeline_chunk.o $(OBJDIR)/module_json_call.o $(OBJDIR)/tests/support/module_bus_stub.o $(OBJDIR)/cJSON.o \
                                        $(OBJDIR)/modules/roundtable/roundtable_pipeline_eval.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -4802,7 +4802,7 @@ $(TESTPREFIX)/unit-test-roundtable-pipeline-ctl: \
                                        $(OBJDIR)/server/server_pipeline.o $(OBJDIR)/server/server_pipeline_merge.o \
                                        $(OBJDIR)/modules/git/git_pr_ci_grade.o \
                                        $(OBJDIR)/modules/roundtable/roundtable_pipeline_eval.o \
-                                       $(OBJDIR)/modules/roundtable/roundtable_pipeline_chunk.o \
+                                       $(OBJDIR)/modules/roundtable/roundtable_pipeline_chunk.o $(OBJDIR)/module_json_call.o $(OBJDIR)/tests/support/module_bus_stub.o $(OBJDIR)/cJSON.o \
                                        $(OBJDIR)/db1/roundtable_pipeline.o \
                                        $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                        $(OBJDIR)/db1/local_operator.o \

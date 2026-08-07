@@ -30,7 +30,7 @@
     "src/modules/roundtable/module_adapter.c"
   ],
   "go_sources": [
-    "server-go/modules/roundtable/roundtable.go",
+    "server-go/modules/roundtable/chunk.go",
     "server-go/modules/roundtable/panel/analysis.go",
     "server-go/modules/roundtable/panel/artifact.go",
     "server-go/modules/roundtable/panel/chairman.go",
@@ -42,9 +42,11 @@
     "server-go/modules/roundtable/panel/result.go",
     "server-go/modules/roundtable/panel/store.go",
     "server-go/modules/roundtable/review.go",
-    "server-go/modules/roundtable/reviewer.go"
+    "server-go/modules/roundtable/reviewer.go",
+    "server-go/modules/roundtable/roundtable.go"
   ],
   "go_tests": [
+    "server-go/modules/roundtable/chunk_test.go",
     "server-go/modules/roundtable/panel/analysis_test.go",
     "server-go/modules/roundtable/panel/artifact_test.go",
     "server-go/modules/roundtable/panel/chairman_test.go",
