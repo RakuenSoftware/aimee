@@ -399,6 +399,7 @@ _batch_lock = threading.Lock()
 _batch_cv = threading.Condition(_batch_lock)
 _batch_pending = []          # [_BatchItem]
 _batch_worker_started = False
+_tokenizer = None
 
 
 class _BatchItem:
@@ -411,8 +412,26 @@ class _BatchItem:
         self.done = threading.Event()
 
 
+def _token_count(texts):
+    """Real token count via the model's own tokenizer, cached after first use.
+
+    Chunking targets ~512 APPROXIMATE tokens; the tokenizer is the authority on
+    what the model actually processes, and the gap between the two is exactly
+    what this is here to expose.
+    """
+    global _tokenizer
+    if _tokenizer is None:
+        tok = getattr(_model, "tokenizer", None)
+        if tok is None:
+            return -1
+        _tokenizer = tok
+    return sum(len(_tokenizer(t)["input_ids"]) for t in texts)
+
+
 def _run_encode(items):
     """One model call for a group of items; distribute or fail them together."""
+    _t0 = time.monotonic()
+    _chars = sum(len(i.prefixed) for i in items)
     try:
         vecs = _model.encode([i.prefixed for i in items], normalize_embeddings=True)
         for item, vec in zip(items, vecs):
@@ -421,6 +440,22 @@ def _run_encode(items):
         for item in items:
             item.error = exc
     finally:
+        # INSTRUMENTATION: what is actually being handed to the model, and what it
+        # costs. Rate in production sat ~13x below a standalone benchmark of this
+        # same model, so the question is whether the inputs match what was
+        # benchmarked (batch size and, more importantly, sequence length -- the
+        # chunker targets "approximate tokens" and attention is quadratic).
+        _el = time.monotonic() - _t0
+        _n = len(items)
+        try:
+            _tok = _token_count([i.prefixed for i in items])
+        except Exception:  # noqa: BLE001 - never fail an embed to log it
+            _tok = -1
+        sys.stderr.write(
+            "embed-batch n=%d chars=%d tokens=%d %.3fs %.1f ms/text %.0f tok/s\n"
+            % (_n, _chars, _tok, _el, _el * 1000.0 / max(_n, 1),
+               (_tok / _el) if (_tok > 0 and _el > 0) else 0.0))
+        sys.stderr.flush()
         for item in items:
             item.done.set()
 
