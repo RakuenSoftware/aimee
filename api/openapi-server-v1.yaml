@@ -4539,13 +4539,54 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Persona' }
+  /workspace/mirror-sync:
+    post:
+      summary: Upload the client working-tree patch for a mirror workspace
+      description: >
+        The client of a remote server ships its full working-tree patch (tracked
+        modifications, deletions and untracked files, as a --binary diff against
+        HEAD) so the server's mirror reconstructs the tree the client actually
+        has. Absent, the reconstruct is a clean checkout at head and every
+        uncommitted change is silently missing from the tree agents work in. The
+        target must already be registered as a `mirror` workspace. Capability:
+        tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [args, diff]
+              properties:
+                args:
+                  type: array
+                  items: { type: string }
+                  description: Single element - the workspace root as the client knows it
+                diff:
+                  type: string
+                  description: The patch; empty string for a clean tree
+      responses:
+        "200":
+          description: Patch stored for the next reconstruct
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+        "400":
+          description: Not a registered mirror workspace, or missing root
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /workspaces:
     get:
       summary: List registered workspaces (instance-scoped)
       description: >
         The workspaces registered on this instance, each with its provider
-        (shared|detached) and the projects discovered under it. Capability:
-        index:read.
+        (shared|detached|mirror) and the projects discovered under it. A mirror
+        workspace also reports the client vcs coordinates its server-side tree is
+        reconstructed from. Capability: index:read.
       responses:
         "200":
           description: Workspace registry
@@ -4560,14 +4601,19 @@ paths:
                       type: object
                       properties:
                         path: { type: string }
-                        provider: { type: string, enum: [shared, detached] }
+                        provider: { type: string, enum: [shared, detached, mirror] }
+                        remote: { type: string, description: "mirror only: client remote URL" }
+                        head: { type: string, description: "mirror only: client HEAD commit" }
                         projects: { type: array, items: { type: string } }
     post:
       summary: Register a workspace (instance-scoped)
       description: >
         Register a working tree as an instance-scoped workspace. The optional
-        provider selects co-located (shared) or marshalled (detached) access.
-        Capability: tool:execute.
+        provider selects co-located (shared), marshalled to the client
+        (detached), or a server-side tree reconstructed from the client's git
+        remote (mirror). A mirror registration requires both `remote` and `head`,
+        since the server seeds its bare mirror by fetching that head from that
+        remote, and is rejected without them. Capability: tool:execute.
       requestBody:
         required: true
         content:
@@ -4579,7 +4625,13 @@ paths:
                 root_hint:
                   type: string
                   description: Absolute path to the workspace root
-                provider: { type: string, enum: [shared, detached] }
+                provider: { type: string, enum: [shared, detached, mirror] }
+                remote:
+                  type: string
+                  description: "Required for provider=mirror: the client's git remote URL"
+                head:
+                  type: string
+                  description: "Required for provider=mirror: the client's HEAD commit"
       responses:
         "200":
           description: Workspace registered (with discovered projects)

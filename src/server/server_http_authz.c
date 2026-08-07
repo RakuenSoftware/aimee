@@ -124,6 +124,14 @@ static int v1_route_tcp_exempt(const char *method, const char *path)
       return 1;
    if (strcmp(method, "POST") == 0 && strcmp(path, "/v1/workspaces") == 0) /* workspace.add */
       return 1;
+   /* Same plane, same reason: the remote fs authority ships its working-tree
+    * patch here so the mirror reconstructs the tree it actually has. This route
+    * needs tool:execute, so without the exemption it would demand
+    * remote_writes=full over TCP — i.e. at the default a thin client could never
+    * upload, and the server would reconstruct a clean checkout at head with the
+    * client's uncommitted work silently missing. */
+   if (strcmp(method, "POST") == 0 && strcmp(path, "/v1/workspace/mirror-sync") == 0)
+      return 1;
    if (strcmp(method, "DELETE") == 0 && strncmp(path, "/v1/workspaces/", 15) == 0) /* .remove */
       return 1;
    return 0;
