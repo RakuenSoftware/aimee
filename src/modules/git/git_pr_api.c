@@ -1112,18 +1112,72 @@ int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number
 int git_pr_merge_via_api_slug(const char *principal, const char *slug, int number, char *err,
                               size_t errlen)
 {
+   /* The squash-with-empty-body form the workflow forge and webchat rely on. */
+   return git_pr_merge_via_api_slug_ex(principal, slug, number, "squash", NULL, NULL, 0, err,
+                                       errlen);
+}
+
+int git_pr_merge_via_api_slug_ex(const char *principal, const char *slug, int number,
+                                 const char *merge_method, const char *expected_head_sha,
+                                 char *out_sha, size_t out_sha_cap, char *err, size_t errlen)
+{
    if (err && errlen)
       err[0] = '\0';
+   if (out_sha && out_sha_cap)
+      out_sha[0] = '\0';
    if (number <= 0)
       return -1;
+
+   /* Default to a real merge commit. Silently squashing would rewrite history the
+    * caller did not ask to rewrite, so an unrecognised method is refused rather
+    * than coerced. */
+   const char *method = (merge_method && merge_method[0]) ? merge_method : "merge";
+   if (strcmp(method, "merge") != 0 && strcmp(method, "squash") != 0 &&
+       strcmp(method, "rebase") != 0)
+   {
+      snprintf(err, errlen, "unsupported merge_method '%s' (merge|squash|rebase)", method);
+      return -1;
+   }
+
    gh_ctx_t cx;
    if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
+
+   cJSON *j = cJSON_CreateObject();
+   cJSON_AddStringToObject(j, "merge_method", method);
+   /* Only a squash synthesizes a body from the child commits, which is where the
+    * attribution trailers protected branches reject come back in -- see
+    * GIT_PR_SQUASH_MERGE_JSON. A merge or rebase has nothing to synthesize. */
+   if (strcmp(method, "squash") == 0)
+      cJSON_AddStringToObject(j, "commit_message", "");
+   /* Drift safety: GitHub refuses the merge if the head has moved. */
+   if (expected_head_sha && expected_head_sha[0])
+      cJSON_AddStringToObject(j, "sha", expected_head_sha);
+   char *payload = cJSON_PrintUnformatted(j);
+   cJSON_Delete(j);
+   if (!payload)
+   {
+      gh_ctx_done(&cx);
+      snprintf(err, errlen, "internal error");
+      return -1;
+   }
+
    char path[64];
    snprintf(path, sizeof(path), "pulls/%d/merge", number);
    char *resp = NULL;
-   int st = gh_put(&cx, path, GIT_PR_SQUASH_MERGE_JSON, &resp);
+   int st = gh_put(&cx, path, payload, &resp);
+   free(payload);
    gh_ctx_done(&cx);
+
+   /* The 200 body carries the merge commit, so the caller needs no second lookup. */
+   if (st >= 200 && st < 300 && resp && out_sha && out_sha_cap)
+   {
+      cJSON *jr = cJSON_Parse(resp);
+      const cJSON *sha = jr ? cJSON_GetObjectItem(jr, "sha") : NULL;
+      if (cJSON_IsString(sha) && sha->valuestring)
+         snprintf(out_sha, out_sha_cap, "%s", sha->valuestring);
+      cJSON_Delete(jr);
+   }
    int res;
    if (st >= 200 && st < 300)
       res = 0; /* merged */

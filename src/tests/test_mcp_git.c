@@ -12,6 +12,7 @@
 #include "session_worktree_key.h"
 #include "modules/workspace/workspace_provider.h"
 #include "modules/git/git_verify.h"
+#include "tests/support/git_pr_api_stub.h"
 #include "cJSON.h"
 #include "db_schema.h"
 #include "../db1/db1.h"
@@ -876,8 +877,10 @@ static void test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge
    snprintf(gh_path, sizeof(gh_path), "%s/gh", tmpdir);
    FILE *fp = fopen(gh_path, "w");
    assert(fp != NULL);
+   /* Only `gh pr merge --auto` is faked now. The CI gate no longer shells out --
+    * it reads the Checks API in-process -- so a faked `gh pr checks` would never
+    * be consulted; the verdict comes from the stub below instead. */
    fputs("#!/bin/sh\n"
-         "if [ \"$1\" = pr ] && [ \"$2\" = checks ]; then exit 8; fi\n"
          "if [ \"$1\" = pr ] && [ \"$2\" = merge ]; then exit 0; fi\n"
          "exit 2\n",
          fp);
@@ -893,6 +896,11 @@ static void test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge
             old_path ? old_path : "");
    assert(setenv("PATH", new_path, 1) == 0);
 
+   /* Pending CI is the whole point of auto-merge: branch protection holds the PR
+    * until green, so the gate must NOT refuse it here. Without this exemption an
+    * auto-merge into a protected branch would refuse itself. */
+   git_pr_api_stub_set_ci(GIT_PR_CI_PENDING);
+
    cJSON *args = cJSON_CreateObject();
    cJSON_AddStringToObject(args, "action", "merge");
    cJSON_AddNumberToObject(args, "number", 123);
@@ -905,6 +913,36 @@ static void test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge
    assert(strstr(text, "\"merged\":false") != NULL);
    cJSON_Delete(resp);
    cJSON_Delete(args);
+
+   /* The exemption is for PENDING alone. An unreadable forge is not "pending", and
+    * "unknown" is never "pass" -- auto or not, that must still refuse. */
+   git_pr_api_stub_set_ci(GIT_PR_CI_ERROR);
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "merge");
+   cJSON_AddNumberToObject(args, "number", 123);
+   cJSON_AddBoolToObject(args, "auto", 1);
+   resp = handle_git_pr(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "merge blocked") != NULL);
+   assert(strstr(text, "--auto") == NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   /* A failed check refuses even with auto, for the same reason. */
+   git_pr_api_stub_set_ci(GIT_PR_CI_FAILURE);
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "merge");
+   cJSON_AddNumberToObject(args, "number", 123);
+   cJSON_AddBoolToObject(args, "auto", 1);
+   resp = handle_git_pr(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "merge blocked") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   git_pr_api_stub_set_ci(GIT_PR_CI_ERROR); /* leave the fail-closed default in place */
 
    if (saved_path[0])
       assert(setenv("PATH", saved_path, 1) == 0);
