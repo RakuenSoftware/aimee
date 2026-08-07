@@ -7,7 +7,8 @@
 #include "platform_path.h"
 #include "cli_client.h"
 #define V1_PROTOCOL_VERSION 1
-#include "util.h"         /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
+#include "util.h"
+#include <aimee/workspace/client_diff.h> /* workspace.mirror-sync ships the client diff */
 #include "aimee_client.h" /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
 #include "code_collect.h" /* code_collect_files + code_collect_discover_repos (thin-client push) */
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -475,67 +476,6 @@ static cJSON *marshal_workspace_add(int argc, char **argv)
    return req;
 }
 
-/* Compute the client's FULL working-tree patch vs HEAD — tracked modifications,
- * deletions, AND untracked (non-ignored) files as additions — without touching
- * the client's real index: stage everything into a throwaway index
- * (GIT_INDEX_FILE) seeded from HEAD, then `diff --cached --binary HEAD`. git's
- * --binary patch format is ASCII (base85 hunks), so the result is JSON-safe even
- * for binary files. Returns a malloc'd patch (caller frees), or NULL when the
- * root is not a repo / has no HEAD. POSIX-only (the thin Windows client cannot
- * fork git); Windows ships no diff. */
-#if !defined(_WIN32) && !defined(_WIN64)
-extern char **environ;
-static char *mirror_compute_diff(const char *root)
-{
-   char idx[] = "/tmp/aimee-msync-idx-XXXXXX";
-   int fd = mkstemp(idx);
-   if (fd < 0)
-      return NULL;
-   close(fd); /* git read-tree overwrites it */
-
-   int n = 0;
-   while (environ[n])
-      n++;
-   char **envp = calloc((size_t)n + 2, sizeof(char *));
-   if (!envp)
-   {
-      unlink(idx);
-      return NULL;
-   }
-   char giv[300];
-   snprintf(giv, sizeof(giv), "GIT_INDEX_FILE=%s", idx);
-   for (int i = 0; i < n; i++)
-      envp[i] = environ[i];
-   envp[n] = giv;
-   envp[n + 1] = NULL;
-
-   char *out = NULL;
-   const char *rt[] = {"git", "-C", root, "read-tree", "HEAD", NULL};
-   int rc = safe_exec_capture_env(rt, envp, &out, 4096);
-   free(out);
-   out = NULL;
-   char *patch = NULL;
-   if (rc == 0)
-   {
-      const char *add[] = {"git", "-C", root, "add", "-A", NULL};
-      safe_exec_capture_env(add, envp, &out, 4096);
-      free(out);
-      out = NULL;
-      const char *df[] = {"git", "-C", root, "diff", "--cached", "--binary", "HEAD", NULL};
-      safe_exec_capture_env(df, envp, &patch, 16 * 1024 * 1024);
-   }
-   free(envp);
-   unlink(idx);
-   return patch; /* may be "" (clean tree) */
-}
-#else
-static char *mirror_compute_diff(const char *root)
-{
-   (void)root;
-   return NULL;
-}
-#endif
-
 /* `aimee workspace mirror-sync <root>`: ship the client's full working-tree patch
  * (see mirror_compute_diff) to the server, which stores it for the mirror
  * workspace's next reconstruct (workspace-resource-plane §3). A clean tree ships
@@ -548,7 +488,7 @@ static cJSON *marshal_workspace_mirror_sync(int argc, char **argv)
       return NULL;
    }
    const char *root = argv[0];
-   char *patch = mirror_compute_diff(root);
+   char *patch = workspace_client_diff_compute(root);
    if (!patch)
       fprintf(stderr,
               "warning: could not compute a diff for %s (not a git repo / no HEAD?); "

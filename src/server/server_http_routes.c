@@ -1578,6 +1578,15 @@ static int rh_workspaces_register(const route_req_t *rq, char *resp, int cap)
    const char *root = (cJSON_IsString(jroot) && jroot->valuestring) ? jroot->valuestring : "";
    const cJSON *jprov = cJSON_GetObjectItemCaseSensitive(body, "provider");
    const char *provider = (cJSON_IsString(jprov) && jprov->valuestring) ? jprov->valuestring : "";
+   /* A `mirror` workspace is seeded by fetching the client's head from its
+    * remote, so workspace.add requires both. Dropping them here (as this route
+    * did) meant a mirror registration over REST was rejected for a missing
+    * --remote, leaving the reverse channel no route to the sandboxed tier. */
+   const cJSON *jremote = cJSON_GetObjectItemCaseSensitive(body, "remote");
+   const char *remote =
+       (cJSON_IsString(jremote) && jremote->valuestring) ? jremote->valuestring : "";
+   const cJSON *jhead = cJSON_GetObjectItemCaseSensitive(body, "head");
+   const char *head = (cJSON_IsString(jhead) && jhead->valuestring) ? jhead->valuestring : "";
    int rc;
    if (!root[0])
    {
@@ -1586,8 +1595,9 @@ static int rh_workspaces_register(const route_req_t *rq, char *resp, int cap)
    }
    if (provider[0])
    {
-      const char *extra[2] = {"--provider", provider};
-      rc = ws_dispatch_args("workspace.add", root, extra, 2, resp, cap);
+      const char *extra[WS_ADD_FLAG_ARGS_MAX];
+      int extra_n = workspace_add_flag_args(provider, remote, head, extra, WS_ADD_FLAG_ARGS_MAX);
+      rc = ws_dispatch_args("workspace.add", root, extra, extra_n, resp, cap);
    }
    else
    {
