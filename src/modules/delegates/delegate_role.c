@@ -127,9 +127,13 @@ int delegate_role_enable_tools_by_default(const char *role)
       return 0;
 
    role = delegate_role_canonicalize(role);
-   return strcmp(role, "review") == 0 || strcmp(role, "search") == 0 ||
-          strcmp(role, "execute") == 0 || strcmp(role, "diagnose") == 0 ||
-          strcmp(role, "validate") == 0 ||
+   /* A write role cannot do its job without a filesystem, and left tools-off it
+    * cannot fail visibly either: asked to implement, an agent with no file tools
+    * returns a per-file diff summary of code it never wrote. Tools-on is the
+    * only honest default here; an explicit --no-tools still overrides it. */
+   return delegate_role_is_write(role) || strcmp(role, "review") == 0 ||
+          strcmp(role, "search") == 0 || strcmp(role, "execute") == 0 ||
+          strcmp(role, "diagnose") == 0 || strcmp(role, "validate") == 0 ||
           /* Novel-mode read-only checks inspect the world bible by default. */
           strcmp(role, "continuity") == 0 || strcmp(role, "beat-check") == 0;
 }

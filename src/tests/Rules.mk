@@ -589,6 +589,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-ingest-worker-cap \
                $(TESTPREFIX)/unit-test-kb-dense-vector-scope \
                $(TESTPREFIX)/unit-test-mcp-roundtable-contract \
+               $(TESTPREFIX)/unit-test-mcp-delegate-contract \
                $(TESTPREFIX)/unit-test-workspace-prune-dead \
                $(TESTPREFIX)/unit-test-workspace-add-idempotent \
                $(TESTPREFIX)/unit-test-kb-doc-pdf \
@@ -6304,6 +6305,11 @@ $(TESTPREFIX)/unit-test-p3b-spend: $(OBJDIR)/tests/test_p3b_spend.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-mcp-roundtable-contract: $(OBJDIR)/tests/test_mcp_roundtable_contract.o \
+                                     $(OBJDIR)/modules/protocols/mcp/mcp_tools.o \
+                                     $(OBJDIR)/cJSON.o $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-mcp-delegate-contract: $(OBJDIR)/tests/test_mcp_delegate_contract.o \
                                      $(OBJDIR)/modules/protocols/mcp/mcp_tools.o \
                                      $(OBJDIR)/cJSON.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
