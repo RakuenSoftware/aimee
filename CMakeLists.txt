@@ -1511,7 +1511,6 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_advance.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_router.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_router_catalog.c
-    ${AIMEE_SRC_DIR}/modules/workflows/wfe_autonomous_route.c
 )
 target_include_directories(aimee PRIVATE
     ${AIMEE_SRC_DIR}
