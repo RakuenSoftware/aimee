@@ -1529,6 +1529,23 @@ repaired in Finding 31:
 
 That names the layer and the symptom without handing over the row.
 
+### CONFIRMED at 0/5 (all arms now measured)
+
+| arm | verdict | credits | prod / test |
+|---|---|---|---|
+| ponytail-instructions | FAIL does_not_catch_defect | 26.60 | 13 / 24 |
+| ponytail-addon | FAIL does_not_catch_defect | 34.92 | 2 / 42 |
+| aimee (review off) | FAIL does_not_catch_defect | 36.56 | 11 / 68 |
+| baseline | FAIL does_not_catch_defect | 43.45 | 16 / 49 |
+| aimee (review on) | FAIL does_not_catch_defect | 66.74 | 30 / 51 |
+
+234 lines of test across five arms and not one catches the defect, because every
+arm tested the CLI marshalling layer the ticket names while the grader checks the
+server dispatch table. Five independent agents across four scaffolds all landed
+on the same layer and all were wrong by the grader. The ticket steered every one
+of them, which is what distinguishes this from a task that is merely hard
+(compare Finding 34: am_67e9b0449a, 3/5 pass).
+
 ### Why this matters beyond one task
 
 Three of fourteen tickets have now shown the same defect: the graded test
