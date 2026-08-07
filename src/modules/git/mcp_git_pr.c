@@ -4,6 +4,8 @@
 #include "config.h"
 #include "guardrails.h"
 #include "git_verify.h"
+#include "git_pr_api.h"   /* git_pr_create_via_api_slug */
+#include "agent_config.h" /* agent_get_request_vault_principal */
 #include "mcp_git.h"
 #include "util.h"
 #include "branch_ownership.h"
@@ -465,78 +467,62 @@ cJSON *handle_git_pr(cJSON *args)
       if (cJSON_IsString(jbody))
          strip_ai_attribution(jbody->valuestring);
 
-      char *esc_title = shell_escape(jtitle->valuestring);
-      char *esc_body = shell_escape(cJSON_IsString(jbody) ? jbody->valuestring : "");
       const char *base = cJSON_IsString(jbase) ? jbase->valuestring : "main";
-      char *esc_base = shell_escape(base);
 
-      /* In worktree mode, gh pr create infers the branch from HEAD, which is the
-       * session branch (aimee/session/<id>). Pass --head explicitly with the owned branch. */
-      /* Size the command buffer to the escaped fields (see the edit path above):
-       * a fixed buffer silently truncates a long PR body, corrupting the created
-       * PR's description (and risks the same accumulation overflow). */
-      char *esc_head = NULL;
+      /* Resolve the repository through mcp_git_run, the SAME runner every other git
+       * command here goes through, and hand the slug to the API. The API's
+       * repo_dir-based entry points run git in aimee-server's own process, which is
+       * wrong for this tool: a DETACHED workspace keeps the checkout on the client,
+       * so the server cannot see that path and every create failed with "no origin
+       * remote" (#2386, reverted in #2391). */
+      char slug[264];
+      if (get_origin_repo_slug(slug, sizeof(slug)) != 0)
+         return mcp_text("error: cannot resolve a github.com origin for this checkout");
+
+      /* HEAD is the session branch (aimee/session/<id>) in worktree mode, not the
+       * branch the work belongs to, so name the owned branch explicitly. Otherwise
+       * ask the runner which branch is checked out -- again not this process. */
+      char head[256];
       if (mcp_git_get_worktree())
       {
-         char owned_branch[256];
-         if (branch_own_get_session_branch(owned_branch, sizeof(owned_branch)) != 0)
-         {
-            free(esc_title);
-            free(esc_body);
-            free(esc_base);
+         if (branch_own_get_session_branch(head, sizeof(head)) != 0)
             return mcp_text("error: in worktree mode but no owned branch found. "
                             "Use git_branch action=create to create and register a branch first.");
+      }
+      else
+      {
+         int hrc;
+         char *hout = mcp_git_run("git rev-parse --abbrev-ref HEAD 2>/dev/null", &hrc);
+         if (hrc != 0 || !hout || !hout[0])
+         {
+            free(hout);
+            return mcp_text("error: cannot determine the current branch");
          }
-         esc_head = shell_escape(owned_branch);
-      }
-      size_t cmdcap = 160 + strlen(esc_title) + strlen(esc_body) + strlen(esc_base) +
-                      (esc_head ? strlen(esc_head) : 0);
-      char *cmd = malloc(cmdcap);
-      if (!cmd)
-      {
-         free(esc_title);
-         free(esc_body);
-         free(esc_base);
-         free(esc_head);
-         return mcp_text("error: out of memory building gh command");
-      }
-      if (esc_head)
-         snprintf(cmd, cmdcap, "gh pr create --title '%s' --body '%s' --base '%s' --head '%s' 2>&1",
-                  esc_title, esc_body, esc_base, esc_head);
-      else
-         snprintf(cmd, cmdcap, "gh pr create --title '%s' --body '%s' --base '%s' 2>&1", esc_title,
-                  esc_body, esc_base);
-      free(esc_head);
-      free(esc_title);
-      free(esc_body);
-      free(esc_base);
-
-      int rc;
-      char *out = mcp_git_run(cmd, &rc);
-      free(cmd);
-      if (rc != 0)
-      {
-         cJSON *r = mcp_error("error: gh pr create failed: %s", out ? out : "unknown");
-         free(out);
-         return r;
+         size_t hl = strlen(hout);
+         while (hl > 0 && isspace((unsigned char)hout[hl - 1]))
+            hout[--hl] = '\0';
+         if (!hout[0] || strcmp(hout, "HEAD") == 0)
+         {
+            free(hout);
+            return mcp_text("error: not on a branch (detached HEAD)");
+         }
+         snprintf(head, sizeof(head), "%s", hout);
+         free(hout);
       }
 
-      /* Output from gh pr create is typically just the URL */
-      char result[1024];
-      if (out)
-      {
-         /* Trim trailing newline */
-         size_t len = strlen(out);
-         while (len > 0 && (out[len - 1] == '\n' || out[len - 1] == '\r'))
-            out[--len] = '\0';
-         snprintf(result, sizeof(result), "created: \"%s\"\nurl: %s\nbase: %s", jtitle->valuestring,
-                  out, base);
-      }
-      else
-      {
-         snprintf(result, sizeof(result), "created: \"%s\" (base: %s)", jtitle->valuestring, base);
-      }
-      free(out);
+      char url[1024];
+      char err[512];
+      url[0] = '\0';
+      err[0] = '\0';
+      if (git_pr_create_via_api_slug(agent_get_request_vault_principal(), slug, head, base,
+                                     jtitle->valuestring,
+                                     cJSON_IsString(jbody) ? jbody->valuestring : "", 0, url,
+                                     sizeof(url), err, sizeof(err)) != 0)
+         return mcp_error("error: pr create failed: %s", err[0] ? err : "unknown");
+
+      char result[1280];
+      snprintf(result, sizeof(result), "created: \"%s\"\nurl: %s\nbase: %s", jtitle->valuestring,
+               url, base);
       return mcp_text(result);
    }
 

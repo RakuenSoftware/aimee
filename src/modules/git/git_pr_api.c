@@ -189,6 +189,48 @@ static int gh_ctx_resolve(const char *principal, const char *repo_dir, gh_ctx_t 
    return 0;
 }
 
+/* As gh_ctx_resolve, but from an "owner/repo" slug the CALLER resolved, for the
+ * callers with no server-visible checkout to run git in. The credential is looked
+ * up against the slug's canonical https remote so per-host resolution still works;
+ * repo_dir is NULL because there is no such directory here. */
+static int gh_ctx_resolve_slug(const char *principal, const char *slug, gh_ctx_t *cx, char *err,
+                               size_t errlen)
+{
+   memset(cx, 0, sizeof(*cx));
+   if (!slug || !slug[0])
+   {
+      snprintf(err, errlen, "no repository");
+      return -1;
+   }
+   const char *sl = strchr(slug, '/');
+   if (!sl || sl == slug || !sl[1] || strchr(sl + 1, '/'))
+   {
+      snprintf(err, errlen, "requires an owner/repo slug");
+      return -1;
+   }
+   size_t ol = (size_t)(sl - slug);
+   if (ol >= sizeof(cx->owner) || strlen(sl + 1) >= sizeof(cx->repo))
+   {
+      snprintf(err, errlen, "repository name too long");
+      return -1;
+   }
+   memcpy(cx->owner, slug, ol);
+   cx->owner[ol] = '\0';
+   snprintf(cx->repo, sizeof(cx->repo), "%s", sl + 1);
+
+   char remote[512];
+   snprintf(remote, sizeof(remote), "https://github.com/%s/%s.git", cx->owner, cx->repo);
+   if (git_cred_inject_resolve_token(principal, remote, NULL, NULL, cx->token, sizeof(cx->token)) !=
+           1 ||
+       !cx->token[0])
+   {
+      wipe(cx->token, sizeof(cx->token));
+      snprintf(err, errlen, "no github credential — connect one in the Git panel");
+      return -1;
+   }
+   return 0;
+}
+
 static void gh_ctx_done(gh_ctx_t *cx)
 {
    wipe(cx->token, sizeof(cx->token));
@@ -411,6 +453,38 @@ int git_pr_create_via_api_ex_draft(const char *principal, const char *repo_dir, 
       else
          title = head;
    }
+
+   /* Everything above needed the checkout; the request itself does not. Hand the
+    * resolved slug to the no-checkout path so there is one copy of the POST. The
+    * token is resolved again there, which costs one vault read and keeps this
+    * function from having to hand a live credential across the boundary. */
+   char slug[264];
+   snprintf(slug, sizeof(slug), "%s/%s", cx.owner, cx.repo);
+   gh_ctx_done(&cx);
+   return git_pr_create_via_api_slug(principal, slug, head, base, title, body, draft, out, out_cap,
+                                     err, errlen);
+}
+
+int git_pr_create_via_api_slug(const char *principal, const char *slug, const char *head,
+                               const char *base, const char *title, const char *body, int draft,
+                               char *out, size_t out_cap, char *err, size_t errlen)
+{
+   if (out && out_cap)
+      out[0] = '\0';
+   if (err && errlen)
+      err[0] = '\0';
+
+   /* No checkout to infer these from, and guessing is how a PR lands on the wrong
+    * base. Refuse instead. */
+   if (!head || !head[0] || !base || !base[0] || !title || !title[0])
+   {
+      snprintf(err, errlen, "head, base and title are required without a checkout");
+      return -1;
+   }
+
+   gh_ctx_t cx;
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
+      return -1;
 
    /* Standing directive: no AI co-authorship / "Generated with" attribution in
     * PR bodies — strip a copy before it reaches GitHub. */
