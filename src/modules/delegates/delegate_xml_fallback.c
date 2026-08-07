@@ -39,6 +39,52 @@ static const char *find_xml_tag(const char *haystack, const char *tag, const cha
    return start;
 }
 
+/* Find a <tool_call> block that carries an XML namespace prefix, e.g.
+ * <tools:tool_call> ... </tools:tool_call>.
+ *
+ * Namespaced blocks were only half-wired: delegate_rescue_has_tool_calls matches
+ * ":tool_call>" and the content-boundary logic knows how to step back over the
+ * prefix, but the block scanner only ever looked for the literal "<tool_call>".
+ * So such a response was reported as containing tool calls and then yielded
+ * none -- the caller is told there is work and handed nothing.
+ *
+ * Only consulted when the unprefixed form is absent, so the common path is
+ * untouched. */
+static const char *find_namespaced_tool_call(const char *haystack, const char **end_out)
+{
+   const char *marker = strstr(haystack, ":tool_call>");
+   if (!marker)
+      return NULL;
+
+   /* Step back over the prefix to the '<' that opens the tag. The prefix is an
+    * XML name, so stop at anything that cannot be part of one rather than
+    * scanning the whole buffer. */
+   const char *open = marker;
+   while (open > haystack && open[-1] != '<')
+   {
+      char c = open[-1];
+      if (!(isalnum((unsigned char)c) || c == '_' || c == '-' || c == '.'))
+         return NULL;
+      open--;
+   }
+   if (open == haystack || open[-1] != '<')
+      return NULL;
+
+   size_t prefix_len = (size_t)(marker - open);
+   if (prefix_len == 0 || prefix_len > 32)
+      return NULL;
+
+   char close[64];
+   snprintf(close, sizeof(close), "</%.*s:tool_call>", (int)prefix_len, open);
+   const char *body = marker + strlen(":tool_call>");
+   const char *end = strstr(body, close);
+   if (!end)
+      return NULL;
+   if (end_out)
+      *end_out = end;
+   return body;
+}
+
 static const char *find_balanced_json_end(const char *open);
 
 static const char *find_channel_tool_end(const char *args_open)
@@ -540,11 +586,31 @@ static char *channel_args_to_json(const char *args_start, size_t args_len)
    if (!decoded)
       return strdup("{}");
 
-   cJSON *check = cJSON_Parse(decoded);
-   if (check)
+   /* The caller hands us the INSIDE of the braces, so put them back before
+    * asking whether this is already an arguments object.
+    *
+    * Parsing the brace-less text directly is not that question: cJSON_Parse
+    * succeeds on `"command": "ls"` by reading the leading bare string and
+    * stopping, so the guard passed and the brace-less text was returned as
+    * `arguments` -- a JSON string where the executor requires an object. */
+   size_t decoded_len = strlen(decoded);
+   char *wrapped = malloc(decoded_len + 3);
+   if (wrapped)
    {
-      cJSON_Delete(check);
-      return decoded;
+      wrapped[0] = '{';
+      memcpy(wrapped + 1, decoded, decoded_len);
+      wrapped[decoded_len + 1] = '}';
+      wrapped[decoded_len + 2] = '\0';
+      cJSON *check = cJSON_Parse(wrapped);
+      int is_object = check && cJSON_IsObject(check);
+      if (check)
+         cJSON_Delete(check);
+      if (is_object)
+      {
+         free(decoded);
+         return wrapped;
+      }
+      free(wrapped);
    }
 
    char *colon = strchr(decoded, ':');
@@ -835,6 +901,12 @@ int delegate_rescue_parse_tool_calls(const char *text, parsed_response_t *out, i
       /* Look for <tool_call> block */
       const char *block_end;
       const char *block_start = find_xml_tag(p, "tool_call", &block_end);
+      int namespaced = 0;
+      if (!block_start)
+      {
+         block_start = find_namespaced_tool_call(p, &block_end);
+         namespaced = block_start != NULL;
+      }
       if (!block_start)
          break;
 
@@ -922,8 +994,16 @@ int delegate_rescue_parse_tool_calls(const char *text, parsed_response_t *out, i
          found++;
       }
 
-      /* Advance past this <tool_call> block */
-      p = block_end + strlen("</tool_call>");
+      /* Advance past this <tool_call> block. A namespaced close tag is longer
+       * than the plain one, so step to the '>' that actually ends it rather than
+       * assuming a fixed width. */
+      if (namespaced)
+      {
+         const char *gt = strchr(block_end, '>');
+         p = gt ? gt + 1 : block_end + strlen("</tool_call>");
+      }
+      else
+         p = block_end + strlen("</tool_call>");
       if (p > scan + strlen(scan))
          break;
    }

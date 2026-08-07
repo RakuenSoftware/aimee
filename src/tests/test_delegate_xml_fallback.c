@@ -22,7 +22,12 @@
  * the test self-contained. */
 struct cJSON *agent_tool_get_schema_cached(const char *tool_name)
 {
-   (void)tool_name;
+   /* The <tool_call> and <function=> forms accept any name, but the invoke and
+    * bare-JSON rescue paths gate on the registry, so the formats exercised below
+    * need "bash" and "read" to look declared. Everything else stays unknown, which
+    * is what the unknown-tool rescue cases rely on. */
+   if (tool_name && (strcmp(tool_name, "bash") == 0 || strcmp(tool_name, "read") == 0))
+      return cJSON_CreateObject();
    return NULL;
 }
 
@@ -168,6 +173,125 @@ static void test_brace_in_string(void)
    printf("  brace_in_string: ok\n");
 }
 
+/* ---- 8. the other formats the parser claims to recognise ----
+ * The suite covered <tool_call> only; these pin the rest so a port has a spec.
+ * Each asserts the shape a tool executor actually needs: a name plus an
+ * arguments OBJECT. */
+static void assert_object_args(const parsed_tool_call_t *tc, const char *what)
+{
+   cJSON *args = cJSON_Parse(tc->arguments);
+   /* cJSON_Parse succeeds on a bare string, so "it parsed" is not the test --
+    * an executor needs an object. */
+   assert(args != NULL);
+   assert(cJSON_IsObject(args));
+   (void)what;
+   cJSON_Delete(args);
+}
+
+static void test_invoke_format(void)
+{
+   parsed_response_t r;
+   memset(&r, 0, sizeof(r));
+   int n = xml_parse_tool_calls(
+       "<invoke name=\"bash\"><parameter name=\"command\">ls -la</parameter></invoke>", &r);
+   assert(n == 1 && r.call_count == 1);
+   assert(strcmp(r.calls[0].name, "bash") == 0);
+   assert_object_args(&r.calls[0], "invoke");
+   assert(strstr(r.calls[0].arguments, "ls -la") != NULL);
+   agent_free_parsed_response(&r);
+   printf("  invoke: ok\n");
+}
+
+static void test_qwen_function_format(void)
+{
+   /* The qwen <function=>/<parameter=> form is only reached INSIDE a
+    * <tool_call> block; bare, it is not recognised at all. */
+   parsed_response_t r;
+   memset(&r, 0, sizeof(r));
+   int n = xml_parse_tool_calls("<tool_call><function=bash>\n<parameter=command>\nls -la\n"
+                                "</parameter>\n</function></tool_call>",
+                                &r);
+   assert(n == 1 && r.call_count == 1);
+   assert(strcmp(r.calls[0].name, "bash") == 0);
+   assert_object_args(&r.calls[0], "qwen");
+   agent_free_parsed_response(&r);
+
+   memset(&r, 0, sizeof(r));
+   assert(xml_parse_tool_calls("<function=bash><parameter=command>ls</parameter></function>", &r) ==
+          0);
+   agent_free_parsed_response(&r);
+   printf("  qwen function=: ok\n");
+}
+
+static void test_mistral_format(void)
+{
+   parsed_response_t r;
+   memset(&r, 0, sizeof(r));
+   int n = xml_parse_tool_calls(
+       "[TOOL_CALLS][{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}]", &r);
+   assert(n == 1 && r.call_count == 1);
+   assert(strcmp(r.calls[0].name, "bash") == 0);
+   assert_object_args(&r.calls[0], "mistral");
+   agent_free_parsed_response(&r);
+   printf("  mistral: ok\n");
+}
+
+/* ---- 9. REGRESSION: harmony arguments must be an object ----
+ * <|channel>call: passes the INSIDE of the braces to the argument builder, and
+ * the "is this already JSON?" guard used a bare cJSON_Parse -- which succeeds on
+ * `"command": "ls"` by reading the leading string and stopping. The brace-less
+ * text was then handed to the executor as `arguments`, where an object was
+ * required. */
+static void test_channel_arguments_are_an_object(void)
+{
+   parsed_response_t r;
+   memset(&r, 0, sizeof(r));
+   int n = xml_parse_tool_calls("<|channel>call:bash {\"command\": \"ls\"}", &r);
+   assert(n == 1 && r.call_count == 1);
+   assert(strcmp(r.calls[0].name, "bash") == 0);
+   assert_object_args(&r.calls[0], "channel");
+
+   cJSON *args = cJSON_Parse(r.calls[0].arguments);
+   const cJSON *command = cJSON_GetObjectItemCaseSensitive(args, "command");
+   assert(cJSON_IsString(command) && strcmp(command->valuestring, "ls") == 0);
+   cJSON_Delete(args);
+   agent_free_parsed_response(&r);
+
+   /* A nested object value must survive too, not collapse to a string. */
+   memset(&r, 0, sizeof(r));
+   assert(xml_parse_tool_calls("<|channel>call:bash {\"opts\": {\"deep\": true}}", &r) == 1);
+   assert_object_args(&r.calls[0], "channel nested");
+   agent_free_parsed_response(&r);
+   printf("  channel arguments are an object: ok\n");
+}
+
+/* ---- 10. REGRESSION: detector and parser must agree ----
+ * The detector matches ":tool_call>", so a namespaced block reports "there are
+ * tool calls here"; the parser only scans "<tool_call>" and extracts none. A
+ * caller told a response holds tool calls, then handed zero, either drops the
+ * call or retries forever. */
+static void test_detector_and_parser_agree(void)
+{
+   static const char *cases[] = {
+       "<tool_call><name>bash</name><arguments>{\"a\":1}</arguments></tool_call>",
+       "<tools:tool_call><name>bash</name><arguments>{\"a\":1}</arguments></tools:tool_call>",
+       "<invoke name=\"bash\"><parameter name=\"command\">ls</parameter></invoke>",
+       "[TOOL_CALLS][{\"name\": \"bash\", \"arguments\": {}}]",
+       "<|channel>call:bash {\"a\": 1}",
+   };
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+   {
+      parsed_response_t r;
+      memset(&r, 0, sizeof(r));
+      int parsed = xml_parse_tool_calls(cases[i], &r);
+      int detected = delegate_rescue_has_tool_calls(cases[i]);
+      /* Detection without extraction is the failure mode being pinned. */
+      assert(!(detected && parsed == 0));
+      agent_free_parsed_response(&r);
+   }
+   printf("  detector/parser agree: ok\n");
+}
+
 int main(void)
 {
    printf("delegate_xml_fallback:\n");
@@ -178,6 +302,11 @@ int main(void)
    test_normalize_name();
    test_no_tool_call();
    test_brace_in_string();
+   test_invoke_format();
+   test_qwen_function_format();
+   test_mistral_format();
+   test_channel_arguments_are_an_object();
+   test_detector_and_parser_agree();
    printf("All delegate_xml_fallback tests passed.\n");
    return 0;
 }
