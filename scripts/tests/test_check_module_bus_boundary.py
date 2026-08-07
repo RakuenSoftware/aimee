@@ -30,6 +30,9 @@ FIXTURE = {
         "#include <aimee/workspace/workspace.h>\n"
     ),
     "src/modules/tools/include/aimee/tools/agent_tools.h": "#include <aimee/core/bus_client.h>\n",
+    # A private header at the module root: the shape the build puts on the
+    # include path, so a peer can name it without any prefix.
+    "src/modules/tools/tools_internal.h": "#pragma once\n",
     "src/modules/workspace/workspace.c": "#include <aimee/core/bus_client.h>\n",
     "src/modules/workspace/include/aimee/workspace/workspace.h": "#pragma once\n",
 }
@@ -143,6 +146,69 @@ class ModuleBusBoundaryTests(unittest.TestCase):
             None,
         )
 
+    def test_a_bare_include_of_a_peers_header_is_rejected(self) -> None:
+        """The build puts module directories on the include path, so a bare name
+        reaches straight into a peer. Counting only prefixed includes missed 122
+        crossings against the 45 it saw."""
+        self.assert_fixture(
+            self.append("src/modules/workspace/workspace.c", '#include "tools_internal.h"\n'),
+            "undeclared-cross-module",
+        )
+
+    def test_a_bare_include_resolved_by_the_own_directory_is_not_a_crossing(self) -> None:
+        """A quoted include finds the including file's own directory first.
+
+        Two module roots sharing a basename is ambiguity and is refused outright,
+        so the case this rule actually covers is a file in a SUBdirectory sitting
+        beside its own copy of a name some module root also publishes.
+        """
+        def mutate(root: Path) -> None:
+            nested = root / "src/modules/workspace/sub"
+            nested.mkdir(parents=True, exist_ok=True)
+            (nested / "tools_internal.h").write_text("#pragma once\n", encoding="utf-8")
+            (nested / "nested.c").write_text('#include "tools_internal.h"\n', encoding="utf-8")
+        self.assert_fixture(mutate, None)
+
+    def test_a_bare_include_naming_no_module_is_ignored(self) -> None:
+        self.assert_fixture(
+            self.append("src/modules/workspace/workspace.c", '#include "nothing_owns_this.h"\n'),
+            None,
+        )
+
+    def test_an_ambiguous_module_header_name_is_refused(self) -> None:
+        """Two modules publishing one basename makes ownership depend on include
+        order, so the check refuses to guess rather than pick the first."""
+        def mutate(root: Path) -> None:
+            (root / "src/modules/workspace/tools_internal.h").write_text("#pragma once\n", encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.fixture(root)
+            (root / "src/modules/tools/tools_internal.h").write_text("#pragma once\n", encoding="utf-8")
+            mutate(root)
+            with self.assertRaisesRegex(checker.CheckError, "rule=ambiguous-module-header"):
+                checker.crossings(root)
+
+    def test_a_module_header_shadowed_by_src_headers_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.fixture(root)
+            (root / "src/headers").mkdir(parents=True, exist_ok=True)
+            (root / "src/headers/workspace.h").write_text("#pragma once\n", encoding="utf-8")
+            (root / "src/modules/workspace/workspace.h").write_text("#pragma once\n", encoding="utf-8")
+            with self.assertRaisesRegex(checker.CheckError, "rule=shadowed-module-header"):
+                checker.crossings(root)
+
+    def test_core_linked_reaches_name_a_core_linked_module(self) -> None:
+        """The exception is only meaningful if the group actually holds it."""
+        core_linked = {"audit", "config", "execution-policy", "gateway", "ir",
+                       "module-runtime", "protocols", "translation", "vault"}
+        for path, header in checker.CORE_LINKED_REACH:
+            with self.subTest(path=path):
+                self.assertIn(header.split("/")[0], core_linked)
+        for path, header in checker.FLAT_ROOT_REACH:
+            with self.subTest(path=path):
+                self.assertNotIn(header.split("/")[0], core_linked)
+
     def test_a_missing_module_root_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(checker.CheckError, "rule=module-root-missing"):
@@ -179,7 +245,8 @@ class ModuleBusBoundaryTests(unittest.TestCase):
 
     def test_every_declared_crossing_is_classified_exactly_once(self) -> None:
         groups = (checker.IR_SHARED_TYPE, checker.PENDING_BUS_MIGRATION,
-                  checker.PRIVATE_HEADER_REACH)
+                  checker.PRIVATE_HEADER_REACH, checker.CORE_LINKED_REACH,
+                  checker.FLAT_ROOT_REACH)
         union: set = set()
         for group in groups:
             self.assertEqual(union & group, set())

@@ -81,13 +81,153 @@ PRIVATE_HEADER_REACH = {
     ("src/modules/webuser/webuser_editor.c", "modules/git/forge_credentials.h"),
     ("src/modules/webuser/webuser_editor.c", "modules/git/git_cred_inject.h"),
     ("src/modules/webuser/webuser_editor.c", "modules/workspace/workspace_scope.h"),
-    ("src/modules/webuser/webuser_runtime.c", "modules/workspace/workspace_scope.h"),
     ("src/modules/workflows/wfe_live_forge.c", "modules/git/git_cred_inject.h"),
     ("src/modules/workflows/wfe_live_forge.c", "modules/git/git_pr_api.h"),
     ("src/modules/workspace/workspace_turn.c", "modules/git/forge_credentials.h"),
     ("src/modules/workspace/workspace_turn.c", "modules/git/git_cred_inject.h"),
 }
-ALLOWED = IR_SHARED_TYPE | PENDING_BUS_MIGRATION | PRIVATE_HEADER_REACH
+# Reaches into a module the build links into core rather than supervising as a bus
+# peer (`execution: core` in the repository lock): config, vault, audit,
+# execution-policy, gateway, ir, module-runtime, protocols, translation.
+#
+# These are the invariant's real exception, and the point of listing them is that
+# it stops being unstated. A credential store cannot be a bus peer -- git_cred_inject
+# promises its token is "never logged" while the bus keeps an ordered capture and
+# audit tap -- so vault is core by necessity, not by omission. Whether every module
+# here belongs in core is a question this list is meant to make askable.
+CORE_LINKED_REACH = {
+    ("src/modules/audit/audit_ledger.c", "config/config.h"),
+    ("src/modules/audit/obs_bus.c", "config/config.h"),
+    ("src/modules/benchmarks/agent_eval.c", "config/config.h"),
+    ("src/modules/benchmarks/agent_eval_benchmarks.c", "config/config.h"),
+    ("src/modules/benchmarks/agent_eval_memory_support.c", "config/config.h"),
+    ("src/modules/benchmarks/agent_eval_memory_support.c", "config/config_database.h"),
+    ("src/modules/config/config.c", "vault/runtime_secret.h"),
+    ("src/modules/config/config_database.c", "vault/runtime_secret.h"),
+    ("src/modules/config/config_fields.c", "vault/runtime_secret.h"),
+    ("src/modules/config/config_server_api.c", "vault/runtime_secret.h"),
+    ("src/modules/css/css_render_cmd.c", "config/config.h"),
+    ("src/modules/delegates/delegate_credential_retry.c", "config/config.h"),
+    ("src/modules/delegates/delegate_credential_retry.c", "vault/runtime_secret.h"),
+    ("src/modules/delegates/delegate_credential_retry.c", "vault/vault_service.h"),
+    ("src/modules/delegates/delegate_prompt.c", "config/config.h"),
+    ("src/modules/delegates/delegate_sandbox_image.c", "config/config.h"),
+    ("src/modules/delegates/include/aimee/delegates/delegate_credentials.h", "vault/vault_principal.h"),
+    ("src/modules/economizer/gateway_mutate_wire.c", "config/config.h"),
+    ("src/modules/economizer/tool_condense.h", "config/config.h"),
+    ("src/modules/execution-policy/execution_policy.c", "config/config.h"),
+    ("src/modules/gateway/gateway_policy.c", "config/config.h"),
+    ("src/modules/git/git_forge_vault.c", "vault/vault_service.h"),
+    ("src/modules/git/git_host_cred.c", "vault/vault_service.h"),
+    ("src/modules/git/git_host_cred.c", "vault/vault_store.h"),
+    ("src/modules/git/git_oauth_device.c", "vault/vault_service.h"),
+    ("src/modules/git/git_oauth_github.c", "vault/runtime_secret.h"),
+    ("src/modules/git/git_oauth_github.c", "vault/vault_service.h"),
+    ("src/modules/git/git_verify.c", "config/config.h"),
+    ("src/modules/git/git_verify_ops.c", "config/config.h"),
+    ("src/modules/git/mcp_git_pr.c", "config/config.h"),
+    ("src/modules/git/mcp_git_query.c", "config/config.h"),
+    ("src/modules/git/mcp_git_write.c", "config/config.h"),
+    ("src/modules/guardrails/guardrails_action_audit.c", "config/config.h"),
+    ("src/modules/guardrails/guardrails_blast_radius.c", "config/config.h"),
+    ("src/modules/guardrails/guardrails_orchestrator.c", "config/config.h"),
+    ("src/modules/guardrails/guardrails_semantic.h", "config/config.h"),
+    ("src/modules/kb-synthesis/kb_curator_drain.c", "config/config.h"),
+    ("src/modules/kb-synthesis/kb_curator_drain.c", "config/config_database.h"),
+    ("src/modules/kb-synthesis/kb_curator_extract.c", "config/config.h"),
+    ("src/modules/kb-synthesis/kb_curator_index_claims.c", "config/config.h"),
+    ("src/modules/kb-synthesis/kb_curator_index_code_unit.c", "config/config.h"),
+    ("src/modules/kb-synthesis/kb_curator_index_narrative.c", "config/config.h"),
+    ("src/modules/kb-synthesis/kb_curator_judge.h", "config/config.h"),
+    ("src/modules/kb-synthesis/kb_curator_link_artifacts.c", "config/config.h"),
+    ("src/modules/kb-synthesis/kb_curator_notify.c", "config/config.h"),
+    ("src/modules/kb-synthesis/kb_curator_promote.c", "config/config.h"),
+    ("src/modules/kb-synthesis/kb_curator_queue.c", "config/config.h"),
+    ("src/modules/kb-synthesis/kb_curator_queue.c", "config/config_database.h"),
+    ("src/modules/kb-synthesis/kb_curator_resolve_entities.c", "config/config.h"),
+    ("src/modules/kb-synthesis/kb_curator_synthesize.c", "config/config.h"),
+    ("src/modules/kb_client/kb_client.c", "vault/runtime_secret.h"),
+    ("src/modules/kb_client/kb_client_mtls.c", "config/config.h"),
+    ("src/modules/kb_client/kb_client_mtls.c", "vault/runtime_secret.h"),
+    ("src/modules/kb_client/kb_client_ws.c", "vault/runtime_secret.h"),
+    ("src/modules/learning/learning_implicit.c", "config/config.h"),
+    ("src/modules/lsp/lsp_manager.c", "config/config.h"),
+    ("src/modules/memory/memory_advanced.c", "config/config.h"),
+    ("src/modules/memory/memory_core_helpers_b.c", "vault/runtime_secret.h"),
+    ("src/modules/memory/memory_core_internal.h", "config/config.h"),
+    ("src/modules/memory/memory_core_scope_embed.c", "config/config_database.h"),
+    ("src/modules/memory/memory_logic.c", "config/config.h"),
+    ("src/modules/memory/memory_rewrite_llm.h", "config/config.h"),
+    ("src/modules/protocols/include/aimee/protocols/mcp/mcp_client_registry.h", "config/config.h"),
+    ("src/modules/protocols/mcp/mcp_client_registry.c", "vault/runtime_secret.h"),
+    ("src/modules/roundtable/delegate_ensemble.c", "config/config.h"),
+    ("src/modules/roundtable/delegate_ensemble.c", "vault/runtime_secret.h"),
+    ("src/modules/roundtable/delegate_ensemble.h", "config/config.h"),
+    ("src/modules/roundtable/delegate_ensemble_review.c", "config/config.h"),
+    ("src/modules/roundtable/roundtable_preset.c", "config/config.h"),
+    ("src/modules/roundtable/roundtable_preset.h", "config/config.h"),
+    ("src/modules/roundtable/roundtable_seat_resolve.h", "config/config.h"),
+    ("src/modules/sandbox/sandbox_learned.c", "config/config.h"),
+    ("src/modules/skills/skill.c", "config/config.h"),
+    ("src/modules/tools/agent_tools.c", "config/config.h"),
+    ("src/modules/tools/agent_tools_anchored.c", "config/config.h"),
+    ("src/modules/tools/agent_tools_completion.c", "config/config.h"),
+    ("src/modules/tools/agent_tools_dispatch.c", "config/config.h"),
+    ("src/modules/vault/vault_capability.c", "config/config.h"),
+    ("src/modules/vault/vault_config_bootstrap.c", "config/config.h"),
+    ("src/modules/vault/vault_custody_tpm2.c", "config/config.h"),
+    ("src/modules/vault/vault_server_key.c", "config/config.h"),
+    ("src/modules/vault/vault_store.c", "config/config.h"),
+    ("src/modules/workflows/wfe_autonomy.c", "config/config.h"),
+    ("src/modules/workflows/wfe_blocks.c", "config/config.h"),
+    ("src/modules/workflows/wfe_live_forge.c", "config/config.h"),
+    ("src/modules/workflows/wfe_live_panel.c", "config/config.h"),
+    ("src/modules/workflows/wfe_scheduler.c", "config/config.h"),
+    ("src/modules/workspace/workspace.c", "config/config.h"),
+    ("src/modules/workspace/workspace.c", "config/config_accessors.h"),
+    ("src/modules/workspace/workspace_turn.c", "config/config.h"),
+}
+# Reaches into a module that is NOT core-linked, through the flat include root the
+# build puts on the path. Same coupling as PRIVATE_HEADER_REACH, reached by bare
+# filename instead of a prefix, and invisible until this check learned to resolve
+# names. Retiring one means the owner grows a bus stage, or the caller stops being
+# a separate module.
+FLAT_ROOT_REACH = {
+    ("src/modules/config/config_sections.c", "economizer/economizer.h"),
+    ("src/modules/delegates/delegate_prompt.c", "kb_client/kb_client.h"),
+    ("src/modules/delegates/delegate_run_phases.c", "guardrails/guardrails.h"),
+    ("src/modules/delegates/delegate_sandbox_image.c", "guardrails/guardrails.h"),
+    ("src/modules/delegates/delegate_sandbox_image.c", "sandbox/sandbox_learned.h"),
+    ("src/modules/delegates/include/aimee/delegates/panel_provider.h", "roundtable/roundtable_types.h"),
+    ("src/modules/execution-policy/execution_policy.c", "economizer/coord_closet.h"),
+    ("src/modules/execution-policy/execution_policy.c", "kb_client/kb_client.h"),
+    ("src/modules/git/git_ssh_agent.c", "webuser/webuser_runtime.h"),
+    ("src/modules/git/git_verify_ops.c", "guardrails/guardrails.h"),
+    ("src/modules/git/mcp_git_pr.c", "guardrails/guardrails.h"),
+    ("src/modules/git/mcp_git_query.c", "guardrails/guardrails.h"),
+    ("src/modules/git/mcp_git_write.c", "guardrails/guardrails.h"),
+    ("src/modules/guardrails/guardrails.c", "kb_client/kb_client.h"),
+    ("src/modules/guardrails/guardrails_blast_radius.c", "kb_client/kb_client.h"),
+    ("src/modules/guardrails/guardrails_orchestrator.c", "kb_client/kb_client.h"),
+    ("src/modules/sandbox/sandbox_learned.c", "guardrails/guardrails.h"),
+    ("src/modules/tools/agent_tools.c", "economizer/economizer.h"),
+    ("src/modules/tools/agent_tools.c", "kb_client/kb_client.h"),
+    ("src/modules/tools/agent_tools.c", "lsp/lsp.h"),
+    ("src/modules/tools/agent_tools.c", "sandbox/sandbox_learned.h"),
+    ("src/modules/tools/agent_tools_anchored.c", "economizer/economizer.h"),
+    ("src/modules/tools/agent_tools_anchored.c", "guardrails/guardrails.h"),
+    ("src/modules/tools/agent_tools_anchored.c", "kb_client/kb_client.h"),
+    ("src/modules/tools/agent_tools_dispatch.c", "economizer/economizer.h"),
+    ("src/modules/tools/agent_tools_dispatch.c", "guardrails/guardrails_blast_radius.h"),
+    ("src/modules/tools/agent_tools_dispatch.c", "kb_client/kb_client.h"),
+    ("src/modules/tools/agent_tools_dispatch.c", "lsp/lsp.h"),
+    ("src/modules/tools/agent_tools_dispatch.c", "sandbox/sandbox_learned.h"),
+    ("src/modules/workflows/wfe_live_panel.c", "roundtable/roundtable_verify.h"),
+    ("src/modules/workflows/wfe_panel_roundtable.h", "roundtable/delegate_ensemble.h"),
+    ("src/modules/workspace/workspace.c", "kb_client/kb_client.h"),
+}
+ALLOWED = (IR_SHARED_TYPE | PENDING_BUS_MIGRATION | PRIVATE_HEADER_REACH |
+           CORE_LINKED_REACH | FLAT_ROOT_REACH)
 # Both bracket styles: a quoted include couples exactly as hard as an angled one,
 # and the tree uses quoted form for every `modules/` reach and for three
 # `aimee/protocols/` ones.
@@ -103,12 +243,49 @@ def owning_module(relative: str) -> str:
     return relative.split("/")[2]
 
 
+def flat_root_owners(root: Path) -> dict[str, str]:
+    """Header basename -> the module whose directory root publishes it.
+
+    The build puts most module directories on the include path (`-Imodules/<id>`
+    or `-iquote modules/<id>`), so `#include "vault_service.h"` reaches straight
+    into vault. Counting only `aimee/` and `modules/` prefixes missed all of it:
+    122 crossings against the 45 those prefixes see.
+
+    Ownership is by basename, which is only sound while basenames are unique. A
+    collision, or a name that `src/headers` would resolve first, makes the answer
+    depend on include order rather than on the name, so it is rejected outright
+    rather than guessed at.
+    """
+    owners: dict[str, str] = {}
+    collisions: list[str] = []
+    modules = root / MODULES
+    for module_dir in sorted(path for path in modules.iterdir() if path.is_dir()):
+        for header in sorted(module_dir.glob("*.h")):
+            previous = owners.get(header.name)
+            if previous is not None:
+                collisions.append(f"{header.name} in {previous} and {module_dir.name}")
+                continue
+            owners[header.name] = module_dir.name
+    if collisions:
+        raise CheckError(
+            f"rule=ambiguous-module-header headers={sorted(collisions)} "
+            "(a bare include would resolve by search order, not by owner)"
+        )
+    shadowed = sorted(name for name in owners if (root / "src/headers" / name).exists())
+    if shadowed:
+        raise CheckError(
+            f"rule=shadowed-module-header headers={shadowed} "
+            "(src/headers resolves first, so the owner cannot be read off the name)"
+        )
+    return owners
+
+
 def included_module(header: str) -> str | None:
-    """The module an include names, or None when it names no module at all.
+    """The module a prefixed include names, or None when it names no module.
 
     `aimee/<id>/...` is a module's public API and `modules/<id>/...` is its
-    private tree. Everything else -- db1/, db2/, bare filenames -- is a lower
-    layer, not a peer, and is none of this check's business.
+    private tree. Everything else with a path -- db1/, db2/ -- is a lower layer,
+    not a peer. Bare filenames are resolved separately, by owner lookup.
     """
     parts = header.split("/")
     if len(parts) < 2 or parts[0] not in MODULE_ROOTS:
@@ -122,11 +299,20 @@ def crossings(root: Path):
     if not modules.is_dir():
         raise CheckError(f"rule=module-root-missing path={MODULES}")
 
+    owners = flat_root_owners(root)
     found: set[tuple[str, str]] = set()
     for path in sorted((*modules.rglob("*.c"), *modules.rglob("*.h"))):
         relative = path.relative_to(root).as_posix()
         owner = owning_module(relative)
         for header in INCLUDE.findall(path.read_text(encoding="utf-8")):
+            if "/" not in header:
+                # A bare include. It reaches a peer only when some module root
+                # publishes the name and the including file's own directory does
+                # not -- an own-directory header always wins for a quoted include.
+                peer = owners.get(header)
+                if peer is not None and peer != owner and not (path.parent / header).exists():
+                    found.add((relative, f"{peer}/{header}"))
+                continue
             if header in BUS_TRANSPORT_HEADERS:
                 continue
             peer = included_module(header)
