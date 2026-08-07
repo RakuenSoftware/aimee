@@ -81,7 +81,6 @@ PRIVATE_HEADER_REACH = {
     ("src/modules/webuser/webuser_editor.c", "modules/git/forge_credentials.h"),
     ("src/modules/webuser/webuser_editor.c", "modules/git/git_cred_inject.h"),
     ("src/modules/webuser/webuser_editor.c", "modules/workspace/workspace_scope.h"),
-    ("src/modules/webuser/webuser_runtime.c", "modules/workspace/workspace_scope.h"),
     ("src/modules/workflows/wfe_live_forge.c", "modules/git/git_cred_inject.h"),
     ("src/modules/workflows/wfe_live_forge.c", "modules/git/git_pr_api.h"),
     ("src/modules/workspace/workspace_turn.c", "modules/git/forge_credentials.h"),

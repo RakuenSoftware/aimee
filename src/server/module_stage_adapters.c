@@ -11,6 +11,7 @@
 #include "response_dedup.h"
 #include "server_error_kind.h"
 #include "modules/skills/skill_trigger_policy.h"
+#include "modules/webuser/webuser_runtime.h"
 #include "modules/workspace/workspace_scope.h"
 #include <aimee/audit/obs_bus.h>
 #include <aimee/benchmarks/module_api.h>
@@ -312,6 +313,10 @@ void server_module_stage_adapters_configure(void)
    delegate_role_register_canonicalizer(delegate_canonicalize);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
+   /* Same decision, same owner: webuser's runtime dir names a single path
+    * component, and workspace owns what a reference may be. One registration
+    * serves both seams so the rule cannot drift between them. */
+   webuser_runtime_register_name_validator(workspace_validate);
    git_ops_register_classifier(git_classify);
    git_ops_register_ref_validator(git_validate_ref);
    gw_response_governance_register_provider(governance_evaluate);
