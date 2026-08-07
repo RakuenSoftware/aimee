@@ -319,6 +319,11 @@
           "id": 2,
           "name": "roundtable-review",
           "event_kind": 9474
+        },
+        {
+          "id": 3,
+          "name": "roundtable-chunk-plan",
+          "event_kind": 9475
         }
       ]
     },
