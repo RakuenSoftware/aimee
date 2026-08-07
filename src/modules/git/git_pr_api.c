@@ -231,6 +231,31 @@ static int gh_ctx_resolve_slug(const char *principal, const char *slug, gh_ctx_t
    return 0;
 }
 
+/* "owner/repo" for a checkout THIS PROCESS can read. The repo_dir entry points use
+ * it to reach their _slug siblings, which hold the actual request. */
+static int gh_slug_from_repo_dir(const char *repo_dir, char *slug, size_t cap, char *err,
+                                 size_t errlen)
+{
+   char origin[1024];
+   if (git_cap(repo_dir, "config --get remote.origin.url", origin, sizeof(origin)) != 0)
+   {
+      snprintf(err, errlen, "no origin remote");
+      return -1;
+   }
+   char owner[128], repo[128];
+   if (parse_github_slug(origin, owner, sizeof(owner), repo, sizeof(repo)) != 0)
+   {
+      snprintf(err, errlen, "requires a github.com origin");
+      return -1;
+   }
+   if ((size_t)snprintf(slug, cap, "%s/%s", owner, repo) >= cap)
+   {
+      snprintf(err, errlen, "repository name too long");
+      return -1;
+   }
+   return 0;
+}
+
 static void gh_ctx_done(gh_ctx_t *cx)
 {
    wipe(cx->token, sizeof(cx->token));
@@ -553,6 +578,21 @@ int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const 
       out[0] = '\0';
    if (number_out)
       *number_out = 0;
+   char slug[264];
+   if (gh_slug_from_repo_dir(repo_dir, slug, sizeof(slug), err, errlen) != 0)
+      return -1;
+   return git_pr_find_open_via_api_slug(principal, slug, head, base, out, out_cap, number_out, err,
+                                        errlen);
+}
+
+int git_pr_find_open_via_api_slug(const char *principal, const char *slug, const char *head,
+                                  const char *base, char *out, size_t out_cap, int *number_out,
+                                  char *err, size_t errlen)
+{
+   if (out && out_cap)
+      out[0] = '\0';
+   if (number_out)
+      *number_out = 0;
    if (!head || !head[0] || !base || !base[0] || strlen(head) > 200 || strlen(base) > 200 ||
        strchr(head, '&') || strchr(head, '?') || strchr(base, '&') || strchr(base, '?'))
    {
@@ -560,7 +600,7 @@ int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const 
       return -1;
    }
    gh_ctx_t cx;
-   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
    char path[700];
    snprintf(path, sizeof(path), "pulls?state=open&head=%s:%s&base=%s&per_page=1", cx.owner, head,
@@ -596,13 +636,24 @@ int git_pr_update_via_api(const char *principal, const char *repo_dir, int numbe
 {
    if (err && errlen)
       err[0] = '\0';
+   char slug[264];
+   if (gh_slug_from_repo_dir(repo_dir, slug, sizeof(slug), err, errlen) != 0)
+      return -1;
+   return git_pr_update_via_api_slug(principal, slug, number, title, body, err, errlen);
+}
+
+int git_pr_update_via_api_slug(const char *principal, const char *slug, int number,
+                               const char *title, const char *body, char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
    if (number <= 0 || !title || !title[0] || !body || !body[0])
    {
       snprintf(err, errlen, "invalid PR update");
       return -1;
    }
    gh_ctx_t cx;
-   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
 
    char *clean = strdup(body);
@@ -642,13 +693,24 @@ int git_pr_info_via_api(const char *principal, const char *repo_dir, int number,
 {
    if (err && errlen)
       err[0] = '\0';
+   char slug[264];
+   if (gh_slug_from_repo_dir(repo_dir, slug, sizeof(slug), err, errlen) != 0)
+      return -1;
+   return git_pr_info_via_api_slug(principal, slug, number, out, err, errlen);
+}
+
+int git_pr_info_via_api_slug(const char *principal, const char *slug, int number,
+                             git_pr_info_t *out, char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
    if (!out || number <= 0)
       return -1;
    memset(out, 0, sizeof(*out));
    out->mergeable = -1;
 
    gh_ctx_t cx;
-   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
    char path[64];
    snprintf(path, sizeof(path), "pulls/%d", number);
@@ -710,13 +772,24 @@ git_pr_ci_t git_pr_ci_via_api(const char *principal, const char *repo_dir, int n
 {
    if (err && errlen)
       err[0] = '\0';
+   char slug[264];
+   if (gh_slug_from_repo_dir(repo_dir, slug, sizeof(slug), err, errlen) != 0)
+      return GIT_PR_CI_ERROR;
+   return git_pr_ci_via_api_slug(principal, slug, number, err, errlen);
+}
+
+git_pr_ci_t git_pr_ci_via_api_slug(const char *principal, const char *slug, int number, char *err,
+                                   size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
    git_pr_info_t info;
-   if (git_pr_info_via_api(principal, repo_dir, number, &info, err, errlen) != 0 ||
+   if (git_pr_info_via_api_slug(principal, slug, number, &info, err, errlen) != 0 ||
        !info.head_sha[0])
       return GIT_PR_CI_ERROR;
 
    gh_ctx_t cx;
-   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return GIT_PR_CI_ERROR;
    char path[160];
    snprintf(path, sizeof(path), "commits/%s/check-runs?per_page=100", info.head_sha);
@@ -750,10 +823,21 @@ int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number
 {
    if (err && errlen)
       err[0] = '\0';
+   char slug[264];
+   if (gh_slug_from_repo_dir(repo_dir, slug, sizeof(slug), err, errlen) != 0)
+      return -1;
+   return git_pr_merge_via_api_slug(principal, slug, number, err, errlen);
+}
+
+int git_pr_merge_via_api_slug(const char *principal, const char *slug, int number, char *err,
+                              size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
    if (number <= 0)
       return -1;
    gh_ctx_t cx;
-   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
    char path[64];
    snprintf(path, sizeof(path), "pulls/%d/merge", number);
