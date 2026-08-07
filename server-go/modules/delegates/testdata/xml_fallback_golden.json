@@ -1,0 +1,578 @@
+{
+	"known_tools":	["bash", "read"],
+	"cases":	[{
+			"name":	"basic",
+			"text":	"<tool_call><name>bash</name><arguments>{\"command\":\"ls -la\"}</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"command\":\"ls -la\"}"
+				}]
+		}, {
+			"name":	"content_prefix",
+			"text":	"Sure thing.<tool_call><name>bash</name><arguments>{\"a\":1}</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	"Sure thing.",
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"a\":1}"
+				}]
+		}, {
+			"name":	"two_blocks",
+			"text":	"<tool_call><name>bash</name><arguments>{\"a\":1}</arguments></tool_call><tool_call><name>read</name><arguments>{\"b\":2}</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	2,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"a\":1}"
+				}, {
+					"id":	"xml_call_2",
+					"name":	"read",
+					"arguments":	"{\"b\":2}"
+				}]
+		}, {
+			"name":	"content_between_blocks",
+			"text":	"first<tool_call><name>bash</name><arguments>{\"a\":1}</arguments></tool_call>middle<tool_call><name>read</name><arguments>{\"b\":2}</arguments></tool_call>tail",
+			"allow_json":	true,
+			"rc":	2,
+			"is_tool_call":	true,
+			"content":	"first",
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"a\":1}"
+				}, {
+					"id":	"xml_call_2",
+					"name":	"read",
+					"arguments":	"{\"b\":2}"
+				}]
+		}, {
+			"name":	"name_needs_trim",
+			"text":	"<tool_call><name>  bash  </name><arguments>{\"a\":1}</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"a\":1}"
+				}]
+		}, {
+			"name":	"name_normalized_Bash",
+			"text":	"<tool_call><name>Bash</name><arguments>{\"a\":1}</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"a\":1}"
+				}]
+		}, {
+			"name":	"name_normalized_dash",
+			"text":	"<tool_call><name>Read-File</name><arguments>{\"a\":1}</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"read_file",
+					"arguments":	"{\"a\":1}"
+				}]
+		}, {
+			"name":	"name_empty",
+			"text":	"<tool_call><name></name><arguments>{\"a\":1}</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	0,
+			"is_tool_call":	false,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[]
+		}, {
+			"name":	"name_whitespace",
+			"text":	"<tool_call><name>   </name><arguments>{\"a\":1}</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	0,
+			"is_tool_call":	false,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[]
+		}, {
+			"name":	"name_missing",
+			"text":	"<tool_call><arguments>{\"a\":1}</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	0,
+			"is_tool_call":	false,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[]
+		}, {
+			"name":	"args_missing",
+			"text":	"<tool_call><name>bash</name></tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{}"
+				}]
+		}, {
+			"name":	"args_empty",
+			"text":	"<tool_call><name>bash</name><arguments></arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"value\":\"\"}"
+				}]
+		}, {
+			"name":	"args_not_object",
+			"text":	"<tool_call><name>bash</name><arguments>\"plain string\"</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"\"plain string\""
+				}]
+		}, {
+			"name":	"args_nested_braces",
+			"text":	"<tool_call><name>bash</name><arguments>{\"o\":{\"i\":{\"deep\":1}}}</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"o\":{\"i\":{\"deep\":1}}}"
+				}]
+		}, {
+			"name":	"args_brace_in_string",
+			"text":	"<tool_call><name>bash</name><arguments>{\"s\":\"a}b\"}</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"s\":\"a}b\"}"
+				}]
+		}, {
+			"name":	"unterminated_block",
+			"text":	"<tool_call><name>bash</name><arguments>{\"a\":1}",
+			"allow_json":	true,
+			"rc":	0,
+			"is_tool_call":	false,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[]
+		}, {
+			"name":	"close_before_open",
+			"text":	"</tool_call><tool_call><name>bash</name><arguments>{\"a\":1}</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	"</tool_call>",
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"a\":1}"
+				}]
+		}, {
+			"name":	"namespaced_block",
+			"text":	"<tools:tool_call><name>bash</name><arguments>{\"a\":1}</arguments></tools:tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"a\":1}"
+				}]
+		}, {
+			"name":	"namespaced_short",
+			"text":	"<ns:tool_call><name>bash</name><arguments>{\"a\":1}</arguments></ns:tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"a\":1}"
+				}]
+		}, {
+			"name":	"invoke",
+			"text":	"<invoke name=\"bash\"><parameter name=\"command\">ls -la</parameter></invoke>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"command\":\"ls -la\"}"
+				}]
+		}, {
+			"name":	"invoke_two",
+			"text":	"<invoke name=\"bash\"><parameter name=\"command\">a</parameter></invoke><invoke name=\"read\"><parameter name=\"path\">b</parameter></invoke>",
+			"allow_json":	true,
+			"rc":	2,
+			"is_tool_call":	true,
+			"content":	"<invoke name=\"bash\"><parameter name=\"command\">a</parameter></invoke>",
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"command\":\"a\"}"
+				}, {
+					"id":	"xml_call_2",
+					"name":	"read",
+					"arguments":	"{\"path\":\"b\"}"
+				}]
+		}, {
+			"name":	"qwen_in_block",
+			"text":	"<tool_call><function=bash>\n<parameter=command>\nls -la\n</parameter>\n</function></tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"command\":\"ls -la\"}"
+				}]
+		}, {
+			"name":	"qwen_bare",
+			"text":	"<function=bash><parameter=command>ls</parameter></function>",
+			"allow_json":	true,
+			"rc":	0,
+			"is_tool_call":	false,
+			"content":	null,
+			"detected":	false,
+			"detected_json":	false,
+			"calls":	[]
+		}, {
+			"name":	"channel",
+			"text":	"<|channel>call:bash {\"command\": \"ls\"}",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"command\": \"ls\"}"
+				}]
+		}, {
+			"name":	"channel_no_space",
+			"text":	"<|channel>call:bash{\"command\":\"ls\"}",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"command\":\"ls\"}"
+				}]
+		}, {
+			"name":	"channel_nested",
+			"text":	"<|channel>call:bash {\"opts\": {\"deep\": true}}",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"opts\": {\"deep\": true}}"
+				}]
+		}, {
+			"name":	"mistral",
+			"text":	"[TOOL_CALLS][{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}]",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	"[TOOL_CALLS][",
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"command\":\"ls\"}"
+				}]
+		}, {
+			"name":	"mistral_prose_before",
+			"text":	"Sure, I will list them.\n[TOOL_CALLS][{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}]",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	"Sure, I will list them.\n[TOOL_CALLS][",
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"command\":\"ls\"}"
+				}]
+		}, {
+			"name":	"json_known",
+			"text":	"{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"command\":\"ls\"}"
+				}]
+		}, {
+			"name":	"json_unknown",
+			"text":	"{\"name\": \"nope\", \"arguments\": {}}",
+			"allow_json":	true,
+			"rc":	0,
+			"is_tool_call":	false,
+			"content":	null,
+			"detected":	false,
+			"detected_json":	false,
+			"calls":	[]
+		}, {
+			"name":	"json_disallowed",
+			"text":	"{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}",
+			"allow_json":	false,
+			"rc":	0,
+			"is_tool_call":	false,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	false,
+			"calls":	[]
+		}, {
+			"name":	"json_prose_around",
+			"text":	"Sure.\n{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}\nDone.",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	"Sure.",
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"command\":\"ls\"}"
+				}]
+		}, {
+			"name":	"json_array",
+			"text":	"[{\"name\": \"bash\", \"arguments\": {\"a\":1}}, {\"name\": \"read\", \"arguments\": {\"b\":2}}]",
+			"allow_json":	true,
+			"rc":	2,
+			"is_tool_call":	true,
+			"content":	"[",
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"a\":1}"
+				}, {
+					"id":	"xml_call_2",
+					"name":	"read",
+					"arguments":	"{\"b\":2}"
+				}]
+		}, {
+			"name":	"json_tool_parameters",
+			"text":	"{\"tool\": \"bash\", \"parameters\": {\"command\": \"ls -la\"}}",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"command\":\"ls -la\"}"
+				}]
+		}, {
+			"name":	"json_name_args",
+			"text":	"{\"name\": \"bash\", \"args\": {\"command\": \"x\"}}",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"command\":\"x\"}"
+				}]
+		}, {
+			"name":	"json_fenced",
+			"text":	"```json\n{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}\n```",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	"```json",
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"command\":\"ls\"}"
+				}]
+		}, {
+			"name":	"think_then_block",
+			"text":	"<think>I should list files</think><tool_call><name>bash</name><arguments>{\"command\":\"ls\"}</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"command\":\"ls\"}"
+				}]
+		}, {
+			"name":	"think_only",
+			"text":	"<think>just reasoning, no call</think>plain answer",
+			"allow_json":	true,
+			"rc":	0,
+			"is_tool_call":	false,
+			"content":	null,
+			"detected":	false,
+			"detected_json":	false,
+			"calls":	[]
+		}, {
+			"name":	"think_bracket_form",
+			"text":	"[THINK]reasoning[/THINK]<tool_call><name>bash</name><arguments>{\"a\":1}</arguments></tool_call>",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"a\":1}"
+				}]
+		}, {
+			"name":	"think_then_json",
+			"text":	"<think>plan</think>{\"name\": \"bash\", \"arguments\": {\"a\":1}}",
+			"allow_json":	true,
+			"rc":	1,
+			"is_tool_call":	true,
+			"content":	null,
+			"detected":	true,
+			"detected_json":	true,
+			"calls":	[{
+					"id":	"xml_call_1",
+					"name":	"bash",
+					"arguments":	"{\"a\":1}"
+				}]
+		}, {
+			"name":	"empty",
+			"text":	"",
+			"allow_json":	true,
+			"rc":	0,
+			"is_tool_call":	false,
+			"content":	null,
+			"detected":	false,
+			"detected_json":	false,
+			"calls":	[]
+		}, {
+			"name":	"plain_prose",
+			"text":	"Here is an explanation with no calls at all.",
+			"allow_json":	true,
+			"rc":	0,
+			"is_tool_call":	false,
+			"content":	null,
+			"detected":	false,
+			"detected_json":	false,
+			"calls":	[]
+		}, {
+			"name":	"prose_with_braces",
+			"text":	"Use the {foo} placeholder in your config.",
+			"allow_json":	true,
+			"rc":	0,
+			"is_tool_call":	false,
+			"content":	null,
+			"detected":	false,
+			"detected_json":	false,
+			"calls":	[]
+		}]
+}

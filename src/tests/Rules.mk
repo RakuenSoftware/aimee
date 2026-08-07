@@ -3797,6 +3797,24 @@ $(TESTPREFIX)/unit-test-cli-http-transport: $(OBJDIR)/tests/test_cli_http_transp
                                             $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+# Differential reference for the tool-call rescue parser. Emits the C parser's
+# output for tests/support/xml_fallback_corpus.h; the Go port in
+# server-go/modules/delegates is asserted against it, so a divergence names the
+# shape that diverged instead of surfacing in production.
+#
+#   make xml-fallback-golden      # refresh after an intentional parser change
+$(OBJDIR)/tests/gen_xml_fallback_golden.o: C_FLAGS += -Itests
+$(TESTPREFIX)/gen-xml-fallback-golden: $(OBJDIR)/tests/gen_xml_fallback_golden.o \
+                                       $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+.PHONY: xml-fallback-golden
+xml-fallback-golden: $(TESTPREFIX)/gen-xml-fallback-golden
+	@mkdir -p ../server-go/modules/delegates/testdata
+	@$< > ../server-go/modules/delegates/testdata/xml_fallback_golden.json
+	@echo "xml-fallback-golden: refreshed"
+
 $(TESTPREFIX)/unit-test-delegate-xml-fallback: $(OBJDIR)/tests/test_delegate_xml_fallback.o \
                                                $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                                $(TEST_CORE_OBJS)
