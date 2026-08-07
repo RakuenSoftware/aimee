@@ -419,36 +419,48 @@ int cli_workspace_reverse_channel_start(void)
    char *bearer = cli_v1_client_bearer();
    int should_unregister = 0;
 
-   /* Prefer `mirror`: the server seeds a bare mirror from this repo's remote,
-    * reconstructs a server-side worktree at this head, applies the client diff
-    * shipped below, and agents work THERE. `detached` instead marshals every
-    * file and shell op back to this machine, so an agent acts directly on the
-    * developer's live tree — the opposite of the sandbox the delegate path
-    * assumes it has. Mirror also unblocks that path: a delegate on a detached
-    * workspace is never given a container at all (server_compute.c), so it
-    * landed in an empty scratch dir and could not see the repo.
+   /* Register as `mirror`: the server seeds a bare mirror from this repo's
+    * remote, reconstructs a worktree at this head, applies the client diff
+    * shipped below, and delegates work THERE.
     *
-    * `detached` remains the fallback for a root the mirror cannot seed (not a
-    * repo / no origin / no commits). It is announced, not silent, because it
-    * means agents reach the live tree. */
+    * That placement is the point. The thin client is always remote from
+    * aimee-server (mTLS), but a delegate runs LOCAL to the server — so the tree
+    * it needs must exist on the server's own filesystem, which is exactly what
+    * the mirror reconstructs. `detached` produces the opposite: the tree stays
+    * on this machine and every file and shell op marshals back to it, so an
+    * agent edits the developer's live working copy. The delegate path refuses
+    * that rather than reach across — a detached workspace is never given a
+    * container (server_compute.c) — which is why such a delegate landed in an
+    * empty scratch dir and could not see the repo at all.
+    *
+    * So there is no `detached` fallback here. A root the mirror cannot seed is
+    * refused: the reverse channel does not start and the operator is told what
+    * is missing. Failing closed leaves a delegate with no workspace, which is
+    * visible; failing open leaves it editing the developer's files, which is
+    * not.
+    *
+    * (`aimee workspace serve` still registers `detached` explicitly. That is an
+    * operator deliberately serving a tree, not an automatic default.) */
    char ws_remote[512] = "", ws_head[128] = "";
-   int mirrorable = rc_mirror_coords(cwd, ws_remote, sizeof(ws_remote), ws_head, sizeof(ws_head));
-   if (!mirrorable)
+   if (!rc_mirror_coords(cwd, ws_remote, sizeof(ws_remote), ws_head, sizeof(ws_head)))
+   {
       fprintf(stderr,
-              "aimee: %s has no git origin+HEAD to mirror; registering it as a DETACHED workspace "
-              "— agents will act on this live tree rather than a server-side sandbox\n",
+              "aimee: %s cannot be mirrored (needs a git repository with an `origin` remote and at "
+              "least one commit), so no workspace was registered. Agents get no sandbox rather "
+              "than access to this working tree. Add an origin remote and commit, then reattach.\n",
               cwd);
+      free(endpoint);
+      free(bearer);
+      return 0;
+   }
 
    /* Register the workspace. Treat "already registered" as an idempotent attach,
     * but only tear down registrations created by this bridge. */
    cJSON *reg = cJSON_CreateObject();
    cJSON_AddStringToObject(reg, "root", cwd);
-   cJSON_AddStringToObject(reg, "provider", mirrorable ? "mirror" : "detached");
-   if (mirrorable)
-   {
-      cJSON_AddStringToObject(reg, "remote", ws_remote);
-      cJSON_AddStringToObject(reg, "head", ws_head);
-   }
+   cJSON_AddStringToObject(reg, "provider", "mirror");
+   cJSON_AddStringToObject(reg, "remote", ws_remote);
+   cJSON_AddStringToObject(reg, "head", ws_head);
    char *body = cJSON_PrintUnformatted(reg);
    cJSON_Delete(reg);
    if (!body)
@@ -487,8 +499,7 @@ int cli_workspace_reverse_channel_start(void)
     * and an absent one is a silent clean checkout at head. Runs on the attach
     * path too ("already registered"), because a re-attaching client's tree has
     * usually moved on since the registration that created it. */
-   if (mirrorable)
-      rc_ship_client_diff(endpoint, bearer, cwd);
+   rc_ship_client_diff(endpoint, bearer, cwd);
 
    struct rc_args *a = calloc(1, sizeof(*a));
    if (!a)
