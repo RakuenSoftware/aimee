@@ -427,6 +427,11 @@ typedef struct
    /* Transient per-request routing contract: an explicit agent/provider pin
     * must surface that agent's result and may never substitute a peer. */
    int route_pinned;
+   /* One absolute per-request budget shared by the primary route, credential
+    * retries, configured fallbacks, and same-tier fallbacks. Runtime-only: the
+    * deadline is CLOCK_MONOTONIC milliseconds and is never serialized. */
+   int tool_loop_timeout_ms_cap;
+   int64_t tool_loop_deadline_ms;
    agent_network_t network;
    agent_tunnel_mgr_t tunnel_mgr;
    agent_ablation_flags_t ablation;
