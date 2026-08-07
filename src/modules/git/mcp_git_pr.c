@@ -111,21 +111,36 @@ cJSON *handle_git_pr(cJSON *args)
          return mcp_text("error: blocking PR check waits are disabled; call action=checks with "
                          "wait=false and poll with a bounded client-side interval");
 
-      char cmd[256];
-      snprintf(cmd, sizeof(cmd), "gh pr checks %d%s 2>&1", jnum->valueint,
-               watch_checks ? " --watch" : "");
+      char slug[264];
+      if (get_origin_repo_slug(slug, sizeof(slug)) != 0)
+         return mcp_text("error: cannot resolve a github.com origin for this checkout");
 
-      int rc;
-      char *out = mcp_git_run(cmd, &rc);
-      if (rc != 0 && rc != 1 && rc != 8)
-      {
-         cJSON *r = mcp_error("error: gh pr checks failed: %s", out ? out : "unknown");
-         free(out);
-         return r;
-      }
+      git_pr_check_t rows[100];
+      int n = 0;
+      char err[512];
+      err[0] = '\0';
+      if (git_pr_checks_via_api_slug(agent_get_request_vault_principal(), slug, jnum->valueint,
+                                     (int)(sizeof(rows) / sizeof(rows[0])), rows, &n, err,
+                                     sizeof(err)) != 0)
+         return mcp_error("error: pr checks failed: %s", err[0] ? err : "unknown");
+      if (n == 0)
+         return mcp_text("(no checks output)");
 
-      cJSON *r = mcp_text(out && out[0] ? out : "(no checks output)");
-      free(out);
+      /* gh printed one TAB-separated row per check and left a trailing empty
+       * column, so each line ends with a tab before the newline. Reproduced
+       * exactly: callers parse this by field. */
+      size_t cap = (size_t)n * (sizeof(rows[0].name) + sizeof(rows[0].status) +
+                                sizeof(rows[0].elapsed) + sizeof(rows[0].url) + 8) +
+                   1;
+      char *text = malloc(cap);
+      if (!text)
+         return mcp_text("error: out of memory rendering checks");
+      size_t pos = 0;
+      for (int i = 0; i < n && pos < cap; i++)
+         pos += (size_t)snprintf(text + pos, cap - pos, "%s\t%s\t%s\t%s\t\n", rows[i].name,
+                                 rows[i].status, rows[i].elapsed, rows[i].url);
+      cJSON *r = mcp_text(text);
+      free(text);
       return r;
    }
 
@@ -209,10 +224,16 @@ cJSON *handle_git_pr(cJSON *args)
             snprintf(match, sizeof(match), " --match-head-commit %s", h);
       }
 
-      /* CI must be fully green before the merge (operator ruling 2026-07-15). Reuses
-       * the same `gh pr checks` read (and its 0/1/8 tri-state) as action=checks, so
-       * this stays correct for a detached workspace, where the command is marshalled
-       * to the client that holds the creds.
+      /* CI must be fully green before the merge (operator ruling 2026-07-15). Still
+       * its own `gh pr checks` read, relying on that command's 0/1/8 tri-state exit
+       * code. action=checks NO LONGER shares this path -- it reads the Checks API
+       * in-process -- so the two are now independent and this one inherits the `gh`
+       * problem: `gh` in the aimee-server image has no credential, and mcp_git_run
+       * hands children the token on a memfd rather than as GH_TOKEN, so this gate
+       * only works from a DETACHED workspace where the client holds its own creds.
+       * Migrating it means replacing the exit-code verdict with git_pr_ci_permits_merge
+       * over git_pr_ci_via_api_slug, which is a change to a MERGE gate and wants its
+       * own review rather than riding along with the read migrations.
        *
        * Fails CLOSED on anything it cannot positively classify. In particular the
        * verdict is taken from gh's EXIT CODE, never inferred from parsed counters:

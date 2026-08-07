@@ -46,6 +46,21 @@ int git_pr_edit_via_api_slug(const char *principal, const char *slug, int number
    return -1;
 }
 
+int git_pr_checks_via_api_slug(const char *principal, const char *slug, int number, int max,
+                               git_pr_check_t *out, int *count, char *err, size_t errlen)
+{
+   (void)principal;
+   (void)slug;
+   (void)number;
+   (void)max;
+   (void)out;
+   if (count)
+      *count = 0;
+   if (err && errlen)
+      snprintf(err, errlen, "pr api unavailable (stub)");
+   return -1;
+}
+
 int git_pr_list_open_via_api_slug(const char *principal, const char *slug, int limit,
                                   git_pr_list_item_t *out, int *count, char *err, size_t errlen)
 {

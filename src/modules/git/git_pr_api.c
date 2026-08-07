@@ -712,6 +712,160 @@ int git_pr_edit_via_api_slug(const char *principal, const char *slug, int number
    return 0;
 }
 
+/* Seconds since the epoch for "YYYY-MM-DDTHH:MM:SSZ", or -1 if it does not parse.
+ *
+ * Done by arithmetic rather than strptime/timegm: neither is available on every
+ * target this builds for (there is a Windows build), and the input is a fixed UTC
+ * format, so a civil-days conversion is both portable and exact. */
+static long long gh_iso8601_secs(const char *s)
+{
+   int y, mo, d, h, mi, se;
+   if (!s || sscanf(s, "%4d-%2d-%2dT%2d:%2d:%2dZ", &y, &mo, &d, &h, &mi, &se) != 6)
+      return -1;
+   /* days_from_civil (Howard Hinnant): shift the year so March starts the era,
+    * which removes the leap-day special case entirely. */
+   y -= mo <= 2;
+   long long era = (y >= 0 ? y : y - 399) / 400;
+   unsigned yoe = (unsigned)(y - era * 400);
+   unsigned doy = (unsigned)((153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1);
+   unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+   long long days = era * 146097 + (long long)doe - 719468;
+   return days * 86400 + h * 3600 + mi * 60 + se;
+}
+
+/* gh printed a bare "0" for anything not completed or of zero length, "<n>s"
+ * under a minute, and "<m>m<s>s" above it. */
+static void gh_elapsed(const char *started, const char *completed, int completed_state, char *out,
+                       size_t cap)
+{
+   long long a = gh_iso8601_secs(started), b = gh_iso8601_secs(completed);
+   if (!completed_state || a < 0 || b < 0 || b <= a)
+   {
+      snprintf(out, cap, "0");
+      return;
+   }
+   long long d = b - a;
+   if (d >= 60)
+      snprintf(out, cap, "%lldm%llds", d / 60, d % 60);
+   else
+      snprintf(out, cap, "%llds", d);
+}
+
+/* GitHub's conclusion vocabulary mapped to the four words gh printed. Anything
+ * unrecognised reports "pending" rather than inventing a word: a caller polling
+ * for completion keeps polling, which is the safe direction to be wrong in. */
+static const char *gh_check_word(const char *status, const char *conclusion)
+{
+   if (!status || strcmp(status, "completed") != 0)
+      return "pending";
+   if (!conclusion)
+      return "pending";
+   if (strcmp(conclusion, "success") == 0)
+      return "pass";
+   if (strcmp(conclusion, "failure") == 0 || strcmp(conclusion, "timed_out") == 0 ||
+       strcmp(conclusion, "action_required") == 0 || strcmp(conclusion, "startup_failure") == 0 ||
+       strcmp(conclusion, "cancelled") == 0)
+      return "fail";
+   if (strcmp(conclusion, "neutral") == 0 || strcmp(conclusion, "skipped") == 0 ||
+       strcmp(conclusion, "stale") == 0)
+      return "skipping";
+   return "pending";
+}
+
+/* By name, as gh listed them. A repository can run two checks under ONE name
+ * (observed: `pins` twice on the same commit), and qsort is not stable, so ties
+ * break on the details url to keep the output identical between two calls on
+ * unchanged data. gh's own ordering for a duplicate pair is undefined, so that
+ * one case may differ from it -- deterministic here is worth more than matching
+ * an order gh does not guarantee either. */
+static int gh_check_cmp(const void *a, const void *b)
+{
+   const git_pr_check_t *x = a, *y = b;
+   int c = strcmp(x->name, y->name);
+   return c ? c : strcmp(x->url, y->url);
+}
+
+int git_pr_checks_via_api_slug(const char *principal, const char *slug, int number, int max,
+                               git_pr_check_t *out, int *count, char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   if (count)
+      *count = 0;
+   if (!out || !count || max <= 0 || number <= 0)
+   {
+      snprintf(err, errlen, "invalid PR checks request");
+      return -1;
+   }
+
+   /* The checks belong to the head COMMIT, so the PR has to be read first. */
+   git_pr_info_t info;
+   if (git_pr_info_via_api_slug(principal, slug, number, &info, err, errlen) != 0)
+      return -1;
+   if (!info.head_sha[0])
+   {
+      snprintf(err, errlen, "pull request has no head commit");
+      return -1;
+   }
+
+   gh_ctx_t cx;
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
+      return -1;
+   char path[160];
+   snprintf(path, sizeof(path), "commits/%s/check-runs?per_page=100", info.head_sha);
+   char *resp = NULL;
+   int st = gh_get(&cx, path, &resp);
+   gh_ctx_done(&cx);
+   if (st < 200 || st >= 300 || !resp)
+   {
+      gh_err(resp, st, "pr checks", err, errlen);
+      free(resp);
+      return -1;
+   }
+   cJSON *j = cJSON_Parse(resp);
+   free(resp);
+   const cJSON *runs = j ? cJSON_GetObjectItem(j, "check_runs") : NULL;
+   if (!cJSON_IsArray(runs))
+   {
+      cJSON_Delete(j);
+      snprintf(err, errlen, "github API: unparseable check runs");
+      return -1;
+   }
+   int n = 0;
+   const cJSON *r = NULL;
+   cJSON_ArrayForEach(r, runs)
+   {
+      if (n >= max)
+         break;
+      const cJSON *name = cJSON_GetObjectItem(r, "name");
+      if (!cJSON_IsString(name) || !name->valuestring)
+         continue; /* an unnamed check cannot be reported usefully */
+      const cJSON *status = cJSON_GetObjectItem(r, "status");
+      const cJSON *concl = cJSON_GetObjectItem(r, "conclusion");
+      const cJSON *started = cJSON_GetObjectItem(r, "started_at");
+      const cJSON *done = cJSON_GetObjectItem(r, "completed_at");
+      const cJSON *url = cJSON_GetObjectItem(r, "details_url");
+      const char *status_s = cJSON_IsString(status) ? status->valuestring : NULL;
+      git_pr_check_t *row = &out[n];
+      memset(row, 0, sizeof(*row));
+      snprintf(row->name, sizeof(row->name), "%s", name->valuestring);
+      snprintf(row->status, sizeof(row->status), "%s",
+               gh_check_word(status_s, cJSON_IsString(concl) ? concl->valuestring : NULL));
+      gh_elapsed(cJSON_IsString(started) ? started->valuestring : NULL,
+                 cJSON_IsString(done) ? done->valuestring : NULL,
+                 status_s && strcmp(status_s, "completed") == 0, row->elapsed,
+                 sizeof(row->elapsed));
+      if (cJSON_IsString(url) && url->valuestring)
+         snprintf(row->url, sizeof(row->url), "%s", url->valuestring);
+      n++;
+   }
+   cJSON_Delete(j);
+   if (n > 1)
+      qsort(out, (size_t)n, sizeof(out[0]), gh_check_cmp); /* gh listed them by name */
+   *count = n;
+   return 0;
+}
+
 int git_pr_list_open_via_api_slug(const char *principal, const char *slug, int limit,
                                   git_pr_list_item_t *out, int *count, char *err, size_t errlen)
 {
