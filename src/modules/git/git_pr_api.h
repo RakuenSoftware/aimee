@@ -234,4 +234,22 @@ int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number
 int git_pr_merge_via_api_slug(const char *principal, const char *slug, int number, char *err,
                               size_t errlen);
 
+/* The general merge: choose the method, optionally pin the head, and get the merge
+ * commit back. Same 0/1/2/3/-1 contract as above.
+ *
+ * merge_method is merge (the default when NULL/empty), squash or rebase; an
+ * unrecognised value is REFUSED, never coerced -- silently squashing would rewrite
+ * history the caller did not ask to rewrite. commit_message is emptied only for a
+ * squash, which is the only method that synthesizes a body.
+ *
+ * expected_head_sha, when given, becomes REST's `sha`: GitHub refuses the merge if
+ * the head moved since the caller looked. out_sha receives the merge commit from
+ * the 200 body, so no follow-up read is needed to record it.
+ *
+ * git_pr_merge_via_api{,_slug} keep their squash-with-empty-body behaviour and
+ * delegate here -- the workflow forge and webchat depend on that exact form. */
+int git_pr_merge_via_api_slug_ex(const char *principal, const char *slug, int number,
+                                 const char *merge_method, const char *expected_head_sha,
+                                 char *out_sha, size_t out_sha_cap, char *err, size_t errlen);
+
 #endif /* GIT_PR_API_H */
