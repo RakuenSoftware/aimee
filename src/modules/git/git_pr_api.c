@@ -647,7 +647,23 @@ int git_pr_update_via_api_slug(const char *principal, const char *slug, int numb
 {
    if (err && errlen)
       err[0] = '\0';
-   if (number <= 0 || !title || !title[0] || !body || !body[0])
+   if (!title || !title[0] || !body || !body[0])
+   {
+      snprintf(err, errlen, "invalid PR update");
+      return -1;
+   }
+   return git_pr_edit_via_api_slug(principal, slug, number, title, body, NULL, err, errlen);
+}
+
+int git_pr_edit_via_api_slug(const char *principal, const char *slug, int number, const char *title,
+                             const char *body, const char *base, char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   int has_title = title && title[0];
+   int has_body = body && body[0];
+   int has_base = base && base[0];
+   if (number <= 0 || (!has_title && !has_body && !has_base))
    {
       snprintf(err, errlen, "invalid PR update");
       return -1;
@@ -656,13 +672,21 @@ int git_pr_update_via_api_slug(const char *principal, const char *slug, int numb
    if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
 
-   char *clean = strdup(body);
-   if (clean)
-      strip_ai_attribution(clean);
+   /* Only the fields the caller supplied go in the payload: sending an empty
+    * string would blank the PR's title or body rather than leave it alone. */
    cJSON *json = cJSON_CreateObject();
-   cJSON_AddStringToObject(json, "title", title);
-   cJSON_AddStringToObject(json, "body", clean ? clean : body);
-   free(clean);
+   if (has_title)
+      cJSON_AddStringToObject(json, "title", title);
+   if (has_body)
+   {
+      char *clean = strdup(body);
+      if (clean)
+         strip_ai_attribution(clean);
+      cJSON_AddStringToObject(json, "body", clean ? clean : body);
+      free(clean);
+   }
+   if (has_base)
+      cJSON_AddStringToObject(json, "base", base);
    char *payload = cJSON_PrintUnformatted(json);
    cJSON_Delete(json);
    if (!payload)
@@ -685,6 +709,81 @@ int git_pr_update_via_api_slug(const char *principal, const char *slug, int numb
       return -1;
    }
    free(response);
+   return 0;
+}
+
+int git_pr_list_open_via_api_slug(const char *principal, const char *slug, int limit,
+                                  git_pr_list_item_t *out, int *count, char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   if (count)
+      *count = 0;
+   if (!out || !count || limit <= 0)
+   {
+      snprintf(err, errlen, "invalid PR list request");
+      return -1;
+   }
+   if (limit > 100) /* one page; GitHub caps per_page at 100 */
+      limit = 100;
+
+   gh_ctx_t cx;
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
+      return -1;
+   char path[96];
+   snprintf(path, sizeof(path), "pulls?state=open&sort=updated&direction=desc&per_page=%d", limit);
+   char *resp = NULL;
+   int st = gh_get(&cx, path, &resp);
+   gh_ctx_done(&cx);
+   if (st < 200 || st >= 300 || !resp)
+   {
+      gh_err(resp, st, "pr list", err, errlen);
+      free(resp);
+      return -1;
+   }
+   cJSON *arr = cJSON_Parse(resp);
+   free(resp);
+   if (!cJSON_IsArray(arr))
+   {
+      cJSON_Delete(arr);
+      snprintf(err, errlen, "github API: unparseable pr list");
+      return -1;
+   }
+   int n = 0;
+   const cJSON *item = NULL;
+   cJSON_ArrayForEach(item, arr)
+   {
+      if (n >= limit)
+         break;
+      const cJSON *num = cJSON_GetObjectItem(item, "number");
+      const cJSON *state = cJSON_GetObjectItem(item, "state");
+      const cJSON *title = cJSON_GetObjectItem(item, "title");
+      const cJSON *headj = cJSON_GetObjectItem(item, "head");
+      const cJSON *headref = headj ? cJSON_GetObjectItem(headj, "ref") : NULL;
+      const cJSON *mat = cJSON_GetObjectItem(item, "merged_at");
+      if (!cJSON_IsNumber(num) || num->valueint <= 0)
+         continue; /* a row without a number is not addressable; skip it */
+      git_pr_list_item_t *row = &out[n];
+      memset(row, 0, sizeof(*row));
+      row->number = num->valueint;
+      /* gh spelled the state upper-case, and reported MERGED in place of the
+       * closed state a merged PR actually carries. */
+      if (cJSON_IsString(mat) && mat->valuestring)
+         snprintf(row->state, sizeof(row->state), "MERGED");
+      else if (cJSON_IsString(state) && state->valuestring)
+      {
+         snprintf(row->state, sizeof(row->state), "%s", state->valuestring);
+         for (char *p = row->state; *p; p++)
+            *p = (char)toupper((unsigned char)*p);
+      }
+      if (cJSON_IsString(headref) && headref->valuestring)
+         snprintf(row->head, sizeof(row->head), "%s", headref->valuestring);
+      if (cJSON_IsString(title) && title->valuestring)
+         snprintf(row->title, sizeof(row->title), "%s", title->valuestring);
+      n++;
+   }
+   cJSON_Delete(arr);
+   *count = n;
    return 0;
 }
 

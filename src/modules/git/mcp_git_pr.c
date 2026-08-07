@@ -358,80 +358,64 @@ cJSON *handle_git_pr(cJSON *args)
        * would then run pos past the end and wrap (cap - pos) to a huge size_t on
        * the next write — an out-of-bounds (stack) write. Sizing the buffer to
        * fit avoids both the overflow and silently truncating a long body. */
-      char *esc_title = has_title ? shell_escape(jtitle->valuestring) : NULL;
-      char *esc_body = has_body ? shell_escape(jbody->valuestring) : NULL;
-      char *esc_base = has_base ? shell_escape(jbase->valuestring) : NULL;
-      size_t cmdcap = strlen(repo_slug) + 160 + (esc_title ? strlen(esc_title) : 0) +
-                      (esc_body ? strlen(esc_body) : 0) + (esc_base ? strlen(esc_base) : 0);
-      char *cmd = malloc(cmdcap);
-      if (!cmd)
-      {
-         free(esc_title);
-         free(esc_body);
-         free(esc_base);
-         return mcp_text("error: out of memory building gh command");
-      }
+      const char *principal = agent_get_request_vault_principal();
+      char err[512];
+      err[0] = '\0';
+      if (git_pr_edit_via_api_slug(principal, repo_slug, jnum->valueint,
+                                   has_title ? jtitle->valuestring : NULL,
+                                   has_body ? jbody->valuestring : NULL,
+                                   has_base ? jbase->valuestring : NULL, err, sizeof(err)) != 0)
+         return mcp_error("error: pr edit failed: %s", err[0] ? err : "unknown");
+
+      /* Read back what the edit produced, as the gh --template did. A failure here
+       * means the PATCH landed but the confirmation did not: say so rather than
+       * reporting the edit itself as failed. */
+      git_pr_info_t info;
+      err[0] = '\0';
+      if (git_pr_info_via_api_slug(principal, repo_slug, jnum->valueint, &info, err, sizeof(err)) !=
+          0)
+         return mcp_error("updated PR, but reading it back failed: %s", err[0] ? err : "unknown");
+
+      char result[1600];
       int pos =
-          snprintf(cmd, cmdcap, "gh api -X PATCH repos/%s/pulls/%d", repo_slug, jnum->valueint);
-      if (esc_title)
-         pos += snprintf(cmd + pos, cmdcap - (size_t)pos, " -f title='%s'", esc_title);
-      if (esc_body)
-         pos += snprintf(cmd + pos, cmdcap - (size_t)pos, " -f body='%s'", esc_body);
-      if (esc_base)
-         pos += snprintf(cmd + pos, cmdcap - (size_t)pos, " -f base='%s'", esc_base);
-      snprintf(cmd + pos, cmdcap - (size_t)pos, " 2>&1");
-      free(esc_title);
-      free(esc_body);
-      free(esc_base);
-
-      int rc;
-      char *out = mcp_git_run(cmd, &rc);
-      free(cmd);
-      if (rc != 0)
-      {
-         cJSON *r = mcp_error("error: gh api pull update failed: %s", out ? out : "unknown");
-         free(out);
-         return r;
-      }
-      free(out);
-
-      char view_cmd[512];
-      snprintf(view_cmd, sizeof(view_cmd),
-               "gh pr view %d --json title,state,url,baseRefName,headRefName,mergedAt "
-               "--template 'updated PR #%d\\ntitle: {{.title}}\\n"
-               "base: {{.baseRefName}} <- {{.headRefName}}\\nurl: {{.url}}"
-               "{{if .mergedAt}}\\nmerged: {{.mergedAt}}{{end}}' 2>&1",
-               jnum->valueint, jnum->valueint);
-
-      out = mcp_git_run(view_cmd, &rc);
-      if (rc != 0)
-      {
-         cJSON *r = mcp_error("error: gh pr view failed after edit: %s", out ? out : "unknown");
-         free(out);
-         return r;
-      }
-
-      cJSON *r = mcp_text(out ? out : "updated");
-      free(out);
-      return r;
+          snprintf(result, sizeof(result), "updated PR #%d\ntitle: %s\nbase: %s <- %s\nurl: %s",
+                   jnum->valueint, info.title, info.base, info.head, info.html_url);
+      if (info.merged_at[0] && pos > 0 && (size_t)pos < sizeof(result))
+         snprintf(result + pos, sizeof(result) - (size_t)pos, "\nmerged: %s", info.merged_at);
+      return mcp_text(result);
    }
 
    if (strcmp(action, "list") == 0)
    {
-      int rc;
-      char *out = mcp_git_run(
-          "gh pr list --limit 20 --json number,title,state,headRefName "
-          "--template '{{range .}}#{{.number}} [{{.state}}] {{.headRefName}}: {{.title}}\n{{end}}' "
-          "2>&1",
-          &rc);
-      if (rc != 0)
-      {
-         cJSON *r = mcp_error("error: gh pr list failed: %s", out ? out : "unknown");
-         free(out);
-         return r;
-      }
-      cJSON *r = mcp_text(out && out[0] ? out : "(no open PRs)");
-      free(out);
+      char slug[264];
+      if (get_origin_repo_slug(slug, sizeof(slug)) != 0)
+         return mcp_text("error: cannot resolve a github.com origin for this checkout");
+
+      git_pr_list_item_t rows[20];
+      int n = 0;
+      char err[512];
+      err[0] = '\0';
+      if (git_pr_list_open_via_api_slug(agent_get_request_vault_principal(), slug,
+                                        (int)(sizeof(rows) / sizeof(rows[0])), rows, &n, err,
+                                        sizeof(err)) != 0)
+         return mcp_error("error: pr list failed: %s", err[0] ? err : "unknown");
+      if (n == 0)
+         return mcp_text("(no open PRs)");
+
+      /* One line per PR, as the gh template rendered them. Sized for 20 rows of
+       * the struct's own maxima plus the fixed decoration. */
+      size_t cap =
+          (size_t)n * (sizeof(rows[0].title) + sizeof(rows[0].head) + sizeof(rows[0].state) + 32) +
+          1;
+      char *text = malloc(cap);
+      if (!text)
+         return mcp_text("error: out of memory rendering PR list");
+      size_t pos = 0;
+      for (int i = 0; i < n && pos < cap; i++)
+         pos += (size_t)snprintf(text + pos, cap - pos, "#%d [%s] %s: %s\n", rows[i].number,
+                                 rows[i].state, rows[i].head, rows[i].title);
+      cJSON *r = mcp_text(text);
+      free(text);
       return r;
    }
 

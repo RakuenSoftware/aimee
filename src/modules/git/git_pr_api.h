@@ -86,6 +86,32 @@ int git_pr_find_open_via_api_slug(const char *principal, const char *slug, const
 int git_pr_update_via_api_slug(const char *principal, const char *slug, int number,
                                const char *title, const char *body, char *err, size_t errlen);
 
+/* PATCH a PR with ANY SUBSET of title/body/base -- a NULL or empty field is left
+ * out of the payload rather than sent empty, so editing a title cannot blank a
+ * body. At least one must be present. `base` retargets the PR.
+ *
+ * git_pr_update_via_api{,_slug} above demand BOTH title and body and cannot touch
+ * base; they stay as they are because the workflow forge relies on that
+ * all-or-nothing contract for idempotent replays. This is the general form and
+ * they delegate to it, so there is one PATCH. */
+int git_pr_edit_via_api_slug(const char *principal, const char *slug, int number, const char *title,
+                             const char *body, const char *base, char *err, size_t errlen);
+
+/* One row of an open-PR listing. */
+typedef struct
+{
+   int number;
+   char state[16];  /* OPEN / CLOSED / MERGED, gh's spelling */
+   char head[128];  /* head.ref */
+   char title[512]; /* PR title */
+} git_pr_list_item_t;
+
+/* The `limit` most recently updated OPEN PRs into out[], writing how many landed
+ * to *count. Returns 0 on success (including zero PRs), -1 with `err` set
+ * otherwise. Caller supplies the array; nothing is allocated. */
+int git_pr_list_open_via_api_slug(const char *principal, const char *slug, int limit,
+                                  git_pr_list_item_t *out, int *count, char *err, size_t errlen);
+
 /* Find the existing open PR for an exact head/base pair. Returns 1 + URL,
  * 0 when absent, or -1 on API/validation failure. */
 int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const char *head,

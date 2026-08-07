@@ -30,6 +30,36 @@ int git_pr_create_via_api_slug(const char *principal, const char *slug, const ch
    return -1;
 }
 
+/* The edit action's PATCH and the list action's read. Same contract as the rest:
+ * these binaries assert on routing and validation, never on a real forge call. */
+int git_pr_edit_via_api_slug(const char *principal, const char *slug, int number, const char *title,
+                             const char *body, const char *base, char *err, size_t errlen)
+{
+   (void)principal;
+   (void)slug;
+   (void)number;
+   (void)title;
+   (void)body;
+   (void)base;
+   if (err && errlen)
+      snprintf(err, errlen, "pr api unavailable (stub)");
+   return -1;
+}
+
+int git_pr_list_open_via_api_slug(const char *principal, const char *slug, int limit,
+                                  git_pr_list_item_t *out, int *count, char *err, size_t errlen)
+{
+   (void)principal;
+   (void)slug;
+   (void)limit;
+   (void)out;
+   if (count)
+      *count = 0;
+   if (err && errlen)
+      snprintf(err, errlen, "pr api unavailable (stub)");
+   return -1;
+}
+
 /* The view action's read, for the same reason: routing and validation only. */
 int git_pr_info_via_api_slug(const char *principal, const char *slug, int number,
                              git_pr_info_t *out, char *err, size_t errlen)
