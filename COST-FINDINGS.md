@@ -1543,6 +1543,53 @@ after three sweeps of misattributed failures.
 
 Not yet checked the same way: am_67e9b0449a, the other review-off failure.
 
+## Finding 33 — am_67e9b0449a: the ticket names neither layer (proposed repair, NOT applied)
+
+The other review-off failure, checked the same way as Finding 32. Same family,
+weaker case: the ticket does not name the WRONG layer, it names NEITHER.
+
+The graded test exercises kb_management_action_body_parse, declared in
+src/kb/kb_management_action.h:98 and implemented in src/kb/kb_management_action.c
+-- the KB layer. It feeds three inputs: an escaped NUL in the action value, an
+escaped NUL in the agent value, and a LITERAL backslash-u0000 that must be
+treated differently from the escape.
+
+aimee changed src/server/server_mgmt_endpoint.c and its test -- the server layer.
+
+Ticket word counts, whole text: management 1, parser 1, request 1, kb 0,
+server 0. "A management request" is genuinely ambiguous: both surfaces are
+management, and nothing in the ticket selects between them. Unlike am_842ff35656,
+where the ticket actively named the CLI and the grader checked the server, this
+one simply never says.
+
+### Proposed repair
+
+    "The check belongs in the KB's management action body parser
+     (kb_management_action_body_parse), where the decoded value is produced,
+     rather than at an individual endpoint."
+
+Names the layer and the reason without giving the implementation.
+
+### Where the corpus stands
+
+Four of fourteen tickets now show a gap between what the ticket entails and what
+the graded test asserts:
+
+| task | gap |
+|---|---|
+| am_b84c9294aa | deliverable never stated | REPAIRED, 0/4 -> 5/5 |
+| am_1e7cb3da16 | identifier never named | REPAIRED, 0/4 -> 3/5 |
+| am_842ff35656 | wrong layer named | proposed |
+| am_67e9b0449a | neither layer named | proposed |
+
+The two repaired cases both went from total failure to majority pass on one
+sentence, which is the reason to take the other two seriously rather than
+recording them as capability gaps.
+
+Note what this does NOT license: the aimee failure on am_270b3483d5 was checked
+the same way and is real -- the ticket entails the presence check, the graded
+test asserts the presence check, and aimee did content validation instead.
+
 ## Caveats for anything published from this
 
 - 6 of 8 tasks, **one replicate**, no confidence intervals. Per-task spread is
