@@ -509,7 +509,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "call_tool {arguments,name} req:arguments,name\n"                                               \
    "clarify {answer,command,description,session_id} req:command\n"                                 \
    "dashboard_metrics {} req:\n"                                                                   \
-   "delegate {branch,cwd,persona,prompt,role} req:persona,prompt,role\n"                           \
+   "delegate {branch,cwd,persona,prompt,role,tools} req:persona,prompt,role\n"                     \
    "delegate_reply {content,delegation_id} req:content,delegation_id\n"                            \
    "delegate_status {job_id} req:job_id\n"                                                         \
    "describe_tool {name} req:name\n"                                                               \

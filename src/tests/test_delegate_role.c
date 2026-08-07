@@ -371,6 +371,37 @@ static void test_auto_tools_policy(void)
    printf("  PASS: test_auto_tools_policy\n");
 }
 
+/* A write role left tools-off cannot fail visibly. Measured: a `code` packet
+ * delegated over MCP -- which had no way to ask for tools -- came back with a
+ * per-file diff summary naming files that were never created, and the caller
+ * had to disprove it by searching the disk. `review` enabled tools by default
+ * and `code` did not, so delegation worked for inspection and fabricated for
+ * implementation: the failure distribution that builds trust before it lies. */
+static void test_write_roles_get_tools_by_default(void)
+{
+   assert(delegate_role_enable_tools_by_default("code") == 1);
+   assert(delegate_role_enable_tools_by_default("refactor") == 1);
+   /* Through the aliases a caller actually types. */
+   assert(delegate_role_auto_tools_for_invocation("implement", -1, 0) == 1);
+   assert(delegate_role_auto_tools_for_invocation("build", -1, 0) == 1);
+
+   /* Every write role, whatever the alias table holds, by the same rule. */
+   static const char *const write_roles[] = {"code", "refactor", "implement", "build"};
+   for (size_t i = 0; i < sizeof(write_roles) / sizeof(write_roles[0]); i++)
+   {
+      assert(delegate_role_is_write(write_roles[i]) == 1);
+      assert(delegate_role_auto_tools_for_invocation(write_roles[i], -1, 0) == 1);
+   }
+
+   /* The two overrides still win: a single turn cannot use tools, and an
+    * explicit --no-tools is honored (server side) as a deliberate choice. */
+   assert(delegate_role_auto_tools_for_invocation("code", 1, 0) == 0);
+
+   /* Prose generation is not a write role and stays text-only. */
+   assert(delegate_role_enable_tools_by_default("draft") == 0);
+   printf("  PASS: test_write_roles_get_tools_by_default\n");
+}
+
 int main(void)
 {
    printf("test_delegate_role\n");
@@ -399,6 +430,7 @@ int main(void)
    test_apply_max_turns_policy();
    test_apply_max_turns_cap();
    test_auto_tools_policy();
+   test_write_roles_get_tools_by_default();
    printf("All tests passed.\n");
    return 0;
 }

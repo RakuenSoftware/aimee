@@ -657,8 +657,9 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
               "delegate",
               "Delegate a task to an aimee delegate agent instead of provider-native "
               "sub-agent tools (spawn_agent/Agent). Always async: returns a job_id; "
-              "poll delegate_status for the result. Has SSH to homelab hosts and full tool "
-              "execution. If already a sub-agent, return findings.",
+              "poll delegate_status for the result. Write and inspection roles run with full "
+              "tool execution, including SSH to homelab hosts; see `tools`. If already a "
+              "sub-agent, return findings.",
               cJSON_Parse(
                   "{\"type\":\"object\",\"properties\":{"
                   "\"role\":{\"type\":\"string\",\"description\":\"Delegation role (e.g. code, "
@@ -670,7 +671,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                   "qa, security, reviewer, architect, or custom); sets the delegate's identity "
                   "and principles.\"},"
                   "\"cwd\":{\"type\":\"string\",\"description\":\"Optional cwd to anchor delegate "
-                  "worktree isolation; defaults to the active MCP session worktree.\"}},"
+                  "worktree isolation; defaults to the active MCP session worktree.\"},"
+                  "\"tools\":{\"type\":\"boolean\",\"description\":\"Give the delegate file and "
+                  "shell tools. Write and inspection roles enable these on their own; pass true "
+                  "to add them to a role that would otherwise run text-only, or false to force a "
+                  "text-only run.\"}},"
                   "\"required\":[\"role\",\"prompt\",\"persona\"]}")));
    }
    /* delegate_status */
