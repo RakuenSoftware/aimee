@@ -571,6 +571,27 @@ def descends_from(repo: Path, ancestor: str, descendant: str) -> bool:
     return result.returncode == 0
 
 
+def anchor_descendants(repo: Path, anchor: str) -> set[str]:
+    """Every commit between the anchor and HEAD, in one command.
+
+    Asking `merge-base --is-ancestor` per signal is one process per commit, and
+    this job runs the checker four times over a hundred-plus signals: enough to
+    exceed the job's five-minute budget on its own. `rev-list --ancestry-path`
+    answers the same question once. The range excludes the anchor, so a parent
+    equal to it is correctly absent.
+    """
+    head = git_run(repo, "rev-parse", "HEAD")
+    if head.returncode != 0:
+        return set()
+    # git_run yields bytes; interpolating them raw produces a b'...' rev range
+    # that git rejects, and an empty set silently fails every signal at once.
+    revision = f"{anchor}..{head.stdout.decode('ascii', 'replace').strip()}"
+    result = git_run(repo, "rev-list", "--ancestry-path", revision)
+    if result.returncode != 0:
+        return set()
+    return set(result.stdout.decode("ascii", "replace").split())
+
+
 def on_first_parent_chain(repo: Path, ancestor: str, descendant: str) -> bool:
     current = descendant
     while True:
@@ -599,10 +620,11 @@ def enforce_signal_precedence(
     whose parent does not, did not. `parent == anchor` still fails, so approval
     and the first change it authorizes stay distinct commits.
     """
+    descendants = anchor_descendants(repo, anchor)
     for commit, parent, evidence in signals:
         if commit in PRE_APPROVAL_SIGNALS:
             continue
-        if parent == anchor or not descends_from(repo, anchor, parent):
+        if parent == anchor or parent not in descendants:
             rendered = ", ".join(f"{kind}:{value}" for kind, value in evidence)
             fail(
                 "git-contract-ordering",
