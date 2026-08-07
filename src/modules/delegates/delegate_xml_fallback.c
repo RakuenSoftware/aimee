@@ -941,20 +941,35 @@ int delegate_rescue_parse_tool_calls(const char *text, parsed_response_t *out, i
          args_end = NULL;
       }
 
-      if (name_start && name_end)
+      /* The tag being PRESENT is not the same as a name being there. An empty
+       * <name></name> used to produce a call named "", which dispatches to
+       * nothing and is indistinguishable downstream from a tool that does not
+       * exist. And a name too long for the field was truncated, so two distinct
+       * long names collapse to the same prefix and a call can be attributed to
+       * the WRONG tool -- refuse rather than guess. */
+      size_t raw_name_len = (name_start && name_end) ? (size_t)(name_end - name_start) : 0;
+      int name_usable = name_start && name_end && raw_name_len < sizeof(out->calls[0].name);
+
+      if (name_usable)
       {
          parsed_tool_call_t *tc = &out->calls[out->call_count++];
          memset(tc, 0, sizeof(*tc));
          snprintf(tc->id, sizeof(tc->id), "xml_call_%d", out->call_count);
 
          /* Copy name */
-         size_t name_len = (size_t)(name_end - name_start);
-         if (name_len >= sizeof(tc->name))
-            name_len = sizeof(tc->name) - 1;
-         memcpy(tc->name, name_start, name_len);
-         tc->name[name_len] = '\0';
+         memcpy(tc->name, name_start, raw_name_len);
+         tc->name[raw_name_len] = '\0';
          trim_inplace(tc->name);
          normalize_tool_name(tc->name);
+
+         if (!tc->name[0])
+         {
+            /* Nothing survived trimming: give the slot back and leave this block
+             * unparsed rather than emitting a nameless call. */
+            memset(tc, 0, sizeof(*tc));
+            out->call_count--;
+            goto advance_block;
+         }
 
          /* Copy arguments */
          if (args_start && args_end)
@@ -1001,6 +1016,7 @@ int delegate_rescue_parse_tool_calls(const char *text, parsed_response_t *out, i
          found++;
       }
 
+   advance_block:
       /* Advance past this <tool_call> block. A namespaced close tag is longer
        * than the plain one, so step to the '>' that actually ends it rather than
        * assuming a fixed width. */

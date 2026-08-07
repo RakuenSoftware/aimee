@@ -388,6 +388,80 @@ static void test_reasoning_and_content(void)
    printf("  reasoning and content: ok\n");
 }
 
+/* ---- 14. the call cap and malformed-block recovery ---- */
+static void test_cap_and_malformed(void)
+{
+   /* More blocks than the cap: the first AGENT_MAX_TOOL_CALLS are taken and the
+    * rest dropped, rather than overrunning the fixed array. */
+   size_t n = (size_t)AGENT_MAX_TOOL_CALLS + 8;
+   size_t cap = n * 96 + 64;
+   char *buf = malloc(cap);
+   assert(buf);
+   buf[0] = '\0';
+   for (size_t i = 0; i < n; i++)
+      strcat(buf, "<tool_call><name>bash</name><arguments>{\"a\":1}</arguments></tool_call>");
+   parsed_response_t r;
+   memset(&r, 0, sizeof(r));
+   int got = xml_parse_tool_calls(buf, &r);
+   assert(got == AGENT_MAX_TOOL_CALLS && r.call_count == AGENT_MAX_TOOL_CALLS);
+   agent_free_parsed_response(&r);
+   free(buf);
+
+   /* An unterminated block yields nothing rather than reading past it. */
+   memset(&r, 0, sizeof(r));
+   assert(xml_parse_tool_calls("<tool_call><name>bash</name><arguments>{\"a\":1}", &r) == 0);
+   agent_free_parsed_response(&r);
+   printf("  cap and malformed: ok\n");
+}
+
+/* ---- 15. REGRESSION: a tool call must carry a usable name ----
+ * The block path accepted a call whenever the <name> TAG was present, without
+ * checking that a name survived trimming. An empty <name></name> therefore
+ * produced a call with name "" -- dispatched to nothing, and indistinguishable
+ * downstream from a tool that simply does not exist.
+ *
+ * A name too long for the field was silently truncated to 31 characters, so two
+ * distinct long names collapse to the same prefix and a call can be attributed
+ * to the WRONG tool. Refusing is the only safe reading. */
+static void test_name_must_be_usable(void)
+{
+   parsed_response_t r;
+
+   memset(&r, 0, sizeof(r));
+   assert(xml_parse_tool_calls("<tool_call><name></name><arguments>{\"a\":1}</arguments>"
+                               "</tool_call>",
+                               &r) == 0);
+   assert(r.call_count == 0);
+   agent_free_parsed_response(&r);
+
+   memset(&r, 0, sizeof(r));
+   assert(xml_parse_tool_calls("<tool_call><name>   </name><arguments>{\"a\":1}</arguments>"
+                               "</tool_call>",
+                               &r) == 0);
+   agent_free_parsed_response(&r);
+
+   /* Longer than parsed_tool_call_t::name can hold: refused, not truncated. */
+   {
+      char big[256];
+      int off = snprintf(big, sizeof big, "<tool_call><name>");
+      memset(big + off, 'a', 80);
+      snprintf(big + off + 80, sizeof(big) - (size_t)off - 80,
+               "</name><arguments>{\"a\":1}</arguments></tool_call>");
+      memset(&r, 0, sizeof(r));
+      assert(xml_parse_tool_calls(big, &r) == 0);
+      agent_free_parsed_response(&r);
+   }
+
+   /* A name that merely needs trimming is still accepted. */
+   memset(&r, 0, sizeof(r));
+   assert(xml_parse_tool_calls("<tool_call><name>  bash  </name><arguments>{\"a\":1}</arguments>"
+                               "</tool_call>",
+                               &r) == 1);
+   assert(strcmp(r.calls[0].name, "bash") == 0);
+   agent_free_parsed_response(&r);
+   printf("  name must be usable: ok\n");
+}
+
 int main(void)
 {
    printf("delegate_xml_fallback:\n");
@@ -406,6 +480,8 @@ int main(void)
    test_bare_json_rescue();
    test_tool_parameters_spelling();
    test_reasoning_and_content();
+   test_cap_and_malformed();
+   test_name_must_be_usable();
    printf("All delegate_xml_fallback tests passed.\n");
    return 0;
 }
