@@ -1123,7 +1123,7 @@
         },
         {
           "path": "src/headers/server_http_internal.h",
-          "sha256": "7db99431f8debc8d7122d22fdb058805f418f8dd6e040f0fc829c597da4facf8"
+          "sha256": "631e81081f4dc57d2dead956a78ec78409ac11bb1f169322321e28e08882f43c"
         },
         {
           "path": "src/headers/server_identity_token.h",
@@ -1604,7 +1604,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "05b69d36235618ff22e0fe827f7b3ed74abc7515fce7f4c27e89874f5bdb8e0c",
+      "sha256": "5fdfa87820dd485146647e8d447a48d9b0fa0a31d9366b81ccc09ff0a02047c5",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

@@ -1562,32 +1562,6 @@ static int ws_dispatch_args(const char *method, const char *arg0, const char *co
 }
 
 /* POST /v1/workspaces — register {root_hint|root|path, provider?}. */
-/* Build the `workspace.add` flag arguments for a REST registration. `remote` and
- * `head` are emitted only when non-empty; a `mirror` registration REQUIRES both
- * (the server seeds its bare mirror by fetching that head from that remote), so
- * dropping them turns a mirror registration into a rejection. Pure: borrows the
- * caller's strings, returns the count written. */
-int workspace_add_flag_args(const char *provider, const char *remote, const char *head,
-                            const char *out[], int out_cap)
-{
-   int n = 0;
-   if (!out || out_cap < 2 || !provider || !provider[0])
-      return 0;
-   out[n++] = "--provider";
-   out[n++] = provider;
-   if (remote && remote[0] && n + 2 <= out_cap)
-   {
-      out[n++] = "--remote";
-      out[n++] = remote;
-   }
-   if (head && head[0] && n + 2 <= out_cap)
-   {
-      out[n++] = "--head";
-      out[n++] = head;
-   }
-   return n;
-}
-
 static int rh_workspaces_register(const route_req_t *rq, char *resp, int cap)
 {
    cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : cJSON_CreateObject();

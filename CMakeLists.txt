@@ -936,6 +936,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_persona.c
     ${AIMEE_SRC_DIR}/cli_roles.c
     ${AIMEE_SRC_DIR}/modules/workspace/cli_workspace_serve.c
+    ${AIMEE_SRC_DIR}/modules/workspace/workspace_client_diff.c
     ${AIMEE_SRC_DIR}/cli_agent_keys.c
     ${AIMEE_SRC_DIR}/cli_remote.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_plan.c
@@ -981,6 +982,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/sandbox_audit_bridge.c
     ${AIMEE_SRC_DIR}/server/memory_audit_bridge.c
     ${AIMEE_SRC_DIR}/server/server_runner_endpoints.c
+    ${AIMEE_SRC_DIR}/server/workspace_register_args.c
     ${AIMEE_SRC_DIR}/server/server_state_audit.c
     ${AIMEE_SRC_DIR}/server/server_css_query.c
     ${AIMEE_SRC_DIR}/server/server_runner_endpoints.c

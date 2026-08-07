@@ -198,7 +198,7 @@ int rh_git_sshkey(const route_req_t *rq, char *resp, int cap);
 #define WS_ADD_FLAG_ARGS_MAX 6
 
 /* Build the `workspace.add` flag arguments for a REST workspace registration.
- * See the definition in server_http_routes.c. Returns the count written. */
+ * See the definition in workspace_register_args.c. Returns the count written. */
 int workspace_add_flag_args(const char *provider, const char *remote, const char *head,
                             const char *out[], int out_cap);
 
