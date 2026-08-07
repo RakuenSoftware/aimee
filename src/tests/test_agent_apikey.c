@@ -218,6 +218,21 @@ static void test_agent_loop_per_call_timeout(void)
    /* Small configured timeout: the floor never exceeds agent_timeout_ms. */
    assert(agent_loop_per_call_timeout_ms(10000, 40000, 0) == 10000);
    assert(agent_loop_per_call_timeout_ms(10000, 40000, 35000) == -1);
+
+   /* A workflow stage cap can be SMALLER than one viable call, so the very first
+    * call is already non-viable. Production numbers: a 180s agent capped to the
+    * 57759ms left in its stage. The loop used to start anyway and report the
+    * budget as exhausted after 97ms; agent_execute_with_tools_internal now
+    * preflights this exact condition and refuses with an honest reason. */
+   assert(agent_loop_total_timeout_ms(180000, 57759) == 57759);
+   assert(agent_loop_per_call_timeout_ms(180000, 57759, 0) == -1);
+   /* One millisecond over the floor is viable, so the preflight must not fire. */
+   assert(agent_loop_per_call_timeout_ms(180000, 60000, 0) == 60000);
+
+   /* The predicate the runtime actually branches on. */
+   assert(agent_loop_window_too_small(180000, 57759) == 1);
+   assert(agent_loop_window_too_small(180000, 60000) == 0);
+   assert(agent_loop_window_too_small(180000, 720000) == 0);
 }
 
 static void test_claude_cli_predicate(void)

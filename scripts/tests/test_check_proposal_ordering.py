@@ -47,6 +47,21 @@ class ProposalOrderingTests(unittest.TestCase):
         )
         return self.git(repo, "rev-parse", "HEAD")
 
+    def merge(self, repo: Path, branch: str, message: str) -> str:
+        self.git(
+            repo,
+            "-c",
+            "user.name=Aimee Test",
+            "-c",
+            "user.email=aimee@example.invalid",
+            "merge",
+            "--no-ff",
+            "-m",
+            message,
+            branch,
+        )
+        return self.git(repo, "rev-parse", "HEAD")
+
     def make_repo(self) -> tuple[tempfile.TemporaryDirectory[str], Path, str]:
         tmp = tempfile.TemporaryDirectory()
         repo = Path(tmp.name)
@@ -56,9 +71,13 @@ class ProposalOrderingTests(unittest.TestCase):
         return tmp, repo, cutoff
 
     def test_current_repository_passes(self) -> None:
+        # Gated on ancestry, matching the rule itself. Gating on first-parent
+        # membership skipped this on every ordinary checkout -- including the
+        # integration branch -- so the one test that exercises the real history
+        # never ran.
         head = ordering.git_text(REPO_ROOT, "rev-parse", "HEAD")
-        if not ordering.on_first_parent_chain(REPO_ROOT, ordering.SLICE2_ANCHOR, head):
-            self.skipTest("checkout is not on the feature/core-modularization first-parent line")
+        if not ordering.descends_from(REPO_ROOT, ordering.SLICE2_ANCHOR, head):
+            self.skipTest("checkout does not descend from the approved Slice 2 anchor")
         signal_count = ordering.validate_ordering(REPO_ROOT)
         self.assertIsInstance(signal_count, int)
         self.assertGreaterEqual(signal_count, 1)
@@ -492,6 +511,74 @@ class ProposalOrderingTests(unittest.TestCase):
                 ordering.enforce_signal_precedence(repo, anchor, signals)
         finally:
             tmp.cleanup()
+
+    def test_a_signal_is_accepted_when_the_anchor_arrived_by_merge(self) -> None:
+        """The integration branch's actual shape must pass.
+
+        The approval lands on its own branch and the integration branch merges
+        it, so the anchor is a second parent and is on no commit's first-parent
+        ancestry there. Requiring first-parent membership therefore rejected
+        every post-approval Git-module change on `testing` -- 91 of 95 signals
+        -- while passing on the branch the anchor happened to sit on.
+        """
+        tmp, repo, cutoff = self.make_repo()
+        try:
+            integration = self.git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+            self.git(repo, "checkout", "-b", "approval")
+            (repo / "contract.md").write_text("approved\n", encoding="utf-8")
+            anchor = self.commit(repo, "anchor")
+            self.git(repo, "checkout", integration)
+            self.merge(repo, "approval", "merge approval")
+            source = repo / "src/modules/git/example.c"
+            source.parent.mkdir(parents=True)
+            source.write_text("signal\n", encoding="utf-8")
+            self.commit(repo, "signal after approval")
+            head = self.git(repo, "rev-parse", "HEAD")
+
+            signals = ordering.scan_history(
+                repo, cutoff, head, exact_paths=set(), root_claims=[]
+            )
+            self.assertTrue(signals)
+            # Red before green: the retired rule rejects exactly this shape.
+            for _, parent, _ in signals:
+                self.assertFalse(ordering.on_first_parent_chain(repo, anchor, parent))
+            ordering.enforce_signal_precedence(repo, anchor, signals)
+        finally:
+            tmp.cleanup()
+
+    def test_a_signal_that_predates_the_anchor_is_still_rejected(self) -> None:
+        """Waiving the frozen ones must not stop the rule catching new ones."""
+        tmp, repo, cutoff = self.make_repo()
+        try:
+            source = repo / "src/modules/git/example.c"
+            source.parent.mkdir(parents=True)
+            source.write_text("pre-approval\n", encoding="utf-8")
+            offender = self.commit(repo, "signal before approval")
+            (repo / "contract.md").write_text("approved\n", encoding="utf-8")
+            anchor = self.commit(repo, "anchor")
+            head = self.git(repo, "rev-parse", "HEAD")
+            signals = ordering.scan_history(
+                repo, cutoff, head, exact_paths=set(), root_claims=[]
+            )
+            self.assertTrue(any(commit == offender for commit, _, _ in signals))
+            with self.assertRaisesRegex(ordering.OrderingError, "git-contract-ordering"):
+                ordering.enforce_signal_precedence(repo, anchor, signals)
+        finally:
+            tmp.cleanup()
+
+    def test_a_waived_commit_that_stops_being_a_signal_must_be_deleted(self) -> None:
+        waived = next(iter(ordering.PRE_APPROVAL_SIGNALS))
+        with self.assertRaisesRegex(ordering.OrderingError, "pre-approval-waiver"):
+            ordering.enforce_waiver_is_live([])
+        ordering.enforce_waiver_is_live(
+            [(commit, commit, []) for commit in ordering.PRE_APPROVAL_SIGNALS]
+        )
+        self.assertIn(waived, ordering.PRE_APPROVAL_SIGNALS)
+
+    def test_every_waived_commit_is_a_full_sha(self) -> None:
+        for commit in ordering.PRE_APPROVAL_SIGNALS:
+            with self.subTest(commit=commit):
+                self.assertRegex(commit, r"^[0-9a-f]{40}$")
 
     def test_all_signal_evidence_is_rendered_on_failure(self) -> None:
         tmp, repo, cutoff = self.make_repo()
