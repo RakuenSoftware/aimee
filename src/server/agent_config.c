@@ -1949,17 +1949,21 @@ static int agent_save_config_impl(const agent_config_t *cfg, int emptied_by_remo
       return -1;
    }
    chmod(agent_config_path(), 0600);
-   {
-      struct stat st;
-      if (stat(agent_config_path(), &st) == 0)
-      {
-         pthread_mutex_lock(&g_agent_config_cache_lock);
-         memcpy(&g_agent_config_cache, cfg, sizeof(g_agent_config_cache));
-         agent_config_stat_remember(&st);
-         g_agent_config_cached = 1;
-         pthread_mutex_unlock(&g_agent_config_cache_lock);
-      }
-   }
+   /* INVALIDATE, never populate. A caller-built config has not been through
+    * agent_load_config()'s normalisation — provider defaulting, the MiniMax wire
+    * rewrite, agent_derive_catalog_provider() and the cost-tier/capability pass
+    * all run there, not here. Caching |cfg| verbatim while stamping it with the
+    * file's fresh stat made every later load a cache HIT on that unnormalised
+    * struct, so the derived fields stayed empty for the whole process lifetime
+    * and only a restart recovered them. That is what left a wizard-added agent
+    * with an empty catalog_provider: it silently lost its required-temperature
+    * row (sending temperature=0.3 to a model that accepts only 1) and its
+    * catalog capability lookup (so it advertised no tools). Dropping the entry
+    * costs one re-parse of a small file on the next load, which then caches the
+    * fully normalised result itself. */
+   pthread_mutex_lock(&g_agent_config_cache_lock);
+   g_agent_config_cached = 0;
+   pthread_mutex_unlock(&g_agent_config_cache_lock);
    free(json);
    return 0;
 }

@@ -3363,6 +3363,67 @@ static void test_agent_config_deletion_guard(void)
    printf("  PASS: agent_config_deletion_guard\n");
 }
 
+/* Saving a config must not seed the load cache with the caller's struct.
+ *
+ * Every writer (the setup wizard's /v1 agent-add included) builds an agent_t
+ * from request fields and calls agent_save_config(); NONE of them run the
+ * normalisation that agent_load_config() owns — provider defaulting, the wire
+ * rewrite, agent_derive_catalog_provider(), the tier/capability pass. The save
+ * path used to memcpy that raw struct into the cache and stamp it with the
+ * freshly written file's stat, so the very next load was a cache HIT on an
+ * unnormalised config and stayed one for the life of the process.
+ *
+ * The user-visible damage was silent: a wizard-added Kimi agent kept an empty
+ * catalog_provider, so agent_catalog_provider() fell back to the wire name
+ * "openai". That cost it the {moonshotai,k3,1.0} required-temperature row (the
+ * delegate's default 0.3 reached a model that accepts only 1, failing every
+ * call with "invalid temperature: only 1 is allowed for this model") and made
+ * model_capability_get() miss, so it advertised no tools and tool roles
+ * rejected it as unavailable. Only a restart cleared it. */
+static void test_agent_save_config_does_not_cache_underived_agents(void)
+{
+   /* The bug is invisible when the cache is bypassed, so assert on the cached
+    * path explicitly rather than inheriting whatever the harness set. */
+   platform_unsetenv("AIMEE_NO_CACHE");
+   unlink(agent_config_path());
+
+   /* Exactly what a writer hands to agent_save_config: endpoint and model set,
+    * no provider and no catalog_provider — both are load-side derivations. */
+   agent_config_t built;
+   memset(&built, 0, sizeof(built));
+   built.agent_count = 1;
+   snprintf(built.default_agent, sizeof(built.default_agent), "%s", "Kimi");
+   snprintf(built.agents[0].name, sizeof(built.agents[0].name), "%s", "Kimi");
+   snprintf(built.agents[0].endpoint, sizeof(built.agents[0].endpoint), "%s",
+            "https://api.kimi.com/coding/v1");
+   snprintf(built.agents[0].model, sizeof(built.agents[0].model), "%s", "kimi-k3");
+   snprintf(built.agents[0].auth_type, sizeof(built.agents[0].auth_type), "%s", "bearer");
+   snprintf(built.agents[0].api_key, sizeof(built.agents[0].api_key), "%s", "k");
+   snprintf(built.agents[0].roles[0], sizeof(built.agents[0].roles[0]), "%s", "review");
+   built.agents[0].role_count = 1;
+   built.agents[0].enabled = 1;
+   assert(built.agents[0].catalog_provider[0] == '\0');
+
+   assert(agent_save_config(&built) == 0);
+
+   agent_config_t loaded;
+   assert(agent_load_config(&loaded) == 0);
+   const agent_t *kimi = agent_find(&loaded, "Kimi");
+   assert(kimi != NULL);
+
+   /* The load must have re-parsed and derived. Asserting the raw field rather
+    * than agent_catalog_provider() is deliberate: the accessor falls back to
+    * ->provider, which would mask an empty field behind the wire name — and it
+    * is the RAW field that model_sampling.c's required-temperature gate reads. */
+   assert(strcmp(kimi->catalog_provider, "moonshotai") == 0);
+
+   /* The wire provider is still the load-side default, untouched by derivation. */
+   assert(strcmp(kimi->provider, "openai") == 0);
+
+   unlink(agent_config_path());
+   printf("  PASS: test_agent_save_config_does_not_cache_underived_agents\n");
+}
+
 int main(void)
 {
    char tmp_home[512];
@@ -3412,6 +3473,7 @@ int main(void)
    test_catalog_provider_explicit_round_trip();
    test_unknown_context_window_does_not_pass_min_context();
    test_context_window_table_covers_live_vendors();
+   test_agent_save_config_does_not_cache_underived_agents();
    test_catalog_provider_host_matching_is_label_anchored();
    test_catalog_provider_namespaced_model_ids();
    test_moonshot_heuristic_scopes_reasoning_to_known_families();
