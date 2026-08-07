@@ -415,6 +415,29 @@ native_provider_http:
    int total_timeout_ms =
        agent_loop_total_timeout_ms(agent->timeout_ms, agent->tool_loop_timeout_ms_cap);
 
+   /* A stage cap can be SMALLER than one viable call, and nothing checked that.
+    * The loop then stops on its first iteration and reports the budget as
+    * exhausted after a few milliseconds. Seen in production as:
+    *
+    *   tool loop budget exhausted (elapsed=97ms effective=57759ms
+    *                               configured=720000ms stage_remaining_cap=57759ms)
+    *
+    * Nothing was exhausted -- 57.7s never covered the 60s minimum call, so the
+    * delegate could not have started. Refusing here says that plainly instead of
+    * blaming a budget the turn never got to spend, and it costs no model call.
+    * The roundtable path already preflights its phase budget this way. */
+   if (agent_loop_window_too_small(agent->timeout_ms, total_timeout_ms))
+   {
+      int minimum =
+          agent->timeout_ms < AGENT_LOOP_MIN_CALL_MS ? agent->timeout_ms : AGENT_LOOP_MIN_CALL_MS;
+      snprintf(out->error, sizeof(out->error),
+               "stage window too small to start a delegate call (effective=%dms minimum=%dms "
+               "configured=%dms stage_remaining_cap=%dms)",
+               total_timeout_ms, minimum, configured_total_timeout_ms,
+               agent->tool_loop_timeout_ms_cap);
+      return -1;
+   }
+
    /* Ephemeral SSH setup */
    char ephemeral_key[MAX_PATH_LEN] = {0};
    char session_id[128] = {0};
