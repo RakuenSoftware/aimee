@@ -965,6 +965,14 @@ int memory_embed(int64_t memory_id, const char *command);
  * embed_input_type_t). It is required rather than defaulted so the compiler forces
  * every call site to state it — a query silently embedded as a document costs
  * retrieval quality and raises no error. */
+/* Bound on one embed round trip, in milliseconds.
+ *
+ * Env override AIMEE_EMBED_HTTP_TIMEOUT_MS; garbage and out-of-range values fall
+ * back to the default rather than disabling the bound. The cost of an embed is a
+ * property of batch size and host load, not of the service being healthy, so a
+ * bound below the real cost turns a slow build into a failed one. */
+int memory_embed_http_timeout_ms(void);
+
 int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
                       float *out, int max_dim);
 

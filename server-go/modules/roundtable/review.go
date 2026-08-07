@@ -3,6 +3,7 @@ package roundtable
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
@@ -48,7 +49,7 @@ type Reviewer interface {
 func NewReviewHandler(reviewer Reviewer) bus.ModuleHandler {
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 		if reviewer == nil {
-			return nil, bus.ModuleStatusInternal
+			return []byte("roundtable reviewer is not configured"), bus.ModuleStatusInternal
 		}
 		// Review and deliberate share a module and are told apart only by stage id,
 		// so a deliberate id arriving here is a protocol error, not a review.
@@ -66,17 +67,30 @@ func NewReviewHandler(reviewer Reviewer) bus.ModuleHandler {
 		// so a review that overruns is reported as such rather than replied to.
 		result, err := reviewer.Review(context.Background(), decoded)
 		if err != nil {
+			// A request this panel will never accept is reported as invalid, not
+			// internal. The distinction is the caller's only way to tell "try
+			// again later" from "this will fail every time", and without it a
+			// workflow parks and resubmits the same rejected review indefinitely.
+			var invalid panel.ValidationError
+			if errors.As(err, &invalid) {
+				return []byte(invalid.Error()), bus.ModuleStatusInvalidRequest
+			}
 			// A failed review must never be reported as an empty success: a caller
 			// reading an empty result as "approved, no findings" would ship
 			// unreviewed work.
-			return nil, bus.ModuleStatusInternal
+			//
+			// The reason rides back as the body. A non-OK reply does not carry it
+			// over the wire, but the runtime logs it on the way past -- without
+			// that, every distinct failure here reaches the caller as the same
+			// bare status number and the operator has nothing to go on.
+			return []byte(err.Error()), bus.ModuleStatusInternal
 		}
 		body, err := json.Marshal(result)
 		if err != nil {
-			return nil, bus.ModuleStatusInternal
+			return []byte("encode roundtable result: " + err.Error()), bus.ModuleStatusInternal
 		}
 		if uint32(len(body)) > bus.ModuleMessageMaxBody {
-			return nil, bus.ModuleStatusInternal
+			return []byte("roundtable result exceeds the module message limit"), bus.ModuleStatusInternal
 		}
 		return body, bus.ModuleStatusOK
 	}

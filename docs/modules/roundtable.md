@@ -74,6 +74,14 @@ and pipeline state. A compiled route or saved preset is not proof of an executab
   fallback reads `AIMEE_MODULE_ROUNDTABLE`; it accepts case-insensitive `1`, `true`, `on`, and
   `yes`, or `0`, `false`, `off`, and `no`. Missing, empty, whitespace-padded, or unknown values
   fail closed to disabled. An explicit config value always wins over the environment.
+- The same control decides whether `aimee-module-roundtable` is launched. Reviews run in that
+  module process over the event bus, and since the private HTTP proxy was deleted the daemon has
+  no other implementation of `roundtable.review`, so with the module absent the route reports it
+  as not attached however the feature is configured. The shipped module manifest is fixed when the
+  image is built and cannot know what an operator enabled, so the container entrypoint consults
+  `AIMEE_MODULE_ROUNDTABLE` at startup and adds the module when it is set. Containers must pass
+  that variable through; a compose deployment that only sets it in `.env` does not reach the
+  container.
 
 Configuration covers reference seats/models, consensus rounds/turns, personas, chair behavior, cost and
 token bounds, pipeline passes/attempts/gates, capture, and named presets. The aggregate and roundtable

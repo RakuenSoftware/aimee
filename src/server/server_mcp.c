@@ -142,20 +142,9 @@ static int send_roundtable_mcp_result(server_conn_t *conn, cJSON *result)
 static int handle_mcp_roundtable_review(server_conn_t *conn, cJSON *args)
 {
    char err[320] = "";
-   cJSON *run = mcp_roundtable_submit(args, conn->capabilities, err, sizeof(err));
-   return run ? send_roundtable_mcp_result(conn, run)
-              : server_send_error(conn, err[0] ? err : "roundtable submission failed", NULL);
-}
-
-static int handle_mcp_roundtable_status(server_conn_t *conn, cJSON *args)
-{
-   uint32_t required = server_capability_for_method("roundtable.review");
-   if (required && conn && (conn->capabilities & required) == 0)
-      return server_send_error(conn, "forbidden: insufficient capabilities", NULL);
-   char err[320] = "";
-   cJSON *run = mcp_roundtable_status(args, err, sizeof(err));
-   return run ? send_roundtable_mcp_result(conn, run)
-              : server_send_error(conn, err[0] ? err : "roundtable status failed", NULL);
+   cJSON *verdict = mcp_roundtable_review(args, conn->capabilities, err, sizeof(err));
+   return verdict ? send_roundtable_mcp_result(conn, verdict)
+                  : server_send_error(conn, err[0] ? err : "roundtable review failed", NULL);
 }
 cJSON *tool_get_help(cJSON *args)
 {
@@ -2051,14 +2040,6 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    if (strcmp(tool, "roundtable_review") == 0)
    {
       int rc = handle_mcp_roundtable_review(conn, jargs);
-      if (owns_jargs)
-         cJSON_Delete(jargs);
-      return rc;
-   }
-
-   if (strcmp(tool, "roundtable_status") == 0)
-   {
-      int rc = handle_mcp_roundtable_status(conn, jargs);
       if (owns_jargs)
          cJSON_Delete(jargs);
       return rc;

@@ -282,6 +282,7 @@ static bus_pending_t *pending_add(bus_host_t *h, uint64_t corr, uint32_t request
       {
          h->pending[i].in_use = 1;
          h->pending[i].correlation_id = corr;
+         h->pending[i].server_correlation_id = ++h->next_server_correlation;
          h->pending[i].requester = requester;
          h->pending[i].server = server;
          h->pending[i].request_open = request_open;
@@ -291,12 +292,38 @@ static bus_pending_t *pending_add(bus_host_t *h, uint64_t corr, uint32_t request
    return NULL;
 }
 
-static bus_pending_t *pending_find(bus_host_t *h, uint64_t corr)
+/* Look up by the requester's own numbering. Correlation ids only mean anything
+ * alongside the client that chose them, so every caller-side lookup pairs the
+ * two -- matching on the id alone is what let one client's request collide with
+ * another's and be refused as a capability that was in fact being served. */
+static bus_pending_t *pending_find_requester(bus_host_t *h, uint64_t corr, uint32_t requester)
 {
    for (uint32_t i = 0; i < BUS_HOST_MAX_PENDING; i++)
-      if (h->pending[i].in_use && h->pending[i].correlation_id == corr)
+      if (h->pending[i].in_use && h->pending[i].correlation_id == corr &&
+          h->pending[i].requester == requester)
          return &h->pending[i];
    return NULL;
+}
+
+/* Look up by the id the host handed the server. That id is bus-unique, so the
+ * server pairing only guards against a reply forged by a slot that is not the
+ * one the request went to. */
+static bus_pending_t *pending_find_server(bus_host_t *h, uint64_t corr, uint32_t server)
+{
+   for (uint32_t i = 0; i < BUS_HOST_MAX_PENDING; i++)
+      if (h->pending[i].in_use && h->pending[i].server_correlation_id == corr &&
+          h->pending[i].server == server)
+         return &h->pending[i];
+   return NULL;
+}
+
+/* Rewrite a frame's correlation for delivery without disturbing the original,
+ * which the pump may re-route if a destination is full. */
+static bus_frame_t frame_with_correlation(const bus_frame_t *f, uint64_t corr)
+{
+   bus_frame_t out = *f;
+   out.correlation_id = corr;
+   return out;
 }
 
 /* Register a new request or advance the only legal continuation: the same
@@ -305,10 +332,10 @@ static bus_pending_t *pending_find(bus_host_t *h, uint64_t corr)
 static bus_pending_t *pending_request(bus_host_t *h, const bus_frame_t *frame, uint32_t requester,
                                       uint32_t server)
 {
-   bus_pending_t *pending = pending_find(h, frame->correlation_id);
+   bus_pending_t *pending = pending_find_requester(h, frame->correlation_id, requester);
    if (pending)
    {
-      if (pending->requester != requester || pending->server != server || !pending->request_open)
+      if (pending->server != server || !pending->request_open)
          return NULL;
       pending->request_open = (frame->hdr_flags & BUS_F_MORE) != 0;
       return pending;
@@ -513,8 +540,8 @@ static int route_arena_request(bus_host_t *h, uint32_t src, bus_frame_t *f, uint
       obs_set(targets, server);
       if (bus_arena_publish(&h->arena, lease, &server, 1) != BUS_ARENA_OK)
       {
-         bus_pending_t *p = pending_find(h, f->correlation_id);
-         if (p && p->requester == src)
+         bus_pending_t *p = pending_find_requester(h, f->correlation_id, src);
+         if (p)
             p->in_use = 0;
          h->slots[src].dropped++;
          return 1;
@@ -524,15 +551,21 @@ static int route_arena_request(bus_host_t *h, uint32_t src, bus_frame_t *f, uint
    uint32_t s = arena_single_target(targets, h->cfg.max_slots);
    if (s == UINT32_MAX || obs_test(delivered, s))
       return 1;
-   arena_dest_t r = arena_deliver_one(h, f, lease, generation, s, k ? k->policy : BUS_KIND_BLOCK);
+   /* Resolved on every attempt, not just the first: a blocked delivery is
+    * retried against the unmodified frame and must rewrite the same way. */
+   bus_pending_t *out_pending = pending_find_requester(h, f->correlation_id, src);
+   bus_frame_t out = frame_with_correlation(f, out_pending ? out_pending->server_correlation_id
+                                                           : f->correlation_id);
+   arena_dest_t r =
+       arena_deliver_one(h, &out, lease, generation, s, k ? k->policy : BUS_KIND_BLOCK);
    if (r == ARENA_DEST_BLOCKED)
       return 0;
    if (r == ARENA_DEST_SHED)
    {
       /* The request was shed to a full server: no reply will come, so retire the
        * correlation rather than leave it dangling. */
-      bus_pending_t *p = pending_find(h, f->correlation_id);
-      if (p && p->requester == src)
+      bus_pending_t *p = pending_find_requester(h, f->correlation_id, src);
+      if (p)
          p->in_use = 0;
    }
    /* DELIVERED keeps the pending entry for the reply; GONE means the server was
@@ -559,12 +592,12 @@ static int route_arena_reply(bus_host_t *h, uint32_t src, bus_frame_t *f, uint64
          h->slots[src].dropped++;
          return 1;
       }
-      bus_pending_t *p = pending_find(h, f->correlation_id);
-      if (!p || p->server != src || p->request_open || !h->slots[p->requester].in_use)
+      bus_pending_t *p = pending_find_server(h, f->correlation_id, src);
+      if (!p || p->request_open || !h->slots[p->requester].in_use)
       {
          /* No matching request, a forged reply, or the requester departed: nothing
           * to deliver. Reclaim the lease; retire a real-but-undeliverable pending. */
-         if (p && p->server == src)
+         if (p)
             p->in_use = 0;
          else
             h->slots[src].dropped++; /* forged or unmatched: count the drop */
@@ -584,13 +617,16 @@ static int route_arena_reply(bus_host_t *h, uint32_t src, bus_frame_t *f, uint64
    uint32_t s = arena_single_target(targets, h->cfg.max_slots);
    if (s == UINT32_MAX || obs_test(delivered, s))
       return 1;
-   arena_dest_t r = arena_deliver_one(h, f, lease, generation, s, BUS_KIND_BLOCK);
+   bus_pending_t *out_pending = pending_find_server(h, f->correlation_id, src);
+   bus_frame_t out =
+       frame_with_correlation(f, out_pending ? out_pending->correlation_id : f->correlation_id);
+   arena_dest_t r = arena_deliver_one(h, &out, lease, generation, s, BUS_KIND_BLOCK);
    if (r == ARENA_DEST_BLOCKED)
       return 0;
    /* DELIVERED or GONE: retire the correlation (a departed requester's ref was
     * already dropped by reap). */
-   bus_pending_t *p = pending_find(h, f->correlation_id);
-   if (p && p->server == src)
+   bus_pending_t *p = pending_find_server(h, f->correlation_id, src);
+   if (p)
       p->in_use = 0;
    obs_set(delivered, s);
    return 1;
@@ -644,19 +680,23 @@ static int route_fresh(bus_host_t *h, uint32_t src, bus_frame_t *f, const uint8_
          }
          return 0; /* block: retry next pump */
       }
-      if (!pending_request(h, f, src, (uint32_t)k->server))
+      bus_pending_t *p = pending_request(h, f, src, (uint32_t)k->server);
+      if (!p)
       {
          emit_control(h, (int)src, BUS_KIND_CAPABILITY_ABSENT, f->correlation_id, NULL, 0);
          return 1;
       }
-      put(h, d, f, inl);
+      /* The server sees the host's bus-unique id, so it can key work on the
+       * correlation alone without two callers ever colliding. */
+      bus_frame_t out = frame_with_correlation(f, p->server_correlation_id);
+      put(h, d, &out, inl);
       return 1;
    }
 
    if (f->hdr_flags & BUS_F_REPLY)
    {
-      bus_pending_t *p = pending_find(h, f->correlation_id);
-      if (!p || p->server != src || p->request_open)
+      bus_pending_t *p = pending_find_server(h, f->correlation_id, src);
+      if (!p || p->request_open)
          return 1; /* no matching request, or a forged reply; drop */
       uint32_t requester = p->requester;
       if (!h->slots[requester].in_use)
@@ -669,20 +709,23 @@ static int route_fresh(bus_host_t *h, uint32_t src, bus_frame_t *f, const uint8_
          return 0; /* block until the requester has room; keep the pending entry */
       if (!(f->hdr_flags & BUS_F_MORE))
          p->in_use = 0;
-      put(h, d, f, inl);
+      /* Answer in the requester's own numbering, not the host's. */
+      bus_frame_t out = frame_with_correlation(f, p->correlation_id);
+      put(h, d, &out, inl);
       return 1;
    }
 
    if (f->hdr_flags & BUS_F_CANCEL)
    {
-      bus_pending_t *p = pending_find(h, f->correlation_id);
-      if (p && p->requester == src)
+      bus_pending_t *p = pending_find_requester(h, f->correlation_id, src);
+      if (p)
       {
          if (h->slots[p->server].in_use)
          {
             bus_slot_t *d = &h->slots[p->server];
+            bus_frame_t out = frame_with_correlation(f, p->server_correlation_id);
             if (has_room(d, 0))
-               put(h, d, f, inl); /* best-effort */
+               put(h, d, &out, inl); /* best-effort */
          }
          /* The requester has abandoned the call and never waits for a terminal
           * reply. Retire the correlation now, including a partially assembled

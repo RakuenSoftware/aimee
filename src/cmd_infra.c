@@ -1153,17 +1153,24 @@ static void repo_name_from_url(const char *url, char *out, size_t outlen)
 static int register_and_index(app_ctx_t *ctx, const char *abs_path)
 {
    int add_rc = config_workspace_add(abs_path, NULL, NULL, NULL);
+   /* Already registered is the state the caller asked for, so it is not an
+    * error. Failing here made `workspace add` non-idempotent, and scripted
+    * setup issues it unconditionally: re-running any automation that had
+    * already registered its path aborted at setup with exit 1, before doing
+    * any work. Fall through to discovery so a repeat run still re-indexes,
+    * which is the half of the command that actually matters on a second call.
+    *
+    * This is the same read-your-writes hazard documented for `workspace
+    * remove` in server_state.c -- a state change a caller cannot immediately
+    * act on is worse than a slow one. */
    if (add_rc == -2)
-   {
-      fprintf(stderr, "workspace: already registered: %s\n", abs_path);
-      return -1;
-   }
-   if (add_rc == -3)
+      fprintf(stderr, "workspace: already registered: %s (re-indexing)\n", abs_path);
+   else if (add_rc == -3)
    {
       fprintf(stderr, "workspace: maximum workspace count reached (64)\n");
       return -1;
    }
-   if (add_rc != 0)
+   if (add_rc != 0 && add_rc != -2)
    {
       fprintf(stderr, "workspace: failed to save config\n");
       return -1;
@@ -1178,7 +1185,8 @@ static int register_and_index(app_ctx_t *ctx, const char *abs_path)
       return -1;
    }
 
-   fprintf(stderr, "workspace: added %s (%d project(s) discovered)\n", abs_path, count);
+   fprintf(stderr, "workspace: %s %s (%d project(s) discovered)\n",
+           add_rc == -2 ? "re-indexed" : "added", abs_path, count);
 
    for (int i = 0; i < count; i++)
    {

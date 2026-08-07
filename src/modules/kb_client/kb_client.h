@@ -1127,6 +1127,38 @@ int kb_client_code_scan_push(const char *name, const char *root, int force, void
  * failure or kb-side error. */
 int kb_client_index_scan_apply_response(const void *resp, kb_client_index_scan_result_t *out);
 
+/* Blast-radius contract checks, split from the transport so a recorded kb
+ * payload can be asserted against without a live kb. `why` receives the first
+ * failing term ("resolved", "dependent_edges", ...) so a rejection names
+ * itself. Returns 1 when the payload satisfies the contract. */
+int kb_client_index_blast_response_valid(const void *resp, char *why, size_t why_n);
+int kb_client_index_blast_edges_valid(const void *edges, const char *identity_field);
+
+/* Timeout the code-index scan POST uses, in ms. Default 5 minutes; raise with
+ * AIMEE_KB_SCAN_TIMEOUT_MS for trees whose scan legitimately runs longer.
+ * Values outside (0, 24h] are ignored so a typo cannot disable the bound. */
+int kb_client_index_scan_timeout_ms(void);
+int kb_client_index_read_timeout_ms(void);
+
+/* Whether a failed call is the caller's budget expiring rather than the KB
+ * being unreachable. A read timeout and a refused connection look identical
+ * on the wire (no body, no status), so elapsed time against the budget is
+ * what separates 'nobody answered' from 'someone is still working'. A
+ * timeout must not open the shared dependency breaker. */
+/* Failure-budget classes. Bulk work (ingest, embed) and interactive work (reads,
+ * lookups) keep separate breakers so neither can suppress the other. */
+typedef enum
+{
+   KB_DEP_INTERACTIVE = 0,
+   KB_DEP_BULK = 1,
+   KB_DEP_CLASS_COUNT = 2
+} kb_dependency_class_t;
+
+kb_dependency_class_t kb_dependency_class_for_path(const char *path);
+
+int kb_transport_call_timed_out(int http_status, const char *response, int64_t elapsed_ms,
+                                int timeout_ms);
+
 /* Internal: build the wire-level response object that aimee-server's
  * handle_index_scan returns to the CLI, given the kb_client result and
  * its rc. Pulled out so dispatch and tests share one truth about
