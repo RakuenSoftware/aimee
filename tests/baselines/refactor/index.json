@@ -359,7 +359,7 @@
         },
         {
           "path": "src/headers/cli_v1_routes_internal.h",
-          "sha256": "bbefaae8a455f6a1f5193ca516635d9753fb96cefbc7062b30b80f4687209d59"
+          "sha256": "3653d371e3c640b3e1cc4692c380d7cb8e53fec2223b24f747b966cbab3773ae"
         },
         {
           "path": "src/headers/client_constants.h",
@@ -1083,7 +1083,7 @@
         },
         {
           "path": "src/headers/server.h",
-          "sha256": "eaa64f4727529c6c9ac5989bb6c4bcae02994f9265ef5e4fea4bfe0eecf4325a"
+          "sha256": "6e49753551ec43602d09e0d6fcb298682c43af3392bcd3377fd792b765f743b0"
         },
         {
           "path": "src/headers/server_cli_oauth.h",
@@ -1604,7 +1604,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "4c9a5fd3fd10d38ef2ea13bdfb69cca1f2aed9701992e3238cee6def39ca5309",
+      "sha256": "b166c3dab001ba2f8b9aee9200e9b5a106e9e721f97bcb7054eb8ba28b749b3f",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
