@@ -185,12 +185,18 @@ func (e *DelegateLimitError) Error() string {
 		e.Elapsed.Round(time.Millisecond))
 }
 
-// A bound of zero means it was never set — no stage deadline on the context, or
-// no tool-loop cap applied — which is a different fact from a bound of zero
-// length. Printing "0s" for it invites exactly the misreading this error exists
-// to prevent: that the limit was reached instantly.
+// Exactly zero means the bound was never set — no deadline on the context, or no
+// tool-loop cap applied — which is a different fact from a bound of zero length.
+// Printing "0s" for it invites the misreading this error exists to prevent: that
+// the limit was reached instantly.
+//
+// A NEGATIVE value is a third, distinct fact. StageWallRemaining comes from
+// time.Until(deadline), which goes negative once the deadline has passed and is
+// not clamped, so a non-positive test would report the one case where the limit
+// provably WAS reached as though no limit existed — the same inversion, pointing
+// the other way. Negatives are rendered as themselves.
 func boundOrUnset(d time.Duration) string {
-	if d <= 0 {
+	if d == 0 {
 		return "unset"
 	}
 	return d.Round(time.Millisecond).String()

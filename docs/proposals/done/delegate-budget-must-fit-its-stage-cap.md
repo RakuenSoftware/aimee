@@ -144,11 +144,29 @@ Run `roundtable-93a0fd7ce4a1693bfb5b3734`, three seats, converged, verdict
 | Finding | Outcome |
 |---|---|
 | The 360s floor fixes an absolute value for one knob, in tension with "Deliberately not proposed" | **Accepted in part.** The number is the arithmetic consequence of two already-shipped engine budgets, not a new policy choice, so the check stays — but it was written as a bare `360` literal, which reads as a chosen value. It is now spelled as `writeVerifyReserveSecs + writeMinRunSecs`, and the refusal message names both components so a reader sees the derivation. |
-| The floor rejects `max_wall_secs` of 1–359, an unrequested compatibility break, without auditing existing configs | **Accepted; audit performed.** No config, fixture, default, or doc in the tree sets a value below 360 — the only values present are the 1800 default and the C clamp range `[30, 86400]`. The exposure is limited to an operator who explicitly set 30–359, for whom every write stage was already refusing before it started. |
-| Clause 3 substituted rather than met; a delegate budget of 900s against a wall cap of 600s still loads | **Disputed, on the record.** After clause 1 that pairing is satisfiable: the 900s budget is clamped to the stage's remaining wall and the delegate finishes inside it. The condition the clause names stopped being the condition that prevents progress. |
-| Clause 1 unmet: the stage-deadline path returns an error, not a partial | **Disputed.** The tool-loop-budget path assembles an abstained partial in `src/posix/agent_runtime.c`. The panel could not read that file from its workspace and said so. A stage deadline firing means the clamp did not hold, which the residual covers. |
+| The floor rejects `max_wall_secs` of 1–359, an unrequested compatibility break, without auditing existing configs | **Accepted; audit performed.** Search set: `max_wall_secs` across `*.yaml *.yml *.json *.md *.c *.go *.sh`. Every occurrence is a schema/accessor reference, not a value, except three: the `1800` default (`server-go/internal/config/store.go` `policyDefaults`, `src/modules/config/config.c`), the C clamp `clampi(item->valueint, 30, 86400)` (`src/modules/config/config_sections.c:833`), and a test reading the shipped default. Nothing sets a value below 360. Exposure is limited to an operator who explicitly set 30–359, for whom every write stage was already refusing before it started. |
+| Clause 3 substituted rather than met; a delegate budget of 900s against a wall cap of 600s still loads | **Disputed, on the record.** `applyDelegateDeadlineCap` (`server-go/internal/engine/native_runner.go`) reduces `ToolLoopTimeoutMSCap` to the stage's remaining wall minus a reserve, and the C side takes the smaller of the two in `agent_loop_total_timeout_ms` (`src/headers/agent_types.h:117`, where a positive `request_cap_ms` "may only reduce that budget"). A 900s budget under a 600s cap therefore runs as ~600s-minus-reserve and finishes inside the stage. The condition the clause names stopped being the condition that prevents progress. Pinned by `TestDelegateDeadlineCapNeverEnlargesCallerCap` and `assert(agent_loop_total_timeout_ms(180000, 57759) == 57759)` in `src/tests/test_agent_apikey.c`. |
+| Clause 1 unmet: the stage-deadline path returns an error, not a partial | **Disputed.** `src/posix/agent_runtime.c` breaks the loop when `agent_loop_per_call_timeout_ms` returns -1 and then assembles a partial: `out->response` is set to a summary, `out->success = 0`, `out->abstained = 1`, and `out->abstain_reason` becomes `"partial result after tool use: tool loop budget exhausted (...)"`. The panel could not read that file from its workspace and said so. A stage deadline firing instead means the clamp did not hold, which the residual covers — and that path has no automated coverage, recorded as validation-pending rather than proven. |
 | Unset bounds render as `0s` | **Accepted and fixed.** An unset bound now renders `unset`; `0s` invited the reading that a limit was hit instantly. |
-| Criterion 4 unmet — no tests in the artifact; proposal not moved | **Reviewer-side artifact error, not a code gap.** The diff submitted to the panel was abridged to non-test Go hunks, so the tests and the `pending/` → `done/` move were genuinely absent *from what it was shown*. Both exist in the merged change. Corrected by re-reviewing the complete diff. |
+| Criterion 4 unmet — no tests in the artifact; proposal not moved | **Reviewer-side artifact error, not a code gap.** The diff submitted was abridged to non-test Go hunks, so the tests and the move were genuinely absent *from what the panel was shown*. Both are in the merged change: `TestStageDeadlineDiagnosticNamesBothLimitsAndElapsed` and `TestDelegateBudgetSmallerThanStageCapKeepsItsOwnDiagnostic` cover the two directions (`server-go/internal/engine/native_runner_test.go`), and this file's location under `done/` is the move. Corrected by re-reviewing the complete diff. |
+
+### Second pass — run `roundtable-7a5d8322d168268a7ea84195`
+
+Three seats, converged, **approved**, with three suggestions and two nits. One
+was a real defect in the fix above and is worth recording plainly:
+`boundOrUnset` treated every non-positive duration as "unset", but
+`StageWallRemaining` comes from `time.Until(deadline)`, which goes negative once
+the deadline has passed and is not clamped. So the one case where the limit
+provably *was* reached would have printed as though no limit existed — the same
+inversion the type was added to remove, pointing the other way. Only an exact zero
+now means unset; negatives render as themselves, pinned by
+`TestDelegateLimitErrorReportsAnExpiredBoundNotUnset`.
+
+Also accepted from that pass: `TestWallFloorIsTheSumOfItsComponents` was
+tautological — it restated a definition from the same `const` block and could only
+fail if someone edited that line — so it is gone; the cross-package guard that
+matters is `TestWriteRoleWallFloorMatchesConfigBound` in `internal/engine`. The
+unset-rendering test now asserts per field instead of one verbatim string.
 
 ## Not closed here
 

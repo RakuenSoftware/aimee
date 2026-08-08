@@ -203,15 +203,38 @@ func TestDelegateLimitErrorDistinguishesUnsetBoundsFromZero(t *testing.T) {
 		Err:     context.DeadlineExceeded,
 		Elapsed: 90 * time.Second,
 	}
-	got := err.Error()
-	want := "context deadline exceeded (stage_wall_remaining=unset delegate_tool_loop_cap=unset elapsed=1m30s)"
-	if got != want {
-		t.Fatalf("Error()=%q, want %q", got, want)
+	for _, want := range []string{
+		"stage_wall_remaining=unset", "delegate_tool_loop_cap=unset", "elapsed=1m30s",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("diagnostic %q is missing %q", err.Error(), want)
+		}
 	}
 	// A set bound still renders as a duration.
 	err.ToolLoopCap = 25 * time.Minute
 	if !strings.Contains(err.Error(), "delegate_tool_loop_cap=25m0s") {
 		t.Fatalf("set bound rendered wrong: %q", err.Error())
+	}
+}
+
+// An ALREADY-EXPIRED bound must not render as "unset". StageWallRemaining comes
+// from time.Until(deadline), which goes negative once the deadline has passed, and
+// nothing clamps it — so treating every non-positive value as "never set" reports
+// the one case where the limit provably WAS reached as though no limit existed.
+// That is the same inversion this error type was added to remove.
+func TestDelegateLimitErrorReportsAnExpiredBoundNotUnset(t *testing.T) {
+	err := &DelegateLimitError{
+		Err:                context.DeadlineExceeded,
+		StageWallRemaining: -2 * time.Second,
+		ToolLoopCap:        25 * time.Minute,
+		Elapsed:            30 * time.Minute,
+	}
+	got := err.Error()
+	if strings.Contains(got, "stage_wall_remaining=unset") {
+		t.Fatalf("an expired stage wall budget was reported as unset: %q", got)
+	}
+	if !strings.Contains(got, "stage_wall_remaining=-2s") {
+		t.Fatalf("diagnostic %q must show the expired budget", got)
 	}
 }
 

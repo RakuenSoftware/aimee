@@ -178,16 +178,6 @@ func TestWallCapBelowWriteRoleFloorIsRejectedNamingBothValues(t *testing.T) {
 	}
 }
 
-// The floor is the sum of the engine's two shipped write-role budgets, not an
-// independently chosen number. Pinning the derivation here keeps the constant
-// honest if either component is ever retuned.
-func TestWallFloorIsTheSumOfItsComponents(t *testing.T) {
-	if MinAutonomyMaxWallSecs != writeVerifyReserveSecs+writeMinRunSecs {
-		t.Fatalf("floor %d is not %d+%d", MinAutonomyMaxWallSecs,
-			writeVerifyReserveSecs, writeMinRunSecs)
-	}
-}
-
 // The shipped default must keep loading. A floor that rejected the default would
 // be a worse failure than the misconfiguration it exists to catch.
 func TestDefaultWallCapRemainsAcceptable(t *testing.T) {
