@@ -1397,7 +1397,34 @@ static void test_shell_worktree_rewrite_is_applied_not_refused(void)
       assert(strncmp(msg, "cd ", 3) == 0);
       assert(strstr(msg, ".aimee") != NULL);
       assert(strstr(msg, "pwd") != NULL);
-      printf("  shell_worktree_rewrite: rc=3 rewrite=[%.60s...]\n", msg);
+
+      /* End to end: the dispatch must APPLY that rewrite, not report it. Create
+       * the worktree the guardrail wants to redirect into, then run the same
+       * tool call through the real dispatch and require both that it was not
+       * refused and that the command actually ran there. Before the fix this
+       * returned "error: guardrail blocked: cd ... && pwd". */
+      char target[768] = "";
+      const char *start = msg + 3; /* past "cd " */
+      const char *end = strstr(start, " && ");
+      assert(end != NULL && (size_t)(end - start) < sizeof(target));
+      memcpy(target, start, (size_t)(end - start));
+      target[end - start] = '\0';
+      snprintf(shellcmd, sizeof(shellcmd), "mkdir -p '%s'", target);
+      assert(system(shellcmd) == 0);
+
+      run_cmd_set_cwd(repo);
+      char *out = dispatch_tool_call("bash", "{\"command\":\"pwd\"}", 10000);
+      run_cmd_set_cwd(NULL);
+      assert(out != NULL);
+      if (strstr(out, "guardrail blocked") != NULL)
+      {
+         fprintf(stderr, "  dispatch refused the rewrite instead of applying it: %s\n", out);
+         assert(0 && "shell worktree rewrite was reported as a refusal");
+      }
+      /* pwd ran inside the redirected worktree, so its output names that path. */
+      assert(strstr(out, target) != NULL);
+      free(out);
+      printf("  shell_worktree_rewrite: rc=3 applied; pwd ran in %.48s...\n", target);
    }
    else
    {
