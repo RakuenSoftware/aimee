@@ -24,7 +24,12 @@ KB_STATUS_AUTHORITY = ../aimee-kb-status-authority$(EXEEXT)
 KB_TOKEN_AUTHORITY = ../aimee-kb-token-authority$(EXEEXT)
 RUNTIME_WEB = ../aimee-runtime-web$(EXEEXT)
 GATEWAY = ../aimee-gateway$(EXEEXT)
-RETIRED_ROOT_BINARIES = ../aimee-client$(EXEEXT) ../aimee-worker$(EXEEXT)
+# Binaries a rename left behind. `all` removes these first so a renamed artifact
+# does not sit in the repo root forever: aimee-webchat became aimee-runtime-web
+# and its 14MB predecessor was never retired, so it stayed untracked, unignored,
+# and large enough to push a workspace sync past the server's 4MB body cap.
+RETIRED_ROOT_BINARIES = ../aimee-client$(EXEEXT) ../aimee-worker$(EXEEXT) \
+                        ../aimee-webchat$(EXEEXT)
 
 # aimee-runtime-web is the only Go artifact and needs the Go toolchain (go.mod pins a
 # newer Go than some distros package, e.g. Debian 13 ships 1.24). The C services
@@ -1448,21 +1453,16 @@ oidc-login-live: ../oidc-login-live
 .PHONY: write-tier-enforce-live
 write-tier-enforce-live: ../write-tier-enforce-live
 
-# Standalone libpq memory-negation eval driver (dev tool, not part of `all`): the
-# aimee-kb object set with kb_main() swapped for a corpus-eval main() plus the
-# mem_eval harness. Links the REAL libpq DB2, so mem_eval_load_corpus opens an
-# isolated throwaway schema in a DISPOSABLE Postgres (AIMEE_DB2_EVAL_URL) and can
-# exercise Postgres-only retrieval (memory_negation_fts_tsv). Build explicitly:
-#   make ../aimee-negation-eval
-../aimee-negation-eval: $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS) $(OBJDIR)/kb/modules/benchmarks/agent_eval.o $(OBJDIR)/kb/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/kb/modules/benchmarks/agent_eval_baseline.o $(OBJDIR)/tests/mem_negation_eval_main.o $(OBJDIR)/tests/support/agent_runtime_eval_stub.o
-	$(CC) -o $@ $^ $(L_KB)
-
-# Deterministic Bucket-3 code-graph harness (dev tool, not part of `all`): loads a
-# code-graph fixture into an isolated temp schema and runs the real
-# db2_code_index_blast_radius. Same libpq object set as aimee-negation-eval, minus the
-# agent_eval/memory objects (not needed). Build: make ../aimee-blast-radius-eval
-../aimee-blast-radius-eval: $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS) $(OBJDIR)/tests/support/agent_runtime_eval_stub.o $(OBJDIR)/tests/blast_radius_eval_main.o
-	$(CC) -o $@ $^ $(L_KB)
+# The standalone memory-negation and blast-radius eval drivers were removed.
+# Both were unbuildable and had been for some time (they referenced
+# modules/agent_eval/, a directory that does not exist), and once that was
+# repaired they could not open their scratch store at all: db2_eval_open_temp_store
+# applies the schema into a private shadow schema, while schema.sql addresses
+# ~950 objects as public.<name>. The two designs are mutually exclusive.
+# See docs/proposals/pending/eval-temp-store-schema-relocation.md.
+#
+# mem_eval_open_temp_db / db2_eval_open_temp_store are KEPT: they still back
+# src/tests/test_memory_retrieval_eval.c and mem_eval_load_corpus.
 
 # aimee_client.o for the same reason as $(SERVER): cli_v1_client_endpoint calls
 # the dependency-free remote-target accessors; --gc-sections drops the transport.
