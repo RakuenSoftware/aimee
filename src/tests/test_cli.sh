@@ -118,6 +118,21 @@ check "version" $AIMEE version
 check "version flag" $AIMEE --version
 check_output "version --json" "\"version\"" $AIMEE --json version
 
+# --- {id}-bearing routes with the id missing ---
+# `workspace get` with no path used to answer "'workspace.get' has no /v1 route",
+# pointing at the route table when the route is present and correct -- the same
+# command with a path works. It must name the missing argument instead, and must
+# not also claim the server request failed, since no request was attempted.
+check_output "missing path-id argument names the argument" "needs an argument" \
+    $AIMEE workspace get
+check_output_not_contains "missing argument does not blame the route table" \
+    "has no /v1 route" $AIMEE workspace get
+check_output_not_contains "missing argument does not blame the server" \
+    "request failed" $AIMEE workspace get
+# The same command WITH the argument still routes.
+check_output_not_contains "workspace get with a path still routes" \
+    "needs an argument" $AIMEE workspace get /tmp
+
 # --- Memory (read-only baseline; write/KB routing lives in service tests) ---
 check_output "memory list json" "[" $AIMEE --json memory list
 check_output "memory read json" "\"context\"" $AIMEE --json memory read

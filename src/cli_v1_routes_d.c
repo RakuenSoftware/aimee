@@ -2222,6 +2222,12 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
       rest_path = cli_v1_pathid_build(disp_method, req, pathid_buf, sizeof(pathid_buf), &rest_verb);
    if (!async_path && !rest_path)
       rest_path = cli_v1_route_for_method(disp_method, &rest_verb);
+   /* Whether the METHOD is a {id}-bearing route at all, independent of whether
+    * this invocation supplied the id. Captured HERE, before the request tree is
+    * freed: disp_method can point into `req` (bm->valuestring), so it dangles
+    * once cJSON_Delete(req) runs and must not be dereferenced below. */
+   const int is_pathid_route =
+       cli_v1_pathid_route_for_method(disp_method, NULL, NULL, NULL) != NULL;
 
    char *http_body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
@@ -2299,15 +2305,33 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
    }
    else if (http_body)
    {
-      /* No first-class route — unreachable given the coverage gates; surface it
-       * rather than silently dropping the command. This is a routing gap, not an
-       * unreachable server, so return early instead of falling through to the
-       * misleading "is the server running?" hint below. */
-      fprintf(stderr, "aimee: '%s' has no /v1 route\n", route->method);
+      /* Two different failures land here. A path-id route ({id}-bearing) whose id
+       * is missing produced no path, which is a MISSING ARGUMENT, not a routing
+       * gap: `aimee workspace get` with no path answered "'workspace.get' has no
+       * /v1 route" while `aimee workspace get <path>` worked fine, sending the
+       * user to look for a route that is present and correct. Ask
+       * cli_v1_pathid_route_for_method() which case this is -- it reports whether
+       * the METHOD is a path-id route at all, independently of whether this
+       * invocation supplied the id. */
+      const int missing_arg = is_pathid_route;
+      if (missing_arg)
+         fprintf(stderr, "aimee: '%s' needs an argument (the id or path to act on)\n",
+                 route->method);
+      else
+         /* Genuinely no first-class route — surface it rather than silently
+          * dropping the command. This is a routing gap, not an unreachable
+          * server, so return early instead of falling through to the misleading
+          * "is the server running?" hint below. */
+         fprintf(stderr, "aimee: '%s' has no /v1 route\n", route->method);
       free(http_body);
       free(bearer);
       free(remote);
-      return -1;
+      /* >= 0 means "handled, this is the exit code" and suppresses the caller's
+       * "server /v1 request failed" line. A missing argument IS fully handled --
+       * no request was ever attempted, so blaming the server on the next line is
+       * doubly wrong. A real routing gap keeps returning -1 so that path is
+       * unchanged. */
+      return missing_arg ? 1 : -1;
    }
 
    free(http_body);
