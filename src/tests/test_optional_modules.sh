@@ -110,6 +110,36 @@ unset AIMEE_MODULE_CONTROL_WEB
 # 9. The shipped manifest itself is never modified.
 check "shipped manifest is unmodified" "$shipped_before" "$(cat "$shipped")"
 
+# 10. The caller captures this function's stdout as the manifest path, so stdout
+# must carry NOTHING but that path. Every case above ran without a `log` defined,
+# and the library only logs when one exists — so the diagnostics were never on
+# stdout to begin with and the contract went untested. The real caller
+# (server-entrypoint.sh) does define log(), and when its log() wrote to stdout the
+# captured "path" became the diagnostic plus the path. The module supervisor was
+# handed that and died with "fatal: missing module manifest", taking down every
+# module — the whole point of the gate — the moment any optional module was gated.
+#
+# Tested behaviourally against the entrypoint's OWN log() definition, extracted
+# and evaluated here, so this pins the real caller rather than a restatement of
+# it. A log() that prints to stdout fails this.
+entrypoint="$root/deploy/container/server-entrypoint.sh"
+[ -r "$entrypoint" ] || { echo "optional-modules: missing $entrypoint" >&2; exit 1; }
+log_def=$(grep -m1 '^log() {' "$entrypoint")
+[ -n "$log_def" ] || { echo "optional-modules: no log() in $entrypoint" >&2; exit 1; }
+eval "$log_def"
+check "the entrypoint's log() writes nothing to stdout" "" "$(log probe 2>/dev/null)"
+
+# And with that same log() in scope, the captured value must be a usable path.
+AIMEE_MODULE_GOVERNANCE=1
+export AIMEE_MODULE_GOVERNANCE
+out=$(apply_optional_modules server "$shipped" "$tmp" 2>/dev/null)
+check "captured stdout is a readable manifest path" \
+    "1" "$(test -r "$out" && echo 1 || echo 0)"
+check "captured stdout carries no diagnostic text" \
+    "0" "$(printf '%s' "$out" | grep -c 'server-entrypoint' || true)"
+unset AIMEE_MODULE_GOVERNANCE
+unset -f log 2>/dev/null || true
+
 if [ "$fails" -ne 0 ]; then
     echo "test_optional_modules: $fails failure(s)" >&2
     exit 1
