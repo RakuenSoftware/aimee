@@ -321,8 +321,24 @@ int handle_workspace_mirror_sync(server_ctx_t *ctx, server_conn_t *conn, cJSON *
     * commits or pushes, so accepting the patch while keeping an older head would
     * store a pair that cannot be applied — and the failure would surface later,
     * during a reconstruct, far from the request that caused it. */
+   /* A working tree is not bounded by anything the transport can choose, so the
+    * patch arrives in chunks and is reassembled here rather than shipped whole.
+    * `seq` 0 truncates (discarding a partial from an abandoned run), later ones
+    * append, and only `final` commits the head — a head stored against a patch
+    * that is still arriving would be applied to a fragment on the next
+    * reconstruct, far from the request that caused it.
+    *
+    * A request with neither field is the single-shot form and behaves exactly as
+    * before: seq 0, final true. */
+   cJSON *jseq = cJSON_GetObjectItemCaseSensitive(req, "seq");
+   cJSON *jfinal = cJSON_GetObjectItemCaseSensitive(req, "final");
+   int seq = cJSON_IsNumber(jseq) ? (int)jseq->valuedouble : 0;
+   int final = jfinal ? cJSON_IsTrue(jfinal) : 1;
+   if (seq < 0)
+      return server_send_error(conn, "workspace: mirror-sync seq must not be negative", NULL);
+
    const char *client_head = jo_str(req, "head", "");
-   if (client_head && client_head[0])
+   if (final && client_head && client_head[0])
    {
       (void)config_workspace_add(root, "mirror", NULL, client_head);
       /* Republish the live snapshot, for the same reason workspace.add does:
@@ -350,11 +366,23 @@ int handle_workspace_mirror_sync(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    platform_mkdir_p(parent, 0700);
 
    const workspace_provider_t *ws = workspace_provider_shared();
-   if (ws->write_all(ws, diff_path, diff, strlen(diff)) != 0)
+   if (seq > 0 && !ws->append)
+      return server_send_error(
+          conn, "workspace: this provider cannot append, so a chunked sync cannot be reassembled",
+          NULL);
+   int stored = seq == 0 ? ws->write_all(ws, diff_path, diff, strlen(diff))
+                         : ws->append(ws, diff_path, diff, strlen(diff));
+   if (stored != 0)
       return server_send_error(conn, "workspace: failed to store client diff", NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "bytes", (double)strlen(diff));
+   cJSON_AddNumberToObject(resp, "seq", seq);
+   /* The ack a chunking client checks before sending anything after chunk 0. An
+    * older server answers without it, and writes every chunk whole — the last
+    * one would win and the mirror would reconstruct from a fragment that looks
+    * like a complete tree. The client must be able to tell the difference. */
+   cJSON_AddBoolToObject(resp, "chunked", 1);
    return send_and_free(conn, resp);
 }
 

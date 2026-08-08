@@ -1658,6 +1658,162 @@ int cli_index_scan_remote(int argc, char **argv)
 
 #endif /* AIMEE_POSIX */
 
+/* Ship a workspace patch as a sequence of bounded requests.
+ *
+ * A working tree is not bounded by anything the transport can choose, so sending
+ * the patch whole made the route unusable on any real checkout: one generated
+ * file exceeds the request cap, and raising the cap only moves the number that
+ * will be wrong next. The server reassembles by appending each chunk to the same
+ * file, so the size that matters is the tree's, not a request's.
+ *
+ * `seq` 0 truncates server-side; only the final chunk carries the head, so a head
+ * is never stored against a patch that is still arriving.
+ *
+ * An older server ignores both fields and writes every chunk whole, which would
+ * leave the mirror holding the LAST chunk while looking complete. Two things
+ * prevent that. The first response must acknowledge `chunked` before any later
+ * chunk is sent; and chunk 0 deliberately carries NO patch data, so the worst an
+ * old server can be left holding is an empty diff — a defined state (a clean
+ * checkout at the recorded head), never a fragment of one. Patch data starts at
+ * seq 1. */
+static int cli_v1_mirror_sync_chunked(cJSON *req, int timeout, int json_output)
+{
+   cJSON *jdiff = cJSON_GetObjectItemCaseSensitive(req, "diff");
+   const char *diff = cJSON_IsString(jdiff) ? jdiff->valuestring : "";
+   size_t total = strlen(diff);
+
+   /* Sized against the PER-METHOD limit, not the transport one. Requests are
+    * capped twice: SHTTP_MAX_BODY (4MB) at the listener, and a per-method limit
+    * that defaults to LIMIT_DEFAULT — 256KB — for any method without its own
+    * entry, which mirror-sync does not have. The method limit is the binding one
+    * and rejects with PAYLOAD_TOO_LARGE.
+    *
+    * 128KB of patch leaves room for JSON escaping (worst case ~2x on a binary
+    * patch's escapes) and the envelope inside that 256KB. Chunking means no limit
+    * anywhere has to move: the size of one request stops being a function of the
+    * size of the tree. */
+   const size_t chunk_max = 128u * 1024u;
+
+   char *remote = cli_v1_client_endpoint();
+   char *bearer = remote ? cli_v1_client_bearer() : NULL;
+
+   cJSON *jhead = cJSON_GetObjectItemCaseSensitive(req, "head");
+   char *head = cJSON_IsString(jhead) ? safe_strdup(jhead->valuestring) : safe_strdup("");
+
+   size_t sent = 0;
+   int seq = 0, rc = 0;
+   int data_chunks = (int)((total + chunk_max - 1) / chunk_max);
+   /* One empty begin chunk, then the data. A patch that fits in a single request
+    * still uses the begin chunk: one extra tiny round trip buys the same
+    * old-server safety on every sync rather than only on large ones. */
+   int chunks = data_chunks + 1;
+
+   for (;;)
+   {
+      int begin = (seq == 0);
+      size_t n = begin ? 0 : (total - sent > chunk_max ? chunk_max : total - sent);
+      int final = !begin && (sent + n >= total);
+      if (begin && total == 0)
+         final = 1; /* nothing to ship: the begin chunk is the whole sync */
+
+      cJSON *body = cJSON_CreateObject();
+      cJSON_AddStringToObject(body, "method", "workspace.mirror-sync");
+      cJSON *args = cJSON_CreateArray();
+      cJSON *src_args = cJSON_GetObjectItemCaseSensitive(req, "args");
+      cJSON *a = NULL;
+      cJSON_ArrayForEach(a, src_args) if (cJSON_IsString(a))
+          cJSON_AddItemToArray(args, cJSON_CreateString(a->valuestring));
+      cJSON_AddItemToObject(body, "args", args);
+      char *slice = (char *)malloc(n + 1);
+      if (!slice)
+      {
+         cJSON_Delete(body);
+         rc = 1;
+         break;
+      }
+      memcpy(slice, diff + sent, n);
+      slice[n] = '\0';
+      cJSON_AddStringToObject(body, "diff", slice);
+      free(slice);
+      cJSON_AddNumberToObject(body, "seq", seq);
+      cJSON_AddBoolToObject(body, "final", final);
+      if (final && head[0])
+         cJSON_AddStringToObject(body, "head", head);
+
+      char *wire = cJSON_PrintUnformatted(body);
+      cJSON_Delete(body);
+      if (!wire)
+      {
+         rc = 1;
+         break;
+      }
+      int status = 0;
+      cJSON *resp =
+          cli_v1_send(remote, bearer, "POST", "/v1/workspace/mirror-sync", wire, timeout, &status);
+      free(wire);
+      if (!resp)
+      {
+         fprintf(stderr, "aimee: workspace mirror-sync: chunk %d of %d was not answered\n", seq + 1,
+                 chunks);
+         rc = 1;
+         break;
+      }
+      /* The refusal envelope is {"status":"error","message":...}; an "error" key
+       * only appears on some paths. Reading the wrong one made a server that had
+       * answered clearly ("PAYLOAD_TOO_LARGE ...") fall through to the
+       * capability message below and get reported as too old — a plain refusal
+       * dressed up as a version problem. */
+      cJSON *st = cJSON_GetObjectItemCaseSensitive(resp, "status");
+      cJSON *err = cJSON_GetObjectItemCaseSensitive(resp, "error");
+      int failed = (cJSON_IsString(st) && strcmp(st->valuestring, "error") == 0) || err != NULL;
+      if (failed)
+      {
+         cJSON *m = cJSON_GetObjectItemCaseSensitive(resp, "message");
+         if (!cJSON_IsString(m) && cJSON_IsObject(err))
+            m = cJSON_GetObjectItemCaseSensitive(err, "message");
+         if (!cJSON_IsString(m) && cJSON_IsString(err))
+            m = err;
+         fprintf(stderr, "aimee: workspace mirror-sync: chunk %d of %d refused: %s\n", seq + 1,
+                 chunks, cJSON_IsString(m) ? m->valuestring : "rejected");
+         cJSON_Delete(resp);
+         rc = 1;
+         break;
+      }
+      /* Refuse to keep going against a server that cannot reassemble: it would
+       * accept every chunk and end up storing only the last one. */
+      if (!final)
+      {
+         cJSON *ack = cJSON_GetObjectItemCaseSensitive(resp, "chunked");
+         if (!cJSON_IsTrue(ack))
+         {
+            fprintf(stderr,
+                    "aimee: workspace mirror-sync: this patch needs %d chunks but the server did "
+                    "not acknowledge chunked sync, so the parts would overwrite each other and the "
+                    "mirror would look complete while holding only the last one. Upgrade the "
+                    "server, or sync a tree small enough for one request.\n",
+                    chunks);
+            cJSON_Delete(resp);
+            rc = 1;
+            break;
+         }
+      }
+      cJSON_Delete(resp);
+
+      sent += n;
+      seq++;
+      if (final)
+         break;
+   }
+
+   free(remote);
+   free(bearer);
+   free(head);
+
+   if (rc == 0 && !json_output)
+      printf("workspace mirror-sync: shipped %zu byte(s) in %d chunk(s)\n", total, seq);
+   return rc;
+}
+
 /* cli_v1_dispatch_local: dispatch a pre-marshalled {method, ...params} request to its
  * first-class /v1 route over the co-located transport — the local aimee-http.sock
  * on POSIX, or the configured remote on Windows (no UDS). Interactive
@@ -2028,6 +2184,12 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
    }
 
    int timeout = route->timeout_ms > 0 ? route->timeout_ms : CLIENT_DEFAULT_TIMEOUT_MS;
+   if (strcmp(route->method, "workspace.mirror-sync") == 0)
+   {
+      int rc = cli_v1_mirror_sync_chunked(req, timeout, effective_json_output);
+      cJSON_Delete(req);
+      return rc;
+   }
    if (strcmp(route->method, "delegate") == 0)
    {
       int delegate_timeout = delegate_timeout_from_args(fwd_argc, fwd_argv);
