@@ -1363,10 +1363,65 @@ char *memory_assemble_context_explain(const char *task_hint,
 
    int ecount = 0;
    int tokens_used = 0;
+   /* Indices of candidates already admitted, for the near-duplicate check below.
+    * Comparing against the admitted set keeps the work bounded (at most this many
+    * comparisons per candidate) and means suppression is judged against what the
+    * model will actually see, not against every candidate considered. */
+#define ASSEMBLE_DEDUP_TRACKED 64
+   int selected_idx[ASSEMBLE_DEDUP_TRACKED];
+   int selected_n = 0;
    for (int i = 0; i < scored_count && ecount < explain_max; i++)
    {
       context_assemble_explain_entry_t *e = &explain[ecount];
       const context_candidate_t *c = &scored[i];
+
+      /* Read-time near-duplicate suppression.
+       *
+       * Candidates are deduplicated by memory id upstream, and a similarity floor
+       * drops weak hits -- but neither notices two DIFFERENT rows that say the
+       * same thing. The budget is finite, so a restatement admitted here is
+       * evidence displaced: rejected_for_budget then counts real context pushed
+       * out by a paraphrase of context already present. Dense, redundant
+       * injections also give a model concrete grounds to distrust the recall
+       * block as a whole.
+       *
+       * Lexical, not embedding-based, and deliberately so: this is the read path,
+       * where an embedder round-trip per candidate pair would add latency to
+       * every turn. Token overlap catches the case that actually occurs -- the
+       * same fact stored twice in slightly different words -- and costs a set
+       * comparison. The threshold is high on purpose: this suppresses
+       * restatements, not merely related memories, because wrongly dropping a
+       * distinct fact is far worse than admitting a redundant one. */
+      int duplicate_of = -1;
+      for (int s = 0; s < selected_n; s++)
+      {
+         const context_candidate_t *sel = &scored[selected_idx[s]];
+         if (assemble_texts_near_duplicate(c->content[0] ? c->content : c->key,
+                                           sel->content[0] ? sel->content : sel->key))
+         {
+            duplicate_of = selected_idx[s];
+            break;
+         }
+      }
+      if (duplicate_of >= 0)
+      {
+         memset(e, 0, sizeof(*e));
+         e->id = c->id;
+         snprintf(e->tier, sizeof(e->tier), "%s", c->tier);
+         snprintf(e->key, sizeof(e->key), "%.*s", (int)(sizeof(e->key) - 1), c->key);
+         snprintf(e->kind, sizeof(e->kind), "%s", c->kind);
+         snprintf(e->scope, sizeof(e->scope), "%s", c->scope[0] ? c->scope : "global");
+         e->tokens = c->estimated_tokens;
+         e->score = c->score;
+         e->score_per_token = c->score_per_token;
+         e->selected = 0;
+         snprintf(e->rejection_reason, sizeof(e->rejection_reason),
+                  "near_duplicate of memory %lld", (long long)scored[duplicate_of].id);
+         if (metrics)
+            metrics->suppressed_near_duplicates++;
+         ecount++;
+         continue;
+      }
       memset(e, 0, sizeof(*e));
       e->id = c->id;
       snprintf(e->tier, sizeof(e->tier), "%s", c->tier);
@@ -1383,6 +1438,8 @@ char *memory_assemble_context_explain(const char *task_hint,
          {
             e->selected = 1;
             tokens_used += e->tokens;
+            if (selected_n < (int)(sizeof(selected_idx) / sizeof(selected_idx[0])))
+               selected_idx[selected_n++] = i;
             if (metrics)
                metrics->used_tokens = tokens_used;
          }
@@ -1398,6 +1455,9 @@ char *memory_assemble_context_explain(const char *task_hint,
       else
       {
          e->selected = (ecount < MAX_CONTEXT_MEMS) ? 1 : 0;
+         if (e->selected &&
+             selected_n < (int)(sizeof(selected_idx) / sizeof(selected_idx[0])))
+            selected_idx[selected_n++] = i;
          if (!e->selected)
             snprintf(e->rejection_reason, sizeof(e->rejection_reason), "count_cap (MAX=%d)",
                      MAX_CONTEXT_MEMS);
