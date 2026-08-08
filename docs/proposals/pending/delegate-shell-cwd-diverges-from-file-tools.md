@@ -65,6 +65,34 @@ compile, test, or `gofmt` to notice. Writes are permitted; verification is not.
 That combination should not be reachable. Either a delegate can check its own work
 or it should not be able to write.
 
+## The provisioning half is mostly not a gap
+
+`workspace_turn_bind_active` (`src/modules/workspace/workspace_turn.c`) already
+has two server-side paths, and they differ in exactly the way that matters here:
+
+| Provider | Bound by | Needs a live client? |
+|---|---|---|
+| `mirror` | `bind_mirror(cwd, root, remote, head)` — `remote`/`head` read from `config_workspace_vcs_remote()` / `config_workspace_vcs_head()`, then `mirror_reconstruct_cwd()` materialises a real worktree from the server's own bare mirror | **No** |
+| `detached` | the runner queue, served by the client's `aimee workspace serve` loop | **Yes** |
+
+So provisioning a server-side tree for a background delegate is a solved problem:
+it is the `mirror` provider, and it works with no client present because the head
+and remote are persisted in config rather than reported per turn.
+
+A `detached` workspace is unserviceable by a background job **by design** — the
+files live on the client, and the job runs after that client has gone. That is
+not an omission to be filled in; it is what "detached" means. The refusal
+therefore names the mirror route with its exact command rather than the vague
+"use a different provider", and explains why detached cannot work in that
+position.
+
+What remains genuinely open is narrower than this document first claimed:
+a detached workspace that *does* carry a `remote` and `head` could fall back to
+the mirror tier instead of being refused. Whether that is desirable is a real
+question — it would run the delegate against the last synced state rather than
+the client's current tree, which is its own way to be quietly wrong — and it is
+an operator-facing decision, not an obvious win.
+
 ## Proposal
 
 1. **One root per delegate turn.** The shell and the file tools must resolve the
