@@ -150,3 +150,51 @@ func TestTriggerRulesRejectUnsafeHumanInputs(t *testing.T) {
 		})
 	}
 }
+
+// A wall cap below the write-role floor makes every implement stage refuse
+// before it starts, so the stage can never finish however often it retries.
+// Rejecting the value when it is set reports that as the configuration error it
+// is, instead of leaving it to be inferred from dying attempts.
+func TestWallCapBelowWriteRoleFloorIsRejectedNamingBothValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aimee.yaml")
+	if err := os.WriteFile(path, []byte("provider: codex\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.Set("autonomy.max_wall_secs", float64(MinAutonomyMaxWallSecs-1))
+	if err == nil {
+		t.Fatal("a wall cap under which no write stage can ever finish was accepted")
+	}
+	if !strings.Contains(err.Error(), "359") || !strings.Contains(err.Error(), "360") {
+		t.Fatalf("error %q must name both the configured value and the required floor", err)
+	}
+}
+
+// The shipped default must keep loading. A floor that rejected the default would
+// be a worse failure than the misconfiguration it exists to catch.
+func TestDefaultWallCapRemainsAcceptable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aimee.yaml")
+	if err := os.WriteFile(path, []byte("provider: codex\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shipped, ok := number(policyDefaults["autonomy.max_wall_secs"])
+	if !ok {
+		t.Fatalf("shipped default missing: %#v", policyDefaults["autonomy.max_wall_secs"])
+	}
+	if shipped < MinAutonomyMaxWallSecs {
+		t.Fatalf("shipped default %d is below the enforced floor %d", shipped, MinAutonomyMaxWallSecs)
+	}
+	if err := store.Set("autonomy.max_wall_secs", float64(shipped)); err != nil {
+		t.Fatalf("shipped default rejected: %v", err)
+	}
+	if err := store.Set("autonomy.max_wall_secs", float64(MinAutonomyMaxWallSecs)); err != nil {
+		t.Fatalf("exact floor rejected: %v", err)
+	}
+}
