@@ -77,6 +77,24 @@ struct workspace_provider
     * success, -1 on open/write/close error. */
    int (*write_all)(const workspace_provider_t *p, const char *path, const char *data, size_t len);
 
+   /* Append `len` bytes of `data` to `path`, creating it when absent. Same
+    * error contract as write_all.
+    *
+    * Exists so a payload larger than one request can be reassembled where it
+    * lands, rather than held whole in memory first: a workspace patch is bounded
+    * by the size of a working tree, not by anything the transport can pick, so
+    * "raise the request cap" only moves the number that will be wrong next. The
+    * caller writes chunk 0 with write_all (truncating any partial from an
+    * abandoned run) and every later chunk with this.
+    *
+    * OPTIONAL — may be NULL. The container backend exposes only a whole-file
+    * write_file(), so an append there would have to read-modify-write, and its
+    * NUL-terminated wire would truncate binary content in the process. A caller
+    * that needs append must check for NULL and refuse rather than assume it, and
+    * only the shared provider (which is what the mirror tier writes through)
+    * implements it today. */
+   int (*append)(const workspace_provider_t *p, const char *path, const char *data, size_t len);
+
    /* Fill `*st` for `path`. Always returns 0; st->exists is 0 when absent. */
    int (*stat)(const workspace_provider_t *p, const char *path, ws_stat_t *st);
 
