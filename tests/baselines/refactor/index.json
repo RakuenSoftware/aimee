@@ -891,7 +891,7 @@
         },
         {
           "path": "src/headers/memory.h",
-          "sha256": "22f157b0dd5ece2e36cb055a41f0aa4144149ecbe511d8a39d44c031f831c5bb"
+          "sha256": "13fbd3cbc89990f42cbac5652ae0a79da53d3812bd1a09b69c740eac66650bb8"
         },
         {
           "path": "src/headers/middleware.h",
@@ -1604,7 +1604,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "4bc993edd587e55689645267d25711f6b7dd9511926f80451aeb4689a8ce7a54",
+      "sha256": "9a52e800a8d8b75838846742557baf28bbaa090175c719d4b5b3eb9c2fc0b049",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
