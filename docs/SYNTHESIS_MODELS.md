@@ -16,7 +16,7 @@ distinction this page replaces.
 | --- | --- | --- |
 | **Simplest thing that works** | Point `SYNTHESIS_ENDPOINT` at an external OpenAI-compatible endpoint | Best quality, no local GPU or RAM cost, your notes leave the machine |
 | **Local, and quality matters most** | deploy the `aimee-llm-e4b` sidecar | 0.81 F1 extraction, 7.46 GB of weights (UD-Q6_K_XL), 3.3 tok/s on 8 CPU threads |
-| **Local, and the box is small** | deploy the `aimee-llm-e2b` sidecar | QAT weights, 2.62 GB (`qat-UD-Q4_K_XL`), ~6.3 tok/s on 8 CPU threads — both the F1 and the throughput caveats below apply |
+| **Local, and the box is small** | deploy the `aimee-llm-e2b` sidecar | QAT weights, 2.62 GB (`qat-UD-Q4_K_XL`), ~6.3 tok/s on 8 CPU threads, and both the F1 and the throughput caveats below apply |
 
 **The two images do not carry the same quant, and the asymmetry is the point.** On
 the 69-note gold set, dropping Q6 to Q4 costs E4B 0.0862 F1 (95% CI
@@ -31,20 +31,20 @@ Q6, and the F1 difference is smaller than one gold triple.
 choice from the quant.** QAT trains the model with the Q4 rounding in the loop, so
 it recovers most of what Q4 costs a model this small. Measured at n=1001 on
 `gold_small`, google's QAT q4_0 arm scores **0.6406 strict F1**, which is **+0.0389
-over the same model's UD-Q4_K_XL** — outside the +/-0.024 interval that n resolves,
+over the same model's UD-Q4_K_XL**, outside the +/-0.024 interval that n resolves,
 so it is one of the few deltas in that campaign that clears its own noise floor.
 That evidence lives on the unmerged `bench/tier-a-small-models` branch (defect 39 and
 finding 31 in its `MEASUREMENT_LOG.md`, 629c62eb93 and 4ae31f8af8), not in the copy
 of that file on this branch.
 
-**Do not read 0.6406 against the 0.81 in the table.** They are different gold sets —
-`gold_small` at n=1001 versus the 69-note set — and the campaign found that even the
+**Do not read 0.6406 against the 0.81 in the table.** They are different gold sets,
+`gold_small` at n=1001 versus the 69-note set, and the campaign found that even the
 same model on overlapping corpora moves by more than the gap between them. The
 +0.0389 is a paired within-corpus delta and is the part that transfers; the absolute
 is quoted so the delta has something to sit on, not as a rank against E4B.
 
 **The F1 number for E2B is deliberately absent from the table above.** What ships is
-unsloth's UD requant *of* google's QAT checkpoint — chosen over google's own GGUF
+unsloth's UD requant *of* google's QAT checkpoint, chosen over google's own GGUF
 because google publishes no MTP draft and no resolvable `repo:tag`, both of which
 this image's addressing depends on, and because it is 2.62 GB against google's 3.35
 GB. That requant has not been benchmarked on its own. The +0.0389 is evidence for
@@ -63,8 +63,8 @@ E4B's F1 above is its shipped quant at strict F1 on that set, measured on
 GPU so throughput is not a confound. The throughput figures are `llama-bench` at
 Q8_0 on 8 CPU threads and have NOT been re-measured at the shipped quants, so treat
 them as the shape of the gap rather than a prediction; E2B at Q4 will be somewhat
-faster than the 6.3 shown. E2B's 6.3 is doubly carried over — Q8_0 rather than the
-shipped Q4, and the non-QAT weights rather than the QAT ones — which is the same
+faster than the 6.3 shown. E2B's 6.3 is doubly carried over, Q8_0 rather than the
+shipped Q4 and the non-QAT weights rather than the QAT ones, which is the same
 reason its F1 was dropped; it is kept only because a throughput ordering survives a
 weight swap in a way an F1 figure does not. See
 [the caveats](#caveats-you-should-read-before-leaning-on-any-of-this). Resident
@@ -172,7 +172,7 @@ Q8_0; the images ship `qat-UD-Q4_K_XL` for E2B and `UD-Q6_K_XL` for E4B.
 non-QAT pair it covers scores 0.7206 (E2B Q4) and 0.8062 (E4B Q6), so the Q8_0 table
 overstates E4B slightly and understates the non-QAT E2B by more than a little. Of
 those two, only 0.8062 still describes a shipped image: E2B has since moved to QAT
-weights, so its row there is a lower bound rather than the shipped figure — see the
+weights, so its row there is a lower bound rather than the shipped figure. See the
 F1 caveat under "Pick one of three". Prefer the
 QUANT_DECISION numbers when the question is "what will I get", and this section
 when the question is "how do the two models compare on one lane".

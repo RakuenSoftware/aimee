@@ -31,7 +31,7 @@ apart.
 > than papered over: the shipped artefact is unsloth's UD *requant* of that QAT
 > checkpoint and was not benchmarked separately, and the QAT arms ran on `gold_small`
 > rather than this document's 69-note set, so no row here is directly comparable to
-> them. **E4B is untouched** — still `UD-Q6_K_XL`, still the measured half, and the
+> them. **E4B is untouched**: still `UD-Q6_K_XL`, still the measured half, and the
 > Q6-over-Q4 result below is still the only quant comparison in the campaign that
 > cleared significance. The operator-facing half of this note is the F1 caveat under
 > "Pick one of three" in [`docs/SYNTHESIS_MODELS.md`](../../docs/SYNTHESIS_MODELS.md);
