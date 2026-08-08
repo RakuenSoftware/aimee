@@ -2852,7 +2852,6 @@ static cJSON *sci_drive_delegate(cJSON *req)
    return out;
 }
 
-
 /* A background delegate on a DETACHED (client-served) workspace has no live client
  * by the time its worker runs, so its shell is redirected into a server-side
  * ephemeral workspace that holds no checkout. Its FILE tools still resolve the
@@ -2879,14 +2878,19 @@ static void bg_detached_delegate_case(const char *role, const char *prompt, int 
    snprintf(mk, sizeof(mk), "mkdir -p %s", wt);
    assert(system(mk) == 0);
 
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_load(&cfg);
-   cfg.workspace_count = 1;
-   snprintf(cfg.workspaces[0], MAX_PATH_LEN, "%s", ws);
-   snprintf(cfg.workspace_providers[0], sizeof(cfg.workspace_providers[0]), "detached");
-   assert(config_save(&cfg) == 0);
+   /* Register the workspace by writing the config file directly. The config
+    * struct is a secret of the config module, so this test never names it. */
+   char cfgdir[700];
+   snprintf(cfgdir, sizeof(cfgdir), "mkdir -p %s/.config/aimee", tmpdir);
+   assert(system(cfgdir) == 0);
+   char cfgpath[700];
+   snprintf(cfgpath, sizeof(cfgpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+   FILE *cf = fopen(cfgpath, "w");
+   assert(cf != NULL);
+   fprintf(cf, "workspaces:\n  - path: %s\n    provider: detached\n", ws);
+   fclose(cf);
    config_reload();
+   assert(config_workspace_count() == 1);
 
    g_git_repo_root_rc = 0;
    snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", ws);
