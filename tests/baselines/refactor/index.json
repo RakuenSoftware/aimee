@@ -7,7 +7,7 @@
       "files": [
         {
           "path": "docs/gen/cli-commands.md",
-          "sha256": "97ff49192796ca16e4104f62c7ddca38bc126aa2976bbcd12d7c1549733f92cf"
+          "sha256": "07047b4d488662f336fa762250b93d45a47427ce832d483c9f3cf4ae166b8968"
         },
         {
           "path": "src/gateway/gateway_main.c",
@@ -1611,7 +1611,7 @@
       "files": [
         {
           "path": "docs/gen/v1-route-descriptor.json",
-          "sha256": "03d9af141da67e7f4745b727ba014f4ecc05df02e5e122a41e48d19a3bf1426e"
+          "sha256": "c3cf54111e6ae5374e8b7de3edb4f5a2acb1499f04de3e77c54152dec7f64798"
         }
       ]
     }
