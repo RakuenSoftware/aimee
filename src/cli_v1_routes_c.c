@@ -2313,11 +2313,56 @@ void pt_print_roundtable_review(const char *method, cJSON *resp)
    cJSON *art = cJSON_GetObjectItemCaseSensitive(resp, "artifact");
    if (cJSON_IsString(art) && art->valuestring[0])
       printf("%s\n", art->valuestring);
+   else
+   {
+      /* A review that produced no artifact is the case that matters most, and it
+       * printed NOTHING while exiting 0 -- so asking for a review, getting none,
+       * and being told nothing was indistinguishable from an approval. The panel
+       * reports exactly why in status/pause_reason/detail; say it.
+       *
+       * Measured against a real server: a review with no saved roundtable
+       * returned status=pending, pause_reason=panel_unreachable, detail="a
+       * roundtable review must name a saved roundtable" -- and the operator saw
+       * a silent success. */
+      cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+      cJSON *reason = cJSON_GetObjectItemCaseSensitive(resp, "pause_reason");
+      cJSON *detail = cJSON_GetObjectItemCaseSensitive(resp, "detail");
+      const char *st = cJSON_IsString(status) ? status->valuestring : "";
+      const char *rs = cJSON_IsString(reason) ? reason->valuestring : "";
+      const char *dt = cJSON_IsString(detail) ? detail->valuestring : "";
+      if (st[0] || rs[0] || dt[0])
+      {
+         fprintf(stderr, "aimee: roundtable produced no review");
+         if (st[0])
+            fprintf(stderr, " (%s)", st);
+         if (rs[0])
+            fprintf(stderr, ": %s", rs);
+         fprintf(stderr, "\n");
+         if (dt[0])
+            fprintf(stderr, "  %s\n", dt);
+      }
+      else
+         fprintf(stderr, "aimee: roundtable produced no review and gave no reason\n");
+   }
    cJSON *rounds = cJSON_GetObjectItemCaseSensitive(resp, "rounds_run");
    cJSON *converged = cJSON_GetObjectItemCaseSensitive(resp, "converged");
    if (cJSON_IsNumber(rounds))
       fprintf(stderr, "[roundtable: %d round(s)%s]\n", (int)rounds->valuedouble,
               cJSON_IsTrue(converged) ? ", converged" : "");
+}
+
+/* A review is a failure for exit-status purposes unless it actually produced
+ * one. `pending` (the panel could not be reached or seated) and any error status
+ * both mean no review happened, and a caller that gates on the exit code -- a
+ * pre-merge hook, CI, an agent -- must not read that as approval. */
+int roundtable_review_response_is_failure(cJSON *resp)
+{
+   if (!resp)
+      return 1;
+   cJSON *art = cJSON_GetObjectItemCaseSensitive(resp, "artifact");
+   if (cJSON_IsString(art) && art->valuestring[0])
+      return 0;
+   return 1;
 }
 
 /* --- kb grant printers. These four commands succeeded but printed NOTHING in text

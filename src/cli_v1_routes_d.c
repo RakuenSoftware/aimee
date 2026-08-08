@@ -1838,6 +1838,11 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
    {
       exit_rc = 1;
    }
+   else if (strcmp(route->method, "roundtable.review") == 0 &&
+            roundtable_review_response_is_failure(resp))
+   {
+      exit_rc = 1;
+   }
 
    if (!effective_json_output && strcmp(route->method, "delegate") == 0)
    {

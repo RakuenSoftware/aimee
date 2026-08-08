@@ -833,6 +833,36 @@ static void test_server_status_route_lookup(void)
    printf("  PASS: test_server_status_route_lookup\n");
 }
 
+/* Asking for a review and not getting one must not look like approval.
+ *
+ * Measured against a real aimee-server with the roundtable module attached: a
+ * review with no saved roundtable came back status=pending,
+ * pause_reason=panel_unreachable, artifact="" -- and `aimee roundtable review`
+ * printed zero bytes and exited 0. A pre-merge hook, CI job or agent gating on
+ * that exit code would have read "no review happened" as "the panel approved
+ * it", which is the one conclusion it must never draw. */
+static void test_roundtable_review_without_an_artifact_is_a_failure(void)
+{
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "pending");
+   cJSON_AddStringToObject(resp, "pause_reason", "panel_unreachable");
+   cJSON_AddStringToObject(resp, "artifact", "");
+   assert(roundtable_review_response_is_failure(resp) == 1);
+
+   /* An actual review is a success, whatever else the envelope carries. */
+   cJSON_ReplaceItemInObject(resp, "artifact", cJSON_CreateString("## Findings\n- one"));
+   assert(roundtable_review_response_is_failure(resp) == 0);
+
+   /* A missing artifact field is the same as an empty one: no review. */
+   cJSON_DeleteItemFromObject(resp, "artifact");
+   assert(roundtable_review_response_is_failure(resp) == 1);
+   cJSON_Delete(resp);
+
+   /* No response at all cannot be an approval either. */
+   assert(roundtable_review_response_is_failure(NULL) == 1);
+   printf("  PASS: a review without an artifact fails\n");
+}
+
 static void test_agent_probe_failure_controls_exit_status(void)
 {
    cJSON *resp = cJSON_CreateObject();
@@ -2080,6 +2110,7 @@ int main(void)
    test_memory_delete_and_supersede_routes();
    test_server_status_route_lookup();
    test_agent_probe_failure_controls_exit_status();
+   test_roundtable_review_without_an_artifact_is_a_failure();
    test_kb_docs_push_route_and_marshal();
    test_kb_remote_status_routes();
    test_git_verify_failure_detection();
