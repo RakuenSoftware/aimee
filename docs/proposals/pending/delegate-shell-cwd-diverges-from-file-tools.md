@@ -98,34 +98,43 @@ only that the two halves of one delegate must agree on where they are.
 - The turn diagnostic names the bound root and whether it is a repository checkout
   or an ephemeral workspace.
 
-## Narrowed in-process: the worker's cwd is empty at the branch
+## In-process status: the branch is not reached, cause unknown
 
-The divergence was chased into the harness. With a `detached` workspace registered
-and a background write delegate dispatched, instrumenting the branch at
-`src/server/server_compute.c` (the `detached_bound && background_job_id > 0` test
-that creates the ephemeral workspace) gives:
+Instrumenting the branch that creates the ephemeral workspace
+(`src/server/server_compute.c`, the `detached_bound && background_job_id > 0`
+test) and driving a background write delegate through the harness shows the
+delegate **never reaches that line**: with markers bracketing the turn, no
+instrumentation output appears between them.
 
-    DBG detached_bound=0 bg_job=27 cwd=[]
+    PROBE-BEGIN ws=[/tmp/aimee-probe-ewAJoT/repo]
     PROBE rc=0 submitted=1 err=[]
+    PROBE-END
 
-The background job id is set correctly, the worker runs, and the binding itself
-works — probed independently as
-`registered=1 provider0=[detached] bind=1`. What is empty is **`cwd` inside the
-worker**, even though the request carried one and `server_compute.c:737` reads
-`req["cwd"]`. `detached_bound` is computed as `cwd[0] ? workspace_turn_bind_active(cwd) : 0`,
-so an empty cwd forces it to 0 regardless of how the workspace is configured.
+The delegate dispatches and its worker runs, so it returns earlier for a reason
+not yet identified — possibly harness-specific (no real agent config, no provider)
+rather than anything to do with the appliance behaviour. **No mechanism is claimed
+here.**
 
-Where that cwd is lost between the request and the worker is the next question,
-and it is the most promising lead: a delegate that reaches its worker without a
-cwd cannot bind its workspace, which is precisely the condition under which the
-shell and the file tools stop agreeing.
+### Retractions
 
-Two corrections to earlier drafts of this document, recorded rather than quietly
-edited away. An earlier version reported `rc=0 submitted=0 response=(none)` as a
-"silent no-op" defect; that was a malformed probe — the delegate was refused with
-`prompt too short (19 chars)` and the message was sitting unread in the harness's
-`g_last_error`. There is no silent no-op. An earlier version also blamed the
-prefix-replacement at `server.c:713`; that was retracted above.
+Three causal claims were published in earlier drafts and are withdrawn. They are
+listed rather than deleted so the next reader does not re-derive them:
+
+1. **The prefix-replacement at `src/server/server.c:713`.** Withdrawn:
+   `worktree_for_cwd()` returns NULL when the cwd is already inside a worktree, and
+   `test_worktree_for_cwd` (`src/tests/test_guardrails.c:403`) asserts it, so the
+   mapping never runs in this case.
+2. **A "silent no-op" from `rc=0 submitted=0 response=(none)`.** Withdrawn: the
+   probe was malformed. The delegate was refused with `prompt too short (19 chars)`,
+   sitting unread in the harness's `g_last_error`.
+3. **"`cwd` is empty inside the worker."** Withdrawn: the `cwd=[]` lines came from
+   *other* tests in the same suite, not from the probed delegate, which never
+   reached the instrumented line at all.
+
+What survives all three is only what was measured on the appliance: the file tools
+resolve the repository worktree and work, the shell is handed a path under the
+ephemeral workspace and is refused, and a `code` delegate truncated a 2157-line
+file with no way to notice.
 
 ## Verification available to whoever takes this
 
