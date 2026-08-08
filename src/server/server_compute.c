@@ -1476,6 +1476,35 @@ void delegate_worker(void *arg)
       if (delegate_ephemeral_ws_create(deleg_id, ephemeral_ws, sizeof(ephemeral_ws)) == 0 &&
           ephemeral_ws[0])
       {
+         /* The ephemeral workspace holds no repository, so a WRITE delegate
+          * redirected here can still edit the tree through its file tools (they
+          * resolve the registered workspace, not this cwd) while every shell
+          * command runs somewhere that has no checkout. It can change code and
+          * cannot build, test, or diff what it changed -- and nothing tells it so.
+          * Observed: a delegate asked to add one comment line to a 2157-line file
+          * truncated it to 5 lines and reported no error.
+          *
+          * Writing without any means of verification is not a degraded mode, it is
+          * an unsafe one, so refuse the dispatch and say why. Read-only delegates
+          * are unaffected: inspection in a repo-less cwd is merely useless, not
+          * destructive, and their file tools still reach the real workspace. */
+         if (delegate_allows_writes)
+         {
+            char errmsg[640];
+            snprintf(errmsg, sizeof(errmsg),
+                     "refusing to run write-capable delegate %s: its detached (client) workspace "
+                     "cannot be served by a background job, so its shell would run in ephemeral "
+                     "workspace '%s', which contains no checkout. The delegate could edit the "
+                     "repository through its file tools but could not build or test the result. "
+                     "Run this delegate in the foreground with `aimee workspace serve`, or use a "
+                     "workspace whose provider is not 'detached'.",
+                     deleg_id, ephemeral_ws);
+            aimee_log(LOG_ERROR, "delegate", "%s", errmsg);
+            delegate_ephemeral_ws_remove(ephemeral_ws);
+            ephemeral_ws[0] = '\0';
+            delegation_compute_error(cctx, errmsg);
+            goto delegate_fail;
+         }
          workspace_turn_unbind_active();
          detached_bound = 0;
          run_cmd_set_cwd(ephemeral_ws);

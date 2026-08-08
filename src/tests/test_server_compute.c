@@ -14,6 +14,8 @@
 #include "db1.h"
 #include "server.h"
 #include <aimee/audit/obs_bus.h>
+#include "platform_path.h"
+#include "platform_test_util.h"
 
 /* The learned toolchain moved to the sandbox module, so resolving a sandbox
  * image now asks the bus for it. No bus runs in a unit test: report the module
@@ -215,6 +217,7 @@ void server_delegate_heartbeat_end(void)
 {
 }
 
+static int g_agent_supports_code = 0;
 int agent_load_config(agent_config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
@@ -226,6 +229,11 @@ int agent_load_config(agent_config_t *cfg)
    cfg->agents[0].tools_enabled = g_config_tools_enabled;
    cfg->agents[0].max_tokens = 4096;
    cfg->agents[0].max_turns = -1;
+   if (g_agent_supports_code)
+   {
+      snprintf(cfg->agents[0].roles[0], sizeof(cfg->agents[0].roles[0]), "code");
+      cfg->agents[0].role_count = 1;
+   }
    return 0;
 }
 
@@ -2844,6 +2852,112 @@ static cJSON *sci_drive_delegate(cJSON *req)
    return out;
 }
 
+/* A background delegate on a DETACHED (client-served) workspace has no live client
+ * by the time its worker runs, so its shell is redirected into a server-side
+ * ephemeral workspace that holds no checkout. Its FILE tools still resolve the
+ * registered workspace, so a write-capable delegate there can edit the tree and
+ * cannot build, test, or diff what it edited -- observed as a delegate truncating
+ * a 2157-line file and reporting no error. That combination is refused; a
+ * read-only delegate in the same position is not, because inspection with no
+ * checkout is useless rather than destructive. */
+static void bg_detached_delegate_case(const char *role, const char *prompt, int expect_refusal)
+{
+   reset_last_response();
+   char tmpdir[512];
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-bgdetached-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(tmpdir) != NULL);
+   platform_setenv("HOME", tmpdir);
+   platform_unsetenv("AIMEE_HOME");
+   platform_setenv("AIMEE_NO_CACHE", "1");
+
+   char ws[600];
+   snprintf(ws, sizeof(ws), "%s/repo", tmpdir);
+   char wt[760];
+   snprintf(wt, sizeof(wt), "%s/.aimee/worktrees/bgdetached/main", ws);
+   char mk[900];
+   snprintf(mk, sizeof(mk), "mkdir -p %s", wt);
+   assert(system(mk) == 0);
+
+   /* Register the workspace by writing the config file directly. The config
+    * struct is a secret of the config module, so this test never names it. */
+   char cfgdir[700];
+   snprintf(cfgdir, sizeof(cfgdir), "mkdir -p %s/.config/aimee", tmpdir);
+   assert(system(cfgdir) == 0);
+   char cfgpath[700];
+   snprintf(cfgpath, sizeof(cfgpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+   FILE *cf = fopen(cfgpath, "w");
+   assert(cf != NULL);
+   fprintf(cf, "workspaces:\n  - path: %s\n    provider: detached\n", ws);
+   fclose(cf);
+   config_reload();
+   assert(config_workspace_count() == 1);
+
+   g_git_repo_root_rc = 0;
+   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", ws);
+   g_worktree_create_rc = 0;
+   g_worktree_sibling_path_rc = 0;
+   snprintf(g_worktree_sibling_path_value, sizeof(g_worktree_sibling_path_value), "%s", wt);
+   run_cmd_set_cwd(NULL);
+   g_agent_response = "did the work";
+   g_agent_supports_code = 1;
+
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "role", role);
+   cJSON_AddStringToObject(req, "persona", "engineer");
+   cJSON_AddStringToObject(req, "prompt", prompt);
+   cJSON_AddStringToObject(req, "cwd", ws);
+   cJSON_AddStringToObject(req, "via", "test-agent");
+   cJSON_AddTrueToObject(req, "tools");
+   cJSON_AddTrueToObject(req, "background");
+   assert(handle_delegate(ctx, conn, req) == 0);
+   assert(g_submitted_fn == delegate_worker && g_submitted_arg != NULL);
+   g_submitted_fn(g_submitted_arg);
+   g_submitted_arg = NULL;
+
+   db1_agent_job_t job;
+   assert(delegate_current_job(&job) == 0);
+   const char *result = job.result ? job.result : "";
+   int refused = strstr(result, "which contains no checkout") != NULL;
+   if (refused != expect_refusal)
+      fprintf(stderr, "  role=%s expected_refusal=%d got=%d status=%s result=[%s]\n", role,
+              expect_refusal, refused, job.status, result);
+   assert(refused == expect_refusal);
+   if (expect_refusal)
+   {
+      /* The refusal must be actionable: name the ephemeral workspace and both
+       * ways out, not merely decline. */
+      assert(strstr(result, "delegate-ws") != NULL);
+      assert(strstr(result, "aimee workspace serve") != NULL);
+      assert(strstr(result, "not 'detached'") != NULL);
+   }
+   db1_agent_job_free(&job);
+
+   g_agent_supports_code = 0;
+   run_cmd_set_cwd(NULL);
+   cJSON_Delete(req);
+   reset_last_response();
+   free(conn);
+   free(ctx);
+}
+
+static void test_bg_detached_write_delegate_is_refused(void)
+{
+   /* Write intent: delegate_prompt_allows_writes() reads it from the prompt. */
+   bg_detached_delegate_case(
+       "code", "implement the fix: edit native_runner.go and write a clarifying sentence", 1);
+   printf("  PASS: test_bg_detached_write_delegate_is_refused\n");
+}
+
+static void test_bg_detached_readonly_delegate_still_runs(void)
+{
+   bg_detached_delegate_case("validate",
+                             "read-only: review the current diff for correctness and report", 0);
+   printf("  PASS: test_bg_detached_readonly_delegate_still_runs\n");
+}
+
 /* Establish a sentinel "outer delegate" context; assert the worker restores it. */
 static void test_delegate_worker_restores_caller_context(void)
 {
@@ -3278,6 +3392,8 @@ int main(void)
    test_delegate_worker_restores_state_on_error();
    test_delegate_worker_sets_session_override_during_run();
    test_create_compute_ctx_threads_vault_identity();
+   test_bg_detached_write_delegate_is_refused();
+   test_bg_detached_readonly_delegate_still_runs();
    db1_shutdown();
    reset_last_response();
    printf("server_compute: all tests passed\n");
