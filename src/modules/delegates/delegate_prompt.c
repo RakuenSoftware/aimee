@@ -1722,6 +1722,71 @@ char *delegate_inject_graph_context(const char *prompt, const char *cwd)
    return out;
 }
 
+char *delegate_bound_root_notice(const char *shell_root, const char *file_root,
+                                 delegate_root_kind_t kind)
+{
+   if ((!shell_root || !shell_root[0]) && (!file_root || !file_root[0]))
+      return NULL;
+   const char *shell = shell_root && shell_root[0] ? shell_root : file_root;
+   const char *files = file_root && file_root[0] ? file_root : shell_root;
+
+   char buf[2048];
+   int pos = 0, rem = (int)sizeof(buf);
+   int w = snprintf(buf + pos, (size_t)rem, "\n\n## Working root\n");
+   if (w > 0 && w < rem)
+   {
+      pos += w;
+      rem -= w;
+   }
+
+   if (strcmp(shell, files) == 0)
+      w = snprintf(buf + pos, (size_t)rem, "You are working in `%s`.\n", shell);
+   else
+      /* Say it outright rather than let the delegate discover it by writing a
+       * file it can then never compile. */
+      w = snprintf(buf + pos, (size_t)rem,
+                   "WARNING: your two halves are in different places. Your shell runs in `%s`, "
+                   "but your file tools read and write `%s`. Anything you edit will NOT be "
+                   "visible to a command you run, so you cannot build or test your own changes. "
+                   "Treat this as a broken environment and report it rather than working around "
+                   "it.\n",
+                   shell, files);
+   if (w > 0 && w < rem)
+   {
+      pos += w;
+      rem -= w;
+   }
+
+   const char *what =
+       kind == DELEGATE_ROOT_RECONSTRUCTED
+           ? "This is NOT the caller's live tree. It is a server-side reconstruction of a "
+             "detached workspace, checked out at the last state synced by `aimee workspace "
+             "mirror-sync`, so it may be behind what the caller currently has. If what you find "
+             "contradicts the task description, suspect the tree is stale before concluding the "
+             "task is wrong.\n"
+       : kind == DELEGATE_ROOT_EPHEMERAL
+           ? "This is an ephemeral scratch directory with NO repository in it. There is nothing "
+             "to build, test, or diff here. If the task needs the caller's code, say that you "
+             "could not reach it -- do not reconstruct it from memory.\n"
+           : NULL; /* the caller's own workspace: nothing surprising to declare */
+   if (what)
+   {
+      w = snprintf(buf + pos, (size_t)rem, "%s", what);
+      if (w > 0 && w < rem)
+      {
+         pos += w;
+         rem -= w;
+      }
+   }
+
+   buf[pos] = '\0';
+   char *out = malloc((size_t)(pos + 1));
+   if (!out)
+      return NULL;
+   memcpy(out, buf, (size_t)(pos + 1));
+   return out;
+}
+
 /* Nested delegate creation is denied at runtime; do not add a prompt block that
  * tells delegates to fan out work they cannot actually create. */
 char *delegate_build_tier_context(const char *via_name, int tier_override, const char *role)

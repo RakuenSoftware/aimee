@@ -700,6 +700,11 @@ void delegate_worker(void *arg)
    char delegate_worktree_path[MAX_PATH_LEN] = "";
    char delegate_git_root[MAX_PATH_LEN] = "";
    char delegate_work_name[32] = "";
+   /* The turn's root when it is NOT the directory the caller named -- a
+    * server-side reconstruction of a client workspace. Declared here, ahead of
+    * every `goto delegate_fail`, so no jump can skip its initialiser. Empty means
+    * the turn runs in the caller's own cwd. See "ONE ROOT PER DELEGATE TURN". */
+   char turn_root[MAX_PATH_LEN] = "";
    cJSON *req = cctx->req;
    bind_request_session_creds(req);
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
@@ -1181,6 +1186,43 @@ void delegate_worker(void *arg)
       }
    }
 
+   /* ONE ROOT PER DELEGATE TURN.
+    *
+    * Everything below derives from `cwd`: the worktree the file tools write to
+    * (delegate_resolve_worktree), the working directory the shell runs in
+    * (run_cmd_set_cwd), the absolute paths rewritten in the prompt, the tree the
+    * no-op detector diffs, the parent-write guard. Resolving the turn's root
+    * HERE -- once, before any of them -- is what stops them disagreeing.
+    *
+    * They used to. A background delegate on a DETACHED (client-served) workspace
+    * had its shell redirected into a server-side tree hundreds of lines below
+    * this point, after the worktree had already been resolved against the
+    * client's path. One delegate, two roots: it wrote through a path that existed
+    * only on the client and ran `pwd` somewhere else entirely. So it could edit
+    * code and could not build, test, or diff the edit -- and nothing told it so.
+    * Measured: asked to add one comment line to a 2157-line file, such a delegate
+    * truncated it to 5 lines and reported success.
+    *
+    * A no-op for every other turn. The resolver returns 0 unless this is a
+    * background job on a detached workspace that has recorded a remote and head
+    * via `aimee workspace mirror-sync`; a detached workspace with nothing
+    * recorded is handled further down, where having no usable tree at all is a
+    * refusal rather than a redirect. */
+   if (cwd[0] && cctx->background_job_id > 0 &&
+       workspace_turn_resolve_detached_mirror_cwd(cwd, turn_root, sizeof(turn_root)) &&
+       turn_root[0])
+   {
+      aimee_log(LOG_WARN, "delegate",
+                "delegate %s: detached workspace '%s' has no client to serve this background job; "
+                "binding the whole turn -- shell and file tools alike -- to the server-side "
+                "reconstruction at %s. That tree is the last state synced by `aimee workspace "
+                "mirror-sync` and may be behind the client",
+                deleg_id, cwd, turn_root);
+      cwd = turn_root;
+   }
+   else
+      turn_root[0] = '\0'; /* a partial write from a failed resolve is not a root */
+
    /* Resolve @path/to/file references in the delegate prompt */
    if (strchr(prompt, '@'))
    {
@@ -1458,8 +1500,12 @@ void delegate_worker(void *arg)
     * call, so a reviewer could resolve a coder's toolset. That is the boundary
     * agent_tools_filter_for_role exists to enforce. */
    agent_tools_set_active_toolset(toolset_override);
-   /* Bind detached workspace: delegate reads the client's live files (no-op if shared). */
-   int detached_bound = cwd[0] ? workspace_turn_bind_active(cwd) : 0;
+   /* Bind detached workspace: delegate reads the client's live files (no-op if shared).
+    *
+    * Skipped when the turn was already moved to a server-side reconstruction
+    * above: there is no client workspace left to bind, and the whole turn --
+    * cwd, worktree, shell -- is server-side by then. */
+   int detached_bound = (cwd[0] && !turn_root[0]) ? workspace_turn_bind_active(cwd) : 0;
    /* A background/durable delegate has no live client connection to serve a
     * DETACHED (client-served) workspace: by the time the worker runs, the
     * dispatching client has disconnected, so the reverse channel is dead and every
@@ -1470,30 +1516,11 @@ void delegate_worker(void *arg)
     * an undefined cwd). The ephemeral workspace does NOT contain the client's repo
     * (it drops an AIMEE_WORKSPACE_NOTE.txt saying so); a background *code* delegate
     * that must edit the client tree needs it provisioned server-side (follow-up). */
+   /* The mirror reconstruction is resolved far above, where rebinding the root
+    * still moves the whole turn. Reaching here means there was none: a detached
+    * workspace with no recorded remote/head, i.e. one that has never been synced.
+    * The only tree left to offer is a repo-less scratch dir. */
    char ephemeral_ws[MAX_PATH_LEN] = "";
-   if (detached_bound && cctx->background_job_id > 0)
-   {
-      /* Before falling back to a repo-less scratch dir: if this detached
-       * workspace has recorded a remote and head (a client ran
-       * `workspace mirror-sync`), the server can reconstruct an equivalent tree
-       * from its own bare mirror and run there. That tree is the LAST SYNCED
-       * state, not the client's current one, so it is announced rather than
-       * assumed -- a delegate working against a stale tree needs to be able to
-       * tell, and so does whoever reads the run afterwards. */
-      char mirror_cwd[MAX_PATH_LEN] = "";
-      if (workspace_turn_resolve_detached_mirror_cwd(cwd, mirror_cwd, sizeof(mirror_cwd)) &&
-          mirror_cwd[0])
-      {
-         workspace_turn_unbind_active();
-         detached_bound = 0;
-         run_cmd_set_cwd(mirror_cwd);
-         aimee_log(LOG_WARN, "delegate",
-                   "delegate %s: detached workspace has no client for this background job; "
-                   "running in the server-side mirror reconstruction at %s, which is the last "
-                   "state synced by `aimee workspace mirror-sync` and may be behind the client",
-                   deleg_id, mirror_cwd);
-      }
-   }
    if (detached_bound && cctx->background_job_id > 0)
    {
       if (delegate_ephemeral_ws_create(deleg_id, ephemeral_ws, sizeof(ephemeral_ws)) == 0 &&
@@ -1551,6 +1578,34 @@ void delegate_worker(void *arg)
                    deleg_id);
       }
    }
+
+   /* Every root decision for this turn is now final, so tell the delegate where
+    * it is standing and what kind of place that is. Placed HERE and not with the
+    * other prompt blocks above: up there the ephemeral fallback had not run yet,
+    * and a notice that names the wrong root is worse than none. The delegate is
+    * the one that has to decide whether its evidence means what it appears to
+    * mean, and it cannot do that while having to infer its own location from
+    * whether commands happen to succeed. */
+   {
+      const char *shell_root = run_cmd_get_cwd();
+      const char *file_root =
+          delegate_worktree_path[0] ? delegate_worktree_path : (cwd[0] ? cwd : NULL);
+      delegate_root_kind_t root_kind = ephemeral_ws[0] ? DELEGATE_ROOT_EPHEMERAL
+                                       : turn_root[0]  ? DELEGATE_ROOT_RECONSTRUCTED
+                                                       : DELEGATE_ROOT_NAMED;
+      aimee_log(LOG_INFO, "delegate", "delegate %s: bound root %s (%s)%s%s", deleg_id,
+                shell_root ? shell_root : (file_root ? file_root : "(none)"),
+                root_kind == DELEGATE_ROOT_EPHEMERAL       ? "ephemeral workspace, no repository"
+                : root_kind == DELEGATE_ROOT_RECONSTRUCTED ? "server-side reconstruction"
+                                                           : "caller's workspace",
+                (shell_root && file_root && strcmp(shell_root, file_root) != 0)
+                    ? "; DIVERGED from file-tool root "
+                    : "",
+                (shell_root && file_root && strcmp(shell_root, file_root) != 0) ? file_root : "");
+      delegate_append_owned_block(&system_prompt, &template_sys_prompt,
+                                  delegate_bound_root_notice(shell_root, file_root, root_kind));
+   }
+
    /* Delegate sandbox (default OFF): run this delegate's shell and file ops INSIDE
     * its own container rather than in-process here.
     *
