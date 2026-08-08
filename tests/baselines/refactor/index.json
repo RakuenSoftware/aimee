@@ -403,7 +403,7 @@
         },
         {
           "path": "src/headers/cmd_self_update.h",
-          "sha256": "c99318cad6b4c95197e9db24b536e05e04211b6e0339cf0aee201e1354a84c52"
+          "sha256": "eac941beb9c179d4c73ae0c2907acee46e4723739c6edaa165c58c9d93015d62"
         },
         {
           "path": "src/headers/cmd_session_start_util.h",
@@ -1604,7 +1604,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "a351eb0069ba9bf89807214f7e72bf64142eb12e0c1f22bc3ed7963d239be5ab",
+      "sha256": "b40d3c43dec35898172acc2321026f9b876058198cf023a5d22dd4fccd22929b",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
