@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
@@ -101,6 +102,151 @@ func TestDelegateDeadlineCapNeverEnlargesCallerCap(t *testing.T) {
 	}
 	if request.ToolLoopTimeoutMSCap != 120000 {
 		t.Fatalf("smaller caller cap changed to %dms", request.ToolLoopTimeoutMSCap)
+	}
+}
+
+// stageDeadlineAgents blocks until the enclosing stage deadline fires, standing
+// in for a delegate that is mid-work when the stage wall cap expires.
+type stageDeadlineAgents struct{}
+
+func (stageDeadlineAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
+	<-ctx.Done()
+	return DelegateResult{}, ctx.Err()
+}
+
+// budgetExhaustedAgents reproduces the diagnostic the C runtime emits when the
+// delegate's OWN tool-loop budget ends the loop first (src/posix/agent_runtime.c).
+type budgetExhaustedAgents struct{}
+
+func (budgetExhaustedAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{}, errors.New(
+		"tool loop budget exhausted (elapsed=660258ms effective=720000ms configured=720000ms stage_remaining_cap=1500000ms)")
+}
+
+// Direction one: the stage wall cap is smaller than the delegate's budget, so
+// the stage deadline fires while the delegate is still working. The recorded
+// diagnostic must name both limits and the elapsed time, because "context
+// deadline exceeded" alone cannot show that the two limits are in conflict.
+func TestStageDeadlineDiagnosticNamesBothLimitsAndElapsed(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	runner := &NativeRunner{agents: stageDeadlineAgents{}}
+	_, err := runner.delegate(ctx, StepRequest{}, DelegateRequest{Role: "review", Persona: "reviewer"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v, want it to remain a deadline error so the engine still parks on wall_cap", err)
+	}
+	for _, want := range []string{"stage_wall_remaining=", "delegate_tool_loop_cap=", "elapsed="} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("diagnostic %q is missing %q", err.Error(), want)
+		}
+	}
+	var limit *DelegateLimitError
+	if !errors.As(err, &limit) {
+		t.Fatalf("err=%v, want a DelegateLimitError carrying both bounds", err)
+	}
+	if limit.ToolLoopCap <= 0 || limit.StageWallRemaining <= 0 || limit.Elapsed <= 0 {
+		t.Fatalf("limits not populated: %+v", limit)
+	}
+	if limit.ToolLoopCap > limit.StageWallRemaining {
+		t.Fatalf("tool loop cap %s exceeds the stage wall budget %s it was derived from",
+			limit.ToolLoopCap, limit.StageWallRemaining)
+	}
+}
+
+// Direction two: the delegate's own budget is smaller than the stage cap. The C
+// runtime already names both limits and the elapsed time in that case, so the
+// engine must pass it through intact rather than re-wrapping it in timings for a
+// deadline that never fired.
+func TestDelegateBudgetSmallerThanStageCapKeepsItsOwnDiagnostic(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Minute)
+	defer cancel()
+	runner := &NativeRunner{agents: budgetExhaustedAgents{}}
+	_, err := runner.delegate(ctx, StepRequest{}, DelegateRequest{Role: "review", Persona: "reviewer"})
+	if err == nil {
+		t.Fatal("want the delegate budget failure to surface")
+	}
+	var limit *DelegateLimitError
+	if errors.As(err, &limit) {
+		t.Fatalf("budget exhaustion was annotated as a stage-deadline failure: %v", err)
+	}
+	for _, want := range []string{"elapsed=660258ms", "effective=720000ms", "stage_remaining_cap=1500000ms"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("diagnostic %q is missing %q", err.Error(), want)
+		}
+	}
+}
+
+// The write-role numbers from the proposal's measured runs, asserted directly so
+// the message stays readable at implement-stage magnitudes without a slow test.
+func TestDelegateLimitErrorNamesWriteStageMagnitudes(t *testing.T) {
+	err := &DelegateLimitError{
+		Err:                context.DeadlineExceeded,
+		StageWallRemaining: 30 * time.Minute,
+		ToolLoopCap:        25 * time.Minute,
+		Elapsed:            24*time.Minute + 59*time.Second,
+	}
+	got := err.Error()
+	want := "context deadline exceeded (stage_wall_remaining=30m0s delegate_tool_loop_cap=25m0s elapsed=24m59s)"
+	if got != want {
+		t.Fatalf("Error()=%q, want %q", got, want)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("DelegateLimitError must unwrap to the deadline error")
+	}
+}
+
+// An unset bound must not render as "0s". A reader seeing 0s concludes the limit
+// was hit instantly, which is the opposite of "there was no such limit" — and
+// misreading the numbers is the failure this error was added to remove.
+func TestDelegateLimitErrorDistinguishesUnsetBoundsFromZero(t *testing.T) {
+	err := &DelegateLimitError{
+		Err:     context.DeadlineExceeded,
+		Elapsed: 90 * time.Second,
+	}
+	for _, want := range []string{
+		"stage_wall_remaining=unset", "delegate_tool_loop_cap=unset", "elapsed=1m30s",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("diagnostic %q is missing %q", err.Error(), want)
+		}
+	}
+	// A set bound still renders as a duration.
+	err.ToolLoopCap = 25 * time.Minute
+	if !strings.Contains(err.Error(), "delegate_tool_loop_cap=25m0s") {
+		t.Fatalf("set bound rendered wrong: %q", err.Error())
+	}
+}
+
+// An ALREADY-EXPIRED bound must not render as "unset". StageWallRemaining comes
+// from time.Until(deadline), which goes negative once the deadline has passed, and
+// nothing clamps it — so treating every non-positive value as "never set" reports
+// the one case where the limit provably WAS reached as though no limit existed.
+// That is the same inversion this error type was added to remove.
+func TestDelegateLimitErrorReportsAnExpiredBoundNotUnset(t *testing.T) {
+	err := &DelegateLimitError{
+		Err:                context.DeadlineExceeded,
+		StageWallRemaining: -2 * time.Second,
+		ToolLoopCap:        25 * time.Minute,
+		Elapsed:            30 * time.Minute,
+	}
+	got := err.Error()
+	if strings.Contains(got, "stage_wall_remaining=unset") {
+		t.Fatalf("an expired stage wall budget was reported as unset: %q", got)
+	}
+	if !strings.Contains(got, "stage_wall_remaining=-2s") {
+		t.Fatalf("diagnostic %q must show the expired budget", got)
+	}
+}
+
+// The config package rejects a wall cap below its own copy of this floor. If the
+// engine's reserve or minimum-run budget changes without that constant moving,
+// the config gate would start accepting caps under which every write stage
+// refuses immediately -- the exact unsatisfiable pairing it exists to catch.
+func TestWriteRoleWallFloorMatchesConfigBound(t *testing.T) {
+	floor := delegateWriteVerifyReserve + delegateWriteMinRunBudget
+	if got := time.Duration(appconfig.MinAutonomyMaxWallSecs) * time.Second; got != floor {
+		t.Fatalf("config.MinAutonomyMaxWallSecs=%s, want the engine write-role floor %s (reserve %s + minimum run %s)",
+			got, floor, delegateWriteVerifyReserve, delegateWriteMinRunBudget)
 	}
 }
 

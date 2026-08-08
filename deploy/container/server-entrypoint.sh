@@ -386,12 +386,15 @@ done
 
 webchat_prepare
 
-# Diagnostics go to stderr, matching aimee-llm-entrypoint.sh and
-# aimee-embedder-entrypoint.sh. This was the odd one out, printing to stdout, and
-# that is not cosmetic: any helper whose stdout is captured by a command
-# substitution silently folds its log lines into the captured value. It did --
-# see the note above apply_optional_modules in optional-modules-lib.sh. Both
-# streams land in `docker logs`, so operator-visible output is unchanged.
+# Diagnostics go to stderr. Two callers capture a helper's stdout as a VALUE
+# (`MODULE_MANIFEST="$(apply_optional_modules ...)"`), and those helpers report
+# through this function, so a log line on stdout is captured as part of the value.
+# When it was stdout, gating any optional module handed the module supervisor
+# "<diagnostic>\n<path>" as its manifest; the supervisor found no such file, called
+# it fatal, and exited — stopping EVERY module, which is the opposite of what
+# enabling one asks for. optional-modules-lib.sh documents this contract
+# ("Diagnostics go to stderr via log()") and module-supervisor.sh already honours
+# it. Docker captures both streams, so operators see these lines either way.
 log() { printf '[server-entrypoint] %s\n' "$*" >&2; }
 
 # Compose the one line an operator reads when the container comes down. Kept
