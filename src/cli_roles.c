@@ -3,7 +3,8 @@
  *
  * Role templates are the delegate analog of personas: the body
  * `aimee delegate <role>` uses. They are server-owned config; the client edits
- * them over /v1 (http_uds_client) rather than touching files directly. `edit`
+ * them over /v1 (cli_v1_path_request, so a remote thin client reaches its own
+ * server rather than a local socket) rather than touching files directly. `edit`
  * round-trips the raw markdown body through $EDITOR. */
 #include "http_uds_client.h"
 #include "cJSON.h"
@@ -37,7 +38,7 @@ static int roles_server_down(int status)
 static int roles_list_cmd(int json_output)
 {
    int st = 0;
-   char *resp = http_uds_request("GET", "/v1/role_templates", NULL, &st);
+   char *resp = cli_v1_path_request("GET", "/v1/role_templates", NULL, &st);
    if (roles_server_down(st))
    {
       free(resp);
@@ -73,7 +74,7 @@ static int roles_fetch_body(const char *role, char **out)
    char path[256];
    snprintf(path, sizeof(path), "/v1/role_templates/%s", role);
    int st = 0;
-   char *resp = http_uds_request("GET", path, NULL, &st);
+   char *resp = cli_v1_path_request("GET", path, NULL, &st);
    if (st == 200 && resp)
    {
       cJSON *o = cJSON_Parse(resp);
@@ -93,7 +94,7 @@ static int roles_show_cmd(const char *role, int json_output)
       char path[256];
       snprintf(path, sizeof(path), "/v1/role_templates/%s", role);
       int st = 0;
-      char *resp = http_uds_request("GET", path, NULL, &st);
+      char *resp = cli_v1_path_request("GET", path, NULL, &st);
       if (roles_server_down(st))
       {
          free(resp);
@@ -184,7 +185,7 @@ static int roles_edit_cmd(const char *role)
    char path[256];
    snprintf(path, sizeof(path), "/v1/role_templates/%s", role);
    int wst = 0;
-   char *resp = http_uds_request("PUT", path, reqbody, &wst);
+   char *resp = cli_v1_path_request("PUT", path, reqbody, &wst);
    free(reqbody);
    if (wst != 200)
    {
@@ -204,7 +205,7 @@ static int roles_rm_cmd(const char *role)
    char path[256];
    snprintf(path, sizeof(path), "/v1/role_templates/%s", role);
    int st = 0;
-   char *resp = http_uds_request("DELETE", path, NULL, &st);
+   char *resp = cli_v1_path_request("DELETE", path, NULL, &st);
    free(resp);
    if (roles_server_down(st))
       return 1;
