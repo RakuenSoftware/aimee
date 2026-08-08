@@ -49,6 +49,16 @@ typedef struct cJSON cJSON;
 #define SERVER_LISTEN_BACKLOG  128
 #define CONN_WRITE_DEADLINE_MS 10000 /* 10 seconds */
 
+/* The largest /v1 request body the HTTP listener will accept (the roundtable
+ * review path has its own, larger cap). Lives here rather than inside
+ * server_http.c so a CLIENT can refuse an oversized request itself and say why:
+ * a body over this is dropped by the listener, which the client could otherwise
+ * only report as "could not reach the endpoint" — blaming a server that is up
+ * and answering. The sibling LIMIT_* values below are already documented against
+ * it. */
+#define SHTTP_MAX_BODY            (4 * 1024 * 1024)
+#define SHTTP_MAX_ROUNDTABLE_BODY (128 * 1024 * 1024)
+
 /* Per-method payload size limits */
 #define LIMIT_MEMORY     (256 * 1024)        /* 256KB for memory operations */
 #define LIMIT_TOOL       (4 * 1024 * 1024)   /* 4MB for tool I/O */

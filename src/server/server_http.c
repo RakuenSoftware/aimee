@@ -60,9 +60,9 @@
 #include <unistd.h>
 #include <stdatomic.h>
 
-#define SHTTP_MAX_BODY            (4 * 1024 * 1024)
-#define SHTTP_MAX_ROUNDTABLE_BODY (128 * 1024 * 1024)
-#define SHTTP_BACKLOG             16
+/* SHTTP_MAX_BODY / SHTTP_MAX_ROUNDTABLE_BODY now live in headers/server.h so
+ * clients can honour the same cap. */
+#define SHTTP_BACKLOG 16
 /* ── per-session persona store ──────────────────────────────────────────── */
 
 #define SHTTP_MAX_SESSIONS 256
