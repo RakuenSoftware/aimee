@@ -1698,7 +1698,9 @@ static int cli_v1_mirror_sync_chunked(cJSON *req, int timeout, int json_output)
    char *bearer = remote ? cli_v1_client_bearer() : NULL;
 
    cJSON *jhead = cJSON_GetObjectItemCaseSensitive(req, "head");
-   char *head = cJSON_IsString(jhead) ? safe_strdup(jhead->valuestring) : safe_strdup("");
+   /* Borrowed, not copied: `req` outlives this loop, and copying pulled
+    * safe_strdup (util.o) into a TU whose test link line does not carry it. */
+   const char *head = cJSON_IsString(jhead) ? jhead->valuestring : "";
 
    size_t sent = 0;
    int seq = 0, rc = 0;
@@ -1807,7 +1809,6 @@ static int cli_v1_mirror_sync_chunked(cJSON *req, int timeout, int json_output)
 
    free(remote);
    free(bearer);
-   free(head);
 
    if (rc == 0 && !json_output)
       printf("workspace mirror-sync: shipped %zu byte(s) in %d chunk(s)\n", total, seq);
