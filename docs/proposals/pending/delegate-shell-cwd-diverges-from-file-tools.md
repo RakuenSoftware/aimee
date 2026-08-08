@@ -26,10 +26,24 @@ Measured on the validation appliance with a server-side checkout at
   session-worktree suffix appended. That path does not exist, so the guardrail
   refuses it — correctly. Even `pwd` and `echo hello` fail this way.
 
-The ephemeral workspace is created at `src/server/server_compute.c:1473`, which
-calls `run_cmd_set_cwd(ephemeral_ws)`; `run_cmd()` then prefixes every shell line
-with `cd <tl_run_cwd> && …` (`src/util.c:715`). The file tools do not go through
-that path, which is why only one half moves.
+## What is established, and what is not
+
+**Established by measurement.** The two observations above, plus: the ephemeral
+workspace is created at `src/server/server_compute.c:1473`, which calls
+`run_cmd_set_cwd(ephemeral_ws)`, and `run_cmd()` prefixes every shell line with
+`cd <tl_run_cwd> && …` (`src/util.c:715`). The file tools do not go through that
+path, which is why only one half moves. So the shell's root is whatever
+`tl_run_cwd` holds, and it held the ephemeral workspace with a session-worktree
+suffix appended.
+
+**Not established: which code appends that suffix.** A first reading blamed the
+prefix-replacement at `src/server/server.c:713`, which maps a cwd under `git_root`
+onto `worktree_path + suffix`. That is wrong, and the tree already proves it:
+`worktree_for_cwd()` returns NULL when the cwd is *already* inside a worktree, and
+`test_worktree_for_cwd` in `src/tests/test_guardrails.c:403` asserts exactly that
+("CWD inside worktree should NOT match"). The `if (wt)` guard above that mapping is
+therefore false in this case and the mapping never runs. Whoever picks this up
+should start from `tl_run_cwd` and work backwards, not from that site.
 
 That site already records the underlying gap:
 
@@ -84,6 +98,18 @@ only that the two halves of one delegate must agree on where they are.
 - The turn diagnostic names the bound root and whether it is a repository checkout
   or an ephemeral workspace.
 
+## Verification available to whoever takes this
+
+The C suite builds and runs on an ordinary workstation (gcc 14, GNU make) — a
+single test binary builds with
+
+    make -C src build/obj/tests/unit-test-delegate-ephemeral-ws
+
+so the path-composition half of this is unit-testable without a server or a model
+provider. What a workstation cannot exercise is a real delegate turn end to end,
+which needs a running server and a model backend; that is the part to reproduce on
+an appliance.
+
 ## Evidence
 
 Delegate jobs 36 (read-only probe) and 38 (write probe) against
@@ -91,3 +117,10 @@ Delegate jobs 36 (read-only probe) and 38 (write probe) against
 `192.168.1.210`, 2026-08-08. Job 36 recorded the working file tools and the blocked
 shell with the verbatim path above; job 38 produced the 2152-line deletion. The
 truncated file was restored and nothing was committed or pushed.
+
+`worktrees.tsv` on that appliance carried two rows for the same session key
+`7c548df2-b127074c54171e76` — one under
+`/var/lib/aimee-workspaces/environment/rakuensoftware/aimee` and one under
+`/var/lib/aimee-workspaces/aimee` — so a session key can be registered against more
+than one git root at once. Whether that plurality contributes to the wrong root is
+untested and is a lead, not a conclusion.
