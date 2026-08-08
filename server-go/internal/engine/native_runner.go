@@ -158,6 +158,35 @@ const (
 	delegateWriteMinRunBudget = time.Minute
 )
 
+// DelegateLimitError names both time bounds that could have stopped a delegate,
+// and how long it actually ran. Two independent limits bound one dispatch -- the
+// stage wall cap and the delegate's own tool-loop budget -- and a bare "context
+// deadline exceeded" says neither which one fired nor what the other one was, so
+// a conflicting pair could not be diagnosed from the event log at all.
+//
+// The C runtime already reports both numbers when its own budget ends the loop
+// ("tool loop budget exhausted (elapsed=... effective=... configured=...
+// stage_remaining_cap=...)", src/posix/agent_runtime.c). This carries the
+// equivalent for the other direction, where the stage deadline fires first.
+type DelegateLimitError struct {
+	Err error
+	// StageWallRemaining is the stage wall budget this dispatch was given.
+	StageWallRemaining time.Duration
+	// ToolLoopCap is the tool-loop budget actually handed to the delegate, after
+	// applyDelegateDeadlineCap bounded it by the stage's remaining wall.
+	ToolLoopCap time.Duration
+	// Elapsed is how long the dispatch ran before it failed.
+	Elapsed time.Duration
+}
+
+func (e *DelegateLimitError) Error() string {
+	return fmt.Sprintf("%s (stage_wall_remaining=%s delegate_tool_loop_cap=%s elapsed=%s)",
+		e.Err, e.StageWallRemaining.Round(time.Millisecond),
+		e.ToolLoopCap.Round(time.Millisecond), e.Elapsed.Round(time.Millisecond))
+}
+
+func (e *DelegateLimitError) Unwrap() error { return e.Err }
+
 func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request DelegateRequest) (DelegateResult, error) {
 	if err := applyDelegateDeadlineCap(ctx, &request); err != nil {
 		return DelegateResult{}, err
@@ -167,7 +196,25 @@ func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request D
 	request.ExecutionVersion = step.WorkItem.UpdatedAt
 	request.MaxCostUSD = step.CostLimitUSD
 	request.ReplayOnly = step.ReplayOnly
-	return r.agents.Delegate(ctx, request)
+	stageWallRemaining := time.Duration(0)
+	if deadline, ok := ctx.Deadline(); ok {
+		stageWallRemaining = time.Until(deadline)
+	}
+	started := time.Now()
+	result, err := r.agents.Delegate(ctx, request)
+	// Only the stage-deadline direction is annotated. When the delegate's own
+	// budget ends the loop the C runtime already names both limits, and wrapping
+	// every unrelated dispatch failure would bury its cause behind timings that
+	// had nothing to do with it.
+	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+		return result, &DelegateLimitError{
+			Err:                err,
+			StageWallRemaining: stageWallRemaining,
+			ToolLoopCap:        time.Duration(request.ToolLoopTimeoutMSCap) * time.Millisecond,
+			Elapsed:            time.Since(started),
+		}
+	}
+	return result, err
 }
 
 func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requests []DelegateRequest) []DelegateGroupResult {
