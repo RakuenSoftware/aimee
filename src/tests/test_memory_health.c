@@ -304,6 +304,40 @@ int main(void)
       assert(after == before); /* and the values stay put */
    }
 
+   /* --- quiet-lane alarm: the rule, not the plumbing ---
+    *
+    * A maintenance cycle that produces nothing is indistinguishable from a
+    * healthy idle one unless something asks whether work was waiting. These pin
+    * both sides of that question, because an alarm that fires on a healthy idle
+    * system is worse than no alarm -- operators learn to ignore it. */
+   {
+      /* Output, backlog or not: never an alarm. */
+      assert(memory_quiet_lane_alarm(1, 0, 99) == 0);
+      assert(memory_quiet_lane_alarm(5, 500, 99) == 0);
+
+      /* Quiet with an EMPTY backlog is a healthy idle system, however long it
+       * lasts. This is the case that must stay silent. */
+      assert(memory_quiet_lane_alarm(0, 0, 1) == 0);
+      assert(memory_quiet_lane_alarm(0, 0, 1000) == 0);
+
+      /* Quiet WITH a backlog: not yet an alarm -- one or two idle cycles are
+       * normal (rate limits, nothing eligible this pass). */
+      assert(memory_quiet_lane_alarm(0, 10, 1) == 0);
+      assert(memory_quiet_lane_alarm(0, 10, 2) == 0);
+
+      /* Sustained silence while work waits is the fault. */
+      assert(memory_quiet_lane_alarm(0, 10, 3) == 1);
+      assert(memory_quiet_lane_alarm(0, 1, 4) == 1);
+
+      /* A negative/absent backlog reading must not alarm: an unknown count is
+       * not evidence of a wedged lane. */
+      assert(memory_quiet_lane_alarm(0, -1, 99) == 0);
+
+      /* The run counter starts clean and is readable. */
+      assert(memory_quiet_cycles() >= 0);
+      printf("quiet_lane_alarm OK ");
+   }
+
    db1_shutdown();
    db2_test_shim_close();
 
