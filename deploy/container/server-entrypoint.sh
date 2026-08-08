@@ -386,7 +386,16 @@ done
 
 webchat_prepare
 
-log() { printf '[server-entrypoint] %s\n' "$*"; }
+# Diagnostics go to stderr. Two callers capture a helper's stdout as a VALUE
+# (`MODULE_MANIFEST="$(apply_optional_modules ...)"`), and those helpers report
+# through this function, so a log line on stdout is captured as part of the value.
+# When it was stdout, gating any optional module handed the module supervisor
+# "<diagnostic>\n<path>" as its manifest; the supervisor found no such file, called
+# it fatal, and exited — stopping EVERY module, which is the opposite of what
+# enabling one asks for. optional-modules-lib.sh documents this contract
+# ("Diagnostics go to stderr via log()") and module-supervisor.sh already honours
+# it. Docker captures both streams, so operators see these lines either way.
+log() { printf '[server-entrypoint] %s\n' "$*" >&2; }
 
 # Compose the one line an operator reads when the container comes down. Kept
 # pure (args in, string out, no globals) so it can be tested without a container.
