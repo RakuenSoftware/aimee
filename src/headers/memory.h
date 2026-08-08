@@ -835,6 +835,11 @@ typedef struct
    int budget_tokens;
    int used_tokens;
    int rejected_for_budget; /* items excluded because budget was full */
+   /* Items excluded as restatements of something already admitted. Distinct from
+    * rejected_for_budget: a suppressed duplicate FREES budget for real evidence,
+    * so the two moving in opposite directions is the intended effect and the way
+    * to tell whether the suppression is earning its place. */
+   int suppressed_near_duplicates;
 } context_budget_metrics_t;
 
 char *memory_assemble_context(const char *task_hint);
