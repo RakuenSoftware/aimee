@@ -17,6 +17,26 @@ apart.
 > rather than one quietly overwritten. "What would change this" still applies: the
 > E2B half needs a larger gold set, not more runs.
 
+> **THE E2B ARMS BELOW ARE NON-QAT AND NO LONGER DESCRIBE THE SHIPPED IMAGE, 2026-08-08.**
+> `aimee-llm-e2b` now bakes `unsloth/gemma-4-E2B-it-qat-GGUF` at `qat-UD-Q4_K_XL`
+> (2.62 GB), a quantisation-aware-trained checkpoint. This document's E2B rows measured
+> `unsloth/gemma-4-E2B-it-GGUF`, trained at full precision and quantised afterwards, so
+> its 0.7206 is a lower bound on the shipped model rather than a figure for it. The
+> QAT evidence is google's QAT q4_0 arm at **0.6406 strict F1 on `gold_small`
+> (n=1001)**, which is **+0.0389 over the same model's UD-Q4_K_XL** and outside the
+> +/-0.024 interval that n resolves. **That evidence is not on this branch.** It is
+> defect 39 and finding 31 in `MEASUREMENT_LOG.md` as it stands on branch
+> `bench/tier-a-small-models` (629c62eb93, 4ae31f8af8); the copy of that file beside
+> this one stops at defect 30. Two gaps remain open and are stated rather
+> than papered over: the shipped artefact is unsloth's UD *requant* of that QAT
+> checkpoint and was not benchmarked separately, and the QAT arms ran on `gold_small`
+> rather than this document's 69-note set, so no row here is directly comparable to
+> them. **E4B is untouched**: still `UD-Q6_K_XL`, still the measured half, and the
+> Q6-over-Q4 result below is still the only quant comparison in the campaign that
+> cleared significance. The operator-facing half of this note is the F1 caveat under
+> "Pick one of three" in [`docs/SYNTHESIS_MODELS.md`](../../docs/SYNTHESIS_MODELS.md);
+> the two are meant to be read together.
+
 ## The measurement
 
 Six arms, Unsloth Dynamic quants, thinking ON, `--no-mmproj`, `-c 8192`, all on

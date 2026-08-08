@@ -20,7 +20,15 @@
 #
 # An explicit repo+filename per model id: no quant-tag resolution at runtime,
 # which is what silently served the wrong file when a tag stopped matching.
-# UD-Q6_K_XL (Unsloth Dynamic Q6) is published only in unsloth's repos.
+# The UD (Unsloth Dynamic) quants are published only in unsloth's repos.
+#
+# THE TWO ENTRIES ARE DELIBERATELY NOT THE SAME QUANT, and E2B is deliberately the
+# QAT checkpoint: see the header of scripts/synthesis-model-table.sh, which carries
+# the reasoning and the measurement. KEEP THE TWO TABLES IN STEP. They serve
+# different builds -- that one Dockerfile.llm, this one Dockerfile.model -- and they
+# have drifted before: this entry sat on a non-QAT UD-Q6_K_XL E2B while the other
+# had moved to UD-Q4_K_XL, so the model image and the sidecar image disagreed about
+# which weights "gemma-4-E2B-it" names.
 set -eu
 
 model=${1:?usage: fetch-synthesis-model.sh <model-id> <outdir>}
@@ -29,8 +37,8 @@ mirror=${AIMEE_MODEL_MIRROR:-}
 
 case "$model" in
   gemma-4-E2B-it)
-    repo=unsloth/gemma-4-E2B-it-GGUF; file=gemma-4-E2B-it-UD-Q6_K_XL.gguf
-    sha=ae15474bc78f68c6a44bd17cad32f672b9501d90c4a0eed2fceeb6878ed530c5 ;;
+    repo=unsloth/gemma-4-E2B-it-qat-GGUF; file=gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf
+    sha=e531007218dfab990486a5de7676a6932d6ea8dea233d1f698d7c21cf8a16889 ;;
   gemma-4-E4B-it)
     repo=unsloth/gemma-4-E4B-it-GGUF; file=gemma-4-E4B-it-UD-Q6_K_XL.gguf
     sha=17b9c459b28b420ce20d75bcfc329db4fac1343792a964c3ae2e2680ce768932 ;;
