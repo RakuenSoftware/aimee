@@ -9,6 +9,7 @@
 
 #include "../headers/aimee.h" /* memory_t */
 #include "memory_query.h"
+#include "memory_relations.h" /* db2_memory_provenance_insert */
 #include "memory_scope_query.h"
 #include "vector_index_ops.h"
 #include "db2_internal.h"
@@ -1789,8 +1790,25 @@ int db2_memory_dedupe_by_key(int dry_run)
          {
             aimee_pg_bind_int64(upd, "?1", canonical_id);
             aimee_pg_bind_int64(upd, "?2", id);
-            (void)aimee_pg_step(upd, err, sizeof(err));
+            int rc = aimee_pg_step(upd, err, sizeof(err));
             aimee_pg_finalize(upd);
+            if (rc == AIMEE_PG_DONE)
+            {
+               /* This merge is applied autonomously -- nothing gates it and no
+                * human reviews it -- so the record IS the safety mechanism. It
+                * was previously silent: a row simply acquired merged_into with no
+                * trace of when, by what, or into which canonical, which makes an
+                * incorrect merge both unnoticeable and un-undoable.
+                *
+                * Recorded on the MERGED row rather than the canonical, because
+                * that is the row whose meaning changed and the one an undo has to
+                * find. Best-effort by contract: an audit write must never fail
+                * the maintenance pass that produced the change. */
+               char details[128];
+               snprintf(details, sizeof(details), "merged_into=%lld (duplicate key, auto)",
+                        (long long)canonical_id);
+               db2_memory_provenance_insert(id, NULL, "dedupe_merge", details);
+            }
          }
       }
       merged++;

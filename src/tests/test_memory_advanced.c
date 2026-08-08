@@ -343,6 +343,34 @@ int main(void)
       assert(aimee_pg_step(chk, err, sizeof(err)) == AIMEE_PG_ROW);
       assert(aimee_pg_column_int(chk, 0) == 1);
       aimee_pg_finalize(chk);
+
+      /* The merge is applied autonomously -- nothing gates it, no human reviews
+       * it -- so the audit record IS the safety mechanism. Without it a row
+       * silently acquires merged_into with no trace of when, by what, or into
+       * which canonical, and an incorrect merge is both unnoticeable and
+       * un-undoable. Assert the record exists and names the canonical, on the
+       * MERGED row: that is the row whose meaning changed and the one an undo
+       * would have to find. */
+      aimee_pg_stmt_t *prov = aimee_pg_prepare(
+          db2_conn(),
+          "SELECT p.action, p.details FROM memory_provenance p"
+          "  JOIN memories m ON m.id = p.memory_id"
+          " WHERE m.key = 'dup-key-improve' AND m.merged_into != 0"
+          "   AND p.action = 'dedupe_merge'",
+          err, sizeof(err));
+      assert(prov);
+      assert(aimee_pg_step(prov, err, sizeof(err)) == AIMEE_PG_ROW);
+      const char *pdetails = aimee_pg_column_text(prov, 1);
+      /* Names the canonical it was folded into, not merely "something happened". */
+      assert(pdetails && strstr(pdetails, "merged_into=") != NULL);
+      aimee_pg_finalize(prov);
+
+      /* Idempotence: a second pass must not re-merge or double-record. Under
+       * autonomous curation this is what stops the loop churning the same rows
+       * every cycle. */
+      int again = memory_improve_dedupe(0);
+      assert(again == 0);
+      printf("  dedupe_audit: ok\n");
    }
 
    /* --- memory_apply_feedback: updates utility scores on success and failure --- */
