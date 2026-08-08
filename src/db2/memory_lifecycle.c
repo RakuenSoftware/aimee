@@ -52,11 +52,30 @@ int db2_memory_lifecycle_update_state(int64_t memory_id, const char *new_state,
    const char *reason = (archive_reason && archive_reason[0]) ? archive_reason : "";
 
    /* Same UPDATE shape as the legacy memory_transition_lifecycle: leaving
-    * `pending` clears ttl_at; entering `archived` records the reason. */
+    * `pending` clears ttl_at; entering `archived` records the reason.
+    *
+    * Entering `superseded` or `archived` additionally CLOSES the row's event-time
+    * interval by stamping valid_until.
+    *
+    * Why: lifecycle_state answers "is this true NOW", and that is all it can
+    * answer. It cannot answer "what did we believe on 12 June" -- a superseded
+    * row looks identically superseded whether it stopped being true yesterday or
+    * last year. memory_relations already carries valid_at/invalid_at and has a
+    * working --as-of read path; memories carried valid_from/valid_until columns
+    * that supersession never populated, so the same question about a PREFERENCE
+    * or a DECISION -- exactly the facts most likely to change -- had no answer.
+    *
+    * Only set when currently empty, so a valid_until asserted by a caller who
+    * knows the real end date is never overwritten by the transition timestamp.
+    * The stamp is when we LEARNED it stopped being true, which is the honest
+    * value available here; a caller with better information should say so. */
    static const char *sql =
        "UPDATE memories SET lifecycle_state = ?1,"
        " ttl_at = CASE WHEN ?2 = 'pending' THEN ttl_at ELSE '' END,"
        " archive_reason = CASE WHEN ?3 = 'archived' THEN ?4 ELSE archive_reason END,"
+       " valid_until = CASE WHEN ?6 IN ('superseded','archived') AND"
+       "                         COALESCE(valid_until,'') = ''"
+       "                    THEN pg_now_text() ELSE valid_until END,"
        " updated_at = pg_now_text() WHERE id = ?5";
    char err[ML_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -67,9 +86,38 @@ int db2_memory_lifecycle_update_state(int64_t memory_id, const char *new_state,
    aimee_pg_bind_text(st, "?3", new_state);
    aimee_pg_bind_text(st, "?4", reason);
    aimee_pg_bind_int64(st, "?5", memory_id);
+   aimee_pg_bind_text(st, "?6", new_state);
    int rc = aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
+}
+
+int db2_memory_valid_at(int64_t memory_id, const char *as_of)
+{
+   if (memory_id <= 0 || !as_of || !*as_of)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   /* Absent bounds are OPEN, not closed: an empty valid_from means "as far back
+    * as we know", an empty valid_until means "still true". Rows written before
+    * supersession began stamping valid_until therefore read as current -- the
+    * truthful answer, since we genuinely do not know when they stopped being
+    * true. Inventing a boundary from updated_at would manufacture history. */
+   static const char *sql = "SELECT 1 FROM memories WHERE id = ?1"
+                            " AND (COALESCE(valid_from,'') = '' OR valid_from <= ?2)"
+                            " AND (COALESCE(valid_until,'') = '' OR valid_until > ?3)";
+   char err[ML_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", memory_id);
+   aimee_pg_bind_text(st, "?2", as_of);
+   aimee_pg_bind_text(st, "?3", as_of);
+   int rc = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return (rc == AIMEE_PG_ROW) ? 1 : 0;
 }
 
 int db2_memory_lifecycle_mark_pending(int64_t memory_id, int ttl_days)
