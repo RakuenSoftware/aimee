@@ -1,5 +1,7 @@
 #include "memory_vectors.h"
 #include "pgvec_transport.h"
+#include "db2_internal.h" /* db2_conn */
+#include "db_postgres.h"  /* aimee_pg_* */
 
 #include <stddef.h>
 #include <stdio.h>
@@ -15,6 +17,64 @@ void pgvec_memory_vector_scope_hint_set(const char *workspace, const char *proje
       snprintf(scope_hint_workspace, sizeof(scope_hint_workspace), "%s", workspace);
    if (project && project[0])
       snprintf(scope_hint_project, sizeof(scope_hint_project), "%s", project);
+}
+
+int pgvec_memory_vector_near_duplicate_pairs(const int64_t *ids, int n, double min_cosine,
+                                             int64_t *a_out, int64_t *b_out, double *cosine_out,
+                                             int max)
+{
+   if (!ids || n <= 1 || !a_out || !b_out || !cosine_out || max <= 0)
+      return -1;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+
+   /* An explicit id list rather than a parameter array: the pg wrapper binds
+    * scalars, and this set is small and bounded by the caller's candidate cap, so
+    * the list is short. Ids are int64 read from our own rows, never user text. */
+   char in_list[64 * 24];
+   int pos = 0;
+   for (int i = 0; i < n; i++)
+   {
+      int wrote = snprintf(in_list + pos, sizeof(in_list) - (size_t)pos, "%s%lld", i ? "," : "",
+                           (long long)ids[i]);
+      if (wrote <= 0 || (size_t)(pos + wrote) >= sizeof(in_list))
+         break; /* bounded: compare the prefix that fits rather than overflow */
+      pos += wrote;
+   }
+   if (pos == 0)
+      return 0;
+
+   /* a.point_id < b.point_id yields each unordered pair once. Unlike the kNN
+    * self-join used for code similarity, this is an exhaustive comparison within
+    * a small explicit set, so it cannot drop one-directional pairs and needs no
+    * C-side dedup. */
+   char sql[1024];
+   snprintf(sql, sizeof(sql),
+            "SELECT a.point_id, b.point_id, 1.0 - (a.embedding <=> b.embedding) AS cosine"
+            " FROM %s a JOIN %s b ON a.point_id < b.point_id"
+            " WHERE a.point_id IN (%s) AND b.point_id IN (%s)"
+            "   AND 1.0 - (a.embedding <=> b.embedding) >= :minc"
+            " ORDER BY cosine DESC LIMIT :lim",
+            PGVEC_MEMORY_TABLE, PGVEC_MEMORY_TABLE, in_list, in_list);
+
+   char errbuf[256] = "";
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+      return 0; /* no vector collection yet: report nothing, never fail the turn */
+   aimee_pg_bind_double(stmt, ":minc", min_cosine);
+   aimee_pg_bind_int(stmt, ":lim", max);
+
+   int count = 0;
+   while (count < max && aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
+   {
+      a_out[count] = aimee_pg_column_int64(stmt, 0);
+      b_out[count] = aimee_pg_column_int64(stmt, 1);
+      cosine_out[count] = aimee_pg_column_double(stmt, 2);
+      count++;
+   }
+   aimee_pg_finalize(stmt);
+   return count;
 }
 
 void pgvec_memory_vector_scope_hint_clear(void)

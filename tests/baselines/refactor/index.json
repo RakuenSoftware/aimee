@@ -375,7 +375,7 @@
         },
         {
           "path": "src/headers/cmd_agent_delegate_impl.h",
-          "sha256": "034ab8863662bc892f297a745d4867fba17787ad78264f76fdbf9176b42960aa"
+          "sha256": "04a2836fb656a0096c53e5b1590167cbc0af49021588a3e87dc9704dbce3af1a"
         },
         {
           "path": "src/headers/cmd_agent_delegate_internal.h",
@@ -891,7 +891,7 @@
         },
         {
           "path": "src/headers/memory.h",
-          "sha256": "0918bfe6ca76f6b1d86c313fb8fda70def9fdd205052abf15c73e86cc5b8578e"
+          "sha256": "13fbd3cbc89990f42cbac5652ae0a79da53d3812bd1a09b69c740eac66650bb8"
         },
         {
           "path": "src/headers/middleware.h",
@@ -1604,7 +1604,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "b94d55d2f9ef7833c085566a898cfd88858d30026651389b943f323fe1a7bb35",
+      "sha256": "9a52e800a8d8b75838846742557baf28bbaa090175c719d4b5b3eb9c2fc0b049",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
