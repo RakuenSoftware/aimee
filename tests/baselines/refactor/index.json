@@ -595,7 +595,7 @@
         },
         {
           "path": "src/headers/ingress_preinject.h",
-          "sha256": "1914d7e970ecdf317303b9eed348f82a10e29f902a2263fbc6b78329317ff2f2"
+          "sha256": "b76fe6403a80ffbd7a7d360fd175b1cf768d9cb7df3aed398dbb9eaae994b25a"
         },
         {
           "path": "src/headers/integrity.h",
@@ -1604,7 +1604,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "b166c3dab001ba2f8b9aee9200e9b5a106e9e721f97bcb7054eb8ba28b749b3f",
+      "sha256": "6d71f1b3e136bc9104bd3d6d1a73fb8316ecb4925d8dafd393588c2bbee1ec13",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
