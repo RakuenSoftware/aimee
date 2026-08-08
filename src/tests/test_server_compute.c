@@ -2860,7 +2860,8 @@ static cJSON *sci_drive_delegate(cJSON *req)
  * a 2157-line file and reporting no error. That combination is refused; a
  * read-only delegate in the same position is not, because inspection with no
  * checkout is useless rather than destructive. */
-static void bg_detached_delegate_case(const char *role, const char *prompt, int expect_refusal)
+static void bg_detached_delegate_case(const char *role, const char *prompt, int expect_refusal,
+                                      int with_mirror_inputs)
 {
    reset_last_response();
    char tmpdir[512];
@@ -2885,9 +2886,32 @@ static void bg_detached_delegate_case(const char *role, const char *prompt, int 
    assert(system(cfgdir) == 0);
    char cfgpath[700];
    snprintf(cfgpath, sizeof(cfgpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+   /* A detached workspace that has been mirror-synced records a remote and a
+    * head; the server can then reconstruct an equivalent tree with no client
+    * present. A local repository stands in for the remote so this stays offline. */
+   char remote[700] = "", head[64] = "";
+   if (with_mirror_inputs)
+   {
+      snprintf(remote, sizeof(remote), "%s/origin", tmpdir);
+      char gitcmd[1800];
+      snprintf(gitcmd, sizeof(gitcmd),
+               "git init -q %s && cd %s && git config user.email t@t && git config user.name t && "
+               "echo seed > seed.txt && git add -A && git commit -q -m seed",
+               remote, remote);
+      assert(system(gitcmd) == 0);
+      snprintf(gitcmd, sizeof(gitcmd), "git -C %s rev-parse HEAD", remote);
+      FILE *rp = popen(gitcmd, "r");
+      assert(rp != NULL);
+      assert(fgets(head, sizeof(head), rp) != NULL);
+      pclose(rp);
+      head[strcspn(head, "\n")] = '\0';
+      assert(head[0]);
+   }
    FILE *cf = fopen(cfgpath, "w");
    assert(cf != NULL);
    fprintf(cf, "workspaces:\n  - path: %s\n    provider: detached\n", ws);
+   if (with_mirror_inputs)
+      fprintf(cf, "    remote: %s\n    head: %s\n", remote, head);
    fclose(cf);
    config_reload();
    assert(config_workspace_count() == 1);
@@ -2931,7 +2955,8 @@ static void bg_detached_delegate_case(const char *role, const char *prompt, int 
        * ways out, not merely decline. */
       assert(strstr(result, "delegate-ws") != NULL);
       assert(strstr(result, "aimee workspace serve") != NULL);
-      assert(strstr(result, "not 'detached'") != NULL);
+      /* and the server-side route that works without a client at all */
+      assert(strstr(result, "--provider mirror") != NULL);
    }
    db1_agent_job_free(&job);
 
@@ -2947,14 +2972,26 @@ static void test_bg_detached_write_delegate_is_refused(void)
 {
    /* Write intent: delegate_prompt_allows_writes() reads it from the prompt. */
    bg_detached_delegate_case(
-       "code", "implement the fix: edit native_runner.go and write a clarifying sentence", 1);
+       "code", "implement the fix: edit native_runner.go and write a clarifying sentence", 1, 0);
    printf("  PASS: test_bg_detached_write_delegate_is_refused\n");
+}
+
+/* A detached workspace that HAS been mirror-synced records a remote and a head,
+ * so the server reconstructs an equivalent tree from its own bare mirror and runs
+ * the delegate there instead of refusing it. That tree is the last synced state,
+ * which the run announces; what matters here is that the delegate is no longer
+ * stranded with nowhere to work. */
+static void test_bg_detached_write_delegate_uses_mirror_when_synced(void)
+{
+   bg_detached_delegate_case(
+       "code", "implement the fix: edit native_runner.go and write a clarifying sentence", 0, 1);
+   printf("  PASS: test_bg_detached_write_delegate_uses_mirror_when_synced\n");
 }
 
 static void test_bg_detached_readonly_delegate_still_runs(void)
 {
    bg_detached_delegate_case("validate",
-                             "read-only: review the current diff for correctness and report", 0);
+                             "read-only: review the current diff for correctness and report", 0, 0);
    printf("  PASS: test_bg_detached_readonly_delegate_still_runs\n");
 }
 
@@ -3394,6 +3431,7 @@ int main(void)
    test_create_compute_ctx_threads_vault_identity();
    test_bg_detached_write_delegate_is_refused();
    test_bg_detached_readonly_delegate_still_runs();
+   test_bg_detached_write_delegate_uses_mirror_when_synced();
    db1_shutdown();
    reset_last_response();
    printf("server_compute: all tests passed\n");
