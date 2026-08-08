@@ -66,7 +66,18 @@ _module_intent() {
 # edits the shipped manifest in place — that path is read-only in the image and
 # shared by every restart.
 #
-# Diagnostics go to stderr via log() when the caller provides one.
+# This function's STDOUT is its return value, so every diagnostic below is
+# redirected to stderr AT THE CALL SITE rather than trusting the caller's log()
+# to do it. server-entrypoint.sh's log() printed to stdout, so the enable path --
+# the only path that logs and rewrites -- put its message inside the command
+# substitution at server-entrypoint.sh:537. MODULE_MANIFEST became the log line
+# followed by the real path, module-supervisor.sh could not read that as a file,
+# and EVERY module died rather than just the one being toggled. The operator saw
+# "fatal: missing module manifest" naming a path that looked like prose.
+#
+# A caller cannot be relied on for this: aimee-kb-entrypoint.sh captures the same
+# way at :232 and defines no log() at all, so a log() added there later would
+# reintroduce it. Redirecting here makes the contract hold for any caller.
 apply_optional_modules() {
     _om_placement="$1"
     _om_manifest="$2"
@@ -109,10 +120,10 @@ apply_optional_modules() {
                 printf '%s\t%s\n' "$_om_id" "$_om_bin" >> "$_om_tmp"
                 _om_changed=1
                 command -v log >/dev/null 2>&1 && \
-                    log "optional module $_om_id enabled by $(_module_env_name "$_om_id")"
+                    log "optional module $_om_id enabled by $(_module_env_name "$_om_id")" >&2
             else
                 command -v log >/dev/null 2>&1 && \
-                    log "warning: $(_module_env_name "$_om_id") is set but $_om_bin is not in this image"
+                    log "warning: $(_module_env_name "$_om_id") is set but $_om_bin is not in this image" >&2
             fi
         elif [ "$_om_intent" = off ] && [ "$_om_present" -eq 1 ]; then
             # grep -v exits 1 when it prints nothing, which happens whenever the
@@ -124,7 +135,7 @@ apply_optional_modules() {
             mv "$_om_tmp.f" "$_om_tmp"
             _om_changed=1
             command -v log >/dev/null 2>&1 && \
-                log "optional module $_om_id disabled by $(_module_env_name "$_om_id")"
+                log "optional module $_om_id disabled by $(_module_env_name "$_om_id")" >&2
         fi
     done
 

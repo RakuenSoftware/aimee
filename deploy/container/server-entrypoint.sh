@@ -386,7 +386,13 @@ done
 
 webchat_prepare
 
-log() { printf '[server-entrypoint] %s\n' "$*"; }
+# Diagnostics go to stderr, matching aimee-llm-entrypoint.sh and
+# aimee-embedder-entrypoint.sh. This was the odd one out, printing to stdout, and
+# that is not cosmetic: any helper whose stdout is captured by a command
+# substitution silently folds its log lines into the captured value. It did --
+# see the note above apply_optional_modules in optional-modules-lib.sh. Both
+# streams land in `docker logs`, so operator-visible output is unchanged.
+log() { printf '[server-entrypoint] %s\n' "$*" >&2; }
 
 # Compose the one line an operator reads when the container comes down. Kept
 # pure (args in, string out, no globals) so it can be tested without a container.

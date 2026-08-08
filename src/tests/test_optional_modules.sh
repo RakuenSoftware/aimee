@@ -107,7 +107,36 @@ out=$(apply_optional_modules kb "$kb" "$tmp")
 check "kb: off removes control-web" "" "$(ids "$out")"
 unset AIMEE_MODULE_CONTROL_WEB
 
-# 9. The shipped manifest itself is never modified.
+# 9. A caller whose log() writes to STDOUT must not corrupt the return value.
+#
+#    apply_optional_modules echoes the manifest path, so a diagnostic printed to
+#    stdout lands inside the caller's command substitution. In production that is
+#    exactly what happened: server-entrypoint.sh's log() printed to stdout, so
+#    MODULE_MANIFEST became the log line followed by the real path,
+#    module-supervisor.sh could not read that as a file, and EVERY module died
+#    instead of just the one being toggled.
+#
+#    Every case above leaves log() undefined, so the lib's
+#    `command -v log ... && log ...` guard short-circuits and the logging path is
+#    never exercised. That is precisely why the suite passed while the bug
+#    shipped. This case defines log() the way a real entrypoint does -- writing to
+#    stdout, the wrong stream on purpose -- and asserts the return value survives.
+log() { printf '[test-entrypoint] %s\n' "$*"; }   # deliberately stdout
+AIMEE_MODULE_SANDBOX=0; export AIMEE_MODULE_SANDBOX
+out=$(apply_optional_modules server "$shipped" "$tmp")
+unset AIMEE_MODULE_SANDBOX
+if [ -r "$out" ]; then
+    printf '  ok    stdout log() does not corrupt the returned manifest path\n'
+    check "returned path is the rewritten manifest" "$tmp/server.modules" "$out"
+    check "diagnostic did not leak into the manifest" "memory routing" "$(ids "$out")"
+else
+    printf '  FAIL  stdout log() corrupted the returned manifest path\n     got: %s\n' \
+        "$out" >&2
+    fails=$((fails + 1))
+fi
+unset -f log
+
+# 10. The shipped manifest itself is never modified.
 check "shipped manifest is unmodified" "$shipped_before" "$(cat "$shipped")"
 
 if [ "$fails" -ne 0 ]; then
