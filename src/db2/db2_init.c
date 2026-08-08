@@ -1370,6 +1370,27 @@ static int db2_eval_open_temp_store_pg(void)
       aimee_pg_close(conn);
       return -1;
    }
+   /* The schema qualifies references as public.<table> in ~950 places, deliberately:
+    * kb_principal_is_admin() is an RLS admin gate, and an unqualified lookup there
+    * would resolve through search_path, which is exactly the escalation a qualifier
+    * prevents. That convention collides with the shadowing above -- applying into the
+    * eval schema on a fresh database made CREATE FUNCTION kb_principal_is_admin fail
+    * with 'relation "public.kb_admin_grant" does not exist', because the table exists
+    * in the eval schema and not in public. It made the eval store unopenable, which is
+    * why the negation harness could not load a corpus.
+    *
+    * Skip body validation for this session, the same mechanism pg_dump/pg_restore use
+    * to load functions whose dependencies are not yet present. This only defers the
+    * check: a function that is CALLED still resolves normally, and the eval never
+    * exercises the admin RLS path. Dropping the qualifier instead would have weakened
+    * the gate in production to make a dev-only harness run. */
+   if (aimee_pg_exec(conn, "SET check_function_bodies = off", err, sizeof(err)) != 0)
+   {
+      fprintf(stderr, "aimee: eval temp store: SET check_function_bodies failed: %s\n", err);
+      db2_eval_pg_drop_schema(conn, schema);
+      aimee_pg_close(conn);
+      return -1;
+   }
    if (db_apply_schema_postgres(conn, db2_embedding_dim(), err, sizeof(err)) != 0)
    {
       fprintf(stderr, "aimee: eval temp store: schema apply failed: %s\n", err);

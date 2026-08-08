@@ -156,9 +156,20 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          return server_send_error(conn, "workspace: not a directory", NULL);
    }
 
-   /* Mirror workspaces carry the client VCS coordinates the lifecycle seeds from. */
-   int add_rc = config_workspace_add(abs, provider, is_mirror ? remote : NULL,
-                                     (is_mirror && head) ? head : NULL);
+   /* Mirror workspaces carry the client VCS coordinates the lifecycle seeds from.
+    *
+    * A DETACHED workspace may carry them too. It is served by its client, so
+    * while that client is connected nothing here is used — the live tree is
+    * better than any reconstruction of it. But a background delegate runs after
+    * the dispatching client has gone, and then the alternative is not a stale
+    * tree, it is no tree at all: the turn lands in a scratch directory holding no
+    * repository. Recording the coordinates lets that case fall back to the
+    * server-side reconstruction instead, which is what
+    * workspace_turn_resolve_detached_mirror_cwd exists to do. Nothing could set
+    * them before, so that fallback was unreachable. */
+   int wants_vcs = is_mirror || is_detached;
+   int add_rc = config_workspace_add(abs, provider, wants_vcs ? remote : NULL,
+                                     (wants_vcs && head) ? head : NULL);
    /* Already registered is the state the caller asked for, so it is not an
     * error: workspace.add is idempotent. Rejecting the second call made every
     * re-run of any automation that registers its workspace fail at setup,
@@ -302,29 +313,64 @@ int handle_workspace_mirror_sync(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    const char *root = argv[0];
    const char *diff = jo_str(req, "diff", "");
 
-   /* Only a registered `mirror` workspace has a server-side tree to mirror. */
-   int is_mirror = 0;
+   /* A `mirror` workspace always has a server-side tree to mirror. A `detached`
+    * one does too once it has recorded a remote — its client serves the live tree
+    * while connected, but a background delegate arrives after that client is gone
+    * and would otherwise get a scratch directory with no repository in it. Both
+    * reconstruct through the same path, so both may sync into it; a workspace
+    * with no remote recorded has nothing to reconstruct from and is refused. */
+   int syncable = 0, has_remote = 0;
+   ws_provider_kind_t kind = WS_PROVIDER_SHARED;
    int ws_n = config_workspace_count();
    for (int i = 0; i < ws_n; i++)
       if (strcmp(config_workspaces(i), root) == 0)
       {
-         is_mirror =
-             ws_provider_kind_from_string(config_workspace_providers(i)) == WS_PROVIDER_MIRROR;
+         kind = ws_provider_kind_from_string(config_workspace_providers(i));
+         has_remote = config_workspace_vcs_remote(i)[0] != '\0';
+         syncable = (kind == WS_PROVIDER_MIRROR) || (kind == WS_PROVIDER_DETACHED && has_remote);
          break;
       }
-   if (!is_mirror)
+   if (!syncable)
       return server_send_error(
-          conn, "workspace: mirror-sync requires a registered `mirror` workspace", NULL);
+          conn,
+          kind == WS_PROVIDER_DETACHED
+              ? "workspace: this detached workspace has no remote recorded, so there is nothing to "
+                "reconstruct from. Re-register it with `--remote <url>` (and `--head <sha>`), or "
+                "use `--provider mirror`."
+              : "workspace: mirror-sync requires a `mirror` workspace, or a `detached` one with a "
+                "remote recorded",
+          NULL);
 
    /* The patch and the commit it applies to arrive together, and the registry is
     * updated from the same request. A client's base moves whenever the developer
     * commits or pushes, so accepting the patch while keeping an older head would
     * store a pair that cannot be applied — and the failure would surface later,
     * during a reconstruct, far from the request that caused it. */
+   /* A working tree is not bounded by anything the transport can choose, so the
+    * patch arrives in chunks and is reassembled here rather than shipped whole.
+    * `seq` 0 truncates (discarding a partial from an abandoned run), later ones
+    * append, and only `final` commits the head — a head stored against a patch
+    * that is still arriving would be applied to a fragment on the next
+    * reconstruct, far from the request that caused it.
+    *
+    * A request with neither field is the single-shot form and behaves exactly as
+    * before: seq 0, final true. */
+   cJSON *jseq = cJSON_GetObjectItemCaseSensitive(req, "seq");
+   cJSON *jfinal = cJSON_GetObjectItemCaseSensitive(req, "final");
+   int seq = cJSON_IsNumber(jseq) ? (int)jseq->valuedouble : 0;
+   int final = jfinal ? cJSON_IsTrue(jfinal) : 1;
+   if (seq < 0)
+      return server_send_error(conn, "workspace: mirror-sync seq must not be negative", NULL);
+
    const char *client_head = jo_str(req, "head", "");
-   if (client_head && client_head[0])
+   if (final && client_head && client_head[0])
    {
-      (void)config_workspace_add(root, "mirror", NULL, client_head);
+      /* Keep the registered provider. Hardcoding "mirror" here would silently
+       * convert a detached workspace on its first sync, and a detached workspace
+       * is detached on purpose: its client serves the live tree, which is better
+       * than any reconstruction while that client is connected. The head is
+       * recorded for the case where no client is. */
+      (void)config_workspace_add(root, ws_provider_kind_to_string(kind), NULL, client_head);
       /* Republish the live snapshot, for the same reason workspace.add does:
        * config_load() serves the snapshot rather than disk in the server, so
        * without this the head sits correct on disk while every reader — the
@@ -350,11 +396,23 @@ int handle_workspace_mirror_sync(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    platform_mkdir_p(parent, 0700);
 
    const workspace_provider_t *ws = workspace_provider_shared();
-   if (ws->write_all(ws, diff_path, diff, strlen(diff)) != 0)
+   if (seq > 0 && !ws->append)
+      return server_send_error(
+          conn, "workspace: this provider cannot append, so a chunked sync cannot be reassembled",
+          NULL);
+   int stored = seq == 0 ? ws->write_all(ws, diff_path, diff, strlen(diff))
+                         : ws->append(ws, diff_path, diff, strlen(diff));
+   if (stored != 0)
       return server_send_error(conn, "workspace: failed to store client diff", NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "bytes", (double)strlen(diff));
+   cJSON_AddNumberToObject(resp, "seq", seq);
+   /* The ack a chunking client checks before sending anything after chunk 0. An
+    * older server answers without it, and writes every chunk whole — the last
+    * one would win and the mirror would reconstruct from a fragment that looks
+    * like a complete tree. The client must be able to tell the difference. */
+   cJSON_AddBoolToObject(resp, "chunked", 1);
    return send_and_free(conn, resp);
 }
 
