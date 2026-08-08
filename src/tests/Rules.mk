@@ -318,6 +318,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-forge-credentials \
                $(TESTPREFIX)/unit-test-forge-app-token \
                $(TESTPREFIX)/unit-test-workspace-mirror \
+               $(TESTPREFIX)/unit-test-workspace-client-base \
                $(TESTPREFIX)/unit-test-workspace-provider-detached \
                $(TESTPREFIX)/unit-test-workspace-runner-queue \
                $(TESTPREFIX)/unit-test-cli-kb-smoke \
@@ -3911,6 +3912,11 @@ $(TESTPREFIX)/unit-test-forge-app-token: $(OBJDIR)/tests/test_forge_app_token.o 
 $(TESTPREFIX)/unit-test-workspace-mirror: $(OBJDIR)/tests/test_workspace_mirror.o \
                       $(OBJDIR)/modules/workspace/workspace_mirror.o $(OBJDIR)/aimee_home.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-workspace-client-base: $(OBJDIR)/tests/test_workspace_client_base.o \
+                      $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/posix/util.o \
+                      $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Gated live integration test (NOT in unit-tests / verify): drives the broker
 # against a real authenticated git remote. Build + run via `make forge-cred-integration`.

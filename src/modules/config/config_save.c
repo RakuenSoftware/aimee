@@ -1763,6 +1763,37 @@ int config_workspace_add(const char *path, const char *provider, const char *rem
                   head ? head : "");
          rc = config_save(cfg);
       }
+      else if (rc == -2)
+      {
+         /* Already registered: REFRESH the coordinates the caller supplied.
+          *
+          * These are not static properties of a path — a mirror workspace's head
+          * is whichever commit the client's patch applies to, and it moves every
+          * time the developer commits or pushes. Leaving the first value frozen
+          * meant a re-attaching client shipped a patch against one commit while
+          * the server still checked out another, and `git apply` failed on a
+          * tree that had been fine at first attach.
+          *
+          * Only non-NULL arguments are written, so a caller that supplies just a
+          * head (workspace.mirror-sync) does not erase the remote. Still returns
+          * -2, which callers treat as idempotent success. */
+         for (int i = 0; i < cfg->workspace_count; i++)
+         {
+            if (strcmp(cfg->workspaces[i], path) != 0)
+               continue;
+            if (provider)
+               snprintf(cfg->workspace_providers[i], sizeof(cfg->workspace_providers[i]), "%s",
+                        strcmp(provider, "shared") != 0 ? provider : "");
+            if (remote)
+               snprintf(cfg->workspace_vcs_remote[i], sizeof(cfg->workspace_vcs_remote[i]), "%s",
+                        remote);
+            if (head)
+               snprintf(cfg->workspace_vcs_head[i], sizeof(cfg->workspace_vcs_head[i]), "%s", head);
+            if (provider || remote || head)
+               (void)config_save(cfg);
+            break;
+         }
+      }
    }
    free(cfg);
    return rc;

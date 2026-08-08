@@ -1591,7 +1591,7 @@
         },
         {
           "path": "src/modules/workspace/include/aimee/workspace/client_diff.h",
-          "sha256": "9629922120eddaa96554d55e066e0421eee7e065b9d694ffb508488f58868940"
+          "sha256": "26c8191ddb0032363781dc0a468301f81caa38fdc1945a06765604acfcd12007"
         },
         {
           "path": "src/modules/workspace/include/aimee/workspace/module_api.h",
@@ -1604,7 +1604,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "5fdfa87820dd485146647e8d447a48d9b0fa0a31d9366b81ccc09ff0a02047c5",
+      "sha256": "55b71462af2056f287e3339bed78eeaf154219a76276db984283597ef684a94d",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
