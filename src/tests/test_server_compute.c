@@ -2931,7 +2931,8 @@ static void bg_detached_delegate_case(const char *role, const char *prompt, int 
        * ways out, not merely decline. */
       assert(strstr(result, "delegate-ws") != NULL);
       assert(strstr(result, "aimee workspace serve") != NULL);
-      assert(strstr(result, "not 'detached'") != NULL);
+      /* and the server-side route that works without a client at all */
+      assert(strstr(result, "--provider mirror") != NULL);
    }
    db1_agent_job_free(&job);
 

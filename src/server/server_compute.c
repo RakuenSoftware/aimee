@@ -1490,14 +1490,18 @@ void delegate_worker(void *arg)
           * destructive, and their file tools still reach the real workspace. */
          if (delegate_allows_writes)
          {
-            char errmsg[640];
+            char errmsg[1024];
             snprintf(errmsg, sizeof(errmsg),
                      "refusing to run write-capable delegate %s: its detached (client) workspace "
                      "cannot be served by a background job, so its shell would run in ephemeral "
                      "workspace '%s', which contains no checkout. The delegate could edit the "
                      "repository through its file tools but could not build or test the result. "
-                     "Run this delegate in the foreground with `aimee workspace serve`, or use a "
-                     "workspace whose provider is not 'detached'.",
+                     "A detached workspace is served by its client, so a background job cannot "
+                     "reach it at all. Either keep the client serving it -- run this delegate in "
+                     "the foreground with `aimee workspace serve` -- or register the repository "
+                     "as a mirror workspace (`aimee workspace add <path> --provider mirror "
+                     "--remote <url>`), which the server reconstructs from its own bare mirror at "
+                     "the recorded head and can therefore serve with no client present.",
                      deleg_id, ephemeral_ws);
             aimee_log(LOG_ERROR, "delegate", "%s", errmsg);
             delegate_ephemeral_ws_remove(ephemeral_ws);
