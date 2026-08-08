@@ -318,9 +318,43 @@ static void test_gated_method_refuses_without_confirmation(void)
    printf("  workspace remove refuses without --confirm on a non-tty\n");
 }
 
+/* A pending count with nothing draining it must SAY so on `aimee kb status`.
+ *
+ * memory.store enqueues a memory_facts job whenever typed facts are on (the
+ * default); the only consumer runs on the curator LLM lane, which deliberately
+ * does not start without a synthesis endpoint. Both decisions are right, and
+ * together they mean a supported configuration queues one row per stored memory
+ * that nothing will ever claim. The warning for it was written into
+ * kb_service_health_object() while its own comment named the symptom on the
+ * OTHER surface -- so the command an operator runs kept printing a bare number.
+ *
+ * Reproduced live: 65 jobs, oldest 34 hours, attempts 0, under "status: ok".
+ * An undrainable queue and a busy one print the same pending count; only this
+ * line distinguishes them, so it must survive a verdict that stays ok. */
+static void test_kb_status_warns_about_undrainable_queue(void)
+{
+   static const char *payload =
+       "{\"summary_status\":\"ok\",\"project\":\"\",\"chunks\":2,"
+       "\"queue\":{\"pending\":65,\"running\":0,\"done\":0,\"failed\":0,\"total\":65},"
+       "\"warnings\":[\"typed-fact extraction: 65 job(s) queued with nothing to drain "
+       "them - no synthesis endpoint is configured\"],"
+       "\"ingest_queue\":{\"pending\":0,\"running\":0,\"done_last_24h\":0}}";
+   char out[2048] = "";
+   capture_printer(pt_print_kb_status, "kb.status", payload, out, sizeof(out));
+
+   /* The verdict is still ok -- that is the point, the warning cannot depend on
+    * a degraded status to be shown. */
+   assert(strstr(out, "ok") != NULL);
+   assert(strstr(out, "65 pending") != NULL);
+   assert(strstr(out, "WARNING") != NULL);
+   assert(strstr(out, "nothing to drain") != NULL);
+   printf("  kb status warns when the queue has nothing to drain it\n");
+}
+
 int main(void)
 {
    printf("test_cli_v1_subcommands\n");
+   test_kb_status_warns_about_undrainable_queue();
    test_unknown_command_is_safe();
    test_known_command_lists_subcommands();
    test_list_formatting();
