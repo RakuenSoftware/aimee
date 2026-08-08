@@ -443,7 +443,7 @@
         },
         {
           "path": "src/headers/commands.h",
-          "sha256": "48bcf1f4bccf1c8c70bf76d2e0893962ace4608ae68f572521a8c61d45f01cfb"
+          "sha256": "0a5194d6120587e249bdbc161d43a429cb245a57c1adce30a8f9c410dbe1d3c2"
         },
         {
           "path": "src/headers/compact.h",
@@ -1604,7 +1604,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "b40d3c43dec35898172acc2321026f9b876058198cf023a5d22dd4fccd22929b",
+      "sha256": "4c9a5fd3fd10d38ef2ea13bdfb69cca1f2aed9701992e3238cee6def39ca5309",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
