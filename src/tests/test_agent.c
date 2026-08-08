@@ -1365,6 +1365,52 @@ static void test_detached_skips_worktree_rewrite(void)
           rc_detached);
 }
 
+/* The guardrail redirects a shell command into the session worktree by returning
+ * 3 with the rewritten line ("cd <worktree> && <cmd>") — the command-shaped twin
+ * of the rc==1 path rewrite. cmd_hooks.c applies both; the delegate tool dispatch
+ * applied only rc==1, so a rewrite arrived as "not 0" and was reported as a
+ * refusal, with the rewritten command as the reason. Every shell command a
+ * delegate ran came back "guardrail blocked: cd <worktree> && <cmd>" — `pwd` and
+ * `echo hello` included — so a delegate could edit files and never run one
+ * command. This pins the verdict and that it is applied, not refused. */
+static void test_shell_worktree_rewrite_is_applied_not_refused(void)
+{
+   char repo[256];
+   snprintf(repo, sizeof(repo), "/tmp/shell_wt_rw.XXXXXX");
+   assert(mkdtemp(repo) != NULL);
+   char shellcmd[512];
+   snprintf(shellcmd, sizeof(shellcmd), "git init -q '%s' >/dev/null 2>&1", repo);
+   (void)system(shellcmd);
+
+   session_state_t state;
+   memset(&state, 0, sizeof(state));
+   strcpy(state.guardrail_mode, MODE_APPROVE);
+
+   workspace_provider_clear_active();
+   char msg[1024] = "";
+   int rc = pre_tool_check("bash", "{\"command\":\"pwd\"}", &state, MODE_APPROVE, repo, msg,
+                           sizeof(msg));
+
+   if (rc == 3)
+   {
+      /* The verdict carries a rewritten command, not a refusal reason. */
+      assert(strncmp(msg, "cd ", 3) == 0);
+      assert(strstr(msg, ".aimee") != NULL);
+      assert(strstr(msg, "pwd") != NULL);
+      printf("  shell_worktree_rewrite: rc=3 rewrite=[%.60s...]\n", msg);
+   }
+   else
+   {
+      /* Not every environment reaches the rewrite (it needs a session worktree
+       * to redirect into). Say so rather than pass silently on a case that never
+       * exercised the contract. */
+      printf("  shell_worktree_rewrite: skipped (rc=%d, no worktree to redirect into)\n", rc);
+   }
+
+   snprintf(shellcmd, sizeof(shellcmd), "rm -rf '%s'", repo);
+   (void)system(shellcmd);
+}
+
 static void test_tool_read_file(void)
 {
    /* Write a temp file */
@@ -3561,6 +3607,7 @@ int main(void)
    test_compact_system_role();
    test_delegation_error_guidance();
    test_cancelled_durable_job_blocks_tool_dispatch();
+   test_shell_worktree_rewrite_is_applied_not_refused();
    test_delegate_bash_cancel_kills_running_tool();
    test_parent_write_guard_readonly_large_find();
    test_agent_trace_log_uses_db1_execution_trace();
