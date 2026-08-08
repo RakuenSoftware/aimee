@@ -244,4 +244,17 @@ const char *rpc_get(const rpc_opts_t *opts, const char *name);
 int rpc_get_int(const rpc_opts_t *opts, const char *name, int def);
 int rpc_has_flag(const rpc_opts_t *opts, const char *name);
 void rpc_parse(int argc, char **argv, const char **bool_flags, rpc_opts_t *out);
+
+/* The largest /v1 request body the server will accept, mirrored client-side so
+ * the CLI can refuse an oversized request itself. A body over this is dropped by
+ * the listener before it is parsed, which the client can otherwise only report as
+ * "could not reach the endpoint" — blaming a server that is up and answering.
+ *
+ * Mirrored rather than included because headers/server.h pulls in the server's
+ * own dependency chain, which the CLI does not build against.
+ * test_cli_v1_body_cap_matches_server pins these equal to SHTTP_MAX_BODY /
+ * SHTTP_MAX_ROUNDTABLE_BODY. */
+#define CLI_V1_MAX_BODY            (4 * 1024 * 1024)
+#define CLI_V1_MAX_ROUNDTABLE_BODY (128 * 1024 * 1024)
+
 #endif
