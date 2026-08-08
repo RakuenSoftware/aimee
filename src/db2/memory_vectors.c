@@ -36,8 +36,8 @@ int pgvec_memory_vector_near_duplicate_pairs(const int64_t *ids, int n, double m
    int pos = 0;
    for (int i = 0; i < n; i++)
    {
-      int wrote = snprintf(in_list + pos, sizeof(in_list) - (size_t)pos, "%s%lld",
-                           i ? "," : "", (long long)ids[i]);
+      int wrote = snprintf(in_list + pos, sizeof(in_list) - (size_t)pos, "%s%lld", i ? "," : "",
+                           (long long)ids[i]);
       if (wrote <= 0 || (size_t)(pos + wrote) >= sizeof(in_list))
          break; /* bounded: compare the prefix that fits rather than overflow */
       pos += wrote;

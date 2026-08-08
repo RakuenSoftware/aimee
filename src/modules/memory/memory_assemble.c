@@ -1461,8 +1461,8 @@ char *memory_assemble_context_explain(const char *task_hint,
          e->score = c->score;
          e->score_per_token = c->score_per_token;
          e->selected = 0;
-         snprintf(e->rejection_reason, sizeof(e->rejection_reason),
-                  "near_duplicate of memory %lld", (long long)scored[duplicate_of].id);
+         snprintf(e->rejection_reason, sizeof(e->rejection_reason), "near_duplicate of memory %lld",
+                  (long long)scored[duplicate_of].id);
          if (metrics)
             metrics->suppressed_near_duplicates++;
          ecount++;
@@ -1501,8 +1501,7 @@ char *memory_assemble_context_explain(const char *task_hint,
       else
       {
          e->selected = (ecount < MAX_CONTEXT_MEMS) ? 1 : 0;
-         if (e->selected &&
-             selected_n < (int)(sizeof(selected_idx) / sizeof(selected_idx[0])))
+         if (e->selected && selected_n < (int)(sizeof(selected_idx) / sizeof(selected_idx[0])))
             selected_idx[selected_n++] = i;
          if (!e->selected)
             snprintf(e->rejection_reason, sizeof(e->rejection_reason), "count_cap (MAX=%d)",
