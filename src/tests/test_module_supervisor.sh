@@ -44,7 +44,13 @@ while :; do
     sleep 0.1
 done
 
-read -r restarted_pid < "$module_pid_file"
+restarted_pid=""
+read -r restarted_pid < "$module_pid_file" || true
+[ -n "$restarted_pid" ] || { echo "module-supervisor: restarted module wrote no pid" >&2; exit 1; }
+# The shutdown check below only proves something if this pid is the live
+# restarted child. A dead pid here would make that check pass without testing
+# anything, so refuse to continue on one.
+kill -0 "$restarted_pid" 2>/dev/null || { echo "module-supervisor: restarted module pid $restarted_pid is not alive" >&2; exit 1; }
 kill "$supervisor_pid"
 wait "$supervisor_pid" 2>/dev/null || true
 supervisor_pid=""
