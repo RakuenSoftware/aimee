@@ -2099,6 +2099,17 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/worktree/gc", NULL, RM_EXACT, "worktree.gc", 0, rh_dispatch_op},
     {"POST", "/v1/aux/test", NULL, RM_EXACT, "aux.test", 0, rh_dispatch_op},
     {"GET", "/v1/eval/results", NULL, RM_EXACT, "eval.results", 0, rh_dispatch_op},
+    /* Roundtable authoring pipelines. Every one of these is a DB-backed state
+     * machine (rtp_* accessors in server_pipeline.c) that returns the next action
+     * for the caller to take -- none of them runs a panel or any other LLM work
+     * inline -- so they belong on the synchronous bridge, not the async lane. */
+    {"GET", "/v1/pipeline/list", NULL, RM_EXACT, "pipeline.list", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/status", NULL, RM_EXACT, "pipeline.status", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/start", NULL, RM_EXACT, "pipeline.start", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/cancel", NULL, RM_EXACT, "pipeline.cancel", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/resume", NULL, RM_EXACT, "pipeline.resume", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/advance", NULL, RM_EXACT, "pipeline.advance", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/gate", NULL, RM_EXACT, "pipeline.gate", 0, rh_dispatch_op},
     {"GET", "/v1/trigger/list", NULL, RM_EXACT, "trigger.list", 0, rh_dispatch_op},
     {"POST", "/v1/trigger/status", NULL, RM_EXACT, "trigger.status", 0, rh_dispatch_op},
     {"POST", "/v1/trigger/fire", NULL, RM_EXACT, "trigger.fire", 0, rh_dispatch_op},
