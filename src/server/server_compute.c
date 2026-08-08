@@ -1473,6 +1473,29 @@ void delegate_worker(void *arg)
    char ephemeral_ws[MAX_PATH_LEN] = "";
    if (detached_bound && cctx->background_job_id > 0)
    {
+      /* Before falling back to a repo-less scratch dir: if this detached
+       * workspace has recorded a remote and head (a client ran
+       * `workspace mirror-sync`), the server can reconstruct an equivalent tree
+       * from its own bare mirror and run there. That tree is the LAST SYNCED
+       * state, not the client's current one, so it is announced rather than
+       * assumed -- a delegate working against a stale tree needs to be able to
+       * tell, and so does whoever reads the run afterwards. */
+      char mirror_cwd[MAX_PATH_LEN] = "";
+      if (workspace_turn_resolve_detached_mirror_cwd(cwd, mirror_cwd, sizeof(mirror_cwd)) &&
+          mirror_cwd[0])
+      {
+         workspace_turn_unbind_active();
+         detached_bound = 0;
+         run_cmd_set_cwd(mirror_cwd);
+         aimee_log(LOG_WARN, "delegate",
+                   "delegate %s: detached workspace has no client for this background job; "
+                   "running in the server-side mirror reconstruction at %s, which is the last "
+                   "state synced by `aimee workspace mirror-sync` and may be behind the client",
+                   deleg_id, mirror_cwd);
+      }
+   }
+   if (detached_bound && cctx->background_job_id > 0)
+   {
       if (delegate_ephemeral_ws_create(deleg_id, ephemeral_ws, sizeof(ephemeral_ws)) == 0 &&
           ephemeral_ws[0])
       {

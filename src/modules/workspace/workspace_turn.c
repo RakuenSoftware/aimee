@@ -256,6 +256,35 @@ int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap
    return 0;
 }
 
+int workspace_turn_resolve_detached_mirror_cwd(const char *cwd, char *out, size_t out_cap)
+{
+   if (out && out_cap)
+      out[0] = '\0';
+   if (!cwd || !cwd[0] || !out || out_cap == 0)
+      return 0;
+   for (int i = 0; i < config_workspace_count(); i++)
+   {
+      if (!cwd_in_workspace(cwd, config_workspaces(i)))
+         continue;
+      ws_provider_kind_t kind = config_workspace_providers(i)[0]
+                                    ? ws_provider_kind_from_string(config_workspace_providers(i))
+                                    : WS_PROVIDER_SHARED;
+      if (kind != WS_PROVIDER_DETACHED)
+         return 0; /* mirror workspaces use the resolver above; shared needs nothing */
+      /* Copied out of the accessor buffers for the same reason as the mirror
+       * resolver: the runner ctx outlives a config read underneath it. */
+      char root[MAX_PATH_LEN], remote[512], head[64];
+      snprintf(root, sizeof(root), "%s", config_workspaces(i));
+      snprintf(remote, sizeof(remote), "%s", config_workspace_vcs_remote(i));
+      snprintf(head, sizeof(head), "%s", config_workspace_vcs_head(i));
+      if (!remote[0] || !head[0])
+         return 0; /* never synced: there is no recorded state to reconstruct */
+      ws_mirror_drift_t v;
+      return mirror_reconstruct_cwd(cwd, root, remote, head, out, out_cap, NULL, 0, &v);
+   }
+   return 0;
+}
+
 int workspace_turn_bind_active(const char *cwd)
 {
    t_turn_bound = 0;
