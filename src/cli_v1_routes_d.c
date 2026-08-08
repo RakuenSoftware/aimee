@@ -2083,6 +2083,32 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
        * connection; a full compute queue returns {status:error,"compute queue
        * full"}) — both clear fast. */
       const char *body = http_body;
+      /* A body over the listener's cap is dropped before it is ever parsed, so
+       * the send returns nothing and the failure reads as "could not reach the
+       * endpoint (is the server running?)" — pointing at a server that is up and
+       * answering every other request. Measured on a real workspace:
+       * `workspace mirror-sync` shipped 16.8MB (a repo with 247 untracked files)
+       * against the 4MB cap and reported the server as unreachable.
+       *
+       * Refuse here instead, naming the two numbers, so the size is the finding
+       * rather than something the operator has to infer. The roundtable review
+       * path has its own larger cap and is checked against that one. */
+      size_t body_len = body ? strlen(body) : 0;
+      size_t body_cap = rest_path && strcmp(rest_path, "/v1/roundtable/review") == 0
+                            ? (size_t)CLI_V1_MAX_ROUNDTABLE_BODY
+                            : (size_t)CLI_V1_MAX_BODY;
+      if (body_len > body_cap)
+      {
+         fprintf(stderr,
+                 "aimee: '%s' request body is %zu bytes, over the %zu-byte limit the server "
+                 "accepts, so it would be dropped before it was read. Reduce what the request "
+                 "carries (for a workspace sync, untracked files dominate it) and retry.\n",
+                 route->method, body_len, body_cap);
+         free(http_body);
+         free(bearer);
+         free(remote);
+         return -1;
+      }
       static const int retry_delays_ms[] = {200, 500, 1000};
       const int max_retries = (int)(sizeof(retry_delays_ms) / sizeof(retry_delays_ms[0]));
       for (int attempt = 0; attempt <= max_retries; attempt++)

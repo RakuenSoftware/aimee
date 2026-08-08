@@ -16,7 +16,7 @@ distinction this page replaces.
 | --- | --- | --- |
 | **Simplest thing that works** | Point `SYNTHESIS_ENDPOINT` at an external OpenAI-compatible endpoint | Best quality, no local GPU or RAM cost, your notes leave the machine |
 | **Local, and quality matters most** | deploy the `aimee-llm-e4b` sidecar | 0.81 F1 extraction, 7.46 GB of weights (UD-Q6_K_XL), 3.3 tok/s on 8 CPU threads |
-| **Local, and the box is small** | deploy the `aimee-llm-e2b` sidecar | 0.72 F1 extraction, 2.97 GB of weights (UD-Q4_K_XL), 6.3 tok/s on 8 CPU threads |
+| **Local, and the box is small** | deploy the `aimee-llm-e2b` sidecar | QAT weights, 2.62 GB (`qat-UD-Q4_K_XL`), ~6.3 tok/s on 8 CPU threads, and both the F1 and the throughput caveats below apply |
 
 **The two images do not carry the same quant, and the asymmetry is the point.** On
 the 69-note gold set, dropping Q6 to Q4 costs E4B 0.0862 F1 (95% CI
@@ -27,18 +27,46 @@ its tie is broken by the role E2B exists for. On the small box where you would p
 E2B at all, Q4 is 1.70 GB of VRAM and 2.68 GB of host RSS against 2.30 and 3.86 at
 Q6, and the F1 difference is smaller than one gold triple.
 
-Be careful reading that as "Q4 is free for E2B". It is not measured to be equal. It
-is measured to be *indistinguishable*, which is a statement about the set as much as
-the model, and `QUANT_DECISION.md` argues the opposite call on a directional prior
-(pooled P(Q6 > Q4) = 0.946). The full six-arm table, the memory figures, and what
+**E2B additionally ships quantisation-aware-trained weights, and that is a separate
+choice from the quant.** QAT trains the model with the Q4 rounding in the loop, so
+it recovers most of what Q4 costs a model this small. Measured at n=1001 on
+`gold_small`, google's QAT q4_0 arm scores **0.6406 strict F1**, which is **+0.0389
+over the same model's UD-Q4_K_XL**, outside the +/-0.024 interval that n resolves,
+so it is one of the few deltas in that campaign that clears its own noise floor.
+That evidence lives on the unmerged `bench/tier-a-small-models` branch (defect 39 and
+finding 31 in its `MEASUREMENT_LOG.md`, 629c62eb93 and 4ae31f8af8), not in the copy
+of that file on this branch.
+
+**Do not read 0.6406 against the 0.81 in the table.** They are different gold sets,
+`gold_small` at n=1001 versus the 69-note set, and the campaign found that even the
+same model on overlapping corpora moves by more than the gap between them. The
++0.0389 is a paired within-corpus delta and is the part that transfers; the absolute
+is quoted so the delta has something to sit on, not as a rank against E4B.
+
+**The F1 number for E2B is deliberately absent from the table above.** What ships is
+unsloth's UD requant *of* google's QAT checkpoint, chosen over google's own GGUF
+because google publishes no MTP draft and no resolvable `repo:tag`, both of which
+this image's addressing depends on, and because it is 2.62 GB against google's 3.35
+GB. That requant has not been benchmarked on its own. The +0.0389 is evidence for
+QAT weights, not for this particular requant of them, and the old 0.72 belongs to the
+non-QAT build that no longer ships. Quoting either as the shipped figure would be
+inventing a measurement. E4B's 0.81 is unaffected: that image is unchanged.
+
+Be careful reading the Q6/Q4 result as "Q4 is free for E2B". It is not measured to be
+equal. It is measured to be *indistinguishable*, which is a statement about the set as
+much as the model, and `QUANT_DECISION.md` argues the opposite call on a directional
+prior (pooled P(Q6 > Q4) = 0.946). The full six-arm table, the memory figures, and what
 would resolve the E2B half are in
 [`bench/tier-a/QUANT_DECISION.md`](../bench/tier-a/QUANT_DECISION.md).
 
-The F1 figures above are the shipped quants at strict F1 on that set, measured on
+E4B's F1 above is its shipped quant at strict F1 on that set, measured on
 GPU so throughput is not a confound. The throughput figures are `llama-bench` at
 Q8_0 on 8 CPU threads and have NOT been re-measured at the shipped quants, so treat
 them as the shape of the gap rather than a prediction; E2B at Q4 will be somewhat
-faster than the 6.3 shown. See
+faster than the 6.3 shown. E2B's 6.3 is doubly carried over, Q8_0 rather than the
+shipped Q4 and the non-QAT weights rather than the QAT ones, which is the same
+reason its F1 was dropped; it is kept only because a throughput ordering survives a
+weight swap in a way an F1 figure does not. See
 [the caveats](#caveats-you-should-read-before-leaning-on-any-of-this). Resident
 memory is larger than the weights by the KV cache for your configured context, which
 is a deployment setting rather than a property of the model.
@@ -139,10 +167,13 @@ difference is insignificant. The paired test is the one to read.
 
 **The quantisation in the tables above does not match what ships, and the gap is
 now measured rather than assumed.** Every number in this section was taken at
-Q8_0; the images ship UD-Q4_K_XL for E2B and UD-Q6_K_XL for E4B.
-`bench/tier-a/QUANT_DECISION.md` measures all six arms on the same gold set, and
-the shipped pair scores 0.7206 (E2B Q4) and 0.8062 (E4B Q6), so the Q8_0 table
-overstates E4B slightly and understates E2B by more than a little. Prefer the
+Q8_0; the images ship `qat-UD-Q4_K_XL` for E2B and `UD-Q6_K_XL` for E4B.
+`bench/tier-a/QUANT_DECISION.md` measures all six arms on the same gold set, and the
+non-QAT pair it covers scores 0.7206 (E2B Q4) and 0.8062 (E4B Q6), so the Q8_0 table
+overstates E4B slightly and understates the non-QAT E2B by more than a little. Of
+those two, only 0.8062 still describes a shipped image: E2B has since moved to QAT
+weights, so its row there is a lower bound rather than the shipped figure. See the
+F1 caveat under "Pick one of three". Prefer the
 QUANT_DECISION numbers when the question is "what will I get", and this section
 when the question is "how do the two models compare on one lane".
 
@@ -215,7 +246,7 @@ target lives (it moved from `examples/` to `tools/`, which changes the cmake
 flags).
 
 **The model-to-repo mapping is fixed at build time, not resolved at run time.**
-`gemma-4-E2B-it` maps to `unsloth/gemma-4-E2B-it-GGUF` at `UD-Q4_K_XL` and
+`gemma-4-E2B-it` maps to `unsloth/gemma-4-E2B-it-qat-GGUF` at `qat-UD-Q4_K_XL` and
 `gemma-4-E4B-it` to `unsloth/gemma-4-E4B-it-GGUF` at `UD-Q6_K_XL`: per-model
 quants, decided by measurement (see QUANT_DECISION.md), with
 `scripts/synthesis-model-table.sh` as the single source of truth for the pairing
@@ -302,8 +333,8 @@ It buys an operational property too. The sidecar holds no data, so moving betwee
 synthesis to a running deployment, or removing it, is a container swap with the kb left running. The
 embedder is still a one-way door; synthesis is not.
 
-Weights are baked per-model, 7.46 GB for E4B at UD-Q6_K_XL and 2.97 GB for E2B at
-UD-Q4_K_XL, from unsloth's GGUF repos, which is where the UD quants are published.
+Weights are baked per-model, 7.46 GB for E4B at UD-Q6_K_XL and 2.62 GB for E2B at
+qat-UD-Q4_K_XL, from unsloth's GGUF repos, which is where the UD quants are published.
 The quant is a property of the model, not of the channel; see
 `scripts/synthesis-model-table.sh`.
 

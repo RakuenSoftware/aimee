@@ -24,7 +24,12 @@ KB_STATUS_AUTHORITY = ../aimee-kb-status-authority$(EXEEXT)
 KB_TOKEN_AUTHORITY = ../aimee-kb-token-authority$(EXEEXT)
 RUNTIME_WEB = ../aimee-runtime-web$(EXEEXT)
 GATEWAY = ../aimee-gateway$(EXEEXT)
-RETIRED_ROOT_BINARIES = ../aimee-client$(EXEEXT) ../aimee-worker$(EXEEXT)
+# Binaries a rename left behind. `all` removes these first so a renamed artifact
+# does not sit in the repo root forever: aimee-webchat became aimee-runtime-web
+# and its 14MB predecessor was never retired, so it stayed untracked, unignored,
+# and large enough to push a workspace sync past the server's 4MB body cap.
+RETIRED_ROOT_BINARIES = ../aimee-client$(EXEEXT) ../aimee-worker$(EXEEXT) \
+                        ../aimee-webchat$(EXEEXT)
 
 # aimee-runtime-web is the only Go artifact and needs the Go toolchain (go.mod pins a
 # newer Go than some distros package, e.g. Debian 13 ships 1.24). The C services
