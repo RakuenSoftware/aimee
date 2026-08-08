@@ -30,7 +30,6 @@ typedef struct
    double score_per_token; /* score / max(1, estimated_tokens) */
 } context_candidate_t;
 
-
 /* From memory_logic.c — used by memory_health.c's maintenance cycle. */
 int memory_demote_from_failures(void);
 void embed_unembedded_l2(void);

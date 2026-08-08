@@ -79,9 +79,9 @@ static void test_near_duplicate(void)
 
    /* A genuine restatement: same content, trivially reworded. This is what the
     * suppression exists for -- the same fact stored twice. */
-   assert(assemble_texts_near_duplicate(
-              "the deploy uses the staging matrix before production",
-              "the deploy uses the staging matrix before production!") == 1);
+   assert(assemble_texts_near_duplicate("the deploy uses the staging matrix before production",
+                                        "the deploy uses the staging matrix before production!") ==
+          1);
 
    /* Distinct facts that SHARE vocabulary must survive. Both mention deploy,
     * staging and production; they say different things. Suppressing either would
