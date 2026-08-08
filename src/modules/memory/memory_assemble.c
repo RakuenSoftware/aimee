@@ -15,6 +15,7 @@
 #include "db2/anti_patterns.h"
 #include "db2/entity_edges.h"
 #include "db2/memory_query.h"
+#include "db2/memory_vectors.h"
 #include "db2/memory_relations.h"
 #include "db2/memory_scope_query.h"
 #include "db2/rules.h"
@@ -25,6 +26,11 @@
 #include <strings.h>
 #include <time.h>
 #include <unistd.h>
+
+/* Cosine at which two memories are treated as the same fact. High on purpose:
+ * wrongly suppressing a DISTINCT memory silently loses evidence, while admitting
+ * a redundant one merely spends budget. */
+#define ASSEMBLE_NEAR_DUPLICATE_COSINE 0.94
 
 #if defined(AIMEE_DB2_DISABLED)
 static char *memory_empty_context(void)
@@ -1370,6 +1376,37 @@ char *memory_assemble_context_explain(const char *task_hint,
 #define ASSEMBLE_DEDUP_TRACKED 64
    int selected_idx[ASSEMBLE_DEDUP_TRACKED];
    int selected_n = 0;
+
+   /* Semantic near-duplicates, resolved once for the whole candidate set.
+    *
+    * Memories are embedded at write time, so the vectors already exist: this is a
+    * single query that lets pgvector compute the cosines where the vectors live,
+    * NOT an embedder call per pair. That distinction is what makes a semantic
+    * check affordable on the read path.
+    *
+    * Embeddings catch what token overlap cannot -- "deploy to staging first" and
+    * "ship through the pre-prod matrix" share no vocabulary and mean the same
+    * thing. The lexical check below remains as the fallback for rows that have no
+    * vector yet (written but not yet embedded), where the vector answer is
+    * "unknown" rather than "distinct". */
+   int64_t dup_a[ASSEMBLE_DEDUP_TRACKED * 4];
+   int64_t dup_b[ASSEMBLE_DEDUP_TRACKED * 4];
+   double dup_cos[ASSEMBLE_DEDUP_TRACKED * 4];
+   int dup_n = 0;
+   {
+      int64_t cand_ids[ASSEMBLE_DEDUP_TRACKED];
+      int cand_n = 0;
+      for (int i = 0; i < scored_count && cand_n < ASSEMBLE_DEDUP_TRACKED; i++)
+         if (scored[i].id > 0)
+            cand_ids[cand_n++] = scored[i].id;
+      if (cand_n > 1)
+      {
+         int rc = pgvec_memory_vector_near_duplicate_pairs(
+             cand_ids, cand_n, ASSEMBLE_NEAR_DUPLICATE_COSINE, dup_a, dup_b, dup_cos,
+             (int)(sizeof(dup_a) / sizeof(dup_a[0])));
+         dup_n = rc > 0 ? rc : 0; /* no collection / no pairs: fall back to lexical */
+      }
+   }
    for (int i = 0; i < scored_count && ecount < explain_max; i++)
    {
       context_assemble_explain_entry_t *e = &explain[ecount];
@@ -1396,8 +1433,17 @@ char *memory_assemble_context_explain(const char *task_hint,
       for (int s = 0; s < selected_n; s++)
       {
          const context_candidate_t *sel = &scored[selected_idx[s]];
-         if (assemble_texts_near_duplicate(c->content[0] ? c->content : c->key,
-                                           sel->content[0] ? sel->content : sel->key))
+         /* Semantic first (it catches paraphrase), lexical as the fallback for
+          * rows the vector store does not know about yet. */
+         int same = 0;
+         for (int d = 0; d < dup_n && !same; d++)
+            if ((dup_a[d] == c->id && dup_b[d] == sel->id) ||
+                (dup_b[d] == c->id && dup_a[d] == sel->id))
+               same = 1;
+         if (!same)
+            same = assemble_texts_near_duplicate(c->content[0] ? c->content : c->key,
+                                                 sel->content[0] ? sel->content : sel->key);
+         if (same)
          {
             duplicate_of = selected_idx[s];
             break;
