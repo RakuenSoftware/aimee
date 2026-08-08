@@ -181,8 +181,19 @@ type DelegateLimitError struct {
 
 func (e *DelegateLimitError) Error() string {
 	return fmt.Sprintf("%s (stage_wall_remaining=%s delegate_tool_loop_cap=%s elapsed=%s)",
-		e.Err, e.StageWallRemaining.Round(time.Millisecond),
-		e.ToolLoopCap.Round(time.Millisecond), e.Elapsed.Round(time.Millisecond))
+		e.Err, boundOrUnset(e.StageWallRemaining), boundOrUnset(e.ToolLoopCap),
+		e.Elapsed.Round(time.Millisecond))
+}
+
+// A bound of zero means it was never set — no stage deadline on the context, or
+// no tool-loop cap applied — which is a different fact from a bound of zero
+// length. Printing "0s" for it invites exactly the misreading this error exists
+// to prevent: that the limit was reached instantly.
+func boundOrUnset(d time.Duration) string {
+	if d <= 0 {
+		return "unset"
+	}
+	return d.Round(time.Millisecond).String()
 }
 
 func (e *DelegateLimitError) Unwrap() error { return e.Err }

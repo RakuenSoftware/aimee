@@ -195,6 +195,26 @@ func TestDelegateLimitErrorNamesWriteStageMagnitudes(t *testing.T) {
 	}
 }
 
+// An unset bound must not render as "0s". A reader seeing 0s concludes the limit
+// was hit instantly, which is the opposite of "there was no such limit" — and
+// misreading the numbers is the failure this error was added to remove.
+func TestDelegateLimitErrorDistinguishesUnsetBoundsFromZero(t *testing.T) {
+	err := &DelegateLimitError{
+		Err:     context.DeadlineExceeded,
+		Elapsed: 90 * time.Second,
+	}
+	got := err.Error()
+	want := "context deadline exceeded (stage_wall_remaining=unset delegate_tool_loop_cap=unset elapsed=1m30s)"
+	if got != want {
+		t.Fatalf("Error()=%q, want %q", got, want)
+	}
+	// A set bound still renders as a duration.
+	err.ToolLoopCap = 25 * time.Minute
+	if !strings.Contains(err.Error(), "delegate_tool_loop_cap=25m0s") {
+		t.Fatalf("set bound rendered wrong: %q", err.Error())
+	}
+}
+
 // The config package rejects a wall cap below its own copy of this floor. If the
 // engine's reserve or minimum-run budget changes without that constant moving,
 // the config gate would start accepting caps under which every write stage

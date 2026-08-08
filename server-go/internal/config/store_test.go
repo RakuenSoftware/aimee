@@ -171,6 +171,21 @@ func TestWallCapBelowWriteRoleFloorIsRejectedNamingBothValues(t *testing.T) {
 	if !strings.Contains(err.Error(), "359") || !strings.Contains(err.Error(), "360") {
 		t.Fatalf("error %q must name both the configured value and the required floor", err)
 	}
+	// And where the floor comes from, so it reads as derived rather than chosen.
+	if !strings.Contains(err.Error(), "300s verifier reserve") ||
+		!strings.Contains(err.Error(), "60s minimum run") {
+		t.Fatalf("error %q must name the two components the floor is derived from", err)
+	}
+}
+
+// The floor is the sum of the engine's two shipped write-role budgets, not an
+// independently chosen number. Pinning the derivation here keeps the constant
+// honest if either component is ever retuned.
+func TestWallFloorIsTheSumOfItsComponents(t *testing.T) {
+	if MinAutonomyMaxWallSecs != writeVerifyReserveSecs+writeMinRunSecs {
+		t.Fatalf("floor %d is not %d+%d", MinAutonomyMaxWallSecs,
+			writeVerifyReserveSecs, writeMinRunSecs)
+	}
 }
 
 // The shipped default must keep loading. A floor that rejected the default would

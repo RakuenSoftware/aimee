@@ -136,6 +136,20 @@ The floor constant is duplicated across the `config` and `engine` packages
 because `engine` already imports `config`; `TestWriteRoleWallFloorMatchesConfigBound`
 fails if the two drift apart.
 
+## Roundtable review, 2026-08-08
+
+Run `roundtable-93a0fd7ce4a1693bfb5b3734`, three seats, converged, verdict
+**changes requested**. Its findings and what came of them:
+
+| Finding | Outcome |
+|---|---|
+| The 360s floor fixes an absolute value for one knob, in tension with "Deliberately not proposed" | **Accepted in part.** The number is the arithmetic consequence of two already-shipped engine budgets, not a new policy choice, so the check stays — but it was written as a bare `360` literal, which reads as a chosen value. It is now spelled as `writeVerifyReserveSecs + writeMinRunSecs`, and the refusal message names both components so a reader sees the derivation. |
+| The floor rejects `max_wall_secs` of 1–359, an unrequested compatibility break, without auditing existing configs | **Accepted; audit performed.** No config, fixture, default, or doc in the tree sets a value below 360 — the only values present are the 1800 default and the C clamp range `[30, 86400]`. The exposure is limited to an operator who explicitly set 30–359, for whom every write stage was already refusing before it started. |
+| Clause 3 substituted rather than met; a delegate budget of 900s against a wall cap of 600s still loads | **Disputed, on the record.** After clause 1 that pairing is satisfiable: the 900s budget is clamped to the stage's remaining wall and the delegate finishes inside it. The condition the clause names stopped being the condition that prevents progress. |
+| Clause 1 unmet: the stage-deadline path returns an error, not a partial | **Disputed.** The tool-loop-budget path assembles an abstained partial in `src/posix/agent_runtime.c`. The panel could not read that file from its workspace and said so. A stage deadline firing means the clamp did not hold, which the residual covers. |
+| Unset bounds render as `0s` | **Accepted and fixed.** An unset bound now renders `unset`; `0s` invited the reading that a limit was hit instantly. |
+| Criterion 4 unmet — no tests in the artifact; proposal not moved | **Reviewer-side artifact error, not a code gap.** The diff submitted to the panel was abridged to non-test Go hunks, so the tests and the `pending/` → `done/` move were genuinely absent *from what it was shown*. Both exist in the merged change. Corrected by re-reviewing the complete diff. |
+
 ## Not closed here
 
 The stage-deadline annotation covers the single-delegate dispatch path, which is
