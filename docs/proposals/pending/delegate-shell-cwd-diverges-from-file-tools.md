@@ -98,24 +98,34 @@ only that the two halves of one delegate must agree on where they are.
 - The turn diagnostic names the bound root and whether it is a repository checkout
   or an ephemeral workspace.
 
-## A second, separable defect found while building the reproduction
+## Narrowed in-process: the worker's cwd is empty at the branch
 
-Driving the same shape through the in-process harness (`handle_delegate` in
-`src/tests/test_server_compute.c`) with role `code`, `tools: true`,
-`background: true`, and a cwd inside a registered **detached** workspace produces:
+The divergence was chased into the harness. With a `detached` workspace registered
+and a background write delegate dispatched, instrumenting the branch at
+`src/server/server_compute.c` (the `detached_bound && background_job_id > 0` test
+that creates the ephemeral workspace) gives:
 
-    handle_delegate rc=0 submitted=0 response=(none)
+    DBG detached_bound=0 bg_job=27 cwd=[]
+    PROBE rc=0 submitted=1 err=[]
 
-Success returned, no worker submitted, and no response sent. From the caller's
-side that is a silent no-op: the delegate is neither run nor refused, and nothing
-says so. Whether this is the detached provider correctly parking the turn for a
-client that never polls, or a missing refusal, is not established — but a
-`rc=0` with no response and no work is indistinguishable from a delegate that ran
-and did nothing, which is the failure mode this repository has repeatedly fixed
-elsewhere.
+The background job id is set correctly, the worker runs, and the binding itself
+works — probed independently as
+`registered=1 provider0=[detached] bind=1`. What is empty is **`cwd` inside the
+worker**, even though the request carried one and `server_compute.c:737` reads
+`req["cwd"]`. `detached_bound` is computed as `cwd[0] ? workspace_turn_bind_active(cwd) : 0`,
+so an empty cwd forces it to 0 regardless of how the workspace is configured.
 
-Reproducing it needs only the harness below plus a detached workspace registered
-the way `src/tests/test_workspace_turn.c:85` does it.
+Where that cwd is lost between the request and the worker is the next question,
+and it is the most promising lead: a delegate that reaches its worker without a
+cwd cannot bind its workspace, which is precisely the condition under which the
+shell and the file tools stop agreeing.
+
+Two corrections to earlier drafts of this document, recorded rather than quietly
+edited away. An earlier version reported `rc=0 submitted=0 response=(none)` as a
+"silent no-op" defect; that was a malformed probe — the delegate was refused with
+`prompt too short (19 chars)` and the message was sitting unread in the harness's
+`g_last_error`. There is no silent no-op. An earlier version also blamed the
+prefix-replacement at `server.c:713`; that was retracted above.
 
 ## Verification available to whoever takes this
 
