@@ -98,6 +98,25 @@ only that the two halves of one delegate must agree on where they are.
 - The turn diagnostic names the bound root and whether it is a repository checkout
   or an ephemeral workspace.
 
+## A second, separable defect found while building the reproduction
+
+Driving the same shape through the in-process harness (`handle_delegate` in
+`src/tests/test_server_compute.c`) with role `code`, `tools: true`,
+`background: true`, and a cwd inside a registered **detached** workspace produces:
+
+    handle_delegate rc=0 submitted=0 response=(none)
+
+Success returned, no worker submitted, and no response sent. From the caller's
+side that is a silent no-op: the delegate is neither run nor refused, and nothing
+says so. Whether this is the detached provider correctly parking the turn for a
+client that never polls, or a missing refusal, is not established — but a
+`rc=0` with no response and no work is indistinguishable from a delegate that ran
+and did nothing, which is the failure mode this repository has repeatedly fixed
+elsewhere.
+
+Reproducing it needs only the harness below plus a detached workspace registered
+the way `src/tests/test_workspace_turn.c:85` does it.
+
 ## Verification available to whoever takes this
 
 The C suite builds and runs on an ordinary workstation (gcc 14, GNU make) — a
