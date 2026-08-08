@@ -351,13 +351,13 @@ int main(void)
        * un-undoable. Assert the record exists and names the canonical, on the
        * MERGED row: that is the row whose meaning changed and the one an undo
        * would have to find. */
-      aimee_pg_stmt_t *prov = aimee_pg_prepare(
-          db2_conn(),
-          "SELECT p.action, p.details FROM memory_provenance p"
-          "  JOIN memories m ON m.id = p.memory_id"
-          " WHERE m.key = 'dup-key-improve' AND m.merged_into != 0"
-          "   AND p.action = 'dedupe_merge'",
-          err, sizeof(err));
+      aimee_pg_stmt_t *prov =
+          aimee_pg_prepare(db2_conn(),
+                           "SELECT p.action, p.details FROM memory_provenance p"
+                           "  JOIN memories m ON m.id = p.memory_id"
+                           " WHERE m.key = 'dup-key-improve' AND m.merged_into != 0"
+                           "   AND p.action = 'dedupe_merge'",
+                           err, sizeof(err));
       assert(prov);
       assert(aimee_pg_step(prov, err, sizeof(err)) == AIMEE_PG_ROW);
       const char *pdetails = aimee_pg_column_text(prov, 1);
