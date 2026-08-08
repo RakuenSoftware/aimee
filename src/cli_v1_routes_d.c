@@ -656,6 +656,7 @@ static const struct
     {"collab_rules.list_active", "GET", "/v1/collab_rules/active"},
     {"collab_rules.reject", "POST", "/v1/collab_rules/reject"},
     {"collab_rules.retire", "POST", "/v1/collab_rules/retire"},
+    {"config.deploy_env", "GET", "/v1/config/deploy-env"},
     {"config.get", "POST", "/v1/config/get"},
     {"config.set", "POST", "/v1/config/set"},
     {"config.show", "GET", "/v1/config"},
