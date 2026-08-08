@@ -137,6 +137,20 @@ var configurableIntBounds = map[string]intBounds{
 	"autonomy.delegate_pending_secs": {min: 2, max: 3600},
 }
 
+// MinAutonomyMaxWallSecs is the smallest per-stage wall cap under which a
+// write-role delegate can still run at all. A write dispatch reserves time for
+// the mandatory repository verifier and refuses outright below one viable
+// model-call window, so a smaller cap makes every implement attempt refuse
+// immediately: the stage can never finish, no matter how often it retries.
+// Rejecting it when the value is set states that up front instead of leaving it
+// to be discovered by watching attempts die.
+//
+// This must stay equal to the engine's own write-role floor
+// (delegateWriteVerifyReserve + delegateWriteMinRunBudget). It is duplicated
+// rather than imported because internal/engine already imports this package, and
+// TestWriteRoleWallFloorMatchesConfigBound in internal/engine pins the two together.
+const MinAutonomyMaxWallSecs = 360
+
 func (s *Store) Values() (map[string]any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -399,6 +413,11 @@ func validateKeyValue(key string, value any) error {
 		}
 		if bounds, bounded := configurableIntBounds[key]; bounded && (n < bounds.min || n > bounds.max) {
 			return fmt.Errorf("%s must be between %d and %d", key, bounds.min, bounds.max)
+		}
+		if key == "autonomy.max_wall_secs" && n > 0 && n < MinAutonomyMaxWallSecs {
+			return fmt.Errorf(
+				"autonomy.max_wall_secs=%d is below the %d seconds a write-role delegate needs to run: every implement stage would refuse before starting, so no attempt could ever finish",
+				n, MinAutonomyMaxWallSecs)
 		}
 	case "bool":
 		if _, ok := value.(bool); !ok {
