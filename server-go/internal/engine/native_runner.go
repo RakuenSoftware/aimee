@@ -181,8 +181,25 @@ type DelegateLimitError struct {
 
 func (e *DelegateLimitError) Error() string {
 	return fmt.Sprintf("%s (stage_wall_remaining=%s delegate_tool_loop_cap=%s elapsed=%s)",
-		e.Err, e.StageWallRemaining.Round(time.Millisecond),
-		e.ToolLoopCap.Round(time.Millisecond), e.Elapsed.Round(time.Millisecond))
+		e.Err, boundOrUnset(e.StageWallRemaining), boundOrUnset(e.ToolLoopCap),
+		e.Elapsed.Round(time.Millisecond))
+}
+
+// Exactly zero means the bound was never set — no deadline on the context, or no
+// tool-loop cap applied — which is a different fact from a bound of zero length.
+// Printing "0s" for it invites the misreading this error exists to prevent: that
+// the limit was reached instantly.
+//
+// A NEGATIVE value is a third, distinct fact. StageWallRemaining comes from
+// time.Until(deadline), which goes negative once the deadline has passed and is
+// not clamped, so a non-positive test would report the one case where the limit
+// provably WAS reached as though no limit existed — the same inversion, pointing
+// the other way. Negatives are rendered as themselves.
+func boundOrUnset(d time.Duration) string {
+	if d == 0 {
+		return "unset"
+	}
+	return d.Round(time.Millisecond).String()
 }
 
 func (e *DelegateLimitError) Unwrap() error { return e.Err }
