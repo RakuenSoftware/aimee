@@ -146,6 +146,10 @@ void pt_print_delegate(const char *method, cJSON *resp);
 void pt_print_delegate_launch(const char *method, cJSON *resp);
 void pt_print_delegate_log(const char *method, cJSON *resp);
 void pt_print_roundtable_review(const char *method, cJSON *resp);
+/* 1 when the response carries no review artifact, so the caller's exit status
+ * reports "no review happened" rather than success. Defined beside the printer
+ * because both answer the same question about the same response. */
+int roundtable_review_response_is_failure(cJSON *resp);
 void pt_print_delegate_status(const char *method, cJSON *resp);
 void pt_print_dogfood_report(const char *method, cJSON *resp);
 void pt_print_dogfood_tag(const char *method, cJSON *resp);
