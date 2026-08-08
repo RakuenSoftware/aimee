@@ -138,7 +138,7 @@ int main(void)
       assert(strstr(eid, "You are the MANAGER") != NULL); /* manager role */
       assert(strstr(eid, "## Work Queue") == NULL);       /* the queue does not exist */
       assert(strstr(eid, "aimee work ") == NULL);
-      assert(strstr(eid, "/tmp/session-cwd") != NULL);    /* %s -> cwd */
+      assert(strstr(eid, "/tmp/session-cwd") != NULL); /* %s -> cwd */
       assert(strstr(eid, "%s") == NULL);
       free(eid);
       persona_free(&eng);
