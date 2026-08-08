@@ -203,7 +203,16 @@ static void tool_execute_worker(void *arg)
    int rc = pre_tool_check(tool, args, &state, config_guardrail_mode(), cwd, msg, sizeof(msg));
    session_state_save(&state, sid);
 
-   if (rc != 0)
+   /* 1 and 3 are ALLOW-with-rewrite verdicts, not refusals: 1 carries a rewritten
+    * path, 3 a rewritten command ("cd <worktree> && …"). Treating them as blocked
+    * refused every tool call the guardrail merely wanted to redirect into the
+    * session worktree — for rc==1 that is an ordinary Write/Edit, the common case.
+    *
+    * They are let through rather than applied here because dispatch_tool_call
+    * runs pre_tool_check again and applies both rewrites to the arguments it
+    * passes on; re-deriving them here would be a second copy of that logic, free
+    * to drift from the one that actually decides. */
+   if (rc != 0 && rc != 1 && rc != 3)
    {
       cJSON *resp = cJSON_CreateObject();
       cJSON_AddStringToObject(resp, "status", "blocked");
