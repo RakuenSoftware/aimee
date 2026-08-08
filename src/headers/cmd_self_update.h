@@ -33,7 +33,15 @@ const char *aimee_self_update_asset(void);
  * (no remote endpoint, transport failure, or malformed response). */
 int aimee_fetch_server_version(char *out, size_t cap);
 
-/* If a remote (thin-client) server is configured AND reports a version newer
+/* Pure drift verdict: given both sides' version strings and HEAD commit times
+ * (epoch seconds; <=0 when unknown), write a one-line human notice to `out` and
+ * return 1, or return 0 when there is nothing to say. A semver server is ordered
+ * by version; a non-semver dev/branch server ("testing-<sha>") is ordered by
+ * commit time instead, which is the only orderable thing such a pair shares. */
+int aimee_self_update_notice_for(const char *server_ver, long server_time, const char *client_ver,
+                                 long client_time, char *out, size_t cap);
+
+/* If a remote (thin-client) server is configured AND reports a build newer
  * than this client, write a one-line human notice to `out` and return 1.
  * Returns 0 (and leaves `out` empty) when up to date, not a thin client, or the
  * check could not be completed. Never blocks longer than a few seconds. */

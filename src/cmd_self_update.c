@@ -47,11 +47,22 @@ static const char *vnum(const char *s)
    return (s && (s[0] == 'v' || s[0] == 'V')) ? s + 1 : s;
 }
 
-int aimee_fetch_server_version(char *out, size_t cap)
+/* GET `path` and read the build it describes: the version string under
+ * `ver_key`, and (optionally) the HEAD commit time under "commit_time".
+ *
+ * Two endpoints describe the same build. /v1/version is public and reports only
+ * a version string; /v1/server/info additionally carries commit_time, which is
+ * the only thing that orders a dev/branch build whose version string does not.
+ * `commit_time_out` receives 0 when the endpoint or the server does not
+ * advertise one. */
+static int fetch_server_build(const char *path, const char *ver_key, char *out, size_t cap,
+                              long *commit_time_out)
 {
+   if (commit_time_out)
+      *commit_time_out = 0;
    if (out && cap)
       out[0] = '\0';
-   if (!out || cap == 0)
+   if (!out || cap == 0 || !path || !ver_key)
       return -1;
    char *endpoint = cli_v1_client_endpoint();
    if (!endpoint)
@@ -68,7 +79,7 @@ int aimee_fetch_server_version(char *out, size_t cap)
     * unreachable". aimee_client_request is the Schannel transport the rest of the
     * Windows client already uses; it resolves the configured remote itself. */
    free(endpoint);
-   char *raw = aimee_client_request("GET", "/v1/version", NULL, &status);
+   char *raw = aimee_client_request("GET", path, NULL, &status);
    if (raw)
    {
       resp = cJSON_Parse(raw);
@@ -76,21 +87,31 @@ int aimee_fetch_server_version(char *out, size_t cap)
    }
 #else
    char *bearer = cli_v1_client_bearer();
-   resp = cli_http_request(endpoint, "GET", "/v1/version", NULL, bearer, 5000, &status);
+   resp = cli_http_request(endpoint, "GET", path, NULL, bearer, 5000, &status);
    free(endpoint);
    free(bearer);
 #endif
    if (!resp)
       return -1;
    int rc = -1;
-   cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, "version");
+   cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, ver_key);
    if (status == 200 && cJSON_IsString(v) && v->valuestring[0])
    {
       snprintf(out, cap, "%s", v->valuestring);
+      cJSON *ct = cJSON_GetObjectItemCaseSensitive(resp, "commit_time");
+      if (commit_time_out && cJSON_IsNumber(ct) && ct->valuedouble > 0)
+         *commit_time_out = (long)ct->valuedouble;
       rc = 0;
    }
    cJSON_Delete(resp);
    return rc;
+}
+
+int aimee_fetch_server_version(char *out, size_t cap)
+{
+   /* self-update resolves a RELEASE asset by version, so it keeps the public
+    * endpoint it has always used; commit_time is of no use to it. */
+   return fetch_server_build("/v1/version", "version", out, cap, NULL);
 }
 
 int aimee_self_update_notice(char *out, size_t cap)
@@ -103,20 +124,16 @@ int aimee_self_update_notice(char *out, size_t cap)
     * a co-located session shares this very binary and cannot drift. */
    if (!cli_v1_has_remote_endpoint())
       return 0;
+   /* server.info, not /v1/version: it reports server_version and commit_time in
+    * one response, and commit_time is what makes a dev/branch build orderable.
+    * Best-effort -- if it cannot be reached, stay silent as before. */
    char server_ver[64];
-   if (aimee_fetch_server_version(server_ver, sizeof server_ver) != 0)
+   long server_time = 0;
+   if (fetch_server_build("/v1/server/info", "server_version", server_ver, sizeof server_ver,
+                          &server_time) != 0)
       return 0;
-   /* Only a comparable (semver) server that is strictly newer is actionable; a
-    * dev/branch "testing-<sha>" server is not orderable, so stay silent. */
-   if (!aimee_version_is_semver(server_ver))
-      return 0;
-   if (aimee_version_compare(server_ver, AIMEE_VERSION) <= 0)
-      return 0;
-   snprintf(out, cap,
-            "aimee-server is v%s but this client is v%s. Run `aimee self-update` to "
-            "catch up (keeps client and server in lockstep).",
-            vnum(server_ver), vnum(AIMEE_VERSION));
-   return 1;
+   return aimee_self_update_notice_for(server_ver, server_time, AIMEE_VERSION,
+                                       (long)AIMEE_GIT_COMMIT_TIME, out, cap);
 }
 
 /* readlink /proc/self/exe -> `out`. 0 on success. Linux-only; the swap path is
