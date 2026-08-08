@@ -10,6 +10,7 @@
 #include "db1.h"
 #include "db2.h"
 #include "db2_test_shim.h"
+#include "db2/memory_lifecycle.h" /* db2_memory_valid_at */
 #include "modules/memory/memory_ontology.h"
 #include "../db2/bandit.h"
 #include "../db2/db2_internal.h"
@@ -1997,6 +1998,48 @@ int main(void)
       /* maybe_run is gated on memory_maintenance.enabled; say so in config. */
       write_test_config("memory_maintenance:\n  enabled: false\n");
       assert(memory_maintenance_maybe_run(NULL) == 0);
+   }
+
+   /* --- event-time intervals: "what did we believe on <date>" ---
+    *
+    * lifecycle_state answers "is this true NOW" and nothing more: a superseded
+    * row looks identically superseded whether it stopped being true yesterday or
+    * last year. Closing valid_until at the transition makes the point-in-time
+    * question answerable for ROWS the way it already is for relations. */
+   {
+      memory_t m;
+      assert(memory_insert(TIER_L2, KIND_PREFERENCE, "bt:pref", "deploy on Fridays is fine", 0.9,
+                           "s-bt", &m) == 0);
+
+      /* While active the interval is open at both ends: true then, true now,
+       * true at an absurd future date. An open bound must never read as closed. */
+      assert(db2_memory_valid_at(m.id, "2000-01-01 00:00:00") == 1);
+      assert(db2_memory_valid_at(m.id, "2099-01-01 00:00:00") == 1);
+
+      /* Supersede it. This is the transition that closes the interval. */
+      assert(memory_transition_lifecycle(m.id, MEMORY_LIFECYCLE_STATE_SUPERSEDED, NULL) == 0);
+
+      /* The past is unchanged -- it WAS true then, and rewriting history is
+       * exactly what a state flag does by omission. */
+      assert(db2_memory_valid_at(m.id, "2000-01-01 00:00:00") == 1);
+      /* ...and it is no longer true at a date after the close. */
+      assert(db2_memory_valid_at(m.id, "2099-01-01 00:00:00") == 0);
+
+      /* Bad calls are refused rather than guessed. */
+      assert(db2_memory_valid_at(m.id, NULL) == -1);
+      assert(db2_memory_valid_at(m.id, "") == -1);
+      assert(db2_memory_valid_at(0, "2020-01-01 00:00:00") == -1);
+
+      /* A row that never closed reads as still true at any date. Rows written
+       * before this stamping existed fall here, and "still true" is the honest
+       * answer for them: we do not know when they stopped, and manufacturing a
+       * boundary would be worse than leaving the interval open. */
+      memory_t open_row;
+      assert(memory_insert(TIER_L2, KIND_FACT, "bt:open", "never superseded", 0.9, "s-bt",
+                           &open_row) == 0);
+      assert(db2_memory_valid_at(open_row.id, "2099-01-01 00:00:00") == 1);
+
+      printf("  bitemporal_rows: ok\n");
    }
 
    db2_test_shim_close();
