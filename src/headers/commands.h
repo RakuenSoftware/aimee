@@ -186,7 +186,10 @@ void cmd_trace(app_ctx_t *ctx, int argc, char **argv);
 void cmd_trajectory(app_ctx_t *ctx, int argc, char **argv);
 void cmd_jobs(app_ctx_t *ctx, int argc, char **argv);
 void cmd_plans(app_ctx_t *ctx, int argc, char **argv);
-void cmd_eval(app_ctx_t *ctx, int argc, char **argv);
+/* cmd_eval removed: the benchmark suites moved to the benchmarks module
+ * (aimee-server --eval). The thin client's `eval run` / `eval results` are
+ * unaffected -- they marshal to the server's eval.run / eval.results RPC via
+ * cli_v1_routes_b.c, not through this table. */
 
 /* cmd_sweep.c — `aimee sweep [project]`: server-side deepening sweep (analysis-only) */
 void cmd_sweep(app_ctx_t *ctx, int argc, char **argv);
