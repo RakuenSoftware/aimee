@@ -138,6 +138,27 @@ static void test_notice_dev_build_drift(void)
    printf("  test_notice_dev_build_drift ok\n");
 }
 
+/* The notice interpolates BOTH version strings, and a git-describe version is
+ * far longer than a release tag. Caught live: cli_session_start passed a 256-byte
+ * buffer and the dev-build notice truncated mid-word ("...the server's own bui").
+ * Short fixtures like "0.3.0" hide this entirely, so pin the real shape. */
+static void test_notice_fits_real_version_strings(void)
+{
+   char buf[512];
+   const char *srv = "pre-merge-safety-902-g0ec2c4f523";
+   const char *cli = "pre-merge-safety-903-g6fee67ae87";
+
+   assert(aimee_self_update_notice_for(srv, T0 + 7 * DAY, cli, T0, buf, sizeof buf) == 1);
+   /* Rendered whole: the last sentence must survive to its final word. */
+   size_t len = strlen(buf);
+   assert(len > 0 && buf[len - 1] == '.');
+   assert(strstr(buf, "server's own build."));
+   /* And it genuinely does not fit the old buffer -- otherwise this test would
+    * pass for the wrong reason and stop defending the size it exists to justify. */
+   assert(len >= 256);
+   printf("  test_notice_fits_real_version_strings ok (%zu bytes)\n", len);
+}
+
 static void test_notice_defensive(void)
 {
    char buf[256];
@@ -156,6 +177,7 @@ int main(void)
    test_version_is_semver();
    test_notice_semver();
    test_notice_dev_build_drift();
+   test_notice_fits_real_version_strings();
    test_notice_defensive();
    test_asset();
    printf("test_self_update: all passed\n");
