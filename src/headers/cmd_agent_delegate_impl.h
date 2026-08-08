@@ -239,6 +239,27 @@ char *delegate_inject_code_context(const char *prompt);
  * fail-open. Heap string (caller frees) or NULL. */
 char *delegate_inject_graph_context(const char *prompt, const char *cwd);
 
+/* What kind of place a delegate turn's root is. A delegate cannot judge its own
+ * evidence without this: `git log` showing nothing unusual means one thing in the
+ * repository and quite another in a reconstruction of it taken at some earlier
+ * point, and "the file is not here" means something different again in a
+ * directory that never held a repository at all. */
+typedef enum
+{
+   DELEGATE_ROOT_NAMED = 0,     /* the workspace the caller named */
+   DELEGATE_ROOT_RECONSTRUCTED, /* server-side mirror of a detached workspace */
+   DELEGATE_ROOT_EPHEMERAL,     /* scratch directory, no repository in it */
+} delegate_root_kind_t;
+
+/* Build a "## Working root" block naming the root this turn is bound to and what
+ * kind of place it is, so the delegate is not left inferring it from whether
+ * commands happen to work. Both roots are passed because they are what the
+ * delegate actually experiences -- the directory its shell runs in and the one
+ * its file tools write to -- and when they differ, saying so plainly is the whole
+ * point. Heap string (caller frees); NULL when there is no root to describe. */
+char *delegate_bound_root_notice(const char *shell_root, const char *file_root,
+                                 delegate_root_kind_t kind);
+
 /* Rewrite every occurrence of `cwd` in `prompt` to `worktree_path` so a delegate
  * running in an isolated sibling worktree sees paths under its own checkout.
  * Returns a newly malloc'd string (caller frees) and sets *occurrences_out to
