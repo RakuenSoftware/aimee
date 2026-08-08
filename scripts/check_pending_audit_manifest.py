@@ -93,16 +93,24 @@ def main() -> int:
             fail(f"{name}: review record is missing")
 
     actual_pending = {path.name for path in (ROOT / "docs/proposals/pending").glob("*.md")}
-    if actual_pending != expected_pending:
-        fail(
-            f"pending set mismatch: missing={sorted(expected_pending-actual_pending)}, "
-            f"extra={sorted(actual_pending-expected_pending)}"
-        )
+    # A manifest is a DATED snapshot, so a proposal written after it is expected to
+    # be absent from it. Requiring set equality made every newly drafted proposal a
+    # failure -- which is why this gate was never wired into anything and drifted
+    # unnoticed. Only one direction is a real defect: the manifest says a proposal
+    # is live in pending/ and it is not there, so a row describes a file that moved
+    # without its row being reconciled.
+    missing = sorted(expected_pending - actual_pending)
+    if missing:
+        fail(f"manifest lists these as pending but they are absent from pending/: {missing}")
+    unlisted = sorted(actual_pending - expected_pending)
     print(
         "pending-audit-manifest: ok "
         f"({manifest.name}: {len(rows)} originals, "
-        f"{len(actual_pending)} final pending proposals)"
+        f"{len(actual_pending)} pending proposals, "
+        f"{len(unlisted)} drafted since the snapshot)"
     )
+    for name in unlisted:
+        print(f"  not in the {manifest.name} snapshot: {name}")
     return 0
 
 
