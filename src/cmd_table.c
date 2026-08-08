@@ -245,7 +245,6 @@ const command_t commands[] = {
      CMD_TIER_ADMIN},
     {"gateway", "Ambient-presence gateway management (pair list/issue/approve/revoke)", cmd_gateway,
      CMD_TIER_ADMIN},
-    {"eval", "Eval harness (run, results)", cmd_eval, CMD_TIER_ADMIN},
     {"export", "Export state to portable JSONL format", cmd_export, CMD_TIER_ADMIN},
     {"import", "Import state from exported directory", cmd_import, CMD_TIER_ADMIN},
     {"db", "Database diagnostics and maintenance", cmd_db, CMD_TIER_ADMIN},

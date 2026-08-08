@@ -14,6 +14,7 @@
 
 #include "aimee.h"
 #include "agent_eval.h"
+#include "config.h" /* config_embedder_command_current */
 
 int main(int argc, char **argv)
 {
@@ -34,8 +35,12 @@ int main(int argc, char **argv)
       return 2;
    }
 
+   /* mem_eval_load_corpus gained an explicit embedder-command argument; passing
+    * the configured one keeps this harness on the same embedder as production
+    * rather than silently falling back (see the note above its declaration). */
    static mem_eval_case_t cases[MEM_CORPUS_MAX_CASES];
-   int n = mem_eval_load_corpus(corpus, cases, MEM_CORPUS_MAX_CASES);
+   int n = mem_eval_load_corpus(corpus, config_embedder_command_current(NULL), cases,
+                                MEM_CORPUS_MAX_CASES);
    if (n <= 0)
    {
       fprintf(stderr, "FAIL: corpus load failed for %s\n", corpus);

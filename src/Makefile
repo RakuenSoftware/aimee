@@ -676,6 +676,7 @@ KB_MCP_OBJS = $(OBJDIR)/modules/protocols/mcp/mcp_client.o \
               $(OBJDIR)/kb/kb_mcp_osv_stub.o
 KB_SYNTHESIS_SRCS = modules/kb-synthesis/kb_curator_contradictions.c modules/kb-synthesis/kb_curator_custom.c modules/kb-synthesis/kb_curator_drain.c modules/kb-synthesis/kb_curator_extract.c modules/kb-synthesis/kb_curator_extract_code.c modules/kb-synthesis/kb_curator_grounding.c modules/kb-synthesis/kb_curator_index_claims.c modules/kb-synthesis/kb_curator_index_code_unit.c modules/kb-synthesis/kb_curator_index_narrative.c modules/kb-synthesis/kb_curator_judge.c modules/kb-synthesis/kb_curator_link_artifacts.c modules/kb-synthesis/kb_curator_llm.c modules/kb-synthesis/kb_curator_notify.c modules/kb-synthesis/kb_curator_pipeline.c modules/kb-synthesis/kb_curator_promote.c modules/kb-synthesis/kb_curator_queue.c modules/kb-synthesis/kb_curator_resolve_entities.c modules/kb-synthesis/kb_curator_serve.c modules/kb-synthesis/kb_curator_sidecar.c modules/kb-synthesis/kb_curator_synthesize.c modules/kb-synthesis/kb_curator_version.c
 KB_SYNTHESIS_OBJS = $(KB_SYNTHESIS_SRCS:%.c=$(OBJDIR)/kb/%.o)
+
 $(OBJDIR)/kb/modules/kb-synthesis/%.o: modules/kb-synthesis/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) $(KB_TPM2_CFLAGS) $(KB_PKCS11_CFLAGS) -Ikb -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM -o $@ $<
@@ -1453,7 +1454,7 @@ write-tier-enforce-live: ../write-tier-enforce-live
 # isolated throwaway schema in a DISPOSABLE Postgres (AIMEE_DB2_EVAL_URL) and can
 # exercise Postgres-only retrieval (memory_negation_fts_tsv). Build explicitly:
 #   make ../aimee-negation-eval
-../aimee-negation-eval: $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS) $(OBJDIR)/kb/modules/agent_eval/agent_eval.o $(OBJDIR)/kb/modules/agent_eval/agent_eval_memory_support.o $(OBJDIR)/kb/modules/agent_eval/agent_eval_baseline.o $(OBJDIR)/tests/mem_negation_eval_main.o $(OBJDIR)/tests/support/agent_runtime_eval_stub.o
+../aimee-negation-eval: $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS) $(OBJDIR)/kb/modules/benchmarks/agent_eval.o $(OBJDIR)/kb/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/kb/modules/benchmarks/agent_eval_baseline.o $(OBJDIR)/tests/mem_negation_eval_main.o $(OBJDIR)/tests/support/agent_runtime_eval_stub.o
 	$(CC) -o $@ $^ $(L_KB)
 
 # Deterministic Bucket-3 code-graph harness (dev tool, not part of `all`): loads a
