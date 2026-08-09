@@ -956,17 +956,13 @@ int db2_code_index_file_modified_since(int64_t project_id, const char *rel_path,
       const char *ts = aimee_pg_column_text(st, 0);
       if (ts)
       {
-         struct tm tmv;
-         memset(&tmv, 0, sizeof(tmv));
-         if (sscanf(ts, "%d-%d-%dT%d:%d:%d", &tmv.tm_year, &tmv.tm_mon, &tmv.tm_mday, &tmv.tm_hour,
-                    &tmv.tm_min, &tmv.tm_sec) == 6)
-         {
-            tmv.tm_year -= 1900;
-            tmv.tm_mon -= 1;
-            time_t scanned = timegm(&tmv);
-            if (scanned >= mtime)
-               modified = 0;
-         }
+         /* Shared parser: this matched only the ISO spelling, and the column also
+          * holds the canonical text form that pg_now_text() writes. An unparsed
+          * stamp left `modified` at 1, so the file was re-indexed on every scan
+          * -- wasteful rather than wrong, which is why nothing surfaced it. */
+         time_t scanned = parse_utc_ts(ts);
+         if (scanned > 0 && scanned >= mtime)
+            modified = 0;
       }
    }
    aimee_pg_finalize(st);
