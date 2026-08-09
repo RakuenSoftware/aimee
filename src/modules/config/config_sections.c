@@ -1223,6 +1223,19 @@ void config_parse_transport_section(config_t *cfg, cJSON *root)
          cfg->cache_min_chars = (int)item->valuedouble;
    }
 
+   cJSON *xth = cJSON_GetObjectItemCaseSensitive(root, "extended_thinking");
+   if (cJSON_IsObject(xth))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(xth, "enabled");
+      if (cJSON_IsBool(item))
+         cfg->extended_thinking_enabled = cJSON_IsTrue(item) ? 1 : 0;
+      /* A budget of 0 would emit thinking the provider rejects, so require > 0
+       * rather than silently sending an unusable request. */
+      item = cJSON_GetObjectItemCaseSensitive(xth, "budget_tokens");
+      if (cJSON_IsNumber(item) && item->valuedouble > 0)
+         cfg->extended_thinking_budget_tokens = (int)item->valuedouble;
+   }
+
    cJSON *ing = cJSON_GetObjectItemCaseSensitive(root, "ingress");
    if (cJSON_IsObject(ing))
    {

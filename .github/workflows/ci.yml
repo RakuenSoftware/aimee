@@ -926,6 +926,12 @@ jobs:
       - name: Managed compose env derived from config
         run: cd src && make deploy-compose-env-test
 
+      # `workflow list` prints names that `workflow show` must accept. Two
+      # commands in the same family disagreeing about what a name means is the
+      # kind of thing people work around silently rather than report.
+      - name: Workflow name resolution
+        run: cd src && make workflow-name-resolution-test
+
   windows-cmake:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
