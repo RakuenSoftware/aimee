@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h> /* time_t: parse_utc_ts */
 
 /* Limits */
 #define MAX_PATH_LEN        4096
@@ -187,6 +188,19 @@ __attribute__((noreturn, format(printf, 1, 2))) void fatal(const char *fmt, ...)
 
 /* Utility: timestamp */
 void now_utc(char *buf, size_t len);
+
+/* Parse a stored UTC timestamp to epoch seconds, accepting BOTH spellings the
+ * tree writes: ISO "2026-08-09T19:07:23Z" (now_utc, from C) and the canonical
+ * text form "2026-08-09 19:07:23" (pg_now_text, from SQL). A trailing 'Z' and a
+ * missing time are both tolerated; a date alone reads as midnight.
+ *
+ * One reader must accept both because one column can hold both: the same DB2
+ * timestamp column is written by C via now_utc() and by SQL via pg_now_text(),
+ * depending on the code path that touched the row. Parsers that admitted only
+ * one spelling did not fail loudly on the other -- they returned 0, "the epoch",
+ * which reads as a real and very old time. Returns 0 when nothing parses, which
+ * keeps that existing contract for callers that treat 0 as "unknown/ancient". */
+time_t parse_utc_ts(const char *s);
 
 #include "config.h"
 #include "util.h"
