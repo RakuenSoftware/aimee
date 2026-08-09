@@ -75,6 +75,20 @@ extern "C"
     * bad args. */
    int memory_extract_patterns(const char *text, pattern_triple_t *out, int max);
 
+   /* Triple provider: returns 0 and writes the count to *count, or non-zero if
+    * it could not produce an answer at all. */
+   typedef int (*memory_pattern_extractor_fn)(const char *text, pattern_triple_t *out, int max,
+                                              int *count);
+
+   /* Route extraction through `extractor` (the memory module over the bus)
+    * instead of running it in-process. Pass NULL to go back to local extraction.
+    *
+    * A registered extractor is authoritative: when it fails, memory_extract_patterns
+    * returns -1 rather than falling back or reporting zero triples. Zero means the
+    * text held no facts; a broken module must not be able to say that. -1 is the
+    * function's existing bad-arg code, and the caller already distinguishes it. */
+   void memory_extract_register_extractor(memory_pattern_extractor_fn extractor);
+
 #ifdef __cplusplus
 }
 #endif

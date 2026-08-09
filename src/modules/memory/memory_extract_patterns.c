@@ -289,10 +289,24 @@ int memory_pattern_possessive_attr(const char *text, char *out, size_t out_len)
    return 0;
 }
 
+static memory_pattern_extractor_fn g_extractor;
+
+void memory_extract_register_extractor(memory_pattern_extractor_fn extractor)
+{
+   g_extractor = extractor;
+}
+
 int memory_extract_patterns(const char *text, pattern_triple_t *out, int max)
 {
    if (!text || !out || max <= 0)
       return -1;
+   if (g_extractor)
+   {
+      int count = 0;
+      if (g_extractor(text, out, max, &count) != 0)
+         return -1; /* no answer: never report "no facts" on the module's behalf */
+      return count;
+   }
    int n = 0, len = (int)strlen(text);
    for (int i = 0; i < len && n < max; i++)
    {

@@ -31,6 +31,18 @@ const (
 	relTypeMax               = 256
 	gateRequestLen           = 20 + relTypeMax
 	gateResponseLen          = 8
+
+	extractRequestMagic      uint32 = 0x51525458
+	extractResponseMagic     uint32 = 0x53525458
+	extractRequestHeaderLen         = 16
+	extractResponseHeaderLen        = 8
+	// Field capacities of one triple, mirroring pattern_triple_t's buffers. A
+	// field is never emitted longer than these -- ExtractPatterns already trims
+	// to them -- but the C decoder refuses an over-long field outright, so
+	// emitting one would be a hard failure rather than a truncation.
+	tripleSubjectMax = 128
+	tripleRelTypeMax = 64
+	tripleObjectMax  = 128
 )
 
 const (
@@ -41,10 +53,59 @@ const (
 
 // Handle dispatches a memory stage call.
 func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
-	if invocation.StageID == StageWrite {
+	switch invocation.StageID {
+	case StageWrite:
 		return handleWrite(invocation, request)
+	case StageExtractIndex:
+		return handleExtract(invocation, request)
 	}
 	return handleRerank(invocation, request)
+}
+
+// handleExtract runs the pattern-first extraction over a turn's text.
+//
+// The text is length-prefixed and unbounded on the wire: unlike a relation
+// label, there is no length past which a turn stops being a turn. The bus body
+// cap is the only limit, and it is enforced before the request gets here.
+func handleExtract(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+	if len(request) < extractRequestHeaderLen ||
+		binary.LittleEndian.Uint32(request[0:4]) != extractRequestMagic ||
+		binary.LittleEndian.Uint32(request[4:8]) != wireVersion {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	max := binary.LittleEndian.Uint32(request[8:12])
+	textLen := int(binary.LittleEndian.Uint32(request[12:16]))
+	if max == 0 || textLen != len(request)-extractRequestHeaderLen {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if invocation.Cancelled() {
+		return nil, bus.ModuleStatusCancelled
+	}
+
+	triples := ExtractPatterns(string(request[extractRequestHeaderLen:]), int(max))
+	response := make([]byte, extractResponseHeaderLen)
+	binary.LittleEndian.PutUint32(response[0:4], extractResponseMagic)
+	binary.LittleEndian.PutUint32(response[4:8], uint32(len(triples)))
+	for _, triple := range triples {
+		if len(triple.Subject) >= tripleSubjectMax || len(triple.RelType) >= tripleRelTypeMax ||
+			len(triple.Object) >= tripleObjectMax {
+			// Unreachable through ExtractPatterns, which trims to these bounds.
+			// Refuse rather than emit a field the C decoder will reject anyway,
+			// so the failure names the stage instead of the transport.
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var kinds [8]byte
+		binary.LittleEndian.PutUint32(kinds[0:4], uint32(triple.SubjectKind))
+		binary.LittleEndian.PutUint32(kinds[4:8], uint32(triple.ObjectKind))
+		response = append(response, kinds[:]...)
+		for _, field := range []string{triple.Subject, triple.RelType, triple.Object} {
+			var length [4]byte
+			binary.LittleEndian.PutUint32(length[:], uint32(len(field)))
+			response = append(response, length[:]...)
+			response = append(response, field...)
+		}
+	}
+	return response, bus.ModuleStatusOK
 }
 
 // handleWrite validates a candidate typed fact against the seed ontology.
