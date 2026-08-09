@@ -117,7 +117,11 @@ func TestGitStageTableMatchesContract(t *testing.T) {
 			t.Fatalf("stage %d event kind = %d, want %d", stage, event, want)
 		}
 	}
-	for _, stage := range []uint32{StageForgeRequest, StageCredResolve, StageVerifyRun} {
+	// Forge and credential resolution stay unserved until the vault has a bus
+	// surface: git_pr_api.c resolves its token in-process precisely so it never
+	// reaches another process, and honouring that from a module process needs
+	// the vault extraction in vault-bus-only-access.md.
+	for _, stage := range []uint32{StageForgeRequest, StageCredResolve} {
 		if _, status := Handle(bus.ModuleInvocation{StageID: stage}, nil); status != bus.ModuleStatusInvalidRequest {
 			t.Fatalf("unserved stage %d status = %d, want refused", stage, status)
 		}

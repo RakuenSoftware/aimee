@@ -120,6 +120,7 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 			{EventKind: modulegit.EventKind, StageID: modulegit.StageOperation},
 			{EventKind: modulegit.EventRefValidate, StageID: modulegit.StageRefValidate},
 			{EventKind: modulegit.EventCIGrade, StageID: modulegit.StageCIGrade},
+			{EventKind: modulegit.EventVerifyRun, StageID: modulegit.StageVerifyRun},
 		}
 		config.Handler = modulegit.Handle
 	case "skills":
