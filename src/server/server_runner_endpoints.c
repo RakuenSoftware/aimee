@@ -24,9 +24,13 @@
 #include "platform_path.h"
 #include "server_http.h"  /* session_primary_set/get/clear */
 #include "agent_config.h" /* agent_load_config / agent_find */
+#include "aimee_sha256.h"
 #include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -295,6 +299,35 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+static int mirror_sync_write_atomic(const char *path, const char *data, size_t len)
+{
+   char temp[MAX_PATH_LEN];
+   int n = snprintf(temp, sizeof(temp), "%s.tmp.XXXXXX", path);
+   if (n < 0 || (size_t)n >= sizeof(temp))
+      return -1;
+   int fd = mkstemp(temp);
+   if (fd < 0)
+      return -1;
+   size_t off = 0;
+   while (off < len)
+   {
+      ssize_t wrote = write(fd, data + off, len - off);
+      if (wrote <= 0)
+      {
+         close(fd);
+         unlink(temp);
+         return -1;
+      }
+      off += (size_t)wrote;
+   }
+   int sync_ok = fsync(fd) == 0;
+   int close_ok = close(fd) == 0; /* always close, including after fsync failure */
+   int ok = sync_ok && close_ok && rename(temp, path) == 0;
+   if (!ok)
+      unlink(temp);
+   return ok ? 0 : -1;
+}
+
 /* workspace.mirror-sync: the client serving a `mirror` workspace ships its full
  * working-tree patch vs HEAD (tracked mods + deletions + untracked-file adds, as
  * one `git diff --cached --binary` blob) so the server's reconstructed worktree
@@ -357,33 +390,37 @@ int handle_workspace_mirror_sync(server_ctx_t *ctx, server_conn_t *conn, cJSON *
     * before: seq 0, final true. */
    cJSON *jseq = cJSON_GetObjectItemCaseSensitive(req, "seq");
    cJSON *jfinal = cJSON_GetObjectItemCaseSensitive(req, "final");
-   int seq = cJSON_IsNumber(jseq) ? (int)jseq->valuedouble : 0;
+   if ((jseq && (!cJSON_IsNumber(jseq) || jseq->valuedouble < 0 || jseq->valuedouble > INT_MAX ||
+                 jseq->valuedouble != (int)jseq->valuedouble)) ||
+       (jfinal && !cJSON_IsBool(jfinal)))
+      return server_send_error(conn, "workspace: invalid mirror-sync sequence envelope", NULL);
+   int seq = jseq ? (int)jseq->valuedouble : 0;
    int final = jfinal ? cJSON_IsTrue(jfinal) : 1;
-   if (seq < 0)
-      return server_send_error(conn, "workspace: mirror-sync seq must not be negative", NULL);
 
    const char *client_head = jo_str(req, "head", "");
-   if (final && client_head && client_head[0])
-   {
-      /* Keep the registered provider. Hardcoding "mirror" here would silently
-       * convert a detached workspace on its first sync, and a detached workspace
-       * is detached on purpose: its client serves the live tree, which is better
-       * than any reconstruction while that client is connected. The head is
-       * recorded for the case where no client is. */
-      (void)config_workspace_add(root, ws_provider_kind_to_string(kind), NULL, client_head);
-      /* Republish the live snapshot, for the same reason workspace.add does:
-       * config_load() serves the snapshot rather than disk in the server, so
-       * without this the head sits correct on disk while every reader — the
-       * reconstruct included — keeps using the previous one until the server
-       * loop's next tick. Measured: the patch shipped against the right base and
-       * the checkout still used the stale head, so nothing reconstructed. */
-      (void)config_reload_if_changed();
-   }
+   const char *client_branch = jo_str(req, "branch", "");
+   const char *client_upstream = jo_str(req, "upstream", "");
+   const char *wire_transfer = jo_str(req, "transfer", "");
+   int chunked_request = jseq != NULL || jfinal != NULL;
+   const char *transfer = wire_transfer[0] ? wire_transfer : "00000000000000000000000000000000";
+   if (strlen(client_branch) >= sizeof(((ws_mirror_snapshot_t *)0)->branch) ||
+       strlen(client_upstream) >= sizeof(((ws_mirror_snapshot_t *)0)->upstream) ||
+       !workspace_mirror_ref_valid(client_branch) || !workspace_mirror_ref_valid(client_upstream))
+      return server_send_error(conn, "workspace: invalid branch or upstream in mirror-sync", NULL);
+   if (chunked_request && !wire_transfer[0])
+      return server_send_error(
+          conn,
+          "workspace: chunked mirror-sync requires a transfer id; upgrade the client before "
+          "using Git",
+          NULL);
 
-   char base[MAX_PATH_LEN], diff_path[MAX_PATH_LEN];
+   char base[MAX_PATH_LEN], diff_path[MAX_PATH_LEN], state_path[MAX_PATH_LEN];
+   char lock_path[MAX_PATH_LEN], counter_path[MAX_PATH_LEN];
    if (workspace_mirror_base(base, sizeof(base)) != 0)
       return server_send_error(conn, "workspace: cannot resolve workspaces dir", NULL);
-   if (workspace_mirror_diff_path(base, root, diff_path, sizeof(diff_path)) != 0)
+   if (workspace_mirror_transfer_paths(base, root, transfer, diff_path, sizeof(diff_path),
+                                       state_path, sizeof(state_path), lock_path, sizeof(lock_path),
+                                       counter_path, sizeof(counter_path)) != 0)
       return server_send_error(conn, "workspace: path too long", NULL);
 
    /* Ensure the hashed parent dir exists (the worktree may not be materialized
@@ -393,17 +430,212 @@ int handle_workspace_mirror_sync(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    char *slash = strrchr(parent, '/');
    if (slash)
       *slash = '\0';
-   platform_mkdir_p(parent, 0700);
+   if (platform_mkdir_p(parent, 0700) != 0)
+      return server_send_error(conn, "workspace: cannot create mirror-sync directory", NULL);
+
+   int lock_fd = open(lock_path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+   if (lock_fd < 0 || flock(lock_fd, LOCK_EX) != 0)
+   {
+      if (lock_fd >= 0)
+         close(lock_fd);
+      return server_send_error(conn, "workspace: cannot lock mirror-sync transfer", NULL);
+   }
+
+#define MIRROR_SYNC_FAIL(message)                                                                  \
+   do                                                                                              \
+   {                                                                                               \
+      (void)flock(lock_fd, LOCK_UN);                                                               \
+      close(lock_fd);                                                                              \
+      return server_send_error(conn, (message), NULL);                                             \
+   } while (0)
 
    const workspace_provider_t *ws = workspace_provider_shared();
-   if (seq > 0 && !ws->append)
-      return server_send_error(
-          conn, "workspace: this provider cannot append, so a chunked sync cannot be reassembled",
-          NULL);
-   int stored = seq == 0 ? ws->write_all(ws, diff_path, diff, strlen(diff))
-                         : ws->append(ws, diff_path, diff, strlen(diff));
-   if (stored != 0)
-      return server_send_error(conn, "workspace: failed to store client diff", NULL);
+   ws_mirror_transfer_state_t transfer_state = {0};
+   if (seq == 0)
+   {
+      unsigned long long prior_order = 0;
+      ws_stat_t counter_stat;
+      if (ws->stat(ws, counter_path, &counter_stat) != 0)
+         MIRROR_SYNC_FAIL("workspace: cannot inspect mirror-sync counter");
+      if (counter_stat.exists)
+      {
+         char *counter_text = NULL;
+         size_t counter_len = 0;
+         char extra = '\0';
+         int parsed = ws->read_all(ws, counter_path, &counter_text, &counter_len) == 0 &&
+                      sscanf(counter_text, "%llu %c", &prior_order, &extra) == 1;
+         free(counter_text);
+         if (!parsed)
+            MIRROR_SYNC_FAIL("workspace: mirror-sync counter is corrupt");
+      }
+      if (prior_order == ULLONG_MAX)
+         MIRROR_SYNC_FAIL("workspace: mirror-sync counter exhausted");
+      transfer_state.order = prior_order + 1;
+      transfer_state.next_seq = 1;
+      char counter_text[64];
+      int counter_len =
+          snprintf(counter_text, sizeof(counter_text), "%llu\n", transfer_state.order);
+      if (counter_len < 0 || (size_t)counter_len >= sizeof(counter_text) ||
+          mirror_sync_write_atomic(counter_path, counter_text, (size_t)counter_len) != 0 ||
+          ws->write_all(ws, diff_path, diff, strlen(diff)) != 0)
+         MIRROR_SYNC_FAIL("workspace: failed to begin mirror-sync transfer");
+   }
+   else
+   {
+      if (!ws->append)
+         MIRROR_SYNC_FAIL(
+             "workspace: this provider cannot append, so chunked sync cannot be reassembled");
+      char *state_text = NULL;
+      size_t state_len = 0;
+      int state_ok = ws->read_all(ws, state_path, &state_text, &state_len) == 0 &&
+                     workspace_mirror_transfer_state_parse(state_text, &transfer_state) == 0;
+      free(state_text);
+      if (!state_ok || transfer_state.next_seq != (unsigned)seq)
+         MIRROR_SYNC_FAIL(
+             "workspace: mirror-sync transfer lost ownership or arrived out of sequence; restart "
+             "the refresh before using Git");
+      if (ws->append(ws, diff_path, diff, strlen(diff)) != 0)
+         MIRROR_SYNC_FAIL("workspace: failed to append client diff");
+      transfer_state.next_seq++;
+   }
+
+   if (!final)
+   {
+      char state_text[96];
+      int state_len = snprintf(state_text, sizeof(state_text), "%llu %u\n", transfer_state.order,
+                               transfer_state.next_seq);
+      if (state_len < 0 || (size_t)state_len >= sizeof(state_text) ||
+          mirror_sync_write_atomic(state_path, state_text, (size_t)state_len) != 0)
+         MIRROR_SYNC_FAIL("workspace: failed to persist mirror-sync transfer state");
+   }
+
+   unsigned long long generation = 0;
+   if (final)
+   {
+      if (!workspace_mirror_oid_valid(client_head))
+         MIRROR_SYNC_FAIL("workspace: final mirror-sync chunk requires a full commit id");
+      /* Publish a complete client snapshot, never a mutable worktree in place.
+       * The transfer-qualified diff above is only the chunk assembly file. Once final arrives,
+       * hash the complete (head, patch) pair, copy it to a generation-qualified
+       * immutable diff, then atomically replace the tiny metadata pointer.  A
+       * resolver racing this request therefore sees either the whole old pair
+       * or the whole new pair. */
+      char *full_diff = NULL;
+      size_t full_len = 0;
+      if (ws->read_all(ws, diff_path, &full_diff, &full_len) != 0)
+         MIRROR_SYNC_FAIL("workspace: failed to read assembled client diff");
+      size_t head_len = strlen(client_head);
+      size_t branch_len = strlen(client_branch), upstream_len = strlen(client_upstream);
+      if (head_len > SIZE_MAX - full_len - branch_len - upstream_len - 3)
+      {
+         free(full_diff);
+         MIRROR_SYNC_FAIL("workspace: client snapshot is too large");
+      }
+      size_t digest_len = head_len + 1 + branch_len + 1 + upstream_len + 1 + full_len;
+      char *digest_input = malloc(digest_len);
+      char digest[65] = "";
+      if (!digest_input)
+      {
+         free(full_diff);
+         MIRROR_SYNC_FAIL("workspace: out of memory publishing client snapshot");
+      }
+      memcpy(digest_input, client_head, head_len);
+      digest_input[head_len] = '\n';
+      memcpy(digest_input + head_len + 1, client_branch, branch_len);
+      digest_input[head_len + 1 + branch_len] = '\n';
+      memcpy(digest_input + head_len + 2 + branch_len, client_upstream, upstream_len);
+      digest_input[head_len + 2 + branch_len + upstream_len] = '\n';
+      memcpy(digest_input + head_len + 3 + branch_len + upstream_len, full_diff, full_len);
+      int digest_ok = aimee_sha256_hex(digest_input, digest_len, digest) == 0;
+      free(digest_input);
+      if (!digest_ok)
+      {
+         free(full_diff);
+         MIRROR_SYNC_FAIL("workspace: failed to digest client snapshot");
+      }
+
+      char meta_path[MAX_PATH_LEN], version_diff[MAX_PATH_LEN];
+      if (workspace_mirror_snapshot_meta_path(base, root, meta_path, sizeof(meta_path)) != 0)
+      {
+         free(full_diff);
+         MIRROR_SYNC_FAIL("workspace: snapshot path too long");
+      }
+      char *old_text = NULL;
+      size_t old_len = 0;
+      ws_mirror_snapshot_t old_snapshot;
+      ws_stat_t meta_stat;
+      if (ws->stat(ws, meta_path, &meta_stat) != 0)
+      {
+         free(full_diff);
+         MIRROR_SYNC_FAIL("workspace: cannot inspect client snapshot metadata");
+      }
+      int have_old = meta_stat.exists;
+      int old_valid = !have_old || (ws->read_all(ws, meta_path, &old_text, &old_len) == 0 &&
+                                    workspace_mirror_snapshot_parse(old_text, &old_snapshot) == 0);
+      free(old_text);
+      if (!old_valid)
+      {
+         free(full_diff);
+         MIRROR_SYNC_FAIL("workspace: existing client snapshot metadata is corrupt");
+      }
+      if (workspace_mirror_snapshot_next_generation(&old_snapshot, have_old, transfer_state.order,
+                                                    digest, &generation) != 0)
+      {
+         free(full_diff);
+         unlink(state_path);
+         unlink(diff_path);
+         MIRROR_SYNC_FAIL(
+             "workspace: a newer mirror-sync already published; restart the refresh before using "
+             "Git");
+      }
+
+      if (workspace_mirror_snapshot_diff_path(base, root, generation, digest, version_diff,
+                                              sizeof(version_diff)) != 0)
+      {
+         free(full_diff);
+         MIRROR_SYNC_FAIL("workspace: snapshot diff path is too long");
+      }
+
+      /* A digest-qualified diff is immutable. Repeated identical snapshots keep
+       * their generation and must not truncate/rewrite a file a concurrent Git
+       * reconstruction may be reading. Repair only a missing or size-mismatched
+       * payload, using the same atomic writer as metadata publication. */
+      ws_stat_t diff_stat;
+      if (ws->stat(ws, version_diff, &diff_stat) != 0)
+      {
+         free(full_diff);
+         MIRROR_SYNC_FAIL("workspace: cannot inspect client snapshot diff");
+      }
+      int diff_complete = diff_stat.exists && !diff_stat.is_dir && full_len <= LONG_MAX &&
+                          diff_stat.size == (long)full_len;
+      if (!diff_complete && mirror_sync_write_atomic(version_diff, full_diff, full_len) != 0)
+      {
+         free(full_diff);
+         MIRROR_SYNC_FAIL("workspace: failed to publish client snapshot diff");
+      }
+      free(full_diff);
+
+      char metadata[1024];
+      int metadata_len = snprintf(metadata, sizeof(metadata), "%llu %s %s %s %s %llu\n", generation,
+                                  digest, client_head, client_branch[0] ? client_branch : "-",
+                                  client_upstream[0] ? client_upstream : "-", transfer_state.order);
+      if (metadata_len < 0 || (size_t)metadata_len >= sizeof(metadata))
+         MIRROR_SYNC_FAIL("workspace: snapshot metadata is too long");
+      if (mirror_sync_write_atomic(meta_path, metadata, (size_t)metadata_len) != 0)
+         MIRROR_SYNC_FAIL("workspace: failed to publish snapshot metadata");
+
+      /* Keep the registered provider. Hardcoding mirror would silently convert
+       * a deliberately detached workspace. The snapshot metadata is already
+       * authoritative for reconstruction; this registry update keeps status and
+       * subsequent registrations consistent with it. */
+      (void)config_workspace_add(root, ws_provider_kind_to_string(kind), NULL, client_head);
+      (void)config_reload_if_changed();
+      unlink(state_path);
+      unlink(diff_path);
+   }
+
+   (void)flock(lock_fd, LOCK_UN);
+   close(lock_fd);
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "bytes", (double)strlen(diff));
@@ -413,6 +645,10 @@ int handle_workspace_mirror_sync(server_ctx_t *ctx, server_conn_t *conn, cJSON *
     * one would win and the mirror would reconstruct from a fragment that looks
     * like a complete tree. The client must be able to tell the difference. */
    cJSON_AddBoolToObject(resp, "chunked", 1);
+   cJSON_AddNumberToObject(resp, "order", (double)transfer_state.order);
+   if (generation)
+      cJSON_AddNumberToObject(resp, "generation", (double)generation);
+#undef MIRROR_SYNC_FAIL
    return send_and_free(conn, resp);
 }
 

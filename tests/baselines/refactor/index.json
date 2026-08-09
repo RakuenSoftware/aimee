@@ -307,7 +307,7 @@
         },
         {
           "path": "src/headers/cli_client.h",
-          "sha256": "f48c62db7a70ef4d5efd6002205072f4a3249c413891f9dc613a36b5228124e8"
+          "sha256": "3e9f96b2d7909c7a44e2e56e1cbda866587ed21610553efa5f74c56e9f1951a8"
         },
         {
           "path": "src/headers/cli_code_audit.h",
@@ -1604,7 +1604,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "882906d881b5ee24a22dafb15677987815de4a80cc9c37ce8a8df34a48c17553",
+      "sha256": "59412708dffad9abc82290fdbf17e29fbd25bb12310be9f9c2090a3aab783182",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

@@ -5,6 +5,7 @@
 
 #include "cli_v1_routes_internal.h"
 #include "platform_path.h"
+#include "platform_random.h"
 #include "cli_client.h"
 #define V1_PROTOCOL_VERSION 1
 #include "util.h"         /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
@@ -1727,6 +1728,31 @@ static int cli_v1_mirror_sync_chunked(cJSON *req, int timeout, int json_output)
    /* Borrowed, not copied: `req` outlives this loop, and copying pulled
     * safe_strdup (util.o) into a TU whose test link line does not carry it. */
    const char *head = cJSON_IsString(jhead) ? jhead->valuestring : "";
+   cJSON *jbranch = cJSON_GetObjectItemCaseSensitive(req, "branch");
+   cJSON *jupstream = cJSON_GetObjectItemCaseSensitive(req, "upstream");
+   const char *branch = cJSON_IsString(jbranch) ? jbranch->valuestring : "";
+   const char *upstream = cJSON_IsString(jupstream) ? jupstream->valuestring : "";
+
+   /* A transfer id keeps the server's cross-request assembly ownership explicit.
+    * The server serializes transfers from their empty begin chunk through final
+    * metadata publication; without an id it could not distinguish a delayed
+    * continuation from a second client using the same workspace. */
+   unsigned char transfer_random[16];
+   char transfer[33];
+   if (platform_random_bytes(transfer_random, sizeof(transfer_random)) != 0)
+   {
+      fprintf(stderr, "aimee: workspace mirror-sync: cannot create transfer id\n");
+      free(remote);
+      free(bearer);
+      return 1;
+   }
+   static const char hex[] = "0123456789abcdef";
+   for (size_t i = 0; i < sizeof(transfer_random); i++)
+   {
+      transfer[i * 2] = hex[transfer_random[i] >> 4];
+      transfer[i * 2 + 1] = hex[transfer_random[i] & 0x0f];
+   }
+   transfer[32] = '\0';
 
    size_t sent = 0;
    int seq = 0, rc = 0;
@@ -1765,8 +1791,13 @@ static int cli_v1_mirror_sync_chunked(cJSON *req, int timeout, int json_output)
       free(slice);
       cJSON_AddNumberToObject(body, "seq", seq);
       cJSON_AddBoolToObject(body, "final", final);
+      cJSON_AddStringToObject(body, "transfer", transfer);
       if (final && head[0])
          cJSON_AddStringToObject(body, "head", head);
+      if (final && branch[0])
+         cJSON_AddStringToObject(body, "branch", branch);
+      if (final && upstream[0])
+         cJSON_AddStringToObject(body, "upstream", upstream);
 
       char *wire = cJSON_PrintUnformatted(body);
       cJSON_Delete(body);

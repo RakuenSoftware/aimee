@@ -112,6 +112,64 @@ int workspace_mirror_paths(const char *base_dir, const char *root, char *mirror_
  * returns 0 on success, -1 on bad args / truncation. */
 int workspace_mirror_diff_path(const char *base_dir, const char *root, char *out, size_t out_cap);
 
+/* A mirror-sync snapshot is immutable once published.  The tiny metadata file
+ * names its generation, content digest, and fetchable base head; the matching
+ * diff and reconstructed worktree are generation-qualified.  A new client tree
+ * therefore materializes beside an older server-side Git session instead of
+ * destructively reusing its worktree. */
+typedef struct
+{
+   unsigned long long generation;
+   unsigned long long sync_order;
+   char digest[65];
+   char head[65];
+   char branch[256];
+   char upstream[256];
+} ws_mirror_snapshot_t;
+
+typedef struct
+{
+   unsigned long long order;
+   unsigned next_seq;
+} ws_mirror_transfer_state_t;
+
+int workspace_mirror_snapshot_meta_path(const char *base_dir, const char *root, char *out,
+                                        size_t out_cap);
+int workspace_mirror_snapshot_diff_path(const char *base_dir, const char *root,
+                                        unsigned long long generation, const char *digest,
+                                        char *out, size_t out_cap);
+int workspace_mirror_snapshot_work_path(const char *base_dir, const char *root,
+                                        unsigned long long generation, const char *digest,
+                                        char *out, size_t out_cap);
+/* Git object IDs are lowercase hex and currently use SHA-1 (40 chars) or the
+ * repository-format SHA-256 form (64 chars). */
+int workspace_mirror_oid_valid(const char *oid);
+/* Conservative git-check-ref-format equivalent for branch/upstream names used
+ * as argv by reconstruction. Empty is allowed for detached snapshots. */
+int workspace_mirror_ref_valid(const char *ref);
+int workspace_mirror_snapshot_parse(const char *text, ws_mirror_snapshot_t *out);
+
+/* Durable chunk-transfer coordinates. Each transfer owns a separate assembly
+ * and state file, while lock/counter are shared by the workspace. This lets a
+ * continuation land on another server process without losing ownership. */
+int workspace_mirror_transfer_paths(const char *base_dir, const char *root, const char *transfer,
+                                    char *assembly, size_t assembly_cap, char *state,
+                                    size_t state_cap, char *lock, size_t lock_cap, char *counter,
+                                    size_t counter_cap);
+int workspace_mirror_transfer_state_parse(const char *text, ws_mirror_transfer_state_t *out);
+int workspace_mirror_snapshot_next_generation(const ws_mirror_snapshot_t *current, int have_current,
+                                              unsigned long long order, const char *digest,
+                                              unsigned long long *generation_out);
+
+/* Materialize a Git-capable client snapshot as an independent local clone of
+ * the durable bare mirror.  Unlike `git worktree add --detach`, this preserves
+ * the client's branch name and upstream, and independent clones allow older
+ * snapshot generations to retain their own branch/index state. */
+int workspace_mirror_reconstruct_branch(ws_git_runner_fn run, void *ctx, const char *remote,
+                                        const char *mirror_dir, const char *work_dir,
+                                        const char *head, const char *branch, const char *upstream,
+                                        const char *diff_path);
+
 /* Drive the mirror lifecycle for a detached session, from the registry's VCS
  * coordinates (workspace-resource-plane §3 — the wiring AC #5 turns on):
  *
@@ -137,5 +195,12 @@ int workspace_mirror_session_setup(ws_git_runner_fn run, void *ctx, const char *
                                    const char *head, const char *mirror_dir, const char *work_dir,
                                    const char *diff_path, int already_materialized, char *drift_out,
                                    size_t drift_cap, ws_mirror_drift_t *verdict_out);
+
+int workspace_mirror_session_setup_branch(ws_git_runner_fn run, void *ctx, const char *remote,
+                                          const char *head, const char *branch,
+                                          const char *upstream, const char *mirror_dir,
+                                          const char *work_dir, const char *diff_path,
+                                          int already_materialized, char *drift_out,
+                                          size_t drift_cap, ws_mirror_drift_t *verdict_out);
 
 #endif /* WORKSPACE_MIRROR_H */

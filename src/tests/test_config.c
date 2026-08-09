@@ -313,7 +313,8 @@ int main(void)
       snprintf(cfg.workspace_providers[2], sizeof(cfg.workspace_providers[2]), "mirror");
       snprintf(cfg.workspace_vcs_remote[2], sizeof(cfg.workspace_vcs_remote[2]),
                "https://example.com/r.git");
-      snprintf(cfg.workspace_vcs_head[2], sizeof(cfg.workspace_vcs_head[2]), "abc123def456");
+      snprintf(cfg.workspace_vcs_head[2], sizeof(cfg.workspace_vcs_head[2]),
+               "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
       cfg.memory_maintenance_trigger_inserts = 7;
       cfg.memory_maintenance_trigger_secs = 90;
       cfg.memory_cognify_async_enabled = 1;
@@ -578,7 +579,8 @@ int main(void)
       assert(strcmp(cfg2.workspaces[2], "/tmp/ws-mirror-rt") == 0);
       assert(strcmp(cfg2.workspace_providers[2], "mirror") == 0);
       assert(strcmp(cfg2.workspace_vcs_remote[2], "https://example.com/r.git") == 0);
-      assert(strcmp(cfg2.workspace_vcs_head[2], "abc123def456") == 0);
+      assert(strcmp(cfg2.workspace_vcs_head[2],
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef") == 0);
       assert(cfg2.worktree_gc_enabled == 0);
       assert(cfg2.worktree_gc_max_age_days == 21);
       assert(cfg2.memory_maintenance_trigger_inserts == 7);
