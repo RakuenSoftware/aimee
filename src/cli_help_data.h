@@ -236,7 +236,8 @@
     {"config", "View and update configuration", CLIENT_TIER_CORE, 1,
      "  show             Show all config values\n"
      "  get <key>        Get one config value\n"
-     "  set <key> <val>  Set one config value\n"},
+     "  set <key> <val>  Set one config value\n"
+     "  deploy-env       Emit the compose env for this backend record\n"},
     {"vault", "Per-user encrypted agent credentials", CLIENT_TIER_CORE, 0,
      "  unlock                       Unlock the vault (creates a local root key)\n"
      "  set <agent> <name> <secret>  Store an encrypted credential\n"

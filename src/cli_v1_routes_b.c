@@ -1193,6 +1193,7 @@ static const char *const MARSHAL_NO_ARGS[] = {
     "aux.config_show",
     "calibration.readiness",
     "cert.list",
+    "config.deploy_env",
     "config.show",
     "cron.list",
     "delegate.backend_list",

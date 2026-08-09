@@ -7,7 +7,7 @@
       "files": [
         {
           "path": "docs/gen/cli-commands.md",
-          "sha256": "97ff49192796ca16e4104f62c7ddca38bc126aa2976bbcd12d7c1549733f92cf"
+          "sha256": "07047b4d488662f336fa762250b93d45a47427ce832d483c9f3cf4ae166b8968"
         },
         {
           "path": "src/gateway/gateway_main.c",
@@ -19,7 +19,7 @@
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "d33b55a1ab81092701065e3a608bec8b7d614d6401d003a59c053045808f55bb"
+          "sha256": "4afacbd65680ebcae084ebf86773f6b1af9a753cb1ec5eb5a1e7e226490475dd"
         }
       ]
     },
@@ -1083,7 +1083,7 @@
         },
         {
           "path": "src/headers/server.h",
-          "sha256": "6e49753551ec43602d09e0d6fcb298682c43af3392bcd3377fd792b765f743b0"
+          "sha256": "7fc9eb39956e99ec1790e4c2b3b4bbede40d4dd949e15752ef0cc7998a2bcc45"
         },
         {
           "path": "src/headers/server_cli_oauth.h",
@@ -1604,14 +1604,14 @@
       ]
     },
     "public-symbols": {
-      "sha256": "116cb2fe7b1aa20836eb0d6579666fc28bd695235b9a44460b097c43e9140bed",
+      "sha256": "771926eab733db56faff215a30b51ae53f5e0d5a8e8de240032bf9fc1c206146",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
       "files": [
         {
           "path": "docs/gen/v1-route-descriptor.json",
-          "sha256": "03d9af141da67e7f4745b727ba014f4ecc05df02e5e122a41e48d19a3bf1426e"
+          "sha256": "32b337f0a26cc30139790762319eef9b4defa6366eb785b528ad9e7f36b6e4a9"
         }
       ]
     }
