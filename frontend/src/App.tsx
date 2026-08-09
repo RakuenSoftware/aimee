@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import Logs from './pages/Logs';
 import EditWorkflows from './pages/EditWorkflows';
 import WorkflowActions from './pages/WorkflowActions';
+import Providers from './pages/Providers';
 import Agents from './pages/Agents';
 import Personas from './pages/Personas';
 import Roles from './pages/Roles';
@@ -260,6 +261,7 @@ export default function App() {
                 <Route path="/logs" element={<Logs />} />
                 <Route path="/edit-workflows" element={<EditWorkflows />} />
                 <Route path="/workflow-actions" element={<WorkflowActions />} />
+                <Route path="/providers" element={<Providers />} />
                 <Route path="/agents" element={<Agents />} />
                 <Route path="/delegates" element={<Navigate to="/agents" replace />} />
                 <Route path="/personas" element={<Personas />} />

@@ -877,17 +877,16 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * reset-the-record semantics: agent.add/set describe the agent's whole
     * desired state, so an omitted field is "no longer declared". */
    ag->declared = 0;
-   if (opt_has(&opts, "ctx") || opt_has(&opts, "context-window"))
+   /* CAPACITIES declare only a usable number. Unlike a price, a 0 window is not
+    * a statement -- it is the absence of one -- and the existing edit form
+    * always sends "--context-window 0" for an unset field, so keying the bit on
+    * presence alone would write an explicit 0 into every config it touched and
+    * assert a declaration nobody made. */
+   if (ag->middleware.context_window > 0)
       ag->declared |= AGENT_DECL_CONTEXT_WINDOW;
-   if (opt_has(&opts, "max-output"))
-   {
-      ag->max_output = opt_get_int(&opts, "max-output", 0);
+   ag->max_output = opt_get_int(&opts, "max-output", 0);
+   if (ag->max_output > 0)
       ag->declared |= AGENT_DECL_MAX_OUTPUT;
-   }
-   else
-   {
-      ag->max_output = 0;
-   }
    {
       static const struct
       {
