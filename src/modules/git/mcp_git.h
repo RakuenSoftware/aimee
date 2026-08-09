@@ -49,6 +49,12 @@ cJSON *handle_git_add(cJSON *args);
 cJSON *handle_git_switch(cJSON *args);
 cJSON *handle_git_checkout(cJSON *args);
 
+/* 1 when a git tool's response reports failure. The tools say so in the text they
+ * return (it leads with "error" or "conflict"), and composed operations — sync,
+ * pr action=ready — have to branch on that. Defined once so a wrapper cannot
+ * accidentally bury the marker and make a failure read as success. */
+int mcp_git_response_failed(cJSON *resp);
+
 /* Unstage anything in the index that is_sensitive_file() matches, naming them in
  * report (may be NULL). Returns how many. Screens the INDEX rather than a caller's
  * path list, which is what `add all=true` needs. */

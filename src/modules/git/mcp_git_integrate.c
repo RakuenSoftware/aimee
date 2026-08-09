@@ -54,6 +54,20 @@ static cJSON *mcp_textf(const char *fmt, ...)
    return mcp_text(buf);
 }
 
+/* See mcp_git.h. The git tools report failure in the text they return — the
+ * leading word is "error" or "conflict" — and composed operations (sync, pr
+ * action=ready) have to branch on it. One definition of the convention, here,
+ * rather than a substring check per caller. */
+int mcp_git_response_failed(cJSON *resp)
+{
+   cJSON *item = resp ? cJSON_GetArrayItem(resp, 0) : NULL;
+   cJSON *text = item ? cJSON_GetObjectItem(item, "text") : NULL;
+   if (!cJSON_IsString(text))
+      return 1;
+   return strncmp(text->valuestring, "error", 5) == 0 ||
+          strncmp(text->valuestring, "conflict", 8) == 0;
+}
+
 /* One row per operation. `start` and the continuation words are git's own
  * spelling; everything else about how the operation is driven is shared. */
 typedef struct
@@ -480,13 +494,23 @@ cJSON *handle_git_sync(cJSON *args)
       else
          snprintf(base, sizeof(base), "origin/main");
    }
-   /* A bare branch name means the remote's copy of it: syncing to a stale local
-    * base is never what was meant. */
+   /* A bare branch name means the remote's copy of it — syncing to a stale local
+    * base is never what was meant — but only if the remote actually has it. A repo
+    * with no origin, or a base that lives only locally, syncs to the local branch
+    * rather than failing on a ref that was never going to resolve. */
    if (!strchr(base, '/'))
    {
-      char qualified[256];
-      snprintf(qualified, sizeof(qualified), "origin/%s", base);
-      snprintf(base, sizeof(base), "%s", qualified);
+      char *esc = shell_escape(base);
+      char probe[512];
+      snprintf(probe, sizeof(probe), "git rev-parse --verify --quiet 'origin/%s' >/dev/null 2>&1",
+               esc);
+      free(esc);
+      if (run_ok(probe))
+      {
+         char qualified[256];
+         snprintf(qualified, sizeof(qualified), "origin/%s", base);
+         snprintf(base, sizeof(base), "%s", qualified);
+      }
    }
 
    if (strcmp(branch, "main") == 0 || strcmp(branch, "master") == 0)
@@ -523,14 +547,21 @@ cJSON *handle_git_sync(cJSON *args)
 
    cJSON *resp = integrate_dispatch(strcmp(mode, "merge") == 0 ? "merge" : "rebase", args);
 
-   /* Prefix the gap that was closed; the integrate result already says what moved. */
+   /* Add the gap that was closed — but NEVER in front of a failure. Every caller
+    * reads failure off the leading "error"/"conflict" word (mcp_git_response_failed),
+    * so prefixing context to a conflicted sync would make it look like it worked.
+    * On success the context leads; on failure it trails. */
    cJSON *item = resp ? cJSON_GetArrayItem(resp, 0) : NULL;
    cJSON *text = item ? cJSON_GetObjectItem(item, "text") : NULL;
    if (cJSON_IsString(text))
    {
       char merged[INTEGRATE_OUT_MAX];
-      snprintf(merged, sizeof(merged), "sync %s <- %s (%d behind, %d ahead) via %s\n%s", branch,
-               base, behind, ahead, mode, text->valuestring);
+      if (mcp_git_response_failed(resp))
+         snprintf(merged, sizeof(merged), "%s\n\n(sync %s <- %s: %d behind, %d ahead, via %s)",
+                  text->valuestring, branch, base, behind, ahead, mode);
+      else
+         snprintf(merged, sizeof(merged), "sync %s <- %s (%d behind, %d ahead) via %s\n%s", branch,
+                  base, behind, ahead, mode, text->valuestring);
       cJSON_ReplaceItemInObject(item, "text", cJSON_CreateString(merged));
    }
    return resp;

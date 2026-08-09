@@ -2694,6 +2694,78 @@ static void test_pr_create_with_no_commits_says_so(void)
    teardown_git_repo();
 }
 
+/* --- pr action=ready --- */
+
+/* ready stops at the FIRST real failure and returns that step's own explanation,
+ * so the caller is never told "ready failed" with no idea which part. Here the
+ * sync conflicts, so the conflicted file must come back — and nothing must have
+ * been pushed. */
+static void test_pr_ready_stops_at_the_failing_step(void)
+{
+   setup_conflicting_branches();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "ready");
+   cJSON_AddStringToObject(args, "base", "side");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   /* sync's own conflict report, verbatim — not a generic ready failure. */
+   assert(strstr(text, "file.txt") != NULL);
+   assert(strstr(text, "push:") == NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+/* When the sync succeeds, the push is attempted next and its failure is what
+ * comes back (no origin in the fixture) — proving the steps run in order and the
+ * report is not fabricated. */
+static void test_pr_ready_runs_sync_then_push(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+   assert(system("git checkout -q -b feat/ready && echo x > x.txt && git add x.txt && "
+                 "git commit -q -m 'feat: work'") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "ready");
+   cJSON_AddStringToObject(args, "base", "master");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   /* The push is the step that fails here, and its own message says so. */
+   assert(strstr(text, "push") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+static void test_pr_unknown_action_lists_ready(void)
+{
+   setup_git_repo();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "nonsense");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "ready") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
 static void test_feature_branch_commit_allowed(void)
 {
    setup_git_repo();
@@ -3279,6 +3351,9 @@ int main(void)
    test_pr_create_derives_title_from_single_commit();
    test_pr_create_derives_title_from_many_commits();
    test_pr_create_with_no_commits_says_so();
+   test_pr_ready_stops_at_the_failing_step();
+   test_pr_ready_runs_sync_then_push();
+   test_pr_unknown_action_lists_ready();
 
    printf("all tests passed\n");
    return 0;

@@ -31,7 +31,7 @@ Call these directly without CLI. All available via the MCP server.
 | `git_branch action [name] [base]` | create/switch/list/delete/claim/orphan |
 | `git_log [count] [ref] [diff_stat]` | Commit log |
 | `git_diff_summary [ref] [stat_only] [files]` | Diff summary |
-| `git_pr action [title] [body] [number] [base]` | create/view/list/edit/checks/watch/merge_status |
+| `git_pr action [title] [body] [number] [base]` | create/view/list/edit/checks/watch/merge_status/merge/**ready**. `create` derives title+body from your commits when omitted; `ready` = sync + push + open the PR |
 | `git_pull [rebase]` | Pull from remote |
 | `git_clone url [path] [branch] [depth]` | Clone repo |
 | `git_stash action [message] [index]` | push/pop/apply/list/drop |

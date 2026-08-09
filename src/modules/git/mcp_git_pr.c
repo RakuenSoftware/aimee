@@ -197,6 +197,127 @@ static int get_origin_repo_slug(char *buf, size_t len)
    return 0;
 }
 
+/* --- action=ready: sync, push, open the PR ---
+ *
+ * "This work is done, put it up for review" is three calls and one piece of
+ * knowledge the caller should not need: that rebasing during the sync rewrites
+ * history, so the push after it has to be a lease-protected force. Doing them
+ * separately also means a failure halfway leaves the caller to work out which
+ * step it was. This runs them in order, stops at the first real failure with that
+ * step's own explanation (sync already says how to resolve a conflict), and
+ * reports each step's outcome on its own line.
+ *
+ * Idempotent: run it again after more commits and it re-syncs, re-pushes, and
+ * says the PR is already open rather than failing. */
+static void first_line_of(cJSON *resp, char *out, size_t out_len)
+{
+   out[0] = '\0';
+   cJSON *item = resp ? cJSON_GetArrayItem(resp, 0) : NULL;
+   cJSON *text = item ? cJSON_GetObjectItem(item, "text") : NULL;
+   if (!cJSON_IsString(text))
+      return;
+   snprintf(out, out_len, "%s", text->valuestring);
+   char *nl = strchr(out, '\n');
+   if (nl)
+      *nl = '\0';
+}
+
+static cJSON *pr_ready(cJSON *args)
+{
+   cJSON *jbase = cJSON_GetObjectItemCaseSensitive(args, "base");
+   const char *base = (cJSON_IsString(jbase) && jbase->valuestring[0]) ? jbase->valuestring : NULL;
+
+   char report[4096];
+   int pos = 0;
+
+   /* 1. Sync. A conflict here is the caller's to resolve, and sync's own message
+    * is the one that explains how — so return it unchanged rather than wrapping. */
+   cJSON *sync_args = cJSON_CreateObject();
+   if (base)
+      cJSON_AddStringToObject(sync_args, "base", base);
+   cJSON *sync_resp = handle_git_sync(sync_args);
+   int synced_moved = 0;
+   {
+      char line[1024];
+      first_line_of(sync_resp, line, sizeof(line));
+      if (mcp_git_response_failed(sync_resp))
+      {
+         cJSON_Delete(sync_args);
+         return sync_resp; /* carries the conflicted files and the way forward */
+      }
+      synced_moved = (strstr(line, "already current") == NULL);
+      pos = str_appendf(report, pos, (int)sizeof(report), "sync: %s\n", line);
+   }
+   cJSON_Delete(sync_resp);
+   cJSON_Delete(sync_args);
+
+   /* 2. Push. A sync that rebased rewrote history, so the push must be
+    * lease-protected — which is also safe when nothing moved, so it is
+    * unconditional rather than a guess about what sync did. */
+   cJSON *push_args = cJSON_CreateObject();
+   cJSON_AddBoolToObject(push_args, "force", 1);
+   cJSON *push_resp = handle_git_push(push_args);
+   {
+      char line[1024];
+      first_line_of(push_resp, line, sizeof(line));
+      if (mcp_git_response_failed(push_resp))
+      {
+         cJSON_Delete(push_args);
+         return push_resp; /* the ownership / merged-PR / verify gates speak for themselves */
+      }
+      pos = str_appendf(report, pos, (int)sizeof(report), "push: %s\n", line);
+   }
+   cJSON_Delete(push_resp);
+   cJSON_Delete(push_args);
+
+   /* 3. Open the PR. Title and body are derived from the commits unless the
+    * caller passed them, so `action=ready` alone is a complete request. */
+   cJSON *create_args = cJSON_CreateObject();
+   cJSON_AddStringToObject(create_args, "action", "create");
+   if (base)
+      cJSON_AddStringToObject(create_args, "base", base);
+   cJSON *jtitle = cJSON_GetObjectItemCaseSensitive(args, "title");
+   cJSON *jbody = cJSON_GetObjectItemCaseSensitive(args, "body");
+   if (cJSON_IsString(jtitle) && jtitle->valuestring[0])
+      cJSON_AddStringToObject(create_args, "title", jtitle->valuestring);
+   if (cJSON_IsString(jbody) && jbody->valuestring[0])
+      cJSON_AddStringToObject(create_args, "body", jbody->valuestring);
+
+   cJSON *create_resp = handle_git_pr(create_args);
+   {
+      char line[1024];
+      first_line_of(create_resp, line, sizeof(line));
+      cJSON *item = cJSON_GetArrayItem(create_resp, 0);
+      cJSON *text = item ? cJSON_GetObjectItem(item, "text") : NULL;
+      const char *full = cJSON_IsString(text) ? text->valuestring : "";
+      if (mcp_git_response_failed(create_resp) && strstr(full, "already exist"))
+         pos = str_appendf(report, pos, (int)sizeof(report),
+                           "pr:   already open for this branch — the new commits are on it now "
+                           "(command=pr action=list to see it)\n");
+      else if (mcp_git_response_failed(create_resp))
+      {
+         /* Synced and pushed, but the PR did not open: say what DID happen, so the
+          * caller does not redo the first two steps. */
+         cJSON *r = mcp_error("%s", full[0] ? full : "error: pr create failed");
+         cJSON *ritem = cJSON_GetArrayItem(r, 0);
+         char merged[4096];
+         snprintf(merged, sizeof(merged), "%s%s", report, full);
+         cJSON_ReplaceItemInObject(ritem, "text", cJSON_CreateString(merged));
+         cJSON_Delete(create_resp);
+         cJSON_Delete(create_args);
+         return r;
+      }
+      else
+         pos = str_appendf(report, pos, (int)sizeof(report), "pr:   %s\n%s\n", line,
+                           full + strlen(line));
+   }
+   cJSON_Delete(create_resp);
+   cJSON_Delete(create_args);
+   (void)synced_moved;
+
+   return mcp_text(report);
+}
+
 /* --- git_pr --- */
 
 cJSON *handle_git_pr(cJSON *args)
@@ -304,9 +425,12 @@ cJSON *handle_git_pr(cJSON *args)
        *
        * Needed because a base protected with "require branches to be up to date"
        * reports its required checks as merely "expected" while the head is BEHIND:
-       * the PR will not merge however green those checks already are, and nothing
-       * else in this tool can clear it (`pull` is a bare `git pull` on the head's
-       * OWN upstream, and there is no merge subcommand).
+       * the PR will not merge however green those checks already are.
+       *
+       * Distinct from command=sync, which is the LOCAL equivalent: sync rebases the
+       * checked-out branch onto its base and needs the checkout; this asks GitHub to
+       * merge the base into a PR head by number, so it works on a PR that is not
+       * checked out here (and on someone else's branch).
        *
        * Deliberately NOT folded into `merge`: this rewrites the contributor's
        * branch and restarts their CI, which is a separate decision from merging.
@@ -765,6 +889,9 @@ cJSON *handle_git_pr(cJSON *args)
       return mcp_text(result);
    }
 
-   return mcp_text(
-       "error: unknown action. Use create/view/list/edit/checks/watch/merge_status/merge/wait");
+   if (strcmp(action, "ready") == 0)
+      return pr_ready(args);
+
+   return mcp_text("error: unknown action. Use "
+                   "create/view/list/edit/checks/watch/merge_status/merge/wait/ready");
 }

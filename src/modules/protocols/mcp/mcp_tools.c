@@ -1125,7 +1125,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       } git_params[] = {
           {"action", "string",
            "Sub-action for: branch (create/switch/list/delete/claim/orphan), pr "
-           "(create/view/list/edit/checks/merge_status/update_branch/merge), stash "
+           "(create/view/list/edit/checks/merge_status/update_branch/merge/ready), stash "
            "(push/pop/apply/list/drop), tag (create/list/delete), issue (list), verify "
            "(run/check/conflicts/env/prepare-pr/status), merge / rebase / sync / cherry_pick / "
            "revert (omit to start one; continue/abort/skip to drive one that stopped on a "
@@ -1225,7 +1225,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
               "branch's commits when you omit them. Remaining "
               "params apply per command (see each description); branch/pr/stash/tag/issue/"
               "verify also take an 'action' sub-selector. Use command=pr action=view to "
-              "check a PR's merge state before pushing. PASS 'path' WHENEVER YOU MEAN A "
+              "check a PR's merge state before pushing. command=pr action=ready is the whole \"put "
+              "this up for review\" errand: sync, lease-protected push, and open the PR (deriving "
+              "title and body), stopping at the first real failure with that step's own "
+              "explanation. PASS 'path' WHENEVER YOU MEAN A "
               "SPECIFIC CHECKOUT: without it the repository is inferred from session state, "
               "and a worktree-isolated session can silently act on the shared checkout — "
               "committing or pushing another branch's work.",

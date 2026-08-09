@@ -78,10 +78,23 @@ a required Git configuration dependency.
 
 ## Surfaces
 
-Surfaces include native/MCP `git_status`, diff, log, branch, commit, push, pull, fetch, clone, restore,
-reset, stash, tag, issue, PR, and `aimee git verify` operations plus project/forge credential flows.
-Protocol and tools modules expose these operations, but Git owns their repository semantics, credential
-containment, verification gates, and mutation results.
+Surfaces include native/MCP `git_status`, diff, log, branch, add, commit, push, pull, fetch, clone,
+restore, reset, stash, tag, issue, PR, merge, rebase, sync, cherry-pick, revert, switch, checkout and
+verify operations plus project/forge credential flows. Protocol and tools modules expose these operations,
+but Git owns their repository semantics, credential containment, verification gates, and mutation results.
+
+The `aimee` CLI reaches all of them through one wildcard `/v1` route (`{"git", NULL, "git.cli", ...}` in
+`cli_v1_routes.c`, marshalled by `marshal_git_cli`) that dispatches `mcp.call` with `tool=git_<command>` —
+previously only `git verify` was routed and every other `aimee git ...` answered "is not a subcommand of
+'git'". The CLI grammar is uniform rather than per-command: `aimee git <command> [primary] [key=value ...]`,
+where the table in `marshal_git_cli` holds the only per-command knowledge (what a bare first, and
+sometimes second, word means). Values are typed the way verify's already are, `continue`/`abort`/`skip` are
+recognised as actions, and the repository defaults to the caller's directory unless `path=` names one.
+`git verify` keeps its own marshaller — its row precedes the wildcard, and the lookup takes the first
+match.
+
+Note that `cmd_git` in `src/cmd_infra.c` parses the same commands for the in-process (non-thin) path; the
+two agree today but are separate parsers, and folding them together is untaken work.
 
 ### History integration: merge, rebase, sync, cherry_pick, revert
 
@@ -124,6 +137,21 @@ list, so a pattern-based add cannot slip a `.env` past `command=commit`.
 `command=switch` and `command=checkout` are routing, not second implementations: `switch` is
 `branch action=switch` (keeping the worktree lock and ownership registration in one place), and
 `checkout` is `restore` when `files` is given and `switch` otherwise.
+
+### `pr action=ready`: the whole "put this up for review" errand
+
+Sync, push, open the PR. It exists because doing them separately makes the caller hold one piece of
+knowledge it should not need — the sync rebases, which rewrites history, so the push after it must be a
+lease-protected force — and because a failure halfway otherwise leaves the caller working out which step
+broke. `ready` runs them in order, **stops at the first real failure and returns that step's own
+explanation** (sync's conflict report already says how to resolve it), and otherwise reports each step on
+its own line. It is idempotent: run it again after more commits and it re-syncs, re-pushes, and says the
+PR is already open rather than failing.
+
+Composition depends on one convention: a git tool reports failure in the text it returns, leading with
+`error` or `conflict`. `mcp_git_response_failed` is the single definition of that check — a wrapper that
+prefixed its own context to a failure (which `sync` originally did) makes a conflict read as success, so
+`sync` now appends its context on failure and prepends it only on success.
 
 ### PR title and body are derived
 
