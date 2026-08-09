@@ -200,9 +200,12 @@ function ModelEditor({
       "--context-window", ctx.trim() || "0",
       "--max-output", maxOut.trim() || "0",
     ];
-    if (priceIn.trim() !== "") args.push("--price-in", priceIn.trim());
-    if (priceOut.trim() !== "") args.push("--price-out", priceOut.trim());
-    if (priceCached.trim() !== "") args.push("--price-cached", priceCached.trim());
+    /* Always sent, empty included. agent.set is a PATCH: an omitted option
+     * changes nothing, so omitting a cleared field would silently keep the old
+     * price. An empty value is the explicit withdrawal of the declaration. */
+    args.push("--price-in", priceIn.trim());
+    args.push("--price-out", priceOut.trim());
+    args.push("--price-cached", priceCached.trim());
     try {
       const res = await postArgs<{ error?: string }>("/api/agents/set", args);
       if (res.error) setErr(res.error);
