@@ -84,13 +84,13 @@ verify operations plus project/forge credential flows. Protocol and tools module
 but Git owns their repository semantics, credential containment, verification gates, and mutation results.
 
 The `aimee` CLI reaches all of them through one wildcard `/v1` route (`{"git", NULL, "git.cli", ...}` in
-`cli_v1_routes.c`, marshalled by `marshal_git_cli`) that dispatches `mcp.call` with `tool=git_<command>` —
-previously only `git verify` was routed and every other `aimee git ...` answered "is not a subcommand of
+`cli_v1_routes.c`, marshalled by `marshal_git_cli`) that dispatches `mcp.call` with `tool=git_<command>`.
+Previously only `git verify` was routed and every other `aimee git ...` answered "is not a subcommand of
 'git'". The CLI grammar is uniform rather than per-command: `aimee git <command> [primary] [key=value ...]`,
 where the table in `marshal_git_cli` holds the only per-command knowledge (what a bare first, and
 sometimes second, word means). Values are typed the way verify's already are, `continue`/`abort`/`skip` are
 recognised as actions, and the repository defaults to the caller's directory unless `path=` names one.
-`git verify` keeps its own marshaller — its row precedes the wildcard, and the lookup takes the first
+`git verify` keeps its own marshaller: its row precedes the wildcard, and the lookup takes the first
 match.
 
 Note that `cmd_git` in `src/cmd_infra.c` parses the same commands for the in-process (non-thin) path; the
@@ -99,8 +99,8 @@ two agree today but are separate parsers, and folding them together is untaken w
 ### History integration: merge, rebase, sync, cherry_pick, revert
 
 `src/modules/git/mcp_git_integrate.c` owns the operations that bring one line of history into another.
-They are one operation with five names — each can stop mid-flight on a conflict, each leaves a state that
-must be continued or abandoned, each commits and so needs an identity — so they share one driver and
+They are one operation with five names. Each can stop mid-flight on a conflict, each leaves a state that
+must be continued or abandoned, and each commits and so needs an identity, so they share one driver and
 differ only by a row in `OPS`.
 
 They are modeled, not passed through, because the caller states the intent and aimee does the mechanics:
@@ -114,7 +114,7 @@ They are modeled, not passed through, because the caller states the intent and a
   opts into resolving in place, then `action=continue` (which refuses while markers remain) or
   `action=abort`;
 - a continuation **commits with the vaulted operator identity**, via the same `mcp_git_identity_flags`
-  `git_commit` uses — otherwise a conflict resolution would produce an authorless merge commit;
+  `git_commit` uses, because otherwise a conflict resolution would produce an authorless merge commit;
 - an operation already in progress is named, with the way out, instead of letting a second one start on
   top of it;
 - the result says **what changed** (`pre..post`, commit count, diffstat) rather than echoing git's prose.
@@ -129,7 +129,7 @@ remains `command=pr action=merge`.
 
 ### Staging and ref movement
 
-`command=add` (`files`, or `all` to include new files) is the staging `git_commit` cannot reach — it
+`command=add` (`files`, or `all` to include new files) is the staging `git_commit` cannot reach: commit
 stages tracked changes or the paths it was handed, so a new file had no route. Sensitive paths are
 dropped, and for `all` the screen runs against the resulting **index** rather than the caller's argument
 list, so a pattern-based add cannot slip a `.env` past `command=commit`.
@@ -141,15 +141,15 @@ list, so a pattern-based add cannot slip a `.env` past `command=commit`.
 ### `pr action=ready`: the whole "put this up for review" errand
 
 Sync, push, open the PR. It exists because doing them separately makes the caller hold one piece of
-knowledge it should not need — the sync rebases, which rewrites history, so the push after it must be a
-lease-protected force — and because a failure halfway otherwise leaves the caller working out which step
+knowledge it should not need (the sync rebases, which rewrites history, so the push after it must be a
+lease-protected force), and because a failure halfway otherwise leaves the caller working out which step
 broke. `ready` runs them in order, **stops at the first real failure and returns that step's own
 explanation** (sync's conflict report already says how to resolve it), and otherwise reports each step on
 its own line. It is idempotent: run it again after more commits and it re-syncs, re-pushes, and says the
 PR is already open rather than failing.
 
 Composition depends on one convention: a git tool reports failure in the text it returns, leading with
-`error` or `conflict`. `mcp_git_response_failed` is the single definition of that check — a wrapper that
+`error` or `conflict`. `mcp_git_response_failed` is the single definition of that check. A wrapper that
 prefixed its own context to a failure (which `sync` originally did) makes a conflict read as success, so
 `sync` now appends its context on failure and prepends it only on success.
 
@@ -158,7 +158,7 @@ prefixed its own context to a failure (which `sync` originally did) makes a conf
 `command=pr action=create` no longer requires `title`. When it is omitted, `pr_derive_from_commits`
 writes both from the commits the branch has that the base does not: a single commit lends its subject and
 its message body verbatim; several keep the conventional-commit prefix they agree on and get a bulleted
-list plus the diffstat. Deterministic, no model call — the commit subjects already are the summary, so
+list plus the diffstat. Deterministic, with no model call: the commit subjects already are the summary, so
 asking the caller to write one costs a turn to say the same thing. An explicit `title` always wins, and a
 branch with no commits ahead of base is told exactly that.
 
