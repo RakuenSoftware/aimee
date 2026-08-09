@@ -189,6 +189,21 @@
           "id": 3,
           "name": "git-ci-grade",
           "event_kind": 7427
+        },
+        {
+          "id": 4,
+          "name": "git-forge-request",
+          "event_kind": 7428
+        },
+        {
+          "id": 5,
+          "name": "git-credential-resolve",
+          "event_kind": 7429
+        },
+        {
+          "id": 6,
+          "name": "git-verify-run",
+          "event_kind": 7430
         }
       ]
     },

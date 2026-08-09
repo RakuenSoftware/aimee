@@ -442,14 +442,16 @@ fi
 # Verification runs inside the server image, whose deployment posture is
 # expressed through AIMEE_* environment overrides. Those values are correct for
 # the live daemon but must not override config fixtures in repository unit tests.
-if sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
-   grep -qF 'unset AIMEE_HOME AIMEE_API_REMOTE_WRITES AIMEE_API_MTLS AIMEE_API_BEARER_TOKEN' &&
-   sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
-       grep -qF 'AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL' &&
-   sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
-       grep -qF 'AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET' &&
-   sed -n '/^go-unit-tests:/,/^verify-local:/p' Makefile |
-       grep -qF 'unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'; then
+# Match in-shell rather than piping into grep -q. Under `set -o pipefail` such
+# a pipeline reports the SIGPIPE that grep's early exit sends back to its
+# writer, so the check starts failing purely because the recipe grew past a
+# 4KiB pipe block -- a false red that says nothing about the overrides.
+unit_tests_recipe=$(sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk)
+go_unit_tests_recipe=$(sed -n '/^go-unit-tests:/,/^verify-local:/p' Makefile)
+if [[ "$unit_tests_recipe" == *'unset AIMEE_HOME AIMEE_API_REMOTE_WRITES AIMEE_API_MTLS AIMEE_API_BEARER_TOKEN'* &&
+      "$unit_tests_recipe" == *'AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL'* &&
+      "$unit_tests_recipe" == *'AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'* &&
+      "$go_unit_tests_recipe" == *'unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'* ]]; then
     pass "unit verification removes server deployment overrides"
 else
     fail "unit verification inherits server deployment overrides"

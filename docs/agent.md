@@ -31,7 +31,7 @@ Call these directly without CLI. All available via the MCP server.
 | `git_branch action [name] [base]` | create/switch/list/delete/claim/orphan |
 | `git_log [count] [ref] [diff_stat]` | Commit log |
 | `git_diff_summary [ref] [stat_only] [files]` | Diff summary |
-| `git_pr action [title] [body] [number] [base]` | create/view/list/edit/checks/watch/merge_status |
+| `git_pr action [title] [body] [number] [base]` | create/view/list/edit/checks/watch/merge_status/merge/**ready**. `create` derives title+body from your commits when omitted; `ready` = sync + push + open the PR |
 | `git_pull [rebase]` | Pull from remote |
 | `git_clone url [path] [branch] [depth]` | Clone repo |
 | `git_stash action [message] [index]` | push/pop/apply/list/drop |
@@ -40,6 +40,17 @@ Call these directly without CLI. All available via the MCP server.
 | `git_reset [ref] [mode]` | soft/mixed/hard reset |
 | `git_restore files [staged] [source]` | Restore or unstage files |
 | `git_verify [action] [async] [job_id] [base]` | Project verification, health, conflicts, and PR prep |
+| `git_add files \| all` | Stage, including new files (sensitive paths are dropped) |
+| `git_merge ref [action] [abort_on_conflict]` | Merge a ref in; fetches it first, names conflicts, undoes itself on conflict by default |
+| `git_rebase base [action] [abort_on_conflict]` | Rebase onto a branch, same conflict handling |
+| `git_sync [base] [mode]` | Make this branch current with its base: resolve + fetch + rebase (or merge) + report the gap |
+| `git_cherry_pick ref [action]` | Apply a commit here |
+| `git_revert ref [action]` | Back a commit out |
+| `git_switch ref` / `git_checkout ref \| files` | Move to a branch, or restore paths |
+
+For merge/rebase/sync/cherry_pick/revert: omit `action` to start one; `action=continue\|abort\|skip`
+drives one that stopped on a conflict. `command=pr action=create` writes its own title and body from the
+branch's commits when you omit them. See [modules/git.md](modules/git.md#history-integration-merge-rebase-sync-cherry_pick-revert).
 
 ---
 
