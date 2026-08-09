@@ -651,27 +651,12 @@ int db2_demotion_retrieval_attribution_write(const char *retrieval_event_id,
    return 0;
 }
 
-/* Parse a "YYYY-MM-DD HH:MM:SS" UTC timestamp string and return seconds since
- * epoch.  Returns 0 on parse failure (treated as ancient; no decay impact). */
-static time_t parse_utc_ts(const char *ts)
-{
-   if (!ts || !*ts)
-      return 0;
-   struct tm t;
-   memset(&t, 0, sizeof(t));
-   int n = sscanf(ts, "%d-%d-%d %d:%d:%d", &t.tm_year, &t.tm_mon, &t.tm_mday, &t.tm_hour, &t.tm_min,
-                  &t.tm_sec);
-   if (n < 3)
-      return 0;
-   t.tm_year -= 1900;
-   t.tm_mon -= 1;
-   t.tm_isdst = 0;
-#ifdef _WIN32
-   return _mkgmtime(&t);
-#else
-   return timegm(&t);
-#endif
-}
+/* Timestamp parsing is shared (parse_utc_ts in util.c). This file used to keep
+ * its own copy that matched only "YYYY-MM-DD HH:MM:SS", and these columns also
+ * hold the ISO spelling that now_utc() writes. The mismatch was silent and it
+ * mattered here more than anywhere: an unparsed stamp returns 0, the epoch,
+ * which this decay treats as ancient -- so a memory used minutes ago decayed as
+ * though it had never been used. */
 
 /* Verdict contribution: accepted → +w, negative verdicts → -w, irrelevant → 0. */
 static double verdict_sign(const char *verdict)
