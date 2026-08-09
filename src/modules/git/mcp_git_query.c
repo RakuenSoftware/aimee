@@ -792,16 +792,19 @@ int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mi
 
    char candidates[8][MAX_PATH_LEN];
    int candidate_count = 0;
+   cJSON *jpath = args ? cJSON_GetObjectItemCaseSensitive(args, "path") : NULL;
+   int explicit_path = cJSON_IsString(jpath) && jpath->valuestring[0];
    int no_session_redirect =
-       args && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(args, "no_session_redirect"));
+       explicit_path ||
+       (args && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(args, "no_session_redirect")));
 
-   /* Priority 1: explicit 'path' argument from tool call */
-   if (args)
-   {
-      cJSON *jpath = cJSON_GetObjectItemCaseSensitive(args, "path");
-      if (cJSON_IsString(jpath) && jpath->valuestring[0])
-         mcp_git_add_candidate(candidates, &candidate_count, 8, jpath->valuestring);
-   }
+   /* An explicit path is an authoritative repository identity, not merely the
+    * first guess before stale session state. If it cannot be read through the
+    * active workspace provider, fail closed instead of falling through to a
+    * different checkout. Clone dispatch removes its destination path before
+    * calling this resolver because that path need not exist yet. */
+   if (explicit_path)
+      mcp_git_add_candidate(candidates, &candidate_count, 8, jpath->valuestring);
 
    /* Priority 2: session CWD tracking file (thread-safe: keyed by session_id) */
    if (!no_session_redirect)
@@ -832,7 +835,7 @@ int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mi
 
    /* Priority 3: caller cwd. MCP stdio proxies may be long-lived and launched
     * from a stale directory, so this must not outrank the session cwd file. */
-   if (args)
+   if (!explicit_path && args)
    {
       cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
       if (cJSON_IsString(jcwd) && jcwd->valuestring[0])
@@ -841,12 +844,14 @@ int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mi
 
    /* Priority 4: environment fallbacks. Some MCP hosts launch the stdio
     * wrapper from / but preserve a meaningful PWD or explicit override. */
+   if (!explicit_path)
    {
       mcp_git_add_candidate(candidates, &candidate_count, 8, getenv("AIMEE_MCP_CWD"));
       mcp_git_add_candidate(candidates, &candidate_count, 8, getenv("PWD"));
    }
 
    /* Priority 5: process CWD (racy in multi-session but useful as a fallback) */
+   if (!explicit_path)
    {
       char cwd_buf[MAX_PATH_LEN];
       if (getcwd(cwd_buf, sizeof(cwd_buf)))
@@ -855,6 +860,7 @@ int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mi
 
    /* Priority 6: executable directory. This catches repo-local plugin/server
     * launches where the process cwd is not the checkout root. */
+   if (!explicit_path)
    {
       char exe[MAX_PATH_LEN];
       if (platform_get_exe_path(exe, sizeof(exe)) == 0)
@@ -880,7 +886,7 @@ int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mi
    }
 
    if (!git_root[0])
-      return 0; /* No git repo found; run_cmd uses process CWD */
+      return explicit_path ? -2 : 0; /* Explicit identity never falls through. */
 
    /* Worktree redirect: if session has a sibling worktree for this git root,
     * point run_cmd there instead. This is the single place where worktree

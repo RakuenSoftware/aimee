@@ -153,6 +153,23 @@ int main(void)
       assert(git_identity_resolve(repo, name, sizeof(name), email, sizeof(email)) == 0);
       assert(name[0] == '\0' && email[0] == '\0');
 
+      /* The operator's normal global identity is valid too. This is the common
+       * workstation setup and must not require duplicating identity into every
+       * Aimee-managed checkout. */
+      assert(system("git config --global user.name 'Global Operator' && "
+                    "git config --global user.email 'global@example.test'") == 0);
+      setenv("GIT_CONFIG_NOSYSTEM", "1", 1);
+      setenv("GIT_CONFIG_SYSTEM", "/dev/null", 1);
+      setenv("GIT_CONFIG_GLOBAL", "/dev/null", 1);
+      assert(git_identity_resolve(repo, name, sizeof(name), email, sizeof(email)) == 1);
+      assert(strcmp(name, "Global Operator") == 0);
+      assert(strcmp(email, "global@example.test") == 0);
+      unsetenv("GIT_CONFIG_NOSYSTEM");
+      unsetenv("GIT_CONFIG_SYSTEM");
+      unsetenv("GIT_CONFIG_GLOBAL");
+      assert(system("git config --global --unset-all user.name && "
+                    "git config --global --unset-all user.email") == 0);
+
       /* Half an identity is not an identity — same rule as the vault path. */
       snprintf(cmd, sizeof(cmd), "git -C %s config user.name 'Repo Operator'", repo);
       assert(system(cmd) == 0);

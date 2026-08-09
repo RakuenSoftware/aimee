@@ -96,7 +96,7 @@ static int read_git_config(const char *repo_dir, const char *key, int scope, cha
    snprintf(cmd, sizeof(cmd), "%sgit -C '%s' config --get %s 2>/dev/null",
             scope == GIT_CFG_SCOPE_REPO
                 ? "GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_GLOBAL=/dev/null "
-                : "",
+                : "unset GIT_CONFIG_NOSYSTEM GIT_CONFIG_SYSTEM GIT_CONFIG_GLOBAL; ",
             dir, key);
    free(dir);
 

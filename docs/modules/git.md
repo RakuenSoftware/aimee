@@ -138,6 +138,24 @@ list, so a pattern-based add cannot slip a `.env` past `command=commit`.
 `branch action=switch` (keeping the worktree lock and ownership registration in one place), and
 `checkout` is `restore` when `files` is given and `switch` otherwise.
 
+### Repository selection and raw-shell boundary
+
+For MCP Git operations, an explicit `path` is repository identity, not a hint.
+It is never redirected through stale session state or replaced by a fallback
+checkout. A registered detached workspace routes Git to the client that owns
+that path; a server-visible path runs directly; an inaccessible path fails
+closed with a rebind/adopt/mount/serve explanation. This also permits Git
+operations in another registered repository's managed worktree without relying
+on shell working-directory persistence. `git_clone` is the exception because
+its `path` is a destination that may not exist yet.
+
+This repository-selection contract does not broaden raw Bash authority. The
+attention guard's session-scratchpad carve-out and its parsing of compound
+`cd`, redirects, and heredocs remain a separate subsystem; raw-shell behavior
+outside registered/managed worktrees is intentionally deferred here. Git MCP
+callers should pass `path` on each call instead of depending on a preceding
+shell `cd`, since shell working directories are not session-persistent.
+
 ### `pr action=ready`: the whole "put this up for review" errand
 
 Sync, push, open the PR. It exists because doing them separately makes the caller hold one piece of

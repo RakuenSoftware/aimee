@@ -300,6 +300,7 @@ static void test_namespaced_tools_and_dispatch(void)
    int saw_skill_manage = 0;
    int saw_skill_manage_cwd = 0;
    int saw_git_path_is_universal = 0;
+   int saw_git_fetch_is_remote_tracking_only = 0;
    cJSON *tool = NULL;
    cJSON_ArrayForEach(tool, public_tools)
    {
@@ -328,6 +329,7 @@ static void test_namespaced_tools_and_dispatch(void)
        * say the param selects the repository for EVERY command. */
       if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "git") == 0)
       {
+         cJSON *tool_desc = cJSON_GetObjectItemCaseSensitive(tool, "description");
          cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
          cJSON *props = cJSON_GetObjectItemCaseSensitive(schema, "properties");
          cJSON *path = cJSON_GetObjectItemCaseSensitive(props, "path");
@@ -335,6 +337,13 @@ static void test_namespaced_tools_and_dispatch(void)
          if (cJSON_IsString(desc) && strstr(desc->valuestring, "every command") &&
              strstr(desc->valuestring, "SHARED checkout"))
             saw_git_path_is_universal = 1;
+         cJSON *prune = cJSON_GetObjectItemCaseSensitive(props, "prune");
+         cJSON *prune_desc = cJSON_GetObjectItemCaseSensitive(prune, "description");
+         if (cJSON_IsString(tool_desc) &&
+             strstr(tool_desc->valuestring, "writes/prunes only refs/remotes/<remote>/*") &&
+             cJSON_IsString(prune_desc) &&
+             strstr(prune_desc->valuestring, "local branches are never"))
+            saw_git_fetch_is_remote_tracking_only = 1;
       }
       if (cJSON_IsString(tool_name) && strcmp(tool_name->valuestring, "skill_manage") == 0)
       {
@@ -370,6 +379,7 @@ static void test_namespaced_tools_and_dispatch(void)
    assert(saw_skill_manage);
    assert(saw_skill_manage_cwd);
    assert(saw_git_path_is_universal);
+   assert(saw_git_fetch_is_remote_tracking_only);
    cJSON_Delete(public_tools);
 
    mcp_client_registry_shutdown();

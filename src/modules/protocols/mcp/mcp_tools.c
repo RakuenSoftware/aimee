@@ -1124,7 +1124,9 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
          const char *desc;
       } git_params[] = {
           {"action", "string",
-           "Sub-action for: branch (create/switch/list/delete/claim/orphan), pr "
+           "Sub-action for: branch (create/switch/list/delete/claim/release/orphan; claim "
+           "force=true transfers stale ownership, release drops it; switch creates a "
+           "local tracking branch from origin/<name> when needed), pr "
            "(create/view/list/edit/checks/merge_status/update_branch/merge/ready), stash "
            "(push/pop/apply/list/drop), tag (create/list/delete), issue (list), verify "
            "(run/check/conflicts/env/prepare-pr/status), merge / rebase / sync / cherry_pick / "
@@ -1142,10 +1144,14 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
            "log / diff_summary: ref or range; tag: ref to tag; reset: target ref (default "
            "HEAD~1); merge: branch or commit to merge in; cherry_pick / revert: the commit; "
            "switch / checkout: the branch or ref to move to."},
-          {"force", "boolean", "push: --force-with-lease; branch delete: -D."},
+          {"force", "boolean",
+           "push: --force-with-lease; branch delete: -D; branch claim/release: transfer or remove "
+           "another session's stale ownership record."},
           {"mirror", "boolean", "push: --mirror (DESTRUCTIVE — replaces all remote refs)."},
           {"rebase", "boolean", "pull: use --rebase."},
-          {"prune", "boolean", "fetch: prune stale remote-tracking refs."},
+          {"prune", "boolean",
+           "fetch: prune stale refs only under refs/remotes/<remote>/*; local branches are never "
+           "fetch/prune destinations."},
           {"count", "integer", "log: number of commits (default 10, max 50)."},
           {"diff_stat", "boolean", "log: include per-commit diffstat."},
           {"stat_only", "boolean", "diff_summary: file-level stats only (default true)."},
@@ -1200,8 +1206,9 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
        * so leave it untyped to accept either. */
       cJSON *rem = cJSON_AddObjectToObject(p, "remote");
       cJSON_AddStringToObject(rem, "description",
-                              "fetch: remote name (default origin); branch delete: true to also "
-                              "delete the remote branch.");
+                              "fetch: remote name (default origin), mapped explicitly to "
+                              "refs/remotes/<remote>/* regardless of remote.*.fetch config; "
+                              "branch delete: true to also delete the remote branch.");
 
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("command"));
@@ -1221,7 +1228,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
               "conflict "
               "report the conflicted files and undo the operation, so you are never handed a "
               "half-applied tree (abort_on_conflict=false to resolve in place, then "
-              "action=continue). command=pr action=create writes its own title and body from the "
+              "action=continue). command=fetch ignores unsafe configured fetch destinations, "
+              "writes/prunes only refs/remotes/<remote>/*, and verifies that HEAD, all local "
+              "branches, the index, and worktree are unchanged. command=switch creates a local "
+              "tracking branch from origin/<branch> when it does not already exist. "
+              "command=pr action=create writes its own title and body from the "
               "branch's commits when you omit them. Remaining "
               "params apply per command (see each description); branch/pr/stash/tag/issue/"
               "verify also take an 'action' sub-selector. Use command=pr action=view to "

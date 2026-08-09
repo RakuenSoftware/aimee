@@ -134,6 +134,14 @@ int main(void)
    assert(workspace_turn_bind_active("") == 0);
    assert(workspace_provider_active() == shared);
 
+   /* Git repository identity: explicit path beats cwd, except clone path is a
+    * not-yet-existing destination and therefore cannot select a repository. */
+   assert(strcmp(workspace_turn_git_target("git_status", "/explicit/repo", "/caller/repo"),
+                 "/explicit/repo") == 0);
+   assert(strcmp(workspace_turn_git_target("git_clone", "/new/destination", "/caller/repo"),
+                 "/caller/repo") == 0);
+   assert(workspace_turn_git_target("git_status", NULL, NULL) == NULL);
+
    /* AC #6 — foreign-cwd trust gate (pure decision). A remote peer (not
     * trusted-local) supplying a raw absolute path that did NOT bind a detached
     * provider is rejected; every other combination is allowed. */

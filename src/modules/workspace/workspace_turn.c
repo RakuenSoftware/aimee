@@ -335,6 +335,13 @@ int workspace_turn_bind_active(const char *cwd)
    return 0; /* cwd not in any registered workspace */
 }
 
+const char *workspace_turn_git_target(const char *tool, const char *path, const char *cwd)
+{
+   if ((!tool || strcmp(tool, "git_clone") != 0) && path && path[0])
+      return path;
+   return (cwd && cwd[0]) ? cwd : NULL;
+}
+
 /* Is `workspace` a tree aimee may hand a delegate? Canonicalizes into `out` and
  * returns 1 if it lives inside one of the operator's REGISTERED workspace roots.
  *

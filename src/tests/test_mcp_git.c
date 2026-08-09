@@ -12,6 +12,7 @@
 #include "session_worktree_key.h"
 #include "modules/workspace/workspace_provider.h"
 #include "modules/git/git_verify.h"
+#include "branch_ownership.h"
 #include "tests/support/git_pr_api_stub.h"
 #include "cJSON.h"
 #include "db_schema.h"
@@ -43,6 +44,7 @@ static void verify_test_write_yaml(const char *tmpdir, char *fake_home, size_t f
 static void verify_test_teardown(const char *tmpdir, const char *fake_home);
 static void setup_ownership_db(void);
 static void teardown_ownership_db(void);
+static void init_nested_git_repo(const char *path, const char *label);
 
 static void setup_git_repo(void)
 {
@@ -168,6 +170,92 @@ static void test_mcp_chdir_session_cwd_precedes_proxy_cwd(void)
 
    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tracked_repo);
    system(cmd);
+   teardown_git_repo();
+}
+
+static void test_explicit_path_is_authoritative_and_live(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+
+   assert(system("printf 'requested\\n' >> file.txt && git commit -q -am requested-head") == 0);
+
+   char stale[MAX_PATH_LEN];
+   snprintf(stale, sizeof(stale), "/tmp/aimee-test-mcp-git-stale-%d", (int)getpid());
+   init_nested_git_repo(stale, "stale-head");
+
+   const char *sid = "explicit-path-session";
+   session_id_set_override(sid);
+   session_state_t state;
+   memset(&state, 0, sizeof(state));
+   snprintf(state.session_mode, sizeof(state.session_mode), "implement");
+   snprintf(state.guardrail_mode, sizeof(state.guardrail_mode), "approve");
+   state.worktree_count = 1;
+   snprintf(state.worktrees[0].git_root, sizeof(state.worktrees[0].git_root), "%s", g_tmpdir);
+   snprintf(state.worktrees[0].worktree_path, sizeof(state.worktrees[0].worktree_path), "%s", stale);
+   session_state_force_save(&state, sid);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "path", g_tmpdir);
+   assert(mcp_chdir_git_root(NULL, 0, args, NULL) == 1);
+   cJSON *resp = handle_git_log(args);
+   char *result = get_mcp_text(resp);
+   assert(result != NULL);
+   assert(strstr(result, "requested-head") != NULL);
+   assert(strstr(result, "stale-head") == NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   /* Mutations must use the same authoritative path.  This is the direct
+    * regression for branch=create claiming success in an invisible scratch
+    * checkout while leaving the named repository untouched. */
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "path", g_tmpdir);
+   cJSON_AddStringToObject(args, "action", "create");
+   cJSON_AddStringToObject(args, "name", "path-created");
+   assert(mcp_chdir_git_root(NULL, 0, args, NULL) == 1);
+   resp = handle_git_branch(args);
+   result = get_mcp_text(resp);
+   assert(result != NULL);
+   assert(strstr(result, "created: path-created") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+   assert(system("git show-ref --verify --quiet refs/heads/path-created") == 0);
+
+   char stale_check[MAX_PATH_LEN + 96];
+   snprintf(stale_check, sizeof(stale_check),
+            "git -C '%s' show-ref --verify --quiet refs/heads/path-created", stale);
+   assert(system(stale_check) != 0);
+
+   /* Delete the stale mapped checkout, then change the requested checkout.
+    * The second call must read the new state live rather than replaying a
+    * cached response or holding the stale worktree provider. */
+   char cmd[MAX_PATH_LEN + 32];
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", stale);
+   assert(system(cmd) == 0);
+   FILE *fp = fopen("live-only.txt", "w");
+   assert(fp != NULL);
+   fputs("live\n", fp);
+   fclose(fp);
+
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "path", g_tmpdir);
+   assert(mcp_chdir_git_root(NULL, 0, args, NULL) == 1);
+   resp = handle_git_status(args);
+   result = get_mcp_text(resp);
+   assert(result != NULL);
+   assert(strstr(result, "live-only.txt") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "path", "/tmp/aimee-path-that-does-not-exist");
+   assert(mcp_chdir_git_root(NULL, 0, args, NULL) == -2);
+   cJSON_Delete(args);
+
+   run_cmd_set_cwd(NULL);
+   session_id_clear_override();
+   teardown_ownership_db();
    teardown_git_repo();
 }
 
@@ -420,6 +508,71 @@ static void test_git_commit_success(void)
    teardown_git_repo();
 }
 
+static void test_git_commit_reads_masked_global_identity(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b global-identity-test && "
+                 "git config --unset-all user.name && git config --unset-all user.email") == 0);
+
+   char fake_home[256] = "/tmp/aimee-test-git-identity-XXXXXX";
+   assert(mkdtemp(fake_home) != NULL);
+   const char *env_names[] = {"HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_NOSYSTEM",
+                              "GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL",
+                              "AIMEE_TEST_GIT_IDENTITY_FROM_CONFIG"};
+   char *saved[sizeof(env_names) / sizeof(env_names[0])] = {0};
+   for (size_t i = 0; i < sizeof(env_names) / sizeof(env_names[0]); i++)
+   {
+      const char *value = getenv(env_names[i]);
+      saved[i] = value ? strdup(value) : NULL;
+   }
+
+   setenv("HOME", fake_home, 1);
+   setenv("XDG_CONFIG_HOME", fake_home, 1);
+   unsetenv("GIT_CONFIG_NOSYSTEM");
+   unsetenv("GIT_CONFIG_SYSTEM");
+   unsetenv("GIT_CONFIG_GLOBAL");
+   assert(system("git config --global user.name 'Global Operator' && "
+                 "git config --global user.email 'global@example.test'") == 0);
+   setenv("GIT_CONFIG_NOSYSTEM", "1", 1);
+   setenv("GIT_CONFIG_SYSTEM", "/dev/null", 1);
+   setenv("GIT_CONFIG_GLOBAL", "/dev/null", 1);
+   setenv("AIMEE_TEST_GIT_IDENTITY_FROM_CONFIG", "1", 1);
+
+   FILE *fp = fopen("global-author.txt", "w");
+   assert(fp != NULL);
+   fputs("identity\n", fp);
+   fclose(fp);
+   assert(system("git add global-author.txt") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "message", "use global identity");
+   cJSON *resp = handle_git_commit(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "committed") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+   assert(system("test \"$(git log -1 --format='%an <%ae>')\" = "
+                 "'Global Operator <global@example.test>'") == 0);
+
+   for (size_t i = 0; i < sizeof(env_names) / sizeof(env_names[0]); i++)
+   {
+      if (saved[i])
+      {
+         setenv(env_names[i], saved[i], 1);
+         free(saved[i]);
+      }
+      else
+      {
+         unsetenv(env_names[i]);
+      }
+   }
+   char clean[320];
+   snprintf(clean, sizeof(clean), "rm -rf '%s'", fake_home);
+   assert(system(clean) == 0);
+   teardown_git_repo();
+}
+
 /* --- Test handle_git_commit with sensitive file filtering --- */
 
 static void test_git_commit_skips_sensitive(void)
@@ -583,6 +736,168 @@ static void test_git_branch_create_and_list(void)
    text = get_mcp_text(resp);
    assert(text != NULL);
    assert(strstr(text, "deleted") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+/* A repository can carry a hostile/broken remote.<name>.fetch configuration.
+ * The MCP fetch operation must override it with a remote-tracking refspec rather
+ * than trusting it to choose which local refs -- and which prune namespace --
+ * are writable. This reproduces the incident configuration exactly. */
+static void test_git_fetch_never_writes_or_prunes_local_branches(void)
+{
+   char root[] = "/tmp/aimee-test-safe-fetch-XXXXXX";
+   assert(mkdtemp(root) != NULL);
+   char remote[512], seed[512], local[512], cmd[4096];
+   snprintf(remote, sizeof(remote), "%s/remote.git", root);
+   snprintf(seed, sizeof(seed), "%s/seed", root);
+   snprintf(local, sizeof(local), "%s/local", root);
+
+   snprintf(cmd, sizeof(cmd),
+            "git init -q --bare '%s' && git init -q -b main '%s' && "
+            "git -C '%s' config user.email test@test && git -C '%s' config user.name test && "
+            "printf 'base\\n' > '%s/file.txt' && git -C '%s' add file.txt && "
+            "git -C '%s' commit -q -m base && git -C '%s' remote add origin '%s' && "
+            "git -C '%s' push -q -u origin main && "
+            "git -C '%s' checkout -q -b feature && printf 'feature\\n' > '%s/feature.txt' && "
+            "git -C '%s' add feature.txt && git -C '%s' commit -q -m feature && "
+            "git -C '%s' push -q -u origin feature && "
+            "git --git-dir='%s' symbolic-ref HEAD refs/heads/main && git clone -q '%s' '%s'",
+            remote, seed, seed, seed, seed, seed, seed, seed, remote, seed, seed, seed, seed, seed,
+            seed, remote, remote, local);
+   assert(system(cmd) == 0);
+
+   /* Advance origin/main after the clone. A fetch that falls back to the bad
+    * configured destination would now try to update refs/heads/main and fail
+    * because main is checked out. */
+   snprintf(cmd, sizeof(cmd),
+            "git -C '%s' checkout -q main && printf 'advanced\\n' >> '%s/file.txt' && "
+            "git -C '%s' commit -q -am advanced && git -C '%s' tag fetch-side-effect && "
+            "git -C '%s' push -q origin main refs/tags/fetch-side-effect",
+            seed, seed, seed, seed, seed);
+   assert(system(cmd) == 0);
+
+   char saved[4096];
+   assert(getcwd(saved, sizeof(saved)) != NULL);
+   assert(chdir(local) == 0);
+   assert(system("git config user.email test@test && git config user.name test && "
+                 "git config --replace-all remote.origin.fetch "
+                 "'+refs/heads/*:refs/heads/*' && "
+                 "git config remote.origin.pruneTags true && git tag local-keep-tag") == 0);
+
+   int local_rc = 0;
+   char *local_main_before = mcp_git_run("git rev-parse refs/heads/main", &local_rc);
+   assert(local_rc == 0);
+   snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse refs/heads/main", seed);
+   int expected_rc = 0;
+   char *expected_main = run_cmd(cmd, &expected_rc);
+   assert(local_main_before != NULL && expected_main != NULL && expected_rc == 0);
+   assert(strcmp(local_main_before, expected_main) != 0);
+
+   /* The unsafe configured refspec would try to update checked-out main and
+    * fail. The explicit safe refspec must make this fetch succeed. */
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddBoolToObject(args, "prune", 1);
+   cJSON *resp = handle_git_fetch(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL && strncmp(text, "error:", 6) != 0);
+   char *local_main_after = mcp_git_run("git rev-parse refs/heads/main", &local_rc);
+   assert(local_rc == 0);
+   char *remote_main_after = mcp_git_run("git rev-parse refs/remotes/origin/main", &local_rc);
+   assert(local_rc == 0);
+   char *configured_refspec = mcp_git_run("git config --get remote.origin.fetch", &local_rc);
+   assert(local_rc == 0);
+   assert(local_main_after != NULL && remote_main_after != NULL && configured_refspec != NULL);
+   assert(strcmp(local_main_before, local_main_after) == 0);
+   assert(strcmp(expected_main, remote_main_after) == 0);
+   assert(strcmp(configured_refspec, "+refs/heads/*:refs/heads/*\n") == 0);
+   assert(system("! git show-ref --verify --quiet refs/tags/fetch-side-effect") == 0);
+   assert(system("git show-ref --verify --quiet refs/tags/local-keep-tag") == 0);
+   free(local_main_before);
+   free(local_main_after);
+   free(remote_main_after);
+   free(expected_main);
+   free(configured_refspec);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   assert(system(
+                 "git checkout -q -b local-only && git branch keep-local && "
+                 "git update-ref refs/remotes/origin/stale HEAD && "
+                 "printf 'dirty\\n' >> file.txt && printf 'staged\\n' > staged.txt && "
+                 "git add staged.txt && printf 'untracked\\n' > untracked.txt") == 0);
+
+   char *head_before = mcp_git_run("git rev-parse HEAD", &local_rc);
+   char *status_before =
+       mcp_git_run("git status --porcelain=v1 --untracked-files=all", &local_rc);
+   char *refs_before = mcp_git_run(
+       "git for-each-ref --sort=refname --format='%(refname) %(objectname)' refs/heads", &local_rc);
+   assert(head_before != NULL && status_before != NULL && refs_before != NULL);
+
+   args = cJSON_CreateObject();
+   cJSON_AddBoolToObject(args, "prune", 1);
+   resp = handle_git_fetch(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL && strncmp(text, "error:", 6) != 0);
+
+   char *head_after = mcp_git_run("git rev-parse HEAD", &local_rc);
+   char *status_after =
+       mcp_git_run("git status --porcelain=v1 --untracked-files=all", &local_rc);
+   char *refs_after = mcp_git_run(
+       "git for-each-ref --sort=refname --format='%(refname) %(objectname)' refs/heads", &local_rc);
+   assert(head_after != NULL && status_after != NULL && refs_after != NULL);
+   assert(strcmp(head_before, head_after) == 0);
+   assert(strcmp(status_before, status_after) == 0);
+   assert(strcmp(refs_before, refs_after) == 0);
+   free(head_before);
+   free(head_after);
+   free(status_before);
+   free(status_after);
+   free(refs_before);
+   free(refs_after);
+
+   assert(system("test \"$(git symbolic-ref --short HEAD)\" = local-only && "
+                 "git show-ref --verify --quiet refs/heads/local-only && "
+                 "git show-ref --verify --quiet refs/heads/keep-local && "
+                 "git show-ref --verify --quiet refs/remotes/origin/main && "
+                 "git show-ref --verify --quiet refs/remotes/origin/feature && "
+                 "! git show-ref --verify --quiet refs/remotes/origin/stale") == 0);
+
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+   assert(chdir(saved) == 0);
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);
+   assert(system(cmd) == 0);
+}
+
+static void test_git_fetch_refuses_unborn_head(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q --orphan unborn && git rm -q -rf .") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON *resp = handle_git_fetch(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "HEAD does not resolve") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+static void test_git_fetch_rejects_unsafe_remote_name(void)
+{
+   setup_git_repo();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "remote", "-overwrite");
+   cJSON *resp = handle_git_fetch(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "remote name is invalid") != NULL);
    cJSON_Delete(resp);
    cJSON_Delete(args);
 
@@ -2083,6 +2398,96 @@ static void test_branch_claim(void)
    cJSON_Delete(resp);
    cJSON_Delete(args);
 
+   /* Another session gets an actionable refusal, then may explicitly transfer
+    * stale ownership rather than being trapped by the suggested claim. */
+   session_id_set_override("session-B");
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "claim");
+   cJSON_AddStringToObject(args, "name", "some-branch");
+   resp = handle_git_branch(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "session-A") != NULL);
+   assert(strstr(text, "force=true") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "claim");
+   cJSON_AddStringToObject(args, "name", "some-branch");
+   cJSON_AddBoolToObject(args, "force", 1);
+   resp = handle_git_branch(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "claimed: some-branch") != NULL);
+   char owned[256] = "";
+   assert(branch_own_get_session_branch(owned, sizeof(owned)) == 0);
+   assert(strcmp(owned, "some-branch") == 0);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   /* A non-owner cannot release silently, but force provides the documented
+    * stale-record escape hatch. */
+   session_id_set_override("session-A");
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "release");
+   cJSON_AddStringToObject(args, "name", "some-branch");
+   resp = handle_git_branch(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL && strstr(text, "force=true") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "release");
+   cJSON_AddStringToObject(args, "name", "some-branch");
+   cJSON_AddBoolToObject(args, "force", 1);
+   resp = handle_git_branch(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL && strstr(text, "released ownership") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   session_id_set_override("session-C");
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "claim");
+   cJSON_AddStringToObject(args, "name", "some-branch");
+   resp = handle_git_branch(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL && strstr(text, "claimed: some-branch") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   /* Ownership identity is (canonical repository, branch), not branch name
+    * alone. The same name in another repository must remain independently
+    * claimable without force. */
+   char other_repo[MAX_PATH_LEN];
+   snprintf(other_repo, sizeof(other_repo), "/tmp/aimee-test-owner-scope-%d", (int)getpid());
+   init_nested_git_repo(other_repo, "other-repo");
+   run_cmd_set_cwd(other_repo);
+   session_id_set_override("session-D");
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "claim");
+   cJSON_AddStringToObject(args, "name", "some-branch");
+   resp = handle_git_branch(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL && strstr(text, "claimed: some-branch") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   char repo_owner[64] = "";
+   char other_owner[64] = "";
+   assert(db1_git_ownership_get_owner(g_tmpdir, "some-branch", repo_owner,
+                                      sizeof(repo_owner)) == 1);
+   assert(db1_git_ownership_get_owner(other_repo, "some-branch", other_owner,
+                                      sizeof(other_owner)) == 1);
+   assert(strcmp(repo_owner, "session-C") == 0);
+   assert(strcmp(other_owner, "session-D") == 0);
+   run_cmd_set_cwd(NULL);
+   char clean[MAX_PATH_LEN + 32];
+   snprintf(clean, sizeof(clean), "rm -rf '%s'", other_repo);
+   assert(system(clean) == 0);
+
    session_id_clear_override();
    teardown_ownership_db();
    teardown_git_repo();
@@ -2532,6 +2937,31 @@ static void test_add_refuses_only_sensitive_paths(void)
    teardown_git_repo();
 }
 
+static void test_add_allows_env_templates(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b env-template-test") == 0);
+
+   FILE *fp = fopen(".env.example", "w");
+   assert(fp != NULL);
+   fputs("APP_PORT=3000\n", fp);
+   fclose(fp);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON *files = cJSON_AddArrayToObject(args, "files");
+   cJSON_AddItemToArray(files, cJSON_CreateString(".env.example"));
+   cJSON *resp = handle_git_add(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "staged") != NULL);
+   assert(strstr(text, "sensitive") == NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   assert(system("git diff --cached --name-only | grep -qx .env.example") == 0);
+   teardown_git_repo();
+}
+
 static void test_add_requires_files_or_all(void)
 {
    setup_git_repo();
@@ -2558,7 +2988,7 @@ static void test_switch_routes_to_branch_switch(void)
    assert(system("git branch -q target") == 0);
 
    cJSON *args = cJSON_CreateObject();
-   cJSON_AddStringToObject(args, "ref", "target");
+   cJSON_AddStringToObject(args, "ref", "refs/heads/target");
    cJSON *resp = handle_git_switch(args);
    char *text = get_mcp_text(resp);
    assert(text != NULL);
@@ -2568,6 +2998,51 @@ static void test_switch_routes_to_branch_switch(void)
 
    teardown_ownership_db();
    teardown_git_repo();
+}
+
+static void test_switch_creates_tracking_branch_from_origin(void)
+{
+   char root[] = "/tmp/aimee-test-tracking-switch-XXXXXX";
+   assert(mkdtemp(root) != NULL);
+   char remote[512], seed[512], local[512], cmd[4096];
+   snprintf(remote, sizeof(remote), "%s/remote.git", root);
+   snprintf(seed, sizeof(seed), "%s/seed", root);
+   snprintf(local, sizeof(local), "%s/local", root);
+   snprintf(cmd, sizeof(cmd),
+            "git init -q --bare '%s' && git init -q -b main '%s' && "
+            "git -C '%s' config user.email test@test && git -C '%s' config user.name test && "
+            "printf 'base\\n' > '%s/file.txt' && git -C '%s' add file.txt && "
+            "git -C '%s' commit -q -m base && git -C '%s' checkout -q -b topic && "
+            "git -C '%s' push -q '%s' main topic && "
+            "git --git-dir='%s' symbolic-ref HEAD refs/heads/main && git clone -q '%s' '%s'",
+            remote, seed, seed, seed, seed, seed, seed, seed, seed, remote, remote, remote, local);
+   assert(system(cmd) == 0);
+
+   char saved[4096];
+   assert(getcwd(saved, sizeof(saved)) != NULL);
+   assert(chdir(local) == 0);
+   setup_ownership_db();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "refs/remotes/origin/topic");
+   cJSON *resp = handle_git_switch(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "tracking origin/topic") != NULL);
+   assert(system("test \"$(git symbolic-ref --short HEAD)\" = topic && "
+                 "test \"$(git rev-parse --abbrev-ref '@{upstream}')\" = origin/topic && "
+                 "test \"$(git config branch.topic.remote)\" = origin && "
+                 "test \"$(git config branch.topic.merge)\" = refs/heads/topic") == 0);
+   char owned_branch[256] = "";
+   assert(branch_own_get_session_branch(owned_branch, sizeof(owned_branch)) == 0);
+   assert(strcmp(owned_branch, "topic") == 0);
+
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+   teardown_ownership_db();
+   assert(chdir(saved) == 0);
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);
+   assert(system(cmd) == 0);
 }
 
 /* A path-scoped checkout is a restore, and routes there rather than moving HEAD. */
@@ -3305,6 +3780,7 @@ int main(void)
    test_git_status_modified();
    test_mcp_chdir_uses_cwd_argument();
    test_mcp_chdir_session_cwd_precedes_proxy_cwd();
+   test_explicit_path_is_authoritative_and_live();
    test_mcp_chdir_repairs_stale_delegate_tracked_cwd();
    test_mcp_chdir_keeps_stale_delegate_cwd_when_repair_missing();
    test_mcp_chdir_does_not_repair_delegate_session_cwd();
@@ -3312,11 +3788,15 @@ int main(void)
    test_mcp_chdir_uses_pwd_fallback();
    test_git_commit_missing_message();
    test_git_commit_success();
+   test_git_commit_reads_masked_global_identity();
    test_git_commit_skips_sensitive();
    test_git_container_provider_runs_on_server();
    test_git_push_requires_branch();
    test_git_branch_missing_action();
    test_git_branch_create_and_list();
+   test_git_fetch_never_writes_or_prunes_local_branches();
+   test_git_fetch_refuses_unborn_head();
+   test_git_fetch_rejects_unsafe_remote_name();
    /* test_git_log skipped: format string issue in handle_git_log */
    test_git_clone_missing_url();
    test_git_stash_unknown_action();
@@ -3404,8 +3884,10 @@ int main(void)
    /* Staging and ref movement */
    test_add_all_stages_new_files_but_not_secrets();
    test_add_refuses_only_sensitive_paths();
+   test_add_allows_env_templates();
    test_add_requires_files_or_all();
    test_switch_routes_to_branch_switch();
+   test_switch_creates_tracking_branch_from_origin();
    test_checkout_with_files_restores();
    test_switch_requires_a_ref();
 
