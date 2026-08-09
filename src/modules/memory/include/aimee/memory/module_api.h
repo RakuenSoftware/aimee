@@ -1,5 +1,5 @@
 /* Wire contract for the memory process's reranking confidence, typed-fact
- * write-gate and pattern-extraction stages. */
+ * write-gate, pattern-extraction and PII recall-gate stages. */
 #ifndef AIMEE_MEMORY_MODULE_API_H
 #define AIMEE_MEMORY_MODULE_API_H 1
 
@@ -266,6 +266,57 @@ static inline int aimee_memory_extract_response_decode(const uint8_t *in, size_t
    if (offset != len)
       return -1;
    *count = found;
+   return 0;
+}
+
+/* PII recall gate, turn classification (stage RETRIEVE). Answers one question
+ * about the whole turn -- did the user explicitly ask for sensitive
+ * information -- which is asked once per turn.
+ *
+ * The per-fact half of the gate (sensitivity of a relation, and the inject
+ * decision) is deliberately NOT here. A recall pass gates up to
+ * FR_MAX_ENTITIES * FR_MAX_FACTS candidate facts, so a per-fact call would put
+ * hundreds of round trips on the turn's hot path. Batching it is its own step. */
+#define AIMEE_MEMORY_PII_REQUEST_MAGIC  0x51524950u /* "PIRQ" */
+#define AIMEE_MEMORY_PII_RESPONSE_MAGIC 0x53524950u /* "PIRS" */
+#define AIMEE_MEMORY_PII_REQUEST_HEADER_LEN 12u
+#define AIMEE_MEMORY_PII_RESPONSE_LEN       8u
+
+static inline size_t aimee_memory_pii_request_size(const char *turn_text)
+{
+   size_t len = turn_text ? strlen(turn_text) : 0;
+   if (len > UINT32_MAX - AIMEE_MEMORY_PII_REQUEST_HEADER_LEN)
+      return 0;
+   return AIMEE_MEMORY_PII_REQUEST_HEADER_LEN + len;
+}
+
+static inline int aimee_memory_pii_request_encode(const char *turn_text, uint8_t *out, size_t cap)
+{
+   size_t needed = aimee_memory_pii_request_size(turn_text);
+   if (!needed || !out || cap < needed)
+      return -1;
+   size_t len = needed - AIMEE_MEMORY_PII_REQUEST_HEADER_LEN;
+   aimee_memory_put_u32(out, AIMEE_MEMORY_PII_REQUEST_MAGIC);
+   aimee_memory_put_u32(out + 4, AIMEE_MEMORY_WIRE_VERSION);
+   aimee_memory_put_u32(out + 8, (uint32_t)len);
+   if (len)
+      memcpy(out + 12, turn_text, len);
+   return 0;
+}
+
+/* Decodes the answer. Anything other than 0 or 1 is a broken module, not a
+ * truthy value to pass along: this decides whether private facts are eligible
+ * for a prompt, so an unrecognized answer fails the decode. */
+static inline int aimee_memory_pii_response_decode(const uint8_t *in, size_t len,
+                                                   int *requests_sensitive)
+{
+   if (!in || len != AIMEE_MEMORY_PII_RESPONSE_LEN || !requests_sensitive ||
+       aimee_memory_get_u32(in) != AIMEE_MEMORY_PII_RESPONSE_MAGIC)
+      return -1;
+   uint32_t value = aimee_memory_get_u32(in + 4);
+   if (value > 1u)
+      return -1;
+   *requests_sensitive = (int)value;
    return 0;
 }
 

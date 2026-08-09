@@ -292,3 +292,75 @@ func TestExtractStageAcceptsEmptyText(t *testing.T) {
 		t.Fatalf("empty text yielded %d triples", len(triples))
 	}
 }
+
+// piiRequest mirrors aimee_memory_pii_request_encode byte for byte.
+func piiRequest(turnText string) []byte {
+	request := make([]byte, piiRequestHeaderLen, piiRequestHeaderLen+len(turnText))
+	binary.LittleEndian.PutUint32(request[0:4], piiRequestMagic)
+	binary.LittleEndian.PutUint32(request[4:8], wireVersion)
+	binary.LittleEndian.PutUint32(request[8:12], uint32(len(turnText)))
+	return append(request, turnText...)
+}
+
+// The whole turn corpus crosses the wire. A stage that inverted the answer, or
+// one that ignored the text, would agree with a handful of hand-picked turns.
+func TestRetrieveStageCarriesTheTurnVerdict(t *testing.T) {
+	asked, notAsked := 0, 0
+	for _, row := range fixtureRows(t, "testdata/pii_turns.tsv") {
+		text := unescapeField(row[0])
+		want := atoi(t, row[1], row)
+
+		response, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve}, piiRequest(text))
+		if status != bus.ModuleStatusOK || len(response) != piiResponseLen ||
+			binary.LittleEndian.Uint32(response[0:4]) != piiResponseMagic {
+			t.Fatalf("pii(%q) response = %x, status = %d", text, response, status)
+		}
+		if got := int(binary.LittleEndian.Uint32(response[4:8])); got != want {
+			t.Fatalf("pii(%q) = %d over the wire, C gate = %d", text, got, want)
+		}
+		if want == 1 {
+			asked++
+		} else {
+			notAsked++
+		}
+	}
+	if asked == 0 || notAsked == 0 {
+		t.Errorf("only one answer crossed the wire: asked=%d not_asked=%d", asked, notAsked)
+	}
+}
+
+func TestRetrieveStageRejectsMalformedRequests(t *testing.T) {
+	valid := piiRequest("what is my email")
+	if _, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve}, valid); status != bus.ModuleStatusOK {
+		t.Fatalf("valid pii request status = %d", status)
+	}
+	malformed := map[string][]byte{
+		"wire magic":      piiRequest("what is my email"),
+		"wire version":    piiRequest("what is my email"),
+		"declared length": piiRequest("what is my email"),
+		"short header":    valid[:piiRequestHeaderLen-1],
+		"truncated body":  valid[:len(valid)-1],
+	}
+	binary.LittleEndian.PutUint32(malformed["wire magic"][0:4], piiRequestMagic+1)
+	binary.LittleEndian.PutUint32(malformed["wire version"][4:8], wireVersion+1)
+	binary.LittleEndian.PutUint32(malformed["declared length"][8:12], 999)
+	for name, request := range malformed {
+		if _, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve},
+			request); status != bus.ModuleStatusInvalidRequest {
+			t.Errorf("%s status = %d", name, status)
+		}
+	}
+	// An extract-shaped request routed here must not be misparsed: both start
+	// with a magic and a version, and both carry length-prefixed text.
+	if _, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve},
+		extractRequest("what is my email", 16)); status != bus.ModuleStatusInvalidRequest {
+		t.Errorf("extract request on retrieve stage status = %d", status)
+	}
+}
+
+func TestRetrieveStageHonorsCancellation(t *testing.T) {
+	invocation := bus.ModuleInvocation{StageID: StageRetrieve, DeadlineNS: 1}
+	if _, status := Handle(invocation, piiRequest("what is my email")); status != bus.ModuleStatusCancelled {
+		t.Fatalf("expired invocation status = %d", status)
+	}
+}

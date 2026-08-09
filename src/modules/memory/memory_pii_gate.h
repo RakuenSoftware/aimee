@@ -43,6 +43,24 @@ extern "C"
    int memory_pii_should_inject(rel_sensitivity_t sens, double confidence,
                                 int turn_requests_sensitive);
 
+   /* Turn classifier: returns 0 and sets *requests_sensitive to 0 or 1, or
+    * non-zero if it could not produce an answer. */
+   typedef int (*memory_pii_turn_classifier_fn)(const char *turn_text,
+                                                int *requests_sensitive);
+
+   /* Route the turn classification through `classifier` (the memory module over
+    * the bus) instead of scanning in-process. Pass NULL to go back to the local
+    * scan.
+    *
+    * A registered classifier is authoritative, and unlike the write gate there
+    * is no way to defer: the answer is a plain 0/1 with no third state, and the
+    * recall path has to proceed either way. So a failure fails CLOSED -- the
+    * turn is treated as NOT asking for sensitive information, which withholds
+    * PII rather than leaking it. The cost of a broken module is missing facts,
+    * never an exposed one; falling back to the local scan would instead make a
+    * broken module invisible. */
+   void memory_pii_register_turn_classifier(memory_pii_turn_classifier_fn classifier);
+
 #ifdef __cplusplus
 }
 #endif

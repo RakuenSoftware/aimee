@@ -9,6 +9,7 @@
 #include "response_dedup.h"
 #include "modules/memory/memory_extract_patterns.h"
 #include "modules/memory/memory_fact_gate.h"
+#include "modules/memory/memory_pii_gate.h"
 #include "modules/workspace/workspace_scope.h"
 #include <aimee/audit/obs_bus.h>
 #include <aimee/core/event_bus/module_protocol.h>
@@ -154,6 +155,28 @@ static int memory_extract(const char *text, pattern_triple_t *out, int max, int 
    return rc;
 }
 
+static int memory_pii_turn(const char *turn_text, int *requests_sensitive)
+{
+   if (!turn_text || !requests_sensitive)
+      return -1;
+   size_t request_len = aimee_memory_pii_request_size(turn_text);
+   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+      return -1;
+   uint8_t *request = malloc(request_len);
+   uint8_t response[AIMEE_MEMORY_PII_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (!request)
+      return -1;
+   int rc = aimee_memory_pii_request_encode(turn_text, request, request_len) == 0 &&
+                    call_module(AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, request,
+                                (uint32_t)request_len, response, sizeof(response),
+                                &response_len) == 0
+                ? aimee_memory_pii_response_decode(response, response_len, requests_sensitive)
+                : -1;
+   free(request);
+   return rc;
+}
+
 static int learning_classify(const char *signal, uint32_t *sink_mask)
 {
    uint8_t request[AIMEE_LEARNING_REQUEST_LEN], response[AIMEE_LEARNING_RESPONSE_LEN];
@@ -262,6 +285,7 @@ void server_module_stage_adapters_configure(void)
    ingress_preinject_register_confidence_provider(memory_confidence);
    memory_fact_gate_register_checker(memory_fact_gate);
    memory_extract_register_extractor(memory_extract);
+   memory_pii_register_turn_classifier(memory_pii_turn);
    learning_router_register_signal_classifier(learning_classify);
    delegate_role_register_canonicalizer(delegate_canonicalize);
    agent_tools_register_classifier(tool_classify);

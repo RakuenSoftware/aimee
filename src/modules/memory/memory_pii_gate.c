@@ -25,10 +25,24 @@ static int ci_contains(const char *hay, const char *needle)
    return 0;
 }
 
+static memory_pii_turn_classifier_fn g_turn_classifier;
+
+void memory_pii_register_turn_classifier(memory_pii_turn_classifier_fn classifier)
+{
+   g_turn_classifier = classifier;
+}
+
 int memory_pii_turn_requests_sensitive(const char *turn_text)
 {
    if (!turn_text || !turn_text[0])
       return 0;
+   if (g_turn_classifier)
+   {
+      int requests_sensitive = 0;
+      if (g_turn_classifier(turn_text, &requests_sensitive) != 0)
+         return 0; /* no answer: fail closed, withhold rather than leak */
+      return requests_sensitive ? 1 : 0;
+   }
    /* Cues that the user is explicitly asking for a sensitive attribute. Kept
     * specific enough to avoid incidental matches. */
    static const char *cues[] = {"address",    "phone",           "email",           "birthday",
