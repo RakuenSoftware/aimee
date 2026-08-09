@@ -2968,6 +2968,46 @@ paths:
     get:
       summary: Evaluation results
       responses: { "200": { description: Eval results, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/list:
+    get:
+      summary: List roundtable authoring pipelines
+      responses: { "200": { description: Pipeline list, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/status:
+    post:
+      summary: Roundtable authoring pipeline status
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Pipeline status, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/start:
+    post:
+      summary: Start a roundtable authoring pipeline
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Started pipeline, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/cancel:
+    post:
+      summary: Cancel a roundtable authoring pipeline
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Cancel result, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/resume:
+    post:
+      summary: Resume a roundtable authoring pipeline
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Resume result, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/advance:
+    post:
+      summary: Advance a roundtable authoring pipeline to its next phase
+      description: >-
+        Returns the next action for the caller (advance, revise, escalate) after
+        recording the current pass. Capability: delegate.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Advance result, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/gate:
+    post:
+      summary: Record a human gate verdict on a roundtable authoring pipeline
+      description: >-
+        Verdict is pass or fail. Gate authority is checked against the active local
+        operator. Capability: delegate.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Gate result, content: { application/json: { schema: { type: object } } } } }
   /trigger/list:
     get:
       summary: List triggers
