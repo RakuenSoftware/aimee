@@ -104,10 +104,35 @@ int db2_memory_valid_at(int64_t memory_id, const char *as_of)
     * as we know", an empty valid_until means "still true". Rows written before
     * supersession began stamping valid_until therefore read as current -- the
     * truthful answer, since we genuinely do not know when they stopped being
-    * true. Inventing a boundary from updated_at would manufacture history. */
-   static const char *sql = "SELECT 1 FROM memories WHERE id = ?1"
-                            " AND (COALESCE(valid_from,'') = '' OR valid_from <= ?2)"
-                            " AND (COALESCE(valid_until,'') = '' OR valid_until > ?3)";
+    * true. Inventing a boundary from updated_at would manufacture history.
+    *
+    * Normalise the separator before comparing, because these columns genuinely
+    * hold TWO formats. schema.sql declares the canonical text form as
+    * 'YYYY-MM-DD HH24:MI:SS' and pg_now_text() writes that, but the C writers
+    * reach these same columns with now_utc(), which is ISO
+    * ("2026-08-09T19:07:23Z"): db2_memory_set_versioned_key and
+    * db2_memory_set_valid_from are both handed a now_utc() stamp by
+    * memory_supersede, while db2_memory_set_lifecycle_state stamps pg_now_text().
+    *
+    * A plain text compare therefore decided on character 10, where 'T' (0x54)
+    * sorts ABOVE ' ' (0x20). Every ISO bound ranked above every space-separated
+    * value, inverting the verdict: a superseded row read as still in force, and
+    * a row not yet valid read as valid. It failed silently, since a wrong
+    * verdict is indistinguishable from a right one, and it only surfaced when
+    * the DATE matched -- decade-apart dates decide at the year and never reach
+    * the separator.
+    *
+    * replace()/rtrim() rather than a ::timestamptz cast: the DB2 unit tests run
+    * on the SQLite shim, where the cast is a syntax error, and these two are
+    * spelled the same in both engines. Offsets other than 'Z' are still compared
+    * textually -- nothing in this tree writes one, and inventing a parser here
+    * would be guessing at data we do not produce. */
+   static const char *sql =
+       "SELECT 1 FROM memories WHERE id = ?1"
+       " AND (NULLIF(valid_from,'') IS NULL"
+       "      OR rtrim(replace(valid_from,'T',' '),'Z') <= rtrim(replace(?2,'T',' '),'Z'))"
+       " AND (NULLIF(valid_until,'') IS NULL"
+       "      OR rtrim(replace(valid_until,'T',' '),'Z') > rtrim(replace(?3,'T',' '),'Z'))";
    char err[ML_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -117,7 +142,13 @@ int db2_memory_valid_at(int64_t memory_id, const char *as_of)
    aimee_pg_bind_text(st, "?3", as_of);
    int rc = aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
-   return (rc == AIMEE_PG_ROW) ? 1 : 0;
+   if (rc == AIMEE_PG_ROW)
+      return 1;
+   /* A statement error -- an as_of Postgres cannot parse, or a malformed stored
+    * bound -- is "could not tell", not "was not in force". Folding it into 0
+    * would answer a question we failed to evaluate, which is the same lie the
+    * -1 path upstream exists to avoid. */
+   return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
 int db2_memory_lifecycle_mark_pending(int64_t memory_id, int ttl_days)
