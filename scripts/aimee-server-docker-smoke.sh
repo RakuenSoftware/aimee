@@ -110,6 +110,27 @@ check() {
   fi
 }
 
+check_absent() {
+  # check_absent <name> <substring-that-must-NOT-appear> <curl-args...>
+  # A field that must stay OFF the wire needs its own assertion: check() only
+  # proves something is present, and "no verdict was emitted" is exactly the
+  # property that distinguishes "you did not ask" from "the answer is no".
+  local name="$1" forbidden="$2"; shift 2
+  local body
+  if ! body="$(curl -fsS -k --max-time 20 "${AUTH[@]}" "$@" 2>/dev/null)"; then
+    red "  FAIL  $name (no response / curl error)"
+    FAIL=$((FAIL + 1))
+  elif [[ "$body" == *"$forbidden"* ]]; then
+    red   "  FAIL  $name"
+    printf '        must NOT contain: %s\n' "$forbidden"
+    printf '        got: %s\n' "$body"
+    FAIL=$((FAIL + 1))
+  else
+    green "  PASS  $name"
+    PASS=$((PASS + 1))
+  fi
+}
+
 check_status() {
   # check_status <name> <expected-http-code> <curl-args...>  (no auth header added)
   local name="$1" want="$2"; shift 2
@@ -172,6 +193,31 @@ check "GET /v1/kb/status -> kb"  '"vector"'  "${SERVER_URL}/v1/kb/status"
 check "POST /v1/kb/search -> kb" '"hits"'   -X POST -H 'content-type: application/json' \
                                             -d '{"query":"docker smoke test","scope":"all","max_results":3}' \
                                             "${SERVER_URL}/v1/kb/search"
+
+# `memory get --as-of` is a FIELD that has to survive this same hop, and it did
+# not: the server read only the id, so the timestamp was marshalled, sent, and
+# dropped here, and the client printed the row with no verdict -- indistinguishable
+# from "not in force". Unit tests at both ends passed throughout, because each was
+# checked against a payload hand-written to contain the field. Only a real
+# cross-container call catches it, which is why the assertion lives in this job.
+mem_id="$(curl -fsS -k --max-time 20 "${AUTH[@]}" -X POST -H 'content-type: application/json' \
+  -d '{"key":"e2e-as-of","content":"as-of smoke value","tier":"L0","kind":"fact"}' \
+  "${SERVER_URL}/v1/memory/store" 2>/dev/null \
+  | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)"
+if [[ -n "$mem_id" ]]; then
+  check "POST /v1/memory/get --as-of -> kb echoes the timestamp" '"as_of"' \
+        -X POST -H 'content-type: application/json' \
+        -d "{\"id\":${mem_id},\"as_of\":\"2020-01-01T00:00:00Z\"}" "${SERVER_URL}/v1/memory/get"
+  check "POST /v1/memory/get --as-of -> kb returns a verdict" '"valid_at"' \
+        -X POST -H 'content-type: application/json' \
+        -d "{\"id\":${mem_id},\"as_of\":\"2020-01-01T00:00:00Z\"}" "${SERVER_URL}/v1/memory/get"
+  check_absent "POST /v1/memory/get without --as-of emits no verdict" '"valid_at"' \
+        -X POST -H 'content-type: application/json' \
+        -d "{\"id\":${mem_id}}" "${SERVER_URL}/v1/memory/get"
+else
+  red "  FAIL  POST /v1/memory/store did not return an id (cannot check --as-of)"
+  FAIL=$((FAIL + 1))
+fi
 
 bold "==> Auth is enforced"
 check_status "GET /v1/health (no bearer) rejected" 401 "${SERVER_URL}/v1/health"
