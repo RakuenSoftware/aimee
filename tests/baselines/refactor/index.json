@@ -175,7 +175,7 @@
         },
         {
           "path": "src/headers/agent_exec.h",
-          "sha256": "6edc1a5d3f2cc25875aeaaee3657ae0b0dae27e473009439d81e8c0340e2a0e9"
+          "sha256": "49a49dce41a9bf7f4454a527d7c9cd0207667321aec92e41c88a59720edd6bff"
         },
         {
           "path": "src/headers/agent_pipeline.h",
@@ -1604,7 +1604,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "d805110ab0cf024ac12d6d5982f8ce6fd7443baaadfee839e47f75a2ba979cb8",
+      "sha256": "5855e8f593892d70e53133c92f44ffb8bc84ae66c3334270f479a83527eb6815",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
