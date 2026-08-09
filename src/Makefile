@@ -1166,6 +1166,11 @@ module-grants-test:
 deploy-compose-env-test: $(SERVER)
 	./tests/test_deploy_compose_env.sh
 
+# `workflow show/validate` must accept the name `workflow list` prints. Needs the
+# built CLI because the resolution is what is under test, not a parser detail.
+workflow-name-resolution-test: $(BINARY)
+	./tests/test_workflow_name_resolution.sh
+
 index-scan-e2e-test: $(BINARY) $(SERVER)
 	./tests/test_index_scan_e2e.sh
 
