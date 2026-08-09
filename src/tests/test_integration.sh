@@ -495,9 +495,27 @@ if [ "$KB_AVAILABLE" -eq 1 ]; then
 
     RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}")
     check_output "memory.get by ID" "integration test value" echo "$RESP"
+
+    # `memory get --as-of` crosses client -> aimee-server -> aimee-kb, and it was
+    # once broken in the middle: the server read only the id, so the flag was
+    # marshalled, sent, and dropped, and the client printed the row with no
+    # verdict -- which reads exactly like "not in force". Every unit test around
+    # it passed, because each end was checked against a hand-written payload that
+    # already contained the field. Only the real wire shows the gap, so assert it
+    # here: the verdict must come back, and must NOT appear when nobody asked.
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID,\"as_of\":\"2020-01-01 00:00:00\"}")
+    check_output "memory.get --as-of echoes the timestamp" '"as_of"' echo "$RESP"
+    check_output "memory.get --as-of returns an event-time verdict" '"valid_at"' echo "$RESP"
+
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}")
+    if echo "$RESP" | grep -q '"valid_at"'; then
+        check_output "memory.get without --as-of emits no verdict" "no valid_at" echo "found valid_at"
+    else
+        check_output "memory.get without --as-of emits no verdict" "ok" echo "ok"
+    fi
 else
     echo "SKIP: memory write/read round-trip (aimee-kb is not configured)"
-    SKIP=$((SKIP + 3))
+    SKIP=$((SKIP + 6))
 fi
 
 # ============================================================
