@@ -635,6 +635,45 @@ const char *agent_catalog_provider(const agent_t *ag)
    return ag->catalog_provider[0] ? ag->catalog_provider : ag->provider;
 }
 
+/* Effective per-model limits, in one place.
+ *
+ * Precedence is DECLARED first, then the model catalog. Declaration is tested
+ * by its AGENT_DECL_* bit, not by "> 0": callers used to key on the value, so a
+ * deliberately-declared 0 fell through to the catalog and the operator was
+ * silently overruled by a number they had explicitly replaced.
+ *
+ * These exist so the catalog branch is written once. It is being removed --
+ * operator declaration and the provider's own reply are becoming the only
+ * sources -- and a single call site is the difference between deleting three
+ * lines and auditing every consumer again. Returns 0 for "unknown", which every
+ * caller already models. */
+/* NOTE the asymmetry with prices, which is deliberate. A declared 0 PRICE is a
+ * real statement ("this seat costs nothing per token") and must survive. A
+ * declared 0 CAPACITY is not a capacity at all -- there is no such thing as a
+ * model with a zero-token window -- so here 0 reads as "unknown" and resolution
+ * continues to the catalog. The declared BIT still matters: it is what keeps the
+ * key in agents.json across a save. Only the resolved MEANING differs. */
+int agent_declared_context_window(const agent_t *ag)
+{
+   if (!ag)
+      return 0;
+   if ((ag->declared & AGENT_DECL_CONTEXT_WINDOW) && ag->middleware.context_window > 0)
+      return ag->middleware.context_window;
+   model_capability_t cap;
+   if (model_capability_get(agent_catalog_provider(ag), ag->model, &cap) && cap.context_window > 0)
+      return cap.context_window;
+   return 0;
+}
+
+int agent_declared_max_output(const agent_t *ag)
+{
+   if (!ag)
+      return 0;
+   if ((ag->declared & AGENT_DECL_MAX_OUTPUT) && ag->max_output > 0)
+      return ag->max_output;
+   return model_max_output(agent_catalog_provider(ag), ag->model);
+}
+
 static int agent_provider_requires_credentials(const char *provider)
 {
    return agent_provider_env_vars(provider) != NULL;
