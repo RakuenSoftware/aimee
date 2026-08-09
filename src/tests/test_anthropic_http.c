@@ -386,10 +386,14 @@ int gateway_policy_police_parsed_response(parsed_response_t *p)
 
 #include "../server/anthropic_http.c"
 
+/* Sized for the longest relayed sequence a test drives (a full thinking turn is
+ * message_start + two content blocks + message_delta/stop = 10 events). */
+#define EMIT_CAP_MAX 16
+
 typedef struct
 {
-   char events[8][64];
-   char data[8][8192];
+   char events[EMIT_CAP_MAX][64];
+   char data[EMIT_CAP_MAX][8192];
    int count;
 } emit_capture_t;
 
@@ -463,7 +467,7 @@ static void parsed_text(cJSON *root, const char *body, parsed_response_t *out)
 static void cap_emit(void *ctx, const char *event, const char *data_json)
 {
    emit_capture_t *cap = (emit_capture_t *)ctx;
-   assert(cap->count < 8);
+   assert(cap->count < EMIT_CAP_MAX);
    snprintf(cap->events[cap->count], sizeof(cap->events[cap->count]), "%s", event);
    snprintf(cap->data[cap->count], sizeof(cap->data[cap->count]), "%s", data_json);
    cap->count++;
@@ -575,6 +579,126 @@ static void test_anthropic_relay_usage_capture(void)
    sse_parser_free(&relay.parser);
    free(relay.data);
    PASS("anthropic_relay_usage_capture");
+}
+
+/* The reasoning tap must read the model's thought WITHOUT perturbing a single byte
+ * of the relayed stream -- that byte-neutrality is the whole reason the native
+ * passthrough exists, and is what makes observing it safe. */
+static void test_anthropic_relay_reasoning_tap(void)
+{
+   anthropic_relay_ctx_t relay, control;
+   emit_capture_t cap, cap_control;
+   const char *chunk = "event: message_start\n"
+                       "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\","
+                       "\"usage\":{\"input_tokens\":5}}}\n\n"
+                       "event: content_block_start\n"
+                       "data: {\"type\":\"content_block_start\",\"index\":0,"
+                       "\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n"
+                       "event: content_block_delta\n"
+                       "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                       "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"I need a test\"}}\n\n"
+                       "event: content_block_delta\n"
+                       "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                       "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\" environment\"}}\n\n"
+                       "event: content_block_delta\n"
+                       "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                       "\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig\"}}\n\n"
+                       "event: content_block_stop\n"
+                       "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+                       "event: content_block_start\n"
+                       "data: {\"type\":\"content_block_start\",\"index\":1,"
+                       "\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"
+                       "event: content_block_delta\n"
+                       "data: {\"type\":\"content_block_delta\",\"index\":1,"
+                       "\"delta\":{\"type\":\"text_delta\",\"text\":\"Answer\"}}\n\n"
+                       "event: message_delta\n"
+                       "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},"
+                       "\"usage\":{\"output_tokens\":9}}\n\n"
+                       "event: message_stop\n"
+                       "data: {\"type\":\"message_stop\"}\n\n";
+
+   memset(&relay, 0, sizeof(relay));
+   memset(&cap, 0, sizeof(cap));
+   sse_parser_init(&relay.parser);
+   anthropic_backend_stream_state_init(&relay.ir_bst);
+   relay.emit = cap_emit;
+   relay.emit_ctx = &cap;
+   assert(anthropic_relay_chunk_cb(chunk, strlen(chunk), &relay) == 0);
+   relay_flush(&relay);
+
+   /* the reasoning is recovered, and ONLY the reasoning -- not the answer text */
+   assert(relay.reasoning);
+   assert(strcmp(relay.reasoning, "I need a test environment") == 0);
+   assert(!relay.reasoning_truncated && !relay.reasoning_giveup);
+   /* usage tapping still works alongside it */
+   assert(relay.input_tokens == 5 && relay.output_tokens == 9);
+
+   /* Byte-neutrality: a relay with the tap disabled (giveup preset) must emit the
+    * exact same events and payloads, event for event. */
+   memset(&control, 0, sizeof(control));
+   memset(&cap_control, 0, sizeof(cap_control));
+   sse_parser_init(&control.parser);
+   control.reasoning_giveup = 1; /* tap off */
+   control.emit = cap_emit;
+   control.emit_ctx = &cap_control;
+   assert(anthropic_relay_chunk_cb(chunk, strlen(chunk), &control) == 0);
+   relay_flush(&control);
+
+   assert(cap.count == cap_control.count);
+   for (int i = 0; i < cap.count; i++)
+   {
+      assert(strcmp(cap.events[i], cap_control.events[i]) == 0);
+      assert(strcmp(cap.data[i], cap_control.data[i]) == 0);
+   }
+   assert(!control.reasoning);
+
+   sse_parser_free(&relay.parser);
+   free(relay.data);
+   free(relay.reasoning);
+   sse_parser_free(&control.parser);
+   free(control.data);
+   PASS("anthropic_relay_reasoning_tap");
+}
+
+/* A stream the parser rejects must yield NOTHING rather than a partial thought:
+ * acting on a fragment is the failure mode this tap has to avoid. */
+static void test_anthropic_relay_reasoning_abstains_on_bad_stream(void)
+{
+   anthropic_relay_ctx_t relay;
+   emit_capture_t cap;
+   /* real reasoning first, then a malformed KNOWN event (index out of range) */
+   const char *chunk =
+       "event: message_start\n"
+       "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}\n\n"
+       "event: content_block_start\n"
+       "data: {\"type\":\"content_block_start\",\"index\":0,"
+       "\"content_block\":{\"type\":\"thinking\"}}\n\n"
+       "event: content_block_delta\n"
+       "data: {\"type\":\"content_block_delta\",\"index\":0,"
+       "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"half a thought\"}}\n\n"
+       "event: content_block_start\n"
+       "data: {\"type\":\"content_block_start\",\"index\":999999,"
+       "\"content_block\":{\"type\":\"thinking\"}}\n\n"
+       "event: content_block_delta\n"
+       "data: {\"type\":\"content_block_delta\",\"index\":0,"
+       "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\" and more\"}}\n\n";
+
+   memset(&relay, 0, sizeof(relay));
+   memset(&cap, 0, sizeof(cap));
+   sse_parser_init(&relay.parser);
+   anthropic_backend_stream_state_init(&relay.ir_bst);
+   relay.emit = cap_emit;
+   relay.emit_ctx = &cap;
+   assert(anthropic_relay_chunk_cb(chunk, strlen(chunk), &relay) == 0);
+   relay_flush(&relay);
+
+   assert(relay.reasoning_giveup);
+   assert(!relay.reasoning && relay.reasoning_len == 0); /* the fragment is discarded */
+   assert(cap.count == 5); /* every event still relayed to the client */
+
+   sse_parser_free(&relay.parser);
+   free(relay.data);
+   PASS("anthropic_relay_reasoning_abstains_on_bad_stream");
 }
 
 static void test_relay_append_data_growth(void)
@@ -733,6 +857,86 @@ static void test_messages_stream_anthropic_preserves_request_shape(void)
    cJSON_Delete(sent);
    reset_capture();
    PASS("messages_stream_anthropic_preserves_request_shape");
+}
+
+/* End-to-end through the REAL native-relay entry point: the counters are the whole
+ * deliverable of the reasoning tap, so "the tap fills a buffer" is not enough -- the
+ * metric must actually move on a live stream, and stay still when there is nothing
+ * to observe. (This target links the real aimee_ir_metrics.o; the weak stub in
+ * ir_ingress_stubs.c would otherwise make every counter inert.) */
+static void test_messages_stream_anthropic_reasoning_metrics(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   emit_capture_t cap;
+   const char *REQ = "{\"model\":\"m\",\"max_tokens\":64,"
+                     "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+
+   /* (1) a turn with no reasoning must leave BOTH counters alone -- a tap that
+    * fires on ordinary turns would make the base rate meaningless. */
+   aimee_ir_metrics_reset();
+   reset_capture();
+   memset(&cap, 0, sizeof(cap));
+   g_driver = &anthropic;
+   g_stream_payload = "event: message_start\n"
+                      "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}\n\n"
+                      "event: content_block_start\n"
+                      "data: {\"type\":\"content_block_start\",\"index\":0,"
+                      "\"content_block\":{\"type\":\"text\"}}\n\n"
+                      "event: content_block_delta\n"
+                      "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                      "\"delta\":{\"type\":\"text_delta\",\"text\":\"plain answer\"}}\n\n"
+                      "event: message_stop\n"
+                      "data: {\"type\":\"message_stop\"}\n\n";
+   assert(messages_stream(REQ, cap_emit, &cap) == 0);
+   assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_OBSERVED) == 0);
+   assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 0);
+
+   /* (2) a turn that carries reasoning counts as observed, and NOT as incomplete */
+   aimee_ir_metrics_reset();
+   reset_capture();
+   memset(&cap, 0, sizeof(cap));
+   g_stream_payload = "event: message_start\n"
+                      "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}\n\n"
+                      "event: content_block_start\n"
+                      "data: {\"type\":\"content_block_start\",\"index\":0,"
+                      "\"content_block\":{\"type\":\"thinking\"}}\n\n"
+                      "event: content_block_delta\n"
+                      "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                      "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"weighing it up\"}}\n\n"
+                      "event: content_block_stop\n"
+                      "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+                      "event: message_stop\n"
+                      "data: {\"type\":\"message_stop\"}\n\n";
+   assert(messages_stream(REQ, cap_emit, &cap) == 0);
+   assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_OBSERVED) == 1);
+   assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 0);
+
+   /* (3) reasoning the parser had to abandon counts ONLY as incomplete: it was
+    * discarded, so counting it as observed would inflate the base rate with
+    * thoughts nothing can actually act on. */
+   aimee_ir_metrics_reset();
+   reset_capture();
+   memset(&cap, 0, sizeof(cap));
+   g_stream_payload = "event: message_start\n"
+                      "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}\n\n"
+                      "event: content_block_start\n"
+                      "data: {\"type\":\"content_block_start\",\"index\":0,"
+                      "\"content_block\":{\"type\":\"thinking\"}}\n\n"
+                      "event: content_block_delta\n"
+                      "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                      "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"half a thought\"}}\n\n"
+                      "event: content_block_start\n"
+                      "data: {\"type\":\"content_block_start\",\"index\":424242,"
+                      "\"content_block\":{\"type\":\"thinking\"}}\n\n"
+                      "event: message_stop\n"
+                      "data: {\"type\":\"message_stop\"}\n\n";
+   assert(messages_stream(REQ, cap_emit, &cap) == 0);
+   assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_OBSERVED) == 0);
+   assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 1);
+
+   aimee_ir_metrics_reset();
+   reset_capture();
+   PASS("messages_stream_anthropic_reasoning_metrics");
 }
 
 static void test_messages_buffered_openai_family_translates(void)
@@ -961,6 +1165,9 @@ int main(void)
    test_messages_preinject_appends_system_block();
    test_anthropic_relay_round_trip();
    test_anthropic_relay_usage_capture();
+   test_anthropic_relay_reasoning_tap();
+   test_anthropic_relay_reasoning_abstains_on_bad_stream();
+   test_messages_stream_anthropic_reasoning_metrics();
    test_relay_append_data_growth();
    test_relay_transport_error();
    test_messages_buffered_anthropic_preserves_request_shape();

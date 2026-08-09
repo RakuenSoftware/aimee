@@ -367,6 +367,13 @@ static inline int agent_http_effective_connect_timeout_ms(int request_timeout_ms
 }
 
 int agent_http_get(const char *url, const char *extra_headers, char **response_buf, int timeout_ms);
+/* GET that REPORTS a 3xx redirect target in `location` rather than following it.
+ * Deliberately non-following: a forge's log endpoint redirects to pre-signed
+ * third-party storage, and replaying the request there would hand that host the
+ * Authorization header. Only the caller knows which of its headers are
+ * host-bound, so the caller issues the second request itself. */
+int agent_http_get_location(const char *url, const char *extra_headers, char *location,
+                           size_t location_cap, char **response_buf, int timeout_ms);
 /* SSRF-safe GET: connect to the caller-validated numeric `pinned_ip` (no DNS
  * re-resolution) with Host/SNI still taken from the URL host. */
 int agent_http_get_pinned(const char *url, const char *pinned_ip, const char *extra_headers,

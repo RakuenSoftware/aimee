@@ -324,6 +324,12 @@ static const struct
     {"get-help", NULL, "get_help", "help.get", NULL, 0},
     {"verify", NULL, "git.verify", "mcp.call", NULL, 900000},
     {"git", "verify", "git.verify", "mcp.call", NULL, 900000},
+    /* Every other git subcommand, wildcard so `aimee git <anything>` reaches the
+     * server's git tool instead of "not a subcommand of 'git'". MUST stay after
+     * the verify row: pass 2 takes the first match, and verify has its own
+     * marshaler (--status, async=). Wildcard also means argv[0] is the
+     * subcommand, which is what marshal_git_cli needs to pick the tool. */
+    {"git", NULL, "git.cli", "mcp.call", NULL, 300000},
     {"provider", "list", "provider.list", NULL, "providers", 300000},
     {"provider", "show", "provider.show", NULL, NULL, 0},
     {"provider", "models", "provider.models", NULL, "models", 300000},
@@ -587,6 +593,50 @@ cJSON *marshal_memory_recall(int argc, char **argv)
    return req;
 }
 
+/* Join positionals[from..] with single spaces, or NULL when there are none.
+ *
+ * A memory's content is prose, so an operator or an agent that forgets to quote
+ * it hands us one positional per WORD. Reading positional[from] alone stored the
+ * first word and threw the rest away -- with exit 0 and "stored memory 60", so
+ * nothing anywhere said the memory had been gutted. Observed live: `aimee memory
+ * store k one two three four five` stored "one".
+ *
+ * That is the worst failure a memory system has, because it is silent and it is
+ * on the WRITE path: the loss is not discovered when it happens, it is
+ * discovered later as a memory that does not match what was meant, or as a
+ * search that cannot find what was stored. Joining reconstructs the intended
+ * text in the ordinary forgotten-quotes case, and is strictly better than
+ * discarding it in every other case.
+ *
+ * Whitespace runs collapse to one space, which the shell had already destroyed
+ * before argv reached us. Caller frees. */
+static char *positionals_joined(const rpc_opts_t *opts, int from)
+{
+   if (!opts || from >= opts->pos_count)
+      return NULL;
+   size_t need = 1;
+   for (int i = from; i < opts->pos_count; i++)
+      need += strlen(opts->positional[i]) + 1;
+   char *out = malloc(need);
+   if (!out)
+      return NULL;
+   out[0] = '\0';
+   size_t pos = 0;
+   for (int i = from; i < opts->pos_count; i++)
+   {
+      if (i > from && pos + 1 < need)
+         out[pos++] = ' ';
+      const size_t n = strlen(opts->positional[i]);
+      if (pos + n < need)
+      {
+         memcpy(out + pos, opts->positional[i], n);
+         pos += n;
+      }
+   }
+   out[pos] = '\0';
+   return out;
+}
+
 cJSON *marshal_memory_store(int argc, char **argv)
 {
    rpc_opts_t opts;
@@ -598,11 +648,14 @@ cJSON *marshal_memory_store(int argc, char **argv)
     * (`--key` / `--content`) forms; positional wins when present. Previously the
     * flags were silently ignored, yielding a confusing "missing key or content". */
    const char *key = opts.pos_count > 0 ? opts.positional[0] : rpc_get(&opts, "key");
-   const char *content = opts.pos_count > 1 ? opts.positional[1] : rpc_get(&opts, "content");
+   /* Every positional after the key is content, not just the first. */
+   char *joined = positionals_joined(&opts, 1);
+   const char *content = joined ? joined : rpc_get(&opts, "content");
    if (key)
       cJSON_AddStringToObject(req, "key", key);
    if (content)
       cJSON_AddStringToObject(req, "content", content);
+   free(joined);
 
    const char *v;
    if ((v = rpc_get(&opts, "tier")))
@@ -631,12 +684,17 @@ static cJSON *marshal_user_capture(const char *cmd, const char *kind, const char
     * mis-read a value starting with `--` (frontmatter `---`) as a flag, whereas
     * a --content=... value is taken verbatim after the first '='. */
    const char *keyarg = opts.pos_count > 0 ? opts.positional[0] : NULL;
-   const char *content = opts.pos_count > 1 ? opts.positional[1] : rpc_get(&opts, "content");
+   /* All remaining positionals, for the same reason as memory.store: an
+    * unquoted value arrives one word per positional, and keeping only the first
+    * silently stored a fragment of what the operator said about themselves. */
+   char *joined = positionals_joined(&opts, 1);
+   const char *content = joined ? joined : rpc_get(&opts, "content");
    if (!keyarg || !keyarg[0] || !content || !content[0])
    {
       fprintf(stderr,
               "aimee: usage: aimee memory %s <key> <value>   (or: %s <key> --content=<value>)\n",
               cmd, cmd);
+      free(joined);
       return NULL;
    }
    char key[512];
@@ -645,6 +703,7 @@ static cJSON *marshal_user_capture(const char *cmd, const char *kind, const char
    {
       fprintf(stderr, "aimee: memory %s: key too long (max %zu chars)\n", cmd,
               sizeof(key) - strlen(prefix) - 1);
+      free(joined);
       return NULL;
    }
    cJSON *req = marshal_no_args("memory.user_capture");
@@ -652,6 +711,7 @@ static cJSON *marshal_user_capture(const char *cmd, const char *kind, const char
    cJSON_AddStringToObject(req, "tier", tier);
    cJSON_AddStringToObject(req, "key", key);
    cJSON_AddStringToObject(req, "content", content);
+   free(joined);
    return req;
 }
 
