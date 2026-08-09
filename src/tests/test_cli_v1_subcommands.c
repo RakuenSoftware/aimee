@@ -351,10 +351,40 @@ static void test_kb_status_warns_about_undrainable_queue(void)
    printf("  kb status warns when the queue has nothing to drain it\n");
 }
 
+/* `config deploy-env` must be REACHABLE from the thin client.
+ *
+ * It was implemented in cmd_data.c and registered in that local subcommand table,
+ * but had no /v1 route -- so on a managed deployment, where the operator's `aimee`
+ * IS the thin client, the command its own doc comment recommends
+ * (`eval "$(aimee config deploy-env)" && docker compose up -d`) answered
+ * "'deploy-env' is not a subcommand of 'config'; try: show, get, set".
+ *
+ * That is not a cosmetic gap. Recreating a managed container without that env
+ * drops every variable the compose file interpolates: EMBEDDER_MODEL, so the kb
+ * refuses to serve, and AIMEE_KB_VARIANT, so ${AIMEE_KB_VARIANT:+-...} resolves
+ * to the EMBEDDERLESS aimee-kb image -- silently, which is the exact outcome
+ * config_emit_deploy_env's own comments were written to prevent.
+ *
+ * The help-coverage gate cannot catch this: it checks that routed commands are
+ * documented, not that implemented ones are routed. */
+static void test_config_deploy_env_is_routed(void)
+{
+   char buf[256];
+   int n = cli_v1_subcommands("config", buf, sizeof(buf));
+   assert(n > 0);
+   assert(strstr(buf, "deploy-env") != NULL);
+   /* the neighbours stay routed */
+   assert(strstr(buf, "show") != NULL);
+   assert(strstr(buf, "get") != NULL);
+   assert(strstr(buf, "set") != NULL);
+   printf("  config deploy-env is routed to the thin client\n");
+}
+
 int main(void)
 {
    printf("test_cli_v1_subcommands\n");
    test_kb_status_warns_about_undrainable_queue();
+   test_config_deploy_env_is_routed();
    test_unknown_command_is_safe();
    test_known_command_lists_subcommands();
    test_list_formatting();

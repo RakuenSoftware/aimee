@@ -6,6 +6,7 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "config.h"
+#include "config_database.h" /* config_emit_deploy_env_current */
 #include "config_fields.h"
 #include "json_fluent.h" /* jo_ok */
 #include "server.h"
@@ -66,6 +67,36 @@ int handle_config_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_AddStringToObject(resp, "key", key);
    cJSON_AddItemToObject(resp, "value", config_field_public_value_json_current(f));
    cJSON_AddBoolToObject(resp, "secret", config_field_secret_name(f) ? 1 : 0);
+   return server_send_ok(conn, resp);
+}
+
+/* config.deploy_env: emit the compose environment for this backend record.
+ *
+ * Routed rather than local-only because the operator CLI on a managed deployment
+ * IS the thin client, and this command's whole purpose is the recreate wrapper in
+ * cmd_data.c: `eval "$(aimee config deploy-env)" && docker compose up -d`. Without
+ * a route that wrapper cannot run where it is needed, and recreating a managed
+ * container by hand silently drops every variable the compose file interpolates --
+ * EMBEDDER_MODEL (the kb then refuses to serve, loudly) and AIMEE_KB_VARIANT (the
+ * image resolves to the embedderless aimee-kb, quietly), which is exactly the
+ * regression config_emit_deploy_env's own comments were written to prevent.
+ *
+ * No secret reaches this output: config_emit_deploy_env deliberately omits
+ * embedder_api_key and synthesis_api_key, and check-vault-only-container-env
+ * enforces that. What remains is a strict subset of config.show's sensitivity,
+ * so it carries config.show's capability rather than an admin-only one. */
+int handle_config_deploy_env(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   if (!config_present())
+      return server_send_error(conn, "config: could not load configuration", NULL);
+
+   char env[4096];
+   config_emit_deploy_env_current(env, sizeof(env));
+
+   cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "env", env);
    return server_send_ok(conn, resp);
 }
 
