@@ -178,9 +178,9 @@ static int memory_scan_turn(const char *text, memory_pattern_turn_t *out)
    if (!request)
       return -1;
    int rc = aimee_memory_scan_request_encode(text, request, request_len) == 0 &&
-                    call_module(AIMEE_MEMORY_EVENT_EXTRACT_INDEX,
-                                AIMEE_MEMORY_STAGE_EXTRACT_INDEX, request, (uint32_t)request_len,
-                                response, sizeof(response), &response_len) == 0
+                    call_module(AIMEE_MEMORY_EVENT_EXTRACT_INDEX, AIMEE_MEMORY_STAGE_EXTRACT_INDEX,
+                                request, (uint32_t)request_len, response, sizeof(response),
+                                &response_len) == 0
                 ? aimee_memory_scan_response_decode(response, response_len, &out->is_retraction,
                                                     &out->has_attr, out->attr, sizeof(out->attr))
                 : -1;
@@ -200,12 +200,12 @@ static int memory_pii_turn(const char *turn_text, int *requests_sensitive)
    uint32_t response_len = 0;
    if (!request)
       return -1;
-   int rc = aimee_memory_pii_request_encode(turn_text, request, request_len) == 0 &&
-                    call_module(AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, request,
-                                (uint32_t)request_len, response, sizeof(response),
-                                &response_len) == 0
-                ? aimee_memory_pii_response_decode(response, response_len, requests_sensitive)
-                : -1;
+   int rc =
+       aimee_memory_pii_request_encode(turn_text, request, request_len) == 0 &&
+               call_module(AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, request,
+                           (uint32_t)request_len, response, sizeof(response), &response_len) == 0
+           ? aimee_memory_pii_response_decode(response, response_len, requests_sensitive)
+           : -1;
    free(request);
    return rc;
 }
@@ -217,8 +217,7 @@ _Static_assert((int)AIMEE_MEMORY_SENS_NORMAL == (int)SENS_NORMAL &&
                    (int)AIMEE_MEMORY_SENS_SECRET == (int)SENS_SECRET,
                "wire sensitivity tiers must match rel_sensitivity_t");
 
-static int memory_pii_sensitivity(const char *const *rel_types, int count,
-                                  rel_sensitivity_t *out)
+static int memory_pii_sensitivity(const char *const *rel_types, int count, rel_sensitivity_t *out)
 {
    if (!rel_types || !out || count <= 0)
       return -1;

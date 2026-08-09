@@ -422,8 +422,7 @@ static void test_scan_turn_wire_layout(void)
    /* An attribute that does not fit is refused, never shortened: a shortened
     * attribute normalizes to a different relation and would retract that one. */
    aimee_memory_put_u32(response + 12, AIMEE_MEMORY_SCAN_ATTR_MAX);
-   assert(aimee_memory_scan_response_decode(response,
-                                            16u + AIMEE_MEMORY_SCAN_ATTR_MAX, &retraction,
+   assert(aimee_memory_scan_response_decode(response, 16u + AIMEE_MEMORY_SCAN_ATTR_MAX, &retraction,
                                             &has_attr, attr, sizeof(attr)) == -1);
    aimee_memory_put_u32(response + 12, AIMEE_MEMORY_SCAN_ATTR_MAX - 1u);
    memset(response + 16, 'a', AIMEE_MEMORY_SCAN_ATTR_MAX - 1u);

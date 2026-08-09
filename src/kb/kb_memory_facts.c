@@ -399,8 +399,8 @@ static int mf_process_one(const mf_job_t *job)
     * failed over it -- but it is not silently nothing either: pattern facts are
     * missing from this memory until it is reprocessed. */
    if (db2_fact_ingest_text(mem.content, FACT_AUTHORITY_USER, 1) < 0)
-      aimee_log(LOG_WARN, "kb.memory.facts",
-                "pattern extraction gave no answer for memory %lld", (long long)job->memory_id);
+      aimee_log(LOG_WARN, "kb.memory.facts", "pattern extraction gave no answer for memory %lld",
+                (long long)job->memory_id);
 
    cJSON *req = cJSON_CreateObject();
    if (!req)
