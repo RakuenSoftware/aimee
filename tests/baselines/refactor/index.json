@@ -1479,7 +1479,7 @@
         },
         {
           "path": "src/modules/git/include/aimee/git/module_api.h",
-          "sha256": "4d6a0ae542328f07c15e47e3d17759a04a55066f0fc186014bbf2af82c7cfb78"
+          "sha256": "e049765d6007235c1b0fedf2e34624af0c143eaa75f500e219039f508b35d36b"
         },
         {
           "path": "src/modules/governance/include/aimee/governance/module_api.h",
@@ -1491,7 +1491,7 @@
         },
         {
           "path": "src/modules/ir/include/aimee/ir/aimee_ir_metrics.h",
-          "sha256": "43229ea4c671e324f45b60504ef6967ffaa06bd8807502527f47b5a963bd78c9"
+          "sha256": "9d3cf1b7816e9d4c7a129e33a5fb6a18ca441cffcd54fe8f1cc952612d5a5569"
         },
         {
           "path": "src/modules/ir/include/aimee/ir/panel_result.h",
@@ -1575,7 +1575,7 @@
         },
         {
           "path": "src/modules/translation/include/aimee/translation/aimee_backend.h",
-          "sha256": "42ed0f5ae043068f6e7ef0cb68ac88b803b9aafe16377adbae65b26de3d4d48d"
+          "sha256": "3e34960ead2d5a62f077870ec944e0e8afeef0a818891934772cd09b096a5577"
         },
         {
           "path": "src/modules/translation/include/aimee/translation/aimee_frontend.h",
@@ -1583,7 +1583,7 @@
         },
         {
           "path": "src/modules/translation/include/aimee/translation/aimee_ir_stream.h",
-          "sha256": "31de4bf7f0a75f91aab09756380c6f567fcf62952a38f3cae5ef21d3cea89aed"
+          "sha256": "de0435f6661c4148a133921324bd4ca47cd59e404442046dce4320b7f463abce"
         },
         {
           "path": "src/modules/workflows/include/aimee/workflows/module_api.h",
@@ -1604,7 +1604,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "9f510d3e8395aff8b585894ac853e9ea35f108b8673b74488eb36c90294d637a",
+      "sha256": "949f05bcc8f2aaff5b713adb801111c78936e640ba18d3141b3c3276ddaa9183",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
