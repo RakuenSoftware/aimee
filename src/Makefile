@@ -1159,6 +1159,13 @@ kb-entrypoint-test:
 module-grants-test:
 	./tests/test_module_grants.sh
 
+# The managed compose `.env` derived at every container start. Needs $(SERVER)
+# because the strongest cases run the real emitter rather than grepping the
+# entrypoint: an unset AIMEE_KB_VARIANT resolves the kb image to the
+# embedderless aimee-kb SILENTLY, so the value itself is what must be asserted.
+deploy-compose-env-test: $(SERVER)
+	./tests/test_deploy_compose_env.sh
+
 # `workflow show/validate` must accept the name `workflow list` prints. Needs the
 # built CLI because the resolution is what is under test, not a parser detail.
 workflow-name-resolution-test: $(BINARY)
