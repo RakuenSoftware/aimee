@@ -51,6 +51,18 @@ interface AgentCfg {
   price_cached_declared?: boolean;
 }
 
+/* One model as the PROVIDER describes it (POST /api/providers/models).
+ * Fields are absent when the provider did not publish them -- most endpoints
+ * return ids and nothing more -- so absent must read as "not published", never
+ * as zero. */
+interface DiscoveredModel {
+  id: string;
+  display_name?: string;
+  context_window?: number;
+  max_output?: number;
+  deprecated?: boolean;
+}
+
 interface ProviderGroup {
   provider: string;
   endpoint: string;
@@ -274,6 +286,39 @@ function AddModel({
   const [model, setModel] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [found, setFound] = useState<DiscoveredModel[] | null>(null);
+  const [discovering, setDiscovering] = useState(false);
+  const [discoverNote, setDiscoverNote] = useState("");
+
+  /* Ask the provider what it offers. Many cannot answer -- one configured
+   * endpoint 404s, another omits its own configured model -- so a failure is
+   * reported as a plain note and the operator types the id instead. It is never
+   * turned into an empty list, which would read as "this provider has no
+   * models". */
+  const discover = async () => {
+    setDiscovering(true);
+    setDiscoverNote("");
+    setFound(null);
+    try {
+      const r = await fetch("/api/providers/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": window._csrf || "" },
+        body: JSON.stringify({ name: group.provider }),
+      });
+      const d = (await r.json()) as { details?: DiscoveredModel[]; models?: string[]; error?: string };
+      if (d.error) {
+        setDiscoverNote(`${group.provider} could not list its models (${d.error}). Type the id below.`);
+      } else {
+        const list = d.details?.length ? d.details : (d.models || []).map((id) => ({ id }));
+        setFound(list);
+        if (!list.length) setDiscoverNote("This provider reported no models. Type the id below.");
+      }
+    } catch {
+      setDiscoverNote("Could not reach the provider. Type the id below.");
+    } finally {
+      setDiscovering(false);
+    }
+  };
 
   const add = async () => {
     const id = model.trim();
@@ -310,6 +355,38 @@ function AddModel({
         Uses this provider's existing endpoint and credentials. You can set its limits and prices
         afterwards.
       </p>
+      <div style={{ marginBottom: 10 }}>
+        <Button onClick={discover} disabled={busy || discovering} size="md"
+                title="Ask this provider which models it offers.">
+          {discovering ? "Asking…" : "Show models this provider offers"}
+        </Button>
+        {discoverNote && (
+          <div style={{ fontSize: 12, color: "#775", marginTop: 6 }}>{discoverNote}</div>
+        )}
+        {found && found.length > 0 && (
+          <div style={{ maxHeight: 190, overflowY: "auto", marginTop: 8, border: "1px solid #eef", borderRadius: 4 }}>
+            {found.map((f) => (
+              <div key={f.id}
+                   style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                            padding: "5px 8px", borderBottom: "1px solid #f4f4fa" }}>
+                <div>
+                  <div style={{ fontFamily: "monospace", fontSize: 12 }}>{f.id}</div>
+                  <div style={{ fontSize: 11, color: "#889" }}>
+                    {f.display_name ? `${f.display_name} · ` : ""}
+                    {/* Absent means the provider did not publish it, which the
+                        operator needs to know: they will have to state it. */}
+                    {f.context_window ? `${f.context_window.toLocaleString()} ctx` : "context not published"}
+                    {f.deprecated ? " · deprecated" : ""}
+                  </div>
+                </div>
+                <Button onClick={() => setModel(f.id)} size="sm" title="Use this model id.">
+                  Use
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       <label style={{ display: "block", marginBottom: 10 }}>
         <div style={{ fontSize: 12, color: "#556", marginBottom: 3 }}>model id</div>
         <input value={model} onChange={(e) => setModel(e.target.value)} style={inp} disabled={busy}

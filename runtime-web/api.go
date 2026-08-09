@@ -682,3 +682,49 @@ func (s *server) handleLSPDiagnosticsSummary(w http.ResponseWriter, r *http.Requ
 	}
 	json.NewEncoder(w).Encode(out)
 }
+
+// handleProviderList proxies GET /api/providers -> RPC provider.list, the
+// registry of providers aimee knows how to speak to (name, base URL, auth type,
+// whether it can list its own models). Distinct from GET /api/agents, which
+// reports what is CONFIGURED: this is the menu, that is the order.
+func (s *server) handleProviderList(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.socketCallForRequest(r, map[string]any{"method": "provider.list"})
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		// Never hard-fail: the page still renders configured providers from
+		// /api/agents, it just cannot offer the catalog of new ones.
+		fmt.Fprintf(w, `{"providers":[]}`)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// handleProviderModels proxies POST /api/providers/models {name} ->
+// RPC provider.models, asking a provider what models it offers. The reply
+// carries `models` (ids) and `details` (whatever the provider published about
+// each: display name, context window, output ceiling).
+//
+// Most endpoints publish ids only, and one of the configured ones does not even
+// list its own model, so a caller must treat missing detail as "not published"
+// rather than as zero. The error is surfaced verbatim instead of being flattened
+// to an empty list: "this provider cannot list models" and "this provider
+// returned nothing" are different facts for someone deciding what to type.
+func (s *server) handleProviderModels(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if body.Name == "" {
+		writeJSONError(w, http.StatusBadRequest, "provider name required")
+		return
+	}
+	resp, err := s.socketCallForRequest(r, map[string]any{"method": "provider.models", "name": body.Name})
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	_ = json.NewEncoder(w).Encode(resp)
+}
