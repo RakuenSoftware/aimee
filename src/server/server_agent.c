@@ -467,6 +467,45 @@ static cJSON *server_agent_to_json(const agent_t *ag)
       cJSON_AddNumberToObject(obj, "active_delegates", active);
    if (ag->middleware.context_window > 0)
       cJSON_AddNumberToObject(obj, "context_window", ag->middleware.context_window);
+
+   /* Per-model limits, and WHERE EACH ONE CAME FROM.
+    *
+    * The raw value alone is not enough for an operator surface: a window the
+    * catalog guessed and a window the operator typed look identical once
+    * rendered, which is exactly how a stale figure went unquestioned. The
+    * effective_* fields are what the fleet actually uses; the *_source fields
+    * say whether that is the operator's own number ("declared"), something a
+    * provider or catalog supplied ("resolved"), or nobody's ("unknown").
+    *
+    * Emitted unconditionally, including 0, because "unknown" is a state a UI
+    * must be able to show. Absent would be indistinguishable from zero. */
+   {
+      int eff_ctx = agent_declared_context_window(ag);
+      int eff_out = agent_declared_max_output(ag);
+      cJSON_AddNumberToObject(obj, "effective_context_window", eff_ctx);
+      cJSON_AddNumberToObject(obj, "effective_max_output", eff_out);
+      cJSON_AddStringToObject(obj, "context_window_source",
+                              (ag->declared & AGENT_DECL_CONTEXT_WINDOW) &&
+                                      ag->middleware.context_window > 0
+                                  ? "declared"
+                                  : (eff_ctx > 0 ? "resolved" : "unknown"));
+      cJSON_AddStringToObject(obj, "max_output_source",
+                              (ag->declared & AGENT_DECL_MAX_OUTPUT) && ag->max_output > 0
+                                  ? "declared"
+                                  : (eff_out > 0 ? "resolved" : "unknown"));
+      if (ag->declared & AGENT_DECL_MAX_OUTPUT)
+         cJSON_AddNumberToObject(obj, "max_output", ag->max_output);
+      /* The declared mask itself, so a form can tell "the operator set this to
+       * 0" (a free seat) from "the operator never said" -- the one distinction
+       * a bare number cannot carry. */
+      cJSON_AddBoolToObject(obj, "price_in_declared",
+                            (ag->declared & AGENT_DECL_PRICE_IN) != 0);
+      cJSON_AddBoolToObject(obj, "price_out_declared",
+                            (ag->declared & AGENT_DECL_PRICE_OUT) != 0);
+      cJSON_AddBoolToObject(obj, "price_cached_declared",
+                            (ag->declared & AGENT_DECL_PRICE_CACHED) != 0);
+   }
+
    cJSON *roles = cJSON_CreateArray();
    for (int j = 0; j < ag->role_count; j++)
       cJSON_AddItemToArray(roles, cJSON_CreateString(ag->roles[j]));
@@ -827,6 +866,58 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    ag->timeout_ms = opt_get_int(&opts, "timeout-ms", opt_get_int(&opts, "timeout", ag->timeout_ms));
    ag->middleware.context_window =
        opt_get_int(&opts, "ctx", opt_get_int(&opts, "context-window", 0));
+
+   /* Declared per-model values. NAMING THE OPTION IS THE DECLARATION -- the bit
+    * comes from opt_has(), not from the value being non-zero, so "--price-in 0"
+    * states that a seat is free instead of reading as "unset". Without this the
+    * server could accept a declaration the config layer would then drop on its
+    * next save, and an operator's 0 would silently become "ask the catalog".
+    *
+    * Absent options clear their bit, matching this handler's existing
+    * reset-the-record semantics: agent.add/set describe the agent's whole
+    * desired state, so an omitted field is "no longer declared". */
+   ag->declared = 0;
+   if (opt_has(&opts, "ctx") || opt_has(&opts, "context-window"))
+      ag->declared |= AGENT_DECL_CONTEXT_WINDOW;
+   if (opt_has(&opts, "max-output"))
+   {
+      ag->max_output = opt_get_int(&opts, "max-output", 0);
+      ag->declared |= AGENT_DECL_MAX_OUTPUT;
+   }
+   else
+   {
+      ag->max_output = 0;
+   }
+   {
+      static const struct
+      {
+         const char *opt;
+         size_t offset;
+         unsigned bit;
+      } price_opts[] = {
+          {"price-in", offsetof(agent_t, price_in_per_mtok), AGENT_DECL_PRICE_IN},
+          {"price-out", offsetof(agent_t, price_out_per_mtok), AGENT_DECL_PRICE_OUT},
+          {"price-cached", offsetof(agent_t, price_cached_per_mtok), AGENT_DECL_PRICE_CACHED},
+      };
+      for (size_t i = 0; i < sizeof(price_opts) / sizeof(price_opts[0]); ++i)
+      {
+         double *slot = (double *)((char *)ag + price_opts[i].offset);
+         const char *raw = opt_get(&opts, price_opts[i].opt);
+         if (!raw || !raw[0])
+         {
+            *slot = 0.0;
+            continue;
+         }
+         char *end = NULL;
+         double v = strtod(raw, &end);
+         /* A price that does not parse, is negative, or is not finite must not
+          * be accepted as 0 -- that would assert "free" from a typo. */
+         if (end == raw || (end && *end) || !(v >= 0.0) || v != v || v > 1e12)
+            continue;
+         *slot = v;
+         ag->declared |= price_opts[i].bit;
+      }
+   }
 
    /* Primary-only: a flagged agent is never a delegation target (replaces the
     * former global claude_cli_delegate_enabled opt-in with a per-agent choice).
