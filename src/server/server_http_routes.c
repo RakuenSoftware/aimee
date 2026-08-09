@@ -2107,6 +2107,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/launch/run", NULL, RM_EXACT, "launch.run", 0, rh_dispatch_op},
     {"GET", "/v1/server/info", NULL, RM_EXACT, "server.info", 0, rh_dispatch_op},
     {"GET", "/v1/server/health", NULL, RM_EXACT, "server.health", 0, rh_dispatch_op},
+    {"GET", "/v1/workers", NULL, RM_EXACT, "workers", 0, rh_dispatch_op},
 
     /* Long-running / LLM methods, exposed async (rh_dispatch_op_async): each
      * returns a queued run handle; poll GET /v1/runs/{id}. They must NOT use the

@@ -918,6 +918,14 @@ jobs:
       - name: KB entrypoint embedder gate
         run: cd src && make kb-entrypoint-test
 
+      # The managed deployment's identity must be reconstructible from config, not
+      # only from the running container's env. An unset AIMEE_KB_VARIANT resolves the
+      # kb image to the EMBEDDERLESS aimee-kb with no error anywhere, so a recreate
+      # (which every image upgrade performs) could silently drop a deployment's
+      # embedder. This asserts the .env is derived at start.
+      - name: Managed compose env derived from config
+        run: cd src && make deploy-compose-env-test
+
   windows-cmake:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}

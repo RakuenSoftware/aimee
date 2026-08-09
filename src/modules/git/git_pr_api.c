@@ -1117,6 +1117,62 @@ int git_pr_merge_via_api_slug(const char *principal, const char *slug, int numbe
                                        errlen);
 }
 
+/* Merge the base branch INTO the PR's head branch -- the REST equivalent of the
+ * "Update branch" button. A protected base that requires branches to be up to
+ * date reports its required checks as merely "expected" while the head is
+ * BEHIND, so the PR cannot merge however green those checks already are; this is
+ * the only call that clears that state. GitHub answers 202 (queued), so a 2xx
+ * means accepted, NOT that the new head has been built yet -- poll merge_status
+ * before merging. 422 is the benign "already up to date" case. */
+int git_pr_update_branch_via_api_slug(const char *principal, const char *slug, int number,
+                                      const char *expected_head_sha, char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   if (number <= 0)
+      return -1;
+
+   gh_ctx_t cx;
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
+      return -1;
+
+   /* Drift safety, same contract as the merge op: refuse if the head moved. */
+   char *payload = NULL;
+   if (expected_head_sha && expected_head_sha[0])
+   {
+      cJSON *j = cJSON_CreateObject();
+      cJSON_AddStringToObject(j, "expected_head_sha", expected_head_sha);
+      payload = cJSON_PrintUnformatted(j);
+      cJSON_Delete(j);
+      if (!payload)
+      {
+         gh_ctx_done(&cx);
+         snprintf(err, errlen, "internal error");
+         return -1;
+      }
+   }
+
+   char path[64];
+   snprintf(path, sizeof(path), "pulls/%d/update-branch", number);
+   char *resp = NULL;
+   int st = gh_put(&cx, path, payload ? payload : "{}", &resp);
+   free(payload);
+   gh_ctx_done(&cx);
+
+   int res;
+   if (st >= 200 && st < 300)
+      res = 0; /* accepted/queued */
+   else if (st == 422)
+      res = 1; /* nothing to do: head already contains base */
+   else
+   {
+      gh_err(resp, st, "pr update_branch", err, errlen);
+      res = -1;
+   }
+   free(resp);
+   return res;
+}
+
 int git_pr_merge_via_api_slug_ex(const char *principal, const char *slug, int number,
                                  const char *merge_method, const char *expected_head_sha,
                                  char *out_sha, size_t out_sha_cap, char *err, size_t errlen)
