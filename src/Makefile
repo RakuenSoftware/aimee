@@ -1159,6 +1159,13 @@ kb-entrypoint-test:
 module-grants-test:
 	./tests/test_module_grants.sh
 
+# The managed compose `.env` derived at every container start. Needs $(SERVER)
+# because the strongest cases run the real emitter rather than grepping the
+# entrypoint: an unset AIMEE_KB_VARIANT resolves the kb image to the
+# embedderless aimee-kb SILENTLY, so the value itself is what must be asserted.
+deploy-compose-env-test: $(SERVER)
+	./tests/test_deploy_compose_env.sh
+
 index-scan-e2e-test: $(BINARY) $(SERVER)
 	./tests/test_index_scan_e2e.sh
 
