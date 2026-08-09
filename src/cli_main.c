@@ -593,20 +593,41 @@ static void ensemble_usage(void)
            "  See docs/ENSEMBLE.md. `aimee delegate aggregate|roundtable` remain as aliases.\n");
 }
 
-/* Report a command that could not be routed. Two very different causes share this
- * path: the command family genuinely has no /v1 route, or it has routes and the
- * SUBCOMMAND was wrong. Blaming the command for the latter sends users (and
- * maintainers) hunting for a missing route that already exists -- e.g. `aimee
- * economizer status` reported "command 'economizer' has no /v1 route" when the
- * registered subcommand is `stats`. So name the subcommand and list the real ones
- * whenever the family has any. */
+/* Is `name` a command this client advertises at all? client_help[] is the same
+ * table `aimee help --all` prints from, so this answers "would the user have seen
+ * this listed" rather than "is it routable". */
+static int client_cmd_known(const char *name)
+{
+   for (int i = 0; i < (int)(sizeof(client_help) / sizeof(client_help[0])); i++)
+      if (client_help[i].name && strcmp(name, client_help[i].name) == 0)
+         return 1;
+   return 0;
+}
+
+/* Report a command that could not be routed. Several very different causes share
+ * this path: the word is not a command at all, or the command family genuinely
+ * has no /v1 route, or it has routes and the SUBCOMMAND was wrong. Blaming the
+ * command for the latter sends users (and maintainers) hunting for a missing
+ * route that already exists -- e.g. `aimee economizer status` reported "command
+ * 'economizer' has no /v1 route" when the registered subcommand is `stats`. So
+ * name the subcommand and list the real ones whenever the family has any.
+ *
+ * A plain typo took that same fallback, so `aimee foobarbaz` answered "command
+ * 'foobarbaz' has no /v1 route" -- reporting a routing-table gap for a word that
+ * was never a command, which is exactly the wrong place to send someone. Check
+ * the help table first and say so plainly. */
 static int unsupported_client_command(const char *cmd, const char *subcmd, int json_output)
 {
    const char *name = (cmd && cmd[0]) ? cmd : "launch";
    char subs[512];
    int have_subs = cli_v1_subcommands(name, subs, sizeof(subs));
    char msg[768];
-   if (!client_cmd_available(name))
+   /* Only when the user actually typed a word: an empty cmd defaults `name` to
+    * "launch", which is a real dispatch target that client_help[] does not list. */
+   if (cmd && cmd[0] && !client_cmd_known(name))
+      snprintf(msg, sizeof(msg), "unknown command '%s'; run 'aimee help --all' to list commands",
+               name);
+   else if (!client_cmd_available(name))
       snprintf(msg, sizeof(msg),
                "'%s' is not available on the Windows thin client; it needs the local "
                "Unix socket, so run it on the server host",

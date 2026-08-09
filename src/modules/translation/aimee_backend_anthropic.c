@@ -297,6 +297,12 @@ int anthropic_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
             {
                b->type = AIMEE_BLK_THINKING;
                b->text = dupstr(ostr(el, "thinking"));
+               /* Anthropic REQUIRES the signature echoed back verbatim on a
+                * resubmitted thinking turn, so it belongs on the typed block -- the
+                * request-direction parser (anthropic_frontend_parse) and egress
+                * (block_to_anthropic) already model it; the response direction did
+                * not, leaving anything rebuilt from these blocks unresubmittable. */
+               b->thinking_signature = dupstr(ostr(el, "signature"));
             }
             else /* text (default) */
             {

@@ -18,6 +18,7 @@
 #include "modules/workspace/workspace_turn.h" /* workspace_turn_set_container_bound_for_test */
 #include "platform_test_util.h"
 #include "modules/git/git_verify.h"
+#include "support/git_module_fixture.h"
 
 /* Per-case in-memory DB2 backing for test bodies that round-trip
  * memory-subsystem state. The shim helper owns the sqlite handle and
@@ -3749,6 +3750,11 @@ int main(void)
    unlink(db_path);
    assert(db1_init(db_path) == 0);
    assert(server_obs_bus_configure() == 0);
+   /* The verify gate reads its ledger from the git module, so the module has
+    * to be up or every verify assertion below fails on a correctly closed
+    * gate rather than on what it means to test. After the suite's own bus
+    * configuration, not before: reconfiguring a running bus is refused. */
+   git_module_fixture_start();
    /* anti_patterns is DB2 (Postgres). */
 
    test_classify_sensitive();
