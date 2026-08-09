@@ -21,6 +21,7 @@
 #include "../cli_v1_routes_b.c"
 #include "../cli_v1_routes_c.c"
 #include "../cli_v1_routes_d.c"
+#include "../cli_v1_routes_e.c"
 
 static void test_delegate_max_turns_marshaled(void)
 {
