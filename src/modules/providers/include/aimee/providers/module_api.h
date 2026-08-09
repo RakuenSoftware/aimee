@@ -2,9 +2,11 @@
  *
  * A provider owns an endpoint and credentials; models hang off it, and each
  * model carries the numbers that describe it -- context window, output ceiling,
- * prices, capabilities. This module is the single owner of that surface. Reads
- * and writes both go through it, so the CLI, the server and the GUI are three
- * clients of one contract rather than three implementations of the same rules.
+ * prices, capabilities. This module owns the RULES for that surface: which
+ * value wins, where it came from, and whether a proposed declaration is usable.
+ * The CLI, the server and the GUI are three clients of one set of rules rather
+ * than three implementations of them, which is what stopped being true when the
+ * same precedence was rewritten at four call sites and disagreed at each.
  *
  * WHY A MODULE AND NOT A SERVER HANDLER. The bus already carries request/reply
  * module calls (module_client.h: correlation ids, AMOD envelopes, deadlines,
@@ -42,15 +44,27 @@
 #include <stdint.h>
 #include <string.h>
 
-/* Event-kind block 43; blocks 23-31 and 35-42 are taken (see the other
+/* THE MODULE DECIDES; THE CALLER ACTS. Every module_adapter.c in this tree is a
+ * pure function over a wire record -- their entire include set is the runtime
+ * header, their own module_api.h, two local policy headers, and stdlib. None
+ * opens a file, a socket or a database. The daemon owns agents.json, the
+ * provider HTTP fetch and the db1 catalog cache; this module owns the RULES for
+ * combining what they produce.
+ *
+ * So the operations are decisions, not CRUD. An earlier draft of this contract
+ * had MODEL_GET / MODEL_SET / CATALOG_FETCH -- a persisted read, a persisted
+ * write and an HTTP call -- none of which a pure handler can perform. Resolving
+ * precedence and validating a declaration is exactly the rule-heavy logic that
+ * was previously smeared across model_registry.c's five-deep fallback chain,
+ * and it is testable in isolation precisely because it touches nothing.
+ *
+ * Event-kind block 43; blocks 23-31 and 35-42 are taken (see the other
  * module_api.h headers). One stage per event kind, numbered from 1. */
-#define AIMEE_PROVIDERS_EVENT_MODEL_GET     11009u
-#define AIMEE_PROVIDERS_EVENT_MODEL_SET     11010u
-#define AIMEE_PROVIDERS_EVENT_CATALOG_FETCH 11011u
+#define AIMEE_PROVIDERS_EVENT_RESOLVE  11009u
+#define AIMEE_PROVIDERS_EVENT_VALIDATE 11010u
 
-#define AIMEE_PROVIDERS_STAGE_MODEL_GET     1u
-#define AIMEE_PROVIDERS_STAGE_MODEL_SET     2u
-#define AIMEE_PROVIDERS_STAGE_CATALOG_FETCH 3u
+#define AIMEE_PROVIDERS_STAGE_RESOLVE  1u
+#define AIMEE_PROVIDERS_STAGE_VALIDATE 2u
 
 #define AIMEE_PROVIDERS_WIRE_VERSION   1u
 #define AIMEE_PROVIDERS_REQUEST_MAGIC  0x51455250u /* "PREQ" */
@@ -140,30 +154,37 @@ _Static_assert(AIMEE_PROVIDERS_OFF_PRICE_SRC == AIMEE_PROVIDERS_OFF_MAX_OUTPUT_S
 _Static_assert(AIMEE_PROVIDERS_RECORD_LEN == AIMEE_PROVIDERS_OFF_PRICE_SRC + 1u,
                "record ends after price_src");
 
-/* Request: magic, version, then one record. For MODEL_GET and CATALOG_FETCH
- * only `provider` (and, for GET, `model`) are read; the rest is ignored. */
-#define AIMEE_PROVIDERS_REQUEST_LEN (8u + AIMEE_PROVIDERS_RECORD_LEN)
+/* RESOLVE request: magic, version, then TWO records -- what the operator
+ * declared, then what the provider reported. Either may be all-zero, which is
+ * the ordinary case: most configured endpoints publish nothing, and a model
+ * nobody has configured yet has no declaration. The caller supplies both
+ * because it, not the module, is what can read config and talk to a provider.
+ *
+ * VALIDATE request: magic, version, then ONE record -- a proposed declaration,
+ * before it is written anywhere. */
+#define AIMEE_PROVIDERS_RESOLVE_REQUEST_LEN  (8u + 2u * AIMEE_PROVIDERS_RECORD_LEN)
+#define AIMEE_PROVIDERS_VALIDATE_REQUEST_LEN (8u + AIMEE_PROVIDERS_RECORD_LEN)
+#define AIMEE_PROVIDERS_OFF_DECLARED_RECORD  8u
+#define AIMEE_PROVIDERS_OFF_FETCHED_RECORD   (8u + AIMEE_PROVIDERS_RECORD_LEN)
 
-/* Response: magic, version, u32 status, u32 record_count, then records.
- * MODEL_GET returns one; CATALOG_FETCH returns every model the provider now
- * has. The count is explicit so a zero-model provider is a valid answer rather
- * than an error -- an endpoint that lists nothing is a fact about the endpoint,
- * not a failure of the call. */
+/* Response: magic, version, u32 status, u32 record_count, then records. Both
+ * operations return exactly one -- the effective record (RESOLVE) or the
+ * normalized proposal (VALIDATE). The count is explicit anyway so the envelope
+ * does not have to change if a later stage returns a set. */
 #define AIMEE_PROVIDERS_RESPONSE_HEADER_LEN 16u
+#define AIMEE_PROVIDERS_RESPONSE_LEN (AIMEE_PROVIDERS_RESPONSE_HEADER_LEN + AIMEE_PROVIDERS_RECORD_LEN)
 
 typedef enum
 {
    AIMEE_PROVIDERS_OK = 0,
    AIMEE_PROVIDERS_ERR_MALFORMED = 1,
-   AIMEE_PROVIDERS_ERR_UNKNOWN_PROVIDER = 2,
-   AIMEE_PROVIDERS_ERR_UNKNOWN_MODEL = 3,
-   /* The provider was reachable but published nothing usable. Distinct from a
-    * transport failure: it means "asked and got no answer", which is the state
-    * most configured endpoints are actually in, and the caller should fall back
-    * to declared values rather than retry. */
-   AIMEE_PROVIDERS_ERR_NOT_PUBLISHED = 4,
-   AIMEE_PROVIDERS_ERR_UNREACHABLE = 5,
-   AIMEE_PROVIDERS_ERR_READONLY = 6
+   /* The two records disagree about which model they describe. Resolving them
+    * together would silently attribute one model's limits to another. */
+   AIMEE_PROVIDERS_ERR_IDENTITY_MISMATCH = 2,
+   /* A proposed declaration is not usable: an empty model id, or a capacity
+    * that cannot be true. Reachability and "the provider published nothing"
+    * are the CALLER's states, not this module's -- it never talks to anyone. */
+   AIMEE_PROVIDERS_ERR_INVALID_DECLARATION = 3
 } aimee_providers_status_t;
 
 static inline void aimee_providers_put_u32(uint8_t *p, uint32_t v)
