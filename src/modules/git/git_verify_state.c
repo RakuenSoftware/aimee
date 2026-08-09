@@ -13,11 +13,75 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include "aimee.h"
+#include "cJSON.h"
 #include "git_verify.h"
 #include "git_verify_internal.h"
+#include "headers/module_json_call.h"
 #include "util.h"
 #include "log.h"
 #include "platform_path.h"
+#include <aimee/git/module_api.h>
+
+/* The ledger below -- the hashes verify keys itself on and the .last-verify
+ * file -- now lives in the git MODULE (server-go/modules/git, verify_state.go)
+ * and is reached as bus stage AIMEE_GIT_STAGE_VERIFY_RUN. This is the first of
+ * git's I/O paths to move, chosen because verify touches no credential: the
+ * forge and credential paths cannot follow until the vault has a bus surface
+ * (docs/proposals/pending/vault-bus-only-access.md).
+ *
+ * Every function keeps its signature and its failure convention, so callers do
+ * not know the work moved. An unreachable module therefore reports "nothing is
+ * verified" rather than an error, which is the same thing a missing ledger has
+ * always reported and is the safe direction: it forces a verify run, it never
+ * lets one be skipped. */
+#define GIT_VERIFY_STATE_MAX_BODY   (256u * 1024u)
+#define GIT_VERIFY_STATE_TIMEOUT_MS 10000
+
+/* One round trip to the verify-state stage. Takes ownership of `request` the
+ * way aimee_module_json_call does; returns the reply to cJSON_Delete, or NULL.
+ * A reply whose "ok" is false is discarded here: it means the module could not
+ * answer, which every caller treats the same as no answer at all. */
+static cJSON *verify_state_call(cJSON *request)
+{
+   if (!request)
+      return NULL;
+   cJSON *reply =
+       aimee_module_json_call(AIMEE_GIT_EVENT_VERIFY_RUN, AIMEE_GIT_STAGE_VERIFY_RUN, request,
+                              GIT_VERIFY_STATE_MAX_BODY, GIT_VERIFY_STATE_TIMEOUT_MS, NULL);
+   if (!reply)
+      return NULL;
+   if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "ok")))
+   {
+      cJSON_Delete(reply);
+      return NULL;
+   }
+   return reply;
+}
+
+/* Build the common {op, project_root} request. project_root may be NULL, which
+ * the module reads as "use the working directory", exactly as the shell form
+ * without -C did. */
+static cJSON *verify_state_request(const char *op, const char *project_root)
+{
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
+      return NULL;
+   cJSON_AddStringToObject(request, "op", op);
+   cJSON_AddStringToObject(request, "project_root", project_root ? project_root : "");
+   return request;
+}
+
+/* Ask the module for a hash and hand back an owned copy, or NULL. */
+static char *verify_state_hash(const char *op, const char *project_root)
+{
+   cJSON *reply = verify_state_call(verify_state_request(op, project_root));
+   if (!reply)
+      return NULL;
+   const cJSON *hash = cJSON_GetObjectItemCaseSensitive(reply, "hash");
+   char *result = (cJSON_IsString(hash) && hash->valuestring[0]) ? strdup(hash->valuestring) : NULL;
+   cJSON_Delete(reply);
+   return result;
+}
 
 /* --- Commit-hash-based change detection --- */
 
@@ -27,65 +91,26 @@ char *verify_compute_file_hash(const char *project_root)
     * Tree hashes are stable across squash-merges and rebases that don't change
     * content, so a verified worktree HEAD matches the squash-merge commit that
     * GitHub creates from the same tree. */
-   char cmd[MAX_PATH_LEN + 64];
-   if (project_root && project_root[0])
-      snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse HEAD^{tree} 2>/dev/null", project_root);
-   else
-      snprintf(cmd, sizeof(cmd), "git rev-parse HEAD^{tree} 2>/dev/null");
-
-   int rc;
-   char *out = run_cmd(cmd, &rc);
-   if (rc != 0 || !out || !out[0])
-   {
-      free(out);
-      return NULL;
-   }
-
-   /* Strip trailing whitespace */
-   for (char *p = out + strlen(out) - 1; p >= out && (*p == '\n' || *p == '\r' || *p == ' '); p--)
-      *p = '\0';
-
-   char *result = strdup(out);
-   free(out);
-   return result;
+   return verify_state_hash("tree-hash", project_root);
 }
 
 /* Return the HEAD commit hash (for display only — not used as the verify key).
  * Caller must free the returned string. Returns NULL on failure. */
 char *verify_compute_commit_hash(const char *project_root)
 {
-   char cmd[MAX_PATH_LEN + 64];
-   if (project_root && project_root[0])
-      snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse HEAD 2>/dev/null", project_root);
-   else
-      snprintf(cmd, sizeof(cmd), "git rev-parse HEAD 2>/dev/null");
-
-   int rc;
-   char *out = run_cmd(cmd, &rc);
-   if (rc != 0 || !out || !out[0])
-   {
-      free(out);
-      return NULL;
-   }
-   for (char *p = out + strlen(out) - 1; p >= out && (*p == '\n' || *p == '\r' || *p == ' '); p--)
-      *p = '\0';
-   char *result = strdup(out);
-   free(out);
-   return result;
+   return verify_state_hash("commit-hash", project_root);
 }
 
 int verify_worktree_has_changes(const char *project_root)
 {
-   char cmd[MAX_PATH_LEN + 64];
-   int rc;
-   if (project_root && project_root[0])
-      snprintf(cmd, sizeof(cmd), "git -C '%s' status --porcelain 2>/dev/null", project_root);
-   else
-      snprintf(cmd, sizeof(cmd), "git status --porcelain 2>/dev/null");
-   char *status = run_cmd(cmd, &rc);
-   int has_changes = (rc == 0 && status && status[0]);
-   free(status);
-   return has_changes;
+   cJSON *reply = verify_state_call(verify_state_request("worktree-dirty", project_root));
+   if (!reply)
+      return 0; /* Unchanged from the shell form: a git that could not answer
+                 * reported a clean tree. Preserved deliberately -- this port
+                 * moves the work, not the policy. */
+   int dirty = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "dirty"));
+   cJSON_Delete(reply);
+   return dirty;
 }
 
 /* --- State file management --- */
@@ -119,91 +144,37 @@ void verify_state_path(const char *project_root, char *buf, size_t len)
  * (0 if the file doesn't exist or is empty/corrupt). */
 int read_verify_entries(const char *project_root, verify_state_entry_t *entries, int cap)
 {
-   char path[MAX_PATH_LEN];
-   verify_state_path(project_root, path, sizeof(path));
-
-   FILE *f = fopen(path, "r");
-   if (!f)
+   if (!entries || cap <= 0)
       return 0;
 
-   char line[512];
+   cJSON *reply = verify_state_call(verify_state_request("state-read", project_root));
+   if (!reply)
+      return 0;
+
+   const cJSON *list = cJSON_GetObjectItemCaseSensitive(reply, "entries");
    int n = 0;
-
-   /* Peek at the first line to detect legacy format (pure integer = old ts line). */
-   if (!fgets(line, sizeof(line), f))
+   const cJSON *item = NULL;
+   cJSON_ArrayForEach(item, list)
    {
-      fclose(f);
-      return 0;
-   }
-
-   /* Strip trailing whitespace */
-   char *ep = line + strlen(line) - 1;
-   while (ep >= line && (*ep == '\n' || *ep == '\r' || *ep == ' '))
-      *ep-- = '\0';
-
-   /* Legacy format: first line is a bare integer (no spaces). */
-   if (!strchr(line, ' '))
-   {
-      if (n < cap)
-      {
-         time_t ts = (time_t)strtoll(line, NULL, 10);
-         char hline[64] = {0};
-         char rline[32] = {0};
-         if (fgets(hline, sizeof(hline), f))
-         {
-            char *p = hline + strlen(hline) - 1;
-            while (p >= hline && (*p == '\n' || *p == '\r' || *p == ' '))
-               *p-- = '\0';
-            (void)fgets(rline, sizeof(rline), f);
-            p = rline + strlen(rline) - 1;
-            while (p >= rline && (*p == '\n' || *p == '\r' || *p == ' '))
-               *p-- = '\0';
-
-            if (hline[0])
-            {
-               entries[n].ts = ts;
-               snprintf(entries[n].hash, sizeof(entries[n].hash), "%s", hline);
-               entries[n].failed = 0;
-               entries[n].total = 0;
-               entries[n].step_results[0] = '\0';
-               if (rline[0])
-                  sscanf(rline, "failed=%d/total=%d", &entries[n].failed, &entries[n].total);
-               n++;
-            }
-         }
-      }
-      fclose(f);
-      return n;
-   }
-
-   /* New format: parse the first line we already read, then the rest. */
-   for (;;)
-   {
-      if (line[0] && n < cap)
-      {
-         long long ts_ll = 0;
-         char h[64] = {0};
-         int fv = 0, tv = 0;
-         if (sscanf(line, "%lld %63s failed=%d/total=%d", &ts_ll, h, &fv, &tv) >= 2 && h[0])
-         {
-            entries[n].ts = (time_t)ts_ll;
-            snprintf(entries[n].hash, sizeof(entries[n].hash), "%s", h);
-            entries[n].failed = fv;
-            entries[n].total = tv;
-            entries[n].step_results[0] = '\0';
-            const char *sp = strstr(line, " steps=");
-            if (sp)
-               snprintf(entries[n].step_results, sizeof(entries[n].step_results), "%s", sp + 7);
-            n++;
-         }
-      }
-      if (!fgets(line, sizeof(line), f))
+      if (n >= cap)
          break;
-      ep = line + strlen(line) - 1;
-      while (ep >= line && (*ep == '\n' || *ep == '\r' || *ep == ' '))
-         *ep-- = '\0';
+      const cJSON *hash = cJSON_GetObjectItemCaseSensitive(item, "hash");
+      if (!cJSON_IsString(hash) || !hash->valuestring[0])
+         continue;
+      const cJSON *ts = cJSON_GetObjectItemCaseSensitive(item, "timestamp");
+      const cJSON *failed = cJSON_GetObjectItemCaseSensitive(item, "failed");
+      const cJSON *total = cJSON_GetObjectItemCaseSensitive(item, "total");
+      const cJSON *steps = cJSON_GetObjectItemCaseSensitive(item, "step_results");
+
+      entries[n].ts = (time_t)(cJSON_IsNumber(ts) ? ts->valuedouble : 0);
+      snprintf(entries[n].hash, sizeof(entries[n].hash), "%s", hash->valuestring);
+      entries[n].failed = cJSON_IsNumber(failed) ? failed->valueint : 0;
+      entries[n].total = cJSON_IsNumber(total) ? total->valueint : 0;
+      snprintf(entries[n].step_results, sizeof(entries[n].step_results), "%s",
+               cJSON_IsString(steps) ? steps->valuestring : "");
+      n++;
    }
-   fclose(f);
+   cJSON_Delete(reply);
    return n;
 }
 
@@ -244,54 +215,22 @@ int verify_state_step_result_lookup(const char *step_results, const char *name, 
 int write_verify_state(const char *project_root, time_t timestamp, const char *hash,
                        int failed_steps, int total_steps, const char *step_results)
 {
-   char path[MAX_PATH_LEN], tmp_path[MAX_PATH_LEN];
-   verify_state_path(project_root, path, sizeof(path));
-   snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
-
-   char parent[MAX_PATH_LEN];
-   snprintf(parent, sizeof(parent), "%s", path);
-   char *slash = strrchr(parent, '/');
-   if (slash)
-   {
-      *slash = '\0';
-      if (parent[0] && platform_mkdir_p(parent, 0755) != 0 && errno != EEXIST)
-         return -1;
-   }
-
-   verify_state_entry_t old[VERIFY_STATE_MAX];
-   int nold = read_verify_entries(project_root, old, VERIFY_STATE_MAX);
-
-   FILE *f = fopen(tmp_path, "w");
-   if (!f)
+   if (!hash || !hash[0])
       return -1;
 
-   if (step_results && step_results[0])
-      fprintf(f, "%lld %s failed=%d/total=%d steps=%s\n", (long long)timestamp, hash, failed_steps,
-              total_steps, step_results);
-   else
-      fprintf(f, "%lld %s failed=%d/total=%d\n", (long long)timestamp, hash, failed_steps,
-              total_steps);
-
-   int kept = 1;
-   for (int i = 0; i < nold && kept < VERIFY_STATE_MAX; i++)
-   {
-      if (strncmp(old[i].hash, hash, 40) == 0)
-         continue;
-      if (old[i].step_results[0])
-         fprintf(f, "%lld %s failed=%d/total=%d steps=%s\n", (long long)old[i].ts, old[i].hash,
-                 old[i].failed, old[i].total, old[i].step_results);
-      else
-         fprintf(f, "%lld %s failed=%d/total=%d\n", (long long)old[i].ts, old[i].hash,
-                 old[i].failed, old[i].total);
-      kept++;
-   }
-   fclose(f);
-
-   if (rename(tmp_path, path) != 0)
-   {
-      remove(tmp_path);
+   cJSON *request = verify_state_request("state-write", project_root);
+   if (!request)
       return -1;
-   }
+   cJSON_AddNumberToObject(request, "timestamp", (double)timestamp);
+   cJSON_AddStringToObject(request, "hash", hash);
+   cJSON_AddNumberToObject(request, "failed", failed_steps);
+   cJSON_AddNumberToObject(request, "total", total_steps);
+   cJSON_AddStringToObject(request, "step_results", step_results ? step_results : "");
+
+   cJSON *reply = verify_state_call(request);
+   if (!reply)
+      return -1;
+   cJSON_Delete(reply);
    return 0;
 }
 

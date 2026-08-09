@@ -523,6 +523,39 @@ if [ -z "${AIMEE_SANDBOX_HOST_MOUNTS:-}" ] && [ -S "${_dsock:-/var/run/docker.so
     unset _self _map 2>/dev/null || true
 fi
 
+# Derive the managed compose `.env` from config, every start.
+#
+# The managed deployment's identity -- which kb image variant, which embedder --
+# used to live ONLY in the running container's Config.Env, put there by whichever
+# shell first ran compose. A reboot is safe (restart=unless-stopped restarts the
+# same container object with its env intact); a RECREATE is not, and a recreate is
+# what every image upgrade does. Recreating with a different caller environment
+# silently reinterpolates AIMEE_KB_VARIANT to nothing, which resolves the kb image
+# to the EMBEDDERLESS aimee-kb -- a working deployment losing its embedder with no
+# error anywhere.
+#
+# Compose reads `.env` from the project directory on its own, so writing it here
+# makes every later `docker compose up -d` correct without the caller supplying
+# anything: swapping an image becomes a restart rather than a reconfiguration.
+#
+# WRITTEN FRESH RATHER THAN PERSISTED. /opt/aimee/deploy is image content, not a
+# mount, so this file cannot survive to contradict a config changed while the
+# container was down. Config is the single source of truth; this is only its
+# projection. A failure here is not fatal -- the server's own deploy path builds
+# its child environment directly and still works -- so warn and carry on rather
+# than refuse to start a server over a file only compose reads.
+DEPLOY_ENV_DIR="${AIMEE_DEPLOY_COMPOSE_DIR:-/opt/aimee/deploy}"
+if [ -d "$DEPLOY_ENV_DIR" ]; then
+    if aimee-server --emit-deploy-env >"$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null; then
+        chmod 0600 "$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null || true
+        mv -f "$DEPLOY_ENV_DIR/.env.tmp" "$DEPLOY_ENV_DIR/.env"
+        log "wrote managed compose env ($DEPLOY_ENV_DIR/.env) from config"
+    else
+        rm -f "$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null || true
+        log "WARNING: could not derive $DEPLOY_ENV_DIR/.env; a manual 'docker compose up -d' may recreate the kb with the wrong image variant"
+    fi
+fi
+
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
 runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &

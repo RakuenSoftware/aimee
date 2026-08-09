@@ -116,16 +116,24 @@ webchat_migrate_legacy_credentials() {
 #
 # Idempotent: an existing account keeps its password, so a restart never resets a
 # credential the operator has already changed.
+# The managed login group, created on demand. Both the restore path and the
+# provision path need it before their first usermod, and each having its own copy
+# is how one of them ended up without it.
+webchat_ensure_login_group() {
+    getent group "$WEBCHAT_LOGIN_GROUP" >/dev/null 2>&1 && return 0
+    if ! groupadd --system "$WEBCHAT_LOGIN_GROUP"; then
+        webchat_log "ERROR: could not create the managed login group"
+        return 1
+    fi
+    return 0
+}
+
 webchat_provision_login() {
     _bs_user="$1"
     _bs_pass="$2"
     [ -n "$_bs_user" ] && [ -n "$_bs_pass" ] || return 0
 
-    getent group "$WEBCHAT_LOGIN_GROUP" >/dev/null 2>&1 || \
-        groupadd --system "$WEBCHAT_LOGIN_GROUP" || {
-            webchat_log "ERROR: could not create the managed login group"
-            return 1
-        }
+    webchat_ensure_login_group || return 1
     if id "$_bs_user" >/dev/null 2>&1; then
         usermod -aG "$WEBCHAT_LOGIN_GROUP" "$_bs_user" 2>/dev/null || true
         # An account can exist WITHOUT being able to log in: the image ships
@@ -218,6 +226,19 @@ webchat_read_seeded_credentials() {
 # operator made since, and restoring over it would silently roll that back.
 webchat_restore_identities() {
     [ -f "$WEBCHAT_IDENTITIES" ] || return 0
+    # The group must exist BEFORE the first usermod. It ships in no image, and this
+    # function runs first in webchat_provision_bootstrap_account -- ahead of
+    # webchat_provision_login, which was the only thing that created it. So on every
+    # container replacement each restored account failed its `usermod -aG`, silently
+    # (|| true), and came back OUTSIDE the managed group.
+    #
+    # That is not cosmetic. UserManager.List() reads the GROUP, so an unmanaged account
+    # is invisible to it, and snapshotManagedIdentities() rebuilds this record from that
+    # list and writes it WHOLESALE. The next account operation therefore dropped the
+    # restored account from the record, and the container replacement after that lost
+    # the account for good -- observed on the testing appliance, where `admin` existed
+    # only in this record (it is in no image) and was one snapshot away from deletion.
+    webchat_ensure_login_group || return 0
     _wc_restored=0
     while IFS=: read -r _wc_u _wc_h; do
         [ -n "$_wc_u" ] && [ -n "$_wc_h" ] || continue
@@ -239,7 +260,14 @@ webchat_restore_identities() {
             userdel -r "$_wc_u" >/dev/null 2>&1 || true
             continue
         fi
-        usermod -aG "$WEBCHAT_LOGIN_GROUP" "$_wc_u" >/dev/null 2>&1 || true
+        # NOT `|| true`. An account outside the managed group is invisible to
+        # UserManager.List(), so the next snapshot rewrites this record without it and
+        # the following container replacement loses it. Swallowing this is what turned a
+        # recoverable group failure into silent account deletion, so say so loudly.
+        if ! usermod -aG "$WEBCHAT_LOGIN_GROUP" "$_wc_u" >/dev/null 2>&1; then
+            webchat_log "WARNING: restored '$_wc_u' but could not add it to $WEBCHAT_LOGIN_GROUP;" \
+                        "it is NOT managed and the next snapshot will drop it"
+        fi
         _wc_restored=$((_wc_restored + 1))
     done < "$WEBCHAT_IDENTITIES"
     [ "$_wc_restored" -gt 0 ] && webchat_log "restored $_wc_restored dashboard login(s) after a container replacement"

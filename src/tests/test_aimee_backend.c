@@ -151,6 +151,47 @@ int main(void)
    aimee_response_free(&resp);
    cJSON_Delete(rj);
 
+   /* --- (3b) a thinking response must survive parse -> render with its SIGNATURE.
+    *          Anthropic rejects a resubmitted thinking block whose signature does not
+    *          match, so dropping it anywhere on the response path yields a turn that
+    *          cannot be replayed. The request direction already modelled this; the
+    *          response direction dropped it at BOTH ends (parse and render). --- */
+   const char *THINK_RESP =
+       "{\"id\":\"msg_2\",\"model\":\"claude-3-5-sonnet\",\"role\":\"assistant\","
+       "\"content\":[{\"type\":\"thinking\",\"thinking\":\"let me check\","
+       "\"signature\":\"ErUBCkYIAxgCIkA\"},{\"type\":\"text\",\"text\":\"done\"}],"
+       "\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":3,\"output_tokens\":4}}";
+   cJSON *tj = cJSON_Parse(THINK_RESP);
+   aimee_response_t tresp;
+   assert(anthropic_backend_parse(tj, &tresp, err, sizeof err) == 0);
+   assert(tresp.n_content == 2 && tresp.content[0].type == AIMEE_BLK_THINKING);
+   assert(strcmp(tresp.content[0].text, "let me check") == 0);
+   assert(tresp.content[0].thinking_signature &&
+          strcmp(tresp.content[0].thinking_signature, "ErUBCkYIAxgCIkA") == 0);
+
+   cJSON *trendered = anthropic_frontend_render(&tresp);
+   assert(trendered);
+   cJSON *tc = cJSON_GetObjectItem(trendered, "content");
+   cJSON *tblk = cJSON_GetArrayItem(tc, 0);
+   assert(strcmp(cJSON_GetObjectItem(tblk, "type")->valuestring, "thinking") == 0);
+   assert(strcmp(cJSON_GetObjectItem(tblk, "thinking")->valuestring, "let me check") == 0);
+   assert(cJSON_GetObjectItem(tblk, "signature") &&
+          strcmp(cJSON_GetObjectItem(tblk, "signature")->valuestring, "ErUBCkYIAxgCIkA") == 0);
+   cJSON_Delete(trendered);
+
+   /* an unsigned thinking block omits the key rather than emitting an empty one --
+    * an empty signature would be rejected, where an absent one is merely unsigned. */
+   free(tresp.content[0].thinking_signature);
+   tresp.content[0].thinking_signature = NULL;
+   cJSON *tunsigned = anthropic_frontend_render(&tresp);
+   assert(tunsigned);
+   assert(!cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(tunsigned, "content"), 0),
+                               "signature"));
+   cJSON_Delete(tunsigned);
+
+   aimee_response_free(&tresp);
+   cJSON_Delete(tj);
+
    /* --- (4) OpenAI backend: Anthropic client -> IR -> OpenAI request -> re-parse
     *         == equal IR (cross-protocol build via OpenAI). --- */
    aimee_request_t bir;
@@ -259,6 +300,58 @@ int main(void)
    assert(cresp.usage_in == 30 && cresp.usage_out == 9);
    aimee_response_free(&cresp);
    cJSON_Delete(crj);
+
+   /* --- (5b) Responses `reasoning` items: BOTH summary shapes yield the text.
+    *          The wire's shape is not settled here -- a bare string appears in some
+    *          payloads, an array of typed parts (the same idiom this file already
+    *          reads for a message's `content`) in others -- and the parser must not
+    *          bet on one. Betting wrong drops reasoning silently: ostr() on an array
+    *          returns NULL, leaving a THINKING block with no text at all. --- */
+   {
+      /* array of parts */
+      const char *R_ARR = "{\"id\":\"r1\",\"status\":\"completed\",\"output\":["
+                          "{\"type\":\"reasoning\",\"id\":\"rs_1\",\"summary\":["
+                          "{\"type\":\"summary_text\",\"text\":\"first thought\"},"
+                          "{\"type\":\"summary_text\",\"text\":\"second thought\"}]},"
+                          "{\"type\":\"message\",\"role\":\"assistant\",\"content\":["
+                          "{\"type\":\"output_text\",\"text\":\"answer\"}]}]}";
+      cJSON *j = cJSON_Parse(R_ARR);
+      aimee_response_t r;
+      assert(responses_backend_parse(j, &r, err, sizeof err) == 0);
+      assert(r.n_content == 2 && r.content[0].type == AIMEE_BLK_THINKING);
+      assert(r.content[0].text &&
+             strcmp(r.content[0].text, "first thought\n\nsecond thought") == 0);
+      /* the reasoning must not be confused with the answer */
+      assert(r.content[1].type == AIMEE_BLK_TEXT && strcmp(r.content[1].text, "answer") == 0);
+      aimee_response_free(&r);
+      cJSON_Delete(j);
+   }
+   {
+      /* bare string */
+      const char *R_STR = "{\"id\":\"r2\",\"status\":\"completed\",\"output\":["
+                          "{\"type\":\"reasoning\",\"summary\":\"a single thought\"}]}";
+      cJSON *j = cJSON_Parse(R_STR);
+      aimee_response_t r;
+      assert(responses_backend_parse(j, &r, err, sizeof err) == 0);
+      assert(r.n_content == 1 && r.content[0].type == AIMEE_BLK_THINKING);
+      assert(r.content[0].text && strcmp(r.content[0].text, "a single thought") == 0);
+      aimee_response_free(&r);
+      cJSON_Delete(j);
+   }
+   {
+      /* an absent or empty summary yields NO text rather than an empty thought */
+      const char *R_EMPTY = "{\"id\":\"r3\",\"status\":\"completed\",\"output\":["
+                            "{\"type\":\"reasoning\",\"summary\":[]},"
+                            "{\"type\":\"reasoning\"}]}";
+      cJSON *j = cJSON_Parse(R_EMPTY);
+      aimee_response_t r;
+      assert(responses_backend_parse(j, &r, err, sizeof err) == 0);
+      assert(r.n_content == 2);
+      assert(r.content[0].type == AIMEE_BLK_THINKING && r.content[0].text == NULL);
+      assert(r.content[1].type == AIMEE_BLK_THINKING && r.content[1].text == NULL);
+      aimee_response_free(&r);
+      cJSON_Delete(j);
+   }
 
    /* --- (6) tool_result SPLIT (grouping ruling, Option A): an Anthropic tool
     *         conversation -> IR -> OpenAI emits a role:tool message + Responses a
