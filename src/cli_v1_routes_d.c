@@ -751,6 +751,15 @@ static const struct
     {"optimize.export", "GET", "/v1/optimize/export"},
     {"optimize.promote", "POST", "/v1/optimize/promote"},
     {"optimize.replay_record", "POST", "/v1/optimize/replay-record"},
+#if AIMEE_WITH_ROUNDTABLE
+    {"pipeline.advance", "POST", "/v1/pipeline/advance"},
+    {"pipeline.cancel", "POST", "/v1/pipeline/cancel"},
+    {"pipeline.gate", "POST", "/v1/pipeline/gate"},
+    {"pipeline.list", "GET", "/v1/pipeline/list"},
+    {"pipeline.resume", "POST", "/v1/pipeline/resume"},
+    {"pipeline.start", "POST", "/v1/pipeline/start"},
+    {"pipeline.status", "POST", "/v1/pipeline/status"},
+#endif
     {"provider.get", "POST", "/v1/provider/get"},
     {"provider.list", "GET", "/v1/provider/list"},
     {"provider.models", "GET", "/v1/provider/models"},
