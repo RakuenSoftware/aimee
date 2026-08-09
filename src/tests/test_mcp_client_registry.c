@@ -525,9 +525,9 @@ static void test_osv_offline_cache_miss_allows(void)
    "get_help {topic} req:\n"                                                                       \
    "get_identity {} req:\n"                                                                        \
    "git "                                                                                          \
-   "{action,async,auto,base,body,branch,command,count,depth,diff_stat,expected_head_sha,files,"    \
-   "force,index,job_id,merge_method,message,mirror,mode,name,number,path,prune,rebase,ref,remote," \
-   "source,staged,stat_only,state,title,url,wait} req:command\n"                                   \
+   "{abort_on_conflict,action,all,async,auto,base,body,branch,command,count,depth,diff_stat,"      \
+   "expected_head_sha,files,force,index,job_id,merge_method,message,mirror,mode,name,number,path," \
+   "prune,rebase,ref,remote,source,staged,stat_only,state,title,url,wait} req:command\n"           \
    "graph {command,cwd,entity,episode_key,limit,project,query,scope,workspace} req:command\n"      \
    "host {command,name} req:command\n"                                                             \
    "index "                                                                                        \
@@ -609,18 +609,32 @@ static void tool_signature(cJSON *tool, char *out, size_t outsz)
    if (cJSON_IsArray(req))
       cJSON_ArrayForEach(c, req) if (cJSON_IsString(c) && nr < 48) rq[nr++] = c->valuestring;
    qsort(rq, (size_t)nr, sizeof(rq[0]), tools_cmp_ptr);
+   /* Clamped appends: snprintf returns what it WOULD have written, so a signature
+    * wider than the buffer would otherwise walk past it (and, before the clamp,
+    * silently truncate away the `req:` half — a tool could lose a required
+    * parameter and this golden would not notice). */
    int o = snprintf(out, outsz, "%s {", cJSON_IsString(name) ? name->valuestring : "?");
+   if (o > (int)outsz - 1)
+      o = (int)outsz - 1;
+#define SIG_APPEND(...)                                                                            \
+   do                                                                                              \
+   {                                                                                               \
+      int n_ = snprintf(out + o, outsz - (size_t)o, __VA_ARGS__);                                  \
+      o = (n_ < 0 || o + n_ > (int)outsz - 1) ? (int)outsz - 1 : o + n_;                           \
+   } while (0)
    for (int i = 0; i < nk; i++)
-      o += snprintf(out + o, outsz - (size_t)o, "%s%s", i ? "," : "", keys[i]);
-   o += snprintf(out + o, outsz - (size_t)o, "} req:");
+      SIG_APPEND("%s%s", i ? "," : "", keys[i]);
+   SIG_APPEND("} req:");
    for (int i = 0; i < nr; i++)
-      o += snprintf(out + o, outsz - (size_t)o, "%s%s", i ? "," : "", rq[i]);
+      SIG_APPEND("%s%s", i ? "," : "", rq[i]);
+#undef SIG_APPEND
+   assert(o < (int)outsz - 1); /* a truncated signature is not a check */
 }
 static void test_tools_list_surface(void)
 {
    cJSON *tools = mcp_build_tools_list();
    assert(cJSON_IsArray(tools));
-   static char sigs[256][256];
+   static char sigs[256][512];
    int ns = 0;
    cJSON *tool = NULL;
    cJSON_ArrayForEach(tool, tools)
@@ -636,7 +650,7 @@ static void test_tools_list_surface(void)
       ns++;
    }
    qsort(sigs, (size_t)ns, sizeof(sigs[0]), tools_cmp_row);
-   static char joined[256 * 256];
+   static char joined[256 * 512];
    int o = 0;
    for (int i = 0; i < ns; i++)
       o += snprintf(joined + o, sizeof(joined) - (size_t)o, "%s\n", sigs[i]);

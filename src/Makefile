@@ -302,7 +302,7 @@ PLATFORM_CLI_OBJS   = $(filter %/cli_client.o %/cli_main.o %/events.o,$(PLATFORM
 # --- MCP git tools (compiled into both shipped binaries; not in LIB_CORE) ---
 # Keep git MCP handlers out of the shared core library so the thin client and
 # server remain the only shipped binaries while still sharing the same handlers.
-MCP_GIT_SRCS = modules/git/mcp_git_query.c modules/git/mcp_git_write.c modules/git/mcp_git_branch.c modules/git/mcp_git_pr.c modules/git/git_verify.c modules/git/git_verify_state.c modules/git/git_verify_config.c modules/git/git_verify_jobs.c modules/git/git_verify_hook.c modules/git/git_verify_ops.c modules/git/git_verify_select.c modules/git/git_verify_step.c
+MCP_GIT_SRCS = modules/git/mcp_git_query.c modules/git/mcp_git_write.c modules/git/mcp_git_integrate.c modules/git/mcp_git_branch.c modules/git/mcp_git_pr.c modules/git/git_verify.c modules/git/git_verify_state.c modules/git/git_verify_config.c modules/git/git_verify_jobs.c modules/git/git_verify_hook.c modules/git/git_verify_ops.c modules/git/git_verify_select.c modules/git/git_verify_step.c
 MCP_GIT_OBJS = $(MCP_GIT_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 0: Foundation (db, config, util, text, render, log, platform, cJSON) ---
@@ -1158,6 +1158,13 @@ kb-entrypoint-test:
 # server. Needs no image -- it runs the entrypoint's own block against fixtures.
 module-grants-test:
 	./tests/test_module_grants.sh
+
+# The managed compose `.env` derived at every container start. Needs $(SERVER)
+# because the strongest cases run the real emitter rather than grepping the
+# entrypoint: an unset AIMEE_KB_VARIANT resolves the kb image to the
+# embedderless aimee-kb SILENTLY, so the value itself is what must be asserted.
+deploy-compose-env-test: $(SERVER)
+	./tests/test_deploy_compose_env.sh
 
 index-scan-e2e-test: $(BINARY) $(SERVER)
 	./tests/test_index_scan_e2e.sh
