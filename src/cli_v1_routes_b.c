@@ -549,6 +549,211 @@ static void add_verify_arg(cJSON *args, const char *name, const char *val)
    }
 }
 
+/* Every git subcommand except verify, from the CLI.
+ *
+ * The shape is uniform on purpose — `aimee git <command> [primary] [key=value]`,
+ * the same form `aimee git verify action=... key=value` already taught — so there
+ * is ONE parser here rather than a hand-written flag grammar per subcommand. The
+ * only per-command knowledge is what a bare first (and sometimes second) word
+ * means, which is the table below; everything else is key=value and is typed the
+ * same way verify's arguments are.
+ *
+ * `aimee git merge origin/testing`, `aimee git sync`, `aimee git rebase continue`,
+ * `aimee git add -A`, `aimee git pr create title="..."`. */
+static const struct
+{
+   const char *sub;    /* CLI subcommand (dashes allowed) */
+   const char *tool;   /* MCP tool it dispatches to */
+   const char *first;  /* what a bare first word means, NULL if none */
+   const char *second; /* what a bare second word means, NULL if none */
+   int rest_files;     /* remaining bare words accumulate into `files` */
+} GIT_CLI[] = {
+    {"status", "git_status", NULL, NULL, 0},
+    {"commit", "git_commit", "message", NULL, 1},
+    {"push", "git_push", NULL, NULL, 0},
+    {"pull", "git_pull", NULL, NULL, 0},
+    {"fetch", "git_fetch", "remote", NULL, 0},
+    {"branch", "git_branch", "action", "name", 0},
+    {"log", "git_log", NULL, NULL, 0},
+    {"diff", "git_diff_summary", "ref", NULL, 1},
+    {"diff_summary", "git_diff_summary", "ref", NULL, 1},
+    {"pr", "git_pr", "action", NULL, 0},
+    {"issue", "git_issue", "action", NULL, 0},
+    {"clone", "git_clone", "url", "path", 0},
+    {"stash", "git_stash", "action", NULL, 0},
+    {"tag", "git_tag", "action", "name", 0},
+    {"reset", "git_reset", "ref", "mode", 0},
+    {"restore", "git_restore", NULL, NULL, 1},
+    {"add", "git_add", NULL, NULL, 1},
+    {"merge", "git_merge", "ref", NULL, 0},
+    {"rebase", "git_rebase", "base", NULL, 0},
+    {"sync", "git_sync", "base", NULL, 0},
+    {"cherry-pick", "git_cherry_pick", "ref", NULL, 0},
+    {"cherry_pick", "git_cherry_pick", "ref", NULL, 0},
+    {"revert", "git_revert", "ref", NULL, 0},
+    {"switch", "git_switch", "ref", NULL, 0},
+    {"checkout", "git_checkout", NULL, NULL, 1},
+    {NULL, NULL, NULL, NULL, 0},
+};
+
+/* Bare words that mean an action rather than a ref, for the operations that can
+ * stop mid-flight. Spelled with or without dashes. */
+static int git_cli_is_resume_word(const char *w)
+{
+   while (*w == '-')
+      w++;
+   return strcmp(w, "continue") == 0 || strcmp(w, "abort") == 0 || strcmp(w, "skip") == 0;
+}
+
+/* Short flags worth keeping, because typing them is reflex. Everything else is
+ * key=value, which needs no aliasing. */
+static int git_cli_flag_alias(const char *arg, cJSON *args)
+{
+   static const struct
+   {
+      const char *flag;
+      const char *key;
+      int value;
+   } aliases[] = {
+       {"-A", "all", 1},
+       {"--all", "all", 1},
+       {"-f", "force", 1},
+       {"--force", "force", 1},
+       {"--rebase", "rebase", 1},
+       {"--prune", "prune", 1},
+       {"--auto", "auto", 1},
+       {"--staged", "staged", 1},
+       {"--keep-conflicts", "abort_on_conflict", 0},
+       {NULL, NULL, 0},
+   };
+   for (int i = 0; aliases[i].flag; i++)
+      if (strcmp(arg, aliases[i].flag) == 0)
+      {
+         cJSON_AddBoolToObject(args, aliases[i].key, aliases[i].value);
+         return 1;
+      }
+   if (strcmp(arg, "--merge") == 0)
+   {
+      cJSON_AddStringToObject(args, "mode", "merge");
+      return 1;
+   }
+   return 0;
+}
+
+static cJSON *marshal_git_cli(int argc, char **argv)
+{
+   if (argc < 1 || !argv[0] || !argv[0][0])
+   {
+      fprintf(stderr, "usage: aimee git <command> [primary] [key=value ...]\n"
+                      "  status commit push pull fetch branch log diff pr issue clone stash\n"
+                      "  tag reset restore verify add merge rebase sync cherry-pick revert\n"
+                      "  switch checkout\n");
+      return NULL;
+   }
+
+   const char *sub = argv[0];
+   int row = -1;
+   for (int i = 0; GIT_CLI[i].sub; i++)
+      if (strcmp(sub, GIT_CLI[i].sub) == 0)
+      {
+         row = i;
+         break;
+      }
+   if (row < 0)
+   {
+      fprintf(stderr,
+              "aimee: '%s' is not a git command. Try: status commit push pull fetch "
+              "branch log diff pr issue clone stash tag reset restore verify add merge "
+              "rebase sync cherry-pick revert switch checkout\n",
+              sub);
+      return NULL;
+   }
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "method", "mcp.call");
+   cJSON_AddStringToObject(req, "tool", GIT_CLI[row].tool);
+   const char *sid = getenv("AIMEE_SESSION_ID");
+   if (!sid || !sid[0])
+      sid = getenv("CLAUDE_SESSION_ID");
+   if (sid && sid[0])
+      cJSON_AddStringToObject(req, "session_id", sid);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON *files = NULL;
+   int bare = 0;
+
+   for (int i = 1; i < argc; i++)
+   {
+      char *arg = argv[i];
+
+      if (git_cli_flag_alias(arg, args))
+         continue;
+
+      /* key=value / --key=value, typed exactly as verify types its arguments. */
+      const char *raw = arg;
+      if (strncmp(raw, "--", 2) == 0)
+         raw += 2;
+      char *eq = strchr(raw, '=');
+      if (eq)
+      {
+         *eq = '\0';
+         add_verify_arg(args, raw, eq + 1);
+         *eq = '=';
+         continue;
+      }
+
+      if (arg[0] == '-')
+      {
+         /* A bare --flag is a boolean, which is how every boolean in the git
+          * schema reads anyway. */
+         cJSON_AddBoolToObject(args, raw, 1);
+         continue;
+      }
+
+      /* continue/abort/skip is an action wherever an operation can stop. */
+      if (git_cli_is_resume_word(arg) && !cJSON_GetObjectItemCaseSensitive(args, "action"))
+      {
+         cJSON_AddStringToObject(args, "action", arg);
+         continue;
+      }
+
+      bare++;
+      const char *key = (bare == 1) ? GIT_CLI[row].first : (bare == 2 ? GIT_CLI[row].second : NULL);
+      if (key && !cJSON_GetObjectItemCaseSensitive(args, key))
+      {
+         cJSON_AddStringToObject(args, key, arg);
+         continue;
+      }
+      if (GIT_CLI[row].rest_files)
+      {
+         if (!files)
+            files = cJSON_AddArrayToObject(args, "files");
+         cJSON_AddItemToArray(files, cJSON_CreateString(arg));
+         continue;
+      }
+      fprintf(stderr,
+              "aimee: `aimee git %s` does not take '%s' as a bare word; pass it as "
+              "key=value (see `aimee git %s` with no arguments, or the git tool schema)\n",
+              sub, arg, sub);
+      cJSON_Delete(args);
+      cJSON_Delete(req);
+      return NULL;
+   }
+
+   /* Which checkout this is, as everywhere else: the caller's directory unless
+    * they named one. Added last — cJSON keeps duplicates and readers take the
+    * first, so an explicit path= must not be shadowed. */
+   if (!cJSON_GetObjectItemCaseSensitive(args, "path"))
+   {
+      char cwd[4096];
+      if (getcwd(cwd, sizeof(cwd)))
+         cJSON_AddStringToObject(args, "path", cwd);
+   }
+
+   cJSON_AddItemToObject(req, "arguments", args);
+   return req;
+}
+
 static cJSON *marshal_git_verify(int argc, char **argv)
 {
    cJSON *req = cJSON_CreateObject();
@@ -1193,6 +1398,7 @@ static const char *const MARSHAL_NO_ARGS[] = {
     "aux.config_show",
     "calibration.readiness",
     "cert.list",
+    "config.deploy_env",
     "config.show",
     "cron.list",
     "delegate.backend_list",
@@ -1254,6 +1460,7 @@ static const struct
     {"evidence.provenance_retrieval_event", marshal_audit_provenance},
     {"evidence.trace_retrieval_event", marshal_audit_trace},
     {"get_help", marshal_get_help},
+    {"git.cli", marshal_git_cli},
     {"git.verify", marshal_git_verify},
     {"graph.explain", marshal_graph_explain},
     {"graph.sync_code", marshal_graph_sync_code},

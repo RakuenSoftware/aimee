@@ -475,6 +475,7 @@ int handle_coord_job_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_aux_config_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_config_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_config_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_config_deploy_env(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_aux_test(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_reply(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

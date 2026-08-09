@@ -118,6 +118,22 @@ check "version" $AIMEE version
 check "version flag" $AIMEE --version
 check_output "version --json" "\"version\"" $AIMEE --json version
 
+# --- Unknown commands ---
+# A typo used to take the same fallback as a genuine routing gap and answer
+# "command 'foobarbaz' has no /v1 route", pointing at the route table for a word
+# that was never a command. It must name the typo instead.
+check_output "unknown command names itself" "unknown command 'foobarbaz'" \
+    $AIMEE foobarbaz
+check_output "unknown command points at help" "aimee help --all" $AIMEE foobarbaz
+check_output_not_contains "unknown command does not blame the route table" \
+    "has no /v1 route" $AIMEE foobarbaz
+check_output "unknown command --json" "\"message\"" $AIMEE --json foobarbaz
+# A real command whose family has subcommands still names the subcommand, and a
+# real-but-unroutable command still reports the routing gap: that diagnostic is
+# for maintainers and must survive.
+check_output "wrong subcommand names the subcommand" "is not a subcommand of" \
+    $AIMEE economizer status
+
 # --- {id}-bearing routes with the id missing ---
 # `workspace get` with no path used to answer "'workspace.get' has no /v1 route",
 # pointing at the route table when the route is present and correct -- the same

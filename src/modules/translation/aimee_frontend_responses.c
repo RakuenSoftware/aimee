@@ -10,6 +10,8 @@
  * Anthropic/OpenAI turn. */
 #include <aimee/translation/aimee_frontend.h>
 
+#include <aimee/translation/aimee_backend.h> /* responses_reasoning_summary_text (shared) */
+
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -149,7 +151,7 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
                goto oom;
             b->type = AIMEE_BLK_THINKING;
             b->raw = cJSON_Duplicate(item, 1);
-            b->text = dupstr(ostr(item, "summary"));
+            b->text = responses_reasoning_summary_text(item);
          }
          else /* "message" (default) */
          {

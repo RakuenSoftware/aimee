@@ -1910,6 +1910,7 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/aux/config", NULL, RM_EXACT, "aux.config_show", 0, rh_dispatch_op},
     {"GET", "/v1/config", NULL, RM_EXACT, "config.show", 0, rh_dispatch_op},
     {"POST", "/v1/config/get", NULL, RM_EXACT, "config.get", 0, rh_dispatch_op},
+    {"GET", "/v1/config/deploy-env", NULL, RM_EXACT, "config.deploy_env", 0, rh_dispatch_op},
     {"POST", "/v1/config/set", NULL, RM_EXACT, "config.set", 0, rh_dispatch_op},
 
     /* cron.* family (op-parity P1 wave 1) — single-response, object-body
@@ -2106,6 +2107,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/launch/run", NULL, RM_EXACT, "launch.run", 0, rh_dispatch_op},
     {"GET", "/v1/server/info", NULL, RM_EXACT, "server.info", 0, rh_dispatch_op},
     {"GET", "/v1/server/health", NULL, RM_EXACT, "server.health", 0, rh_dispatch_op},
+    {"GET", "/v1/workers", NULL, RM_EXACT, "workers", 0, rh_dispatch_op},
 
     /* Long-running / LLM methods, exposed async (rh_dispatch_op_async): each
      * returns a queued run handle; poll GET /v1/runs/{id}. They must NOT use the

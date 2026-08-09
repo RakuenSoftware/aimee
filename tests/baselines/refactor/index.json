@@ -7,7 +7,7 @@
       "files": [
         {
           "path": "docs/gen/cli-commands.md",
-          "sha256": "97ff49192796ca16e4104f62c7ddca38bc126aa2976bbcd12d7c1549733f92cf"
+          "sha256": "dc50b347d6d4da379036a7541a81075371c61cadfb1fe0a809f74f9a1130ca75"
         },
         {
           "path": "src/gateway/gateway_main.c",
@@ -19,7 +19,7 @@
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "d33b55a1ab81092701065e3a608bec8b7d614d6401d003a59c053045808f55bb"
+          "sha256": "4afacbd65680ebcae084ebf86773f6b1af9a753cb1ec5eb5a1e7e226490475dd"
         }
       ]
     },
@@ -175,7 +175,7 @@
         },
         {
           "path": "src/headers/agent_exec.h",
-          "sha256": "6edc1a5d3f2cc25875aeaaee3657ae0b0dae27e473009439d81e8c0340e2a0e9"
+          "sha256": "49a49dce41a9bf7f4454a527d7c9cd0207667321aec92e41c88a59720edd6bff"
         },
         {
           "path": "src/headers/agent_pipeline.h",
@@ -1083,7 +1083,7 @@
         },
         {
           "path": "src/headers/server.h",
-          "sha256": "6e49753551ec43602d09e0d6fcb298682c43af3392bcd3377fd792b765f743b0"
+          "sha256": "7fc9eb39956e99ec1790e4c2b3b4bbede40d4dd949e15752ef0cc7998a2bcc45"
         },
         {
           "path": "src/headers/server_cli_oauth.h",
@@ -1479,7 +1479,7 @@
         },
         {
           "path": "src/modules/git/include/aimee/git/module_api.h",
-          "sha256": "e049765d6007235c1b0fedf2e34624af0c143eaa75f500e219039f508b35d36b"
+          "sha256": "4d6a0ae542328f07c15e47e3d17759a04a55066f0fc186014bbf2af82c7cfb78"
         },
         {
           "path": "src/modules/governance/include/aimee/governance/module_api.h",
@@ -1491,7 +1491,7 @@
         },
         {
           "path": "src/modules/ir/include/aimee/ir/aimee_ir_metrics.h",
-          "sha256": "43229ea4c671e324f45b60504ef6967ffaa06bd8807502527f47b5a963bd78c9"
+          "sha256": "9d3cf1b7816e9d4c7a129e33a5fb6a18ca441cffcd54fe8f1cc952612d5a5569"
         },
         {
           "path": "src/modules/ir/include/aimee/ir/panel_result.h",
@@ -1575,7 +1575,7 @@
         },
         {
           "path": "src/modules/translation/include/aimee/translation/aimee_backend.h",
-          "sha256": "42ed0f5ae043068f6e7ef0cb68ac88b803b9aafe16377adbae65b26de3d4d48d"
+          "sha256": "3e34960ead2d5a62f077870ec944e0e8afeef0a818891934772cd09b096a5577"
         },
         {
           "path": "src/modules/translation/include/aimee/translation/aimee_frontend.h",
@@ -1583,7 +1583,7 @@
         },
         {
           "path": "src/modules/translation/include/aimee/translation/aimee_ir_stream.h",
-          "sha256": "31de4bf7f0a75f91aab09756380c6f567fcf62952a38f3cae5ef21d3cea89aed"
+          "sha256": "de0435f6661c4148a133921324bd4ca47cd59e404442046dce4320b7f463abce"
         },
         {
           "path": "src/modules/workflows/include/aimee/workflows/module_api.h",
@@ -1604,14 +1604,14 @@
       ]
     },
     "public-symbols": {
-      "sha256": "116cb2fe7b1aa20836eb0d6579666fc28bd695235b9a44460b097c43e9140bed",
+      "sha256": "5855e8f593892d70e53133c92f44ffb8bc84ae66c3334270f479a83527eb6815",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
       "files": [
         {
           "path": "docs/gen/v1-route-descriptor.json",
-          "sha256": "03d9af141da67e7f4745b727ba014f4ecc05df02e5e122a41e48d19a3bf1426e"
+          "sha256": "32b337f0a26cc30139790762319eef9b4defa6366eb785b528ad9e7f36b6e4a9"
         }
       ]
     }

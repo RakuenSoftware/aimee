@@ -19,12 +19,25 @@
 #include <unistd.h>
 #endif /* !_WIN32 (preamble guard) */
 
+/* config.deploy_env prints the env text and NOTHING else -- no banner, no quotes,
+ * no trailing JSON. Its only caller is a shell wrapper, `eval "$(aimee config
+ * deploy-env)"`, so any decoration becomes a shell command. The generic JSON
+ * fallback would emit the whole envelope, which eval would then try to run. */
+static void pt_print_deploy_env(const char *method, cJSON *resp)
+{
+   (void)method;
+   cJSON *env = cJSON_GetObjectItemCaseSensitive(resp, "env");
+   if (cJSON_IsString(env) && env->valuestring)
+      fputs(env->valuestring, stdout);
+}
+
 typedef void (*pt_print_fn)(const char *method, cJSON *resp);
 static const struct
 {
    const char *method;
    pt_print_fn fn;
 } pt_print_table[] = {
+    {"config.deploy_env", pt_print_deploy_env},
     {"roundtable.review", pt_print_roundtable_review},
     {"audit.verify", pt_print_audit},
     {"audit.checkpoint", pt_print_audit},
@@ -42,6 +55,8 @@ static const struct
     {"skill.list", pt_print_skill_list},
     {"skill.show", pt_print_skill_show},
     {"git.verify", pt_print_git_verify},
+    /* Every git command returns MCP content blocks, the same shape verify does. */
+    {"git.cli", pt_print_git_verify},
     {"get_help", pt_print_get_help},
     {"server.health", pt_print_server_health},
     {"session.list", pt_print_session_list},
@@ -643,6 +658,7 @@ static const struct
     {"collab_rules.list_active", "GET", "/v1/collab_rules/active"},
     {"collab_rules.reject", "POST", "/v1/collab_rules/reject"},
     {"collab_rules.retire", "POST", "/v1/collab_rules/retire"},
+    {"config.deploy_env", "GET", "/v1/config/deploy-env"},
     {"config.get", "POST", "/v1/config/get"},
     {"config.set", "POST", "/v1/config/set"},
     {"config.show", "GET", "/v1/config"},
@@ -791,6 +807,7 @@ static const struct
     {"wm.get", "POST", "/v1/wm/get"},
     {"wm.list", "POST", "/v1/wm/list"},
     {"wm.set", "POST", "/v1/wm/set"},
+    {"workers", "GET", "/v1/workers"},
     {"workspace.context", "POST", "/v1/workspaces/context"},
     {"workspace.list", "GET", "/v1/workspaces"},
     {"workspace.mirror-sync", "POST", "/v1/workspace/mirror-sync"},

@@ -1606,6 +1606,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"aux.config_show", handle_aux_config_show},
     {"config.show", handle_config_show},
     {"config.get", handle_config_get},
+    {"config.deploy_env", handle_config_deploy_env},
     {"config.set", handle_config_set},
     {"pipeline.start", handle_pipeline_start},
     {"pipeline.status", handle_pipeline_status},
