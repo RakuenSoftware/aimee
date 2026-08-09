@@ -806,6 +806,7 @@ set(AGENT_SRCS
 set(GIT_SRCS
     ${AIMEE_SRC_DIR}/modules/git/mcp_git_query.c
     ${AIMEE_SRC_DIR}/modules/git/mcp_git_write.c
+    ${AIMEE_SRC_DIR}/modules/git/mcp_git_integrate.c
     ${AIMEE_SRC_DIR}/modules/git/mcp_git_branch.c
     ${AIMEE_SRC_DIR}/modules/git/mcp_git_pr.c
     ${AIMEE_SRC_DIR}/modules/git/git_verify.c

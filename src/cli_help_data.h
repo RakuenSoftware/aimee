@@ -221,7 +221,34 @@
      "  disable <id>     Disable a cron job (--all for rollback)\n"
      "  remove <id>      Remove a cron job\n"},
 
-    {"git", "Git helpers", CLIENT_TIER_ADMIN, 0,
+    {"git", "Git and GitHub operations (run on aimee-server)", CLIENT_TIER_ADMIN, 0,
+     "  Every command takes an optional primary word then key=value pairs:\n"
+     "    aimee git merge origin/testing      aimee git pr create title=\"...\"\n"
+     "    aimee git sync                      aimee git log count=5\n"
+     "\n"
+     "  status           Working tree status\n"
+     "  add <paths|-A>   Stage changes (-A includes new files)\n"
+     "  commit <msg>     Stage tracked changes and commit\n"
+     "  push [-f]        Push the session's branch\n"
+     "  pull / fetch     Bring refs down from a remote\n"
+     "  sync [base]      Make this branch current with its base (fetch + rebase)\n"
+     "  merge <ref>      Merge a ref in; conflicts are named and undone by default\n"
+     "  rebase <base>    Rebase onto a branch, same conflict handling\n"
+     "  cherry-pick <r>  Apply a commit here\n"
+     "  revert <ref>     Back a commit out\n"
+     "    ... any of the five above also take: continue | abort | skip\n"
+     "  switch <branch>  Move to a branch\n"
+     "  checkout <paths> Restore paths from a ref\n"
+     "  restore <paths>  Restore or unstage paths\n"
+     "  reset <ref>      soft/mixed/hard reset\n"
+     "  branch <action>  create/switch/list/delete/claim/orphan\n"
+     "  stash <action>   push/pop/apply/list/drop\n"
+     "  tag <action>     create/list/delete\n"
+     "  log / diff       History and diff summaries\n"
+     "  pr <action>      create/view/list/edit/checks/merge_status/merge/ready\n"
+     "                   (create writes its own title and body from your commits)\n"
+     "  issue list       Open issues\n"
+     "  clone <url>      Clone a repository\n"
      "  verify           Verify the current changes before merge\n"},
     {"clean", "Remove local aimee configuration and integrations", CLIENT_TIER_ADMIN, 0, NULL},
     {"mcp-serve", "MCP stdio bridge to aimee-server", CLIENT_TIER_ADMIN, 1, NULL},
