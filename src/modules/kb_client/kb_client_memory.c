@@ -1201,11 +1201,24 @@ int kb_client_memory_load_eval_corpus(memory_t *out, int max, char *label_out, s
 
 int kb_client_memory_get(int64_t id, memory_t *out)
 {
+   return kb_client_memory_get_as_of(id, NULL, out, NULL);
+}
+
+int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out, kb_valid_at_t *verdict)
+{
+   if (verdict)
+      *verdict = KB_VALID_AT_UNASKED;
    if (!out)
       return -1;
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddNumberToObject(req, "id", (double)id);
+   /* Only sent when asked. aimee-kb emits as_of/valid_at exactly when it
+    * receives a non-empty as_of, so an empty one here would be indistinguishable
+    * from not asking -- and this omission is what left `memory get --as-of`
+    * marshalling the flag correctly and then dropping it on this hop. */
+   if (as_of && as_of[0])
+      cJSON_AddStringToObject(req, "as_of", as_of);
    char *json = kb_v1_action_request("memory.get", req);
    if (!json)
       return -1;
@@ -1230,6 +1243,16 @@ int kb_client_memory_get(int64_t id, memory_t *out)
       return -1;
    }
    kbc_memory_row_from_json(mem_j, out);
+   /* aimee-kb answers with a bool, or the string "unknown" when it could not
+    * tell. A missing key means it was not asked. */
+   if (verdict)
+   {
+      cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, "valid_at");
+      if (cJSON_IsString(v))
+         *verdict = KB_VALID_AT_UNKNOWN;
+      else if (cJSON_IsBool(v))
+         *verdict = cJSON_IsTrue(v) ? KB_VALID_AT_YES : KB_VALID_AT_NO;
+   }
    cJSON_Delete(resp);
    return 0;
 }

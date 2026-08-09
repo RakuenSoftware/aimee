@@ -780,6 +780,28 @@ int kb_client_memory_explain_match(const char *query, int64_t memory_id, memory_
  * 1 for a valid missing row, or -1 when the service/result is unavailable. */
 int kb_client_memory_get(int64_t id, memory_t *out);
 
+/* The EVENT-time verdict for an `as_of` query, kept as a tri-state because the
+ * three answers are genuinely different. UNKNOWN is the service saying "I could
+ * not tell"; folding it into NO is how a bitemporal query lies. UNASKED is the
+ * ordinary no-as_of fetch, which must emit no verdict at all rather than a
+ * default one. */
+typedef enum
+{
+   KB_VALID_AT_UNASKED = 0,
+   KB_VALID_AT_YES,
+   KB_VALID_AT_NO,
+   KB_VALID_AT_UNKNOWN
+} kb_valid_at_t;
+
+/* As-of variant of kb_client_memory_get: forwards `as_of` to aimee-kb, which
+ * owns the valid_from/valid_until interval, and hands back its verdict. The
+ * plain entry point above cannot express this -- memory_t has no field for it
+ * (the valid_at in memory.h belongs to memory_relation_t, a different struct),
+ * so a caller that wants the time answer has to receive it separately.
+ * `as_of` NULL or empty asks nothing and leaves *verdict at UNASKED. */
+int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out,
+                               kb_valid_at_t *verdict);
+
 /* Insert a memory row via aimee-kb (the DB2 owner).  The full
  * write-side gate pipeline runs inside aimee-kb.  Returns 0 on
  * success (|out| filled if non-NULL) or -1 if kb is unreachable or

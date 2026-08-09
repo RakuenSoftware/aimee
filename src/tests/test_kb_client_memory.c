@@ -238,6 +238,86 @@ static void test_explicit_scope_overrides_ambient_context(void)
    printf("  PASS: test_explicit_scope_overrides_ambient_context\n");
 }
 
+/* `memory get --as-of` was marshalled by the client, accepted by aimee-kb, and
+ * lost in between: kb_client_memory_get sent a request carrying nothing but the
+ * id. Every test around it passed anyway, because each end was checked against a
+ * payload written by hand to contain the field -- the CLI marshaller was asserted
+ * to emit as_of, the printer was fed a synthetic reply that already had valid_at,
+ * and the DB2 primitive was called directly. Three green pieces that never
+ * touched each other.
+ *
+ * So this asserts the SERIALIZED REQUEST BODY, which is the thing that was
+ * actually empty. A test that only checked the return value would pass against
+ * the broken version. */
+static char last_request_body[1024];
+static const char *as_of_reply = NULL;
+
+static int as_of_post_handler(const char *url, const char *auth_header, const char *body,
+                              char **response_buf, int timeout_ms, const char *extra_headers)
+{
+   (void)url;
+   (void)auth_header;
+   (void)timeout_ms;
+   (void)extra_headers;
+   snprintf(last_request_body, sizeof(last_request_body), "%s", body ? body : "");
+   if (response_buf)
+      *response_buf = strdup(as_of_reply);
+   return 200;
+}
+
+static void test_as_of_reaches_the_kb_and_its_verdict_comes_back(void)
+{
+   memory_t m;
+   kb_valid_at_t verdict;
+
+   mock_agent_http_set_post_handler(as_of_post_handler);
+   as_of_reply = "{\"status\":\"ok\",\"as_of\":\"2026-06-12 00:00:00\",\"valid_at\":false,"
+                 "\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"}}";
+
+   /* The field must be ON THE WIRE. This is the assertion that fails against the
+    * bug: the old request body was {"id":42} and nothing else. */
+   last_request_body[0] = '\0';
+   assert(kb_client_memory_get_as_of(42, "2026-06-12 00:00:00", &m, &verdict) == 0);
+   assert(strstr(last_request_body, "\"as_of\"") != NULL);
+   assert(strstr(last_request_body, "2026-06-12 00:00:00") != NULL);
+   assert(verdict == KB_VALID_AT_NO);
+
+   /* "unknown" must survive as a third answer. Folding it into NO would report
+    * "not in force" for a row the service could not judge. */
+   as_of_reply = "{\"status\":\"ok\",\"as_of\":\"2026-06-12 00:00:00\",\"valid_at\":\"unknown\","
+                 "\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"}}";
+   assert(kb_client_memory_get_as_of(42, "2026-06-12 00:00:00", &m, &verdict) == 0);
+   assert(verdict == KB_VALID_AT_UNKNOWN);
+
+   as_of_reply = "{\"status\":\"ok\",\"as_of\":\"2026-06-12 00:00:00\",\"valid_at\":true,"
+                 "\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"}}";
+   assert(kb_client_memory_get_as_of(42, "2026-06-12 00:00:00", &m, &verdict) == 0);
+   assert(verdict == KB_VALID_AT_YES);
+
+   /* Not asking must send no as_of at all: aimee-kb emits the verdict exactly
+    * when it receives a non-empty as_of, so an empty string here would be
+    * indistinguishable from asking. */
+   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"}}";
+   last_request_body[0] = '\0';
+   assert(kb_client_memory_get_as_of(42, NULL, &m, &verdict) == 0);
+   assert(strstr(last_request_body, "as_of") == NULL);
+   assert(verdict == KB_VALID_AT_UNASKED);
+
+   last_request_body[0] = '\0';
+   assert(kb_client_memory_get_as_of(42, "", &m, &verdict) == 0);
+   assert(strstr(last_request_body, "as_of") == NULL);
+   assert(verdict == KB_VALID_AT_UNASKED);
+
+   /* The plain entry point keeps its six existing callers' behaviour: no as_of
+    * on the wire, and it must still compile against a NULL verdict. */
+   last_request_body[0] = '\0';
+   assert(kb_client_memory_get(42, &m) == 0);
+   assert(strstr(last_request_body, "as_of") == NULL);
+
+   mock_agent_http_reset();
+   printf("  PASS: test_as_of_reaches_the_kb_and_its_verdict_comes_back\n");
+}
+
 int main(void)
 {
    /* A configured kb URL routes kb_client_v1_post_json through agent_http_post
@@ -249,6 +329,7 @@ int main(void)
    test_single_record_miss_is_not_dependency_failure();
    test_ordered_readers_propagate_active_project_context();
    test_explicit_scope_overrides_ambient_context();
+   test_as_of_reaches_the_kb_and_its_verdict_comes_back();
 
    unsetenv("AIMEE_KB_API_URL");
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
