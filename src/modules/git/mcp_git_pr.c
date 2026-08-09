@@ -34,6 +34,125 @@ static cJSON *mcp_error(const char *fmt, const char *detail)
    return mcp_text(buf);
 }
 
+/* Write a PR title and body from the commits this branch has that `base` does
+ * not. Returns 0, or -1 when the branch has no such commits (nothing to open).
+ *
+ * Deterministic on purpose — no model call. The commit subjects ARE the summary,
+ * so a title the caller would have written costs a turn to produce and says the
+ * same thing. One commit lends its subject verbatim (and its body, which is
+ * usually the rationale worth reading); several get the shared conventional-commit
+ * prefix where they agree, and the body lists them with the diffstat. */
+static int pr_derive_from_commits(const char *base, char *title, size_t title_len, char *body,
+                                  size_t body_len)
+{
+   title[0] = '\0';
+   body[0] = '\0';
+
+   /* Prefer the remote's copy of the base: a stale local base would attribute
+    * commits to this branch that are already merged. */
+   char *esc_base = shell_escape(base);
+   char range[512];
+   int rc = 0;
+   snprintf(range, sizeof(range), "git rev-parse --verify --quiet 'origin/%s' >/dev/null 2>&1",
+            esc_base);
+   int have_remote_base = 0;
+   {
+      char *probe = mcp_git_run(range, &rc);
+      free(probe);
+      have_remote_base = (rc == 0);
+   }
+   char base_ref[600];
+   if (have_remote_base && strncmp(base, "origin/", 7) != 0)
+      snprintf(base_ref, sizeof(base_ref), "origin/%s", esc_base);
+   else
+      snprintf(base_ref, sizeof(base_ref), "%s", esc_base);
+   free(esc_base);
+
+   char cmd[1024];
+   snprintf(cmd, sizeof(cmd), "git log --reverse --format='%%s' '%s'..HEAD 2>/dev/null", base_ref);
+   char *subjects = mcp_git_run(cmd, &rc);
+   if (rc != 0 || !subjects || !subjects[0])
+   {
+      free(subjects);
+      return -1;
+   }
+
+   /* Count and collect. */
+   int n = 0;
+   char first[512] = "";
+   int bpos = 0;
+   char *line = subjects;
+   while (line && *line)
+   {
+      char *nl = strchr(line, '\n');
+      if (nl)
+         *nl = '\0';
+      if (*line)
+      {
+         n++;
+         if (n == 1)
+            snprintf(first, sizeof(first), "%s", line);
+         bpos = str_appendf(body, bpos, (int)body_len, "- %s\n", line);
+      }
+      line = nl ? nl + 1 : NULL;
+   }
+   free(subjects);
+   if (n == 0)
+      return -1;
+
+   if (n == 1)
+   {
+      /* One commit: its subject is the title, and its own body is the rationale. */
+      snprintf(title, title_len, "%s", first);
+      snprintf(cmd, sizeof(cmd), "git log -1 --format='%%b' HEAD 2>/dev/null");
+      char *msg_body = mcp_git_run(cmd, &rc);
+      body[0] = '\0';
+      if (rc == 0 && msg_body && msg_body[0])
+         snprintf(body, body_len, "%s", msg_body);
+      free(msg_body);
+      bpos = (int)strlen(body);
+   }
+   else
+   {
+      /* Several: keep the conventional-commit type when every subject agrees on
+       * one, so the PR title reads like the commits it contains. */
+      char prefix[64] = "";
+      const char *colon = strchr(first, ':');
+      if (colon && colon - first < (long)sizeof(prefix) - 1)
+      {
+         size_t plen = (size_t)(colon - first);
+         memcpy(prefix, first, plen);
+         prefix[plen] = '\0';
+         /* Only a type/scope prefix, not any sentence with a colon in it. */
+         for (char *p = prefix; *p; p++)
+            if (!islower((unsigned char)*p) && *p != '(' && *p != ')' && *p != '-' && *p != '/' &&
+                *p != '_')
+            {
+               prefix[0] = '\0';
+               break;
+            }
+      }
+      char branch[256] = "";
+      get_current_branch(branch, sizeof(branch));
+      const char *topic = branch;
+      const char *slash = strrchr(branch, '/');
+      if (slash && slash[1])
+         topic = slash + 1;
+      if (prefix[0])
+         snprintf(title, title_len, "%s: %s (%d commits)", prefix, topic, n);
+      else
+         snprintf(title, title_len, "%s (%d commits)", topic, n);
+   }
+
+   /* The diffstat is the one thing the subjects do not say: how big this is. */
+   snprintf(cmd, sizeof(cmd), "git diff --stat '%s'...HEAD 2>/dev/null", base_ref);
+   char *stat = mcp_git_run(cmd, &rc);
+   if (rc == 0 && stat && stat[0])
+      str_appendf(body, bpos, (int)body_len, "\n%s", stat);
+   free(stat);
+   return 0;
+}
+
 static int get_origin_repo_slug(char *buf, size_t len)
 {
    if (!buf || len == 0)
@@ -554,15 +673,40 @@ cJSON *handle_git_pr(cJSON *args)
       cJSON *jbody = cJSON_GetObjectItemCaseSensitive(args, "body");
       cJSON *jbase = cJSON_GetObjectItemCaseSensitive(args, "base");
 
+      const char *base = cJSON_IsString(jbase) ? jbase->valuestring : "main";
+
+      /* Title and body are OPTIONAL: the branch's own commits already say what the
+       * change is, so aimee derives them rather than making the caller spend a
+       * model turn writing prose it can read off the history. An explicit title
+       * always wins. */
+      char derived_title[512] = "", derived_body[8192] = "";
       if (!cJSON_IsString(jtitle) || !jtitle->valuestring[0])
-         return mcp_text("error: 'title' parameter is required for create");
+      {
+         if (pr_derive_from_commits(base, derived_title, sizeof(derived_title), derived_body,
+                                    sizeof(derived_body)) != 0)
+            return mcp_text("error: this branch has no commits that are not already on the base, "
+                            "so there is nothing to open a PR for (and no title to derive). Commit "
+                            "your work first, or pass 'title' explicitly.");
+         if (jtitle)
+            cJSON_ReplaceItemInObject(args, "title", cJSON_CreateString(derived_title));
+         else
+            cJSON_AddStringToObject(args, "title", derived_title);
+         jtitle = cJSON_GetObjectItemCaseSensitive(args, "title");
+
+         if (!cJSON_IsString(jbody) || !jbody->valuestring[0])
+         {
+            if (jbody)
+               cJSON_ReplaceItemInObject(args, "body", cJSON_CreateString(derived_body));
+            else
+               cJSON_AddStringToObject(args, "body", derived_body);
+            jbody = cJSON_GetObjectItemCaseSensitive(args, "body");
+         }
+      }
 
       /* Standing directive: no AI attribution in PR bodies (in-place strip is
        * shrink-only, so the cJSON-owned buffer is safe). */
       if (cJSON_IsString(jbody))
          strip_ai_attribution(jbody->valuestring);
-
-      const char *base = cJSON_IsString(jbase) ? jbase->valuestring : "main";
 
       /* Resolve the repository through mcp_git_run, the SAME runner every other git
        * command here goes through, and hand the slug to the API. The API's

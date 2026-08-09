@@ -27,13 +27,13 @@ projects, forge credentials/API, OAuth device flows, and SSH-agent setup. The ap
 is `memory.repository-record.ingest.v1`: Git is submit-only, while [memory](memory.md) retains schema,
 redaction acceptance, persistence, embedding, reranking, and code intelligence.
 
-The descriptor declares this module's twenty-six sources, eighteen module-root headers, fourteen
+The descriptor declares this module's twenty-seven sources, eighteen module-root headers, fourteen
 direct tests, and this document; it sets `ownership_complete: true`. All eighteen headers are
 declared as `private_headers` because they live at the module root rather than under
 `src/modules/git/include/aimee/git/`, the layout the header-layout checker treats as private; sixteen
 pair with a source, and two have no paired source: `git_verify_internal.h` (the verify-family seam)
-and `mcp_git.h` (the shared MCP-git header). Make compiles all twenty-six sources; CMake compiles the
-twelve the thin `aimee` client reaches (the eight `git_verify_*` sources and the four `mcp_git_*`
+and `mcp_git.h` (the shared MCP-git header). Make compiles all twenty-seven sources; CMake compiles the
+thirteen the thin `aimee` client reaches (the eight `git_verify_*` sources and the five `mcp_git_*`
 tools) and omits the fourteen credential, OAuth, ops, forge-vault, host, org-repos, and PR-API sources
 that are server/kb-side, the same intentional thin-client boundary recorded for gateway, learning,
 workspace, vault, and config. This descriptor's `ownership_complete` latch is independent of the
@@ -82,6 +82,57 @@ Surfaces include native/MCP `git_status`, diff, log, branch, commit, push, pull,
 reset, stash, tag, issue, PR, and `aimee git verify` operations plus project/forge credential flows.
 Protocol and tools modules expose these operations, but Git owns their repository semantics, credential
 containment, verification gates, and mutation results.
+
+### History integration: merge, rebase, sync, cherry_pick, revert
+
+`src/modules/git/mcp_git_integrate.c` owns the operations that bring one line of history into another.
+They are one operation with five names — each can stop mid-flight on a conflict, each leaves a state that
+must be continued or abandoned, each commits and so needs an identity — so they share one driver and
+differ only by a row in `OPS`.
+
+They are modeled, not passed through, because the caller states the intent and aimee does the mechanics:
+
+- a remote-looking ref is **fetched first**, so `merge origin/main` cannot merge a stale copy;
+- the **editor is disabled** (`core.editor`/`sequence.editor`), because a blocked editor is
+  indistinguishable from a hang;
+- a **dirty tree is refused up front**, since a conflict in one cannot be cleanly undone;
+- a conflict is reported as **the list of conflicted files**, and by default the operation is **aborted**,
+  so the caller is never handed a half-applied tree it must know how to clean up. `abort_on_conflict=false`
+  opts into resolving in place, then `action=continue` (which refuses while markers remain) or
+  `action=abort`;
+- a continuation **commits with the vaulted operator identity**, via the same `mcp_git_identity_flags`
+  `git_commit` uses — otherwise a conflict resolution would produce an authorless merge commit;
+- an operation already in progress is named, with the way out, instead of letting a second one start on
+  top of it;
+- the result says **what changed** (`pre..post`, commit count, diffstat) rather than echoing git's prose.
+
+`command=sync` is the whole "make this branch current with the branch it will merge into" errand in one
+call: resolve the base (given, else origin's default branch, qualified to the remote's copy), fetch it,
+rebase (default; `mode=merge`) it in, and report the gap it closed. Rebase is the default so a PR branch
+reviews as the work alone.
+
+Writing to `main`/`master` is refused here as everywhere else, so integrating into the default branch
+remains `command=pr action=merge`.
+
+### Staging and ref movement
+
+`command=add` (`files`, or `all` to include new files) is the staging `git_commit` cannot reach — it
+stages tracked changes or the paths it was handed, so a new file had no route. Sensitive paths are
+dropped, and for `all` the screen runs against the resulting **index** rather than the caller's argument
+list, so a pattern-based add cannot slip a `.env` past `command=commit`.
+
+`command=switch` and `command=checkout` are routing, not second implementations: `switch` is
+`branch action=switch` (keeping the worktree lock and ownership registration in one place), and
+`checkout` is `restore` when `files` is given and `switch` otherwise.
+
+### PR title and body are derived
+
+`command=pr action=create` no longer requires `title`. When it is omitted, `pr_derive_from_commits`
+writes both from the commits the branch has that the base does not: a single commit lends its subject and
+its message body verbatim; several keep the conventional-commit prefix they agree on and get a bulleted
+list plus the diffstat. Deterministic, no model call — the commit subjects already are the summary, so
+asking the caller to write one costs a turn to say the same thing. An explicit `title` always wins, and a
+branch with no commits ahead of base is told exactly that.
 
 ## Data and migrations
 

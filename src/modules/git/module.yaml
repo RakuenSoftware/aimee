@@ -38,6 +38,7 @@
     "src/modules/git/git_verify_state.c",
     "src/modules/git/git_verify_step.c",
     "src/modules/git/mcp_git_branch.c",
+    "src/modules/git/mcp_git_integrate.c",
     "src/modules/git/mcp_git_pr.c",
     "src/modules/git/mcp_git_query.c",
     "src/modules/git/mcp_git_write.c",
