@@ -802,7 +802,11 @@ else
 UNIT_TEST_P1_PREREQ := p1-rls-gate-check
 endif
 
-unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(UNIT_TEST_TARGETS)
+# The verify ledger lives in the git module now, so a suite that exercises the
+# verify gate brings the real module up on a real bus
+# (tests/support/git_module_fixture.c). Build it here and name it in the
+# environment, so no suite has to grow an argv contract to find it.
+unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(OBJDIR)/aimee-module $(UNIT_TEST_TARGETS)
 	@if ! printf '%s:%s\n' "$(UNIT_TEST_SHARD_COUNT)" "$(UNIT_TEST_SHARD_INDEX)" | \
 	     awk -F: '$$1 ~ /^[0-9]+$$/ && $$2 ~ /^[0-9]+$$/ && $$1 > 0 && $$2 < $$1 { ok=1 } END { exit !ok }'; then \
 	  echo "invalid unit-test shard $(UNIT_TEST_SHARD_INDEX)/$(UNIT_TEST_SHARD_COUNT)" >&2; \
@@ -846,6 +850,7 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(UNIT_TEST_TARGETS)
 	  AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET; \
 	trap 'rm -rf "$$th"' EXIT; \
 	export AIMEE_TEST_FAILURE_DIR="$$th"; \
+	export AIMEE_TEST_MODULE_BIN="$(CURDIR)/$(OBJDIR)/aimee-module"; \
 	jobs="$(TEST_RUN_JOBS)"; \
 	if [ "$$jobs" -le 1 ]; then \
 	  for t in $(UNIT_TEST_TARGETS); do \
@@ -1322,7 +1327,7 @@ $(TESTPREFIX)/unit-test-cli-server-compat: $(OBJDIR)/tests/test_cli_server_compa
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 
-$(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/tests/test_guardrails.o \
+$(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/tests/test_guardrails.o $(OBJDIR)/tests/support/git_module_fixture.o \
                             $(OBJDIR)/server/obs_bus_adapter.o \
                             $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -2853,7 +2858,7 @@ $(TESTPREFIX)/unit-test-cmd-core: $(OBJDIR)/tests/test_cmd_core.o $(TEST_DATA_OB
 $(TESTPREFIX)/unit-test-client-integrations: $(OBJDIR)/tests/test_client_integrations.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-mcp-git: $(OBJDIR)/tests/test_mcp_git.o $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
+$(TESTPREFIX)/unit-test-mcp-git: $(OBJDIR)/tests/test_mcp_git.o $(OBJDIR)/tests/support/git_module_fixture.o $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
                         $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_pr_ci_grade.o $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o \
                         $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o \
                         $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
@@ -3210,6 +3215,41 @@ $(TESTPREFIX)/unit-test-bus-memory-recall: $(OBJDIR)/tests/test_bus_memory_recal
 .PHONY: unit-test-bus-memory-recall
 unit-test-bus-memory-recall: $(TESTPREFIX)/unit-test-bus-memory-recall
 	$<
+
+# The verify ledger across the real bus, against the real Go module.
+#
+# git_verify_state.c is now a seam: it asks the git module rather than touching
+# the repository. Every other suite that links it uses module_bus_stub, whose
+# default is "no module attached" -- which proves the seam fails closed and
+# proves nothing about whether it is right. This target builds the Go multicall
+# binary, hosts the daemon's authenticated module endpoint, and drives the
+# ordinary C entry points against a real attached process.
+#
+# It needs Go. A missing toolchain fails the target rather than skipping it:
+# skipping would silently retire the only correctness coverage the ledger has.
+$(OBJDIR)/tests/test_git_verify_state_bus.o: C_FLAGS += -Icore/event_bus/include
+
+$(OBJDIR)/aimee-module: $(wildcard ../server-go/modules/git/*.go) $(wildcard ../server-go/cmd/aimee-module/*.go)
+	@test -n "$(GO)" || { echo "aimee-module: ERROR go is required for the bus fixture"; exit 1; }
+	@mkdir -p $(@D)
+	cd ../server-go && CGO_ENABLED=0 $(GO) build -o "$(CURDIR)/$@" ./cmd/aimee-module
+
+$(TESTPREFIX)/unit-test-git-verify-state-bus: $(OBJDIR)/tests/test_git_verify_state_bus.o \
+                                           $(OBJDIR)/modules/git/git_verify_state.o \
+                                           $(OBJDIR)/modules/git/git_verify.o \
+                                           $(OBJDIR)/modules/git/git_verify_config.o \
+                                           $(OBJDIR)/modules/git/git_verify_jobs.o \
+                                           $(OBJDIR)/modules/git/git_verify_hook.o \
+                                           $(OBJDIR)/modules/git/git_verify_ops.o \
+                                           $(OBJDIR)/modules/git/git_verify_select.o \
+                                           $(OBJDIR)/modules/git/git_verify_step.o \
+                                           $(OBJDIR)/module_json_call.o $(OBJDIR)/cJSON.o \
+                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-git-verify-state-bus
+unit-test-git-verify-state-bus: $(TESTPREFIX)/unit-test-git-verify-state-bus $(OBJDIR)/aimee-module
+	$< $(OBJDIR)/aimee-module
 
 # Real mutating memory op over the bus (upsert insert + update, verified by a
 # direct read-back of the store). Same DB1 path + bus objects as the recall test.
@@ -3585,6 +3625,7 @@ unit-test-module-protocol: $(TESTPREFIX)/unit-test-module-protocol
 # force every bus test to relink.
 BUS_TEST_TARGETS := $(addprefix $(TESTPREFIX)/, \
    unit-test-bus-endpoint unit-test-bus-runtime unit-test-bus-memory-recall \
+   unit-test-git-verify-state-bus \
    unit-test-bus-memory-upsert unit-test-bus-config-autonomy \
    unit-test-bus-audit-durability unit-test-bus-audit-replay \
    unit-test-bus-audit-retention unit-test-bus-audit-replay-tool \
