@@ -1479,7 +1479,7 @@
         },
         {
           "path": "src/modules/git/include/aimee/git/module_api.h",
-          "sha256": "e049765d6007235c1b0fedf2e34624af0c143eaa75f500e219039f508b35d36b"
+          "sha256": "4d6a0ae542328f07c15e47e3d17759a04a55066f0fc186014bbf2af82c7cfb78"
         },
         {
           "path": "src/modules/governance/include/aimee/governance/module_api.h",
@@ -1604,7 +1604,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "771926eab733db56faff215a30b51ae53f5e0d5a8e8de240032bf9fc1c206146",
+      "sha256": "9f510d3e8395aff8b585894ac853e9ea35f108b8673b74488eb36c90294d637a",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
