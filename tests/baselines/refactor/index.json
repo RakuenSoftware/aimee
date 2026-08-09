@@ -583,7 +583,7 @@
         },
         {
           "path": "src/headers/http_uds_client.h",
-          "sha256": "a0b916e5069773f311b3aa6de19954e62836bb71fd020eed0248ba4d2a1db842"
+          "sha256": "4966cc7564804882b82899f3420baa956db365c9db9197a640cd2a0d873bc308"
         },
         {
           "path": "src/headers/hud.h",
@@ -1604,7 +1604,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "771926eab733db56faff215a30b51ae53f5e0d5a8e8de240032bf9fc1c206146",
+      "sha256": "43e2a55038bec36029a7a63222c6d9c713f3006d0a9696e0a7b1085826b3bdc0",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
