@@ -7,6 +7,7 @@
 #include "ingress_preinject.h"
 #include <aimee/learning/learning.h>
 #include "response_dedup.h"
+#include "modules/memory/memory_fact_gate.h"
 #include "modules/workspace/workspace_scope.h"
 #include <aimee/audit/obs_bus.h>
 #include <aimee/core/event_bus/module_protocol.h>
@@ -75,6 +76,31 @@ static int memory_confidence(double score, const char **confidence)
    *confidence = result == AIMEE_MEMORY_CONFIDENCE_HIGH     ? "high"
                  : result == AIMEE_MEMORY_CONFIDENCE_MEDIUM ? "medium"
                                                             : "low";
+   return 0;
+}
+
+static int memory_fact_gate(memory_node_kind_t head_kind, const char *rel_type,
+                            memory_node_kind_t tail_kind, int *verdict)
+{
+   uint8_t request[AIMEE_MEMORY_GATE_REQUEST_LEN], response[AIMEE_MEMORY_GATE_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   aimee_memory_fact_verdict_t result;
+   if (!verdict)
+      return -1;
+   if (aimee_memory_gate_request_encode((uint32_t)head_kind, rel_type, (uint32_t)tail_kind, request,
+                                        sizeof(request)) != 0)
+   {
+      /* Only an over-long label can fail encoding here. That is a terminal
+       * answer, not a transport failure: BADARG so the caller drops it, where
+       * DEFER would ask it to retry a label that will never get shorter. */
+      *verdict = AIMEE_MEMORY_FACT_BADARG;
+      return 0;
+   }
+   if (call_module(AIMEE_MEMORY_EVENT_WRITE, AIMEE_MEMORY_STAGE_WRITE, request, sizeof(request),
+                   response, sizeof(response), &response_len) != 0 ||
+       aimee_memory_gate_response_decode(response, response_len, &result) != 0)
+      return -1;
+   *verdict = (int)result;
    return 0;
 }
 
@@ -184,6 +210,7 @@ static int response_key(const response_dedup_key_inputs_t *in, char *out, size_t
 void server_module_stage_adapters_configure(void)
 {
    ingress_preinject_register_confidence_provider(memory_confidence);
+   memory_fact_gate_register_checker(memory_fact_gate);
    learning_router_register_signal_classifier(learning_classify);
    delegate_role_register_canonicalizer(delegate_canonicalize);
    agent_tools_register_classifier(tool_classify);

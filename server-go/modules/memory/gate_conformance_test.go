@@ -17,16 +17,25 @@ import (
 //
 // Regenerate by linking rel_types.c and memory_fact_gate.c against a dumper and
 // re-running it, never by editing the file.
-func TestGateMatchesTheCGate(t *testing.T) {
+// gateCase is one row of the matrix: the triple the C gate was asked about and
+// the verdict it gave.
+type gateCase struct {
+	head    NodeKind
+	relType string
+	tail    NodeKind
+	want    FactVerdict
+}
+
+func gateMatrixCases(t *testing.T) []gateCase {
+	t.Helper()
 	file, err := os.Open("testdata/gate_matrix.tsv")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer file.Close()
 
+	var cases []gateCase
 	scanner := bufio.NewScanner(file)
-	checked := 0
-	seen := map[FactVerdict]int{}
 	for scanner.Scan() {
 		line := scanner.Text()
 		fields := strings.Split(line, "\t")
@@ -37,7 +46,6 @@ func TestGateMatchesTheCGate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("bad head kind in %q: %v", line, err)
 		}
-		relType := fields[1]
 		tail, err := strconv.Atoi(fields[2])
 		if err != nil {
 			t.Fatalf("bad tail kind in %q: %v", line, err)
@@ -46,17 +54,25 @@ func TestGateMatchesTheCGate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("bad verdict in %q: %v", line, err)
 		}
-		want := FactVerdict(wantCode)
-
-		got := GateCheck(NodeKind(head), relType, NodeKind(tail))
-		if got != want {
-			t.Fatalf("GateCheck(%d, %q, %d) = %d, C gate = %d", head, relType, tail, got, want)
-		}
-		seen[want]++
-		checked++
+		cases = append(cases, gateCase{NodeKind(head), fields[1], NodeKind(tail), FactVerdict(wantCode)})
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
+	}
+	return cases
+}
+
+func TestGateMatchesTheCGate(t *testing.T) {
+	checked := 0
+	seen := map[FactVerdict]int{}
+	for _, test := range gateMatrixCases(t) {
+		got := GateCheck(test.head, test.relType, test.tail)
+		if got != test.want {
+			t.Fatalf("GateCheck(%d, %q, %d) = %d, C gate = %d", test.head, test.relType, test.tail,
+				got, test.want)
+		}
+		seen[test.want]++
+		checked++
 	}
 
 	if checked == 0 {
