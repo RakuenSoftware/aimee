@@ -460,3 +460,98 @@ func TestRetrieveStageBatchHonorsCancellation(t *testing.T) {
 		t.Fatalf("expired invocation status = %d", status)
 	}
 }
+
+// scanRequest mirrors aimee_memory_scan_request_encode byte for byte.
+func scanRequest(text string) []byte {
+	request := make([]byte, scanRequestHeaderLen, scanRequestHeaderLen+len(text))
+	binary.LittleEndian.PutUint32(request[0:4], scanRequestMagic)
+	binary.LittleEndian.PutUint32(request[4:8], wireVersion)
+	binary.LittleEndian.PutUint32(request[8:12], uint32(len(text)))
+	return append(request, text...)
+}
+
+// The whole corpus crosses the wire, with both answers checked per turn: a
+// stage that swapped the two flags would agree on every turn where they happen
+// to coincide, and most turns in the corpus have a possessive.
+func TestExtractStageCarriesTheTurnScan(t *testing.T) {
+	retractions, possessives, neither := 0, 0, 0
+	for _, row := range fixtureRows(t, "testdata/extract_corpus.tsv") {
+		text := unescapeField(row[0])
+		wantRetraction := atoi(t, row[1], row)
+		wantHasAttr := atoi(t, row[2], row)
+		wantAttr := unescapeField(row[3])
+
+		response, status := Handle(bus.ModuleInvocation{StageID: StageExtractIndex},
+			scanRequest(text))
+		if status != bus.ModuleStatusOK || len(response) < scanResponseHeaderLen ||
+			binary.LittleEndian.Uint32(response[0:4]) != scanResponseMagic {
+			t.Fatalf("scan(%q) response = %x, status = %d", text, response, status)
+		}
+		gotRetraction := int(binary.LittleEndian.Uint32(response[4:8]))
+		gotHasAttr := int(binary.LittleEndian.Uint32(response[8:12]))
+		attrLen := int(binary.LittleEndian.Uint32(response[12:16]))
+		if len(response) != scanResponseHeaderLen+attrLen {
+			t.Fatalf("scan(%q) declares %d attr bytes in a %d-byte response", text, attrLen,
+				len(response))
+		}
+		gotAttr := string(response[scanResponseHeaderLen:])
+		if gotRetraction != wantRetraction || gotHasAttr != wantHasAttr || gotAttr != wantAttr {
+			t.Fatalf("scan(%q) = (%d, %d, %q) over the wire, C = (%d, %d, %q)", text,
+				gotRetraction, gotHasAttr, gotAttr, wantRetraction, wantHasAttr, wantAttr)
+		}
+		// The flag and the attribute have to agree, or the C decoder refuses.
+		if (gotHasAttr == 0) != (attrLen == 0) {
+			t.Fatalf("scan(%q) has_attr=%d with %d attr bytes", text, gotHasAttr, attrLen)
+		}
+		switch {
+		case wantRetraction == 1:
+			retractions++
+		case wantHasAttr == 1:
+			possessives++
+		default:
+			neither++
+		}
+	}
+	// A corpus that never retracted, or always did, would agree with a stage that
+	// ignored the text.
+	if retractions == 0 || possessives == 0 || neither == 0 {
+		t.Errorf("corpus is one-sided: retractions=%d possessive_only=%d neither=%d",
+			retractions, possessives, neither)
+	}
+}
+
+func TestExtractStageRejectsMalformedScans(t *testing.T) {
+	valid := scanRequest("forget my email")
+	if _, status := Handle(bus.ModuleInvocation{StageID: StageExtractIndex}, valid); status != bus.ModuleStatusOK {
+		t.Fatalf("valid scan status = %d", status)
+	}
+	malformed := map[string][]byte{
+		"wire version":    scanRequest("forget my email"),
+		"declared length": scanRequest("forget my email"),
+		"short header":    valid[:scanRequestHeaderLen-1],
+		"truncated body":  valid[:len(valid)-1],
+	}
+	binary.LittleEndian.PutUint32(malformed["wire version"][4:8], wireVersion+1)
+	binary.LittleEndian.PutUint32(malformed["declared length"][8:12], 999)
+	for name, request := range malformed {
+		if _, status := Handle(bus.ModuleInvocation{StageID: StageExtractIndex},
+			request); status != bus.ModuleStatusInvalidRequest {
+			t.Errorf("%s status = %d", name, status)
+		}
+	}
+	// An extract request and a scan request are the same shape but for the magic;
+	// each stage half must refuse the other's.
+	response, status := Handle(bus.ModuleInvocation{StageID: StageExtractIndex},
+		extractRequest("forget my email", 16))
+	if status != bus.ModuleStatusOK ||
+		binary.LittleEndian.Uint32(response[0:4]) != extractResponseMagic {
+		t.Errorf("extract request answered with %x, status = %d", response[:4], status)
+	}
+}
+
+func TestExtractStageScanHonorsCancellation(t *testing.T) {
+	invocation := bus.ModuleInvocation{StageID: StageExtractIndex, DeadlineNS: 1}
+	if _, status := Handle(invocation, scanRequest("forget my email")); status != bus.ModuleStatusCancelled {
+		t.Fatalf("expired invocation status = %d", status)
+	}
+}

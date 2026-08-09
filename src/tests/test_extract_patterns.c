@@ -307,6 +307,139 @@ static void test_extract_wire_layout(void)
    printf("  PASS: test_extract_wire_layout\n");
 }
 
+/* --- the turn-scan seam ---------------------------------------------------
+ * The §4 correction pre-scan asks both of its questions in one call. */
+
+static struct
+{
+   int calls;
+   int fail;
+   char text[256];
+} g_scan_state;
+
+static int recording_scanner(const char *text, memory_pattern_turn_t *out)
+{
+   g_scan_state.calls++;
+   snprintf(g_scan_state.text, sizeof(g_scan_state.text), "%s", text ? text : "");
+   if (g_scan_state.fail)
+      return -1;
+   /* Deliberately the opposite of the local scan on both counts. */
+   out->is_retraction = 1;
+   out->has_attr = 1;
+   snprintf(out->attr, sizeof(out->attr), "from_the_module");
+   return 0;
+}
+
+static void test_registered_turn_scanner_decides(void)
+{
+   memory_pattern_turn_t scan;
+
+   /* With nothing registered the scan is the two local functions. */
+   memory_extract_register_turn_scanner(NULL);
+   assert(memory_pattern_scan_turn("forget my email", &scan) == 0);
+   assert(scan.is_retraction == 1 && scan.has_attr == 1);
+   assert(strcmp(scan.attr, "email") == 0);
+   assert(memory_pattern_scan_turn("the weather is nice", &scan) == 0);
+   assert(scan.is_retraction == 0 && scan.has_attr == 0 && scan.attr[0] == '\0');
+
+   memset(&g_scan_state, 0, sizeof(g_scan_state));
+   memory_extract_register_turn_scanner(recording_scanner);
+   /* Text the local scan reads as neither a retraction nor a possessive. */
+   assert(memory_pattern_scan_turn("the weather is nice", &scan) == 0);
+   assert(g_scan_state.calls == 1);
+   assert(strcmp(g_scan_state.text, "the weather is nice") == 0);
+   assert(scan.is_retraction == 1 && scan.has_attr == 1);
+   assert(strcmp(scan.attr, "from_the_module") == 0);
+
+   /* Bad args never reach the module. */
+   assert(memory_pattern_scan_turn(NULL, &scan) == -1);
+   assert(memory_pattern_scan_turn("x", NULL) == -1);
+   assert(g_scan_state.calls == 1);
+
+   memory_extract_register_turn_scanner(NULL);
+   assert(memory_pattern_scan_turn("the weather is nice", &scan) == 0);
+   assert(scan.is_retraction == 0);
+   printf("  PASS: test_registered_turn_scanner_decides\n");
+}
+
+static void test_scan_turn_wire_layout(void)
+{
+   /* A failing scanner is reported, never guessed at: this drives a deletion. */
+   memory_pattern_turn_t scan;
+   memset(&g_scan_state, 0, sizeof(g_scan_state));
+   g_scan_state.fail = 1;
+   memory_extract_register_turn_scanner(recording_scanner);
+   assert(memory_pattern_scan_turn("forget my email", &scan) == -1);
+   assert(g_scan_state.calls == 1);
+   memory_extract_register_turn_scanner(NULL);
+
+   const char *turn = "forget my email";
+   uint8_t request[AIMEE_MEMORY_SCAN_REQUEST_HEADER_LEN + 32];
+   assert(aimee_memory_scan_request_size(turn) ==
+          AIMEE_MEMORY_SCAN_REQUEST_HEADER_LEN + strlen(turn));
+   assert(aimee_memory_scan_request_encode(turn, request, sizeof(request)) == 0);
+   assert(aimee_memory_get_u32(request) == AIMEE_MEMORY_SCAN_REQUEST_MAGIC);
+   assert(aimee_memory_get_u32(request + 4) == AIMEE_MEMORY_WIRE_VERSION);
+   assert(aimee_memory_get_u32(request + 8) == (uint32_t)strlen(turn));
+   assert(memcmp(request + 12, turn, strlen(turn)) == 0);
+   assert(aimee_memory_scan_request_encode(turn, request, 4) == -1);
+
+   uint8_t response[AIMEE_MEMORY_SCAN_RESPONSE_MAX];
+   int retraction = -1, has_attr = -1;
+   char attr[AIMEE_MEMORY_SCAN_ATTR_MAX];
+   aimee_memory_put_u32(response, AIMEE_MEMORY_SCAN_RESPONSE_MAGIC);
+   aimee_memory_put_u32(response + 4, 1);
+   aimee_memory_put_u32(response + 8, 1);
+   aimee_memory_put_u32(response + 12, 5);
+   memcpy(response + 16, "email", 5);
+   assert(aimee_memory_scan_response_decode(response, 21, &retraction, &has_attr, attr,
+                                            sizeof(attr)) == 0);
+   assert(retraction == 1 && has_attr == 1 && strcmp(attr, "email") == 0);
+
+   /* No possessive: no attribute, and the two must agree. */
+   aimee_memory_put_u32(response + 8, 0);
+   aimee_memory_put_u32(response + 12, 0);
+   assert(aimee_memory_scan_response_decode(response, 16, &retraction, &has_attr, attr,
+                                            sizeof(attr)) == 0);
+   assert(has_attr == 0 && attr[0] == '\0');
+   /* A flag without an attribute, and an attribute without the flag, are both a
+    * disagreement about what was found. */
+   aimee_memory_put_u32(response + 8, 1);
+   assert(aimee_memory_scan_response_decode(response, 16, &retraction, &has_attr, attr,
+                                            sizeof(attr)) == -1);
+   aimee_memory_put_u32(response + 8, 0);
+   aimee_memory_put_u32(response + 12, 5);
+   assert(aimee_memory_scan_response_decode(response, 21, &retraction, &has_attr, attr,
+                                            sizeof(attr)) == -1);
+
+   /* A truthy-looking 2 is a broken module, not a yes: this deletes. */
+   aimee_memory_put_u32(response + 4, 2);
+   aimee_memory_put_u32(response + 8, 1);
+   assert(aimee_memory_scan_response_decode(response, 21, &retraction, &has_attr, attr,
+                                            sizeof(attr)) == -1);
+   aimee_memory_put_u32(response + 4, 1);
+
+   /* An attribute that does not fit is refused, never shortened: a shortened
+    * attribute normalizes to a different relation and would retract that one. */
+   aimee_memory_put_u32(response + 12, AIMEE_MEMORY_SCAN_ATTR_MAX);
+   assert(aimee_memory_scan_response_decode(response,
+                                            16u + AIMEE_MEMORY_SCAN_ATTR_MAX, &retraction,
+                                            &has_attr, attr, sizeof(attr)) == -1);
+   aimee_memory_put_u32(response + 12, AIMEE_MEMORY_SCAN_ATTR_MAX - 1u);
+   memset(response + 16, 'a', AIMEE_MEMORY_SCAN_ATTR_MAX - 1u);
+   assert(aimee_memory_scan_response_decode(response, 16u + AIMEE_MEMORY_SCAN_ATTR_MAX - 1u,
+                                            &retraction, &has_attr, attr, sizeof(attr)) == 0);
+   assert(strlen(attr) == AIMEE_MEMORY_SCAN_ATTR_MAX - 1u);
+
+   /* Length disagreeing with the message, and a bad magic. */
+   assert(aimee_memory_scan_response_decode(response, 20, &retraction, &has_attr, attr,
+                                            sizeof(attr)) == -1);
+   aimee_memory_put_u32(response, AIMEE_MEMORY_SCAN_RESPONSE_MAGIC + 1);
+   assert(aimee_memory_scan_response_decode(response, 16u + AIMEE_MEMORY_SCAN_ATTR_MAX - 1u,
+                                            &retraction, &has_attr, attr, sizeof(attr)) == -1);
+   printf("  PASS: test_scan_turn_wire_layout\n");
+}
+
 int main(void)
 {
    test_classify();
@@ -316,6 +449,8 @@ int main(void)
    test_registered_extractor_decides();
    test_extractor_failure_is_not_no_facts();
    test_extract_wire_layout();
+   test_registered_turn_scanner_decides();
+   test_scan_turn_wire_layout();
    printf("extract_patterns: all tests passed\n");
    return 0;
 }

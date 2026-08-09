@@ -55,12 +55,14 @@ int db2_typed_fact_ingress(const char *query, char *facts_out, size_t facts_cap)
     * safely no-ops). This stays synchronous: it is a cheap Postgres write, no LLM.
     * Fact EXTRACTION is offline-only (the memory_facts drain runs pattern + LLM),
     * so we do NOT run db2_fact_ingest_text() on the turn hot path. */
-   if (memory_pattern_is_retraction(query))
-   {
-      char attr[128];
-      if (memory_pattern_possessive_attr(query, attr, sizeof(attr)))
-         (void)db2_fact_retract("user", attr, NULL, FACT_AUTHORITY_USER);
-   }
+   memory_pattern_turn_t scan;
+   if (memory_pattern_scan_turn(query, &scan) != 0)
+      /* No answer from the scanner. Do NOT retract: this path deletes, and
+       * leaving a fact the user asked to forget is recoverable (they can ask
+       * again) where deleting one they did not name is not. */
+      LOG_WARN("memory", "retraction scan gave no answer; not retracting this turn");
+   else if (scan.is_retraction && scan.has_attr)
+      (void)db2_fact_retract("user", scan.attr, NULL, FACT_AUTHORITY_USER);
 
    /* §7 read: the user's facts + facts about any entity named in the turn,
     * PII-gated, into the envelope. */

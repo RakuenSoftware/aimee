@@ -49,6 +49,11 @@ const (
 	piiRequestHeaderLen        = 12
 	piiResponseLen             = 8
 
+	scanRequestMagic      uint32 = 0x51525452
+	scanResponseMagic     uint32 = 0x53525452
+	scanRequestHeaderLen         = 12
+	scanResponseHeaderLen        = 16
+
 	sensRequestMagic      uint32 = 0x51525350
 	sensResponseMagic     uint32 = 0x53525350
 	sensRequestHeaderLen         = 12
@@ -67,11 +72,46 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	case StageWrite:
 		return handleWrite(invocation, request)
 	case StageExtractIndex:
+		if len(request) >= 4 && binary.LittleEndian.Uint32(request[0:4]) == scanRequestMagic {
+			return handleScanTurn(invocation, request)
+		}
 		return handleExtract(invocation, request)
 	case StageRetrieve:
 		return handleRetrieve(invocation, request)
 	}
 	return handleRerank(invocation, request)
+}
+
+// handleScanTurn answers both halves of the §4 correction pre-scan: whether the
+// turn retracts something, and which attribute it names. One call, because the
+// caller asks both about the same turn at the same moment.
+func handleScanTurn(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+	if len(request) < scanRequestHeaderLen ||
+		binary.LittleEndian.Uint32(request[0:4]) != scanRequestMagic ||
+		binary.LittleEndian.Uint32(request[4:8]) != wireVersion ||
+		int(binary.LittleEndian.Uint32(request[8:12])) != len(request)-scanRequestHeaderLen {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if invocation.Cancelled() {
+		return nil, bus.ModuleStatusCancelled
+	}
+	text := string(request[scanRequestHeaderLen:])
+	attr, hasAttr := PossessiveAttr(text)
+	if len(attr) >= attrMax {
+		// Unreachable: PossessiveAttr trims to attrMax. Refuse rather than emit a
+		// field the C decoder rejects, so the failure names the stage.
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	response := make([]byte, scanResponseHeaderLen, scanResponseHeaderLen+len(attr))
+	binary.LittleEndian.PutUint32(response[0:4], scanResponseMagic)
+	if IsRetraction(text) {
+		binary.LittleEndian.PutUint32(response[4:8], 1)
+	}
+	if hasAttr {
+		binary.LittleEndian.PutUint32(response[8:12], 1)
+	}
+	binary.LittleEndian.PutUint32(response[12:16], uint32(len(attr)))
+	return append(response, attr...), bus.ModuleStatusOK
 }
 
 // handleExtract runs the pattern-first extraction over a turn's text.

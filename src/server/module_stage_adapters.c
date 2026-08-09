@@ -155,6 +155,32 @@ static int memory_extract(const char *text, pattern_triple_t *out, int max, int 
    return rc;
 }
 
+_Static_assert(sizeof(((memory_pattern_turn_t *)0)->attr) == AIMEE_MEMORY_SCAN_ATTR_MAX,
+               "wire attribute capacity must match memory_pattern_turn_t");
+
+static int memory_scan_turn(const char *text, memory_pattern_turn_t *out)
+{
+   if (!text || !out)
+      return -1;
+   size_t request_len = aimee_memory_scan_request_size(text);
+   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+      return -1;
+   uint8_t *request = malloc(request_len);
+   uint8_t response[AIMEE_MEMORY_SCAN_RESPONSE_MAX];
+   uint32_t response_len = 0;
+   if (!request)
+      return -1;
+   int rc = aimee_memory_scan_request_encode(text, request, request_len) == 0 &&
+                    call_module(AIMEE_MEMORY_EVENT_EXTRACT_INDEX,
+                                AIMEE_MEMORY_STAGE_EXTRACT_INDEX, request, (uint32_t)request_len,
+                                response, sizeof(response), &response_len) == 0
+                ? aimee_memory_scan_response_decode(response, response_len, &out->is_retraction,
+                                                    &out->has_attr, out->attr, sizeof(out->attr))
+                : -1;
+   free(request);
+   return rc;
+}
+
 static int memory_pii_turn(const char *turn_text, int *requests_sensitive)
 {
    if (!turn_text || !requests_sensitive)
@@ -322,6 +348,7 @@ void server_module_stage_adapters_configure(void)
    ingress_preinject_register_confidence_provider(memory_confidence);
    memory_fact_gate_register_checker(memory_fact_gate);
    memory_extract_register_extractor(memory_extract);
+   memory_extract_register_turn_scanner(memory_scan_turn);
    memory_pii_register_turn_classifier(memory_pii_turn);
    memory_pii_register_sensitivity_batch(memory_pii_sensitivity);
    learning_router_register_signal_classifier(learning_classify);

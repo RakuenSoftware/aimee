@@ -269,6 +269,70 @@ static inline int aimee_memory_extract_response_decode(const uint8_t *in, size_t
    return 0;
 }
 
+/* Retraction scan (stage EXTRACT_INDEX, second shape). Answers both halves of
+ * the §4 correction pre-scan in one call, because its caller asks them together
+ * once per turn. Shares the stage with extraction, told apart by its magic. */
+#define AIMEE_MEMORY_SCAN_REQUEST_MAGIC  0x51525452u /* "RTRQ" */
+#define AIMEE_MEMORY_SCAN_RESPONSE_MAGIC 0x53525452u /* "RTRS" */
+#define AIMEE_MEMORY_SCAN_REQUEST_HEADER_LEN  12u
+#define AIMEE_MEMORY_SCAN_RESPONSE_HEADER_LEN 16u
+/* Mirrors the attribute buffer the production caller uses; checked against
+ * memory_pattern_turn_t in the adapter, the one place that sees both. */
+#define AIMEE_MEMORY_SCAN_ATTR_MAX 128u
+#define AIMEE_MEMORY_SCAN_RESPONSE_MAX                                                             \
+   (AIMEE_MEMORY_SCAN_RESPONSE_HEADER_LEN + AIMEE_MEMORY_SCAN_ATTR_MAX - 1u)
+
+static inline size_t aimee_memory_scan_request_size(const char *text)
+{
+   size_t len = text ? strlen(text) : 0;
+   if (len > UINT32_MAX - AIMEE_MEMORY_SCAN_REQUEST_HEADER_LEN)
+      return 0;
+   return AIMEE_MEMORY_SCAN_REQUEST_HEADER_LEN + len;
+}
+
+static inline int aimee_memory_scan_request_encode(const char *text, uint8_t *out, size_t cap)
+{
+   size_t needed = aimee_memory_scan_request_size(text);
+   if (!needed || !out || cap < needed)
+      return -1;
+   size_t len = needed - AIMEE_MEMORY_SCAN_REQUEST_HEADER_LEN;
+   aimee_memory_put_u32(out, AIMEE_MEMORY_SCAN_REQUEST_MAGIC);
+   aimee_memory_put_u32(out + 4, AIMEE_MEMORY_WIRE_VERSION);
+   aimee_memory_put_u32(out + 8, (uint32_t)len);
+   if (len)
+      memcpy(out + 12, text, len);
+   return 0;
+}
+
+/* Decodes the scan. The flags are 0 or 1 and nothing else -- this drives a
+ * deletion, so a truthy-looking 2 is a broken module, not a yes. An attribute
+ * that does not fit is refused rather than shortened, because a shortened
+ * attribute normalizes to a different relation and would retract that one. */
+static inline int aimee_memory_scan_response_decode(const uint8_t *in, size_t len,
+                                                    int *is_retraction, int *has_attr, char *attr,
+                                                    size_t attr_cap)
+{
+   if (!in || !is_retraction || !has_attr || !attr || attr_cap == 0 ||
+       len < AIMEE_MEMORY_SCAN_RESPONSE_HEADER_LEN ||
+       aimee_memory_get_u32(in) != AIMEE_MEMORY_SCAN_RESPONSE_MAGIC)
+      return -1;
+   uint32_t retraction = aimee_memory_get_u32(in + 4);
+   uint32_t possessive = aimee_memory_get_u32(in + 8);
+   uint32_t attr_len = aimee_memory_get_u32(in + 12);
+   if (retraction > 1u || possessive > 1u || attr_len >= attr_cap ||
+       len != AIMEE_MEMORY_SCAN_RESPONSE_HEADER_LEN + (size_t)attr_len)
+      return -1;
+   /* An attribute without the flag, or a flag without one, means the two sides
+    * disagree about what was found. */
+   if ((possessive == 0u) != (attr_len == 0u))
+      return -1;
+   memcpy(attr, in + AIMEE_MEMORY_SCAN_RESPONSE_HEADER_LEN, attr_len);
+   attr[attr_len] = '\0';
+   *is_retraction = (int)retraction;
+   *has_attr = (int)possessive;
+   return 0;
+}
+
 /* PII recall gate, turn classification (stage RETRIEVE). Answers one question
  * about the whole turn -- did the user explicitly ask for sensitive
  * information -- which is asked once per turn.
