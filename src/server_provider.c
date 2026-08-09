@@ -89,18 +89,14 @@ static int server_provider_has_credentials(const model_provider_t *p)
    return 0;
 }
 
-static void server_provider_free_models(char **models, int n)
+static void server_provider_free_models(provider_model_t *models, int n)
 {
-   if (!models)
-      return;
-   for (int i = 0; i < n; i++)
-      free(models[i]);
-   free(models);
+   db1_model_catalog_free(models, n);
 }
 
 #define PROVIDER_MODEL_CATALOG_TTL_SECONDS 3600
 
-static int server_provider_models_cached(model_provider_t *p, char ***models_out, int *n_out)
+static int server_provider_models_cached(model_provider_t *p, provider_model_t **models_out, int *n_out)
 {
    *models_out = NULL;
    *n_out = 0;
@@ -233,7 +229,7 @@ int handle_provider_models(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "provider not found", NULL);
    if (!p->fetch_models)
       return server_send_error(conn, "provider does not support model listing", NULL);
-   char **models = NULL;
+   provider_model_t *models = NULL;
    int n = 0;
    if (server_provider_models_cached(p, &models, &n) != 0)
       return server_send_error(conn, "failed to fetch models", NULL);
@@ -244,7 +240,7 @@ int handle_provider_models(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_AddBoolToObject(resp, "json", cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "json")));
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < n; i++)
-      cJSON_AddItemToArray(arr, cJSON_CreateString(models[i]));
+      cJSON_AddItemToArray(arr, cJSON_CreateString(models[i].id));
    cJSON_AddItemToObject(resp, "models", arr);
    cJSON_AddNumberToObject(resp, "count", n);
    server_provider_free_models(models, n);
@@ -270,7 +266,7 @@ int handle_provider_test(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       snprintf(message, sizeof(message), "%s: credentials available; no probe registered", p->name);
    else
    {
-      char **models = NULL;
+      provider_model_t *models = NULL;
       int n = 0;
       if (p->fetch_models(p, &models, &n) != 0)
          return server_send_error(conn, "provider probe failed", NULL);
