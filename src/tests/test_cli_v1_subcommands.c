@@ -488,11 +488,53 @@ static void test_memory_get_as_of_is_wired(void)
    printf("  memory get --as-of reaches the server and prints its answer\n");
 }
 
+/* `memory recall --query` must reach the field the server actually reads.
+ *
+ * It was marshalled as its own `query` key that nothing consumed:
+ * handle_memory_recall reads task_hint, limit_tokens and session_start, and the
+ * only other jo_str(req,"query") in the tree belongs to kb.search. So the flag
+ * sent text, had it dropped, and fell back to the "session start" hint --
+ * returning the recency bundle while looking like it had searched. Verified on a
+ * deployment: a query matching three stored memories almost verbatim returned
+ * none of them.
+ *
+ * An explicit --task must still win, so no existing invocation changes. */
+static void test_memory_recall_query_feeds_the_hint(void)
+{
+   char *q[] = {(char *)"--query=nightly export manifest"};
+   cJSON *req = marshal_memory_recall(1, q);
+   assert(req);
+   cJSON *hint = cJSON_GetObjectItemCaseSensitive(req, "task_hint");
+   assert(cJSON_IsString(hint));
+   assert(strcmp(hint->valuestring, "nightly export manifest") == 0);
+   /* the dead key is gone, not merely ignored */
+   assert(cJSON_GetObjectItemCaseSensitive(req, "query") == NULL);
+   cJSON_Delete(req);
+
+   /* --task wins over --query. */
+   char *both[] = {(char *)"--task=explicit task", (char *)"--query=ignored"};
+   req = marshal_memory_recall(2, both);
+   assert(req);
+   hint = cJSON_GetObjectItemCaseSensitive(req, "task_hint");
+   assert(cJSON_IsString(hint) && strcmp(hint->valuestring, "explicit task") == 0);
+   cJSON_Delete(req);
+
+   /* Neither given: the session-start bundle, exactly as before. */
+   req = marshal_memory_recall(0, NULL);
+   assert(req);
+   hint = cJSON_GetObjectItemCaseSensitive(req, "task_hint");
+   assert(cJSON_IsString(hint) && strcmp(hint->valuestring, "session start") == 0);
+   cJSON_Delete(req);
+
+   printf("  memory recall --query feeds the hint the server reads\n");
+}
+
 int main(void)
 {
    printf("test_cli_v1_subcommands\n");
    test_memory_store_keeps_unquoted_content();
    test_memory_get_as_of_is_wired();
+   test_memory_recall_query_feeds_the_hint();
    test_kb_status_warns_about_undrainable_queue();
    test_config_deploy_env_is_routed();
    test_unknown_command_is_safe();

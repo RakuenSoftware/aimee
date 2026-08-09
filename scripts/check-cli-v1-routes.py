@@ -8,6 +8,17 @@ scripts/gen-cli-v1-routes.py and lives inline in the thin-client TU
 check regenerates the block and diffs it against what's committed in the file, so
 a registry change that isn't reflected in the committed map fails `make lint`
 instead of silently leaving the client without its first-class /v1 route.
+
+Beyond that sync check, three independent directions must hold for a command to
+actually work. Each has its own check, and each shipped broken at least once:
+
+  route + marshaller, no dispatch row  -> unreachable_methods()
+  dispatch row + route, no marshaller  -> dispatchable_without_marshaller()
+  dispatch row, NO ROUTE               -> dispatchable_without_route()
+
+The last one is the newest and the most severe: the thin client reaches the
+server only through a first-class /v1 route now that the generic dispatch
+endpoint is retired, so such a command cannot work on ANY transport.
 """
 import glob
 import re
@@ -63,8 +74,19 @@ def main() -> int:
             print(f"  {m}")
         return 1
 
+    unrouted = dispatchable_without_route()
+    if unrouted:
+        print("check-cli-v1-routes: FAIL — these methods have an `aimee <cmd> <sub>` "
+              "dispatch row but NO /v1 route, so the command is advertised in the help "
+              "and cannot reach the server on ANY transport; it only ever answers "
+              "\"has no /v1 route\". Add a row to g_v1_routes[] in "
+              "src/server/server_http_routes.c and regenerate:")
+        for m in unrouted:
+            print(f"  {m}")
+        return 1
+
     print(f"check-cli-v1-routes: ok ({n} client /v1 routes in sync, all reachable, "
-          f"all marshalled)")
+          f"all marshalled, all routed)")
     return 0
 
 
@@ -125,7 +147,11 @@ def dispatchable_without_marshaller():
         Path(ROOT / "src" / "cli_v1_routes.c").read_text(encoding="utf-8")))
     exact, prefixes = marshal_coverage()
     # Only methods that also have a path: a dispatch row for a method with no route is
-    # a different defect, reported by the generated-map check above.
+    # a different defect, reported by dispatchable_without_route(). (That was not true
+    # when this comment was written -- it claimed the generated-map check above covered
+    # it, which only verifies the block matches the descriptor and says nothing about
+    # dispatch rows. Nothing covered it, which is how `workers` and every `pipeline`
+    # subcommand shipped unroutable.)
     missing = (dispatch & routed) - exact
     return sorted(m for m in missing if not any(m.startswith(p) for p in prefixes))
 
@@ -139,6 +165,52 @@ def unreachable_methods():
     dispatch = set(DISPATCH_RE.findall(
         Path(ROOT / "src" / "cli_v1_routes.c").read_text(encoding="utf-8")))
     return sorted((routed & marshalled) - dispatch)
+
+
+# THE THIRD DIRECTION. unreachable_methods() catches a routed method with no dispatch
+# row; dispatchable_without_marshaller() catches a dispatch row with no marshaller.
+# Neither catches a dispatch row with NO ROUTE -- and since the generic dispatch
+# endpoint was retired, the thin client reaches the server ONLY through a first-class
+# /v1 route, so that command cannot work on any transport. It is advertised in
+# `aimee help`, documented, and answers "has no /v1 route" forever.
+#
+# `aimee workers` and all seven `aimee pipeline` subcommands shipped exactly like
+# that: handler, capability entry, dispatch row, marshaller and printer all present,
+# and no row in g_v1_routes[].
+#
+# rpc_routes[] rows are (cmd, subcommand, method, server_method, ...). When
+# server_method is set THAT is what gets routed, not method -- `aimee memory archive`
+# dispatches memory.archive but routes memory.user_capture, and `aimee git verify`
+# routes mcp.call. Resolving the wrong one here would report four working commands as
+# broken. Parse only the rpc_routes[] table, so unrelated brace-lists elsewhere in the
+# file (bool flag names, response keys) cannot masquerade as dispatch rows.
+RPC_TABLE_RE = re.compile(r"\}\s*rpc_routes\[\]\s*=\s*\{(.*?)\n\};", re.S)
+RPC_ROW_RE = re.compile(
+    r'\{"[a-z0-9_-]+",\s*(?:NULL|"[a-z0-9 _-]*")\s*,\s*"([a-z0-9_.]+)"\s*,'
+    r'\s*(NULL|"[a-z0-9_.]+")')
+# {id}-bearing routes: {method, verb, prefix, suffix, id_field} -- five fields, so a
+# distinct shape from the three-field {method, verb, path} rows ROUTE_RE finds.
+PATHID_RE = re.compile(
+    r'\{"([a-z0-9_.]+)",\s*"(?:GET|POST|PUT|DELETE)",\s*"/v1/[^"]*",'
+    r'\s*"[^"]*",\s*(?:NULL|"[^"]*")\s*\}')
+
+
+def dispatchable_without_route():
+    """Methods the CLI dispatches that resolve to no /v1 route at all."""
+    routed = set()
+    for f in sorted(glob.glob(TARGET_GLOB)):
+        text = Path(f).read_text(encoding="utf-8")
+        routed |= set(ROUTE_RE.findall(text))    # generated sync + async, and bespoke[]
+        routed |= set(PATHID_RE.findall(text))   # {id}-bearing prefix routes
+    src = Path(ROOT / "src" / "cli_v1_routes.c").read_text(encoding="utf-8")
+    table = RPC_TABLE_RE.search(src)
+    if not table:
+        raise SystemExit("check-cli-v1-routes: rpc_routes[] table not found in "
+                         "src/cli_v1_routes.c; this check cannot run")
+    effective = set()
+    for method, server_method in RPC_ROW_RE.findall(table.group(1)):
+        effective.add(server_method.strip('"') if server_method != "NULL" else method)
+    return sorted(effective - routed)
 
 
 if __name__ == "__main__":
