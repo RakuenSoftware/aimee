@@ -124,7 +124,7 @@ Subcommands:
   search           Search stored memory
   store            Store a memory
   list             List memories
-  get              Read a memory by id
+  get              Read a memory by id (--as-of <ts>: was it in force then?)
   read             Assemble current memory context
 ```
 

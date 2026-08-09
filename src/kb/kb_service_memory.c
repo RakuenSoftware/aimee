@@ -768,7 +768,9 @@ int kb_handle_memory_get(int fd, cJSON *req)
    if (!cJSON_IsNumber(id_j))
       return kb_send_error(fd, "memory.get requires id");
 
-   cJSON *resp = db2_kb_service_memory_get_json((int64_t)id_j->valuedouble);
+   /* Optional: was this memory in force at `as_of`, in EVENT time? */
+   const char *as_of = jo_str(req, "as_of", "");
+   cJSON *resp = db2_kb_service_memory_get_json((int64_t)id_j->valuedouble, as_of);
    return kb_reply_or_error(fd, resp, "failed to get memory");
 }
 

@@ -257,11 +257,26 @@ cJSON *marshal_memory_list(int argc, char **argv)
    return req;
 }
 
+/* `aimee memory get <id> [--as-of <timestamp>]`
+ *
+ * --as-of asks the EVENT-time question: was this memory in force then?
+ * lifecycle_state cannot answer it -- a superseded row looks identically
+ * superseded whether it stopped being true yesterday or last year -- so the
+ * server reads the valid_from/valid_until interval instead. rpc_parse keeps the
+ * id as positional[0], so the flag cannot be mistaken for it. */
 cJSON *marshal_memory_get(int argc, char **argv)
 {
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
+
    cJSON *req = marshal_no_args("memory.get");
-   if (argc > 0)
-      cJSON_AddNumberToObject(req, "id", atoll(argv[0]));
+   if (opts.pos_count > 0)
+      cJSON_AddNumberToObject(req, "id", atoll(opts.positional[0]));
+   const char *as_of = rpc_get(&opts, "as-of");
+   if (!as_of)
+      as_of = rpc_get(&opts, "as_of");
+   if (as_of && as_of[0])
+      cJSON_AddStringToObject(req, "as_of", as_of);
    return req;
 }
 
@@ -478,6 +493,13 @@ void pt_print_memory_list(const char *method, cJSON *resp)
 void pt_print_memory_get(const char *method, cJSON *resp)
 {
    print_memory_row(resp);
+   /* Present only when --as-of was asked. "unknown" is a real third answer: the
+    * server could not tell, which is not the same as "not in force". */
+   cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, "valid_at");
+   cJSON *at = cJSON_GetObjectItemCaseSensitive(resp, "as_of");
+   if (v && cJSON_IsString(at))
+      printf("valid at %s: %s\n", at->valuestring,
+             cJSON_IsString(v) ? v->valuestring : (cJSON_IsTrue(v) ? "yes" : "no"));
 }
 void pt_print_memory_read(const char *method, cJSON *resp)
 {
