@@ -17,6 +17,19 @@ const (
 	StageOperation   uint32 = 1
 	StageRefValidate uint32 = 2
 	StageCIGrade     uint32 = 3
+
+	// Stages 4-6 are the destination for the I/O that still lives in C: the
+	// forge HTTP client, credential resolution, and the verify pipeline. They
+	// are declared with the rest of the wire contract so the port lands one
+	// caller at a time against a fixed stage table rather than renumbering as
+	// it goes. No handler serves them yet.
+	EventForgeRequest uint32 = 7428
+	EventCredResolve  uint32 = 7429
+	EventVerifyRun    uint32 = 7430
+	StageForgeRequest uint32 = 4
+	StageCredResolve  uint32 = 5
+	StageVerifyRun    uint32 = 6
+
 	requestMagic     uint32 = 0x53504f47
 	responseMagic    uint32 = 0x534c4347
 	refRequestMagic  uint32 = 0x46455247
@@ -68,6 +81,8 @@ func validRef(ref string) bool {
 // Handle classifies Git operations and validates refs without repository I/O.
 func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	switch invocation.StageID {
+	case StageVerifyRun:
+		return handleVerifyState(invocation, request)
 	case StageCIGrade:
 		// JSON, not the fixed binary framing the other two stages use: a forge
 		// payload is arbitrarily large and its shape is the forge's, not ours.

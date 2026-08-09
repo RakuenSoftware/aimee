@@ -149,6 +149,20 @@ int agent_http_get(const char *url, const char *extra_headers, char **response_b
    return -1;
 }
 
+int agent_http_get_location(const char *url, const char *extra_headers, char *location,
+                           size_t location_cap, char **response_buf, int timeout_ms)
+{
+   /* Phase 2, with agent_http_get: the forge API path is POSIX-only today. */
+   (void)url;
+   (void)extra_headers;
+   (void)timeout_ms;
+   if (location && location_cap)
+      location[0] = '\0';
+   if (response_buf)
+      *response_buf = NULL;
+   return -1;
+}
+
 int agent_http_put(const char *url, const char *auth_header, const char *body, char **response_buf,
                    int timeout_ms, const char *extra_headers)
 {

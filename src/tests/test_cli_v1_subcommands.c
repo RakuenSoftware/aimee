@@ -318,6 +318,61 @@ static void test_gated_method_refuses_without_confirmation(void)
    printf("  workspace remove refuses without --confirm on a non-tty\n");
 }
 
+/* An unquoted memory body must not be truncated to its first word.
+ *
+ * `aimee memory store <key> <content>` read positional[1] and nothing else, so
+ * a caller who forgot to quote the content -- which arrives as one positional
+ * PER WORD -- stored the first word and lost the rest. It exited 0 and printed
+ * "stored memory 60", so nothing said the memory had been gutted.
+ *
+ * Observed live on a deployment: storing a 16-word fact stored the single word
+ * "The". The loss is silent and on the WRITE path, so it is not discovered when
+ * it happens; it is discovered later as a memory that does not say what was
+ * meant, or as a search that cannot find what was stored.
+ *
+ * memory identity / prefer shared the defect through marshal_user_capture. */
+static void test_memory_store_keeps_unquoted_content(void)
+{
+   char *argv[] = {(char *)"k", (char *)"one", (char *)"two", (char *)"three", (char *)"four"};
+   cJSON *req = marshal_memory_store(5, argv);
+   assert(req);
+   cJSON *content = cJSON_GetObjectItemCaseSensitive(req, "content");
+   assert(cJSON_IsString(content));
+   assert(strcmp(content->valuestring, "one two three four") == 0);
+   cJSON *key = cJSON_GetObjectItemCaseSensitive(req, "key");
+   assert(cJSON_IsString(key) && strcmp(key->valuestring, "k") == 0);
+   cJSON_Delete(req);
+
+   /* The ordinary quoted form is unchanged: one positional stays one value. */
+   char *quoted[] = {(char *)"k", (char *)"one two three four"};
+   req = marshal_memory_store(2, quoted);
+   assert(req);
+   content = cJSON_GetObjectItemCaseSensitive(req, "content");
+   assert(cJSON_IsString(content));
+   assert(strcmp(content->valuestring, "one two three four") == 0);
+   cJSON_Delete(req);
+
+   /* The --content flag still wins when there is no positional body. */
+   char *flagged[] = {(char *)"k", (char *)"--content=from the flag"};
+   req = marshal_memory_store(2, flagged);
+   assert(req);
+   content = cJSON_GetObjectItemCaseSensitive(req, "content");
+   assert(cJSON_IsString(content));
+   assert(strcmp(content->valuestring, "from the flag") == 0);
+   cJSON_Delete(req);
+
+   /* identity shares the marshaller family and the same fix. */
+   char *ident[] = {(char *)"role", (char *)"staff", (char *)"platform", (char *)"engineer"};
+   req = marshal_memory_identity(4, ident);
+   assert(req);
+   content = cJSON_GetObjectItemCaseSensitive(req, "content");
+   assert(cJSON_IsString(content));
+   assert(strcmp(content->valuestring, "staff platform engineer") == 0);
+   cJSON_Delete(req);
+
+   printf("  unquoted memory content is kept whole, not truncated to word one\n");
+}
+
 /* `config deploy-env` must be REACHABLE from the thin client.
  *
  * It was implemented in cmd_data.c and registered in that local subcommand table,
@@ -391,6 +446,7 @@ static void test_memory_recall_query_feeds_the_hint(void)
 int main(void)
 {
    printf("test_cli_v1_subcommands\n");
+   test_memory_store_keeps_unquoted_content();
    test_memory_recall_query_feeds_the_hint();
    test_config_deploy_env_is_routed();
    test_unknown_command_is_safe();

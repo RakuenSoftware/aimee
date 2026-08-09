@@ -1583,14 +1583,29 @@ static const struct
    git_tool_fn fn;
    int mutating;
 } git_tool_table[] = {
-    {"git_status", handle_git_status, 0}, {"git_commit", handle_git_commit, 1},
-    {"git_push", handle_git_push, 1},     {"git_branch", handle_git_branch, 0},
-    {"git_log", handle_git_log, 0},       {"git_diff_summary", handle_git_diff_summary, 0},
-    {"git_pr", handle_git_pr, 1},         {"git_pull", handle_git_pull, 1},
-    {"git_clone", handle_git_clone, 0},   {"git_stash", handle_git_stash, 0},
-    {"git_tag", handle_git_tag, 0},       {"git_fetch", handle_git_fetch, 0},
-    {"git_reset", handle_git_reset, 1},   {"git_restore", handle_git_restore, 1},
+    {"git_status", handle_git_status, 0},
+    {"git_commit", handle_git_commit, 1},
+    {"git_push", handle_git_push, 1},
+    {"git_branch", handle_git_branch, 0},
+    {"git_log", handle_git_log, 0},
+    {"git_diff_summary", handle_git_diff_summary, 0},
+    {"git_pr", handle_git_pr, 1},
+    {"git_pull", handle_git_pull, 1},
+    {"git_clone", handle_git_clone, 0},
+    {"git_stash", handle_git_stash, 0},
+    {"git_tag", handle_git_tag, 0},
+    {"git_fetch", handle_git_fetch, 0},
+    {"git_reset", handle_git_reset, 1},
+    {"git_restore", handle_git_restore, 1},
     {"git_issue", handle_git_issue, 0},
+    {"git_merge", handle_git_merge, 1},
+    {"git_rebase", handle_git_rebase, 1},
+    {"git_cherry_pick", handle_git_cherry_pick, 1},
+    {"git_revert", handle_git_revert, 1},
+    {"git_sync", handle_git_sync, 1},
+    {"git_add", handle_git_add, 1},
+    {"git_switch", handle_git_switch, 0},
+    {"git_checkout", handle_git_checkout, 1},
 };
 
 static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const char *tool,
@@ -1662,7 +1677,6 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
          is_mutating = git_tool_table[i].mutating;
          break;
       }
-
    if (mismatch_err && is_mutating)
    {
       run_cmd_set_cwd(NULL);
