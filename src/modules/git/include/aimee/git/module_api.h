@@ -15,6 +15,17 @@
  * stages use: a forge's check-runs payload is arbitrarily large and its shape is
  * the forge's, not ours. */
 #define AIMEE_GIT_STAGE_CI_GRADE     3u
+/* Stages 4-6 are the destination for the I/O that still lives in C: the forge
+ * HTTP client, credential resolution, and the verify pipeline. They are declared
+ * with the rest of the wire contract so the port lands one caller at a time
+ * against a fixed stage table rather than renumbering as it goes. Each carries
+ * JSON, for the same reason CI grading does: the payload shape is the forge's. */
+#define AIMEE_GIT_EVENT_FORGE_REQUEST 7428u
+#define AIMEE_GIT_EVENT_CRED_RESOLVE  7429u
+#define AIMEE_GIT_EVENT_VERIFY_RUN    7430u
+#define AIMEE_GIT_STAGE_FORGE_REQUEST 4u
+#define AIMEE_GIT_STAGE_CRED_RESOLVE  5u
+#define AIMEE_GIT_STAGE_VERIFY_RUN    6u
 #define AIMEE_GIT_REQUEST_MAGIC      0x53504f47u /* "GOPS" */
 #define AIMEE_GIT_RESPONSE_MAGIC     0x534c4347u /* "GCLS" */
 #define AIMEE_GIT_REF_REQUEST_MAGIC  0x46455247u /* "GREF" */

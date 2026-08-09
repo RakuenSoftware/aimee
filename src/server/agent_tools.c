@@ -975,11 +975,12 @@ static cJSON *tp_git_pr(void)
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "action", "string",
-           "create | view | list | edit | checks | watch | merge_status | merge");
+           "create | view | list | edit | checks | watch | merge_status | update_branch | merge");
    tp_prop(props, "path", "string",
            "Path to the git repository / worktree — the SAME path you pass to git_status. "
            "Without it the repo is resolved from the session, which may not be your worktree.");
-   tp_prop(props, "number", "integer", "PR number (for view/edit/checks/merge_status/merge)");
+   tp_prop(props, "number", "integer",
+           "PR number (for view/edit/checks/merge_status/update_branch/merge)");
    tp_prop(props, "title", "string", "PR title (for create/edit)");
    tp_prop(props, "body", "string", "PR body (for create/edit)");
    tp_prop(props, "base", "string", "Base branch (for create/edit)");
