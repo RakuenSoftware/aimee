@@ -348,8 +348,8 @@ static void test_reasoning_timeout_default(void)
    printf("  PASS: test_reasoning_timeout_default\n");
 }
 
-/* A DECLARED value survives a save even when it is 0, and an undeclared field
- * stays absent.
+/* A declared PRICE survives a save even when it is 0, and an undeclared field
+ * stays absent. Capacities deliberately differ -- see the assertions below.
  *
  * The old convention was "0 = unset, fall back to the catalog", and the
  * serializer wrote a price only when it was > 0. That silently discarded a
@@ -387,8 +387,6 @@ static void test_declared_zero_round_trips(void)
     * so only the bits tell them apart -- which is the point. */
    assert(freebie->declared & AGENT_DECL_PRICE_IN);
    assert(freebie->declared & AGENT_DECL_PRICE_OUT);
-   assert(freebie->declared & AGENT_DECL_CONTEXT_WINDOW);
-   assert(freebie->declared & AGENT_DECL_MAX_OUTPUT);
    assert(freebie->price_in_per_mtok == 0.0);
    assert(quiet->declared == 0);
 
@@ -400,12 +398,17 @@ static void test_declared_zero_round_trips(void)
    agent_t *quiet2 = agent_find(&reloaded, "quiet");
    assert(free2 && quiet2);
 
-   /* The declaration survived the save rather than being dropped for being 0. */
+   /* The PRICE declaration survived the save rather than being dropped for
+    * being 0 -- that is the case a bare number cannot express. */
    assert(free2->declared & AGENT_DECL_PRICE_IN);
    assert(free2->declared & AGENT_DECL_PRICE_OUT);
-   assert(free2->declared & AGENT_DECL_CONTEXT_WINDOW);
-   assert(free2->declared & AGENT_DECL_MAX_OUTPUT);
    assert(free2->price_in_per_mtok == 0.0);
+   /* CAPACITIES are the opposite and deliberately do NOT round-trip a 0: there
+    * is no zero-token window, so 0 is the absence of a statement, and writing
+    * one back would only make configs noisier without telling a reader anything.
+    * Capacity resolution keys on the value for the same reason. */
+   assert(free2->middleware.context_window == 0);
+   assert(free2->max_output == 0);
    /* ...and silence was not turned into a declaration by the round trip. */
    assert(quiet2->declared == 0);
 }

@@ -485,15 +485,13 @@ static cJSON *server_agent_to_json(const agent_t *ag)
       cJSON_AddNumberToObject(obj, "effective_context_window", eff_ctx);
       cJSON_AddNumberToObject(obj, "effective_max_output", eff_out);
       cJSON_AddStringToObject(obj, "context_window_source",
-                              (ag->declared & AGENT_DECL_CONTEXT_WINDOW) &&
-                                      ag->middleware.context_window > 0
+                              ag->middleware.context_window > 0
                                   ? "declared"
                                   : (eff_ctx > 0 ? "resolved" : "unknown"));
       cJSON_AddStringToObject(obj, "max_output_source",
-                              (ag->declared & AGENT_DECL_MAX_OUTPUT) && ag->max_output > 0
-                                  ? "declared"
-                                  : (eff_out > 0 ? "resolved" : "unknown"));
-      if (ag->declared & AGENT_DECL_MAX_OUTPUT)
+                              ag->max_output > 0 ? "declared"
+                                                 : (eff_out > 0 ? "resolved" : "unknown"));
+      if (ag->max_output > 0)
          cJSON_AddNumberToObject(obj, "max_output", ag->max_output);
       /* The declared mask itself, so a form can tell "the operator set this to
        * 0" (a free seat) from "the operator never said" -- the one distinction

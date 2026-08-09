@@ -62,11 +62,15 @@ static void test_overrides(void)
    cfg.closet_budget_tokens = 1000;
    fold_budget_t b;
    assert(fold_budget_resolve("claude-opus-4-8", &cfg, &b) == 0);
-   assert(b.retained_band_tokens == 20000); /* 10% of 200000 */
-   assert(b.tail_cap_tokens == 10000);      /* 5% */
+   /* Percentages of the model's REAL window. These were written against 200000,
+    * which was the prefix table's blanket figure for anything named "claude";
+    * the catalog publishes 1000000 for this model, so every derived band was a
+    * fifth of what it should have been. */
+   assert(b.retained_band_tokens == 100000); /* 10% of 1000000 */
+   assert(b.tail_cap_tokens == 50000);       /* 5% */
    assert(b.closet_budget_tokens == 1000);
    /* unset knobs still take defaults */
-   assert(b.pressure_ceiling_tokens == 170000); /* 85% */
+   assert(b.pressure_ceiling_tokens == 850000); /* 85% */
    PASS("overrides");
 }
 

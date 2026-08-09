@@ -657,7 +657,15 @@ int agent_declared_context_window(const agent_t *ag)
 {
    if (!ag)
       return 0;
-   if ((ag->declared & AGENT_DECL_CONTEXT_WINDOW) && ag->middleware.context_window > 0)
+   /* Keyed on the VALUE, not on AGENT_DECL_CONTEXT_WINDOW. The bit records that
+    * a value came from config so it round-trips on save; it is not the test for
+    * whether one is set. Several paths assign this field directly on an agent_t
+    * -- ag_probe_slots' auto-detection, and callers building an agent in memory
+    * -- and requiring the bit made every one of those silently ignored. A
+    * capacity needs no such bit anyway: 0 is not a capacity, so "> 0" carries
+    * exactly the same information. Prices are the opposite and do need theirs,
+    * because a declared 0 there is a real statement. */
+   if (ag->middleware.context_window > 0)
       return ag->middleware.context_window;
    model_capability_t cap;
    if (model_capability_get(agent_catalog_provider(ag), ag->model, &cap) && cap.context_window > 0)
@@ -669,7 +677,7 @@ int agent_declared_max_output(const agent_t *ag)
 {
    if (!ag)
       return 0;
-   if ((ag->declared & AGENT_DECL_MAX_OUTPUT) && ag->max_output > 0)
+   if (ag->max_output > 0)
       return ag->max_output;
    return model_max_output(agent_catalog_provider(ag), ag->model);
 }
@@ -1792,9 +1800,11 @@ static int agent_save_config_impl(const agent_config_t *cfg, int emptied_by_remo
          cJSON_AddNumberToObject(a, "price_out_per_mtok", ag->price_out_per_mtok);
       if (ag->declared & AGENT_DECL_PRICE_CACHED)
          cJSON_AddNumberToObject(a, "price_cached_per_mtok", ag->price_cached_per_mtok);
-      if (ag->declared & AGENT_DECL_CONTEXT_WINDOW)
+      /* Capacities serialize on value: an explicit 0 carries no information a
+       * reader could act on, and writing one would only make configs noisier. */
+      if (ag->middleware.context_window > 0)
          cJSON_AddNumberToObject(a, "context_window", ag->middleware.context_window);
-      if (ag->declared & AGENT_DECL_MAX_OUTPUT)
+      if (ag->max_output > 0)
          cJSON_AddNumberToObject(a, "max_output", ag->max_output);
       if (ag->max_scope != AGENT_SCOPE_UNSET)
          JSON_ADD_STR(a, "max_scope", agent_scope_name(ag->max_scope));
