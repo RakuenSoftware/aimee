@@ -9,11 +9,17 @@
 #include "mcp_git.h"
 #include "util.h"
 #include "branch_ownership.h"
+#include "dstr.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
+
+/* How much of a failed job's log to bring back. Enough for a compiler error list
+ * or a failed assertion with context; small enough that several failures in one
+ * response stay readable. */
+#define PR_LOG_TAIL_BYTES 6000
 
 /* --- Helpers --- */
 
@@ -151,6 +157,105 @@ static int pr_derive_from_commits(const char *base, char *title, size_t title_le
       str_appendf(body, bpos, (int)body_len, "\n%s", stat);
    free(stat);
    return 0;
+}
+
+/* Would merging this branch into `base` conflict? Names the conflicting files in
+ * `files` when it would.
+ *
+ * A PR opened in that state is worse than no PR: the forge reports it CONFLICTING,
+ * review cannot start, CI results are about a merge that will never happen, and
+ * somebody has to notice and rebase before any of it means anything. The check is
+ * a merge-tree dry run, so it decides this WITHOUT touching the working tree or
+ * the branch.
+ *
+ * Returns 1 for conflicts, 0 for a clean merge, and -1 when it cannot tell (a
+ * missing base, no origin, an ancient git) — callers must treat -1 as "proceed",
+ * because refusing to open a PR on an inconclusive check would be worse than the
+ * problem. */
+int mcp_git_conflicts_with_base(const char *base, char *files, size_t files_cap)
+{
+   if (files && files_cap)
+      files[0] = '\0';
+   if (!base || !base[0])
+      return -1;
+
+   char *esc = shell_escape(base);
+   char base_ref[600];
+   int rc = 0;
+   {
+      char probe[700];
+      snprintf(probe, sizeof(probe), "git rev-parse --verify --quiet 'origin/%s' >/dev/null 2>&1",
+               esc);
+      char *p = mcp_git_run(probe, &rc);
+      free(p);
+   }
+   if (rc == 0 && strncmp(base, "origin/", 7) != 0)
+      snprintf(base_ref, sizeof(base_ref), "origin/%s", esc);
+   else
+      snprintf(base_ref, sizeof(base_ref), "%s", esc);
+   free(esc);
+
+   /* Fetch first: a stale local copy of the base would clear a branch that in fact
+    * conflicts with what the base has become, which is precisely the case that
+    * produces a CONFLICTING PR. */
+   if (strncmp(base_ref, "origin/", 7) == 0)
+   {
+      char fetch_cmd[700];
+      snprintf(fetch_cmd, sizeof(fetch_cmd), "git fetch origin '%s' 2>&1", base_ref + 7);
+      int frc = 0;
+      free(mcp_git_run(fetch_cmd, &frc));
+   }
+
+   /* Resolve the base before merging against it. `merge-tree --write-tree` exits
+    * 1 BOTH for "these conflict" and for "that ref does not exist", so without
+    * this the gate reads an unresolvable base as a conflict and refuses a PR
+    * that would have merged cleanly -- the exact inversion this function's
+    * contract forbids. A base branch that exists on the forge but not in this
+    * checkout is ordinary, so the wrong answer here would be common. */
+   {
+      char verify[700];
+      snprintf(verify, sizeof(verify),
+               "git rev-parse --verify --quiet '%s^{commit}' >/dev/null 2>&1", base_ref);
+      int vrc = 0;
+      free(mcp_git_run(verify, &vrc));
+      if (vrc != 0)
+         return -1;
+   }
+
+   char cmd[1024];
+   snprintf(cmd, sizeof(cmd),
+            "git merge-tree --write-tree --name-only --no-messages HEAD '%s' 2>/dev/null",
+            base_ref);
+   int mrc = 0;
+   char *out = mcp_git_run(cmd, &mrc);
+   /* --write-tree exits 1 with the conflicted paths on stdout, 0 when clean. */
+   if (out && mrc == 1)
+   {
+      /* First line is the merged tree oid; the rest are the conflicted paths. */
+      const char *p = strchr(out, '\n');
+      if (p && p[1] && files && files_cap)
+      {
+         int pos = 0;
+         const char *line = p + 1;
+         while (*line)
+         {
+            const char *nl = strchr(line, '\n');
+            size_t len = nl ? (size_t)(nl - line) : strlen(line);
+            if (len)
+               pos = str_appendf(files, pos, (int)files_cap, "\n  %.*s", (int)len, line);
+            line = nl ? nl + 1 : line + len;
+         }
+      }
+      free(out);
+      return 1;
+   }
+   if (out && mrc == 0)
+   {
+      free(out);
+      return 0;
+   }
+   free(out);
+   return -1; /* merge-tree unavailable or the base could not be resolved */
 }
 
 static int get_origin_repo_slug(char *buf, size_t len)
@@ -380,6 +485,75 @@ cJSON *handle_git_pr(cJSON *args)
          pos += (size_t)snprintf(text + pos, cap - pos, "%s\t%s\t%s\t%s\t\n", rows[i].name,
                                  rows[i].status, rows[i].elapsed, rows[i].url);
       cJSON *r = mcp_text(text);
+      free(text);
+      return r;
+   }
+
+   /* action=failures: why CI is red.
+    *
+    * action=checks says a job failed and hands back a details_url, which an agent
+    * cannot open (no browser, and the shell-git gate blocks `gh`). So the loop
+    * "push, read the failure, fix it" was closed: the only way to learn the cause
+    * was for a human to paste it in. This answers with the job, the step inside it
+    * that failed, and the tail of that job's log — the step name alone is often
+    * enough, because an unnamed step reports its command line, which is the gate to
+    * run locally. */
+   if (strcmp(action, "failures") == 0)
+   {
+      cJSON *jnum = cJSON_GetObjectItemCaseSensitive(args, "number");
+      if (!cJSON_IsNumber(jnum))
+         return mcp_text("error: 'number' parameter is required for failures");
+
+      char slug[264];
+      if (get_origin_repo_slug(slug, sizeof(slug)) != 0)
+         return mcp_text("error: cannot resolve a github.com origin for this checkout");
+
+      /* Logs are fetched for the first few failures only: they are the expensive
+       * part, and a run where twenty jobs went red almost always has one cause. */
+      cJSON *jcount = cJSON_GetObjectItemCaseSensitive(args, "count");
+      int logs_for = (cJSON_IsNumber(jcount) && jcount->valueint > 0) ? jcount->valueint : 3;
+      if (logs_for > 10)
+         logs_for = 10;
+
+      git_pr_failure_t rows[30];
+      int n = 0;
+      char err[512] = "";
+      if (git_pr_failures_via_api_slug(agent_get_request_vault_principal(), slug, jnum->valueint,
+                                       (int)(sizeof(rows) / sizeof(rows[0])), logs_for,
+                                       PR_LOG_TAIL_BYTES, rows, &n, err, sizeof(err)) != 0)
+         return mcp_error("error: pr failures failed: %s", err[0] ? err : "unknown");
+
+      if (n == 0)
+         return mcp_text("no failing checks on this PR's head commit (a check still running is not "
+                         "a failure — use action=checks for the full status list)");
+
+      dstr_t res;
+      dstr_init(&res);
+      dstr_appendf(&res, "%d failing check(s) on PR #%d:\n", n, jnum->valueint);
+      for (int i = 0; i < n; i++)
+      {
+         dstr_appendf(&res, "\n=== %s (%s)\n", rows[i].name[0] ? rows[i].name : "(unnamed check)",
+                      rows[i].conclusion);
+         if (rows[i].failed_step[0])
+            dstr_appendf(&res, "failed at step %d: %s\n", rows[i].failed_step_number,
+                         rows[i].failed_step);
+         if (rows[i].log_tail && rows[i].log_tail[0])
+         {
+            /* The tail starts mid-line after a byte-range read; drop the partial
+             * first line rather than present a truncated one as if it were whole. */
+            const char *tail = rows[i].log_tail;
+            const char *nl = strchr(tail, '\n');
+            if (nl && nl[1])
+               tail = nl + 1;
+            dstr_appendf(&res, "--- last %d bytes of the job log ---\n%s\n", PR_LOG_TAIL_BYTES,
+                         tail);
+         }
+         else if (i < logs_for)
+            dstr_append_str(&res, "(job log unavailable)\n");
+      }
+      git_pr_failures_free(rows, n);
+      char *text = dstr_steal(&res);
+      cJSON *r = mcp_text(text ? text : "error: out of memory rendering failures");
       free(text);
       return r;
    }
@@ -798,6 +972,30 @@ cJSON *handle_git_pr(cJSON *args)
       cJSON *jbase = cJSON_GetObjectItemCaseSensitive(args, "base");
 
       const char *base = cJSON_IsString(jbase) ? jbase->valuestring : "main";
+
+      /* Refuse to open a PR that cannot be merged.
+       *
+       * A CONFLICTING PR blocks its own review: the forge will not merge it, its CI
+       * results describe a merge that will never happen, and someone has to spot
+       * the state and rebase before any of it counts. Opening one is not a partial
+       * success, so this is a refusal and not a warning — with the one command that
+       * fixes it. An inconclusive check (-1) proceeds; refusing on "cannot tell"
+       * would block more work than it protects. */
+      {
+         char conflicts[2048];
+         if (mcp_git_conflicts_with_base(base, conflicts, sizeof(conflicts)) == 1)
+         {
+            char buf[2560];
+            snprintf(buf, sizeof(buf),
+                     "error: not opening this PR — merging it into %s would conflict, so it would "
+                     "arrive unmergeable. Conflicting file(s):%s\n\nRun command=sync base=%s "
+                     "abort_on_conflict=false, resolve them, command=add, command=rebase "
+                     "action=continue, then open the PR (or command=pr action=ready, which does "
+                     "the sync and the push for you).",
+                     base, conflicts, base);
+            return mcp_text(buf);
+         }
+      }
 
       /* Title and body are OPTIONAL: the branch's own commits already say what the
        * change is, so aimee derives them rather than making the caller spend a

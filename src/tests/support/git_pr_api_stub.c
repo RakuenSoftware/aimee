@@ -123,6 +123,30 @@ int git_pr_checks_via_api_slug(const char *principal, const char *slug, int numb
    return -1;
 }
 
+int git_pr_failures_via_api_slug(const char *principal, const char *slug, int number, int max,
+                                 int logs_for, long tail_bytes, git_pr_failure_t *out, int *count,
+                                 char *err, size_t errlen)
+{
+   (void)principal;
+   (void)slug;
+   (void)number;
+   (void)max;
+   (void)logs_for;
+   (void)tail_bytes;
+   (void)out;
+   if (count)
+      *count = 0;
+   if (err && errlen)
+      snprintf(err, errlen, "pr api unavailable (stub)");
+   return -1;
+}
+
+void git_pr_failures_free(git_pr_failure_t *rows, int count)
+{
+   (void)rows;
+   (void)count;
+}
+
 int git_pr_list_open_via_api_slug(const char *principal, const char *slug, int limit,
                                   git_pr_list_item_t *out, int *count, char *err, size_t errlen)
 {

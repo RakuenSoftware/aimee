@@ -3236,6 +3236,61 @@ static void test_git_verify_sync_rejects_same_session_overlap(void)
    verify_test_teardown(tmpdir, fake_home);
 }
 
+/* --- The PR-create mergeability gate ---
+ *
+ * aimee opening PRs that arrive CONFLICTING is the failure this gate exists to
+ * stop: review cannot start, and CI reports on a merge that will never happen.
+ * The gate has to be right in both directions -- a false conflict refuses a
+ * good PR, and an inconclusive answer must let one through rather than block
+ * on a check that could not run. */
+static void test_pr_conflict_gate(void)
+{
+   char tmp[] = "/tmp/aimee-test-pr-conflict-XXXXXX";
+   assert(mkdtemp(tmp) != NULL);
+   char saved[4096];
+   assert(getcwd(saved, sizeof(saved)) != NULL);
+
+   char cmd[4096];
+   /* main has a file; two branches change the same line and a third changes a
+    * different file. All local -- the gate falls back to a bare ref when no
+    * origin/<base> exists, which is what a test repo has. */
+   snprintf(cmd, sizeof(cmd),
+            "cd '%s' && git init -q -b main && git config user.email t@t && git config user.name t"
+            " && printf 'one\n' > f.txt && git add f.txt && git commit -q -m base"
+            " && git checkout -q -b clean && printf 'x\n' > other.txt && git add other.txt"
+            " && git commit -q -m clean"
+            " && git checkout -q main && printf 'two\n' > f.txt && git commit -q -am theirs"
+            " && git checkout -q -b conflicting main~1 && printf 'three\n' > f.txt"
+            " && git commit -q -am ours",
+            tmp);
+   assert(system(cmd) == 0);
+   assert(chdir(tmp) == 0);
+
+   char files[1024];
+
+   /* A branch touching a different file merges cleanly. */
+   assert(system("git checkout -q clean") == 0);
+   assert(mcp_git_conflicts_with_base("main", files, sizeof(files)) == 0);
+
+   /* Both sides rewrote f.txt: conflict, and the gate must name the file so the
+    * refusal tells the caller what to fix. */
+   assert(system("git checkout -q conflicting") == 0);
+   assert(mcp_git_conflicts_with_base("main", files, sizeof(files)) == 1);
+   assert(strstr(files, "f.txt") != NULL);
+
+   /* Cannot tell => proceed. A base that does not exist, and an empty base, must
+    * both return -1 rather than 1: refusing a PR because the check could not run
+    * would be worse than the problem the gate solves. */
+   assert(mcp_git_conflicts_with_base("no-such-branch", files, sizeof(files)) == -1);
+   assert(mcp_git_conflicts_with_base("", files, sizeof(files)) == -1);
+   assert(mcp_git_conflicts_with_base(NULL, files, sizeof(files)) == -1);
+
+   assert(chdir(saved) == 0);
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmp);
+   system(cmd);
+   printf("pr_conflict_gate ");
+}
+
 int main(void)
 {
    /* The verify gate reads its ledger from the git module, so the module has
@@ -3246,6 +3301,7 @@ int main(void)
    printf("mcp_git: ");
 
    test_git_status_clean();
+   test_pr_conflict_gate();
    test_git_status_modified();
    test_mcp_chdir_uses_cwd_argument();
    test_mcp_chdir_session_cwd_precedes_proxy_cwd();
