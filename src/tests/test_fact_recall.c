@@ -9,9 +9,29 @@
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
 #include "modules/memory/memory_ontology.h"
+#include "modules/memory/memory_pii_gate.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+
+/* Stand-ins for the memory module on the recall path. */
+static int failing_batch(const char *const *rel_types, int count, rel_sensitivity_t *out)
+{
+   (void)rel_types;
+   (void)count;
+   (void)out;
+   return -1;
+}
+
+static int g_batch_calls;
+
+static int counting_batch(const char *const *rel_types, int count, rel_sensitivity_t *out)
+{
+   g_batch_calls++;
+   for (int i = 0; i < count; i++)
+      out[i] = memory_pii_rel_sensitivity(rel_types[i]);
+   return 0;
+}
 
 int main(void)
 {
@@ -142,6 +162,29 @@ int main(void)
    /* tight caller buffer: bounded, NUL-terminated, no overflow. */
    n = db2_fact_recall_in_query("devbox", 1, buf, 12);
    assert(n >= 0 && strlen(buf) < 12);
+
+   /* The block's relations are classified in one call, and a classifier that
+    * cannot answer must withhold the whole block rather than let it through as
+    * "nothing sensitive here". -1, not 0: the caller has to be able to tell a
+    * failed gate from an empty one. */
+   {
+      memory_pii_register_sensitivity_batch(failing_batch);
+      n = db2_fact_recall_block("user", 1, buf, sizeof(buf));
+      assert(n == -1);
+      assert(buf[0] == '\0'); /* nothing written on the way to failing */
+      assert(db2_fact_recall_in_query("what about devbox", 1, buf, sizeof(buf)) == -1);
+
+      /* One call for the whole block, not one per fact: the recall path is on the
+       * turn, and per-fact round trips are what this batching exists to avoid. */
+      g_batch_calls = 0;
+      memory_pii_register_sensitivity_batch(counting_batch);
+      n = db2_fact_recall_block("user", 1, buf, sizeof(buf));
+      assert(n >= 1);
+      assert(g_batch_calls == 1);
+
+      memory_pii_register_sensitivity_batch(NULL);
+      assert(db2_fact_recall_block("user", 1, buf, sizeof(buf)) >= 1);
+   }
 
    /* bad args. */
    assert(db2_fact_recall_block(NULL, 0, buf, sizeof(buf)) == -1);

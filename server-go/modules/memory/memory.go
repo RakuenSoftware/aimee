@@ -48,6 +48,11 @@ const (
 	piiResponseMagic    uint32 = 0x53524950
 	piiRequestHeaderLen        = 12
 	piiResponseLen             = 8
+
+	sensRequestMagic      uint32 = 0x51525350
+	sensResponseMagic     uint32 = 0x53525350
+	sensRequestHeaderLen         = 12
+	sensResponseHeaderLen        = 8
 )
 
 const (
@@ -64,7 +69,7 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	case StageExtractIndex:
 		return handleExtract(invocation, request)
 	case StageRetrieve:
-		return handlePIITurn(invocation, request)
+		return handleRetrieve(invocation, request)
 	}
 	return handleRerank(invocation, request)
 }
@@ -140,6 +145,56 @@ func handleWrite(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.M
 	response := make([]byte, gateResponseLen)
 	binary.LittleEndian.PutUint32(response[0:4], gateResponseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], uint32(verdict))
+	return response, bus.ModuleStatusOK
+}
+
+// handleRetrieve serves both halves of the PII recall gate. They share a stage
+// and are told apart by their magic, so a request meant for one is rejected by
+// the other rather than misparsed.
+func handleRetrieve(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+	if len(request) >= 4 && binary.LittleEndian.Uint32(request[0:4]) == sensRequestMagic {
+		return handleSensitivity(invocation, request)
+	}
+	return handlePIITurn(invocation, request)
+}
+
+// handleSensitivity classifies a whole recall block's relations at once.
+func handleSensitivity(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+	if len(request) < sensRequestHeaderLen ||
+		binary.LittleEndian.Uint32(request[0:4]) != sensRequestMagic ||
+		binary.LittleEndian.Uint32(request[4:8]) != wireVersion {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	count := int(binary.LittleEndian.Uint32(request[8:12]))
+	if count <= 0 {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if invocation.Cancelled() {
+		return nil, bus.ModuleStatusCancelled
+	}
+
+	response := make([]byte, sensResponseHeaderLen, sensResponseHeaderLen+count)
+	binary.LittleEndian.PutUint32(response[0:4], sensResponseMagic)
+	binary.LittleEndian.PutUint32(response[4:8], uint32(count))
+	offset := sensRequestHeaderLen
+	for i := 0; i < count; i++ {
+		if offset+2 > len(request) {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		length := int(binary.LittleEndian.Uint16(request[offset : offset+2]))
+		offset += 2
+		if length > relTypeMax || offset+length > len(request) {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		response = append(response, byte(RelSensitivityOf(string(request[offset:offset+length]))))
+		offset += length
+	}
+	// Trailing bytes mean the two sides disagree about the shape. Refuse rather
+	// than answer for the names that happened to parse: a caller that gets fewer
+	// tiers than it has facts cannot tell which fact each tier belongs to.
+	if offset != len(request) {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
 	return response, bus.ModuleStatusOK
 }
 

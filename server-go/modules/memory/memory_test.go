@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/binary"
+	"strings"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -361,6 +362,101 @@ func TestRetrieveStageRejectsMalformedRequests(t *testing.T) {
 func TestRetrieveStageHonorsCancellation(t *testing.T) {
 	invocation := bus.ModuleInvocation{StageID: StageRetrieve, DeadlineNS: 1}
 	if _, status := Handle(invocation, piiRequest("what is my email")); status != bus.ModuleStatusCancelled {
+		t.Fatalf("expired invocation status = %d", status)
+	}
+}
+
+// sensRequest mirrors aimee_memory_sens_request_encode byte for byte.
+func sensRequest(relTypes []string) []byte {
+	request := make([]byte, sensRequestHeaderLen)
+	binary.LittleEndian.PutUint32(request[0:4], sensRequestMagic)
+	binary.LittleEndian.PutUint32(request[4:8], wireVersion)
+	binary.LittleEndian.PutUint32(request[8:12], uint32(len(relTypes)))
+	for _, rel := range relTypes {
+		var length [2]byte
+		binary.LittleEndian.PutUint16(length[:], uint16(len(rel)))
+		request = append(request, length[:]...)
+		request = append(request, rel...)
+	}
+	return request
+}
+
+// Every label the C classifier was asked about goes over the wire in one batch,
+// and each tier has to land against its own label. A stage that returned the
+// tiers in the wrong order, or dropped one, would still look right on a batch
+// where the labels happen to share a tier -- so the batch is the whole corpus.
+func TestRetrieveStageClassifiesAWholeBatch(t *testing.T) {
+	rows := fixtureRows(t, "testdata/pii_sensitivity.tsv")
+	labels := make([]string, 0, len(rows))
+	want := make([]RelSensitivity, 0, len(rows))
+	for _, row := range rows {
+		labels = append(labels, unescapeField(row[0]))
+		want = append(want, RelSensitivity(atoi(t, row[1], row)))
+	}
+
+	response, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve}, sensRequest(labels))
+	if status != bus.ModuleStatusOK {
+		t.Fatalf("batch status = %d", status)
+	}
+	if len(response) != sensResponseHeaderLen+len(labels) ||
+		binary.LittleEndian.Uint32(response[0:4]) != sensResponseMagic ||
+		int(binary.LittleEndian.Uint32(response[4:8])) != len(labels) {
+		t.Fatalf("malformed batch response header %x", response[:8])
+	}
+	for i, label := range labels {
+		if got := RelSensitivity(response[sensResponseHeaderLen+i]); got != want[i] {
+			t.Fatalf("batch[%d] (%q) = %d over the wire, C gate = %d", i, label, got, want[i])
+		}
+	}
+
+	// A batch of one, and a batch whose tiers differ from their neighbours', are
+	// where an off-by-one in the walk shows up.
+	single, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve},
+		sensRequest([]string{"home_password"}))
+	if status != bus.ModuleStatusOK || len(single) != sensResponseHeaderLen+1 ||
+		RelSensitivity(single[sensResponseHeaderLen]) != SensSecret {
+		t.Fatalf("single-label batch = %x, status = %d", single, status)
+	}
+	mixed, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve},
+		sensRequest([]string{"works_for", "ssn", "api_key"}))
+	if status != bus.ModuleStatusOK || len(mixed) != sensResponseHeaderLen+3 {
+		t.Fatalf("mixed batch = %x, status = %d", mixed, status)
+	}
+	for i, tier := range []RelSensitivity{SensNormal, SensPII, SensSecret} {
+		if got := RelSensitivity(mixed[sensResponseHeaderLen+i]); got != tier {
+			t.Fatalf("mixed batch[%d] = %d, want %d", i, got, tier)
+		}
+	}
+}
+
+func TestRetrieveStageRejectsMalformedBatches(t *testing.T) {
+	valid := sensRequest([]string{"works_for", "ssn"})
+	if _, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve}, valid); status != bus.ModuleStatusOK {
+		t.Fatalf("valid batch status = %d", status)
+	}
+	malformed := map[string][]byte{
+		"wire version":               sensRequest([]string{"works_for"}),
+		"count of zero":              sensRequest(nil),
+		"count larger than the body": sensRequest([]string{"works_for"}),
+		"label length past the body": sensRequest([]string{"works_for"}),
+		"label over the bound":       sensRequest([]string{strings.Repeat("a", relTypeMax+1)}),
+		"trailing bytes":             append(sensRequest([]string{"works_for"}), 0),
+		"short header":               valid[:sensRequestHeaderLen-1],
+	}
+	binary.LittleEndian.PutUint32(malformed["wire version"][4:8], wireVersion+1)
+	binary.LittleEndian.PutUint32(malformed["count larger than the body"][8:12], 9)
+	binary.LittleEndian.PutUint16(malformed["label length past the body"][12:14], 999)
+	for name, request := range malformed {
+		if _, status := Handle(bus.ModuleInvocation{StageID: StageRetrieve},
+			request); status != bus.ModuleStatusInvalidRequest {
+			t.Errorf("%s status = %d", name, status)
+		}
+	}
+}
+
+func TestRetrieveStageBatchHonorsCancellation(t *testing.T) {
+	invocation := bus.ModuleInvocation{StageID: StageRetrieve, DeadlineNS: 1}
+	if _, status := Handle(invocation, sensRequest([]string{"works_for"})); status != bus.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
 }

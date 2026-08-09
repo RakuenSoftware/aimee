@@ -177,6 +177,43 @@ static int memory_pii_turn(const char *turn_text, int *requests_sensitive)
    return rc;
 }
 
+/* The wire tiers are compared against rel_sensitivity_t directly, so the two
+ * enums have to agree. Checked here, the one place that sees both. */
+_Static_assert((int)AIMEE_MEMORY_SENS_NORMAL == (int)SENS_NORMAL &&
+                   (int)AIMEE_MEMORY_SENS_PII == (int)SENS_PII &&
+                   (int)AIMEE_MEMORY_SENS_SECRET == (int)SENS_SECRET,
+               "wire sensitivity tiers must match rel_sensitivity_t");
+
+static int memory_pii_sensitivity(const char *const *rel_types, int count,
+                                  rel_sensitivity_t *out)
+{
+   if (!rel_types || !out || count <= 0)
+      return -1;
+   size_t request_len = aimee_memory_sens_request_size(rel_types, count);
+   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+      return -1;
+   size_t response_cap = AIMEE_MEMORY_SENS_RESPONSE_MAX(count);
+   uint8_t *request = malloc(request_len);
+   uint8_t *response = malloc(response_cap);
+   aimee_memory_sensitivity_t *tiers = calloc((size_t)count, sizeof(*tiers));
+   uint32_t response_len = 0;
+   int rc = -1;
+   if (request && response && tiers && response_cap <= UINT32_MAX &&
+       aimee_memory_sens_request_encode(rel_types, count, request, request_len) == 0 &&
+       call_module(AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, request,
+                   (uint32_t)request_len, response, (uint32_t)response_cap, &response_len) == 0 &&
+       aimee_memory_sens_response_decode(response, response_len, tiers, count) == 0)
+   {
+      for (int i = 0; i < count; ++i)
+         out[i] = (rel_sensitivity_t)tiers[i];
+      rc = 0;
+   }
+   free(request);
+   free(response);
+   free(tiers);
+   return rc;
+}
+
 static int learning_classify(const char *signal, uint32_t *sink_mask)
 {
    uint8_t request[AIMEE_LEARNING_REQUEST_LEN], response[AIMEE_LEARNING_RESPONSE_LEN];
@@ -286,6 +323,7 @@ void server_module_stage_adapters_configure(void)
    memory_fact_gate_register_checker(memory_fact_gate);
    memory_extract_register_extractor(memory_extract);
    memory_pii_register_turn_classifier(memory_pii_turn);
+   memory_pii_register_sensitivity_batch(memory_pii_sensitivity);
    learning_router_register_signal_classifier(learning_classify);
    delegate_role_register_canonicalizer(delegate_canonicalize);
    agent_tools_register_classifier(tool_classify);

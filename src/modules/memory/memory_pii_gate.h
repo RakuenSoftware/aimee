@@ -61,6 +61,33 @@ extern "C"
     * broken module invisible. */
    void memory_pii_register_turn_classifier(memory_pii_turn_classifier_fn classifier);
 
+   /* Classify a whole block of relations at once. Writes `count` tiers into
+    * `out`. Returns 0, or -1 if no answer could be produced.
+    *
+    * Batched because the recall path gates every candidate fact it read: the
+    * round trips are the cost, not the classifying. With no classifier
+    * registered this is exactly memory_pii_rel_sensitivity in a loop.
+    *
+    * A -1 means the caller learned nothing about these relations. It must NOT
+    * treat that as "all normal" — withhold the block and let the failure
+    * surface. */
+   int memory_pii_rel_sensitivity_batch(const char *const *rel_types, int count,
+                                        rel_sensitivity_t *out);
+
+   /* Batch classifier: returns 0 and fills `out`, or non-zero if it could not
+    * answer for the whole batch. Partial answers are not a thing — a block is
+    * classified or it is not. */
+   typedef int (*memory_pii_sensitivity_batch_fn)(const char *const *rel_types, int count,
+                                                  rel_sensitivity_t *out);
+
+   /* Route batch classification through `classifier` (the memory module over the
+    * bus). Pass NULL to go back to the local table.
+    *
+    * Authoritative like the others: a failure is reported as a failure, never
+    * quietly answered from the local table, which would make a broken module
+    * look healthy. */
+   void memory_pii_register_sensitivity_batch(memory_pii_sensitivity_batch_fn classifier);
+
 #ifdef __cplusplus
 }
 #endif

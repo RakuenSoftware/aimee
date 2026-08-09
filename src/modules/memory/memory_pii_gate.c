@@ -114,6 +114,25 @@ rel_sensitivity_t memory_pii_rel_sensitivity(const char *rel_type)
    return pii_unknown_rel_sensitivity(norm[0] ? norm : rel_type);
 }
 
+static memory_pii_sensitivity_batch_fn g_sensitivity_batch;
+
+void memory_pii_register_sensitivity_batch(memory_pii_sensitivity_batch_fn classifier)
+{
+   g_sensitivity_batch = classifier;
+}
+
+int memory_pii_rel_sensitivity_batch(const char *const *rel_types, int count,
+                                     rel_sensitivity_t *out)
+{
+   if (!rel_types || !out || count <= 0)
+      return -1;
+   if (g_sensitivity_batch)
+      return g_sensitivity_batch(rel_types, count, out) == 0 ? 0 : -1;
+   for (int i = 0; i < count; i++)
+      out[i] = memory_pii_rel_sensitivity(rel_types[i]);
+   return 0;
+}
+
 int memory_pii_should_inject(rel_sensitivity_t sens, double confidence, int turn_requests_sensitive)
 {
    /* Fail closed on a below-floor OR non-finite confidence: `confidence != confidence`

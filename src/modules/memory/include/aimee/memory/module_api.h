@@ -320,4 +320,92 @@ static inline int aimee_memory_pii_response_decode(const uint8_t *in, size_t len
    return 0;
 }
 
+/* PII recall gate, relation sensitivity (stage RETRIEVE, second shape).
+ *
+ * A batch, not one call per fact: a recall pass gates every candidate fact it
+ * read, and the round trips are what make this expensive, not the classifying.
+ * The caller hands over the whole block's relations at once.
+ *
+ * Shares the stage with the turn classifier and is told apart by its magic. */
+#define AIMEE_MEMORY_SENS_REQUEST_MAGIC  0x51525350u /* "PSRQ" */
+#define AIMEE_MEMORY_SENS_RESPONSE_MAGIC 0x53525350u /* "PSRS" */
+#define AIMEE_MEMORY_SENS_REQUEST_HEADER_LEN 12u
+#define AIMEE_MEMORY_SENS_RESPONSE_HEADER_LEN 8u
+
+/* Mirrors rel_sensitivity_t. Compared against it directly, so the numbering is
+ * not free to drift. */
+typedef enum
+{
+   AIMEE_MEMORY_SENS_NORMAL = 0,
+   AIMEE_MEMORY_SENS_PII = 1,
+   AIMEE_MEMORY_SENS_SECRET = 2
+} aimee_memory_sensitivity_t;
+
+/* Size of a request carrying `count` relation names, or 0 if it cannot be
+ * carried: a name past AIMEE_MEMORY_REL_TYPE_MAX is refused rather than
+ * truncated, for the same reason the write gate refuses one -- a shortened
+ * label normalizes to a different name and would be classified as that other
+ * name. The caller's own line bound keeps real relations well inside this. */
+static inline size_t aimee_memory_sens_request_size(const char *const *rel_types, int count)
+{
+   if (!rel_types || count <= 0)
+      return 0;
+   size_t total = AIMEE_MEMORY_SENS_REQUEST_HEADER_LEN;
+   for (int i = 0; i < count; ++i)
+   {
+      size_t len = rel_types[i] ? strlen(rel_types[i]) : 0;
+      if (len > AIMEE_MEMORY_REL_TYPE_MAX)
+         return 0;
+      total += 2u + len;
+   }
+   return total;
+}
+
+static inline int aimee_memory_sens_request_encode(const char *const *rel_types, int count,
+                                                   uint8_t *out, size_t cap)
+{
+   size_t needed = aimee_memory_sens_request_size(rel_types, count);
+   if (!needed || !out || cap < needed)
+      return -1;
+   aimee_memory_put_u32(out, AIMEE_MEMORY_SENS_REQUEST_MAGIC);
+   aimee_memory_put_u32(out + 4, AIMEE_MEMORY_WIRE_VERSION);
+   aimee_memory_put_u32(out + 8, (uint32_t)count);
+   size_t offset = AIMEE_MEMORY_SENS_REQUEST_HEADER_LEN;
+   for (int i = 0; i < count; ++i)
+   {
+      size_t len = rel_types[i] ? strlen(rel_types[i]) : 0;
+      aimee_memory_put_u16(out + offset, (uint16_t)len);
+      offset += 2u;
+      if (len)
+         memcpy(out + offset, rel_types[i], len);
+      offset += len;
+   }
+   return 0;
+}
+
+/* Response capacity for a request that asked about `count` relations. */
+#define AIMEE_MEMORY_SENS_RESPONSE_MAX(count)                                                      \
+   (AIMEE_MEMORY_SENS_RESPONSE_HEADER_LEN + (size_t)(count))
+
+/* Decodes exactly `count` tiers. A short answer, a long one, or a tier outside
+ * the enum all fail: this decides whether a private fact reaches a prompt, so a
+ * partially understood answer is no answer. */
+static inline int aimee_memory_sens_response_decode(const uint8_t *in, size_t len,
+                                                    aimee_memory_sensitivity_t *out, int count)
+{
+   if (!in || !out || count <= 0 ||
+       len != AIMEE_MEMORY_SENS_RESPONSE_HEADER_LEN + (size_t)count ||
+       aimee_memory_get_u32(in) != AIMEE_MEMORY_SENS_RESPONSE_MAGIC ||
+       aimee_memory_get_u32(in + 4) != (uint32_t)count)
+      return -1;
+   for (int i = 0; i < count; ++i)
+   {
+      uint8_t tier = in[AIMEE_MEMORY_SENS_RESPONSE_HEADER_LEN + i];
+      if (tier > AIMEE_MEMORY_SENS_SECRET)
+         return -1;
+      out[i] = (aimee_memory_sensitivity_t)tier;
+   }
+   return 0;
+}
+
 #endif
