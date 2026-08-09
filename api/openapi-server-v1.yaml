@@ -2072,6 +2072,23 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /config/deploy-env:
+    get:
+      summary: Emit the compose environment for this backend record
+      description: >
+        The KEY=VALUE lines a managed `docker compose up -d` needs, derived from
+        the saved configuration. Intended for the operator wrapper
+        `eval "$(aimee config deploy-env)" && docker compose up -d`: recreating a
+        managed container without these silently reinterpolates AIMEE_KB_VARIANT
+        to empty, which resolves the knowledge-base image to the embedderless
+        variant. Carries no credential: embedder and synthesis API keys are
+        deliberately omitted and live only in Vault.
+      responses:
+        "200":
+          description: Envelope whose `env` string holds the KEY=VALUE lines
+          content:
+            application/json:
+              schema: { type: object }
   /config/get:
     post:
       summary: Get one configuration value
