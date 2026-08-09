@@ -115,6 +115,29 @@ int main(void)
       assert(strlen(extended) > strlen(standard));
       assert(strlen(standard) > strlen(minimal));
 
+      /* THE PROMPT MUST NOT INSTRUCT A COMMAND THAT DOES NOT EXIST.
+       *
+       * Every tier carried a "## Work Queue" section telling the agent to
+       * coordinate with other sessions via `aimee work claim` / `complete` /
+       * `fail` / `list`. None of those exist: there is no `work` row in the
+       * command table, no /v1 route, and no work.* dispatch handler. The only
+       * surviving references are a capability-registry line and an entry in the
+       * write-tier op list, neither of which can make a command run.
+       *
+       * Live on a deployment: `aimee work list` answers "command 'work' has no
+       * /v1 route". This costs every session the turns it takes to discover
+       * that, and it is worse than a wasted turn -- an agent told to coordinate
+       * through a shared queue can believe coordination happened when nothing
+       * was ever queued or claimed.
+       *
+       * If the work queue is implemented, this assertion is the reminder to
+       * restore the instructions WITH it, not before it. */
+      assert(strstr(minimal, "aimee work ") == NULL);
+      assert(strstr(standard, "aimee work ") == NULL);
+      assert(strstr(extended, "aimee work ") == NULL);
+      assert(strstr(standard, "Work Queue") == NULL);
+      assert(strstr(extended, "Work Queue") == NULL);
+
       free(minimal);
       free(standard);
       free(extended);

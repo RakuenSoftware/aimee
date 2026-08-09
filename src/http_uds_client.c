@@ -1,6 +1,8 @@
 /* http_uds_client.c: minimal HTTP/1.1 client over aimee-server's /v1 UDS. */
 #include "http_uds_client.h"
 #include "aimee_home.h"
+#include "cJSON.h"
+#include "cli_client.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -134,3 +136,35 @@ char *http_uds_request(const char *method, const char *path, const char *body, i
    return out;
 }
 #endif /* !_WIN32 */
+
+/* Transport-selecting wrapper (see http_uds_client.h). Shared by both platforms:
+ * on Windows the UDS branch is the stub above and only the remote branch can
+ * succeed, which is exactly right -- that client always has a remote endpoint.
+ *
+ * The response is re-serialized from the parsed JSON rather than passed through
+ * verbatim, because cli_http_request() hands back a cJSON tree, not the raw
+ * body. Every /v1 path routed here answers JSON, and the callers either parse it
+ * or print it, so compact re-serialization is equivalent. */
+char *cli_v1_path_request(const char *method, const char *path, const char *body, int *status_out)
+{
+   if (status_out)
+      *status_out = 0;
+   if (!cli_v1_has_remote_endpoint())
+      return http_uds_request(method, path, body, status_out);
+
+   char *endpoint = cli_v1_client_endpoint();
+   if (!endpoint)
+      return NULL;
+   char *bearer = cli_v1_client_bearer();
+   int status = 0;
+   cJSON *resp = cli_http_request(endpoint, method, path, body, bearer, 30000, &status);
+   free(endpoint);
+   free(bearer);
+   if (status_out)
+      *status_out = status;
+   if (!resp)
+      return NULL;
+   char *out = cJSON_PrintUnformatted(resp);
+   cJSON_Delete(resp);
+   return out;
+}
