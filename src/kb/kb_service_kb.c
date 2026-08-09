@@ -448,20 +448,16 @@ static cJSON *kb_service_health_object(void)
    if (db2_kb_runtime_state_get("last_ingest_at", last_ingest_at, sizeof(last_ingest_at)) == 0 &&
        last_ingest_at[0])
    {
-      /* Parse ISO8601 prefix YYYY-MM-DD HH:MM:SS to compute days elapsed */
-      struct tm t;
-      memset(&t, 0, sizeof(t));
-      if (sscanf(last_ingest_at, "%d-%d-%d %d:%d:%d", &t.tm_year, &t.tm_mon, &t.tm_mday, &t.tm_hour,
-                 &t.tm_min, &t.tm_sec) >= 3)
+      /* Days elapsed. Shared parser: this read only the space form, and mktime()
+       * treated a UTC stamp as local time, skewing freshness by the host offset.
+       * An unparseable stamp must leave freshness_days at its -1 "unknown", not
+       * fall through to 0 -- "we cannot tell how old this is" and "it is current"
+       * are different answers. */
+      time_t then = parse_utc_ts(last_ingest_at);
+      if (then > 0)
       {
-         t.tm_year -= 1900;
-         t.tm_mon -= 1;
-         time_t then = mktime(&t);
          time_t now = time(NULL);
-         if (then > 0 && now > then)
-            freshness_days = (int)((now - then) / 86400);
-         else
-            freshness_days = 0;
+         freshness_days = (now > then) ? (int)((now - then) / 86400) : 0;
       }
    }
    cJSON_AddStringToObject(resp, "last_ingest_at", last_ingest_at);

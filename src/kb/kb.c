@@ -954,11 +954,11 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
                                 findex_ingested, sizeof(findex_ingested)) == 1 &&
           findex_ingested[0])
       {
-         struct tm tm_ingest;
-         memset(&tm_ingest, 0, sizeof(tm_ingest));
-         strptime(findex_ingested, "%Y-%m-%d %H:%M:%S", &tm_ingest);
-         time_t ingested_t = timegm(&tm_ingest);
-         if (fst.st_mtime < ingested_t)
+         /* Shared parser: this read only the space form AND ignored strptime's
+          * return, so an unparsed stamp left a zeroed tm and compared as the
+          * epoch -- every file then looked newer and was re-ingested. */
+         time_t ingested_t = parse_utc_ts(findex_ingested);
+         if (ingested_t > 0 && fst.st_mtime < ingested_t)
          {
             c->stats->files_skipped++;
             return;
