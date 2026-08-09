@@ -63,6 +63,31 @@ int main(void)
    assert(n == 2); /* works_for + age; the over-long bio row skipped */
    assert(strstr(buf, "bio") == NULL);
 
+   /* The floor is applied PER FACT. Every fact above is Class A at confidence
+    * 1.0, so a gate that read one row's confidence for all of them would agree
+    * with all of the above. Insert a below-floor row of an otherwise-injectable
+    * (SENS_NORMAL) relation: it must be withheld while its higher-confidence
+    * neighbours pass, which only holds if each row is judged on its own. */
+   {
+      void *conn = db2_conn();
+      assert(conn);
+      char err[256] = "";
+      aimee_pg_stmt_t *ins = aimee_pg_prepare(
+          conn,
+          "INSERT INTO entity_edges (source, relation, target, weight, edge_class,"
+          " confidence_class, confidence) VALUES ('user', 'has_role', 'guesswork', 1,"
+          " 'semantic', 'C', 0.2)",
+          err, sizeof(err));
+      assert(ins);
+      assert(aimee_pg_step(ins, err, sizeof(err)) == AIMEE_PG_DONE);
+      aimee_pg_finalize(ins);
+   }
+   n = db2_fact_recall_block("user", 1, buf, sizeof(buf));
+   assert(n == 2); /* unchanged: the 0.2 row is below the 0.4 floor */
+   assert(strstr(buf, "has_role: guesswork") == NULL);
+   assert(strstr(buf, "works_for: acme") != NULL); /* its 1.0 neighbours still pass */
+   assert(strstr(buf, "age: 30") != NULL);
+
    /* tight caller buffer: the first line doesn't fit -> no facts, NUL-terminated. */
    n = db2_fact_recall_block("user", 1, buf, 16);
    assert(n == 0 && buf[0] == '\0');

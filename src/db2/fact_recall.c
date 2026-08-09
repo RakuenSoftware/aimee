@@ -10,6 +10,28 @@
 
 #define FR_ERRBUF    256
 #define FR_MAX_FACTS 32
+#define FR_LINE_MAX  256
+
+/* One row that survived formatting, held between the query and the §7 gate.
+ *
+ * The gate runs over the whole set rather than inside the row loop so that the
+ * sensitivity lookup can be answered for all of them at once -- it is the memory
+ * module's to answer, and a call per row would put a round trip per candidate
+ * fact on the turn's hot path.
+ *
+ * The relation is kept as a span inside the formatted line instead of a second
+ * copy: a row whose line fits FR_LINE_MAX has a relation that fits it too, and
+ * one array of lines is half the stack of two arrays of fields. */
+typedef struct
+{
+   char line[FR_LINE_MAX];
+   int line_len;
+   int rel_len; /* the relation is line[FR_REL_OFFSET .. +rel_len) */
+   double confidence;
+} fr_candidate_t;
+
+/* Where the relation starts in "- %s: %s\n". */
+#define FR_REL_OFFSET 2
 
 int db2_fact_recall_block(const char *entity, int turn_requests_sensitive, char *out, size_t cap)
 {
@@ -34,35 +56,53 @@ int db2_fact_recall_block(const char *entity, int turn_requests_sensitive, char 
    aimee_pg_bind_text(st, "?1", entity);
    aimee_pg_bind_int(st, "?2", FR_MAX_FACTS);
 
-   int written = 0;
-   size_t used = 0;
-   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   /* Pass 1: read and format the candidate rows. Nothing is gated here. */
+   fr_candidate_t candidates[FR_MAX_FACTS];
+   int ncandidates = 0;
+   while (ncandidates < FR_MAX_FACTS && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
       const char *rel = aimee_pg_column_text(st, 0);
       const char *tgt = aimee_pg_column_text(st, 1);
       double conf = aimee_pg_column_double(st, 2);
       if (!rel || !rel[0] || !tgt || !tgt[0])
          continue;
-      /* §7 PII gate: sensitivity comes from the rel_type (fail-closed to PII for
-       * unknown types); withhold unless the turn asks. */
-      rel_sensitivity_t sens = memory_pii_rel_sensitivity(rel);
-      if (!memory_pii_should_inject(sens, conf, turn_requests_sensitive))
-         continue;
-      char line[256];
-      int n = snprintf(line, sizeof(line), "- %s: %s\n", rel, tgt);
+      fr_candidate_t *c = &candidates[ncandidates];
+      int n = snprintf(c->line, sizeof(c->line), "- %s: %s\n", rel, tgt);
       /* Skip empty or over-long lines: snprintf returns the would-be length, so a
        * line >= sizeof(line) was truncated — never memcpy that length (it would
-       * over-read the stack buffer) and never inject a truncated fact. */
-      if (n <= 0 || (size_t)n >= sizeof(line))
+       * over-read the stack buffer) and never inject a truncated fact. Doing this
+       * before the gate rather than after changes no outcome: the gate is pure,
+       * and a row rejected for length is rejected either way. */
+      if (n <= 0 || (size_t)n >= sizeof(c->line))
          continue;
-      if (used + (size_t)n >= cap) /* respect the caller's buffer */
+      c->line_len = n;
+      c->rel_len = (int)strlen(rel);
+      c->confidence = conf;
+      ncandidates++;
+   }
+   aimee_pg_finalize(st);
+
+   /* Pass 2: §7 PII gate, then fill the caller's buffer. Sensitivity comes from
+    * the rel_type (unknown types are classified by name); withhold unless the
+    * turn asks. */
+   int written = 0;
+   size_t used = 0;
+   for (int i = 0; i < ncandidates; i++)
+   {
+      const fr_candidate_t *c = &candidates[i];
+      char rel[FR_LINE_MAX];
+      memcpy(rel, c->line + FR_REL_OFFSET, (size_t)c->rel_len);
+      rel[c->rel_len] = '\0';
+      rel_sensitivity_t sens = memory_pii_rel_sensitivity(rel);
+      if (!memory_pii_should_inject(sens, c->confidence, turn_requests_sensitive))
+         continue;
+      if (used + (size_t)c->line_len >= cap) /* respect the caller's buffer */
          break;
-      memcpy(out + used, line, (size_t)n);
-      used += (size_t)n;
+      memcpy(out + used, c->line, (size_t)c->line_len);
+      used += (size_t)c->line_len;
       out[used] = '\0';
       written++;
    }
-   aimee_pg_finalize(st);
    return written;
 }
 
