@@ -111,6 +111,41 @@ static int context_split_tokens(const char *norm, char tokens[][64], int max_tok
    return count;
 }
 
+/* Does `text` restate something already emitted in this section?
+ *
+ * WHY THIS EXISTS HERE AND NOT ONLY IN THE EXPLAIN PATH. Read-time
+ * near-duplicate suppression was added to memory_assemble_context_explain(),
+ * whose header comment claims it "runs a candidate scoring pass (identical to
+ * memory_assemble_context)". That claim is false: they are two separate
+ * implementations, and the explain one has a single production caller -- the
+ * `memory improve` diagnostic. So the suppression never ran for `aimee memory
+ * read`, for the agent-runtime fallback context, or anywhere else real.
+ *
+ * Found by storing two memories that were pure word-order reorderings of each
+ * other and reading the context back: both appeared, though their token sets are
+ * identical and the lexical threshold is 0.85.
+ *
+ * Lexical only, deliberately, and for the reason the explain path already gives:
+ * this is the read path, where an embedder round-trip per candidate pair would
+ * add latency to every assembly. Token overlap catches the case that actually
+ * occurs -- the same fact stored twice in slightly different words.
+ *
+ * Scoped to ONE section. Two memories of different kinds are different sections
+ * and saying related things there is not restatement; suppressing across
+ * sections would be more aggressive than the evidence supports. The asymmetry
+ * governs everything here: admitting a redundant line wastes budget, wrongly
+ * dropping a distinct one silently loses evidence. */
+static int assemble_section_is_near_duplicate(const char *text, const char *const *emitted,
+                                              int emitted_n)
+{
+   if (!text || !text[0])
+      return 0;
+   for (int i = 0; i < emitted_n; i++)
+      if (assemble_texts_near_duplicate(text, emitted[i]))
+         return 1;
+   return 0;
+}
+
 static int append_section(char *buf, int pos, int cap, const char *header,
                           const db2_memory_kv_row_t *rows, int row_count, int max_chars,
                           int max_items)
@@ -121,6 +156,12 @@ static int append_section(char *buf, int pos, int cap, const char *header,
    int items = 0;
    int section_len = 0;
 
+   /* Emitted texts, for read-time near-duplicate suppression (see
+    * assemble_section_is_near_duplicate). Points into `rows`, which outlives
+    * this loop. */
+   const char *emitted[MAX_CONTEXT_MEMS];
+   int emitted_n = 0;
+
    for (int i = 0; i < row_count && items < max_items; i++)
    {
       const char *key = rows[i].key;
@@ -129,6 +170,11 @@ static int append_section(char *buf, int pos, int cap, const char *header,
          continue;
 
       const char *text = content[0] ? content : key;
+
+      if (assemble_section_is_near_duplicate(text, emitted, emitted_n))
+         continue;
+      if (emitted_n < MAX_CONTEXT_MEMS)
+         emitted[emitted_n++] = text;
 
       char truncated[MAX_MEM_CONTENT_LEN + 8];
       if ((int)strlen(text) > MAX_MEM_CONTENT_LEN)
@@ -624,6 +670,8 @@ static int append_untasked_context(char *buf, int pos, int cap)
 
       char *seed_keys[MAX_CONTEXT_MEMS];
       int seed_count = 0;
+      const char *emitted[MAX_CONTEXT_MEMS];
+      int emitted_n = 0;
 
       for (int i = 0; i < kf_n && items < MAX_CONTEXT_MEMS; i++)
       {
@@ -632,6 +680,13 @@ static int append_untasked_context(char *buf, int pos, int cap)
          const char *supersede_ts = kf_rows[i].supersede_date;
          const char *provenance = kf_rows[i].provenance;
          const char *text = content[0] ? content : (key[0] ? key : "");
+
+         /* Before seed_keys: a restatement would seed the graph with a key whose
+          * neighbours the original already contributes. */
+         if (assemble_section_is_near_duplicate(text, emitted, emitted_n))
+            continue;
+         if (emitted_n < MAX_CONTEXT_MEMS)
+            emitted[emitted_n++] = text;
 
          if (key[0])
             seed_keys[seed_count++] = strdup(key);
@@ -999,6 +1054,21 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
          /* In budget mode: skip if remaining token budget is too small */
          if (budget_mode && tokens_used + section_tokens + c->estimated_tokens > token_budget)
             continue;
+
+         /* A restatement admitted here is evidence displaced: the budget is
+          * finite, so it pushes a genuinely different memory out of the block. */
+         {
+            const char *ctext = c->content[0] ? c->content : c->key;
+            int dup = 0;
+            for (int s2 = 0; s2 < selected_count && !dup; s2++)
+            {
+               const context_candidate_t *sel = &candidates[selected[s2]];
+               dup =
+                   assemble_texts_near_duplicate(ctext, sel->content[0] ? sel->content : sel->key);
+            }
+            if (dup)
+               continue;
+         }
 
          selected[selected_count++] = i;
          section_tokens += c->estimated_tokens;
