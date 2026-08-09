@@ -1124,7 +1124,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       } git_params[] = {
           {"action", "string",
            "Sub-action for: branch (create/switch/list/delete/claim/orphan), pr "
-           "(create/view/list/edit/checks/merge_status/merge), stash "
+           "(create/view/list/edit/checks/merge_status/update_branch/merge), stash "
            "(push/pop/apply/list/drop), tag (create/list/delete), issue (list), verify "
            "(run/check/conflicts/env/prepare-pr/status)."},
           {"message", "string",
@@ -1144,7 +1144,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
           {"stat_only", "boolean", "diff_summary: file-level stats only (default true)."},
           {"title", "string", "pr: title (create/edit)."},
           {"body", "string", "pr: body (create/edit)."},
-          {"number", "integer", "pr: PR number (view/edit/checks/watch/merge_status/wait)."},
+          {"number", "integer",
+           "pr: PR number (view/edit/checks/watch/merge_status/update_branch/wait)."},
           {"wait", "boolean",
            "Deprecated for pr checks: blocking waits are rejected; poll snapshots instead."},
           {"auto", "boolean",
