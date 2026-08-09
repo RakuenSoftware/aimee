@@ -3005,6 +3005,14 @@ paths:
     get:
       summary: Server health (RPC twin)
       responses: { "200": { description: Health, content: { application/json: { schema: { type: object } } } } }
+  /workers:
+    get:
+      summary: Server worker-pool status
+      description: >-
+        Occupancy of the server's thread pools: the request and compute pools, per-session
+        pools, on-demand delegate threads, any ephemeral secondary pools, and aimee-kb
+        connection workers. Read-only. Capability: dashboard:read.
+      responses: { "200": { description: Worker-pool status, content: { application/json: { schema: { type: object } } } } }
   /server/forensics:
     get:
       summary: Recent server shutdown forensics

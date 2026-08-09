@@ -805,6 +805,7 @@ static const struct
     {"wm.get", "POST", "/v1/wm/get"},
     {"wm.list", "POST", "/v1/wm/list"},
     {"wm.set", "POST", "/v1/wm/set"},
+    {"workers", "GET", "/v1/workers"},
     {"workspace.context", "POST", "/v1/workspaces/context"},
     {"workspace.list", "GET", "/v1/workspaces"},
     {"workspace.mirror-sync", "POST", "/v1/workspace/mirror-sync"},
