@@ -324,6 +324,12 @@ static const struct
     {"get-help", NULL, "get_help", "help.get", NULL, 0},
     {"verify", NULL, "git.verify", "mcp.call", NULL, 900000},
     {"git", "verify", "git.verify", "mcp.call", NULL, 900000},
+    /* Every other git subcommand, wildcard so `aimee git <anything>` reaches the
+     * server's git tool instead of "not a subcommand of 'git'". MUST stay after
+     * the verify row: pass 2 takes the first match, and verify has its own
+     * marshaler (--status, async=). Wildcard also means argv[0] is the
+     * subcommand, which is what marshal_git_cli needs to pick the tool. */
+    {"git", NULL, "git.cli", "mcp.call", NULL, 300000},
     {"provider", "list", "provider.list", NULL, "providers", 300000},
     {"provider", "show", "provider.show", NULL, NULL, 0},
     {"provider", "models", "provider.models", NULL, "models", 300000},

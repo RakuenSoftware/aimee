@@ -7,7 +7,7 @@
       "files": [
         {
           "path": "docs/gen/cli-commands.md",
-          "sha256": "07047b4d488662f336fa762250b93d45a47427ce832d483c9f3cf4ae166b8968"
+          "sha256": "dc50b347d6d4da379036a7541a81075371c61cadfb1fe0a809f74f9a1130ca75"
         },
         {
           "path": "src/gateway/gateway_main.c",
