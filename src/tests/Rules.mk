@@ -737,7 +737,8 @@ MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/kb_synthesis.o \
    $(OBJDIR)/tests/module_handlers/runtime_web.o \
    $(OBJDIR)/tests/module_handlers/control_web.o \
-   $(OBJDIR)/tests/module_handlers/benchmarks.o
+   $(OBJDIR)/tests/module_handlers/benchmarks.o \
+   $(OBJDIR)/tests/module_handlers/providers.o
 
 define module_handler_test_object
 $(OBJDIR)/tests/module_handlers/$(1).o: modules/$(2)/module_adapter.c
@@ -758,6 +759,7 @@ $(eval $(call module_handler_test_object,kb_synthesis,kb-synthesis))
 $(eval $(call module_handler_test_object,runtime_web,runtime-web))
 $(eval $(call module_handler_test_object,control_web,control-web))
 $(eval $(call module_handler_test_object,benchmarks,benchmarks))
+$(eval $(call module_handler_test_object,providers,providers))
 
 $(TESTPREFIX)/unit-test-process-module-handlers: \
    $(OBJDIR)/tests/test_process_module_handlers.o $(MODULE_HANDLER_TEST_OBJS) \
