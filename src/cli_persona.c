@@ -3,7 +3,8 @@
  *
  * Personas are server-owned config; per the persona registry contract the client
  * never reads the on-disk files directly, it goes over aimee-server's /v1 HTTP
- * API (http_uds_client). `edit` round-trips the persona as JSON through $EDITOR
+ * API (cli_v1_path_request, so a remote thin client reaches its own server
+ * rather than a local socket). `edit` round-trips the persona as JSON through $EDITOR
  * so no markdown parser is needed client-side. */
 #include "http_uds_client.h"
 #include "cJSON.h"
@@ -39,7 +40,7 @@ static int persona_server_down(int status)
  * *status to the HTTP status (0 = transport failure). */
 static cJSON *persona_get_json(const char *path, int *status)
 {
-   char *resp = http_uds_request("GET", path, NULL, status);
+   char *resp = cli_v1_path_request("GET", path, NULL, status);
    cJSON *root = resp ? cJSON_Parse(resp) : NULL;
    free(resp);
    return root;
@@ -48,7 +49,7 @@ static cJSON *persona_get_json(const char *path, int *status)
 static int persona_list_cmd(int json_output)
 {
    int st = 0;
-   char *resp = http_uds_request("GET", "/v1/personas", NULL, &st);
+   char *resp = cli_v1_path_request("GET", "/v1/personas", NULL, &st);
    if (persona_server_down(st))
    {
       free(resp);
@@ -89,7 +90,7 @@ static int persona_show_cmd(const char *name, int json_output)
    char path[256];
    snprintf(path, sizeof(path), "/v1/personas/%s", name);
    int st = 0;
-   char *resp = http_uds_request("GET", path, NULL, &st);
+   char *resp = cli_v1_path_request("GET", path, NULL, &st);
    if (persona_server_down(st))
    {
       free(resp);
@@ -249,7 +250,7 @@ static int persona_edit_cmd(const char *name)
    char path[256];
    snprintf(path, sizeof(path), "/v1/personas/%s", name);
    int wst = 0;
-   char *resp = http_uds_request("PUT", path, buf, &wst);
+   char *resp = cli_v1_path_request("PUT", path, buf, &wst);
    free(buf);
    if (wst != 200)
    {
@@ -269,7 +270,7 @@ static int persona_rm_cmd(const char *name)
    char path[256];
    snprintf(path, sizeof(path), "/v1/personas/%s", name);
    int st = 0;
-   char *resp = http_uds_request("DELETE", path, NULL, &st);
+   char *resp = cli_v1_path_request("DELETE", path, NULL, &st);
    free(resp);
    if (persona_server_down(st))
       return 1;

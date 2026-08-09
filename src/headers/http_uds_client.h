@@ -15,6 +15,19 @@ extern "C"
     * HTTP status. Returns NULL on connect/transport failure (status_out = 0). */
    char *http_uds_request(const char *method, const char *path, const char *body, int *status_out);
 
+   /* Same request, over whichever transport THIS client is configured for: the
+    * co-located Unix socket, or the remote aimee-server when one is configured
+    * (aimee remote / AIMEE_API_ENDPOINT). Identical contract to
+    * http_uds_request() -- heap response body (caller frees), *status_out set to
+    * the HTTP status, NULL and *status_out = 0 on transport failure.
+    *
+    * Callers reaching a server-owned /v1 path should prefer this: calling
+    * http_uds_request() directly hardcodes the local socket, so on a remote thin
+    * client it fails and reports the server unreachable when the server is
+    * merely not local. */
+   char *cli_v1_path_request(const char *method, const char *path, const char *body,
+                             int *status_out);
+
 #ifdef __cplusplus
 }
 #endif
