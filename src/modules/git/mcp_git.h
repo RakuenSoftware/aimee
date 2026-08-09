@@ -98,6 +98,12 @@ int mcp_git_get_worktree(void);
 char *mcp_git_run(const char *cmd, int *exit_code);
 
 /* Git helper utilities shared between mcp_git_query.c and mcp_git_write.c. */
+/* Would merging HEAD into `base` conflict? 1 yes (conflicting paths appended to
+ * `files`), 0 no, -1 cannot tell. A merge-tree dry run: it does not touch the
+ * working tree or the branch. Exposed for the PR-create gate's test -- an
+ * inconclusive answer must stay "proceed", and only a test pins that. */
+int mcp_git_conflicts_with_base(const char *base, char *files, size_t files_cap);
+
 int get_current_branch(char *buf, size_t len);
 int check_branch_has_merged_pr_for(const char *branch);
 

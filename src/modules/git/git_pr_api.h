@@ -120,6 +120,36 @@ typedef struct
 int git_pr_checks_via_api_slug(const char *principal, const char *slug, int number, int max,
                                git_pr_check_t *out, int *count, char *err, size_t errlen);
 
+/* Why one check failed, in the terms someone fixing it needs.
+ *
+ * `status`/`url` from the checks listing say a job is red; they do not say what
+ * broke, and the URL is unreachable from an agent. These fields are: which job,
+ * which step inside it, and the tail of that job's log, which is where the actual
+ * error text lives (the forge's own annotation for a shell failure is
+ * "Process completed with exit code 1", which explains nothing). */
+typedef struct
+{
+   char name[256];        /* check / job name */
+   char conclusion[24];   /* failure / timed_out / cancelled / action_required */
+   char failed_step[256]; /* first failed step; for an unnamed step the forge
+                           * reports the command, which is what to run locally */
+   int failed_step_number;
+   char url[512];
+   char *log_tail; /* malloc'd, NUL-terminated, may be NULL; caller frees */
+} git_pr_failure_t;
+
+/* The failed checks for PR `number`'s head commit, at most `max`, count in
+ * *count. Each row gets its failed step; the first `logs_for` rows also get up to
+ * `tail_bytes` of their job log (0 for neither). Returns 0 on success — including
+ * "nothing failed", which is *count == 0 — or -1 with `err` set.
+ *
+ * Caller supplies the array and must call git_pr_failures_free() to release the
+ * log tails. */
+int git_pr_failures_via_api_slug(const char *principal, const char *slug, int number, int max,
+                                 int logs_for, long tail_bytes, git_pr_failure_t *out, int *count,
+                                 char *err, size_t errlen);
+void git_pr_failures_free(git_pr_failure_t *rows, int count);
+
 /* One row of an open-PR listing. */
 typedef struct
 {
