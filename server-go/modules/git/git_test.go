@@ -93,3 +93,33 @@ func TestGitRejectsInvalidAndExpiredWire(t *testing.T) {
 		t.Fatalf("embedded-NUL wire status = %d", status)
 	}
 }
+
+// The stage table is the contract in src/modules/process-contracts.json, whose
+// event kinds are derived rather than chosen: 4096 + principal_ref*256 + stage.
+// Stages 4-6 are declared ahead of the C-to-Go port so callers land one at a
+// time against fixed numbering; until a handler serves them they must be
+// refused, not silently accepted.
+func TestGitStageTableMatchesContract(t *testing.T) {
+	const principalRef = 13
+	stages := map[uint32]uint32{
+		StageOperation:    EventKind,
+		StageRefValidate:  EventRefValidate,
+		StageCIGrade:      EventCIGrade,
+		StageForgeRequest: EventForgeRequest,
+		StageCredResolve:  EventCredResolve,
+		StageVerifyRun:    EventVerifyRun,
+	}
+	if len(stages) != 6 {
+		t.Fatalf("stage table has %d entries, want 6 dense stages", len(stages))
+	}
+	for stage, event := range stages {
+		if want := 4096 + principalRef*256 + stage; event != want {
+			t.Fatalf("stage %d event kind = %d, want %d", stage, event, want)
+		}
+	}
+	for _, stage := range []uint32{StageForgeRequest, StageCredResolve, StageVerifyRun} {
+		if _, status := Handle(bus.ModuleInvocation{StageID: stage}, nil); status != bus.ModuleStatusInvalidRequest {
+			t.Fatalf("unserved stage %d status = %d, want refused", stage, status)
+		}
+	}
+}

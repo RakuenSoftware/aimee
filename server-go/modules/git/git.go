@@ -17,6 +17,19 @@ const (
 	StageOperation   uint32 = 1
 	StageRefValidate uint32 = 2
 	StageCIGrade     uint32 = 3
+
+	// Stages 4-6 are the destination for the I/O that still lives in C: the
+	// forge HTTP client, credential resolution, and the verify pipeline. They
+	// are declared with the rest of the wire contract so the port lands one
+	// caller at a time against a fixed stage table rather than renumbering as
+	// it goes. No handler serves them yet.
+	EventForgeRequest uint32 = 7428
+	EventCredResolve  uint32 = 7429
+	EventVerifyRun    uint32 = 7430
+	StageForgeRequest uint32 = 4
+	StageCredResolve  uint32 = 5
+	StageVerifyRun    uint32 = 6
+
 	requestMagic     uint32 = 0x53504f47
 	responseMagic    uint32 = 0x534c4347
 	refRequestMagic  uint32 = 0x46455247

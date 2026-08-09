@@ -222,14 +222,17 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "695c04003cc7741a9c17466cde96f10a371d3cdddcbef7f9b9a7e8c32e57d816",
+      "source_sha256": "f5a4f720001d7202d737c43753eff87ede0b1003433b01453e7966a62e8c80af",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 13,
       "serve": [
         7425,
         7426,
-        7427
+        7427,
+        7428,
+        7429,
+        7430
       ]
     },
     {
