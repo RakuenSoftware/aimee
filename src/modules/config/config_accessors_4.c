@@ -408,7 +408,7 @@ const char *config_workspace_vcs_remote(int index)
 
 const char *config_workspace_vcs_head(int index)
 {
-   static _Thread_local char buf[64];
+   static _Thread_local char buf[65];
    buf[0] = 0;
    if (index < 0 || index >= (64))
       return buf;

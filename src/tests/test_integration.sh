@@ -108,6 +108,7 @@ routes = {
   'server.info': ('GET', '/v1/server/info'),
   'server.health': ('GET', '/v1/server/health'),
   'provider.list': ('GET', '/v1/provider/list'),
+  'workspace.add': ('POST', '/v1/workspaces'),
   'rules.list': ('GET', '/v1/rules'),
   'session.list': ('POST', '/v1/sessions/list'),
   'memory.list': ('POST', '/v1/memory/list'),
@@ -553,7 +554,7 @@ fi
 # ============================================================
 
 check_output "local version command" "aimee" $AIMEE version
-check_output "unported command has no typed route" "has no /v1 route" $AIMEE env
+check_output "unknown command fails before generic forwarding" "unknown command 'env'" $AIMEE env
 
 # ============================================================
 # 8. Tool execution via compute pool
@@ -569,7 +570,98 @@ RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"pat
 check_output "tool.execute read_file" '"status":"ok"' echo "$RESP"
 
 # ============================================================
-# 9. Server shutdown
+# 9. Mirror-sync -> reconstructed MCP Git, end to end
+# ============================================================
+
+MIRROR_CASE="$HOME/mirror-sync-e2e"
+MIRROR_REMOTE="$MIRROR_CASE/remote.git"
+MIRROR_CLIENT="$MIRROR_CASE/client"
+mkdir -p "$MIRROR_CASE"
+# Exercise Git's repository-format SHA-256 object IDs through the entire wire,
+# snapshot, reconstruction, and MCP tool path (SHA-1 is covered by unit tests).
+git init --bare --object-format=sha256 "$MIRROR_REMOTE" >/dev/null
+git init --object-format=sha256 -b feature.locked "$MIRROR_CLIENT" >/dev/null
+git -C "$MIRROR_CLIENT" config user.name "Aimee Integration"
+git -C "$MIRROR_CLIENT" config user.email "aimee-integration@example.invalid"
+printf 'base\n' >"$MIRROR_CLIENT/file.txt"
+git -C "$MIRROR_CLIENT" add file.txt
+git -C "$MIRROR_CLIENT" commit -m base >/dev/null
+git -C "$MIRROR_CLIENT" remote add origin "$MIRROR_REMOTE"
+git -C "$MIRROR_CLIENT" push -u origin feature.locked >/dev/null
+MIRROR_HEAD=$(git -C "$MIRROR_CLIENT" rev-parse HEAD)
+printf 'client edit\n' >>"$MIRROR_CLIENT/file.txt"
+git -C "$MIRROR_CLIENT" diff --binary HEAD >"$MIRROR_CASE/client.diff"
+
+ADD_REQ=$(python3 - "$MIRROR_CLIENT" "$MIRROR_REMOTE" "$MIRROR_HEAD" <<'PY'
+import json, sys
+print(json.dumps({"method": "workspace.add", "root": sys.argv[1], "provider": "mirror",
+                  "remote": sys.argv[2], "head": sys.argv[3], "scan": False}))
+PY
+)
+RESP=$(http_rpc "$ADD_REQ")
+check_output "mirror workspace registered" '"status":"ok"' echo "$RESP"
+
+# Deliberately split a small patch into multiple requests. The durable transfer
+# state is re-read on every request, which is the same contract used when a load
+# balancer or rolling deployment routes consecutive chunks to different server
+# processes sharing AIMEE_WORKSPACES_DIR.
+mapfile -t MIRROR_REQS < <(python3 - "$MIRROR_CLIENT" "$MIRROR_HEAD" \
+    "$MIRROR_CASE/client.diff" <<'PY'
+import json, pathlib, sys
+root, head, path = sys.argv[1:]
+patch = pathlib.Path(path).read_text()
+cut = max(1, len(patch) // 2)
+for transfer in ("0123456789abcdef0123456789abcdef",
+                 "1123456789abcdef0123456789abcdef"):
+    base = {"method": "workspace.mirror-sync", "args": [root], "transfer": transfer}
+    print(json.dumps(base | {"seq": 0, "final": False, "diff": ""}))
+    print(json.dumps(base | {"seq": 1, "final": False, "diff": patch[:cut]}))
+    print(json.dumps(base | {"seq": 2, "final": True, "diff": patch[cut:], "head": head,
+                             "branch": "feature.locked", "upstream": "origin/feature.locked"}))
+PY
+)
+RESP=$(http_rpc "${MIRROR_REQS[0]}")
+check_output "mirror-sync begin persisted" '"order":1' echo "$RESP"
+RESP=$(http_rpc "${MIRROR_REQS[1]}")
+check_output "mirror-sync continuation persisted" '"seq":1' echo "$RESP"
+RESP=$(http_rpc "${MIRROR_REQS[2]}")
+check_output "mirror-sync final published" '"generation":1' echo "$RESP"
+RESP=$(http_rpc "${MIRROR_REQS[3]}")
+check_output "identical mirror-sync begin advances order" '"order":2' echo "$RESP"
+RESP=$(http_rpc "${MIRROR_REQS[4]}")
+check_output "identical mirror-sync continuation persisted" '"seq":1' echo "$RESP"
+RESP=$(http_rpc "${MIRROR_REQS[5]}")
+check_output "identical mirror-sync reuses generation" '"generation":1' echo "$RESP"
+
+SNAPSHOT=$(find "$AIMEE_HOME/workspaces" -name client.snapshot -type f -print -quit)
+check "mirror snapshot metadata published" test -s "$SNAPSHOT"
+check_output "mirror snapshot records valid .locked ref" \
+    'feature.locked origin/feature.locked 2' cat "$SNAPSHOT"
+
+GIT_REQ=$(python3 - "$MIRROR_CLIENT" <<'PY'
+import json, sys
+print(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                  "params": {"name": "git", "arguments": {"command": "status",
+                                                               "path": sys.argv[1]}}}))
+PY
+)
+RESP=$(mcp_initialized_req "$GIT_REQ")
+check_output "MCP Git resolves reconstructed .locked branch" 'feature.locked' echo "$RESP"
+check_output "MCP Git sees synchronized client edit" 'file.txt' echo "$RESP"
+
+MIRROR_WORK=$(find "$(dirname "$SNAPSHOT")" -maxdepth 1 -type d -name 'work-1-*' -print -quit)
+check_output "reconstructed worktree keeps branch" 'feature.locked' \
+    git -C "$MIRROR_WORK" branch --show-current
+check_output "reconstructed worktree keeps dirty patch" 'file.txt' git -C "$MIRROR_WORK" status --short
+
+# The second identical multi-chunk refresh must retain generation 1 (and
+# therefore the same server-side Git checkout) while advancing publication
+# order to prevent an older transfer rolling it back.
+check_output "identical refresh reuses snapshot generation" '1 ' head -c 2 "$SNAPSHOT"
+check_output "identical refresh advances publication order" ' 2' tail -c 3 "$SNAPSHOT"
+
+# ============================================================
+# 10. Server shutdown
 # ============================================================
 
 kill "$SERVER_PID" 2>/dev/null

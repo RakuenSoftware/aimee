@@ -324,10 +324,13 @@ static void rc_chomp(char *s)
       s[--n] = '\0';
 }
 
-static int rc_mirror_coords(const char *root, char *remote, size_t rcap, char *head, size_t hcap)
+static int rc_mirror_coords(const char *root, char *remote, size_t rcap, char *head, size_t hcap,
+                            char *branch, size_t bcap, char *upstream, size_t ucap)
 {
    remote[0] = '\0';
    head[0] = '\0';
+   branch[0] = '\0';
+   upstream[0] = '\0';
    char *out = NULL;
    const char *ru[] = {"git", "-C", root, "remote", "get-url", "origin", NULL};
    if (safe_exec_capture(ru, &out, 1024) == 0 && out)
@@ -343,16 +346,38 @@ static int rc_mirror_coords(const char *root, char *remote, size_t rcap, char *h
     * shipped below, which is computed against this same base. */
    if (workspace_client_mirror_base(root, head, hcap) != 0)
       head[0] = '\0';
+   out = NULL;
+   const char *br[] = {"git", "-C", root, "symbolic-ref", "--quiet", "--short", "HEAD", NULL};
+   if (safe_exec_capture(br, &out, 512) == 0 && out)
+   {
+      snprintf(branch, bcap, "%s", out);
+      rc_chomp(branch);
+   }
+   free(out);
+   out = NULL;
+   const char *up[] = {
+       "git", "-C", root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}", NULL};
+   if (safe_exec_capture(up, &out, 512) == 0 && out)
+   {
+      snprintf(upstream, ucap, "%s", out);
+      rc_chomp(upstream);
+   }
+   free(out);
    return remote[0] && head[0];
 }
 #else
-static int rc_mirror_coords(const char *root, char *remote, size_t rcap, char *head, size_t hcap)
+static int rc_mirror_coords(const char *root, char *remote, size_t rcap, char *head, size_t hcap,
+                            char *branch, size_t bcap, char *upstream, size_t ucap)
 {
    (void)root;
    (void)rcap;
    (void)hcap;
+   (void)bcap;
+   (void)ucap;
    remote[0] = '\0';
    head[0] = '\0';
+   branch[0] = '\0';
+   upstream[0] = '\0';
    return 0;
 }
 #endif
@@ -370,27 +395,29 @@ static int rc_mirror_coords(const char *root, char *remote, size_t rcap, char *h
  *
  * Best-effort: a failure is reported, never fatal, because a tree at base is
  * still a usable (if stale) sandbox and the drift report will say so. */
-static void rc_ship_client_diff(const char *endpoint, const char *bearer, const char *root,
-                                const char *base)
+static int rc_ship_client_diff(const char *endpoint, const char *bearer, const char *root,
+                               const char *base, const char *branch, const char *upstream)
 {
    char *patch = workspace_client_diff_compute(root, base);
    cJSON *req = cJSON_CreateObject();
    if (!req)
    {
       free(patch);
-      return;
+      return -1;
    }
    cJSON_AddStringToObject(req, "method", "workspace.mirror-sync");
    cJSON *args = cJSON_CreateArray();
    cJSON_AddItemToArray(args, cJSON_CreateString(root));
    cJSON_AddItemToObject(req, "args", args);
    cJSON_AddStringToObject(req, "head", base ? base : "");
+   cJSON_AddStringToObject(req, "branch", branch ? branch : "");
+   cJSON_AddStringToObject(req, "upstream", upstream ? upstream : "");
    cJSON_AddStringToObject(req, "diff", patch ? patch : "");
    free(patch);
    char *body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
    if (!body)
-      return;
+      return -1;
    /* Resolve the route rather than hardcode it: the method->path table is the
     * one place that mapping is maintained, and a stale copy here would fail as a
     * 404 the operator would have to trace back to a literal in this file. */
@@ -401,17 +428,22 @@ static void rc_ship_client_diff(const char *endpoint, const char *bearer, const 
       free(body);
       fprintf(stderr, "aimee: no route for workspace.mirror-sync; the server-side sandbox will "
                       "NOT contain uncommitted work\n");
-      return;
+      return -1;
    }
    int status = 0;
    cJSON *resp = cli_http_request(endpoint, verb, path, body, bearer, 60000, &status);
    free(body);
    if (status < 200 || status >= 300)
+   {
       fprintf(stderr,
               "aimee: could not ship the working-tree diff for %s (HTTP %d); the server-side "
               "sandbox will be a clean checkout at HEAD and will NOT contain uncommitted work\n",
               root, status);
+      cJSON_Delete(resp);
+      return -1;
+   }
    cJSON_Delete(resp);
+   return 0;
 }
 
 int cli_workspace_reverse_channel_start(void)
@@ -449,8 +481,9 @@ int cli_workspace_reverse_channel_start(void)
     *
     * (`aimee workspace serve` still registers `detached` explicitly. That is an
     * operator deliberately serving a tree, not an automatic default.) */
-   char ws_remote[512] = "", ws_head[128] = "";
-   if (!rc_mirror_coords(cwd, ws_remote, sizeof(ws_remote), ws_head, sizeof(ws_head)))
+   char ws_remote[512] = "", ws_head[128] = "", ws_branch[256] = "", ws_upstream[256] = "";
+   if (!rc_mirror_coords(cwd, ws_remote, sizeof(ws_remote), ws_head, sizeof(ws_head), ws_branch,
+                         sizeof(ws_branch), ws_upstream, sizeof(ws_upstream)))
    {
       fprintf(stderr,
               "aimee: %s cannot be mirrored (needs a git repository with an `origin` remote and at "
@@ -507,7 +540,7 @@ int cli_workspace_reverse_channel_start(void)
     * and an absent one is a silent clean checkout at head. Runs on the attach
     * path too ("already registered"), because a re-attaching client's tree has
     * usually moved on since the registration that created it. */
-   rc_ship_client_diff(endpoint, bearer, cwd, ws_head);
+   rc_ship_client_diff(endpoint, bearer, cwd, ws_head, ws_branch, ws_upstream);
 
    struct rc_args *a = calloc(1, sizeof(*a));
    if (!a)
@@ -569,6 +602,21 @@ int cli_workspace_reverse_channel_start(void)
    free(a);
    rc_unregister_workspace();
    return 0;
+}
+
+int cli_workspace_reverse_channel_sync(void)
+{
+   /* Co-located MCP and calls made outside a registered Git workspace need no
+    * mirror refresh.  Once a remote mirror channel is active, however, a failed
+    * refresh must stop the Git call rather than silently use its older snapshot. */
+   if (!g_rc_active)
+      return 0;
+   char head[128] = "", remote[512] = "", branch[256] = "", upstream[256] = "";
+   if (!rc_mirror_coords(g_rc_workspace_id, remote, sizeof(remote), head, sizeof(head), branch,
+                         sizeof(branch), upstream, sizeof(upstream)))
+      return -1;
+   return rc_ship_client_diff(g_rc_endpoint, g_rc_bearer, g_rc_workspace_id, head, branch,
+                              upstream);
 }
 
 void cli_workspace_reverse_channel_stop(void)

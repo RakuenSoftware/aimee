@@ -147,6 +147,56 @@ static int mirror_reconstruct_cwd(const char *cwd, const char *root, const char 
                               sizeof(work_dir)) != 0)
       return 0;
 
+   /* mirror-sync publishes immutable, generation-qualified snapshots.  Prefer
+    * that atomically-published metadata over the legacy mutable client.diff so
+    * a changed client checkout gets a fresh worktree while repeated Git calls
+    * keep using (and preserving) the same server-side session. */
+   char effective_head[65];
+   snprintf(effective_head, sizeof(effective_head), "%s", head);
+   char effective_branch[256] = "", effective_upstream[256] = "";
+   char snapshot_meta[MAX_PATH_LEN], snapshot_diff[MAX_PATH_LEN];
+   snapshot_diff[0] = '\0';
+   if (workspace_mirror_snapshot_meta_path(base, root, snapshot_meta, sizeof(snapshot_meta)) != 0)
+      return 0;
+
+   /* Absence means this workspace predates snapshot publication and may use the
+    * legacy head/diff pair. Once metadata exists it is authoritative: unreadable
+    * or malformed metadata must fail closed, not silently revive stale state. */
+   {
+      const workspace_provider_t *shared = workspace_provider_shared();
+      ws_stat_t meta_stat;
+      if (shared->stat(shared, snapshot_meta, &meta_stat) != 0)
+         return 0;
+      if (meta_stat.exists)
+      {
+         if (meta_stat.is_dir)
+            return 0;
+         char *metadata = NULL;
+         size_t metadata_len = 0;
+         ws_mirror_snapshot_t snapshot;
+         int valid =
+             shared->read_all(shared, snapshot_meta, &metadata, &metadata_len) == 0 &&
+             workspace_mirror_snapshot_parse(metadata, &snapshot) == 0 &&
+             workspace_mirror_snapshot_work_path(base, root, snapshot.generation, snapshot.digest,
+                                                 work_dir, sizeof(work_dir)) == 0 &&
+             workspace_mirror_snapshot_diff_path(base, root, snapshot.generation, snapshot.digest,
+                                                 snapshot_diff, sizeof(snapshot_diff)) == 0;
+         if (valid)
+         {
+            snprintf(effective_head, sizeof(effective_head), "%s", snapshot.head);
+            snprintf(effective_branch, sizeof(effective_branch), "%s", snapshot.branch);
+            snprintf(effective_upstream, sizeof(effective_upstream), "%s", snapshot.upstream);
+         }
+         free(metadata);
+         if (!valid)
+         {
+            LOG_WARN("workspace",
+                     "client snapshot metadata is invalid for %s; refusing legacy fallback", root);
+            return 0;
+         }
+      }
+   }
+
    /* Ensure the per-workspace parent dir (`<base>/<hash>`) exists before the
     * lifecycle: `git clone --mirror` won't create missing leading dirs, and on a
     * fresh durable volume nothing has created it yet (a prior mirror-sync would
@@ -171,7 +221,11 @@ static int mirror_reconstruct_cwd(const char *cwd, const char *root, const char 
     * the client's working tree. Absent → a clean checkout at head. */
    char diff_path[MAX_PATH_LEN];
    const char *diff_arg = NULL;
-   if (workspace_mirror_diff_path(base, root, diff_path, sizeof(diff_path)) == 0)
+   if (snapshot_diff[0])
+      snprintf(diff_path, sizeof(diff_path), "%s", snapshot_diff);
+   else if (workspace_mirror_diff_path(base, root, diff_path, sizeof(diff_path)) != 0)
+      diff_path[0] = '\0';
+   if (diff_path[0])
    {
       struct stat dst;
       if (stat(diff_path, &dst) == 0 && S_ISREG(dst.st_mode))
@@ -182,9 +236,10 @@ static int mirror_reconstruct_cwd(const char *cwd, const char *root, const char 
     * authenticate under the brokered token, else the per-host vault token for the
     * remote's host, else the server forge identity (§4/§6). */
    ws_mirror_runner_ctx_t rctx = {.wsid = root, .remote = remote};
-   if (workspace_mirror_session_setup(ws_mirror_git_runner, &rctx, remote, head, mirror_dir,
-                                      work_dir, diff_arg, already, drift, drift_cap,
-                                      verdict_out) != 0)
+   if (workspace_mirror_session_setup_branch(ws_mirror_git_runner, &rctx, remote, effective_head,
+                                             effective_branch, effective_upstream, mirror_dir,
+                                             work_dir, diff_arg, already, drift, drift_cap,
+                                             verdict_out) != 0)
    {
       LOG_WARN("workspace", "mirror lifecycle failed for %s (remote=%s head=%.10s)", root,
                remote ? remote : "", head);
@@ -245,7 +300,7 @@ int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap
          /* Copied out of the accessor buffers: mirror_reconstruct_cwd stores root
           * and remote in a ws_mirror_runner_ctx_t and drives a git-runner callback
           * chain with it, so a config read anywhere under there would move them. */
-         char root[MAX_PATH_LEN], remote[512], head[64];
+         char root[MAX_PATH_LEN], remote[512], head[65];
          snprintf(root, sizeof(root), "%s", config_workspaces(i));
          snprintf(remote, sizeof(remote), "%s", config_workspace_vcs_remote(i));
          snprintf(head, sizeof(head), "%s", config_workspace_vcs_head(i));
@@ -273,7 +328,7 @@ int workspace_turn_resolve_detached_mirror_cwd(const char *cwd, char *out, size_
          return 0; /* mirror workspaces use the resolver above; shared needs nothing */
       /* Copied out of the accessor buffers for the same reason as the mirror
        * resolver: the runner ctx outlives a config read underneath it. */
-      char root[MAX_PATH_LEN], remote[512], head[64];
+      char root[MAX_PATH_LEN], remote[512], head[65];
       snprintf(root, sizeof(root), "%s", config_workspaces(i));
       snprintf(remote, sizeof(remote), "%s", config_workspace_vcs_remote(i));
       snprintf(head, sizeof(head), "%s", config_workspace_vcs_head(i));
@@ -324,7 +379,7 @@ int workspace_turn_bind_active(const char *cwd)
          /* Drive the server-side mirror lifecycle from the registry's vcs
           * coordinates, then act on the reconstructed local tree (shared fs). */
          /* Same copy-out as the resolver above: these reach the git runner. */
-         char root[MAX_PATH_LEN], remote[512], head[64];
+         char root[MAX_PATH_LEN], remote[512], head[65];
          snprintf(root, sizeof(root), "%s", config_workspaces(i));
          snprintf(remote, sizeof(remote), "%s", config_workspace_vcs_remote(i));
          snprintf(head, sizeof(head), "%s", config_workspace_vcs_head(i));

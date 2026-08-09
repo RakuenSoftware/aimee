@@ -16,6 +16,8 @@ static char g_last_mcp_call_arg_workspace[4096];
 static char g_last_mcp_call_tool[128];
 static int g_last_mcp_call_paths_count;
 static int g_reverse_channel_starts;
+static int g_reverse_channel_syncs;
+static int g_reverse_channel_sync_rc;
 static int g_remote_active;
 static int g_remote_http_failures;
 static int g_remote_http_calls;
@@ -88,6 +90,11 @@ int cli_workspace_reverse_channel_start(void)
 {
    g_reverse_channel_starts++;
    return 0;
+}
+int cli_workspace_reverse_channel_sync(void)
+{
+   g_reverse_channel_syncs++;
+   return g_reverse_channel_sync_rc;
 }
 void cli_workspace_reverse_channel_stop(void)
 {
@@ -937,6 +944,7 @@ static void test_tools_list_preserves_server_error(void)
 static void test_tools_call_success(void)
 {
    g_reverse_channel_starts = 0;
+   g_reverse_channel_syncs = 0;
    g_last_mcp_call_cwd[0] = '\0';
    g_last_mcp_call_arg_cwd[0] = '\0';
 
@@ -969,9 +977,42 @@ static void test_tools_call_success(void)
    assert(strcmp(g_last_mcp_call_cwd, cwd) == 0);
    assert(strcmp(g_last_mcp_call_arg_cwd, cwd) == 0);
    assert(g_reverse_channel_starts == 1);
+   assert(g_reverse_channel_syncs == 0); /* non-Git calls do not pay the sync gate */
 
    cJSON_Delete(resp);
    cJSON_Delete(req);
+}
+
+static void test_git_call_refreshes_mirror_and_fails_closed(void)
+{
+   g_reverse_channel_syncs = 0;
+   g_reverse_channel_sync_rc = 0;
+   g_last_mcp_call_tool[0] = '\0';
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+   cJSON_AddNumberToObject(req, "id", 12.125);
+   cJSON_AddStringToObject(req, "method", "tools/call");
+   cJSON *params = cJSON_AddObjectToObject(req, "params");
+   cJSON_AddStringToObject(params, "name", "git");
+   cJSON_AddObjectToObject(params, "arguments");
+
+   cJSON *resp = capture_response(req);
+   assert(g_reverse_channel_syncs == 1);
+   assert(strcmp(g_last_mcp_call_tool, "git") == 0);
+   cJSON_Delete(resp);
+
+   g_reverse_channel_sync_rc = -1;
+   g_last_mcp_call_tool[0] = '\0';
+   resp = capture_response(req);
+   cJSON *result = cJSON_GetObjectItemCaseSensitive(resp, "result");
+   assert(cJSON_IsObject(result));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "isError")));
+   assert(g_reverse_channel_syncs == 2);
+   assert(g_last_mcp_call_tool[0] == '\0');
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+   g_reverse_channel_sync_rc = 0;
 }
 
 static void test_tools_call_cwd_is_transport_owned(void)
@@ -1360,6 +1401,7 @@ int main(void)
    test_tools_list_preserves_server_error();
    test_remote_discovery_retries_are_safe();
    test_tools_call_success();
+   test_git_call_refreshes_mirror_and_fails_closed();
    test_tools_call_cwd_is_transport_owned();
    test_tools_call_preview_blast_radius();
    test_tools_call_server_error();
