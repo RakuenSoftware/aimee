@@ -447,6 +447,7 @@ static const config_schema_entry_t config_schema[] = {
     {"reasoning_cap", SCHEMA_OBJECT, 0},
     {"dedup", SCHEMA_OBJECT, 0},
     {"cache_shaping", SCHEMA_OBJECT, 0},
+    {"extended_thinking", SCHEMA_OBJECT, 0},
     {"ingress", SCHEMA_OBJECT, 0},
     {"dogfood", SCHEMA_OBJECT, 0},
     {"learning", SCHEMA_OBJECT, 0},
@@ -909,6 +910,9 @@ static void config_set_defaults(config_t *cfg)
    cfg->reasoning_cap_enabled = 0;
    cfg->dedup_enabled = 1;         /* default-ON: only acts on caller Idempotency-Key requests */
    cfg->cache_shaping_enabled = 1; /* default-ON: cost win, marks aimee's own Anthropic prefix */
+   /* default-OFF: thinking tokens are billed, so enabling this changes spend. */
+   cfg->extended_thinking_enabled = 0;
+   cfg->extended_thinking_budget_tokens = 2048;
    cfg->ingress_usage_accounting_enabled = 1; /* default-ON: begin ingress cost accounting */
    cfg->ingress_audit_async = 1; /* default-ON: keep the cost-row write off the response path */
    cfg->ingress_trusted_proxy_secret[0] = '\0';

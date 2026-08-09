@@ -62,10 +62,40 @@ static void print_blocks(void)
    }
 }
 
+/* Load a workflow named the way `aimee workflow list` prints it, or by path.
+ *
+ * `list` prints bare filenames out of $AIMEE_HOME/workflows ("build.yaml"),
+ * while `show` and `validate` opened the argument relative to the CWD -- so the
+ * obvious composition, read a name from `list` and hand it to `show`, answered
+ * "workflow: build.yaml: cannot open (No such file or directory)" for a file
+ * that plainly exists and that `list` had just called valid.
+ *
+ * The path as given is still tried FIRST and its error is the one reported, so
+ * an explicit path keeps behaving exactly as before -- including a real parse
+ * error in a local file, which must not be masked by a same-named workflow in
+ * the home directory. The fallback applies only to a bare name (no separator)
+ * that does not resolve as given, which is precisely the `list` output. */
 static int load_or_report(const char *path, wfe_def_t **out)
 {
    char err[256];
    wfe_def_t *def = wfe_def_load_file(path, err, sizeof err);
+
+   if (!def && path && path[0] && !strchr(path, '/') && !strchr(path, '\\'))
+   {
+      FILE *probe = fopen(path, "r");
+      if (probe)
+         fclose(probe); /* it exists here: the error was real, keep it */
+      else
+      {
+         char alt[1024];
+         char alt_err[256];
+         snprintf(alt, sizeof alt, "%s/workflows/%s", aimee_home(), path);
+         wfe_def_t *from_home = wfe_def_load_file(alt, alt_err, sizeof alt_err);
+         if (from_home)
+            def = from_home;
+      }
+   }
+
    if (!def)
    {
       fprintf(stderr, "workflow: %s\n", err);

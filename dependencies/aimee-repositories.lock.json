@@ -35,7 +35,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "64c507d06509147711d2271ead07f7762d0a831ed04336b7fec3cd013a5984f3"
+      "source_sha256": "7f316f6a7c6767160934a3f1ee648c357420b0faf7b129aa915d8c16a11d51d8"
     },
     {
       "id": "ir",
@@ -104,7 +104,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "b2be78d67871d36aea3860270e82c4bde46f234433b8f304787b9d9ff1ace3b4",
+      "source_sha256": "276ad39d67bf5799346cca3e5ce9eea3a1309618486e34dd236b9615ed7b5c46",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 7,
