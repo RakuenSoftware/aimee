@@ -19,7 +19,7 @@
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "d33b55a1ab81092701065e3a608bec8b7d614d6401d003a59c053045808f55bb"
+          "sha256": "4afacbd65680ebcae084ebf86773f6b1af9a753cb1ec5eb5a1e7e226490475dd"
         }
       ]
     },
@@ -1611,7 +1611,7 @@
       "files": [
         {
           "path": "docs/gen/v1-route-descriptor.json",
-          "sha256": "c3cf54111e6ae5374e8b7de3edb4f5a2acb1499f04de3e77c54152dec7f64798"
+          "sha256": "32b337f0a26cc30139790762319eef9b4defa6366eb785b528ad9e7f36b6e4a9"
         }
       ]
     }
