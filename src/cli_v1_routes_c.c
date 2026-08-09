@@ -1753,6 +1753,13 @@ void pt_print_kb_status(const char *method, cJSON *resp)
          printf(" (%d running)", n_running);
       printf(", %d done last 24h\n", n_done24);
    }
+
+   /* Shown even though the verdict above stays "ok": an undrainable queue and a
+    * busy one print the same pending count, and only this says which one it is. */
+   cJSON *warn = cJSON_GetObjectItemCaseSensitive(resp, "warnings");
+   for (cJSON *w = warn ? warn->child : NULL; w; w = w->next)
+      if (cJSON_IsString(w))
+         printf("WARNING: %s\n", w->valuestring);
 }
 void pt_print_audit(const char *method, cJSON *resp)
 {

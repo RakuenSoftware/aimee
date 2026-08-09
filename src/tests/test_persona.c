@@ -123,14 +123,22 @@ int main(void)
     * special): each persona's own prose, cwd-substituted; and the engineer
     * manager framing never leaks into a delegate prompt. --- */
    {
-      /* Engineer (the default persona) carries the manager/work-queue framing. */
+      /* Engineer (the default persona) carries the manager framing.
+       *
+       * It used to be asserted by the "## Work Queue" heading as well. That
+       * section instructed `aimee work claim|complete|fail|list`, none of which
+       * exist -- no command-table row, no /v1 route, no work.* handler -- so it
+       * was removed from the prompt. The manager framing is what this case is
+       * really about, and it is asserted directly rather than through a heading
+       * that happened to sit beneath it. */
       persona_t eng;
       assert(persona_load(NULL, "engineer", &eng) == 0);
       char *eid = persona_identity_prose(&eng, "/tmp/session-cwd");
       assert(eid);
       assert(strstr(eid, "You are the MANAGER") != NULL); /* manager role */
-      assert(strstr(eid, "## Work Queue") != NULL);       /* work queue */
-      assert(strstr(eid, "/tmp/session-cwd") != NULL);    /* %s -> cwd */
+      assert(strstr(eid, "## Work Queue") == NULL);       /* the queue does not exist */
+      assert(strstr(eid, "aimee work ") == NULL);
+      assert(strstr(eid, "/tmp/session-cwd") != NULL); /* %s -> cwd */
       assert(strstr(eid, "%s") == NULL);
       free(eid);
       persona_free(&eng);

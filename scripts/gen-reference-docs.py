@@ -157,6 +157,17 @@ CFG_KEY_DESC = {
     "cache_aware_rewrite_enabled": "Rewrite prompts to align with the provider's prompt cache.",
     "cache_min_chars": "Minimum prompt size (chars) before cache-shaping applies.",
     "cache_shaping_enabled": "Enable prompt cache-shaping.",
+    "extended_thinking_enabled": (
+        "Ask for extended thinking on aimee's OWN Anthropic requests (default off). "
+        "Without it a turn aimee originates carries no thinking config at all, so a "
+        "reasoning-capable model is never asked to reason. Off by default because "
+        "thinking tokens are billed: enabling it changes spend, not just visibility."
+    ),
+    "extended_thinking_budget_tokens": (
+        "Reasoning budget when extended_thinking_enabled is on. Anthropic requires it "
+        "below max_tokens, so the request builder raises the output cap to fit rather "
+        "than emitting a request the provider would reject."
+    ),
     "delegate_graph_context_enabled": "Prepend a structural code-graph context block (callers/dependencies of files a delegate task references) to the delegate prompt (advisory, fail-open, default off).",
     "memory_md_retire": "Retire the agent file-memory surface into aimee (default on): a Write under ~/.claude/projects/<slug>/memory/<name>.md is intercepted into aimee's db1 and the .md is never materialized; session-start skips .md hydration. Set false for the legacy re-materialized .md mirrors.",
     "claude_model": "Default Claude model (empty = CLI default).",

@@ -178,6 +178,10 @@ static const elig_row_t g_eligibility[] = {
     {"reasoning_cap_enabled", 0},
     {"dedup_enabled", 0},
     {"cache_shaping_enabled", 0},
+    /* Nested under an "extended_thinking" object with a >0 budget guard, so bespoke
+     * like cache_shaping above rather than a table-drivable flat scalar. */
+    {"extended_thinking_enabled", 0},
+    {"extended_thinking_budget_tokens", 0},
     {"ingress_usage_accounting_enabled", 0},
     {"ingress_audit_async", 0},
     {"ingress_trusted_proxy_secret", 0},

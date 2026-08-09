@@ -27,7 +27,7 @@
       "files": [
         {
           "path": "docs/gen/configuration.md",
-          "sha256": "aa791003f83020731774c9829e84832c82246542940f90e6a9d517adf901f4b6"
+          "sha256": "69a876be6ca3066b22ce7c485c0e84d8e377eb31aafd0f58189cf725bcf5ff35"
         }
       ]
     },
@@ -583,7 +583,7 @@
         },
         {
           "path": "src/headers/http_uds_client.h",
-          "sha256": "a0b916e5069773f311b3aa6de19954e62836bb71fd020eed0248ba4d2a1db842"
+          "sha256": "4966cc7564804882b82899f3420baa956db365c9db9197a640cd2a0d873bc308"
         },
         {
           "path": "src/headers/hud.h",
@@ -1604,14 +1604,14 @@
       ]
     },
     "public-symbols": {
-      "sha256": "5855e8f593892d70e53133c92f44ffb8bc84ae66c3334270f479a83527eb6815",
+      "sha256": "eb3c21fdcf26988c29fdace28fa6689de8c6d5caedf4b1232b3791fab66c8929",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
       "files": [
         {
           "path": "docs/gen/v1-route-descriptor.json",
-          "sha256": "32b337f0a26cc30139790762319eef9b4defa6366eb785b528ad9e7f36b6e4a9"
+          "sha256": "230efbe36196ad315cccdfc9a31cc9cb6eba96aacdd247d68db825e884237d7b"
         }
       ]
     }

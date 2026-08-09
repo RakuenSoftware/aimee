@@ -65,6 +65,31 @@ cJSON *agent_build_request(const agent_t *agent, const char *system_prompt, cons
       ir.max_tokens = agent_request_max_tokens(agent, max_tokens);
       ir.has_max_tokens = 1;
    }
+
+   /* Extended thinking on aimee's own Anthropic turns (default-off). Without this the
+    * IR carried no `thinking` config on an aimee-originated turn -- ir->thinking is
+    * otherwise populated only by an inbound client request -- so aimee never asked a
+    * reasoning-capable Anthropic model to reason, and the reasoning tap had nothing to
+    * observe on this wire. Anthropic requires budget_tokens < max_tokens, so the cap is
+    * raised to fit rather than emitting a request the provider would reject. */
+   const int thinking_on = is_anth && config_extended_thinking_enabled();
+   int thinking_budget = 0;
+   if (thinking_on)
+   {
+      thinking_budget = config_extended_thinking_budget_tokens();
+      if (ir.max_tokens <= thinking_budget)
+      {
+         /* max_tokens covers thinking AND the answer, so keep the caller's cap as
+          * answer headroom on top of the budget instead of merely clearing the
+          * provider's budget < max_tokens rule and leaving no room to reply. */
+         ir.max_tokens = thinking_budget + ir.max_tokens;
+         ir.has_max_tokens = 1;
+      }
+      cJSON *think = cJSON_CreateObject();
+      cJSON_AddStringToObject(think, "type", "enabled");
+      cJSON_AddNumberToObject(think, "budget_tokens", thinking_budget);
+      ir.thinking = think;
+   }
    /* temperature is layered post-build by model_sampling below (so the curated
     * top_p/top_k/... the IR model does not carry are applied alongside it). */
 
@@ -87,6 +112,17 @@ cJSON *agent_build_request(const agent_t *agent, const char *system_prompt, cons
          agent_anthropic_set_system(req, system_prompt, 1, config_cache_min_chars());
       }
       model_sampling_apply_anthropic(agent, req, temperature);
+      /* Anthropic rejects a request that pairs thinking with temperature != 1 or with
+       * any top_p / top_k. model_sampling has just layered exactly those on from the
+       * curated table, so normalize AFTER it rather than trying to talk it out of
+       * them -- the alternative is a 4xx the caller sees as an agent failure. */
+      if (thinking_on)
+      {
+         cJSON_DeleteItemFromObjectCaseSensitive(req, "temperature");
+         cJSON_AddNumberToObject(req, "temperature", 1);
+         cJSON_DeleteItemFromObjectCaseSensitive(req, "top_p");
+         cJSON_DeleteItemFromObjectCaseSensitive(req, "top_k");
+      }
    }
    else if (!is_resp)
    {
