@@ -134,6 +134,21 @@ check_output "unknown command --json" "\"message\"" $AIMEE --json foobarbaz
 check_output "wrong subcommand names the subcommand" "is not a subcommand of" \
     $AIMEE economizer status
 
+# --- {id}-bearing routes with the id missing ---
+# `workspace get` with no path used to answer "'workspace.get' has no /v1 route",
+# pointing at the route table when the route is present and correct -- the same
+# command with a path works. It must name the missing argument instead, and must
+# not also claim the server request failed, since no request was attempted.
+check_output "missing path-id argument names the argument" "needs an argument" \
+    $AIMEE workspace get
+check_output_not_contains "missing argument does not blame the route table" \
+    "has no /v1 route" $AIMEE workspace get
+check_output_not_contains "missing argument does not blame the server" \
+    "request failed" $AIMEE workspace get
+# The same command WITH the argument still routes.
+check_output_not_contains "workspace get with a path still routes" \
+    "needs an argument" $AIMEE workspace get /tmp
+
 # --- Server-owned config over /v1 (roles, personas) ---
 # These moved off a hardcoded http_uds_request() onto cli_v1_path_request(), so
 # they follow whichever transport is configured. This run has no remote endpoint,
