@@ -192,7 +192,8 @@ static void test_explicit_path_is_authoritative_and_live(void)
    snprintf(state.guardrail_mode, sizeof(state.guardrail_mode), "approve");
    state.worktree_count = 1;
    snprintf(state.worktrees[0].git_root, sizeof(state.worktrees[0].git_root), "%s", g_tmpdir);
-   snprintf(state.worktrees[0].worktree_path, sizeof(state.worktrees[0].worktree_path), "%s", stale);
+   snprintf(state.worktrees[0].worktree_path, sizeof(state.worktrees[0].worktree_path), "%s",
+            stale);
    session_state_force_save(&state, sid);
 
    cJSON *args = cJSON_CreateObject();
@@ -516,8 +517,11 @@ static void test_git_commit_reads_masked_global_identity(void)
 
    char fake_home[256] = "/tmp/aimee-test-git-identity-XXXXXX";
    assert(mkdtemp(fake_home) != NULL);
-   const char *env_names[] = {"HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_NOSYSTEM",
-                              "GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL",
+   const char *env_names[] = {"HOME",
+                              "XDG_CONFIG_HOME",
+                              "GIT_CONFIG_NOSYSTEM",
+                              "GIT_CONFIG_SYSTEM",
+                              "GIT_CONFIG_GLOBAL",
                               "AIMEE_TEST_GIT_IDENTITY_FROM_CONFIG"};
    char *saved[sizeof(env_names) / sizeof(env_names[0])] = {0};
    for (size_t i = 0; i < sizeof(env_names) / sizeof(env_names[0]); i++)
@@ -823,15 +827,13 @@ static void test_git_fetch_never_writes_or_prunes_local_branches(void)
    cJSON_Delete(resp);
    cJSON_Delete(args);
 
-   assert(system(
-                 "git checkout -q -b local-only && git branch keep-local && "
+   assert(system("git checkout -q -b local-only && git branch keep-local && "
                  "git update-ref refs/remotes/origin/stale HEAD && "
                  "printf 'dirty\\n' >> file.txt && printf 'staged\\n' > staged.txt && "
                  "git add staged.txt && printf 'untracked\\n' > untracked.txt") == 0);
 
    char *head_before = mcp_git_run("git rev-parse HEAD", &local_rc);
-   char *status_before =
-       mcp_git_run("git status --porcelain=v1 --untracked-files=all", &local_rc);
+   char *status_before = mcp_git_run("git status --porcelain=v1 --untracked-files=all", &local_rc);
    char *refs_before = mcp_git_run(
        "git for-each-ref --sort=refname --format='%(refname) %(objectname)' refs/heads", &local_rc);
    assert(head_before != NULL && status_before != NULL && refs_before != NULL);
@@ -843,8 +845,7 @@ static void test_git_fetch_never_writes_or_prunes_local_branches(void)
    assert(text != NULL && strncmp(text, "error:", 6) != 0);
 
    char *head_after = mcp_git_run("git rev-parse HEAD", &local_rc);
-   char *status_after =
-       mcp_git_run("git status --porcelain=v1 --untracked-files=all", &local_rc);
+   char *status_after = mcp_git_run("git status --porcelain=v1 --untracked-files=all", &local_rc);
    char *refs_after = mcp_git_run(
        "git for-each-ref --sort=refname --format='%(refname) %(objectname)' refs/heads", &local_rc);
    assert(head_after != NULL && status_after != NULL && refs_after != NULL);
@@ -2477,8 +2478,8 @@ static void test_branch_claim(void)
 
    char repo_owner[64] = "";
    char other_owner[64] = "";
-   assert(db1_git_ownership_get_owner(g_tmpdir, "some-branch", repo_owner,
-                                      sizeof(repo_owner)) == 1);
+   assert(db1_git_ownership_get_owner(g_tmpdir, "some-branch", repo_owner, sizeof(repo_owner)) ==
+          1);
    assert(db1_git_ownership_get_owner(other_repo, "some-branch", other_owner,
                                       sizeof(other_owner)) == 1);
    assert(strcmp(repo_owner, "session-C") == 0);

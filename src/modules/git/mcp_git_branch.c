@@ -187,8 +187,8 @@ cJSON *handle_git_branch(cJSON *args)
       free(esc_name);
       char probe[768];
       int rc = 0;
-      snprintf(probe, sizeof(probe),
-               "git show-ref --verify --quiet 'refs/heads/%s' 2>/dev/null", esc_local);
+      snprintf(probe, sizeof(probe), "git show-ref --verify --quiet 'refs/heads/%s' 2>/dev/null",
+               esc_local);
       char *probe_out = mcp_git_run(probe, &rc);
       free(probe_out);
       int local_exists = rc == 0;
@@ -197,8 +197,7 @@ cJSON *handle_git_branch(cJSON *args)
       if (!local_exists)
       {
          snprintf(probe, sizeof(probe),
-                  "git show-ref --verify --quiet 'refs/remotes/origin/%s' 2>/dev/null",
-                  esc_local);
+                  "git show-ref --verify --quiet 'refs/remotes/origin/%s' 2>/dev/null", esc_local);
          probe_out = mcp_git_run(probe, &rc);
          free(probe_out);
          tracking_origin = rc == 0;
@@ -224,8 +223,8 @@ cJSON *handle_git_branch(cJSON *args)
 
       char result[512];
       if (tracking_origin)
-         snprintf(result, sizeof(result),
-                  "switched to %s (tracking origin/%s)%s", local_name, local_name,
+         snprintf(result, sizeof(result), "switched to %s (tracking origin/%s)%s", local_name,
+                  local_name,
                   ownership_ok ? "" : "\nwarning: branch ownership could not be recorded");
       else
          snprintf(result, sizeof(result), "switched to %s", local_name);
@@ -318,11 +317,12 @@ cJSON *handle_git_branch(cJSON *args)
       if (!branch_own_check(jname->valuestring, owner, sizeof(owner)) && !force)
       {
          char err[512];
-         snprintf(err, sizeof(err),
-                  "error: branch '%s' is owned by session %s. "
-                  "Use branch action=claim with force=true to transfer ownership, or action=release "
-                  "from the owning session.",
-                  jname->valuestring, owner);
+         snprintf(
+             err, sizeof(err),
+             "error: branch '%s' is owned by session %s. "
+             "Use branch action=claim with force=true to transfer ownership, or action=release "
+             "from the owning session.",
+             jname->valuestring, owner);
          free(esc_name);
          return mcp_text(err);
       }
@@ -629,7 +629,7 @@ static int fetch_state_capture(fetch_state_t *state)
       fetch_state_free(state);
       char *git_dir = mcp_git_run("git rev-parse --git-dir 2>/dev/null", &rc);
       int result = (rc == 0 && git_dir && git_dir[0]) ? FETCH_STATE_HEAD_UNRESOLVED
-                                                     : FETCH_STATE_UNAVAILABLE;
+                                                      : FETCH_STATE_UNAVAILABLE;
       free(git_dir);
       return result;
    }
@@ -667,8 +667,8 @@ static int fetch_state_capture(fetch_state_t *state)
    if (rc != 0 || !state->untracked_contents)
       goto fail;
 
-   state->status = mcp_git_run(
-       "LC_ALL=C git status --porcelain=v1 --untracked-files=all 2>/dev/null", &rc);
+   state->status =
+       mcp_git_run("LC_ALL=C git status --porcelain=v1 --untracked-files=all 2>/dev/null", &rc);
    if (rc != 0 || !state->status)
       goto fail;
    fetch_state_trim_eol(state->head_commit);
@@ -747,12 +747,11 @@ cJSON *handle_git_fetch(cJSON *args)
     * then the only fetch and prune destination. */
    if (prune)
       snprintf(cmd, sizeof(cmd),
-               "git fetch --no-tags --no-prune-tags --prune --refmap= '%s' '%s' 2>&1",
-               esc_remote, esc_refspec);
-   else
-      snprintf(cmd, sizeof(cmd),
-               "git fetch --no-tags --no-prune-tags --refmap= '%s' '%s' 2>&1", esc_remote,
+               "git fetch --no-tags --no-prune-tags --prune --refmap= '%s' '%s' 2>&1", esc_remote,
                esc_refspec);
+   else
+      snprintf(cmd, sizeof(cmd), "git fetch --no-tags --no-prune-tags --refmap= '%s' '%s' 2>&1",
+               esc_remote, esc_refspec);
    free(esc_remote);
    free(esc_refspec);
 
@@ -783,8 +782,8 @@ cJSON *handle_git_fetch(cJSON *args)
 
    char result[512];
    snprintf(result, sizeof(result),
-            "fetched branches into refs/remotes/%s/*%s; HEAD and local checkout unchanged",
-            remote, prune ? " (pruned remote-tracking refs)" : "");
+            "fetched branches into refs/remotes/%s/*%s; HEAD and local checkout unchanged", remote,
+            prune ? " (pruned remote-tracking refs)" : "");
    free(out);
    return mcp_text(result);
 }
