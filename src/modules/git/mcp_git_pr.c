@@ -179,6 +179,62 @@ cJSON *handle_git_pr(cJSON *args)
       return mcp_text(result);
    }
 
+   if (strcmp(action, "update_branch") == 0)
+   {
+      /* Merge the base INTO the PR head -- REST's "Update branch" button.
+       *
+       * Needed because a base protected with "require branches to be up to date"
+       * reports its required checks as merely "expected" while the head is BEHIND:
+       * the PR will not merge however green those checks already are, and nothing
+       * else in this tool can clear it (`pull` is a bare `git pull` on the head's
+       * OWN upstream, and there is no merge subcommand).
+       *
+       * Deliberately NOT folded into `merge`: this rewrites the contributor's
+       * branch and restarts their CI, which is a separate decision from merging.
+       * GitHub answers 202 -- accepted, not built -- so callers must poll
+       * merge_status before merging rather than treating success as ready. */
+      cJSON *jnum = cJSON_GetObjectItemCaseSensitive(args, "number");
+      if (!cJSON_IsNumber(jnum))
+         return mcp_text("error: 'number' parameter is required for update_branch");
+
+      char expected_head[72] = {0};
+      cJSON *jhead = cJSON_GetObjectItemCaseSensitive(args, "expected_head_sha");
+      if (cJSON_IsString(jhead) && jhead->valuestring[0])
+      {
+         /* Same hex-only guard the merge path applies to this field. */
+         const char *h = jhead->valuestring;
+         int ok = 1;
+         for (const char *p = h; *p; p++)
+            if (!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F')))
+            {
+               ok = 0;
+               break;
+            }
+         if (!ok || !h[0])
+            return mcp_text("error: 'expected_head_sha' must be a hex SHA");
+         snprintf(expected_head, sizeof(expected_head), "%s", h);
+      }
+
+      char slug[264];
+      if (get_origin_repo_slug(slug, sizeof(slug)) != 0)
+         return mcp_text("error: cannot resolve a github.com origin for this checkout");
+
+      char err[512];
+      err[0] = '\0';
+      int rc = git_pr_update_branch_via_api_slug(
+          agent_get_request_vault_principal(), slug, jnum->valueint,
+          expected_head[0] ? expected_head : NULL, err, sizeof(err));
+      if (rc < 0)
+         return mcp_error("error: pr update_branch failed: %s", err[0] ? err : "unknown");
+
+      char msg[256];
+      snprintf(msg, sizeof(msg), "PR #%d: %s", jnum->valueint,
+               rc == 1 ? "already up to date with base; nothing to do"
+                       : "update queued (202) — CI restarts on the new head; poll "
+                         "merge_status before merging");
+      return mcp_text(msg);
+   }
+
    if (strcmp(action, "merge") == 0)
    {
       /* Policy-aware merge executor (authoring-pipeline #50). The caller passes

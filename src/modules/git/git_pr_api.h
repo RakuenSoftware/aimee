@@ -252,4 +252,19 @@ int git_pr_merge_via_api_slug_ex(const char *principal, const char *slug, int nu
                                  const char *merge_method, const char *expected_head_sha,
                                  char *out_sha, size_t out_sha_cap, char *err, size_t errlen);
 
+/* Merge the base branch INTO the PR's head -- REST's "Update branch" button.
+ *
+ * A base protected with "require branches to be up to date" reports its required
+ * checks as "expected" while the head is BEHIND, so the PR will not merge however
+ * green those checks already are. Updating the head is the only way to clear it.
+ *
+ * expected_head_sha, when given, refuses the update if the head moved since the
+ * caller looked -- the same drift guard the merge op uses.
+ *
+ * Returns 0 when GitHub ACCEPTED the update (202 queued -- the new head is not
+ * built yet, so poll merge_status before merging), 1 when the head already
+ * contains the base (422, nothing to do), -1 on error with err set. */
+int git_pr_update_branch_via_api_slug(const char *principal, const char *slug, int number,
+                                      const char *expected_head_sha, char *err, size_t errlen);
+
 #endif /* GIT_PR_API_H */
