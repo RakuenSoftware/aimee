@@ -52,29 +52,15 @@ static void mining_sleep_one_second(void)
 #endif
 }
 
+/* Shared parser (parse_utc_ts in util.c). This copy matched only the space form,
+ * and these job stamps are also written in ISO by the C paths, so half of them
+ * read as "no timestamp". */
 static int parse_job_timestamp(const char *value, time_t *out)
 {
-   int year = 0, mon = 0, day = 0, hour = 0, min = 0, sec = 0;
-   if (!value || !value[0] || !out)
+   if (!out)
       return 0;
-   if (sscanf(value, "%d-%d-%d %d:%d:%d", &year, &mon, &day, &hour, &min, &sec) != 6)
-      return 0;
-
-   struct tm tmv;
-   memset(&tmv, 0, sizeof(tmv));
-   tmv.tm_year = year - 1900;
-   tmv.tm_mon = mon - 1;
-   tmv.tm_mday = day;
-   tmv.tm_hour = hour;
-   tmv.tm_min = min;
-   tmv.tm_sec = sec;
-   tmv.tm_isdst = 0;
-#ifdef AIMEE_WINDOWS
-   time_t parsed = _mkgmtime(&tmv);
-#else
-   time_t parsed = timegm(&tmv);
-#endif
-   if (parsed == (time_t)-1)
+   time_t parsed = parse_utc_ts(value);
+   if (parsed <= 0)
       return 0;
    *out = parsed;
    return 1;

@@ -880,14 +880,10 @@ static time_t parse_db_timestamp_utc(const char *s)
 {
    if (!s || !s[0])
       return (time_t)-1;
-   struct tm tmv;
-   memset(&tmv, 0, sizeof(tmv));
-   if (sscanf(s, "%d-%d-%d %d:%d:%d", &tmv.tm_year, &tmv.tm_mon, &tmv.tm_mday, &tmv.tm_hour,
-              &tmv.tm_min, &tmv.tm_sec) != 6)
-      return (time_t)-1;
-   tmv.tm_year -= 1900;
-   tmv.tm_mon -= 1;
-   return timegm(&tmv);
+   /* Shared parser (space form only here before). Keep this function's -1
+    * sentinel: its callers distinguish "no timestamp" from a real value. */
+   time_t parsed = parse_utc_ts(s);
+   return parsed > 0 ? parsed : (time_t)-1;
 }
 
 static void session_subcmd_list(app_ctx_t *ctx, int argc, char **argv)
