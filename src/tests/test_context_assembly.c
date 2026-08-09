@@ -472,8 +472,60 @@ static void test_agent_context_budget_caps_unpinned_output_reserve(void)
    assert(small > (size_t)(1000000 - 1000000 / 4) * 4u);
 }
 
+/* A restatement must not be assembled twice, on the PRODUCTION path.
+ *
+ * Read-time near-duplicate suppression was added to
+ * memory_assemble_context_explain(), whose comment claims it "runs a candidate
+ * scoring pass (identical to memory_assemble_context)". They are two separate
+ * implementations, and the explain one has a single production caller (the
+ * `memory improve` diagnostic) -- so the suppression never ran for `aimee memory
+ * read` or the agent-runtime fallback context.
+ *
+ * Reproduced on a live deployment before this fix: two memories that are pure
+ * word-order reorderings of each other -- identical token sets, so far above the
+ * 0.85 lexical threshold -- BOTH appeared in the assembled context.
+ *
+ * The second assertion is the one that keeps the fix honest. Suppressing a
+ * DISTINCT fact silently loses evidence, which is worse than admitting a
+ * redundant line, so a memory that merely shares vocabulary must survive. */
+static void test_restatements_are_suppressed_but_distinct_facts_survive(void)
+{
+   setup();
+   memory_t m;
+
+   memory_insert(TIER_L2, KIND_FACT, "release-a",
+                 "The release checklist requires the changelog to be regenerated before any tag "
+                 "is pushed to the origin remote",
+                 0.9, "s1", &m);
+   /* Same sentence, reordered: nothing new is said. */
+   memory_insert(TIER_L2, KIND_FACT, "release-b",
+                 "Before any tag is pushed to the origin remote, the release checklist requires "
+                 "the changelog to be regenerated",
+                 0.9, "s1", &m);
+   /* Heavy vocabulary overlap, DIFFERENT claim. Must not be suppressed. */
+   memory_insert(TIER_L2, KIND_FACT, "release-c",
+                 "The release checklist forbids pushing any tag to the origin remote on a Friday",
+                 0.9, "s1", &m);
+
+   char *ctx = memory_assemble_context(NULL);
+   assert(ctx != NULL);
+
+   /* Count how many of the two restatements survived. */
+   int a = strstr(ctx, "requires the changelog to be regenerated before any tag") != NULL;
+   int b = strstr(ctx, "Before any tag is pushed to the origin remote, the release") != NULL;
+   assert(a + b == 1); /* exactly one, not both */
+
+   /* The distinct fact is still there. */
+   assert(strstr(ctx, "on a Friday") != NULL);
+
+   free(ctx);
+   teardown();
+   printf("  restatement suppressed, distinct fact kept\n");
+}
+
 int main(void)
 {
+   test_restatements_are_suppressed_but_distinct_facts_survive();
    test_null_hint_produces_same_as_original();
    test_task_hint_prioritizes_relevant_memories();
    test_task_hint_respects_budget();
