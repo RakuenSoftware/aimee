@@ -81,6 +81,8 @@ func validRef(ref string) bool {
 // Handle classifies Git operations and validates refs without repository I/O.
 func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	switch invocation.StageID {
+	case StageVerifyRun:
+		return handleVerifyState(invocation, request)
 	case StageCIGrade:
 		// JSON, not the fixed binary framing the other two stages use: a forge
 		// payload is arbitrarily large and its shape is the forge's, not ours.
