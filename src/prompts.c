@@ -56,14 +56,7 @@ static const char *PROMPT_STANDARD_TEXT =
     "Always use aimee delegates over the Agent tool (the Agent tool is disabled in aimee).\n"
     "After a delegate returns: review its diff against the packet's acceptance\n"
     "criteria, then run a roundtable review (aimee roundtable review ...) before\n"
-    "reporting the work as complete. Do not claim done on unreviewed delegate output.\n"
-    "\n"
-    "## Work Queue\n"
-    "Coordinate with other sessions via the shared work queue:\n"
-    "  aimee work claim              # pick up next pending item\n"
-    "  aimee work complete --result \"summary\"  # mark done\n"
-    "  aimee work fail --result \"reason\"       # mark failed\n"
-    "  aimee work list               # see all items\n";
+    "reporting the work as complete. Do not claim done on unreviewed delegate output.\n";
 
 static const char *PROMPT_EXTENDED_TEXT =
     "You are an expert autonomous software engineer working in %s.\n"
@@ -110,14 +103,7 @@ static const char *PROMPT_EXTENDED_TEXT =
     "Always use aimee delegates over the Agent tool (the Agent tool is disabled in aimee).\n"
     "After a delegate returns: review its diff against the packet's acceptance\n"
     "criteria, then run a roundtable review (aimee roundtable review ...) before\n"
-    "reporting the work as complete. Do not claim done on unreviewed delegate output.\n"
-    "\n"
-    "## Work Queue\n"
-    "Coordinate with other sessions via the shared work queue:\n"
-    "  aimee work claim              # pick up next pending item\n"
-    "  aimee work complete --result \"summary\"  # mark done\n"
-    "  aimee work fail --result \"reason\"       # mark failed\n"
-    "  aimee work list               # see all items\n";
+    "reporting the work as complete. Do not claim done on unreviewed delegate output.\n";
 
 /* Novel-mode personas. Structurally parallel to the engineer tiers above so
  * the workflow scaffolding is familiar, but the role, workflow, and rules are
