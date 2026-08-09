@@ -201,9 +201,18 @@ static void test_clone_resolves_origin_head(void)
    printf("  test_clone_resolves_origin_head: ok\n");
 }
 
-/* A git repo with no resolvable default branch is SKIPPED, never silently
- * indexed from the working tree. */
-static void test_no_default_branch_skips(void)
+/* A git repo with no resolvable default branch indexes its working tree, and
+ * says so on stderr.
+ *
+ * This used to return 0 files, to avoid capturing unstable WIP from a repo with
+ * no canonical branch. The reasoning does not survive contact with the repos
+ * that actually land here -- a fresh init before its first commit, a detached
+ * checkout, a CI clone, a worktree -- and the failure mode was silent: the
+ * caller got "0 files" with no reason it could report, and downstream the kb
+ * warned it "saw no files at that path" when the files were present and
+ * readable. Indexing the working tree and naming the choice beats an empty
+ * index nobody can explain. */
+static void test_no_default_branch_uses_worktree(void)
 {
    make_root("nobranch");
    git("init -q -b main");
@@ -211,8 +220,9 @@ static void test_no_default_branch_skips(void)
 
    reset();
    int n = code_collect_files_cb(g_root, rec_cb, NULL);
-   assert(n == 0 && g_n == 0);
-   printf("  test_no_default_branch_skips: ok\n");
+   assert(n == 1 && g_n == 1);
+   assert(has("x.c"));
+   printf("  test_no_default_branch_uses_worktree: ok\n");
 }
 
 /* A non-git directory falls back to the working-tree walk unconditionally. */
@@ -446,8 +456,41 @@ static void test_cpp_headers_collected(void)
    printf("  test_cpp_headers_collected: ok\n");
 }
 
+/* A git checkout with no resolvable default branch -- a detached checkout at a
+ * commit, a CI clone, a git worktree -- indexes its WORKING TREE rather than
+ * nothing.
+ *
+ * The old behaviour returned 0 files here to avoid capturing unstable WIP. But
+ * these repos are the stable ones: pinned at a commit and not moving. The cost
+ * was a silent empty index -- the caller saw "0 files" with no reason it could
+ * report, and the kb then warned it "saw no files at that path", which was
+ * untrue. Every symbol lookup afterwards missed for a reason nothing could
+ * name. */
+static void test_detached_checkout_indexes_working_tree(void)
+{
+   make_root("detached");
+   git("init -q -b main");
+   git("config user.email t@t");
+   git("config user.name t");
+   write_file("src/main.c", "int pinned(void){return 0;}");
+   git("add -A");
+   git("commit -qm init");
+   /* Detach at the commit and remove the branch: no origin/HEAD, no main. */
+   git("checkout -q --detach");
+   git("branch -q -D main");
+
+   reset();
+   int n = code_collect_files_cb(g_root, rec_cb, NULL);
+
+   assert(n == 1); /* indexed, not skipped */
+   assert(has("src/main.c"));
+   assert(strcmp(content_of("src/main.c"), "int pinned(void){return 0;}") == 0);
+   printf("  test_detached_checkout_indexes_working_tree: ok\n");
+}
+
 int main(void)
 {
+   test_detached_checkout_indexes_working_tree();
    printf("test_code_collect:\n");
    /* Skip gracefully if git is unavailable in the test environment. */
    if (system("git --version >/dev/null 2>&1") != 0)
@@ -458,7 +501,7 @@ int main(void)
    test_default_branch_is_canonical();
    test_worktree_optin();
    test_clone_resolves_origin_head();
-   test_no_default_branch_skips();
+   test_no_default_branch_uses_worktree();
    test_non_git_uses_worktree();
    test_build_manifests_collected();
    test_build_manifests_collected_git();

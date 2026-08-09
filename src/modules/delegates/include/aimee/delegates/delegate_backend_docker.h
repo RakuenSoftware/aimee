@@ -65,6 +65,15 @@ extern "C"
    int delegate_backend_docker_build_exec_command(const char *container_name,
                                                   const char *wrapped_script, char **out_cmd);
 
+   /* Translate a path as seen inside the server container into the Docker-host
+    * source path that backs it. `mount_table` is one destination<TAB>source pair
+    * per line, as emitted by Docker inspect. The longest containing destination
+    * wins. Returns 1 when translated, 0 when no mount contains the path (and
+    * copies the original path), or -1 for invalid/truncated input. */
+   int delegate_backend_docker_translate_mount_path(const char *container_path,
+                                                    const char *mount_table, char *out,
+                                                    size_t outsz);
+
 #ifdef __cplusplus
 }
 #endif

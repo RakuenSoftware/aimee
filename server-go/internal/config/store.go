@@ -137,6 +137,29 @@ var configurableIntBounds = map[string]intBounds{
 	"autonomy.delegate_pending_secs": {min: 2, max: 3600},
 }
 
+// The write-role wall floor. A write dispatch reserves time for the mandatory
+// repository verifier and refuses outright below one viable model-call window, so
+// under this many seconds every implement attempt refuses before it starts: the
+// stage can never finish, no matter how often it retries. Rejecting the value
+// when it is set says so up front instead of leaving it to be inferred from
+// attempts dying.
+//
+// These two components are the engine's ALREADY-SHIPPED delegateWriteVerifyReserve
+// and delegateWriteMinRunBudget, spelled out so the floor reads as what it is:
+// the arithmetic consequence of existing behaviour, not a new policy number. The
+// proposal that asked for this check excludes choosing how long a delegate may
+// run, and this does not choose that — it rejects only the caps under which the
+// shipped code already guarantees no attempt can finish.
+//
+// Duplicated rather than imported because internal/engine already imports this
+// package; TestWriteRoleWallFloorMatchesConfigBound there fails if they drift.
+const (
+	writeVerifyReserveSecs = 300 // engine delegateWriteVerifyReserve (5m)
+	writeMinRunSecs        = 60  // engine delegateWriteMinRunBudget (1m)
+
+	MinAutonomyMaxWallSecs = writeVerifyReserveSecs + writeMinRunSecs
+)
+
 func (s *Store) Values() (map[string]any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -399,6 +422,11 @@ func validateKeyValue(key string, value any) error {
 		}
 		if bounds, bounded := configurableIntBounds[key]; bounded && (n < bounds.min || n > bounds.max) {
 			return fmt.Errorf("%s must be between %d and %d", key, bounds.min, bounds.max)
+		}
+		if key == "autonomy.max_wall_secs" && n > 0 && n < MinAutonomyMaxWallSecs {
+			return fmt.Errorf(
+				"autonomy.max_wall_secs=%d is below the %d seconds a write-role delegate needs to run (%ds verifier reserve + %ds minimum run): every implement stage would refuse before starting, so no attempt could ever finish",
+				n, MinAutonomyMaxWallSecs, writeVerifyReserveSecs, writeMinRunSecs)
 		}
 	case "bool":
 		if _, ok := value.(bool); !ok {

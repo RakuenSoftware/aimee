@@ -183,6 +183,19 @@ static int ingress_preinject_first_task_turn(const char *session, const char *pr
    return fetch;
 }
 
+/* Turns whose memory recall could not reach the knowledge service, as opposed to
+ * turns that legitimately recalled nothing. Process-local and monotonic; read
+ * through ingress_preinject_recall_unavailable_total(). A non-zero and climbing
+ * value means agents are being handed envelopes with no memory previews because
+ * the dependency is down -- which reads identically to "nothing to recall" at
+ * every surface unless something counts it. */
+static long long ingress_recall_unavailable_total = 0;
+
+long long ingress_preinject_recall_unavailable_total(void)
+{
+   return ingress_recall_unavailable_total;
+}
+
 /* A first/new-task marker is claimed before retrieval so concurrent turns do
  * not duplicate packets. If that one retrieval never reached the dependency,
  * remove only its exact session/project marker: a related follow-up may then
@@ -231,12 +244,23 @@ static void ingress_query_fingerprint(const char *q, char *out, size_t len)
    snprintf(out, len, "q:%016llx", (unsigned long long)h);
 }
 
-const char *ingress_preinject_confidence(double top_score)
+static int ingress_confidence_valid(const char *confidence)
 {
-   const char *confidence = NULL;
-   if (!g_confidence_provider || g_confidence_provider(top_score, &confidence) != 0 || !confidence)
-      return "low";
-   return confidence;
+   return confidence && (strcmp(confidence, "high") == 0 || strcmp(confidence, "medium") == 0 ||
+                         strcmp(confidence, "low") == 0);
+}
+
+int ingress_preinject_confidence(double top_score, const char **confidence)
+{
+   if (!confidence)
+      return -1;
+   *confidence = NULL;
+   const char *value = NULL;
+   if (!g_confidence_provider || g_confidence_provider(top_score, &value) != 0 ||
+       !ingress_confidence_valid(value))
+      return -1;
+   *confidence = value;
+   return 0;
 }
 
 char *ingress_preinject_format_envelope(const char *context_block, const char *confidence)
@@ -250,8 +274,8 @@ char *ingress_preinject_format_envelope(const char *context_block, const char *c
    if (*p == '\0')
       return NULL;
 
-   if (!confidence || !confidence[0])
-      confidence = "low";
+   if (!ingress_confidence_valid(confidence))
+      return NULL;
 
    dstr_t d;
    dstr_init(&d);
@@ -963,6 +987,30 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * the advertised memory:<id> handle and the memory_get MCP tool. */
    memory_diagnostic_t mems[5];
    int mem_n = legacy_preview_on ? kb_client_memory_diagnose(query, 5, mems, 5) : 0;
+   /* A zero here has two meanings that must not be conflated: this turn had
+    * nothing worth recalling, or the knowledge service could not answer. Both
+    * produce an envelope with no memory previews, and until now both were
+    * silent -- so a memory outage was indistinguishable from a quiet turn, and
+    * the agent would state that something does not exist when it merely could
+    * not look. session_degraded_notice.c makes exactly this point, but it fires
+    * only at SessionStart; every per-turn injection (webchat, the Codex
+    * /v1/responses path, the Anthropic proxy) had no equivalent.
+    *
+    * Recorded, not injected. The envelope bytes are a cache prefix on the
+    * Anthropic arm, and adding a line to it on an outage would perturb the
+    * cached prefix precisely when the service is already struggling. The
+    * counter and this log line separate the two causes without touching the
+    * request the provider sees. */
+   if (legacy_preview_on && mem_n == 0 &&
+       kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE)
+   {
+      ingress_recall_unavailable_total++;
+      LOG_WARN("ingress-memory",
+               "memory recall UNAVAILABLE (not empty): the knowledge service did not answer; "
+               "this turn's envelope carries no memory previews. project=%s total=%lld",
+               active_project[0] ? active_project : "-",
+               (long long)ingress_recall_unavailable_total);
+   }
    for (int i = 0; i < mem_n; i++)
    {
       char *body = format_memory_preview_body(&mems[i], &headline_missing_count);
@@ -1120,7 +1168,14 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       free(blk);
       return NULL;
    }
-   char *env = ingress_preinject_format_envelope(blk, ingress_preinject_confidence(score));
+   const char *confidence = NULL;
+   if (ingress_preinject_confidence(score, &confidence) != 0)
+   {
+      LOG_WARN("memory", "rerank confidence unavailable; omitting pre-injection envelope");
+      free(blk);
+      return NULL;
+   }
+   char *env = ingress_preinject_format_envelope(blk, confidence);
    free(blk);
    return env;
 }

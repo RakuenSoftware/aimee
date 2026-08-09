@@ -19,12 +19,25 @@
 #include <unistd.h>
 #endif /* !_WIN32 (preamble guard) */
 
+/* config.deploy_env prints the env text and NOTHING else -- no banner, no quotes,
+ * no trailing JSON. Its only caller is a shell wrapper, `eval "$(aimee config
+ * deploy-env)"`, so any decoration becomes a shell command. The generic JSON
+ * fallback would emit the whole envelope, which eval would then try to run. */
+static void pt_print_deploy_env(const char *method, cJSON *resp)
+{
+   (void)method;
+   cJSON *env = cJSON_GetObjectItemCaseSensitive(resp, "env");
+   if (cJSON_IsString(env) && env->valuestring)
+      fputs(env->valuestring, stdout);
+}
+
 typedef void (*pt_print_fn)(const char *method, cJSON *resp);
 static const struct
 {
    const char *method;
    pt_print_fn fn;
 } pt_print_table[] = {
+    {"config.deploy_env", pt_print_deploy_env},
     {"roundtable.review", pt_print_roundtable_review},
     {"audit.verify", pt_print_audit},
     {"audit.checkpoint", pt_print_audit},
@@ -42,6 +55,8 @@ static const struct
     {"skill.list", pt_print_skill_list},
     {"skill.show", pt_print_skill_show},
     {"git.verify", pt_print_git_verify},
+    /* Every git command returns MCP content blocks, the same shape verify does. */
+    {"git.cli", pt_print_git_verify},
     {"get_help", pt_print_get_help},
     {"server.health", pt_print_server_health},
     {"session.list", pt_print_session_list},
@@ -643,6 +658,7 @@ static const struct
     {"collab_rules.list_active", "GET", "/v1/collab_rules/active"},
     {"collab_rules.reject", "POST", "/v1/collab_rules/reject"},
     {"collab_rules.retire", "POST", "/v1/collab_rules/retire"},
+    {"config.deploy_env", "GET", "/v1/config/deploy-env"},
     {"config.get", "POST", "/v1/config/get"},
     {"config.set", "POST", "/v1/config/set"},
     {"config.show", "GET", "/v1/config"},
@@ -671,9 +687,11 @@ static const struct
     {"delegate", "POST", "/v1/delegate/run"},
     {"delegate.backend_exec", "POST", "/v1/delegate/backend_exec"},
     {"delegate.backend_list", "GET", "/v1/delegate/backend_list"},
+    {"delegate.cancel_unassigned", "POST", "/v1/delegate/cancel_unassigned"},
     {"delegate.launch", "POST", "/v1/delegate/launch"},
     {"delegate.log", "GET", "/v1/delegate/log"},
     {"delegate.reply", "POST", "/v1/delegate/reply"},
+    {"delegate.reservation.forget", "POST", "/v1/delegate/reservation/forget"},
     {"delegate.sandbox_gc", "POST", "/v1/delegate/sandbox/gc"},
     {"delegate.sandbox_list", "GET", "/v1/delegate/sandbox/images"},
     {"delegate.status", "POST", "/v1/delegate/status"},
@@ -735,6 +753,15 @@ static const struct
     {"optimize.export", "GET", "/v1/optimize/export"},
     {"optimize.promote", "POST", "/v1/optimize/promote"},
     {"optimize.replay_record", "POST", "/v1/optimize/replay-record"},
+#if AIMEE_WITH_ROUNDTABLE
+    {"pipeline.advance", "POST", "/v1/pipeline/advance"},
+    {"pipeline.cancel", "POST", "/v1/pipeline/cancel"},
+    {"pipeline.gate", "POST", "/v1/pipeline/gate"},
+    {"pipeline.list", "GET", "/v1/pipeline/list"},
+    {"pipeline.resume", "POST", "/v1/pipeline/resume"},
+    {"pipeline.start", "POST", "/v1/pipeline/start"},
+    {"pipeline.status", "POST", "/v1/pipeline/status"},
+#endif
     {"provider.get", "POST", "/v1/provider/get"},
     {"provider.list", "GET", "/v1/provider/list"},
     {"provider.models", "GET", "/v1/provider/models"},
@@ -789,8 +816,10 @@ static const struct
     {"wm.get", "POST", "/v1/wm/get"},
     {"wm.list", "POST", "/v1/wm/list"},
     {"wm.set", "POST", "/v1/wm/set"},
+    {"workers", "GET", "/v1/workers"},
     {"workspace.context", "POST", "/v1/workspaces/context"},
     {"workspace.list", "GET", "/v1/workspaces"},
+    {"workspace.mirror-sync", "POST", "/v1/workspace/mirror-sync"},
     {"worktree.gc", "POST", "/v1/worktree/gc"},
 };
 
@@ -845,6 +874,10 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
       const char *path;
    } bespoke[] = {
        {"workspace.add", "POST", "/v1/workspaces"},
+       /* The mirror tier's client-diff upload. Without this mapping the client
+        * resolves no route and ships nothing, so a remote server reconstructs a
+        * clean checkout at head and silently drops every uncommitted change. */
+       {"workspace.mirror-sync", "POST", "/v1/workspace/mirror-sync"},
        /* Detached-workspace runner reverse channel (aimee workspace serve); the
         * REST twins return the same {ok, have_op, op?} / {ok} as the NDJSON ops. */
        {"runner.poll", "POST", "/v1/runner/poll"},
@@ -1651,6 +1684,163 @@ int cli_index_scan_remote(int argc, char **argv)
 
 #endif /* AIMEE_POSIX */
 
+/* Ship a workspace patch as a sequence of bounded requests.
+ *
+ * A working tree is not bounded by anything the transport can choose, so sending
+ * the patch whole made the route unusable on any real checkout: one generated
+ * file exceeds the request cap, and raising the cap only moves the number that
+ * will be wrong next. The server reassembles by appending each chunk to the same
+ * file, so the size that matters is the tree's, not a request's.
+ *
+ * `seq` 0 truncates server-side; only the final chunk carries the head, so a head
+ * is never stored against a patch that is still arriving.
+ *
+ * An older server ignores both fields and writes every chunk whole, which would
+ * leave the mirror holding the LAST chunk while looking complete. Two things
+ * prevent that. The first response must acknowledge `chunked` before any later
+ * chunk is sent; and chunk 0 deliberately carries NO patch data, so the worst an
+ * old server can be left holding is an empty diff — a defined state (a clean
+ * checkout at the recorded head), never a fragment of one. Patch data starts at
+ * seq 1. */
+static int cli_v1_mirror_sync_chunked(cJSON *req, int timeout, int json_output)
+{
+   cJSON *jdiff = cJSON_GetObjectItemCaseSensitive(req, "diff");
+   const char *diff = cJSON_IsString(jdiff) ? jdiff->valuestring : "";
+   size_t total = strlen(diff);
+
+   /* Sized against the PER-METHOD limit, not the transport one. Requests are
+    * capped twice: SHTTP_MAX_BODY (4MB) at the listener, and a per-method limit
+    * that defaults to LIMIT_DEFAULT — 256KB — for any method without its own
+    * entry, which mirror-sync does not have. The method limit is the binding one
+    * and rejects with PAYLOAD_TOO_LARGE.
+    *
+    * 128KB of patch leaves room for JSON escaping (worst case ~2x on a binary
+    * patch's escapes) and the envelope inside that 256KB. Chunking means no limit
+    * anywhere has to move: the size of one request stops being a function of the
+    * size of the tree. */
+   const size_t chunk_max = 128u * 1024u;
+
+   char *remote = cli_v1_client_endpoint();
+   char *bearer = remote ? cli_v1_client_bearer() : NULL;
+
+   cJSON *jhead = cJSON_GetObjectItemCaseSensitive(req, "head");
+   /* Borrowed, not copied: `req` outlives this loop, and copying pulled
+    * safe_strdup (util.o) into a TU whose test link line does not carry it. */
+   const char *head = cJSON_IsString(jhead) ? jhead->valuestring : "";
+
+   size_t sent = 0;
+   int seq = 0, rc = 0;
+   int data_chunks = (int)((total + chunk_max - 1) / chunk_max);
+   /* One empty begin chunk, then the data. A patch that fits in a single request
+    * still uses the begin chunk: one extra tiny round trip buys the same
+    * old-server safety on every sync rather than only on large ones. */
+   int chunks = data_chunks + 1;
+
+   for (;;)
+   {
+      int begin = (seq == 0);
+      size_t n = begin ? 0 : (total - sent > chunk_max ? chunk_max : total - sent);
+      int final = !begin && (sent + n >= total);
+      if (begin && total == 0)
+         final = 1; /* nothing to ship: the begin chunk is the whole sync */
+
+      cJSON *body = cJSON_CreateObject();
+      cJSON_AddStringToObject(body, "method", "workspace.mirror-sync");
+      cJSON *args = cJSON_CreateArray();
+      cJSON *src_args = cJSON_GetObjectItemCaseSensitive(req, "args");
+      cJSON *a = NULL;
+      cJSON_ArrayForEach(a, src_args) if (cJSON_IsString(a))
+          cJSON_AddItemToArray(args, cJSON_CreateString(a->valuestring));
+      cJSON_AddItemToObject(body, "args", args);
+      char *slice = (char *)malloc(n + 1);
+      if (!slice)
+      {
+         cJSON_Delete(body);
+         rc = 1;
+         break;
+      }
+      memcpy(slice, diff + sent, n);
+      slice[n] = '\0';
+      cJSON_AddStringToObject(body, "diff", slice);
+      free(slice);
+      cJSON_AddNumberToObject(body, "seq", seq);
+      cJSON_AddBoolToObject(body, "final", final);
+      if (final && head[0])
+         cJSON_AddStringToObject(body, "head", head);
+
+      char *wire = cJSON_PrintUnformatted(body);
+      cJSON_Delete(body);
+      if (!wire)
+      {
+         rc = 1;
+         break;
+      }
+      int status = 0;
+      cJSON *resp =
+          cli_v1_send(remote, bearer, "POST", "/v1/workspace/mirror-sync", wire, timeout, &status);
+      free(wire);
+      if (!resp)
+      {
+         fprintf(stderr, "aimee: workspace mirror-sync: chunk %d of %d was not answered\n", seq + 1,
+                 chunks);
+         rc = 1;
+         break;
+      }
+      /* The refusal envelope is {"status":"error","message":...}; an "error" key
+       * only appears on some paths. Reading the wrong one made a server that had
+       * answered clearly ("PAYLOAD_TOO_LARGE ...") fall through to the
+       * capability message below and get reported as too old — a plain refusal
+       * dressed up as a version problem. */
+      cJSON *st = cJSON_GetObjectItemCaseSensitive(resp, "status");
+      cJSON *err = cJSON_GetObjectItemCaseSensitive(resp, "error");
+      int failed = (cJSON_IsString(st) && strcmp(st->valuestring, "error") == 0) || err != NULL;
+      if (failed)
+      {
+         cJSON *m = cJSON_GetObjectItemCaseSensitive(resp, "message");
+         if (!cJSON_IsString(m) && cJSON_IsObject(err))
+            m = cJSON_GetObjectItemCaseSensitive(err, "message");
+         if (!cJSON_IsString(m) && cJSON_IsString(err))
+            m = err;
+         fprintf(stderr, "aimee: workspace mirror-sync: chunk %d of %d refused: %s\n", seq + 1,
+                 chunks, cJSON_IsString(m) ? m->valuestring : "rejected");
+         cJSON_Delete(resp);
+         rc = 1;
+         break;
+      }
+      /* Refuse to keep going against a server that cannot reassemble: it would
+       * accept every chunk and end up storing only the last one. */
+      if (!final)
+      {
+         cJSON *ack = cJSON_GetObjectItemCaseSensitive(resp, "chunked");
+         if (!cJSON_IsTrue(ack))
+         {
+            fprintf(stderr,
+                    "aimee: workspace mirror-sync: this patch needs %d chunks but the server did "
+                    "not acknowledge chunked sync, so the parts would overwrite each other and the "
+                    "mirror would look complete while holding only the last one. Upgrade the "
+                    "server, or sync a tree small enough for one request.\n",
+                    chunks);
+            cJSON_Delete(resp);
+            rc = 1;
+            break;
+         }
+      }
+      cJSON_Delete(resp);
+
+      sent += n;
+      seq++;
+      if (final)
+         break;
+   }
+
+   free(remote);
+   free(bearer);
+
+   if (rc == 0 && !json_output)
+      printf("workspace mirror-sync: shipped %zu byte(s) in %d chunk(s)\n", total, seq);
+   return rc;
+}
+
 /* cli_v1_dispatch_local: dispatch a pre-marshalled {method, ...params} request to its
  * first-class /v1 route over the co-located transport — the local aimee-http.sock
  * on POSIX, or the configured remote on Windows (no UDS). Interactive
@@ -1828,6 +2018,11 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
       exit_rc = 1;
    }
    else if (strcmp(route->method, "agent.probe") == 0 && agent_probe_response_is_failure(resp))
+   {
+      exit_rc = 1;
+   }
+   else if (strcmp(route->method, "roundtable.review") == 0 &&
+            roundtable_review_response_is_failure(resp))
    {
       exit_rc = 1;
    }
@@ -2016,6 +2211,12 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
    }
 
    int timeout = route->timeout_ms > 0 ? route->timeout_ms : CLIENT_DEFAULT_TIMEOUT_MS;
+   if (strcmp(route->method, "workspace.mirror-sync") == 0)
+   {
+      int rc = cli_v1_mirror_sync_chunked(req, timeout, effective_json_output);
+      cJSON_Delete(req);
+      return rc;
+   }
    if (strcmp(route->method, "delegate") == 0)
    {
       int delegate_timeout = delegate_timeout_from_args(fwd_argc, fwd_argv);
@@ -2047,6 +2248,12 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
       rest_path = cli_v1_pathid_build(disp_method, req, pathid_buf, sizeof(pathid_buf), &rest_verb);
    if (!async_path && !rest_path)
       rest_path = cli_v1_route_for_method(disp_method, &rest_verb);
+   /* Whether the METHOD is a {id}-bearing route at all, independent of whether
+    * this invocation supplied the id. Captured HERE, before the request tree is
+    * freed: disp_method can point into `req` (bm->valuestring), so it dangles
+    * once cJSON_Delete(req) runs and must not be dereferenced below. */
+   const int is_pathid_route =
+       cli_v1_pathid_route_for_method(disp_method, NULL, NULL, NULL) != NULL;
 
    char *http_body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
@@ -2071,6 +2278,32 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
        * connection; a full compute queue returns {status:error,"compute queue
        * full"}) — both clear fast. */
       const char *body = http_body;
+      /* A body over the listener's cap is dropped before it is ever parsed, so
+       * the send returns nothing and the failure reads as "could not reach the
+       * endpoint (is the server running?)" — pointing at a server that is up and
+       * answering every other request. Measured on a real workspace:
+       * `workspace mirror-sync` shipped 16.8MB (a repo with 247 untracked files)
+       * against the 4MB cap and reported the server as unreachable.
+       *
+       * Refuse here instead, naming the two numbers, so the size is the finding
+       * rather than something the operator has to infer. The roundtable review
+       * path has its own larger cap and is checked against that one. */
+      size_t body_len = body ? strlen(body) : 0;
+      size_t body_cap = rest_path && strcmp(rest_path, "/v1/roundtable/review") == 0
+                            ? (size_t)CLI_V1_MAX_ROUNDTABLE_BODY
+                            : (size_t)CLI_V1_MAX_BODY;
+      if (body_len > body_cap)
+      {
+         fprintf(stderr,
+                 "aimee: '%s' request body is %zu bytes, over the %zu-byte limit the server "
+                 "accepts, so it would be dropped before it was read. Reduce what the request "
+                 "carries (for a workspace sync, untracked files dominate it) and retry.\n",
+                 route->method, body_len, body_cap);
+         free(http_body);
+         free(bearer);
+         free(remote);
+         return -1;
+      }
       static const int retry_delays_ms[] = {200, 500, 1000};
       const int max_retries = (int)(sizeof(retry_delays_ms) / sizeof(retry_delays_ms[0]));
       for (int attempt = 0; attempt <= max_retries; attempt++)
@@ -2098,15 +2331,33 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
    }
    else if (http_body)
    {
-      /* No first-class route — unreachable given the coverage gates; surface it
-       * rather than silently dropping the command. This is a routing gap, not an
-       * unreachable server, so return early instead of falling through to the
-       * misleading "is the server running?" hint below. */
-      fprintf(stderr, "aimee: '%s' has no /v1 route\n", route->method);
+      /* Two different failures land here. A path-id route ({id}-bearing) whose id
+       * is missing produced no path, which is a MISSING ARGUMENT, not a routing
+       * gap: `aimee workspace get` with no path answered "'workspace.get' has no
+       * /v1 route" while `aimee workspace get <path>` worked fine, sending the
+       * user to look for a route that is present and correct. Ask
+       * cli_v1_pathid_route_for_method() which case this is -- it reports whether
+       * the METHOD is a path-id route at all, independently of whether this
+       * invocation supplied the id. */
+      const int missing_arg = is_pathid_route;
+      if (missing_arg)
+         fprintf(stderr, "aimee: '%s' needs an argument (the id or path to act on)\n",
+                 route->method);
+      else
+         /* Genuinely no first-class route — surface it rather than silently
+          * dropping the command. This is a routing gap, not an unreachable
+          * server, so return early instead of falling through to the misleading
+          * "is the server running?" hint below. */
+         fprintf(stderr, "aimee: '%s' has no /v1 route\n", route->method);
       free(http_body);
       free(bearer);
       free(remote);
-      return -1;
+      /* >= 0 means "handled, this is the exit code" and suppresses the caller's
+       * "server /v1 request failed" line. A missing argument IS fully handled --
+       * no request was ever attempted, so blaming the server on the next line is
+       * doubly wrong. A real routing gap keeps returning -1 so that path is
+       * unchanged. */
+      return missing_arg ? 1 : -1;
    }
 
    free(http_body);

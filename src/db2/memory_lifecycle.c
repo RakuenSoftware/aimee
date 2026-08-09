@@ -52,11 +52,30 @@ int db2_memory_lifecycle_update_state(int64_t memory_id, const char *new_state,
    const char *reason = (archive_reason && archive_reason[0]) ? archive_reason : "";
 
    /* Same UPDATE shape as the legacy memory_transition_lifecycle: leaving
-    * `pending` clears ttl_at; entering `archived` records the reason. */
+    * `pending` clears ttl_at; entering `archived` records the reason.
+    *
+    * Entering `superseded` or `archived` additionally CLOSES the row's event-time
+    * interval by stamping valid_until.
+    *
+    * Why: lifecycle_state answers "is this true NOW", and that is all it can
+    * answer. It cannot answer "what did we believe on 12 June" -- a superseded
+    * row looks identically superseded whether it stopped being true yesterday or
+    * last year. memory_relations already carries valid_at/invalid_at and has a
+    * working --as-of read path; memories carried valid_from/valid_until columns
+    * that supersession never populated, so the same question about a PREFERENCE
+    * or a DECISION -- exactly the facts most likely to change -- had no answer.
+    *
+    * Only set when currently empty, so a valid_until asserted by a caller who
+    * knows the real end date is never overwritten by the transition timestamp.
+    * The stamp is when we LEARNED it stopped being true, which is the honest
+    * value available here; a caller with better information should say so. */
    static const char *sql =
        "UPDATE memories SET lifecycle_state = ?1,"
        " ttl_at = CASE WHEN ?2 = 'pending' THEN ttl_at ELSE '' END,"
        " archive_reason = CASE WHEN ?3 = 'archived' THEN ?4 ELSE archive_reason END,"
+       " valid_until = CASE WHEN ?6 IN ('superseded','archived') AND"
+       "                         COALESCE(valid_until,'') = ''"
+       "                    THEN pg_now_text() ELSE valid_until END,"
        " updated_at = pg_now_text() WHERE id = ?5";
    char err[ML_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -67,8 +86,68 @@ int db2_memory_lifecycle_update_state(int64_t memory_id, const char *new_state,
    aimee_pg_bind_text(st, "?3", new_state);
    aimee_pg_bind_text(st, "?4", reason);
    aimee_pg_bind_int64(st, "?5", memory_id);
+   aimee_pg_bind_text(st, "?6", new_state);
    int rc = aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
+   return (rc == AIMEE_PG_DONE) ? 0 : -1;
+}
+
+int db2_memory_valid_at(int64_t memory_id, const char *as_of)
+{
+   if (memory_id <= 0 || !as_of || !*as_of)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   /* Absent bounds are OPEN, not closed: an empty valid_from means "as far back
+    * as we know", an empty valid_until means "still true". Rows written before
+    * supersession began stamping valid_until therefore read as current -- the
+    * truthful answer, since we genuinely do not know when they stopped being
+    * true. Inventing a boundary from updated_at would manufacture history.
+    *
+    * Normalise the separator before comparing, because these columns genuinely
+    * hold TWO formats. schema.sql declares the canonical text form as
+    * 'YYYY-MM-DD HH24:MI:SS' and pg_now_text() writes that, but the C writers
+    * reach these same columns with now_utc(), which is ISO
+    * ("2026-08-09T19:07:23Z"): db2_memory_set_versioned_key and
+    * db2_memory_set_valid_from are both handed a now_utc() stamp by
+    * memory_supersede, while db2_memory_set_lifecycle_state stamps pg_now_text().
+    *
+    * A plain text compare therefore decided on character 10, where 'T' (0x54)
+    * sorts ABOVE ' ' (0x20). Every ISO bound ranked above every space-separated
+    * value, inverting the verdict: a superseded row read as still in force, and
+    * a row not yet valid read as valid. It failed silently, since a wrong
+    * verdict is indistinguishable from a right one, and it only surfaced when
+    * the DATE matched -- decade-apart dates decide at the year and never reach
+    * the separator.
+    *
+    * replace()/rtrim() rather than a ::timestamptz cast: the DB2 unit tests run
+    * on the SQLite shim, where the cast is a syntax error, and these two are
+    * spelled the same in both engines. Offsets other than 'Z' are still compared
+    * textually -- nothing in this tree writes one, and inventing a parser here
+    * would be guessing at data we do not produce. */
+   static const char *sql =
+       "SELECT 1 FROM memories WHERE id = ?1"
+       " AND (NULLIF(valid_from,'') IS NULL"
+       "      OR rtrim(replace(valid_from,'T',' '),'Z') <= rtrim(replace(?2,'T',' '),'Z'))"
+       " AND (NULLIF(valid_until,'') IS NULL"
+       "      OR rtrim(replace(valid_until,'T',' '),'Z') > rtrim(replace(?3,'T',' '),'Z'))";
+   char err[ML_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", memory_id);
+   aimee_pg_bind_text(st, "?2", as_of);
+   aimee_pg_bind_text(st, "?3", as_of);
+   int rc = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   if (rc == AIMEE_PG_ROW)
+      return 1;
+   /* A statement error -- an as_of Postgres cannot parse, or a malformed stored
+    * bound -- is "could not tell", not "was not in force". Folding it into 0
+    * would answer a question we failed to evaluate, which is the same lie the
+    * -1 path upstream exists to avoid. */
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 

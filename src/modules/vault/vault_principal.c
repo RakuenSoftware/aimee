@@ -103,11 +103,26 @@ attested_transport_t vault_principal_resolve(int is_tcp, int is_tls, long peer_u
 
    if (!is_tcp)
    {
-      /* Local UDS peer. A kernel-attested uid > 0 owns a uid: vault. uid 0
-       * (root) and an unknown uid (-1) get NO principal: an un-attested or
-       * zeroed conn reads as uid 0, so granting it would collapse to acting as
-       * root on a missed hop. Fail-closed -> empty principal, vault refuses. */
-      if (peer_uid > 0)
+      /* Local UDS peer: a kernel-attested uid owns the matching uid: vault.
+       *
+       * uid 0 is included. It was excluded to stop a "missed hop" from acting as
+       * root, but the sentinel for a missed hop is -1, not 0: the caller
+       * (server_http_identity_capture) initialises peer_uid to -1 and overwrites it
+       * ONLY when platform_ipc_peer_cred succeeds, so 0 here means the kernel said
+       * root. A zeroed server_conn_t is caught by a different guard -- ATTEST_NONE
+       * is the enum's zero value, so such a conn never classifies as
+       * UDS_PEERCRED at all.
+       *
+       * Excluding it did not make root safe, only mute: the local root operator
+       * owns .vault/.server-master.key on disk and can decrypt the store offline
+       * regardless. What it actually did was leave `aimee vault set-server` refusing
+       * every root caller -- the ordinary case inside the server container -- while
+       * naming principal "(unknown)" in the remediation, telling the operator to run
+       * `aimee vault capability grant (unknown)`. Unusable advice for an
+       * unreachable path.
+       *
+       * An unknown uid (-1) still gets NO principal and still fails closed. */
+      if (peer_uid >= 0)
          snprintf(out, out_len, "uid:%ld", peer_uid);
       return ATTEST_UDS_PEERCRED;
    }

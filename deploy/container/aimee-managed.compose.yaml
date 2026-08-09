@@ -77,6 +77,12 @@ services:
       # single-deployment/multi-role, so callers do not select arbitrary models.
       SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-aimee-synth}
       EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}
+      # Intra-op threads for ONE embed request. The server defaults this to
+      # min(8, usable cpus), which is right for a single request and wrong when
+      # several ingest workers embed concurrently: on a 7-core box that is
+      # 6 workers x 7 threads = 42 threads competing for 7 cores. Pin it so
+      # workers x threads lands near the core count. Unset keeps the default.
+      EMBEDDER_THREADS: ${EMBEDDER_THREADS:-}
       # Internal-only mTLS lane used for server enrollment and signed management
       # JWKS refresh. It is reachable on the Compose network, not published. The
       # value is the certificate DNS identity; the listener still binds all

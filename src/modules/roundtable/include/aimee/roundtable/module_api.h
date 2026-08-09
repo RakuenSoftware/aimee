@@ -6,16 +6,28 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_ROUNDTABLE_EVENT_DELIBERATE       9473u
-#define AIMEE_ROUNDTABLE_STAGE_DELIBERATE       1u
-#define AIMEE_ROUNDTABLE_REQUEST_MAGIC          0x52475452u /* "RTGR" */
-#define AIMEE_ROUNDTABLE_RESPONSE_MAGIC         0x44475452u /* "RTGD" */
-#define AIMEE_ROUNDTABLE_WIRE_VERSION           1u
-#define AIMEE_ROUNDTABLE_SEVERITY_MAX           15u
-#define AIMEE_ROUNDTABLE_REQUEST_LEN            40u
-#define AIMEE_ROUNDTABLE_RESPONSE_LEN           32u
-#define AIMEE_ROUNDTABLE_REQUEST_SEVERITY_OFF   24u
-#define AIMEE_ROUNDTABLE_RESPONSE_SEVERITY_OFF  16u
+#define AIMEE_ROUNDTABLE_EVENT_DELIBERATE 9473u
+#define AIMEE_ROUNDTABLE_STAGE_DELIBERATE 1u
+
+/* The review stage. Unlike deliberate, which is a fixed 40-byte rubric, a review
+ * carries JSON in both directions -- the same body the private HTTP proxy used
+ * to carry, so moving the transport did not change the contract. The kind is
+ * fixed by the process contract at 4096 + ordinal*256 + stage; roundtable is
+ * ordinal 21, so review is deliberate's successor and not a free choice. */
+#define AIMEE_ROUNDTABLE_EVENT_REVIEW 9474u
+#define AIMEE_ROUNDTABLE_STAGE_REVIEW 2u
+/* Chunk planning and the synthesis assembly. JSON: the artifact is arbitrarily
+ * large and the plan is a variable number of spans. */
+#define AIMEE_ROUNDTABLE_EVENT_CHUNK_PLAN      9475u
+#define AIMEE_ROUNDTABLE_STAGE_CHUNK_PLAN      3u
+#define AIMEE_ROUNDTABLE_REQUEST_MAGIC         0x52475452u /* "RTGR" */
+#define AIMEE_ROUNDTABLE_RESPONSE_MAGIC        0x44475452u /* "RTGD" */
+#define AIMEE_ROUNDTABLE_WIRE_VERSION          1u
+#define AIMEE_ROUNDTABLE_SEVERITY_MAX          15u
+#define AIMEE_ROUNDTABLE_REQUEST_LEN           40u
+#define AIMEE_ROUNDTABLE_RESPONSE_LEN          32u
+#define AIMEE_ROUNDTABLE_REQUEST_SEVERITY_OFF  24u
+#define AIMEE_ROUNDTABLE_RESPONSE_SEVERITY_OFF 16u
 
 typedef enum
 {
@@ -58,8 +70,8 @@ static inline int aimee_roundtable_zero_padding(const uint8_t *p, size_t len)
 }
 
 static inline int aimee_roundtable_request_encode(aimee_roundtable_replay_status_t status,
-                                                   int factual, const char *severity, uint8_t *out,
-                                                   size_t capacity)
+                                                  int factual, const char *severity, uint8_t *out,
+                                                  size_t capacity)
 {
    size_t severity_len = severity ? strlen(severity) : 0;
    if (!out || capacity < AIMEE_ROUNDTABLE_REQUEST_LEN ||
@@ -77,9 +89,10 @@ static inline int aimee_roundtable_request_encode(aimee_roundtable_replay_status
    return 0;
 }
 
-static inline int aimee_roundtable_request_decode(
-    const uint8_t *in, size_t len, aimee_roundtable_replay_status_t *status, int *factual,
-    char *severity, size_t severity_capacity)
+static inline int aimee_roundtable_request_decode(const uint8_t *in, size_t len,
+                                                  aimee_roundtable_replay_status_t *status,
+                                                  int *factual, char *severity,
+                                                  size_t severity_capacity)
 {
    if (!in || len != AIMEE_ROUNDTABLE_REQUEST_LEN || !status || !factual || !severity ||
        aimee_roundtable_get_u32(in) != AIMEE_ROUNDTABLE_REQUEST_MAGIC ||
@@ -103,8 +116,8 @@ static inline int aimee_roundtable_request_decode(
 }
 
 static inline int aimee_roundtable_response_encode(aimee_roundtable_verify_action_t action,
-                                                    const char *severity, uint8_t *out,
-                                                    size_t capacity)
+                                                   const char *severity, uint8_t *out,
+                                                   size_t capacity)
 {
    size_t severity_len = severity ? strlen(severity) : 0;
    if (!out || capacity < AIMEE_ROUNDTABLE_RESPONSE_LEN ||
@@ -120,8 +133,8 @@ static inline int aimee_roundtable_response_encode(aimee_roundtable_verify_actio
 }
 
 static inline int aimee_roundtable_response_decode(const uint8_t *in, size_t len,
-                                                    aimee_roundtable_verify_action_t *action,
-                                                    char *severity, size_t severity_capacity)
+                                                   aimee_roundtable_verify_action_t *action,
+                                                   char *severity, size_t severity_capacity)
 {
    if (!in || len != AIMEE_ROUNDTABLE_RESPONSE_LEN || !action || !severity ||
        aimee_roundtable_get_u32(in) != AIMEE_ROUNDTABLE_RESPONSE_MAGIC ||

@@ -16,7 +16,6 @@
 #include "memory_context_internal.h"
 #include "memory_ontology.h"
 #include "platform_process.h"
-#include <aimee/workspace/workspace.h>
 #endif
 #include <ctype.h>
 #include <limits.h>
@@ -26,6 +25,45 @@
 #include <strings.h>
 #include <time.h>
 #include <unistd.h>
+
+/* --- Quiet-lane detection --- */
+
+/* Background work does not raise its hand when it dies. A maintenance cycle that
+ * promotes, demotes and expires NOTHING looks exactly like a healthy cycle with
+ * nothing to do -- "no output" and "nothing to do" are indistinguishable unless
+ * something asks whether there was work waiting. Every ingredient for that
+ * question was already recorded (per-cycle counters here, lifecycle_state counts
+ * next door); nothing drew the conclusion.
+ *
+ * The predicate is deliberately two-sided: zero output WITH a backlog is the
+ * signal, zero output with an empty backlog is a healthy idle system and must
+ * stay silent, or the alarm trains operators to ignore it.
+ *
+ * Process-local: this tracks the run of consecutive quiet cycles within one
+ * daemon lifetime, which is the window in which a wedged lane matters. A restart
+ * legitimately resets it -- the lane gets a fresh chance to prove itself. */
+#define MEMORY_QUIET_CYCLES_ALARM 3
+
+static int g_memory_quiet_cycles = 0;
+
+int memory_quiet_cycles(void)
+{
+   return g_memory_quiet_cycles;
+}
+
+/* Returns 1 when this cycle should alarm. Separated from the logging so the rule
+ * is testable without a database or a log sink: it is pure over its inputs. */
+int memory_quiet_lane_alarm(int changes, int64_t pending, int consecutive_quiet)
+{
+   if (changes > 0)
+      return 0; /* the lane produced output; nothing to say */
+   if (pending <= 0)
+      return 0; /* quiet because there was nothing to do -- healthy */
+   return consecutive_quiet >= MEMORY_QUIET_CYCLES_ALARM;
+}
+
+/* Fold this cycle's outcome into the quiet-run counter and alarm if the lane has
+ * been silent while work was waiting. Called once per maintenance cycle. */
 
 #if defined(AIMEE_DB2_DISABLED)
 /* Memory health, effectiveness, and maintenance writes are DB2-owned. Server
@@ -299,6 +337,31 @@ static int memory_consolidate_l1_chains(void)
    return consolidated;
 }
 
+static void memory_note_cycle_output(int promoted, int demoted, int expired)
+{
+   int changes = promoted + demoted + expired;
+   if (changes > 0)
+   {
+      g_memory_quiet_cycles = 0;
+      return;
+   }
+   g_memory_quiet_cycles++;
+
+   memory_lifecycle_counts_t counts;
+   memset(&counts, 0, sizeof(counts));
+   if (memory_lifecycle_counts(&counts) != 0)
+      return; /* cannot establish a backlog: do not guess, and do not alarm */
+
+   if (!memory_quiet_lane_alarm(changes, counts.pending, g_memory_quiet_cycles))
+      return;
+
+   LOG_WARN("memory.health",
+            "maintenance has produced NO changes for %d consecutive cycles while %lld memories "
+            "are pending: the lane is not idle, it is not progressing. Check the maintenance "
+            "worker and its dependencies (db2, embedder) rather than assuming there was no work.",
+            g_memory_quiet_cycles, (long long)counts.pending);
+}
+
 int memory_run_maintenance(int *promoted, int *demoted, int *expired)
 {
    int p = memory_promote();
@@ -351,6 +414,11 @@ int memory_run_maintenance(int *promoted, int *demoted, int *expired)
 
    /* Record health metrics for this maintenance cycle */
    memory_record_health(p, d, e);
+
+   /* Separate "produced nothing because there was nothing to do" from "produced
+    * nothing while work was waiting". Only the second is a fault, and until now
+    * neither was reported. */
+   memory_note_cycle_output(p, d, e);
 
    /* Prune old health and contradiction_log rows (90-day retention) */
    memory_prune_health();

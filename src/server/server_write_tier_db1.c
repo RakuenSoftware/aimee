@@ -16,6 +16,11 @@
 #include <string.h>
 #include <unistd.h> /* access — startup preflight only */
 
+/* One definition for every server-id buffer in this file. The audience the
+ * verifier compares against lives in one of these, so its size is a contract,
+ * not a local choice. */
+#define SERVER_WRITE_TIER_SERVER_ID_MAX 128
+
 static const char *tier_text(kb_identity_tier_t tier)
 {
    switch (tier)
@@ -75,7 +80,7 @@ int server_write_tier_replay_db1(void *ctx, const server_identity_token_claims_t
 int server_write_tier_team_configured(void)
 {
    int64_t team = 0;
-   char server_id[128];
+   char server_id[SERVER_WRITE_TIER_SERVER_ID_MAX];
    return server_runtime_identity_load(server_id, sizeof(server_id), &team) ==
           SERVER_RUNTIME_IDENTITY_READY;
 }
@@ -83,7 +88,7 @@ int server_write_tier_team_configured(void)
 server_write_tier_config_state_t server_write_tier_config_state(void)
 {
    int64_t team = 0;
-   char server_id[128];
+   char server_id[SERVER_WRITE_TIER_SERVER_ID_MAX];
    server_runtime_identity_state_t state =
        server_runtime_identity_load(server_id, sizeof(server_id), &team);
    if (state == SERVER_RUNTIME_IDENTITY_NO_TEAM)
@@ -111,13 +116,18 @@ server_write_tier_config_state_t server_write_tier_config_state(void)
 /* Assemble the resolver config from this server's environment and JWKS cache.
  * Returns 1 on success. On failure sets *outcome to the specific reason so the
  * caller never has to guess whether the problem was the token or the server. */
+/* server_id is a CALLER-OWNED buffer for the same reason jwks and bundle are:
+ * config->expected_audience points at it, and the config outlives this function.
+ * It used to be a local here, so the audience the verifier compared against was
+ * a pointer into a dead stack frame -- undefined behaviour that happened to hold
+ * the right bytes until an unrelated change to the caller's code disturbed the
+ * frame, at which point every identity token was rejected as INVALID. */
 static int build_config(server_write_tier_config_t *config, char *jwks, size_t jwks_cap,
-                        int64_t *team, char *bundle, size_t bundle_cap, int64_t now,
-                        server_write_tier_outcome_t *outcome)
+                        int64_t *team, char *bundle, size_t bundle_cap, char *server_id,
+                        size_t server_id_cap, int64_t now, server_write_tier_outcome_t *outcome)
 {
    memset(config, 0, sizeof(*config));
-   char server_id[128];
-   if (server_runtime_identity_load(server_id, sizeof(server_id), team) !=
+   if (server_runtime_identity_load(server_id, server_id_cap, team) !=
        SERVER_RUNTIME_IDENTITY_READY)
    {
       *outcome = SERVER_WRITE_TIER_NO_TEAM_CONFIGURED;
@@ -171,9 +181,12 @@ int server_write_tier_verify_for_request(const char *token, size_t token_len, in
    server_write_tier_config_t config;
    char bundle[SERVER_MGMT_JWKS_BUNDLE_MAX];
    char jwks[SERVER_MGMT_JWKS_BYTES_MAX];
+   /* Outlives the config it is pointed into; see build_config. */
+   char server_id[SERVER_WRITE_TIER_SERVER_ID_MAX];
    int64_t team = 0;
    int tier = SERVER_REMOTE_WRITES_OFF;
-   if (build_config(&config, jwks, sizeof(jwks), &team, bundle, sizeof(bundle), now, outcome))
+   if (build_config(&config, jwks, sizeof(jwks), &team, bundle, sizeof(bundle), server_id,
+                    sizeof(server_id), now, outcome))
       tier = server_write_tier_verify(token, token_len, &config, now, outcome, claims_out);
    OPENSSL_cleanse(bundle, sizeof(bundle));
    OPENSSL_cleanse(jwks, sizeof(jwks));
@@ -195,9 +208,12 @@ int server_write_tier_consume_for_request(const server_identity_token_claims_t *
    server_write_tier_config_t config;
    char bundle[SERVER_MGMT_JWKS_BUNDLE_MAX];
    char jwks[SERVER_MGMT_JWKS_BYTES_MAX];
+   /* Outlives the config it is pointed into; see build_config. */
+   char server_id[SERVER_WRITE_TIER_SERVER_ID_MAX];
    int64_t team = 0;
    int tier = SERVER_REMOTE_WRITES_OFF;
-   if (build_config(&config, jwks, sizeof(jwks), &team, bundle, sizeof(bundle), now, outcome))
+   if (build_config(&config, jwks, sizeof(jwks), &team, bundle, sizeof(bundle), server_id,
+                    sizeof(server_id), now, outcome))
       tier = server_write_tier_consume(claims, &config, now, outcome);
    OPENSSL_cleanse(bundle, sizeof(bundle));
    OPENSSL_cleanse(jwks, sizeof(jwks));

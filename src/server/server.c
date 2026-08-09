@@ -1577,10 +1577,12 @@ static const server_method_dispatch_t server_dispatch_table[] = {
      * rh_dispatch_op_async. Direct raw dispatch remains synchronous for
      * compatibility with the dispatch-method surface. */
     {"delegate.aggregate", handle_delegate_aggregate},
-    {"roundtable.review", handle_roundtable_review_proxy},
+    {"roundtable.review", handle_roundtable_review},
     {"dev.sweep", handle_dev_sweep},
     {"delegate.launch", handle_delegate_launch},
     {"delegate.status", handle_delegate_status},
+    {"delegate.reservation.forget", handle_delegate_reservation_forget},
+    {"delegate.cancel_unassigned", handle_delegate_cancel_unassigned},
     {"vault.unlock", handle_vault_unlock},
     {"vault.rekey", handle_vault_rekey},
     {"vault.set", handle_vault_set},
@@ -1604,6 +1606,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"aux.config_show", handle_aux_config_show},
     {"config.show", handle_config_show},
     {"config.get", handle_config_get},
+    {"config.deploy_env", handle_config_deploy_env},
     {"config.set", handle_config_set},
     {"pipeline.start", handle_pipeline_start},
     {"pipeline.status", handle_pipeline_status},

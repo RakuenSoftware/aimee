@@ -361,13 +361,34 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!cJSON_IsNumber(jid))
       return server_send_error(conn, "missing id", NULL);
 
+   /* `memory get --as-of <ts>` asks the EVENT-time question, and this handler is
+    * the only thing between the flag and aimee-kb, which owns the interval. It
+    * used to read nothing but the id, so the flag was marshalled, sent, and
+    * silently dropped here: the client printed the row and no verdict, which
+    * reads exactly like "not in force". */
+   cJSON *jas_of = cJSON_GetObjectItemCaseSensitive(req, "as_of");
+   const char *as_of = cJSON_IsString(jas_of) ? jas_of->valuestring : NULL;
+
    memory_t m;
-   int rc = kb_client_memory_get((int64_t)jid->valuedouble, &m);
+   kb_valid_at_t verdict = KB_VALID_AT_UNASKED;
+   int rc = kb_client_memory_get_as_of((int64_t)jid->valuedouble, as_of, &m, &verdict);
 
    cJSON *resp;
    if (rc == 0)
    {
       resp = jo_ok();
+      /* Echo the question with the answer: the client prints "valid at <ts>:
+       * <verdict>", and a verdict with no timestamp beside it is unreadable.
+       * "unknown" stays a string, distinct from false -- "could not tell" and
+       * "was not in force" are different answers. */
+      if (verdict != KB_VALID_AT_UNASKED && as_of)
+      {
+         cJSON_AddStringToObject(resp, "as_of", as_of);
+         if (verdict == KB_VALID_AT_UNKNOWN)
+            cJSON_AddStringToObject(resp, "valid_at", "unknown");
+         else
+            cJSON_AddBoolToObject(resp, "valid_at", verdict == KB_VALID_AT_YES);
+      }
       cJSON *mj = memory_to_json(&m);
       if (mj)
       {

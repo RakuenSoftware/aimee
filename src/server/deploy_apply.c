@@ -249,6 +249,56 @@ static int deploy_env_overrides(const char *deploy_env, const char *inherited)
  * lines config_emit_deploy_env produced for the live config (later entries win, so
  * the deploy-env overrides any inherited value). Returns a NULL-terminated,
  * heap-owned array, or NULL on OOM / no config. */
+/* Write `env` as the compose project's `.env`, atomically, best-effort.
+ *
+ * Only the non-secret topology reaches this file: config_emit_deploy_env omits
+ * embedder_api_key and synthesis_api_key, and the managed-inference bearer is
+ * appended to the child envp below rather than emitted, so it never lands on
+ * disk. 0600 regardless, because the file still describes the deployment.
+ *
+ * Silent on failure and returns nothing: every caller has already obtained the
+ * environment it needs directly, so there is no decision left to make here. */
+static void deploy_write_compose_env_file(const char *env)
+{
+   if (!env || !env[0])
+      return;
+   const char *file = getenv("AIMEE_DEPLOY_COMPOSE_FILE");
+   if (!file || !file[0])
+      file = DEPLOY_DEFAULT_COMPOSE;
+
+   const char *slash = strrchr(file, '/');
+   if (!slash || slash == file)
+      return;
+
+   char tmp[PATH_MAX];
+   char dest[PATH_MAX];
+   const int dirlen = (int)(slash - file);
+   if (snprintf(dest, sizeof(dest), "%.*s/.env", dirlen, file) >= (int)sizeof(dest))
+      return;
+   if (snprintf(tmp, sizeof(tmp), "%.*s/.env.tmp", dirlen, file) >= (int)sizeof(tmp))
+      return;
+
+   int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+   if (fd < 0)
+      return;
+   const size_t len = strlen(env);
+   size_t off = 0;
+   while (off < len)
+   {
+      ssize_t w = write(fd, env + off, len - off);
+      if (w <= 0)
+      {
+         close(fd);
+         unlink(tmp);
+         return;
+      }
+      off += (size_t)w;
+   }
+   close(fd);
+   if (rename(tmp, dest) != 0)
+      unlink(tmp);
+}
+
 static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
                                 int *managed_kb_out, int *managed_identity_out)
 {
@@ -268,6 +318,19 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
    }
    char env[2048];
    config_emit_deploy_env_current(env, sizeof(env));
+
+   /* Keep the compose `.env` in step with the config this deploy is applying.
+    *
+    * The entrypoint writes it once at container start, which covers a restart or
+    * an image swap. It does NOT cover config changed while this container keeps
+    * running: the operator sets a new embedder, deploys from the UI, and the file
+    * beside the compose still describes the old choice. A later manual
+    * `docker compose up -d` would then quietly rebuild the old topology.
+    *
+    * Best-effort by design. The deploy child gets its environment from envp
+    * below and does not read this file, so failing to refresh it must not fail
+    * the deploy -- it only costs later callers their safety net. */
+   deploy_write_compose_env_file(env);
 
    char llm_token[513] = "";
    /* Currently always 0: config_emit_deploy_env stopped emitting the "llm" profile when

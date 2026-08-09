@@ -92,8 +92,8 @@ class DescriptorTests(unittest.TestCase):
 
     def test_complete_production_graph(self) -> None:
         required, optional = self.taxonomy()
-        self.assertEqual(len(required | optional), 25)
-        self.assertEqual(validator.validate_roots(REPO_ROOT, [Path("src/modules")]), 25)
+        self.assertEqual(len(required | optional), 26)
+        self.assertEqual(validator.validate_roots(REPO_ROOT, [Path("src/modules")]), 26)
 
     def test_schema_is_generated_byte_for_byte(self) -> None:
         validator.check_schema(REPO_ROOT)
@@ -266,7 +266,8 @@ class DescriptorTests(unittest.TestCase):
             ("translation", "sources", "src/modules/translation/aimee_ir_stream.c"),
             ("skills", "sources", "src/modules/skills/skill.c"),
             ("skills", "sources", "src/modules/skills/skill_rollback.c"),
-            ("skills", "sources", "src/modules/skills/skill_review.c"),
+            ("skills", "sources", "src/modules/skills/skill_trigger_policy.c"),
+            ("skills", "private_headers", "src/modules/skills/skill_trigger_policy.h"),
             ("audit", "sources", "src/modules/audit/audit_action.c"),
             ("audit", "sources", "src/modules/audit/audit_worm.c"),
             ("audit", "sources", "src/modules/audit/audit_worm_chain.c"),
@@ -500,7 +501,7 @@ class DescriptorTests(unittest.TestCase):
             public.parent.mkdir(parents=True, exist_ok=True)
             public.write_text("/* public contract */\n", encoding="utf-8")
             self.assertEqual(
-                validator.validate_roots(repo, [Path("src/modules")]), 25
+                validator.validate_roots(repo, [Path("src/modules")]), 26
             )
         finally:
             tmp.cleanup()
@@ -927,7 +928,7 @@ class OwnershipCliTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["schema_version"], 1)
         self.assertEqual(payload["result"], "PASS")
-        self.assertEqual(len(payload["descriptors"]), 25)
+        self.assertEqual(len(payload["descriptors"]), 26)
         for descriptor in payload["descriptors"]:
             self.assertEqual(
                 set(descriptor), {"id", "module_root", "ownership", "result"}

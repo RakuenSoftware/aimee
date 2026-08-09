@@ -362,6 +362,12 @@ static void test_final_response_mode_hard_last_turn(void)
 {
    assert(liveness_final_response_mode(11, 12, 3, 8) == LIVENESS_FINAL_RESPONSE_HARD);
    assert(liveness_final_response_mode(4, 5, 1, -1) == LIVENESS_FINAL_RESPONSE_HARD);
+   /* No call ever landed. That is precisely the delegate that needs the last
+    * turn taken away from tools: every attempt was denied or emptied, so the
+    * count is zero while the whole budget went on calling. Without this it
+    * returned nothing at all. */
+   assert(liveness_final_response_mode(11, 12, 0, 8) == LIVENESS_FINAL_RESPONSE_HARD);
+   assert(liveness_final_response_mode(23, 24, 0, -1) == LIVENESS_FINAL_RESPONSE_HARD);
    printf("  PASS: final response mode marks max-turn boundary hard\n");
 }
 

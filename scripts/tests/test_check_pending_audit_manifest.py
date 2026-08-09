@@ -63,15 +63,58 @@ class PendingAuditManifestTests(unittest.TestCase):
         self.write_manifest("2026-08-04", review_column="roundtable")
         self.assertEqual(checker.main(), 0)
 
-    def test_exact_pending_partition_still_fails_closed(self) -> None:
+    # A manifest is a dated snapshot, so a proposal drafted after it is legitimately
+    # absent from it. This previously failed, which made the gate impossible to wire
+    # into CI: any new proposal broke it. Superseded deliberately, not by accident.
+    def test_proposal_drafted_after_the_snapshot_is_reported_not_fatal(self) -> None:
         (self.proposals / "pending/current.md").write_text(
             "# Current\n\n- **State:** PENDING\n", encoding="utf-8"
         )
-        (self.proposals / "pending/unreviewed.md").write_text(
-            "# Extra\n\n- **State:** PENDING\n", encoding="utf-8"
+        (self.proposals / "pending/drafted-later.md").write_text(
+            "# Later\n\n- **State:** PENDING\n", encoding="utf-8"
         )
         self.write_manifest("2026-08-04")
-        with self.assertRaisesRegex(ValueError, "pending set mismatch"):
+        self.assertEqual(checker.main(), 0)
+
+    # The other direction is still a real defect and must stay fatal: a row claims a
+    # proposal is live in pending/ but the file is not there, so the row describes a
+    # move nobody reconciled.
+    def test_manifest_row_pointing_at_a_vanished_pending_file_fails_closed(self) -> None:
+        (self.proposals / "pending/current.md").write_text(
+            "# Current\n\n- **State:** PENDING\n", encoding="utf-8"
+        )
+        self.write_manifest("2026-08-04")
+        (self.proposals / "pending/current.md").rename(
+            self.proposals / "done/current.md"
+        )
+        with self.assertRaisesRegex(ValueError, "final path does not exist"):
+            checker.main()
+
+    # Same defect, reached the other way: the row's own final_path still resolves,
+    # but a DIFFERENT row's residual is gone from pending/.
+    def test_missing_residual_from_pending_fails_closed(self) -> None:
+        (self.proposals / "pending/current.md").write_text(
+            "# Current\n\n- **State:** PENDING\n", encoding="utf-8"
+        )
+        anchor = "PENDING_AUDIT_2026-08-04.md"
+        (self.proposals / anchor).write_text("# evidence\n", encoding="utf-8")
+        (self.proposals / "done/archived.md").write_text(
+            "# Archived\n\n- **State:** DONE\n\narchived here; residual: residual.md\n",
+            encoding="utf-8",
+        )
+        header = (
+            "original\tdisposition\tfinal_path\tresidual_path\tstale_updated\t"
+            "evidence_anchor\treview_record\n"
+        )
+        rows = (
+            f"current.md\tpending_accurate\tdocs/proposals/pending/current.md\t-\tno\t{anchor}\tr\n"
+            f"archived.md\tpartial_archived\tdocs/proposals/done/archived.md\t"
+            f"docs/proposals/pending/residual.md\tarchive_notice\t{anchor}\tr\n"
+        )
+        (self.proposals / "PENDING_AUDIT_2026-08-04.tsv").write_text(
+            header + rows, encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ValueError, "residual does not exist in pending"):
             checker.main()
 
 

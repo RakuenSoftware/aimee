@@ -12,11 +12,13 @@
 #include "session_worktree_key.h"
 #include "modules/workspace/workspace_provider.h"
 #include "modules/git/git_verify.h"
+#include "tests/support/git_pr_api_stub.h"
 #include "cJSON.h"
 #include "db_schema.h"
 #include "../db1/db1.h"
 #include "../db2/db2.h"
 #include "../db2/db2_internal.h"
+#include "support/git_module_fixture.h"
 
 /* --- Helpers --- */
 
@@ -723,6 +725,51 @@ static void test_git_pr_create_missing_title(void)
    system(cmd);
 }
 
+/* create must resolve the repository through the workspace runner and refuse
+ * cleanly when there is no github.com origin.
+ *
+ * #2386 instead let the API resolve `origin` in aimee-server's own process. That
+ * looks identical on a co-located checkout and fails on every remote one -- a
+ * DETACHED workspace keeps the filesystem on the client, so the server saw no
+ * such path and reported "no origin remote" for repositories that have one. This
+ * pins the refusal to the runner-resolved path: the message is about THIS
+ * checkout's origin, and it arrives before any API call. */
+static void test_git_pr_create_without_github_origin(void)
+{
+   char tmpdir[] = "/tmp/aimee-test-pr-noorigin-XXXXXX";
+   assert(mkdtemp(tmpdir) != NULL);
+
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd),
+            "cd '%s' && git init -q && git config user.email test@test && "
+            "git config user.name test && echo x > f.txt && "
+            "git add f.txt && git commit -q -m 'init'",
+            tmpdir);
+   assert(system(cmd) == 0);
+
+   char saved_cwd[4096];
+   assert(getcwd(saved_cwd, sizeof(saved_cwd)) != NULL);
+   assert(chdir(tmpdir) == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "create");
+   cJSON_AddStringToObject(args, "title", "a title");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") != NULL);
+   /* Not "no origin remote": that string is the API's in-process lookup, which
+    * this path must no longer reach. */
+   assert(strstr(text, "origin") != NULL);
+   assert(strstr(text, "no origin remote") == NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   assert(chdir(saved_cwd) == 0);
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
+   system(cmd);
+}
+
 static void test_git_pr_edit_missing_number(void)
 {
    cJSON *args = cJSON_CreateObject();
@@ -831,8 +878,10 @@ static void test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge
    snprintf(gh_path, sizeof(gh_path), "%s/gh", tmpdir);
    FILE *fp = fopen(gh_path, "w");
    assert(fp != NULL);
+   /* Only `gh pr merge --auto` is faked now. The CI gate no longer shells out --
+    * it reads the Checks API in-process -- so a faked `gh pr checks` would never
+    * be consulted; the verdict comes from the stub below instead. */
    fputs("#!/bin/sh\n"
-         "if [ \"$1\" = pr ] && [ \"$2\" = checks ]; then exit 8; fi\n"
          "if [ \"$1\" = pr ] && [ \"$2\" = merge ]; then exit 0; fi\n"
          "exit 2\n",
          fp);
@@ -848,6 +897,11 @@ static void test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge
             old_path ? old_path : "");
    assert(setenv("PATH", new_path, 1) == 0);
 
+   /* Pending CI is the whole point of auto-merge: branch protection holds the PR
+    * until green, so the gate must NOT refuse it here. Without this exemption an
+    * auto-merge into a protected branch would refuse itself. */
+   git_pr_api_stub_set_ci(GIT_PR_CI_PENDING);
+
    cJSON *args = cJSON_CreateObject();
    cJSON_AddStringToObject(args, "action", "merge");
    cJSON_AddNumberToObject(args, "number", 123);
@@ -860,6 +914,36 @@ static void test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge
    assert(strstr(text, "\"merged\":false") != NULL);
    cJSON_Delete(resp);
    cJSON_Delete(args);
+
+   /* The exemption is for PENDING alone. An unreadable forge is not "pending", and
+    * "unknown" is never "pass" -- auto or not, that must still refuse. */
+   git_pr_api_stub_set_ci(GIT_PR_CI_ERROR);
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "merge");
+   cJSON_AddNumberToObject(args, "number", 123);
+   cJSON_AddBoolToObject(args, "auto", 1);
+   resp = handle_git_pr(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "merge blocked") != NULL);
+   assert(strstr(text, "--auto") == NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   /* A failed check refuses even with auto, for the same reason. */
+   git_pr_api_stub_set_ci(GIT_PR_CI_FAILURE);
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "merge");
+   cJSON_AddNumberToObject(args, "number", 123);
+   cJSON_AddBoolToObject(args, "auto", 1);
+   resp = handle_git_pr(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "merge blocked") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   git_pr_api_stub_set_ci(GIT_PR_CI_ERROR); /* leave the fail-closed default in place */
 
    if (saved_path[0])
       assert(setenv("PATH", saved_path, 1) == 0);
@@ -1324,6 +1408,23 @@ static void test_verify_load_config_no_enforce_defaults_false(void)
    verify_test_teardown(tmpdir, fake_home);
 }
 
+static void verify_test_add_go_module(const char *tmpdir, const char *module)
+{
+   char dir[512], path[512];
+   if (strcmp(module, ".") == 0)
+      snprintf(dir, sizeof(dir), "%s", tmpdir);
+   else
+   {
+      snprintf(dir, sizeof(dir), "%s/%s", tmpdir, module);
+      assert(mkdir(dir, 0700) == 0);
+   }
+   snprintf(path, sizeof(path), "%s/go.mod", dir);
+   FILE *f = fopen(path, "w");
+   assert(f != NULL);
+   fputs("module example.invalid/test\n\ngo 1.25\n", f);
+   fclose(f);
+}
+
 static void test_verify_load_config_emits_parallel_steps(void)
 {
    char tmpdir[256], fake_home[256];
@@ -1348,20 +1449,98 @@ static void test_verify_load_config_emits_parallel_steps(void)
          "\t@echo build-integrity\n",
          f);
    fclose(f);
+   verify_test_add_go_module(tmpdir, "server-go");
 
    verify_config_t cfg;
    int rc = verify_load_config(tmpdir, &cfg);
    assert(rc == 0);
    /* verify-local is the repo's curated fast local gate; prefer it over
-    * auto-splitting Makefile targets and pulling in heavier CI checks. */
-   assert(cfg.count == 1);
+    * auto-splitting Makefile targets and pulling in heavier CI checks. Go
+    * modules remain separate so an older curated target cannot hide them. */
+   assert(cfg.count == 2);
    assert(strcmp(cfg.steps[0].name, "verify-local") == 0);
    assert(strstr(cfg.steps[0].run, "AIMEE_VERIFY_MAKE_JOBS") != NULL);
    /* Builds can use $(nproc), while tests use a bounded per-verifier default so
     * concurrent workflow verification cannot multiply into host-wide overload. */
    assert(strstr(cfg.steps[0].run, "nproc") != NULL);
    assert(strstr(cfg.steps[0].run, "AIMEE_VERIFY_TEST_JOBS") != NULL);
+   assert(strcmp(cfg.steps[1].name, "go-test-server-go") == 0);
+   assert(strstr(cfg.steps[1].run, "cd server-go") != NULL);
+   assert(strstr(cfg.steps[1].run, "/usr/local/go/bin/go") != NULL);
+   assert(strstr(cfg.steps[1].run, "unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET") != NULL);
 
+   verify_test_teardown(tmpdir, fake_home);
+}
+
+static void test_verify_load_config_repairs_existing_generated_plan_with_go_modules(void)
+{
+   char tmpdir[256], fake_home[256];
+   verify_test_setup_repo(tmpdir, sizeof(tmpdir), "aimee-test-verify-existing-go");
+   verify_test_add_go_module(tmpdir, "zeta-go");
+   verify_test_add_go_module(tmpdir, ".");
+   verify_test_add_go_module(tmpdir, "alpha-go");
+   verify_test_write_yaml(tmpdir, fake_home, sizeof(fake_home),
+                          "# Auto-generated by aimee on first verify. Edit freely —\n"
+                          "verify:\n"
+                          "  enforce: false\n"
+                          "  steps:\n"
+                          "    - name: verify-local\n"
+                          "      run: cd src && make -j${AIMEE_VERIFY_MAKE_JOBS:-$(nproc)} "
+                          "AIMEE_VERIFY_TEST_JOBS=${AIMEE_VERIFY_TEST_JOBS:-2} verify-local\n");
+
+   verify_config_t cfg;
+   assert(verify_load_config(tmpdir, &cfg) == 0);
+   assert(cfg.count == 4);
+   assert(strcmp(cfg.steps[0].name, "verify-local") == 0);
+   assert(strcmp(cfg.steps[1].name, "go-test-root") == 0);
+   assert(strcmp(cfg.steps[2].name, "go-test-alpha-go") == 0);
+   assert(strcmp(cfg.steps[3].name, "go-test-zeta-go") == 0);
+   for (int i = 1; i < cfg.count; i++)
+      assert(strstr(cfg.steps[i].run, "unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET") != NULL);
+
+   verify_test_teardown(tmpdir, fake_home);
+}
+
+static void test_verify_load_config_leaves_custom_plan_unchanged(void)
+{
+   char tmpdir[256], fake_home[256];
+   verify_test_setup_repo(tmpdir, sizeof(tmpdir), "aimee-test-verify-custom-go");
+   verify_test_add_go_module(tmpdir, "server-go");
+   verify_test_write_yaml(tmpdir, fake_home, sizeof(fake_home),
+                          "verify:\n"
+                          "  enforce: true\n"
+                          "  steps:\n"
+                          "    - name: verify-local\n"
+                          "      run: ./scripts/project-specific-verify\n");
+
+   verify_config_t cfg;
+   assert(verify_load_config(tmpdir, &cfg) == 0);
+   assert(cfg.count == 1);
+   assert(strcmp(cfg.steps[0].run, "./scripts/project-specific-verify") == 0);
+
+   verify_test_teardown(tmpdir, fake_home);
+}
+
+static void test_verify_load_config_discovers_go_modules_from_cwd(void)
+{
+   char tmpdir[256], fake_home[256], saved_cwd[4096];
+   verify_test_setup_repo(tmpdir, sizeof(tmpdir), "aimee-test-verify-cwd-go");
+   verify_test_add_go_module(tmpdir, "server-go");
+   verify_test_write_yaml(tmpdir, fake_home, sizeof(fake_home),
+                          "verify:\n"
+                          "  enforce: false\n"
+                          "  steps:\n"
+                          "    - name: verify-local\n"
+                          "      run: make -j${AIMEE_VERIFY_MAKE_JOBS:-2} verify-local\n");
+   assert(getcwd(saved_cwd, sizeof(saved_cwd)) != NULL);
+   assert(chdir(tmpdir) == 0);
+
+   verify_config_t cfg;
+   assert(verify_load_config(NULL, &cfg) == 0);
+   assert(cfg.count == 2);
+   assert(strcmp(cfg.steps[1].name, "go-test-server-go") == 0);
+
+   assert(chdir(saved_cwd) == 0);
    verify_test_teardown(tmpdir, fake_home);
 }
 
@@ -2010,6 +2189,584 @@ static void test_main_branch_delete_blocked(void)
    teardown_git_repo();
 }
 
+/* --- The integration operations: merge / rebase / cherry-pick / revert / sync --- */
+
+/* Two branches with a commit each, both touching file.txt, so a merge of one into
+ * the other conflicts. Leaves HEAD on `integration`. */
+static void setup_conflicting_branches(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b side && echo side > file.txt && "
+                 "git commit -q -am 'side change'") == 0);
+   assert(system("git checkout -q -b integration HEAD~1 && echo mine > file.txt && "
+                 "git commit -q -am 'my change'") == 0);
+}
+
+/* A clean merge reports what moved, not git's prose. */
+static void test_merge_clean_reports_the_change(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b side && echo side > side.txt && "
+                 "git add side.txt && git commit -q -m 'side commit'") == 0);
+   assert(system("git checkout -q -b integration HEAD~1") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "side");
+   cJSON *resp = handle_git_merge(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") == NULL);
+   assert(strstr(text, "merge side into integration") != NULL);
+   assert(strstr(text, "commit(s)") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+   assert(system("test -f side.txt") == 0);
+
+   teardown_git_repo();
+}
+
+/* The default on conflict: name the conflicted files AND undo the merge, so the
+ * caller is never left holding a tree it has to know how to clean up. */
+static void test_merge_conflict_aborts_and_names_files(void)
+{
+   setup_conflicting_branches();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "side");
+   cJSON *resp = handle_git_merge(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "conflict") != NULL);
+   assert(strstr(text, "file.txt") != NULL);
+   assert(strstr(text, "aborted") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   /* The tree really is clean: no MERGE_HEAD, no conflict markers. */
+   assert(system("git rev-parse --verify --quiet MERGE_HEAD >/dev/null 2>&1") != 0);
+   assert(system("git diff --name-only --diff-filter=U | grep -q .") != 0);
+   assert(system("grep -q '<<<<<<<' file.txt") != 0);
+
+   teardown_git_repo();
+}
+
+/* abort_on_conflict=false is the opt-in to resolving in place — and then
+ * action=continue finishes it. */
+static void test_merge_keep_conflicts_then_continue(void)
+{
+   setup_conflicting_branches();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "side");
+   cJSON_AddBoolToObject(args, "abort_on_conflict", 0);
+   cJSON *resp = handle_git_merge(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "conflict") != NULL);
+   assert(strstr(text, "left in progress") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+   assert(system("git rev-parse --verify --quiet MERGE_HEAD >/dev/null 2>&1") == 0);
+
+   /* Continuing before resolving must refuse rather than commit the markers. */
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "continue");
+   resp = handle_git_merge(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "still have conflict markers") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   assert(system("echo resolved > file.txt && git add file.txt") == 0);
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "continue");
+   resp = handle_git_merge(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "merge completed") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+   assert(system("git rev-parse --verify --quiet MERGE_HEAD >/dev/null 2>&1") != 0);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+/* action=abort backs the whole thing out. */
+static void test_merge_action_abort(void)
+{
+   setup_conflicting_branches();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "side");
+   cJSON_AddBoolToObject(args, "abort_on_conflict", 0);
+   cJSON *resp = handle_git_merge(args);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "abort");
+   resp = handle_git_merge(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "merge aborted") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+   assert(system("git rev-parse --verify --quiet MERGE_HEAD >/dev/null 2>&1") != 0);
+
+   teardown_git_repo();
+}
+
+/* A half-finished operation is reported as such, with the way out, instead of
+ * letting a second one start on top of it. */
+static void test_second_operation_refused_while_one_is_in_progress(void)
+{
+   setup_conflicting_branches();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "side");
+   cJSON_AddBoolToObject(args, "abort_on_conflict", 0);
+   cJSON *resp = handle_git_merge(args);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "base", "side");
+   resp = handle_git_rebase(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "merge is already in progress") != NULL);
+   assert(strstr(text, "action=continue") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+/* An uncommitted tree cannot be cleanly restored after a conflict, so the
+ * operation is refused before it starts rather than half-done. */
+static void test_integrate_refuses_dirty_tree(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b work && echo dirty >> file.txt") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "master");
+   cJSON *resp = handle_git_merge(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "uncommitted changes") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+static void test_integrate_blocked_on_main(void)
+{
+   setup_git_repo();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "HEAD");
+   cJSON *resp = handle_git_merge(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") != NULL);
+   assert(strstr(text, "main branch") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+static void test_integrate_requires_a_ref(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b work") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON *resp = handle_git_cherry_pick(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") != NULL);
+   assert(strstr(text, "cherry-pick") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+/* cherry-pick and revert run through the same driver, so one round-trip each is
+ * enough to show the wiring is right. */
+static void test_cherry_pick_and_revert(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b side && echo side > side.txt && "
+                 "git add side.txt && git commit -q -m 'side commit'") == 0);
+   char sha[64] = "";
+   FILE *fp = popen("git rev-parse --short HEAD", "r");
+   assert(fp != NULL);
+   assert(fgets(sha, sizeof(sha), fp) != NULL);
+   pclose(fp);
+   sha[strcspn(sha, "\r\n")] = '\0';
+   assert(system("git checkout -q -b picker HEAD~1") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", sha);
+   cJSON *resp = handle_git_cherry_pick(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") == NULL);
+   assert(system("test -f side.txt") == 0);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "HEAD");
+   resp = handle_git_revert(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") == NULL);
+   assert(system("test -f side.txt") != 0); /* the revert took it back out */
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+/* sync answers "am I current?" without a follow-up call. */
+static void test_sync_reports_already_current(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b work") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "base", "master");
+   cJSON *resp = handle_git_sync(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   /* No origin in this fixture, so the base resolves to the local ref and the
+    * answer is the gap: zero behind. */
+   assert(strstr(text, "already current") != NULL || strstr(text, "sync work") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+static void test_sync_rejects_unknown_mode(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b work") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "mode", "squash");
+   cJSON *resp = handle_git_sync(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "mode must be rebase") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+/* --- git_add --- */
+
+/* `all` stages new files (which git_commit cannot reach) but not secrets, and the
+ * screen runs against the index so a pattern-based add cannot slip one past. */
+static void test_add_all_stages_new_files_but_not_secrets(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b staging-test") == 0);
+
+   FILE *fp = fopen(".env", "w");
+   assert(fp != NULL);
+   fputs("SECRET=xyz\n", fp);
+   fclose(fp);
+   fp = fopen("normal.txt", "w");
+   assert(fp != NULL);
+   fputs("normal\n", fp);
+   fclose(fp);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddBoolToObject(args, "all", 1);
+   cJSON *resp = handle_git_add(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "staged") != NULL);
+   assert(strstr(text, ".env") != NULL); /* named in the unstaged warning */
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   assert(system("git diff --cached --name-only | grep -qx normal.txt") == 0);
+   assert(system("git diff --cached --name-only | grep -qx .env") != 0);
+
+   teardown_git_repo();
+}
+
+static void test_add_refuses_only_sensitive_paths(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b staging-test") == 0);
+   FILE *fp = fopen(".env", "w");
+   assert(fp != NULL);
+   fputs("SECRET=xyz\n", fp);
+   fclose(fp);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON *files = cJSON_AddArrayToObject(args, "files");
+   cJSON_AddItemToArray(files, cJSON_CreateString(".env"));
+   cJSON *resp = handle_git_add(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "sensitive") != NULL);
+   assert(strstr(text, "nothing was staged") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+static void test_add_requires_files_or_all(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b staging-test") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON *resp = handle_git_add(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") != NULL);
+   assert(strstr(text, "'all'") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+/* --- switch / checkout routing --- */
+
+static void test_switch_routes_to_branch_switch(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   assert(system("git branch -q target") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "target");
+   cJSON *resp = handle_git_switch(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "switched to target") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+/* A path-scoped checkout is a restore, and routes there rather than moving HEAD. */
+static void test_checkout_with_files_restores(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b work && echo changed > file.txt") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON *files = cJSON_AddArrayToObject(args, "files");
+   cJSON_AddItemToArray(files, cJSON_CreateString("file.txt"));
+   cJSON *resp = handle_git_checkout(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "restored") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+   assert(system("grep -q 'hello world' file.txt") == 0);
+
+   teardown_git_repo();
+}
+
+static void test_switch_requires_a_ref(void)
+{
+   setup_git_repo();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON *resp = handle_git_switch(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") != NULL);
+   assert(strstr(text, "'ref'") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+/* --- PR title/body derivation --- */
+
+/* One commit: the PR is that commit. No model call, no invented prose. */
+static void test_pr_create_derives_title_from_single_commit(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+   assert(system("git checkout -q -b feat/derive && echo x > x.txt && git add x.txt && "
+                 "git commit -q -m 'feat(thing): make it work' -m 'Because it did not.'") == 0);
+
+   /* No origin remote in the fixture, so create cannot reach the forge — but it
+    * must get PAST the title requirement, which is what this covers. The old
+    * behaviour was a hard 'title is required'. */
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "create");
+   cJSON_AddStringToObject(args, "base", "master");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "'title' parameter is required") == NULL);
+   cJSON *jtitle = cJSON_GetObjectItemCaseSensitive(args, "title");
+   assert(cJSON_IsString(jtitle));
+   assert(strcmp(jtitle->valuestring, "feat(thing): make it work") == 0);
+   cJSON *jbody = cJSON_GetObjectItemCaseSensitive(args, "body");
+   assert(cJSON_IsString(jbody));
+   assert(strstr(jbody->valuestring, "Because it did not.") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+/* Several commits: the shared conventional-commit prefix is kept and the body
+ * lists them, so the PR reads like the commits it contains. */
+static void test_pr_create_derives_title_from_many_commits(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+   assert(system("git checkout -q -b feat/many && echo a > a.txt && git add a.txt && "
+                 "git commit -q -m 'feat: first bit' && echo b > b.txt && git add b.txt && "
+                 "git commit -q -m 'feat: second bit'") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "create");
+   cJSON_AddStringToObject(args, "base", "master");
+   cJSON *resp = handle_git_pr(args);
+   cJSON *jtitle = cJSON_GetObjectItemCaseSensitive(args, "title");
+   assert(cJSON_IsString(jtitle));
+   assert(strstr(jtitle->valuestring, "feat: many") != NULL);
+   assert(strstr(jtitle->valuestring, "2 commits") != NULL);
+   cJSON *jbody = cJSON_GetObjectItemCaseSensitive(args, "body");
+   assert(cJSON_IsString(jbody));
+   assert(strstr(jbody->valuestring, "- feat: first bit") != NULL);
+   assert(strstr(jbody->valuestring, "- feat: second bit") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+/* Nothing to open a PR for is its own answer, not a derived-title crash. */
+static void test_pr_create_with_no_commits_says_so(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+   assert(system("git checkout -q -b feat/empty") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "create");
+   cJSON_AddStringToObject(args, "base", "master");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "no commits") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+/* --- pr action=ready --- */
+
+/* ready stops at the FIRST real failure and returns that step's own explanation,
+ * so the caller is never told "ready failed" with no idea which part. Here the
+ * sync conflicts, so the conflicted file must come back — and nothing must have
+ * been pushed. */
+static void test_pr_ready_stops_at_the_failing_step(void)
+{
+   setup_conflicting_branches();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "ready");
+   cJSON_AddStringToObject(args, "base", "side");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   /* sync's own conflict report, verbatim — not a generic ready failure. */
+   assert(strstr(text, "file.txt") != NULL);
+   assert(strstr(text, "push:") == NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+/* When the sync succeeds, the push is attempted next and its failure is what
+ * comes back (no origin in the fixture) — proving the steps run in order and the
+ * report is not fabricated. */
+static void test_pr_ready_runs_sync_then_push(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+   assert(system("git checkout -q -b feat/ready && echo x > x.txt && git add x.txt && "
+                 "git commit -q -m 'feat: work'") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "ready");
+   cJSON_AddStringToObject(args, "base", "master");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   /* The push is the step that fails here, and its own message says so. */
+   assert(strstr(text, "push") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+static void test_pr_unknown_action_lists_ready(void)
+{
+   setup_git_repo();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "nonsense");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "ready") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
 static void test_feature_branch_commit_allowed(void)
 {
    setup_git_repo();
@@ -2479,11 +3236,72 @@ static void test_git_verify_sync_rejects_same_session_overlap(void)
    verify_test_teardown(tmpdir, fake_home);
 }
 
+/* --- The PR-create mergeability gate ---
+ *
+ * aimee opening PRs that arrive CONFLICTING is the failure this gate exists to
+ * stop: review cannot start, and CI reports on a merge that will never happen.
+ * The gate has to be right in both directions -- a false conflict refuses a
+ * good PR, and an inconclusive answer must let one through rather than block
+ * on a check that could not run. */
+static void test_pr_conflict_gate(void)
+{
+   char tmp[] = "/tmp/aimee-test-pr-conflict-XXXXXX";
+   assert(mkdtemp(tmp) != NULL);
+   char saved[4096];
+   assert(getcwd(saved, sizeof(saved)) != NULL);
+
+   char cmd[4096];
+   /* main has a file; two branches change the same line and a third changes a
+    * different file. All local -- the gate falls back to a bare ref when no
+    * origin/<base> exists, which is what a test repo has. */
+   snprintf(cmd, sizeof(cmd),
+            "cd '%s' && git init -q -b main && git config user.email t@t && git config user.name t"
+            " && printf 'one\n' > f.txt && git add f.txt && git commit -q -m base"
+            " && git checkout -q -b clean && printf 'x\n' > other.txt && git add other.txt"
+            " && git commit -q -m clean"
+            " && git checkout -q main && printf 'two\n' > f.txt && git commit -q -am theirs"
+            " && git checkout -q -b conflicting main~1 && printf 'three\n' > f.txt"
+            " && git commit -q -am ours",
+            tmp);
+   assert(system(cmd) == 0);
+   assert(chdir(tmp) == 0);
+
+   char files[1024];
+
+   /* A branch touching a different file merges cleanly. */
+   assert(system("git checkout -q clean") == 0);
+   assert(mcp_git_conflicts_with_base("main", files, sizeof(files)) == 0);
+
+   /* Both sides rewrote f.txt: conflict, and the gate must name the file so the
+    * refusal tells the caller what to fix. */
+   assert(system("git checkout -q conflicting") == 0);
+   assert(mcp_git_conflicts_with_base("main", files, sizeof(files)) == 1);
+   assert(strstr(files, "f.txt") != NULL);
+
+   /* Cannot tell => proceed. A base that does not exist, and an empty base, must
+    * both return -1 rather than 1: refusing a PR because the check could not run
+    * would be worse than the problem the gate solves. */
+   assert(mcp_git_conflicts_with_base("no-such-branch", files, sizeof(files)) == -1);
+   assert(mcp_git_conflicts_with_base("", files, sizeof(files)) == -1);
+   assert(mcp_git_conflicts_with_base(NULL, files, sizeof(files)) == -1);
+
+   assert(chdir(saved) == 0);
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmp);
+   system(cmd);
+   printf("pr_conflict_gate ");
+}
+
 int main(void)
 {
+   /* The verify gate reads its ledger from the git module, so the module has
+    * to be up or every verify assertion below fails on a correctly closed
+    * gate rather than on what it means to test. */
+   git_module_fixture_start();
+
    printf("mcp_git: ");
 
    test_git_status_clean();
+   test_pr_conflict_gate();
    test_git_status_modified();
    test_mcp_chdir_uses_cwd_argument();
    test_mcp_chdir_session_cwd_precedes_proxy_cwd();
@@ -2506,6 +3324,7 @@ int main(void)
    test_git_pr_missing_action();
    test_git_pr_unknown_action();
    test_git_pr_create_missing_title();
+   test_git_pr_create_without_github_origin();
    test_git_pr_edit_missing_number();
    test_git_pr_edit_requires_fields();
    test_git_pr_checks_missing_number();
@@ -2535,6 +3354,9 @@ int main(void)
    test_verify_load_config_enforce_false();
    test_verify_load_config_no_enforce_defaults_false();
    test_verify_load_config_emits_parallel_steps();
+   test_verify_load_config_repairs_existing_generated_plan_with_go_modules();
+   test_verify_load_config_leaves_custom_plan_unchanged();
+   test_verify_load_config_discovers_go_modules_from_cwd();
    test_verify_load_config_collapses_generated_pipeline_to_verify_local();
    test_verify_load_config_prefers_check_linking_for_build();
    test_verify_load_config_test_only_has_no_missing_build_dependency();
@@ -2565,6 +3387,35 @@ int main(void)
    test_main_branch_reset_blocked();
    test_main_branch_delete_blocked();
    test_feature_branch_commit_allowed();
+
+   /* Integration operations */
+   test_merge_clean_reports_the_change();
+   test_merge_conflict_aborts_and_names_files();
+   test_merge_keep_conflicts_then_continue();
+   test_merge_action_abort();
+   test_second_operation_refused_while_one_is_in_progress();
+   test_integrate_refuses_dirty_tree();
+   test_integrate_blocked_on_main();
+   test_integrate_requires_a_ref();
+   test_cherry_pick_and_revert();
+   test_sync_reports_already_current();
+   test_sync_rejects_unknown_mode();
+
+   /* Staging and ref movement */
+   test_add_all_stages_new_files_but_not_secrets();
+   test_add_refuses_only_sensitive_paths();
+   test_add_requires_files_or_all();
+   test_switch_routes_to_branch_switch();
+   test_checkout_with_files_restores();
+   test_switch_requires_a_ref();
+
+   /* PR title/body derivation */
+   test_pr_create_derives_title_from_single_commit();
+   test_pr_create_derives_title_from_many_commits();
+   test_pr_create_with_no_commits_says_so();
+   test_pr_ready_stops_at_the_failing_step();
+   test_pr_ready_runs_sync_then_push();
+   test_pr_unknown_action_lists_ready();
 
    printf("all tests passed\n");
    return 0;

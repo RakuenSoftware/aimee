@@ -19,6 +19,13 @@ handler did. The C adapter remains a parity fixture; storage, extraction,
 embedding, retrieval, graph, and lifecycle implementation units remain C
 relocation work.
 
+The server's context pre-injection path requests its `high`/`medium`/`low`
+confidence tier from that process over event `5893`. It no longer substitutes a
+local `low` tier when the process is absent, fails, or returns an invalid value;
+instead it omits the envelope and logs the unavailable classification. The
+envelope formatter also rejects missing or unknown tiers, so callers cannot
+bypass the module by leaving confidence unset.
+
 ## Public contracts
 
 The current C contract is principally `src/headers/memory.h`, with platform seams in

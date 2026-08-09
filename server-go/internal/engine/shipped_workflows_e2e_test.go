@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
-	roundtablecfg "github.com/JBailes/aimee/server-go/internal/roundtable"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
 // TestShippedWorkflowDefinitionsRunWithNativeEngine loads the exact workflow
@@ -121,7 +121,7 @@ func runExactShippedWorkflow(t *testing.T, workflowName, wantState, wantPause st
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner.SetRoundtableStore(shippedRoundtableStore(t))
+	withPanel(runner, shippedRoundtableStore(t))
 	engine, err := New(store, artifacts, workflowDir, runner)
 	if err != nil {
 		t.Fatal(err)

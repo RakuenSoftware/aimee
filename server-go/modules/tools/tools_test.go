@@ -19,6 +19,8 @@ func toolRequest(name string) []byte {
 func TestToolClassificationParity(t *testing.T) {
 	tests := map[string]uint32{
 		"bash":              ClassExec,
+		"execute_script":    ClassExec,
+		"test":              ClassExec,
 		"run_tests":         ClassExec,
 		"write_file":        ClassWrite,
 		"git_pr":            ClassWrite,

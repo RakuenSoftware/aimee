@@ -2072,6 +2072,23 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /config/deploy-env:
+    get:
+      summary: Emit the compose environment for this backend record
+      description: >
+        The KEY=VALUE lines a managed `docker compose up -d` needs, derived from
+        the saved configuration. Intended for the operator wrapper
+        `eval "$(aimee config deploy-env)" && docker compose up -d`: recreating a
+        managed container without these silently reinterpolates AIMEE_KB_VARIANT
+        to empty, which resolves the knowledge-base image to the embedderless
+        variant. Carries no credential: embedder and synthesis API keys are
+        deliberately omitted and live only in Vault.
+      responses:
+        "200":
+          description: Envelope whose `env` string holds the KEY=VALUE lines
+          content:
+            application/json:
+              schema: { type: object }
   /config/get:
     post:
       summary: Get one configuration value
@@ -2256,6 +2273,16 @@ paths:
       summary: Status of a delegate job
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Delegate status, content: { application/json: { schema: { type: object } } } } }
+  /delegate/reservation/forget:
+    post:
+      summary: Release a delegate replay reservation (job_id makes it a compare-delete, so a newer job under the same key is not erased)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: "Release outcome; released is false when the reservation was already gone or now names a different job", content: { application/json: { schema: { type: object } } } } }
+  /delegate/cancel_unassigned:
+    post:
+      summary: Cancel a delegate job that was never assigned to a worker, if it has been unassigned for at least min_unassigned_secs
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: "Cancellation outcome; cancelled is false when the job was assigned, already terminal, or not yet old enough", content: { application/json: { schema: { type: object } } } } }
   /delegate/sandbox/images:
     get:
       summary: List build-from-spec sandbox images (aimee-sbx:*) with created time, size, and in-use flag
@@ -2941,6 +2968,46 @@ paths:
     get:
       summary: Evaluation results
       responses: { "200": { description: Eval results, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/list:
+    get:
+      summary: List roundtable authoring pipelines
+      responses: { "200": { description: Pipeline list, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/status:
+    post:
+      summary: Roundtable authoring pipeline status
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Pipeline status, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/start:
+    post:
+      summary: Start a roundtable authoring pipeline
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Started pipeline, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/cancel:
+    post:
+      summary: Cancel a roundtable authoring pipeline
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Cancel result, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/resume:
+    post:
+      summary: Resume a roundtable authoring pipeline
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Resume result, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/advance:
+    post:
+      summary: Advance a roundtable authoring pipeline to its next phase
+      description: >-
+        Returns the next action for the caller (advance, revise, escalate) after
+        recording the current pass. Capability: delegate.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Advance result, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/gate:
+    post:
+      summary: Record a human gate verdict on a roundtable authoring pipeline
+      description: >-
+        Verdict is pass or fail. Gate authority is checked against the active local
+        operator. Capability: delegate.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Gate result, content: { application/json: { schema: { type: object } } } } }
   /trigger/list:
     get:
       summary: List triggers
@@ -2978,6 +3045,14 @@ paths:
     get:
       summary: Server health (RPC twin)
       responses: { "200": { description: Health, content: { application/json: { schema: { type: object } } } } }
+  /workers:
+    get:
+      summary: Server worker-pool status
+      description: >-
+        Occupancy of the server's thread pools: the request and compute pools, per-session
+        pools, on-demand delegate threads, any ephemeral secondary pools, and aimee-kb
+        connection workers. Read-only. Capability: dashboard:read.
+      responses: { "200": { description: Worker-pool status, content: { application/json: { schema: { type: object } } } } }
   /server/forensics:
     get:
       summary: Recent server shutdown forensics
@@ -4529,13 +4604,54 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Persona' }
+  /workspace/mirror-sync:
+    post:
+      summary: Upload the client working-tree patch for a mirror workspace
+      description: >
+        The client of a remote server ships its full working-tree patch (tracked
+        modifications, deletions and untracked files, as a --binary diff against
+        HEAD) so the server's mirror reconstructs the tree the client actually
+        has. Absent, the reconstruct is a clean checkout at head and every
+        uncommitted change is silently missing from the tree agents work in. The
+        target must already be registered as a `mirror` workspace. Capability:
+        tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [args, diff]
+              properties:
+                args:
+                  type: array
+                  items: { type: string }
+                  description: Single element - the workspace root as the client knows it
+                diff:
+                  type: string
+                  description: The patch; empty string for a clean tree
+      responses:
+        "200":
+          description: Patch stored for the next reconstruct
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+        "400":
+          description: Not a registered mirror workspace, or missing root
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /workspaces:
     get:
       summary: List registered workspaces (instance-scoped)
       description: >
         The workspaces registered on this instance, each with its provider
-        (shared|detached) and the projects discovered under it. Capability:
-        index:read.
+        (shared|detached|mirror) and the projects discovered under it. A mirror
+        workspace also reports the client vcs coordinates its server-side tree is
+        reconstructed from. Capability: index:read.
       responses:
         "200":
           description: Workspace registry
@@ -4550,14 +4666,19 @@ paths:
                       type: object
                       properties:
                         path: { type: string }
-                        provider: { type: string, enum: [shared, detached] }
+                        provider: { type: string, enum: [shared, detached, mirror] }
+                        remote: { type: string, description: "mirror only: client remote URL" }
+                        head: { type: string, description: "mirror only: client HEAD commit" }
                         projects: { type: array, items: { type: string } }
     post:
       summary: Register a workspace (instance-scoped)
       description: >
         Register a working tree as an instance-scoped workspace. The optional
-        provider selects co-located (shared) or marshalled (detached) access.
-        Capability: tool:execute.
+        provider selects co-located (shared), marshalled to the client
+        (detached), or a server-side tree reconstructed from the client's git
+        remote (mirror). A mirror registration requires both `remote` and `head`,
+        since the server seeds its bare mirror by fetching that head from that
+        remote, and is rejected without them. Capability: tool:execute.
       requestBody:
         required: true
         content:
@@ -4569,7 +4690,13 @@ paths:
                 root_hint:
                   type: string
                   description: Absolute path to the workspace root
-                provider: { type: string, enum: [shared, detached] }
+                provider: { type: string, enum: [shared, detached, mirror] }
+                remote:
+                  type: string
+                  description: "Required for provider=mirror: the client's git remote URL"
+                head:
+                  type: string
+                  description: "Required for provider=mirror: the client's HEAD commit"
       responses:
         "200":
           description: Workspace registered (with discovered projects)

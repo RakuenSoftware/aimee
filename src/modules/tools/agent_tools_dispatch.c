@@ -106,14 +106,10 @@ static void td_outcome_set(const char *verdict, const char *reason)
  * stored; the parsed tree is freed. */
 static int is_exec_tool(const char *name)
 {
-   if (g_tool_classifier)
-   {
-      int classification = 0;
-      return g_tool_classifier(name, &classification) == 0 &&
-             classification == AIMEE_TOOL_CLASS_EXEC;
-   }
-   return strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0 ||
-          strcmp(name, "test") == 0 || strcmp(name, "run_tests") == 0;
+   if (!g_tool_classifier)
+      return 0;
+   int classification = 0;
+   return g_tool_classifier(name, &classification) == 0 && classification == AIMEE_TOOL_CLASS_EXEC;
 }
 
 static void td_classify_exec_result(const char *result)
@@ -2217,6 +2213,39 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
             fp_arg = cJSON_GetObjectItem(args, "path");
          if (fp_arg)
             cJSON_SetValuestring(fp_arg, msg);
+      }
+      else if (rc == 3 && msg[0])
+      {
+         /* Shell COMMAND rewrite: the guardrail redirected this command into the
+          * session worktree and returned the rewritten line ("cd <worktree> && …"),
+          * exactly as it does for a path with rc==1. cmd_hooks.c applies both
+          * ("rc==1: edit tool file_path rewrite, rc==3: bash command rewrite").
+          *
+          * This path applied only rc==1, so a rewrite arrived here as "not 0" and
+          * was reported as a refusal — with the rewritten command as the reason.
+          * Every shell command a delegate ran came back "guardrail blocked: cd
+          * <worktree> && <cmd>", including `pwd` and `echo hello`, because the
+          * rewrite fires on every shell call whose cwd sits outside the worktree.
+          * A delegate could therefore edit files and never run one command.
+          *
+          * Rewrite the same field the guardrail read (command / cmd / body — see
+          * guardrails_command_item) so the tool runs the redirected line. */
+         cJSON *cmd_arg = cJSON_GetObjectItem(args, "command");
+         if (!cmd_arg || !cJSON_IsString(cmd_arg))
+            cmd_arg = cJSON_GetObjectItem(args, "cmd");
+         if (!cmd_arg || !cJSON_IsString(cmd_arg))
+            cmd_arg = cJSON_GetObjectItem(args, "body");
+         if (cmd_arg && cJSON_IsString(cmd_arg))
+            cJSON_SetValuestring(cmd_arg, msg);
+         else
+         {
+            /* Nothing to rewrite: refusing beats running the original command in
+             * a directory the guardrail just said it must not run in. */
+            cJSON_Delete(args);
+            td_outcome_set("refused", "guardrail");
+            return safe_strdup("error: guardrail requires a worktree rewrite but the tool carries "
+                               "no rewritable command field");
+         }
       }
       else if (rc != 0)
       {

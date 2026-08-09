@@ -84,12 +84,24 @@ char *mcp_git_run(const char *cmd, int *exit_code)
    const workspace_provider_t *exec_ws = run_on_server ? workspace_provider_shared() : ws;
 
    /* Credential injection: for a server-run command whose cwd is inside a registered
-    * workspace, run under an execve environment carrying GH_TOKEN + the GIT_ASKPASS
-    * shim so clone/fetch/push/PR authenticate — never on the command line or disk.
-    * The token is resolved through the one shared vault-first policy: a client-handed
-    * per-workspace broker token (§4) wins, else the per-host vault token for the
-    * checkout's `origin`, else the server's own forge identity (§6); no token → fall
-    * through to ambient creds (co-located dev's own gh/SSH). */
+    * workspace, run under an execve environment that authenticates git — never on the
+    * command line or disk. The token is resolved through the one shared vault-first
+    * policy: a client-handed per-workspace broker token (§4) wins, else the per-host
+    * vault token for the checkout's `origin`, else the server's own forge identity
+    * (§6); no token → fall through to ambient creds (co-located dev's own gh/SSH).
+    *
+    * This carries AIMEE_GIT_TOKEN_FD and the GIT_ASKPASS shim, NOT GH_TOKEN. The
+    * builder is called in FD mode (out_token_fd non-NULL), which puts the secret on a
+    * memfd so it never lands in the child's /proc/<pid>/environ — see
+    * git_cred_inject.h. That authenticates `git`, whose askpass reads the fd, and it
+    * does NOT authenticate `gh`, which can only take a token from the environment or
+    * its own config. So a `gh` subcommand routed through here runs with NO credential
+    * and reports "gh auth login", however well the vault is populated. That is why
+    * the PR ops read the GitHub API in-process (git_pr_api.c) instead: the raw token
+    * goes straight into an Authorization header and no child is involved.
+    *
+    * Said plainly because the previous wording claimed GH_TOKEN was injected, which
+    * sent at least one reader hunting for a broken OAuth that was never broken. */
    if (run_on_server)
    {
       const char *cwd = run_cmd_get_cwd();

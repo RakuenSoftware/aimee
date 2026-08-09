@@ -164,17 +164,6 @@ CREATE TABLE IF NOT EXISTS lifecycle_delegate_job (
 	return nil
 }
 
-func (s *Store) DelegateJob(ctx context.Context, key string) (int, string, error) {
-	var id int
-	var participant string
-	err := s.db.QueryRowContext(ctx, `SELECT job_id,participant_token FROM lifecycle_delegate_job WHERE execution_key=?`, key).Scan(&id, &participant)
-	return id, participant, err
-}
-
-func (s *Store) SaveDelegateJob(ctx context.Context, key string, id int, participant string) error {
-	return s.SaveWorkflowDelegateJob(ctx, key, "", id, participant)
-}
-
 func (s *Store) SaveWorkflowDelegateJob(ctx context.Context, key, workItemID string, id int, participant string) error {
 	if key == "" || id <= 0 {
 		return errors.New("delegate execution key and job id are required")
@@ -233,62 +222,6 @@ ORDER BY mapping.cancel_attempts,mapping.job_id LIMIT ?`, terminalCancellationBa
 		return nil, err
 	}
 	return mappings, nil
-}
-
-func (s *Store) ForgetDelegateJob(ctx context.Context, key string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM lifecycle_delegate_job WHERE execution_key=?`, key)
-	return err
-}
-
-// ForgetDelegateJobIfMatches physically compare-deletes a durable mapping by
-// execution key and job ID. It returns true only when exactly that row was
-// deleted; a later retry under the same logical key is preserved.
-func (s *Store) ForgetDelegateJobIfMatches(ctx context.Context, key string, jobID int) (bool, error) {
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-	if key == "" || jobID <= 0 {
-		return false, errors.New("delegate execution key and job id are required")
-	}
-	result, err := s.db.ExecContext(ctx,
-		`DELETE FROM lifecycle_delegate_job WHERE execution_key=? AND job_id=?`, key, jobID)
-	if err != nil {
-		return false, err
-	}
-	changed, err := result.RowsAffected()
-	return changed == 1, err
-}
-
-// CancelUnassignedDelegateJob returns true only when this call atomically moves
-// an expired job without a worker lease to cancelled. Routing may persist an
-// agent name while the row is still pending, so a pending row remains
-// unassigned regardless of agent_name. Once the worker moves it to running, a
-// non-empty agent_name proves assignment and protects it from this lease.
-//
-// Both worker transitions are reciprocal: taking the lease requires pending,
-// and assigning an agent rejects cancelled rows. Whichever SQLite update wins
-// prevents a later transition from reviving a cancelled job.
-func (s *Store) CancelUnassignedDelegateJob(ctx context.Context, jobID int, reason string, minAge time.Duration) (bool, error) {
-	if jobID <= 0 {
-		return false, errors.New("delegate job id is required")
-	}
-	if minAge <= 0 {
-		return false, errors.New("delegate minimum unassigned age is required")
-	}
-	cutoff := time.Now().UTC().Add(-minAge).Format("2006-01-02 15:04:05")
-	result, err := s.db.ExecContext(ctx, `UPDATE agent_jobs
-SET status='cancelled',
-    cancelled_at=datetime('now'),
-    cancel_reason=?,
-    updated_at=datetime('now')
-WHERE id=?
-  AND (status='pending' OR (status='running' AND trim(agent_name)=''))
-  AND COALESCE(NULLIF(heartbeat_at,''),created_at) <= ?`, reason, jobID, cutoff)
-	if err != nil {
-		return false, fmt.Errorf("cancel unassigned delegate job: %w", err)
-	}
-	changed, err := result.RowsAffected()
-	return changed == 1, err
 }
 
 func (s *Store) hasWorkItemColumn(ctx context.Context, wanted string) (bool, error) {
@@ -886,7 +819,7 @@ WHERE work_item_id=? AND reservation_owner=? AND reservation_state='reserved'`, 
 func (s *Store) HeartbeatWorkflowBudget(ctx context.Context, workItemID, owner string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE lifecycle_work_item
 SET reservation_lease_until=datetime('now','+2 minutes')
-WHERE work_item_id=? AND reservation_owner=? AND reservation_state='reserved'`, workItemID, owner)
+WHERE work_item_id=? AND reservation_owner=? AND reservation_state IN ('reserved','actual','unresolved')`, workItemID, owner)
 	return err
 }
 
@@ -1190,6 +1123,51 @@ func (s *Store) StageLoopCount(ctx context.Context, workItemID, stage string) (i
 	return count, err
 }
 
+// StageAttemptCount reports the current consecutive retry count for a stage.
+// Unlike StageLoopCount, this counter is cleared when the stage advances, so it
+// distinguishes a newly reviewed repair from a verifier failure that has just
+// looped back to the same implementation stage.
+func (s *Store) StageAttemptCount(ctx context.Context, workItemID, stage string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE((SELECT attempts FROM lifecycle_stage_attempt WHERE work_item_id=? AND stage=?), 0)`, workItemID, stage).Scan(&count)
+	return count, err
+}
+
+// LatestStageRetryDetail returns the diagnostic that caused the current stage
+// retry. A loop is preferred over later transient runner pauses so cancellation
+// recovery does not hide the verifier failure the next delegate must repair.
+// When an operator resumes a retry-limit park, the park diagnostic is retained
+// while the numeric attempt budget starts fresh. A successful advance is the
+// boundary that makes all earlier diagnostics stale.
+func (s *Store) LatestStageRetryDetail(ctx context.Context, workItemID, stage string) (string, error) {
+	var boundary, reset int64
+	attempts, err := s.StageAttemptCount(ctx, workItemID, stage)
+	if err != nil {
+		return "", err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM lifecycle_event WHERE work_item_id=? AND stage=? AND kind='advance'`, workItemID, stage).Scan(&boundary); err != nil {
+		return "", err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM lifecycle_event WHERE work_item_id=? AND stage=? AND kind='resume' AND detail='retry_limit' AND id>?`, workItemID, stage, boundary).Scan(&reset); err != nil {
+		return "", err
+	}
+	if attempts == 0 && reset <= boundary {
+		return "", nil
+	}
+	var detail string
+	err = s.db.QueryRowContext(ctx, `SELECT detail FROM lifecycle_event WHERE work_item_id=? AND stage=? AND kind='loop' AND id>? ORDER BY id DESC LIMIT 1`, workItemID, stage, max(boundary, reset)).Scan(&detail)
+	if errors.Is(err, sql.ErrNoRows) && reset > boundary {
+		err = s.db.QueryRowContext(ctx, `SELECT detail FROM lifecycle_event WHERE work_item_id=? AND stage=? AND kind='pause' AND detail!='manual' AND id>? AND id<? ORDER BY id DESC LIMIT 1`, workItemID, stage, boundary, reset).Scan(&detail)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		err = s.db.QueryRowContext(ctx, `SELECT detail FROM lifecycle_event WHERE work_item_id=? AND stage=? AND kind='pause' AND detail!='manual' AND id>? ORDER BY id DESC LIMIT 1`, workItemID, stage, boundary).Scan(&detail)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return detail, err
+}
+
 // Park records the stable pause reason as both item state and event detail.
 // Call ParkWithDetail when an operator-safe diagnostic should accompany it.
 func (s *Store) Park(ctx context.Context, workItemID, stage, reason string, costUSD float64) error {
@@ -1249,7 +1227,11 @@ func (s *Store) Resume(ctx context.Context, workItemID string) error {
 	}
 	// delegate_failed parks explicitly for a human, so a human must be able to
 	// release it once the underlying delegate problem is addressed.
-	operatorReasons := map[string]bool{"manual": true, "wall_cap": true, "turn_cap": true, "retry_limit": true, "convergence_limit": true, "convergence_no_progress": true, "budget_cap": true, "fanout_limit": true, "workflow_definition_invalid": true, "workflow_block_unavailable": true, "delegate_failed": true,
+	operatorReasons := map[string]bool{"manual": true, "wall_cap": true, "turn_cap": true, "retry_limit": true, "convergence_limit": true, "convergence_no_progress": true, "budget_cap": true, "fanout_limit": true, "workflow_definition_invalid": true, "workflow_block_unavailable": true, "delegate_failed": true, "replay_unrecoverable": true,
+		// A conflicting parent integration is deliberately aborted and parked with
+		// a clean worktree. An operator must resolve/commit the integration before
+		// releasing the item; no scheduler-owned transition can do that work.
+		"base_integration_conflict": true,
 		// The roundtable judged the request itself unimplementable. A human amends
 		// the request and resumes; nothing the engine can do releases it.
 		"request_unimplementable": true}
@@ -1258,6 +1240,14 @@ func (s *Store) Resume(ctx context.Context, workItemID string) error {
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item SET pause_reason='', paused_state='', updated_at=datetime('now') WHERE work_item_id=? AND state='active'`, workItemID); err != nil {
 		return err
+	}
+	if reason == "retry_limit" {
+		// A human resume is an explicit request for another bounded repair cycle.
+		// Keeping the exhausted value made the very next failed repair park again,
+		// effectively reducing recovery to one attempt per manual resume.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM lifecycle_stage_attempt WHERE work_item_id=? AND stage=?`, workItemID, stage); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO lifecycle_event (work_item_id, stage, kind, actor, detail) VALUES (?, ?, 'resume', 'operator', ?)`, workItemID, stage, reason); err != nil {
 		return err

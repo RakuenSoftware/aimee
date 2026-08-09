@@ -423,8 +423,47 @@ static void test_strip_ai_attribution(void)
    assert(strcmp(buf, "line one\nline two") == 0);
 }
 
+/* parse_utc_ts must read BOTH spellings, because one DB2 column holds both: C
+ * writes ISO via now_utc(), SQL writes the canonical text form via
+ * pg_now_text(), and which one a row carries depends on the code path that last
+ * touched it.
+ *
+ * The failure this guards is silent. Two copies of this parser used to exist
+ * with OPPOSITE assumptions -- db2/demotion.c matched only the space form,
+ * modules/memory/memory_conflict.c only the ISO form -- and each returned 0 for
+ * the spelling it did not know. 0 is not an error here, it is the epoch: a real
+ * and very old time. In demotion that fed a recency decay, so a memory used
+ * minutes ago scored as though it had never been used. Asserting the two
+ * spellings produce the SAME instant is the assertion that catches it; checking
+ * "did it parse" would pass against both broken copies. */
+static void test_parse_utc_ts_accepts_both_spellings(void)
+{
+   /* 2026-08-09T19:07:23Z == 1786302443 */
+   const time_t expect = 1786302443;
+   assert(parse_utc_ts("2026-08-09T19:07:23Z") == expect);
+   assert(parse_utc_ts("2026-08-09T19:07:23") == expect);
+   assert(parse_utc_ts("2026-08-09 19:07:23") == expect);
+   /* The two spellings are the same instant -- the property that was violated. */
+   assert(parse_utc_ts("2026-08-09 19:07:23") == parse_utc_ts("2026-08-09T19:07:23Z"));
+
+   /* A date alone is midnight, not a failure. */
+   assert(parse_utc_ts("2026-08-09") == 1786233600);
+
+   /* Unparseable input stays 0: callers document 0 as "unknown/ancient", so it
+    * must not become a plausible-looking date. */
+   assert(parse_utc_ts(NULL) == 0);
+   assert(parse_utc_ts("") == 0);
+   assert(parse_utc_ts("not a timestamp") == 0);
+   assert(parse_utc_ts("2026-13-40 99:99:99") == 0);
+   /* A separator that is neither 'T' nor ' ' is not one of our formats. */
+   assert(parse_utc_ts("2026-08-09X19:07:23") == 0);
+
+   printf("  parse_utc_ts accepts both stored spellings\n");
+}
+
 int main(void)
 {
+   test_parse_utc_ts_accepts_both_spellings();
    test_normalize_key();
    test_trigram_similarity();
    test_stem_word();

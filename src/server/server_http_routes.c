@@ -40,8 +40,8 @@
 #include "server_mgmt_audit.h"
 #include "server_runtime_identity.h"
 #include "kb_client_mtls.h"
-#include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
-#include "wfe_http_proxy.h"      /* public workflow routes -> private Go control plane */
+#include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
+#include "workflow_control_bus.h" /* public workflow routes -> the workflows control stage */
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -1578,6 +1578,15 @@ static int rh_workspaces_register(const route_req_t *rq, char *resp, int cap)
    const char *root = (cJSON_IsString(jroot) && jroot->valuestring) ? jroot->valuestring : "";
    const cJSON *jprov = cJSON_GetObjectItemCaseSensitive(body, "provider");
    const char *provider = (cJSON_IsString(jprov) && jprov->valuestring) ? jprov->valuestring : "";
+   /* A `mirror` workspace is seeded by fetching the client's head from its
+    * remote, so workspace.add requires both. Dropping them here (as this route
+    * did) meant a mirror registration over REST was rejected for a missing
+    * --remote, leaving the reverse channel no route to the sandboxed tier. */
+   const cJSON *jremote = cJSON_GetObjectItemCaseSensitive(body, "remote");
+   const char *remote =
+       (cJSON_IsString(jremote) && jremote->valuestring) ? jremote->valuestring : "";
+   const cJSON *jhead = cJSON_GetObjectItemCaseSensitive(body, "head");
+   const char *head = (cJSON_IsString(jhead) && jhead->valuestring) ? jhead->valuestring : "";
    int rc;
    if (!root[0])
    {
@@ -1586,8 +1595,9 @@ static int rh_workspaces_register(const route_req_t *rq, char *resp, int cap)
    }
    if (provider[0])
    {
-      const char *extra[2] = {"--provider", provider};
-      rc = ws_dispatch_args("workspace.add", root, extra, 2, resp, cap);
+      const char *extra[WS_ADD_FLAG_ARGS_MAX];
+      int extra_n = workspace_add_flag_args(provider, remote, head, extra, WS_ADD_FLAG_ARGS_MAX);
+      rc = ws_dispatch_args("workspace.add", root, extra, extra_n, resp, cap);
    }
    else
    {
@@ -1900,6 +1910,7 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/aux/config", NULL, RM_EXACT, "aux.config_show", 0, rh_dispatch_op},
     {"GET", "/v1/config", NULL, RM_EXACT, "config.show", 0, rh_dispatch_op},
     {"POST", "/v1/config/get", NULL, RM_EXACT, "config.get", 0, rh_dispatch_op},
+    {"GET", "/v1/config/deploy-env", NULL, RM_EXACT, "config.deploy_env", 0, rh_dispatch_op},
     {"POST", "/v1/config/set", NULL, RM_EXACT, "config.set", 0, rh_dispatch_op},
 
     /* cron.* family (op-parity P1 wave 1) — single-response, object-body
@@ -1945,6 +1956,10 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/delegate/run", NULL, RM_EXACT, "delegate", 0, rh_dispatch_op},
     {"POST", "/v1/delegate/reply", NULL, RM_EXACT, "delegate.reply", 0, rh_dispatch_op},
     {"POST", "/v1/delegate/launch", NULL, RM_EXACT, "delegate.launch", 0, rh_dispatch_op},
+    {"POST", "/v1/delegate/reservation/forget", NULL, RM_EXACT, "delegate.reservation.forget", 0,
+     rh_dispatch_op},
+    {"POST", "/v1/delegate/cancel_unassigned", NULL, RM_EXACT, "delegate.cancel_unassigned", 0,
+     rh_dispatch_op},
     {"POST", "/v1/delegate/backend_exec", NULL, RM_EXACT, "delegate.backend_exec", 0,
      rh_dispatch_op},
     {"GET", "/v1/job/list", NULL, RM_EXACT, "job.list", 0, rh_dispatch_op},
@@ -2084,6 +2099,17 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/worktree/gc", NULL, RM_EXACT, "worktree.gc", 0, rh_dispatch_op},
     {"POST", "/v1/aux/test", NULL, RM_EXACT, "aux.test", 0, rh_dispatch_op},
     {"GET", "/v1/eval/results", NULL, RM_EXACT, "eval.results", 0, rh_dispatch_op},
+    /* Roundtable authoring pipelines. Every one of these is a DB-backed state
+     * machine (rtp_* accessors in server_pipeline.c) that returns the next action
+     * for the caller to take -- none of them runs a panel or any other LLM work
+     * inline -- so they belong on the synchronous bridge, not the async lane. */
+    {"GET", "/v1/pipeline/list", NULL, RM_EXACT, "pipeline.list", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/status", NULL, RM_EXACT, "pipeline.status", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/start", NULL, RM_EXACT, "pipeline.start", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/cancel", NULL, RM_EXACT, "pipeline.cancel", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/resume", NULL, RM_EXACT, "pipeline.resume", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/advance", NULL, RM_EXACT, "pipeline.advance", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/gate", NULL, RM_EXACT, "pipeline.gate", 0, rh_dispatch_op},
     {"GET", "/v1/trigger/list", NULL, RM_EXACT, "trigger.list", 0, rh_dispatch_op},
     {"POST", "/v1/trigger/status", NULL, RM_EXACT, "trigger.status", 0, rh_dispatch_op},
     {"POST", "/v1/trigger/fire", NULL, RM_EXACT, "trigger.fire", 0, rh_dispatch_op},
@@ -2092,6 +2118,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/launch/run", NULL, RM_EXACT, "launch.run", 0, rh_dispatch_op},
     {"GET", "/v1/server/info", NULL, RM_EXACT, "server.info", 0, rh_dispatch_op},
     {"GET", "/v1/server/health", NULL, RM_EXACT, "server.health", 0, rh_dispatch_op},
+    {"GET", "/v1/workers", NULL, RM_EXACT, "workers", 0, rh_dispatch_op},
 
     /* Long-running / LLM methods, exposed async (rh_dispatch_op_async): each
      * returns a queued run handle; poll GET /v1/runs/{id}. They must NOT use the
@@ -2268,6 +2295,13 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/workspaces", NULL, RM_EXACT, "workspace.add", 0, rh_workspaces_register},
     {"POST", "/v1/workspace/clone", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_clone},
     {"POST", "/v1/workspace/git", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_git},
+    /* The client of a REMOTE server ships its working-tree patch here, so the
+     * mirror reconstructs the tree it actually has rather than a clean checkout
+     * at head. The NDJSON method existed from the start but had no /v1 twin,
+     * which made it reachable only over the local socket — i.e. never from the
+     * remote clients the mirror tier exists for. */
+    {"POST", "/v1/workspace/mirror-sync", NULL, RM_EXACT, "workspace.mirror-sync", 0,
+     rh_dispatch_op},
     /* Local mechanical forge bridge for the Go-owned WFE. The handler additionally
      * requires a kernel-attested uid: principal, making this route UDS-only. */
     {"POST", "/v1/internal/forge/execute", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
@@ -2449,9 +2483,9 @@ int v1_route_dispatch(const char *method, const char *path, const char *body, in
       return err_json(resp, resp_cap, 400, "bad request");
    if ((strcmp(path, "/v1/workflow") == 0 || strncmp(path, "/v1/workflow/", 13) == 0) ||
        strcmp(path, "/v1/trigger/fire") == 0 || strcmp(path, "/v1/dev/submit") == 0)
-      return wfe_http_proxy_request(method, path, server_http_identity_query(), body, body_len,
-                                    server_http_identity_principal(),
-                                    (g_rpc_conn_caps & CAP_WORKFLOW_ADMIN) != 0, resp, resp_cap);
+      return workflow_control_request(method, path, server_http_identity_query(), body, body_len,
+                                      server_http_identity_principal(),
+                                      (g_rpc_conn_caps & CAP_WORKFLOW_ADMIN) != 0, resp, resp_cap);
    char id[256];
    const http_route_t *e = route_match(method, path, id, sizeof(id));
    if (!e || !e->handler)

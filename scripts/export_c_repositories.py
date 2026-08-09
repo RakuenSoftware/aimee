@@ -28,6 +28,7 @@ INVENTORY = ROOT / "tests/baselines/modules/canonical-inventory.yaml"
 LOCK = ROOT / "dependencies/aimee-repositories.lock.json"
 CORE_VERSION_FILE = ROOT / "src/core/VERSION"
 REMOTE_ROOT = "https://github.com/RakuenSoftware"
+HOSTED_BY_EXECUTABLE = {"wfe": "/usr/local/bin/aimee-wfe"}
 PRINCIPAL_CLASS = 1
 
 
@@ -598,6 +599,11 @@ def export_runtime_bundle(output_root: Path) -> int:
         stages = contract["stages"]
         assert isinstance(principal_ref, int) and isinstance(stages, list)
         binary = f"aimee-module-{module_id}"
+        # The grant pins the exact executable that may attach as this principal.
+        # An externally hosted process is a different program at a different path.
+        hosted_by = contract.get("hosted_by")
+        executable = (HOSTED_BY_EXECUTABLE[hosted_by] if hosted_by
+                      else f"/usr/local/libexec/aimee-modules/{binary}")
         runtime = contract["runtime"]
         assert isinstance(runtime, str)
         runtimes[module_id] = runtime
@@ -610,13 +616,14 @@ def export_runtime_bundle(output_root: Path) -> int:
             go_sources = descriptor.get("go_sources", [])
             if not isinstance(go_sources, list) or not go_sources:
                 raise ExportError(f"{module_id}: Go process has no go_sources")
-            go_modules.append(module_id)
+            if hosted_by is None:
+                go_modules.append(module_id)
         serve = ",".join(str(stage["event_kind"]) for stage in stages)
         grant = f"""version=1
 principal_class={PRINCIPAL_CLASS}
 principal_ref={principal_ref}
 uid=self
-executable=/usr/local/libexec/aimee-modules/{binary}
+executable={executable}
 publish=
 subscribe=
 request=
@@ -624,9 +631,29 @@ serve={serve}
 """
         for placement in contract["placements"]:
             write_text(output_root / "grants" / placement / f"{module_id}.grant", grant)
-            if enabled:
-                placement_rows[placement].append(f"{module_id}\t/usr/local/libexec/aimee-modules/{binary}")
+            # A process hosted by an already-supervised program is never spawned by
+            # the module supervisor. Listing it would start a second holder of the
+            # principal, and the bus denies a live duplicate.
+            if enabled and hosted_by is None:
+                placement_rows[placement].append(f"{module_id}\t{executable}")
         count += 1
+    # Bus clients request stages but serve none, so they get a grant and no
+    # manifest row: nothing supervises them, they are already running.
+    contract_doc = load_json(process_contracts.CONTRACTS)
+    for client in contract_doc.get("clients", []):
+        request = ",".join(str(kind) for kind in client["request"])
+        client_grant = f"""version=1
+principal_class={PRINCIPAL_CLASS}
+principal_ref={client["principal_ref"]}
+uid=self
+executable={client["executable"]}
+publish=
+subscribe=
+request={request}
+serve=
+"""
+        for placement in client["placements"]:
+            write_text(output_root / "grants" / placement / f"{client['id']}.grant", client_grant)
     for placement, rows in placement_rows.items():
         write_text(output_root / f"{placement}.modules", "\n".join(rows) + "\n")
     write_text(output_root / "go.modules", "\n".join(go_modules) + "\n")

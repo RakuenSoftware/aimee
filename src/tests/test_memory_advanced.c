@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include "aimee.h"
@@ -10,6 +11,7 @@
 #include "db1.h"
 #include "db2.h"
 #include "db2_test_shim.h"
+#include "db2/memory_lifecycle.h" /* db2_memory_valid_at */
 #include "modules/memory/memory_ontology.h"
 #include "../db2/bandit.h"
 #include "../db2/db2_internal.h"
@@ -343,6 +345,34 @@ int main(void)
       assert(aimee_pg_step(chk, err, sizeof(err)) == AIMEE_PG_ROW);
       assert(aimee_pg_column_int(chk, 0) == 1);
       aimee_pg_finalize(chk);
+
+      /* The merge is applied autonomously -- nothing gates it, no human reviews
+       * it -- so the audit record IS the safety mechanism. Without it a row
+       * silently acquires merged_into with no trace of when, by what, or into
+       * which canonical, and an incorrect merge is both unnoticeable and
+       * un-undoable. Assert the record exists and names the canonical, on the
+       * MERGED row: that is the row whose meaning changed and the one an undo
+       * would have to find. */
+      aimee_pg_stmt_t *prov =
+          aimee_pg_prepare(db2_conn(),
+                           "SELECT p.action, p.details FROM memory_provenance p"
+                           "  JOIN memories m ON m.id = p.memory_id"
+                           " WHERE m.key = 'dup-key-improve' AND m.merged_into != 0"
+                           "   AND p.action = 'dedupe_merge'",
+                           err, sizeof(err));
+      assert(prov);
+      assert(aimee_pg_step(prov, err, sizeof(err)) == AIMEE_PG_ROW);
+      const char *pdetails = aimee_pg_column_text(prov, 1);
+      /* Names the canonical it was folded into, not merely "something happened". */
+      assert(pdetails && strstr(pdetails, "merged_into=") != NULL);
+      aimee_pg_finalize(prov);
+
+      /* Idempotence: a second pass must not re-merge or double-record. Under
+       * autonomous curation this is what stops the loop churning the same rows
+       * every cycle. */
+      int again = memory_improve_dedupe(0);
+      assert(again == 0);
+      printf("  dedupe_audit: ok\n");
    }
 
    /* --- memory_apply_feedback: updates utility scores on success and failure --- */
@@ -1997,6 +2027,96 @@ int main(void)
       /* maybe_run is gated on memory_maintenance.enabled; say so in config. */
       write_test_config("memory_maintenance:\n  enabled: false\n");
       assert(memory_maintenance_maybe_run(NULL) == 0);
+   }
+
+   /* --- event-time intervals: "what did we believe on <date>" ---
+    *
+    * lifecycle_state answers "is this true NOW" and nothing more: a superseded
+    * row looks identically superseded whether it stopped being true yesterday or
+    * last year. Closing valid_until at the transition makes the point-in-time
+    * question answerable for ROWS the way it already is for relations. */
+   {
+      memory_t m;
+      assert(memory_insert(TIER_L2, KIND_PREFERENCE, "bt:pref", "deploy on Fridays is fine", 0.9,
+                           "s-bt", &m) == 0);
+
+      /* While active the interval is open at both ends: true then, true now,
+       * true at an absurd future date. An open bound must never read as closed. */
+      assert(db2_memory_valid_at(m.id, "2000-01-01 00:00:00") == 1);
+      assert(db2_memory_valid_at(m.id, "2099-01-01 00:00:00") == 1);
+
+      /* Supersede it. This is the transition that closes the interval. */
+      assert(memory_transition_lifecycle(m.id, MEMORY_LIFECYCLE_STATE_SUPERSEDED, NULL) == 0);
+
+      /* The past is unchanged -- it WAS true then, and rewriting history is
+       * exactly what a state flag does by omission. */
+      assert(db2_memory_valid_at(m.id, "2000-01-01 00:00:00") == 1);
+      /* ...and it is no longer true at a date after the close. */
+      assert(db2_memory_valid_at(m.id, "2099-01-01 00:00:00") == 0);
+
+      /* Bad calls are refused rather than guessed. */
+      assert(db2_memory_valid_at(m.id, NULL) == -1);
+      assert(db2_memory_valid_at(m.id, "") == -1);
+      assert(db2_memory_valid_at(0, "2020-01-01 00:00:00") == -1);
+
+      /* A row that never closed reads as still true at any date. Rows written
+       * before this stamping existed fall here, and "still true" is the honest
+       * answer for them: we do not know when they stopped, and manufacturing a
+       * boundary would be worse than leaving the interval open. */
+      memory_t open_row;
+      assert(memory_insert(TIER_L2, KIND_FACT, "bt:open", "never superseded", 0.9, "s-bt",
+                           &open_row) == 0);
+      assert(db2_memory_valid_at(open_row.id, "2099-01-01 00:00:00") == 1);
+
+      /* SAME-DAY comparison, in both spellings of a timestamp.
+       *
+       * Every assertion above passes even when the bounds are compared as plain
+       * TEXT, because 2000 and 2099 differ from the stored year in the YEAR: the
+       * comparison decides at character 2 and never reaches the separator. The
+       * bug lived at character 10. Bounds are stored ISO by now_utc()
+       * ("2026-08-09T19:07:23Z") and a caller writes "2026-08-09 23:59:59";
+       * 'T' (0x54) sorts above ' ' (0x20), so a text compare ranked the stored
+       * bound above the query and inverted the verdict. It only shows when the
+       * DATE matches and the compare gets that far -- which is why coarse
+       * decade-apart dates missed it for the whole life of the feature. */
+      char today[16];
+      {
+         time_t nowt = time(NULL);
+         struct tm tmv;
+         gmtime_r(&nowt, &tmv);
+         strftime(today, sizeof(today), "%Y-%m-%d", &tmv);
+      }
+      char iso_after[40], spaced_after[40], iso_before[40], spaced_before[40];
+      snprintf(iso_after, sizeof(iso_after), "%sT23:59:59Z", today);
+      snprintf(spaced_after, sizeof(spaced_after), "%s 23:59:59", today);
+      snprintf(iso_before, sizeof(iso_before), "%sT00:00:00Z", today);
+      snprintf(spaced_before, sizeof(spaced_before), "%s 00:00:00", today);
+
+      /* valid_until side: m closed earlier today, so a later time today is out.
+       * The spaced form is the one that read "still in force" against the bug. */
+      assert(db2_memory_valid_at(m.id, iso_after) == 0);
+      assert(db2_memory_valid_at(m.id, spaced_after) == 0);
+      assert(db2_memory_valid_at(m.id, iso_before) == 1);
+      assert(db2_memory_valid_at(m.id, spaced_before) == 1);
+
+      /* valid_from side: memory_supersede stamps the replacement's valid_from at
+       * the same instant it closes the old row's valid_until, so the intervals
+       * meet exactly -- at that instant the old row is out and the new one in,
+       * with neither a gap nor an overlap. Later today the replacement is in
+       * force; against the bug the spaced form read "not yet valid". */
+      memory_t sup_src, replacement;
+      assert(memory_insert(TIER_L2, KIND_PREFERENCE, "bt:from", "original value", 0.9, "s-bt",
+                           &sup_src) == 0);
+      assert(memory_supersede(sup_src.id, "replacement value", 0.9, "s-bt", &replacement) == 0);
+      assert(db2_memory_valid_at(replacement.id, spaced_after) == 1);
+      assert(db2_memory_valid_at(replacement.id, iso_after) == 1);
+      assert(db2_memory_valid_at(replacement.id, spaced_before) == 0);
+      assert(db2_memory_valid_at(replacement.id, iso_before) == 0);
+
+      /* The superseded original closed at that same instant. */
+      assert(db2_memory_valid_at(sup_src.id, spaced_after) == 0);
+
+      printf("  bitemporal_rows: ok\n");
    }
 
    db2_test_shim_close();

@@ -780,6 +780,28 @@ int kb_client_memory_explain_match(const char *query, int64_t memory_id, memory_
  * 1 for a valid missing row, or -1 when the service/result is unavailable. */
 int kb_client_memory_get(int64_t id, memory_t *out);
 
+/* The EVENT-time verdict for an `as_of` query, kept as a tri-state because the
+ * three answers are genuinely different. UNKNOWN is the service saying "I could
+ * not tell"; folding it into NO is how a bitemporal query lies. UNASKED is the
+ * ordinary no-as_of fetch, which must emit no verdict at all rather than a
+ * default one. */
+typedef enum
+{
+   KB_VALID_AT_UNASKED = 0,
+   KB_VALID_AT_YES,
+   KB_VALID_AT_NO,
+   KB_VALID_AT_UNKNOWN
+} kb_valid_at_t;
+
+/* As-of variant of kb_client_memory_get: forwards `as_of` to aimee-kb, which
+ * owns the valid_from/valid_until interval, and hands back its verdict. The
+ * plain entry point above cannot express this -- memory_t has no field for it
+ * (the valid_at in memory.h belongs to memory_relation_t, a different struct),
+ * so a caller that wants the time answer has to receive it separately.
+ * `as_of` NULL or empty asks nothing and leaves *verdict at UNASKED. */
+int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out,
+                               kb_valid_at_t *verdict);
+
 /* Insert a memory row via aimee-kb (the DB2 owner).  The full
  * write-side gate pipeline runs inside aimee-kb.  Returns 0 on
  * success (|out| filled if non-NULL) or -1 if kb is unreachable or
@@ -1126,6 +1148,38 @@ int kb_client_code_scan_push(const char *name, const char *root, int force, void
  * transport failure. Returns 0 on a usable response, -1 on transport
  * failure or kb-side error. */
 int kb_client_index_scan_apply_response(const void *resp, kb_client_index_scan_result_t *out);
+
+/* Blast-radius contract checks, split from the transport so a recorded kb
+ * payload can be asserted against without a live kb. `why` receives the first
+ * failing term ("resolved", "dependent_edges", ...) so a rejection names
+ * itself. Returns 1 when the payload satisfies the contract. */
+int kb_client_index_blast_response_valid(const void *resp, char *why, size_t why_n);
+int kb_client_index_blast_edges_valid(const void *edges, const char *identity_field);
+
+/* Timeout the code-index scan POST uses, in ms. Default 5 minutes; raise with
+ * AIMEE_KB_SCAN_TIMEOUT_MS for trees whose scan legitimately runs longer.
+ * Values outside (0, 24h] are ignored so a typo cannot disable the bound. */
+int kb_client_index_scan_timeout_ms(void);
+int kb_client_index_read_timeout_ms(void);
+
+/* Whether a failed call is the caller's budget expiring rather than the KB
+ * being unreachable. A read timeout and a refused connection look identical
+ * on the wire (no body, no status), so elapsed time against the budget is
+ * what separates 'nobody answered' from 'someone is still working'. A
+ * timeout must not open the shared dependency breaker. */
+/* Failure-budget classes. Bulk work (ingest, embed) and interactive work (reads,
+ * lookups) keep separate breakers so neither can suppress the other. */
+typedef enum
+{
+   KB_DEP_INTERACTIVE = 0,
+   KB_DEP_BULK = 1,
+   KB_DEP_CLASS_COUNT = 2
+} kb_dependency_class_t;
+
+kb_dependency_class_t kb_dependency_class_for_path(const char *path);
+
+int kb_transport_call_timed_out(int http_status, const char *response, int64_t elapsed_ms,
+                                int timeout_ms);
 
 /* Internal: build the wire-level response object that aimee-server's
  * handle_index_scan returns to the CLI, given the kb_client result and

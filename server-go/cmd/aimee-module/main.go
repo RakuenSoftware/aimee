@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
 	controlweb "github.com/JBailes/aimee/server-go/modules/control-web"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
+	"github.com/JBailes/aimee/server-go/modules/delegates/plane"
 	modulegit "github.com/JBailes/aimee/server-go/modules/git"
 	"github.com/JBailes/aimee/server-go/modules/governance"
 	kbsynthesis "github.com/JBailes/aimee/server-go/modules/kb-synthesis"
@@ -22,15 +24,54 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/memory"
 	responsecomposition "github.com/JBailes/aimee/server-go/modules/response-composition"
 	"github.com/JBailes/aimee/server-go/modules/roundtable"
+	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 	"github.com/JBailes/aimee/server-go/modules/routing"
 	runtimeweb "github.com/JBailes/aimee/server-go/modules/runtime-web"
+	"github.com/JBailes/aimee/server-go/modules/sandbox"
 	"github.com/JBailes/aimee/server-go/modules/skills"
 	moduletools "github.com/JBailes/aimee/server-go/modules/tools"
-	"github.com/JBailes/aimee/server-go/modules/workflows"
 	"github.com/JBailes/aimee/server-go/modules/workspace"
 )
 
 var errUsage = errors.New("usage: aimee-module-NAME DAEMON_MODULE_BUS_SOCKET")
+
+// roundtableReviewer assembles the review capability from this process's own
+// environment: the saved roundtables on disk, and the delegate resource plane
+// it seats them over. Both are required -- a review with no configured panel,
+// or with no way to reach an agent, is not a degraded review but no review.
+func roundtableReviewer() (*roundtable.PanelReviewer, error) {
+	home := os.Getenv("AIMEE_HOME")
+	if home == "" {
+		return nil, errors.New("AIMEE_HOME is unset")
+	}
+	socket := os.Getenv("AIMEE_AGENT_SERVICE_SOCKET")
+	url := os.Getenv("AIMEE_AGENT_SERVICE_URL")
+	if socket == "" && url == "" {
+		return nil, errors.New("no agent resource plane is configured")
+	}
+	presets, err := panel.NewStore(filepath.Join(home, "roundtables"))
+	if err != nil {
+		return nil, err
+	}
+	client, err := plane.NewHTTPAgentClient(plane.AgentHTTPConfig{BaseURL: url, UnixSocket: socket})
+	if err != nil {
+		return nil, err
+	}
+	return roundtable.NewPanelReviewer(presets, roundtable.NewPlaneDelegates(client))
+}
+
+// sandboxHome resolves the learned store's root the same way the WFE resolves
+// its own: AIMEE_HOME, else the per-user config directory.
+func sandboxHome() string {
+	if home := os.Getenv("AIMEE_HOME"); home != "" {
+		return home
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return os.TempDir()
+	}
+	return filepath.Join(userHome, ".config", "aimee")
+}
 
 func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 	name := strings.TrimPrefix(filepath.Base(executable), "aimee-module-")
@@ -75,12 +116,20 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 	case "git":
 		config.ModuleName = name
 		config.PrincipalRef = 13
-		config.Stages = []bus.ModuleStage{{EventKind: modulegit.EventKind, StageID: modulegit.StageOperation}}
+		config.Stages = []bus.ModuleStage{
+			{EventKind: modulegit.EventKind, StageID: modulegit.StageOperation},
+			{EventKind: modulegit.EventRefValidate, StageID: modulegit.StageRefValidate},
+			{EventKind: modulegit.EventCIGrade, StageID: modulegit.StageCIGrade},
+			{EventKind: modulegit.EventVerifyRun, StageID: modulegit.StageVerifyRun},
+		}
 		config.Handler = modulegit.Handle
 	case "skills":
 		config.ModuleName = name
 		config.PrincipalRef = 14
-		config.Stages = []bus.ModuleStage{{EventKind: skills.EventKind, StageID: skills.StageContext}}
+		config.Stages = []bus.ModuleStage{
+			{EventKind: skills.EventKind, StageID: skills.StageContext},
+			{EventKind: skills.EventTrigger, StageID: skills.StageTrigger},
+		}
 		config.Handler = skills.Handle
 	case "response-composition":
 		config.ModuleName = name
@@ -92,16 +141,30 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.PrincipalRef = 19
 		config.Stages = []bus.ModuleStage{{EventKind: governance.EventEvaluate, StageID: governance.StageEvaluate}}
 		config.Handler = governance.Handle
-	case "workflows":
-		config.ModuleName = name
-		config.PrincipalRef = 20
-		config.Stages = []bus.ModuleStage{{EventKind: workflows.EventAdvance, StageID: workflows.StageAdvance}}
-		config.Handler = workflows.Handle
 	case "roundtable":
 		config.ModuleName = name
 		config.PrincipalRef = 21
-		config.Stages = []bus.ModuleStage{{EventKind: roundtable.EventDeliberate, StageID: roundtable.StageDeliberate}}
+		// Deliberate and chunk planning need nothing but their arguments, so both
+		// are declared unconditionally. Review is appended below only when this
+		// process can actually convene one.
+		config.Stages = []bus.ModuleStage{
+			{EventKind: roundtable.EventDeliberate, StageID: roundtable.StageDeliberate},
+			{EventKind: roundtable.EventChunkPlan, StageID: roundtable.StageChunkPlan},
+		}
 		config.Handler = roundtable.Handle
+		// Deliberate is a pure rubric and always available. Review convenes real
+		// agents, so it is served only when this process can actually reach the
+		// delegate plane and the saved roundtables. Declaring the stage anyway
+		// would make an unreachable review look like a failing one; leaving it
+		// undeclared makes the daemon report the module as not serving that kind,
+		// which is what is true.
+		if reviewer, err := roundtableReviewer(); err != nil {
+			log.Printf("roundtable review stage unavailable: %v", err)
+		} else {
+			config.Stages = append(config.Stages,
+				bus.ModuleStage{EventKind: roundtable.EventReview, StageID: roundtable.StageReview})
+			config.Handler = roundtable.NewHandler(reviewer)
+		}
 	case "kb-synthesis":
 		config.ModuleName = name
 		config.PrincipalRef = 22
@@ -117,10 +180,30 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.PrincipalRef = 24
 		config.Stages = []bus.ModuleStage{{EventKind: controlweb.EventAuthorize, StageID: controlweb.StageAuthorize}}
 		config.Handler = controlweb.Handle
+	case "sandbox":
+		config.ModuleName = name
+		config.PrincipalRef = 26
+		config.Stages = []bus.ModuleStage{
+			{EventKind: sandbox.EventObserve, StageID: sandbox.StageObserve},
+			{EventKind: sandbox.EventLoad, StageID: sandbox.StageLoad},
+		}
+		// The learned store lives under AIMEE_HOME. Unlike roundtable's review
+		// stage -- which needs a resource plane that may genuinely be absent --
+		// a home always resolves, so both stages are unconditional and the same
+		// fallback the WFE uses applies here.
+		store, err := sandbox.NewStore(sandboxHome())
+		if err != nil {
+			log.Printf("sandbox stages unavailable: %v", err)
+			return bus.ModuleProcessConfig{}, false
+		}
+		config.Handler = sandbox.NewHandler(store)
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25
-		config.Stages = []bus.ModuleStage{{EventKind: benchmarks.EventRun, StageID: benchmarks.StageRun}}
+		config.Stages = []bus.ModuleStage{
+			{EventKind: benchmarks.EventRun, StageID: benchmarks.StageRun},
+			{EventKind: benchmarks.EventLatency, StageID: benchmarks.StageLatency},
+		}
 		config.Handler = benchmarks.Handle
 	default:
 		return bus.ModuleProcessConfig{}, false

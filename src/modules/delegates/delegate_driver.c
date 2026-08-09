@@ -1,7 +1,6 @@
 /* delegate_driver.c: provider driver registry and dispatch helpers */
 #include "aimee.h"
 #include <aimee/delegates/delegate_driver.h>
-#include <aimee/tools/agent_tools.h>
 #include <string.h>
 
 /* --- Registry --- */

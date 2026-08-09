@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -297,6 +296,81 @@ func TestExecutedTurnCountExcludesAdministrativeEvents(t *testing.T) {
 	}
 }
 
+func TestRetryLimitResumeStartsFreshBudgetAndKeepsDiagnostic(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if err := store.CreateWorkItem(ctx, CreateWorkItem{ID: "wi_retry_resume", Repo: "repo", ProposalPath: "retry", WorkflowName: "build", StartStage: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	if parked, err := store.RecordRetry(ctx, "wi_retry_resume", "impl", "impl", "verify failed: stale docs", 1, 0); err != nil || !parked {
+		t.Fatalf("initial retry: parked=%v err=%v", parked, err)
+	}
+	if err := store.Resume(ctx, "wi_retry_resume"); err != nil {
+		t.Fatal(err)
+	}
+	if attempts, err := store.StageAttemptCount(ctx, "wi_retry_resume", "impl"); err != nil || attempts != 0 {
+		t.Fatalf("attempts after retry-limit resume=%d err=%v, want fresh budget", attempts, err)
+	}
+	if detail, err := store.LatestStageRetryDetail(ctx, "wi_retry_resume", "impl"); err != nil || detail != "verify failed: stale docs" {
+		t.Fatalf("retry detail=%q err=%v", detail, err)
+	}
+	if parked, err := store.RecordRetry(ctx, "wi_retry_resume", "impl", "impl", "verify failed again", 3, 0); err != nil || parked {
+		t.Fatalf("first retry in fresh budget: parked=%v err=%v", parked, err)
+	}
+	if attempts, err := store.StageAttemptCount(ctx, "wi_retry_resume", "impl"); err != nil || attempts != 1 {
+		t.Fatalf("attempts after fresh failure=%d err=%v", attempts, err)
+	}
+	if detail, err := store.LatestStageRetryDetail(ctx, "wi_retry_resume", "impl"); err != nil || detail != "verify failed again" {
+		t.Fatalf("new retry detail=%q err=%v", detail, err)
+	}
+	if err := store.Move(ctx, "wi_retry_resume", "impl", "review", "advance", "verified", "hash", 0); err != nil {
+		t.Fatal(err)
+	}
+	if detail, err := store.LatestStageRetryDetail(ctx, "wi_retry_resume", "impl"); err != nil || detail != "" {
+		t.Fatalf("completed-stage retry detail=%q err=%v, want stale detail cleared", detail, err)
+	}
+}
+
+func TestWorkflowBudgetHeartbeatExtendsReplayReservations(t *testing.T) {
+	for _, state := range []string{"actual", "unresolved"} {
+		t.Run(state, func(t *testing.T) {
+			store := newTestStore(t)
+			createTestItem(t, store, "wi_heartbeat_"+state)
+			id := "wi_heartbeat_" + state
+			if _, err := store.db.ExecContext(t.Context(), `UPDATE lifecycle_work_item
+SET reservation_state=?,reservation_owner='owner',reservation_lease_until=datetime('now','-1 minute')
+WHERE work_item_id=?`, state, id); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.HeartbeatWorkflowBudget(t.Context(), id, "owner"); err != nil {
+				t.Fatal(err)
+			}
+			var live bool
+			if err := store.db.QueryRowContext(t.Context(), `SELECT reservation_lease_until > datetime('now')
+FROM lifecycle_work_item WHERE work_item_id=?`, id).Scan(&live); err != nil || !live {
+				t.Fatalf("live=%v err=%v", live, err)
+			}
+		})
+	}
+}
+
+func TestTransientPauseIsNotRepairContext(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if err := store.CreateWorkItem(ctx, CreateWorkItem{ID: "wi_transient", Repo: "repo", ProposalPath: "transient", WorkflowName: "build", StartStage: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ParkWithDetail(ctx, "wi_transient", "impl", "runner_unavailable", "delegate service restarting", 0); err != nil {
+		t.Fatal(err)
+	}
+	if resumed, err := store.ResumeTransient(ctx, "runner_unavailable", 0); err != nil || resumed != 1 {
+		t.Fatalf("resume transient=%d err=%v", resumed, err)
+	}
+	if detail, err := store.LatestStageRetryDetail(ctx, "wi_transient", "impl"); err != nil || detail != "" {
+		t.Fatalf("transient pause leaked as repair detail=%q err=%v", detail, err)
+	}
+}
+
 func TestWorkflowBudgetAggregatesChildrenAndParksWholeTree(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -353,6 +427,36 @@ func TestGenericResumeCannotBypassLifecycleOwnedPause(t *testing.T) {
 	item, _ := store.WorkItem(context.Background(), "wi_owned_pause")
 	if item.PauseReason != "human_gate" {
 		t.Fatalf("item=%+v", item)
+	}
+}
+
+func TestReplayUnrecoverableCanBeResumedByOperator(t *testing.T) {
+	store := newTestStore(t)
+	createTestItem(t, store, "wi_replay_operator")
+	if err := store.Park(context.Background(), "wi_replay_operator", "plan_gate", "replay_unrecoverable", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Resume(context.Background(), "wi_replay_operator"); err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.WorkItem(context.Background(), "wi_replay_operator")
+	if err != nil || item.PauseReason != "" || item.State != "active" {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+}
+
+func TestBaseIntegrationConflictCanBeResumedAfterOperatorRepair(t *testing.T) {
+	store := newTestStore(t)
+	createTestItem(t, store, "wi_base_conflict")
+	if err := store.Park(context.Background(), "wi_base_conflict", "plan_gate", "base_integration_conflict", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Resume(context.Background(), "wi_base_conflict"); err != nil {
+		t.Fatalf("resume repaired base integration conflict: %v", err)
+	}
+	item, err := store.WorkItem(context.Background(), "wi_base_conflict")
+	if err != nil || item.PauseReason != "" || item.State != "active" || item.Stage != "plan_gate" {
+		t.Fatalf("item=%+v err=%v", item, err)
 	}
 }
 
@@ -565,199 +669,6 @@ func TestChangedPlanOrFeedbackIsPositiveProgress(t *testing.T) {
 		if out.Parked || out.IdenticalRepeats != 1 {
 			t.Fatalf("changed review was not recognized as progress: %+v", out)
 		}
-	}
-}
-
-func TestCancelUnassignedDelegateJobPredicateTruthTable(t *testing.T) {
-	store := newTestStore(t)
-	_, err := store.db.Exec(`CREATE TABLE agent_jobs (
-		id INTEGER PRIMARY KEY, agent_name TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
-		heartbeat_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '',
-		cancelled_at TEXT DEFAULT '', cancel_reason TEXT DEFAULT '', updated_at TEXT DEFAULT '')`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.db.Exec(`INSERT INTO agent_jobs(id,status,agent_name) VALUES
-		(41,'pending',''),(42,'pending','codex'),(43,'running','codex'),(44,'pending',' '),
-		(45,'running',''),(46,'done',''),(47,'failed',''),(48,'cancelled','')`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.db.Exec(`UPDATE agent_jobs SET created_at=datetime('now','-2 hours'), heartbeat_at=CASE WHEN status='running' THEN datetime('now','-2 hours') ELSE '' END`); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []int{41, 42, 44, 45} {
-		cancelled, err := store.CancelUnassignedDelegateJob(t.Context(), id, "lease expired", time.Hour)
-		if err != nil || !cancelled {
-			t.Fatalf("cancel unassigned job %d: cancelled=%v err=%v", id, cancelled, err)
-		}
-	}
-	for _, id := range []int{43, 46, 47, 48} {
-		cancelled, err := store.CancelUnassignedDelegateJob(t.Context(), id, "lease expired", time.Hour)
-		if err != nil || cancelled {
-			t.Fatalf("job %d assignment/terminal guard: cancelled=%v err=%v", id, cancelled, err)
-		}
-	}
-	for _, id := range []int{41, 42, 44, 45} {
-		var status, reason string
-		if err := store.db.QueryRow(`SELECT status,cancel_reason FROM agent_jobs WHERE id=?`, id).Scan(&status, &reason); err != nil {
-			t.Fatal(err)
-		}
-		if status != "cancelled" || reason != "lease expired" {
-			t.Fatalf("job %d status=%q reason=%q", id, status, reason)
-		}
-	}
-}
-
-func TestCancelUnassignedDelegateJobRacesRoutedPendingWorker(t *testing.T) {
-	store := newTestStore(t)
-	_, err := store.db.Exec(`CREATE TABLE agent_jobs (
-		id INTEGER PRIMARY KEY, agent_name TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
-		heartbeat_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '',
-		cancelled_at TEXT DEFAULT '', cancel_reason TEXT DEFAULT '', updated_at TEXT DEFAULT '')`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for id := 150; id < 200; id++ {
-		if _, err := store.db.Exec(`INSERT INTO agent_jobs(id,status,agent_name,heartbeat_at,created_at)
-			VALUES (?,'pending','codex','','2000-01-01 00:00:00')`, id); err != nil {
-			t.Fatal(err)
-		}
-		start := make(chan struct{})
-		var wg sync.WaitGroup
-		var cancelled bool
-		var cancelErr, leaseErr error
-		var leased int64
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			<-start
-			cancelled, cancelErr = store.CancelUnassignedDelegateJob(t.Context(), id, "lease expired", time.Hour)
-		}()
-		go func() {
-			defer wg.Done()
-			<-start
-			result, err := store.db.ExecContext(t.Context(), `UPDATE agent_jobs
-				SET status='running', heartbeat_at=datetime('now') WHERE id=? AND status='pending'`, id)
-			leaseErr = err
-			if err == nil {
-				leased, leaseErr = result.RowsAffected()
-			}
-		}()
-		close(start)
-		wg.Wait()
-		if cancelErr != nil || leaseErr != nil {
-			t.Fatalf("iteration %d cancel_err=%v lease_err=%v", id, cancelErr, leaseErr)
-		}
-		if (cancelled && leased != 0) || (!cancelled && leased != 1) {
-			t.Fatalf("iteration %d cancelled=%v leased=%d", id, cancelled, leased)
-		}
-		var status, agent string
-		if err := store.db.QueryRow(`SELECT status,agent_name FROM agent_jobs WHERE id=?`, id).Scan(&status, &agent); err != nil {
-			t.Fatal(err)
-		}
-		if cancelled && (status != "cancelled" || agent != "codex") {
-			t.Fatalf("iteration %d cancelled final status=%q agent=%q", id, status, agent)
-		}
-		if !cancelled && (status != "running" || agent != "codex") {
-			t.Fatalf("iteration %d leased final status=%q agent=%q", id, status, agent)
-		}
-	}
-}
-
-func TestCancelUnassignedDelegateJobRequiresExpiredLease(t *testing.T) {
-	store := newTestStore(t)
-	_, err := store.db.Exec(`CREATE TABLE agent_jobs (
-		id INTEGER PRIMARY KEY, agent_name TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
-		heartbeat_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')),
-		cancelled_at TEXT DEFAULT '', cancel_reason TEXT DEFAULT '', updated_at TEXT DEFAULT '')`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.db.Exec(`INSERT INTO agent_jobs(id,status,agent_name,heartbeat_at) VALUES (49,'running','',datetime('now'))`); err != nil {
-		t.Fatal(err)
-	}
-	cancelled, err := store.CancelUnassignedDelegateJob(t.Context(), 49, "lease expired", time.Hour)
-	if err != nil || cancelled {
-		t.Fatalf("fresh running job cancelled=%v err=%v", cancelled, err)
-	}
-}
-
-func TestCancelUnassignedDelegateJobRacesAssignment(t *testing.T) {
-	store := newTestStore(t)
-	_, err := store.db.Exec(`CREATE TABLE agent_jobs (
-		id INTEGER PRIMARY KEY, agent_name TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
-		heartbeat_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '',
-		cancelled_at TEXT DEFAULT '', cancel_reason TEXT DEFAULT '', updated_at TEXT DEFAULT '')`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for id := 100; id < 150; id++ {
-		if _, err := store.db.Exec(`INSERT INTO agent_jobs(id,status,agent_name,heartbeat_at,created_at) VALUES (?,'running','','2000-01-01 00:00:00','2000-01-01 00:00:00')`, id); err != nil {
-			t.Fatal(err)
-		}
-		start := make(chan struct{})
-		var wg sync.WaitGroup
-		var cancelled bool
-		var cancelErr, assignErr error
-		var assigned int64
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			<-start
-			cancelled, cancelErr = store.CancelUnassignedDelegateJob(t.Context(), id, "lease expired", time.Hour)
-		}()
-		go func() {
-			defer wg.Done()
-			<-start
-			result, err := store.db.ExecContext(t.Context(), `UPDATE agent_jobs SET agent_name='codex' WHERE id=? AND status != 'cancelled'`, id)
-			assignErr = err
-			if err == nil {
-				assigned, assignErr = result.RowsAffected()
-			}
-		}()
-		close(start)
-		wg.Wait()
-		if cancelErr != nil || assignErr != nil {
-			t.Fatalf("iteration %d cancel_err=%v assign_err=%v", id, cancelErr, assignErr)
-		}
-		if (cancelled && assigned != 0) || (!cancelled && assigned != 1) {
-			t.Fatalf("iteration %d cancelled=%v assigned=%d", id, cancelled, assigned)
-		}
-		var status, agent string
-		if err := store.db.QueryRow(`SELECT status,agent_name FROM agent_jobs WHERE id=?`, id).Scan(&status, &agent); err != nil {
-			t.Fatal(err)
-		}
-		if cancelled && (status != "cancelled" || agent != "") {
-			t.Fatalf("iteration %d cancelled final status=%q agent=%q", id, status, agent)
-		}
-		if !cancelled && (status != "running" || agent != "codex") {
-			t.Fatalf("iteration %d assigned final status=%q agent=%q", id, status, agent)
-		}
-	}
-}
-
-func TestForgetDelegateJobIfMatchesCannotEraseNewerRetry(t *testing.T) {
-	store := newTestStore(t)
-	const key = "same-logical-seat"
-	if err := store.SaveDelegateJob(t.Context(), key, 51, "participant-51"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SaveDelegateJob(t.Context(), key, 52, "participant-52"); err != nil {
-		t.Fatal(err)
-	}
-	forgot, err := store.ForgetDelegateJobIfMatches(t.Context(), key, 51)
-	if err != nil || forgot {
-		t.Fatalf("stale cleanup forgot=%v err=%v", forgot, err)
-	}
-	if jobID, participant, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 52 || participant != "participant-52" {
-		t.Fatalf("newer retry mapping job=%d participant=%q err=%v", jobID, participant, err)
-	}
-	forgot, err = store.ForgetDelegateJobIfMatches(t.Context(), key, 52)
-	if err != nil || !forgot {
-		t.Fatalf("matching cleanup forgot=%v err=%v", forgot, err)
-	}
-	if _, _, err := store.DelegateJob(t.Context(), key); err == nil {
-		t.Fatal("matching cleanup retained mapping")
 	}
 }
 

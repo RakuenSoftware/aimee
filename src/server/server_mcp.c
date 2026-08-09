@@ -142,20 +142,9 @@ static int send_roundtable_mcp_result(server_conn_t *conn, cJSON *result)
 static int handle_mcp_roundtable_review(server_conn_t *conn, cJSON *args)
 {
    char err[320] = "";
-   cJSON *run = mcp_roundtable_submit(args, conn->capabilities, err, sizeof(err));
-   return run ? send_roundtable_mcp_result(conn, run)
-              : server_send_error(conn, err[0] ? err : "roundtable submission failed", NULL);
-}
-
-static int handle_mcp_roundtable_status(server_conn_t *conn, cJSON *args)
-{
-   uint32_t required = server_capability_for_method("roundtable.review");
-   if (required && conn && (conn->capabilities & required) == 0)
-      return server_send_error(conn, "forbidden: insufficient capabilities", NULL);
-   char err[320] = "";
-   cJSON *run = mcp_roundtable_status(args, err, sizeof(err));
-   return run ? send_roundtable_mcp_result(conn, run)
-              : server_send_error(conn, err[0] ? err : "roundtable status failed", NULL);
+   cJSON *verdict = mcp_roundtable_review(args, conn->capabilities, err, sizeof(err));
+   return verdict ? send_roundtable_mcp_result(conn, verdict)
+                  : server_send_error(conn, err[0] ? err : "roundtable review failed", NULL);
 }
 cJSON *tool_get_help(cJSON *args)
 {
@@ -1005,22 +994,16 @@ cJSON *tool_list_hosts(void)
    return text_content(buf);
 }
 
-cJSON *smcp_tool_find_symbol(cJSON *args)
+/* Look one identifier up and append its section to `buf`. Split out of
+ * smcp_tool_find_symbol so a batched call can loop it: resolving five symbols
+ * cost five round trips, and a round trip re-sends the whole conversation
+ * prefix. Returns the new write position, or -1 if the index lookup itself
+ * failed (the caller decides whether that kills the batch). */
+static int fs_append_one(const char *ident, const char *project, int all_projects, char *buf,
+                         int pos, int cap)
 {
-   cJSON *jid = cJSON_GetObjectItemCaseSensitive(args, "identifier");
-   if (!cJSON_IsString(jid))
-      return text_content("error: missing 'identifier' parameter");
-
-   int all_projects = mcp_code_scope_all(args);
-   if (all_projects < 0)
-      return text_content("error: scope must be 'current' or 'all'");
-   const char *project = mcp_code_project_from_args(args);
-   if (!all_projects && !project)
-      return text_content("error: no active project determined from cwd; pass 'project' or "
-                          "scope='all' explicitly");
-
    term_hit_t hits[20];
-   int count = kb_client_index_find_scoped(project, all_projects, jid->valuestring, hits, 20);
+   int count = kb_client_index_find_scoped(project, all_projects, ident, hits, 20);
    if (count < 0)
    {
       /* Name the dependency that actually failed. "symbol index unavailable"
@@ -1031,41 +1014,102 @@ cJSON *smcp_tool_find_symbol(cJSON *args)
                 "index_find_scoped failed: status=%s project=%s all_projects=%d",
                 kb_client_result_status_name(kb_client_last_result_status()),
                 project ? project : "(none)", all_projects);
-      return kb_last_result_content("code index lookup failed; see result_status for whether the "
-                                    "knowledge service was unreachable, unauthorized, or the "
-                                    "scope did not resolve");
+      return -1;
    }
    int matched = 0;
    for (int i = 0; i < count; i++)
       if (all_projects || !project || strcmp(hits[i].project, project) == 0)
          matched++;
 
-   char buf[4096];
-   int pos = 0;
    if (matched == 0)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "No symbol found for '%s'%s%s%s",
-                        jid->valuestring, project ? " in project '" : "", project ? project : "",
-                        project ? "'" : "");
-   else
+      return mcp_appendf(buf, pos, cap, "No symbol found for '%s'%s%s%s\n", ident,
+                         project ? " in project '" : "", project ? project : "",
+                         project ? "'" : "");
+
+   pos = mcp_appendf(buf, pos, cap, "Found %d match(es) for '%s':\n\n", matched, ident);
+   for (int i = 0; i < count && pos < cap - 256; i++)
    {
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Found %d match(es) for '%s':\n\n", matched,
-                        jid->valuestring);
-      for (int i = 0; i < count && pos < (int)sizeof(buf) - 256; i++)
+      if (!all_projects && project && strcmp(hits[i].project, project) != 0)
+         continue;
+      /* Show the body span (line-line_end) when known, so a `file::symbol`
+       * read can fetch exactly that range; fall back to the start line. */
+      if (hits[i].line_end > hits[i].line)
+         pos = mcp_appendf(buf, pos, cap, "- %s:%d-%d [%s] in project '%s'\n", hits[i].file_path,
+                           hits[i].line, hits[i].line_end, hits[i].kind, hits[i].project);
+      else
+         pos = mcp_appendf(buf, pos, cap, "- %s:%d [%s] in project '%s'\n", hits[i].file_path,
+                           hits[i].line, hits[i].kind, hits[i].project);
+   }
+   return pos;
+}
+
+cJSON *smcp_tool_find_symbol(cJSON *args)
+{
+   cJSON *jid = cJSON_GetObjectItemCaseSensitive(args, "identifier");
+   cJSON *jids = cJSON_GetObjectItemCaseSensitive(args, "identifiers");
+   int batch = cJSON_IsArray(jids) && cJSON_GetArraySize(jids) > 0;
+   if (!batch && !cJSON_IsString(jid))
+      return text_content("error: missing 'identifier' parameter");
+
+   int all_projects = mcp_code_scope_all(args);
+   if (all_projects < 0)
+      return text_content("error: scope must be 'current' or 'all'");
+   const char *project = mcp_code_project_from_args(args);
+   if (!all_projects && !project)
+      return text_content("error: no active project determined from cwd; pass 'project' or "
+                          "scope='all' explicitly");
+
+   /* One section per identifier, so the batch buffer scales with the request. */
+   static const int FS_BUF = 16384;
+   char *buf = calloc(1, (size_t)FS_BUF);
+   if (!buf)
+      return text_content("error: out of memory");
+   int pos = 0;
+
+   if (!batch)
+   {
+      pos = fs_append_one(jid->valuestring, project, all_projects, buf, pos, FS_BUF);
+      if (pos < 0)
       {
-         if (!all_projects && project && strcmp(hits[i].project, project) != 0)
-            continue;
-         /* Show the body span (line-line_end) when known, so a `file::symbol`
-          * read can fetch exactly that range; fall back to the start line. */
-         if (hits[i].line_end > hits[i].line)
-            pos = mcp_appendf(buf, pos, (int)sizeof(buf), "- %s:%d-%d [%s] in project '%s'\n",
-                              hits[i].file_path, hits[i].line, hits[i].line_end, hits[i].kind,
-                              hits[i].project);
-         else
-            pos = mcp_appendf(buf, pos, (int)sizeof(buf), "- %s:%d [%s] in project '%s'\n",
-                              hits[i].file_path, hits[i].line, hits[i].kind, hits[i].project);
+         free(buf);
+         return kb_last_result_content("code index lookup failed; see result_status for whether "
+                                       "the knowledge service was unreachable, unauthorized, or "
+                                       "the scope did not resolve");
       }
    }
-   return text_content(buf);
+   else
+   {
+      cJSON *it = NULL;
+      int failed = 0;
+      cJSON_ArrayForEach(it, jids)
+      {
+         if (!cJSON_IsString(it) || !it->valuestring[0])
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         if (pos >= FS_BUF - 512)
+         {
+            pos = mcp_appendf(buf, pos, FS_BUF, "\n(truncated: remaining identifiers omitted)\n");
+            break;
+         }
+         int next = fs_append_one(it->valuestring, project, all_projects, buf, pos, FS_BUF);
+         if (next < 0)
+         {
+            /* One lookup failing must not discard the ones that worked -- say so
+             * against that identifier and keep going. */
+            failed++;
+            next = mcp_appendf(buf, pos, FS_BUF, "Lookup failed for '%s' (see server log)\n",
+                               it->valuestring);
+         }
+         pos = next;
+         pos = mcp_appendf(buf, pos, FS_BUF, "\n");
+      }
+      if (pos == 0)
+         pos = mcp_appendf(buf, pos, FS_BUF, "No usable identifiers in 'identifiers'");
+      (void)failed;
+   }
+
+   cJSON *out = text_content(buf);
+   free(buf);
+   return out;
 }
 
 cJSON *smcp_tool_search_docs(cJSON *args)
@@ -1539,14 +1583,29 @@ static const struct
    git_tool_fn fn;
    int mutating;
 } git_tool_table[] = {
-    {"git_status", handle_git_status, 0}, {"git_commit", handle_git_commit, 1},
-    {"git_push", handle_git_push, 1},     {"git_branch", handle_git_branch, 0},
-    {"git_log", handle_git_log, 0},       {"git_diff_summary", handle_git_diff_summary, 0},
-    {"git_pr", handle_git_pr, 1},         {"git_pull", handle_git_pull, 1},
-    {"git_clone", handle_git_clone, 0},   {"git_stash", handle_git_stash, 0},
-    {"git_tag", handle_git_tag, 0},       {"git_fetch", handle_git_fetch, 0},
-    {"git_reset", handle_git_reset, 1},   {"git_restore", handle_git_restore, 1},
+    {"git_status", handle_git_status, 0},
+    {"git_commit", handle_git_commit, 1},
+    {"git_push", handle_git_push, 1},
+    {"git_branch", handle_git_branch, 0},
+    {"git_log", handle_git_log, 0},
+    {"git_diff_summary", handle_git_diff_summary, 0},
+    {"git_pr", handle_git_pr, 1},
+    {"git_pull", handle_git_pull, 1},
+    {"git_clone", handle_git_clone, 0},
+    {"git_stash", handle_git_stash, 0},
+    {"git_tag", handle_git_tag, 0},
+    {"git_fetch", handle_git_fetch, 0},
+    {"git_reset", handle_git_reset, 1},
+    {"git_restore", handle_git_restore, 1},
     {"git_issue", handle_git_issue, 0},
+    {"git_merge", handle_git_merge, 1},
+    {"git_rebase", handle_git_rebase, 1},
+    {"git_cherry_pick", handle_git_cherry_pick, 1},
+    {"git_revert", handle_git_revert, 1},
+    {"git_sync", handle_git_sync, 1},
+    {"git_add", handle_git_add, 1},
+    {"git_switch", handle_git_switch, 0},
+    {"git_checkout", handle_git_checkout, 1},
 };
 
 static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const char *tool,
@@ -1618,7 +1677,6 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
          is_mutating = git_tool_table[i].mutating;
          break;
       }
-
    if (mismatch_err && is_mutating)
    {
       run_cmd_set_cwd(NULL);
@@ -1996,14 +2054,6 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    if (strcmp(tool, "roundtable_review") == 0)
    {
       int rc = handle_mcp_roundtable_review(conn, jargs);
-      if (owns_jargs)
-         cJSON_Delete(jargs);
-      return rc;
-   }
-
-   if (strcmp(tool, "roundtable_status") == 0)
-   {
-      int rc = handle_mcp_roundtable_status(conn, jargs);
       if (owns_jargs)
          cJSON_Delete(jargs);
       return rc;

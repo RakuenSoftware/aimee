@@ -86,10 +86,16 @@ kb_client_result_status_t kb_client_last_result_status(void)
 {
    return g_context_result;
 }
+/* When set, memory recall returns nothing -- the shape of both a quiet turn and
+ * an outage, which is exactly the pair the degraded-recall counter separates. */
+static int g_memory_returns_none = 0;
+
 int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
 {
    (void)query;
    (void)limit;
+   if (g_memory_returns_none)
+      return 0;
    if (!out || max <= 0)
       return 0;
    memset(out, 0, sizeof(out[0]) * (size_t)max);
@@ -259,15 +265,38 @@ static int test_confidence_provider(double score, const char **confidence)
    return 0;
 }
 
+static int failing_confidence_provider(double score, const char **confidence)
+{
+   (void)score;
+   (void)confidence;
+   return -1;
+}
+
+static int invalid_confidence_provider(double score, const char **confidence)
+{
+   (void)score;
+   *confidence = "unknown";
+   return 0;
+}
+
 static void test_confidence_tiers(void)
 {
+   const char *confidence = "stale";
+   ingress_preinject_register_confidence_provider(NULL);
+   assert(ingress_preinject_confidence(0.9, &confidence) == -1 && confidence == NULL);
+   ingress_preinject_register_confidence_provider(failing_confidence_provider);
+   assert(ingress_preinject_confidence(0.9, &confidence) == -1 && confidence == NULL);
+   ingress_preinject_register_confidence_provider(invalid_confidence_provider);
+   assert(ingress_preinject_confidence(0.9, &confidence) == -1 && confidence == NULL);
+
    ingress_preinject_register_confidence_provider(test_confidence_provider);
-   assert(strcmp(ingress_preinject_confidence(0.9), "high") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.66), "high") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.5), "medium") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.33), "medium") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.1), "low") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.0), "low") == 0);
+   assert(ingress_preinject_confidence(0.9, &confidence) == 0 && strcmp(confidence, "high") == 0);
+   assert(ingress_preinject_confidence(0.66, &confidence) == 0 && strcmp(confidence, "high") == 0);
+   assert(ingress_preinject_confidence(0.5, &confidence) == 0 && strcmp(confidence, "medium") == 0);
+   assert(ingress_preinject_confidence(0.33, &confidence) == 0 &&
+          strcmp(confidence, "medium") == 0);
+   assert(ingress_preinject_confidence(0.1, &confidence) == 0 && strcmp(confidence, "low") == 0);
+   assert(ingress_preinject_confidence(0.0, &confidence) == 0 && strcmp(confidence, "low") == 0);
    printf("confidence_tiers OK\n");
 }
 
@@ -285,10 +314,9 @@ static void test_format_envelope(void)
    assert(strstr(e, "</aimee-context>") != NULL);
    free(e);
 
-   /* Missing confidence defaults to low. */
-   char *e2 = ingress_preinject_format_envelope("x", NULL);
-   assert(e2 && strstr(e2, "confidence=\"low\"") != NULL);
-   free(e2);
+   /* Confidence must come from the supervised memory stage. */
+   assert(ingress_preinject_format_envelope("x", NULL) == NULL);
+   assert(ingress_preinject_format_envelope("x", "unknown") == NULL);
    printf("format_envelope OK\n");
 }
 
@@ -393,6 +421,56 @@ static void test_task_context_mode_and_first_turn_gate(void)
    g_facts_enabled = 0;
    g_context_mode = "observe";
    printf("task_context_mode_and_first_turn_gate OK\n");
+}
+
+/* An empty recall and an unreachable knowledge service produce the SAME envelope
+ * -- no memory previews either way -- so nothing downstream can tell them apart.
+ * That is how an agent ends up reporting that a symbol does not exist when it
+ * merely could not look. Assert the counter moves on the outage and stays put on
+ * the quiet turn; the envelope itself must be identical in both cases, because
+ * those bytes are a cache prefix and must not change during an outage. */
+static void test_recall_unavailable_is_counted_apart_from_empty(void)
+{
+   ingress_preinject_task_state_reset();
+   ingress_preinject_set_session_id("session-degraded");
+   g_context_mode = "off"; /* isolate the memory layer from the task-context path */
+   g_memory_returns_none = 1;
+
+   /* Quiet turn: recall reached the service and it had nothing. Not a failure. */
+   g_context_result = KB_CLIENT_RESULT_OK;
+   long long before_quiet = ingress_preinject_recall_unavailable_total();
+   char *quiet = ingress_preinject_build("what did we decide about retries", 0);
+   assert(ingress_preinject_recall_unavailable_total() == before_quiet);
+
+   /* Outage: same empty result, different cause. This must be counted. */
+   g_context_result = KB_CLIENT_RESULT_UNAVAILABLE;
+   char *outage = ingress_preinject_build("what did we decide about retries", 0);
+   assert(ingress_preinject_recall_unavailable_total() == before_quiet + 1);
+
+   /* The envelope is unchanged by the outage: whatever the quiet turn produced,
+    * the degraded turn produces byte-for-byte. The signal is the counter and the
+    * log line, never the provider-visible request. */
+   if (quiet == NULL)
+      assert(outage == NULL);
+   else
+   {
+      assert(outage != NULL);
+      assert(strcmp(quiet, outage) == 0);
+   }
+   free(quiet);
+   free(outage);
+
+   /* Recovery does not keep counting. */
+   g_context_result = KB_CLIENT_RESULT_OK;
+   long long before_recovery = ingress_preinject_recall_unavailable_total();
+   char *recovered = ingress_preinject_build("what did we decide about retries", 0);
+   assert(ingress_preinject_recall_unavailable_total() == before_recovery);
+   free(recovered);
+
+   g_memory_returns_none = 0;
+   g_context_mode = "observe";
+   ingress_preinject_set_session_id(NULL);
+   printf("  ok    memory recall: outage counted apart from an empty result\n");
 }
 
 static void test_unavailable_task_context_retries_after_recovery(void)
@@ -562,6 +640,17 @@ static void test_budgeted_build_uses_memory_previews(void)
    printf("budgeted_build_uses_memory_previews OK\n");
 }
 
+static void test_build_requires_confidence_provider(void)
+{
+   ingress_preinject_task_state_reset();
+   ingress_preinject_register_confidence_provider(NULL);
+   char *env = ingress_preinject_build("deploy matrix", 0);
+   assert(env == NULL);
+   ingress_preinject_register_confidence_provider(test_confidence_provider);
+   ingress_preinject_task_state_reset();
+   printf("build_requires_confidence_provider OK\n");
+}
+
 /* P0 Envelope IR: the renderer reproduces the old inline rendering — group
  * headers, single blank-line separators between non-empty groups, the
  * header-rides-the-first-fitting-candidate rule, the budget/omitted gate, the
@@ -712,12 +801,14 @@ int main(void)
    test_format_task_context_strict_contract();
    test_task_context_mode_and_first_turn_gate();
    test_unavailable_task_context_retries_after_recovery();
+   test_recall_unavailable_is_counted_apart_from_empty();
    test_format_code_block();
    test_query_from_messages();
    test_apply();
    test_append();
    test_render_block();
    test_budgeted_build_uses_memory_previews();
+   test_build_requires_confidence_provider();
    test_turn_id_mint_and_thread_local();
    test_compress_code_fold();
    printf("all tests passed\n");

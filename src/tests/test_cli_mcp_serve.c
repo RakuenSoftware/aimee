@@ -256,6 +256,46 @@ cJSON *handle_git_issue(cJSON *args)
    (void)args;
    return stub_git_content("git_issue");
 }
+cJSON *handle_git_merge(cJSON *args)
+{
+   (void)args;
+   return stub_git_content("git_merge");
+}
+cJSON *handle_git_rebase(cJSON *args)
+{
+   (void)args;
+   return stub_git_content("git_rebase");
+}
+cJSON *handle_git_cherry_pick(cJSON *args)
+{
+   (void)args;
+   return stub_git_content("git_cherry_pick");
+}
+cJSON *handle_git_revert(cJSON *args)
+{
+   (void)args;
+   return stub_git_content("git_revert");
+}
+cJSON *handle_git_sync(cJSON *args)
+{
+   (void)args;
+   return stub_git_content("git_sync");
+}
+cJSON *handle_git_add(cJSON *args)
+{
+   (void)args;
+   return stub_git_content("git_add");
+}
+cJSON *handle_git_switch(cJSON *args)
+{
+   (void)args;
+   return stub_git_content("git_switch");
+}
+cJSON *handle_git_checkout(cJSON *args)
+{
+   (void)args;
+   return stub_git_content("git_checkout");
+}
 
 static int g_tools_list_forbidden;
 

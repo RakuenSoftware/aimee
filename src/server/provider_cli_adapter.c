@@ -1047,6 +1047,8 @@ int provider_cli_adapter_execute(const provider_cli_adapter_t *adapter, const ag
    int timeout_ms = (agent && agent->cli_idle_timeout_ms > 0)
                         ? agent->cli_idle_timeout_ms
                         : ((agent && agent->timeout_ms > 0) ? agent->timeout_ms : -1);
+   if (agent)
+      timeout_ms = agent_timeout_cap_ms(timeout_ms, agent->tool_loop_timeout_ms_cap);
    int rc = provider_cli_collect_child(adapter, stdin_fd, stdout_fd, pid, prompt, timeout_ms,
                                        &output, out);
    free(prompt);

@@ -255,7 +255,10 @@ static int handle_session_start_remote(const char *sid)
     * if the server has moved ahead, surface a one-line notice steering the agent
     * (or user) to `aimee self-update`. Best-effort; never blocks the session. */
    {
-      char notice[256];
+      /* Both version strings are interpolated, and a git-describe version
+       * ("pre-merge-safety-903-g6fee67ae87") is far longer than a release tag --
+       * 256 truncated the dev-build notice mid-word on a real pair. */
+      char notice[512];
       if (aimee_self_update_notice(notice, sizeof notice))
       {
          ss_add(&ctx, "\n# aimee update available\n");

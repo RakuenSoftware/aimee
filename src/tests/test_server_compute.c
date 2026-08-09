@@ -13,6 +13,40 @@
 #include "db_schema.h"
 #include "db1.h"
 #include "server.h"
+#include <aimee/audit/obs_bus.h>
+#include "platform_path.h"
+#include "platform_test_util.h"
+
+/* The learned toolchain moved to the sandbox module, so resolving a sandbox
+ * image now asks the bus for it. No bus runs in a unit test: report the module
+ * as unattached, which is the condition these cases already assume (an image
+ * resolved with no learned packages). */
+int obs_bus_module_available(uint32_t event_kind)
+{
+   (void)event_kind;
+   return 0;
+}
+
+aimee_module_call_result_t
+obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+                    const void *request_body, uint32_t request_len, void *response_body,
+                    uint32_t response_capacity, uint32_t *response_len,
+                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   (void)event_kind;
+   (void)stage_id;
+   (void)trace_id;
+   (void)deadline_ns;
+   (void)request_body;
+   (void)request_len;
+   (void)response_body;
+   (void)response_capacity;
+   (void)response_len;
+   (void)cancelled;
+   (void)cancel_context;
+   return AIMEE_MODULE_CALL_TRANSPORT;
+}
+
 #include "vault_service.h" /* vault_status_t for the inject-api-key stub */
 #include <sqlite3.h>
 /* Private to src/db1/, but test_server_compute reads delegation_spawns and
@@ -51,6 +85,9 @@ static int g_agent_tool_run_calls = 0, g_config_tools_enabled = 1;
 static int g_force_no_tools = 0;
 static int g_agent_run_seen_no_tools = 0;
 static int g_last_agent_max_turns = -999;
+static int g_last_request_tool_loop_cap = -999;
+static int64_t g_last_request_tool_loop_deadline = -999;
+static int g_last_agent_tool_loop_cap = -999;
 static int g_last_write_enforce = -999;
 static int g_budget_acquire_calls = 0;
 static int g_budget_release_calls = 0;
@@ -72,6 +109,15 @@ static int g_worktree_apply_calls = 0;
 static int g_delegate_apply_calls = 0;
 static int g_delegate_apply_rc = 1;
 static char g_last_apply_src[MAX_PATH_LEN], g_last_apply_dst[MAX_PATH_LEN];
+/* The two roots of one delegate turn, sampled while the turn is running: the
+ * directory the shell would execute in, and the directory the file tools are
+ * permitted to write to. They must name the same tree. */
+/* The "## Working root" block as the delegate received it. Captured from the
+ * FULL system prompt rather than read back out of g_last_system_prompt, which is
+ * a fixed 4KB and would truncate away a block appended at the end. */
+static char g_last_root_notice[1024];
+static char g_shell_root_during_run[MAX_PATH_LEN];
+static char g_file_write_root[MAX_PATH_LEN];
 void chat_stream_worker(void *arg)
 {
    (void)arg;
@@ -85,6 +131,12 @@ static void fake_agent_fill_response(const char *prompt, agent_result_t *result)
    {
       const char *s = session_id();
       snprintf(g_session_during_run, sizeof(g_session_during_run), "%s", s ? s : "");
+   }
+   /* Sample the shell's root HERE rather than after the turn: delegate_worker
+    * clears it on the way out, so afterwards there is nothing left to compare. */
+   {
+      const char *rc = run_cmd_get_cwd();
+      snprintf(g_shell_root_during_run, sizeof(g_shell_root_during_run), "%s", rc ? rc : "");
    }
    if (prompt)
       snprintf(g_last_agent_prompt, sizeof(g_last_agent_prompt), "%s", prompt);
@@ -180,6 +232,11 @@ void server_delegate_heartbeat_end(void)
 {
 }
 
+static int g_agent_supports_code = 0;
+/* The single role the stub agent advertises, when a test needs one other than
+ * "code". Without this a delegate for any other role is rejected as unroutable
+ * before it runs, so a test asserting on the RUN silently asserts on nothing. */
+static char g_agent_role[32] = "";
 int agent_load_config(agent_config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
@@ -191,6 +248,16 @@ int agent_load_config(agent_config_t *cfg)
    cfg->agents[0].tools_enabled = g_config_tools_enabled;
    cfg->agents[0].max_tokens = 4096;
    cfg->agents[0].max_turns = -1;
+   if (g_agent_role[0])
+   {
+      snprintf(cfg->agents[0].roles[0], sizeof(cfg->agents[0].roles[0]), "%s", g_agent_role);
+      cfg->agents[0].role_count = 1;
+   }
+   else if (g_agent_supports_code)
+   {
+      snprintf(cfg->agents[0].roles[0], sizeof(cfg->agents[0].roles[0]), "code");
+      cfg->agents[0].role_count = 1;
+   }
    return 0;
 }
 
@@ -281,11 +348,19 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt, 
    (void)max_tokens;
    if (system_prompt)
       snprintf(g_last_system_prompt, sizeof(g_last_system_prompt), "%s", system_prompt);
+   {
+      const char *wr = system_prompt ? strstr(system_prompt, "## Working root") : NULL;
+      snprintf(g_last_root_notice, sizeof(g_last_root_notice), "%s", wr ? wr : "");
+   }
    memset(result, 0, sizeof(*result));
    g_agent_run_calls++;
    g_agent_run_seen_no_tools = g_force_no_tools;
    g_agent_run_seen_compute_override = g_aimee_compute_threads_override;
    g_last_agent_max_turns = cfg->agent_count > 0 ? cfg->agents[0].max_turns : -999;
+   g_last_request_tool_loop_cap = cfg->tool_loop_timeout_ms_cap;
+   g_last_request_tool_loop_deadline = cfg->tool_loop_deadline_ms;
+   g_last_agent_tool_loop_cap =
+       cfg->agent_count > 0 ? cfg->agents[0].tool_loop_timeout_ms_cap : -999;
    g_agent_seen_compute_override = g_aimee_compute_threads_override;
    g_agent_seen_budget_release_calls = g_budget_release_calls;
    fake_agent_fill_response(prompt, result);
@@ -307,10 +382,18 @@ int agent_run_with_tools(agent_config_t *cfg, const char *role, const char *syst
    (void)max_tokens;
    if (system_prompt)
       snprintf(g_last_system_prompt, sizeof(g_last_system_prompt), "%s", system_prompt);
+   {
+      const char *wr = system_prompt ? strstr(system_prompt, "## Working root") : NULL;
+      snprintf(g_last_root_notice, sizeof(g_last_root_notice), "%s", wr ? wr : "");
+   }
    memset(result, 0, sizeof(*result));
    g_agent_tool_run_calls++;
    g_agent_run_seen_compute_override = g_aimee_compute_threads_override;
    g_last_agent_max_turns = cfg->agent_count > 0 ? cfg->agents[0].max_turns : -999;
+   g_last_request_tool_loop_cap = cfg->tool_loop_timeout_ms_cap;
+   g_last_request_tool_loop_deadline = cfg->tool_loop_deadline_ms;
+   g_last_agent_tool_loop_cap =
+       cfg->agent_count > 0 ? cfg->agents[0].tool_loop_timeout_ms_cap : -999;
    g_agent_seen_compute_override = g_aimee_compute_threads_override;
    g_agent_seen_budget_release_calls = g_budget_release_calls;
    fake_agent_fill_response(prompt, result);
@@ -337,8 +420,10 @@ char *dispatch_tool_call(const char *name, const char *arguments_json, int timeo
 
 void agent_tools_parent_write_guard_set(const char *r, const char *w)
 {
-   (void)r;
-   (void)w;
+   /* The root the file tools are allowed to write to for this turn. Recorded so a
+    * test can compare it against the root the shell actually runs in --
+    * see test_delegate_shell_and_file_roots_agree. */
+   snprintf(g_file_write_root, sizeof(g_file_write_root), "%s", w ? w : (r ? r : ""));
 }
 void agent_tools_parent_write_guard_clear(void)
 {
@@ -2147,6 +2232,43 @@ static void test_direct_delegate_explicit_tools_forces_tools(void)
    printf("  PASS: test_direct_delegate_explicit_tools_forces_tools\n");
 }
 
+static void test_direct_delegate_tool_loop_cap_is_request_wide(void)
+{
+   reset_last_response();
+   int fds[2];
+   assert(pipe(fds) == 0);
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   conn->fd = fds[1];
+   g_agent_response = "bounded delegate completed";
+   g_last_request_tool_loop_cap = -999;
+   g_last_request_tool_loop_deadline = -999;
+   g_last_agent_tool_loop_cap = -999;
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "role", "code");
+   cJSON_AddStringToObject(req, "persona", "engineer");
+   cJSON_AddStringToObject(req, "prompt", "run the request-wide timeout cap test");
+   cJSON_AddTrueToObject(req, "tools");
+   cJSON_AddNumberToObject(req, "tool_loop_timeout_ms_cap", 4321);
+   assert(handle_delegate(ctx, conn, req) == 0);
+   assert(g_submitted_fn == delegate_worker && g_submitted_arg != NULL);
+   g_submitted_fn(g_submitted_arg);
+   g_submitted_arg = NULL;
+   close(fds[1]);
+   char buf[256];
+   assert(read(fds[0], buf, sizeof(buf)) >= 0);
+   close(fds[0]);
+   assert(g_last_request_tool_loop_cap == 4321);
+   assert(g_last_request_tool_loop_deadline > 0);
+   assert(g_last_agent_tool_loop_cap == 4321);
+   cJSON_Delete(req);
+   reset_last_response();
+   free(conn);
+   free(ctx);
+   printf("  PASS: test_direct_delegate_tool_loop_cap_is_request_wide\n");
+}
+
 /* Regression: an explicit tools:false (CLI --no-tools) on a tools-on-by-default
  * exec role must run the tools-OFF branch AND force tools off for the turn, so
  * agent_run_ex cannot silently re-enable tools from the agent config (the codex
@@ -2764,6 +2886,260 @@ static cJSON *sci_drive_delegate(cJSON *req)
    return out;
 }
 
+/* A background delegate on a DETACHED (client-served) workspace has no live client
+ * by the time its worker runs, so its shell is redirected into a server-side
+ * ephemeral workspace that holds no checkout. Its FILE tools still resolve the
+ * registered workspace, so a write-capable delegate there can edit the tree and
+ * cannot build, test, or diff what it edited -- observed as a delegate truncating
+ * a 2157-line file and reporting no error. That combination is refused; a
+ * read-only delegate in the same position is not, because inspection with no
+ * checkout is useless rather than destructive. */
+static void bg_detached_delegate_case(const char *role, const char *prompt, int expect_refusal,
+                                      int with_mirror_inputs)
+{
+   reset_last_response();
+   char tmpdir[512];
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-bgdetached-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(tmpdir) != NULL);
+   platform_setenv("HOME", tmpdir);
+   platform_unsetenv("AIMEE_HOME");
+   platform_setenv("AIMEE_NO_CACHE", "1");
+
+   char ws[600];
+   snprintf(ws, sizeof(ws), "%s/repo", tmpdir);
+   char wt[760];
+   snprintf(wt, sizeof(wt), "%s/.aimee/worktrees/bgdetached/main", ws);
+   char mk[900];
+   snprintf(mk, sizeof(mk), "mkdir -p %s", wt);
+   assert(system(mk) == 0);
+
+   /* Register the workspace by writing the config file directly. The config
+    * struct is a secret of the config module, so this test never names it. */
+   char cfgdir[700];
+   snprintf(cfgdir, sizeof(cfgdir), "mkdir -p %s/.config/aimee", tmpdir);
+   assert(system(cfgdir) == 0);
+   char cfgpath[700];
+   snprintf(cfgpath, sizeof(cfgpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+   /* A detached workspace that has been mirror-synced records a remote and a
+    * head; the server can then reconstruct an equivalent tree with no client
+    * present. A local repository stands in for the remote so this stays offline. */
+   char remote[700] = "", head[64] = "";
+   if (with_mirror_inputs)
+   {
+      snprintf(remote, sizeof(remote), "%s/origin", tmpdir);
+      char gitcmd[1800];
+      snprintf(gitcmd, sizeof(gitcmd),
+               "git init -q %s && cd %s && git config user.email t@t && git config user.name t && "
+               "echo seed > seed.txt && git add -A && git commit -q -m seed",
+               remote, remote);
+      assert(system(gitcmd) == 0);
+      snprintf(gitcmd, sizeof(gitcmd), "git -C %s rev-parse HEAD", remote);
+      FILE *rp = popen(gitcmd, "r");
+      assert(rp != NULL);
+      assert(fgets(head, sizeof(head), rp) != NULL);
+      pclose(rp);
+      head[strcspn(head, "\n")] = '\0';
+      assert(head[0]);
+   }
+   FILE *cf = fopen(cfgpath, "w");
+   assert(cf != NULL);
+   fprintf(cf, "workspaces:\n  - path: %s\n    provider: detached\n", ws);
+   if (with_mirror_inputs)
+      fprintf(cf, "    remote: %s\n    head: %s\n", remote, head);
+   fclose(cf);
+   config_reload();
+   assert(config_workspace_count() == 1);
+
+   g_git_repo_root_rc = 0;
+   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", ws);
+   g_worktree_create_rc = 0;
+   g_worktree_sibling_path_rc = 0;
+   snprintf(g_worktree_sibling_path_value, sizeof(g_worktree_sibling_path_value), "%s", wt);
+   run_cmd_set_cwd(NULL);
+   g_shell_root_during_run[0] = g_file_write_root[0] = g_last_root_notice[0] = '\0';
+   g_agent_response = "did the work";
+   g_agent_supports_code = 1;
+   snprintf(g_agent_role, sizeof(g_agent_role), "%s", role);
+
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "role", role);
+   cJSON_AddStringToObject(req, "persona", "engineer");
+   cJSON_AddStringToObject(req, "prompt", prompt);
+   cJSON_AddStringToObject(req, "cwd", ws);
+   cJSON_AddStringToObject(req, "via", "test-agent");
+   cJSON_AddTrueToObject(req, "tools");
+   cJSON_AddTrueToObject(req, "background");
+   assert(handle_delegate(ctx, conn, req) == 0);
+   assert(g_submitted_fn == delegate_worker && g_submitted_arg != NULL);
+   g_submitted_fn(g_submitted_arg);
+   g_submitted_arg = NULL;
+
+   db1_agent_job_t job;
+   assert(delegate_current_job(&job) == 0);
+   const char *result = job.result ? job.result : "";
+   int refused = strstr(result, "which contains no checkout") != NULL;
+   if (refused != expect_refusal)
+      fprintf(stderr, "  role=%s expected_refusal=%d got=%d status=%s result=[%s]\n", role,
+              expect_refusal, refused, job.status, result);
+   assert(refused == expect_refusal);
+   if (expect_refusal)
+   {
+      /* The refusal must be actionable: name the ephemeral workspace and both
+       * ways out, not merely decline. */
+      assert(strstr(result, "delegate-ws") != NULL);
+      assert(strstr(result, "aimee workspace serve") != NULL);
+      /* and the server-side route that works without a client at all */
+      assert(strstr(result, "--provider mirror") != NULL);
+   }
+   db1_agent_job_free(&job);
+
+   g_agent_supports_code = 0;
+   g_agent_role[0] = '\0';
+   run_cmd_set_cwd(NULL);
+   cJSON_Delete(req);
+   reset_last_response();
+   free(conn);
+   free(ctx);
+}
+
+static void test_bg_detached_write_delegate_is_refused(void)
+{
+   /* Write intent: delegate_prompt_allows_writes() reads it from the prompt. */
+   bg_detached_delegate_case(
+       "code", "implement the fix: edit native_runner.go and write a clarifying sentence", 1, 0);
+   printf("  PASS: test_bg_detached_write_delegate_is_refused\n");
+}
+
+/* A detached workspace that HAS been mirror-synced records a remote and a head,
+ * so the server reconstructs an equivalent tree from its own bare mirror and runs
+ * the delegate there instead of refusing it. That tree is the last synced state,
+ * which the run announces; what matters here is that the delegate is no longer
+ * stranded with nowhere to work. */
+static void test_bg_detached_write_delegate_uses_mirror_when_synced(void)
+{
+   bg_detached_delegate_case(
+       "code", "implement the fix: edit native_runner.go and write a clarifying sentence", 0, 1);
+   printf("  PASS: test_bg_detached_write_delegate_uses_mirror_when_synced\n");
+}
+
+static void test_bg_detached_readonly_delegate_still_runs(void)
+{
+   bg_detached_delegate_case("validate",
+                             "read-only: review the current diff for correctness and report", 0, 0);
+   /* This delegate runs where the two roots genuinely DO diverge and that is
+    * allowed: its shell is in a repo-less scratch dir while its file tools point
+    * at the client workspace. Reading in the wrong place is useless rather than
+    * destructive, so it is not refused -- but it must be told, in both respects,
+    * rather than left to conclude the repository is empty. */
+   assert(strstr(g_last_root_notice, "WARNING") != NULL);
+   assert(strstr(g_last_root_notice, "ephemeral scratch directory") != NULL);
+   assert(strstr(g_last_root_notice, "do not reconstruct it from memory") != NULL);
+   printf("  PASS: test_bg_detached_readonly_delegate_still_runs\n");
+}
+
+/* ONE ROOT PER DELEGATE TURN.
+ *
+ * A delegate has two halves that must stand in the same place: its file tools,
+ * which write under the root the parent-write guard permits, and its shell, which
+ * runs wherever run_cmd() was pointed. When those disagree the delegate can edit
+ * code and cannot build, test, or diff what it edited -- and nothing tells it so.
+ * Observed on an appliance: a delegate asked to add one comment line to a
+ * 2157-line file truncated it to 5 lines and reported success.
+ *
+ * Both roots are sampled DURING the run (delegate_worker clears them on the way
+ * out) and compared. Asserting equality is the point: a test that only checks the
+ * shell root would have passed throughout the period the two disagreed. */
+static void assert_delegate_roots_agree(const char *what)
+{
+   if (strcmp(g_shell_root_during_run, g_file_write_root) != 0)
+      fprintf(stderr, "  %s: shell root [%s] != file write root [%s]\n", what,
+              g_shell_root_during_run, g_file_write_root);
+   assert(g_shell_root_during_run[0]);
+   assert(strcmp(g_shell_root_during_run, g_file_write_root) == 0);
+}
+
+/* A background write delegate is isolated in its own sibling worktree, so its
+ * file tools write there. Its shell must run there too, not in the parent. */
+static void test_delegate_shell_and_file_roots_agree(void)
+{
+   reset_last_response();
+   char tmpdir[512];
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-rootparity-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(tmpdir) != NULL);
+   char parent[600], sibling[600];
+   snprintf(parent, sizeof(parent), "%s/repo", tmpdir);
+   snprintf(sibling, sizeof(sibling), "%s/repo-wt", tmpdir);
+   char mk[1400];
+   snprintf(mk, sizeof(mk), "mkdir -p %s %s", parent, sibling);
+   assert(system(mk) == 0);
+
+   g_git_repo_root_rc = 0;
+   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", parent);
+   g_worktree_create_rc = 0;
+   g_worktree_sibling_path_rc = 0;
+   snprintf(g_worktree_sibling_path_value, sizeof(g_worktree_sibling_path_value), "%s", sibling);
+   run_cmd_set_cwd(NULL);
+   g_shell_root_during_run[0] = g_file_write_root[0] = g_last_root_notice[0] = '\0';
+   g_agent_response = "did the work";
+   g_agent_supports_code = 1;
+
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "role", "code");
+   cJSON_AddStringToObject(req, "persona", "engineer");
+   cJSON_AddStringToObject(req, "prompt", "implement the fix: edit util.c and write the guard");
+   cJSON_AddStringToObject(req, "cwd", parent);
+   cJSON_AddStringToObject(req, "via", "test-agent");
+   cJSON_AddTrueToObject(req, "tools");
+   cJSON_AddTrueToObject(req, "background"); /* concurrent => its own worktree */
+   assert(handle_delegate(ctx, conn, req) == 0);
+   assert(g_submitted_fn == delegate_worker && g_submitted_arg != NULL);
+   g_submitted_fn(g_submitted_arg);
+   g_submitted_arg = NULL;
+
+   /* The delegate was isolated into the sibling worktree, and BOTH halves of it
+    * are there -- writes and shell alike. */
+   assert(strcmp(g_file_write_root, sibling) == 0);
+   assert_delegate_roots_agree("bg write delegate in its own worktree");
+   assert(strcmp(g_shell_root_during_run, parent) != 0);
+   /* And the delegate was TOLD where it is, by name -- it does not have to infer
+    * its own location from whether a command happens to work. */
+   assert(strstr(g_last_root_notice, sibling) != NULL);
+   assert(strstr(g_last_root_notice, "WARNING") == NULL); /* nothing diverged */
+
+   g_agent_supports_code = 0;
+   run_cmd_set_cwd(NULL);
+   cJSON_Delete(req);
+   reset_last_response();
+   free(conn);
+   free(ctx);
+   printf("  PASS: test_delegate_shell_and_file_roots_agree\n");
+}
+
+/* Same requirement on the path where the root is not the one the caller named:
+ * a background delegate on a mirror-synced DETACHED workspace is moved to a
+ * server-side reconstruction. Both halves must move together -- this is the case
+ * that regressed, where the shell was redirected long after the worktree had
+ * already been resolved against the client's path. */
+static void test_bg_detached_mirror_delegate_roots_agree(void)
+{
+   bg_detached_delegate_case(
+       "code", "implement the fix: edit native_runner.go and write a clarifying sentence", 0, 1);
+   assert_delegate_roots_agree("bg write delegate on a mirror-synced detached workspace");
+   /* Agreeing on a root is not enough here: the tree is a reconstruction at the
+    * last synced head, so the delegate must be told that what it is looking at
+    * can legitimately be behind the caller. */
+   assert(strstr(g_last_root_notice, g_shell_root_during_run) != NULL);
+   assert(strstr(g_last_root_notice, "mirror-sync") != NULL);
+   assert(strstr(g_last_root_notice, "WARNING") == NULL);
+   printf("  PASS: test_bg_detached_mirror_delegate_roots_agree\n");
+}
+
 /* Establish a sentinel "outer delegate" context; assert the worker restores it. */
 static void test_delegate_worker_restores_caller_context(void)
 {
@@ -3182,6 +3558,7 @@ int main(void)
    test_direct_delegate_review_auto_tools_uses_tools();
    test_direct_delegate_reviewer_alias_auto_tools_uses_tools();
    test_direct_delegate_explicit_tools_forces_tools();
+   test_direct_delegate_tool_loop_cap_is_request_wide();
    test_direct_delegate_no_tools_forces_no_tools();
    test_direct_delegate_one_turn_diagnose_suppresses_default_tools();
    test_readonly_code_delegate_disables_write_enforce();
@@ -3197,6 +3574,11 @@ int main(void)
    test_delegate_worker_restores_state_on_error();
    test_delegate_worker_sets_session_override_during_run();
    test_create_compute_ctx_threads_vault_identity();
+   test_bg_detached_write_delegate_is_refused();
+   test_bg_detached_readonly_delegate_still_runs();
+   test_delegate_shell_and_file_roots_agree();
+   test_bg_detached_mirror_delegate_roots_agree();
+   test_bg_detached_write_delegate_uses_mirror_when_synced();
    db1_shutdown();
    reset_last_response();
    printf("server_compute: all tests passed\n");

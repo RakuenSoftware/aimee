@@ -1,7 +1,9 @@
 #ifndef DEC_KB_CURATOR_GROUNDING_H
 #define DEC_KB_CURATOR_GROUNDING_H 1
 
-#include <stddef.h>
+#include <aimee/kb-synthesis/module_api.h>
+
+#include <stdint.h>
 
 struct cJSON;
 
@@ -10,25 +12,23 @@ extern "C"
 {
 #endif
 
-   /* Return 1 if |callee| is a known side-effecting / system-call style
-    * function name (I/O, filesystem, network, process, signal, env, or
-    * database mutation), else 0. Case-sensitive exact match. */
-   int kb_curator_callee_is_side_effecting(const char *callee);
+   /* Implemented by aimee-kb's event-bus adapter. Grounding policy is owned by
+    * the separately supervised kb-synthesis process; the curator only shapes
+    * bounded request data and applies the returned decision. */
+   typedef int (*kb_curator_grounding_provider_fn)(
+       aimee_kb_synthesis_claim_kind_t claim_kind, const char *const *claims, uint32_t claim_count,
+       const char *const *callees, uint32_t callee_count,
+       aimee_kb_synthesis_grounding_decision_t *decision);
 
-   /* Return 1 if |payload| (a code_unit artifact payload object) claims the
-    * function has NO side effects. "Claims none" means: the "side_effects"
-    * key is absent, is JSON null, is an empty array, OR is an array whose
-    * only entries are strings equal (case-insensitive) to "none", "no",
-    * "no side effects", "pure", or "n/a". Any other non-empty content
-    * counts as an honest non-empty claim (returns 0). */
-   int kb_curator_payload_claims_no_side_effects(const struct cJSON *payload);
+   void kb_curator_grounding_register_provider(kb_curator_grounding_provider_fn provider);
 
-   /* Return 1 (and fill reason_out with the first offending callee name) if
-    * the payload claims no side effects AND at least one entry in
-    * callees[0..n_callees) is side-effecting. Otherwise return 0 and set
-    * reason_out[0]='\0'. reason_out may be NULL. */
-   int kb_curator_grounding_contradicts(const struct cJSON *payload, const char *const *callees,
-                                        int n_callees, char *reason_out, size_t reason_len);
+   /* Request one bounded grounding decision. Returns 0 only after a registered
+    * provider supplies a valid module decision. Missing providers, values that
+    * exceed the wire bounds, and event-bus failures return -1; there is no local
+    * policy fallback. */
+   int kb_curator_grounding_decide(const struct cJSON *payload, const char *const *callees,
+                                   uint32_t callee_count,
+                                   aimee_kb_synthesis_grounding_decision_t *decision);
 
 #ifdef __cplusplus
 }

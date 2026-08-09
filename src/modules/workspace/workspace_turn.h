@@ -95,6 +95,21 @@ const char *workspace_turn_drift_notice(void);
  * is in a mirror workspace; 0 otherwise (out emptied). */
 int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap);
 
+/* Same resolution, for a `detached` workspace that also carries mirror inputs.
+ *
+ * A detached workspace is served by its client, so a job running with no client
+ * attached (a background delegate) cannot reach it at all. When such a workspace
+ * has recorded a `remote` and a `head` — a client ran `workspace mirror-sync` —
+ * the server can still reconstruct an equivalent tree from its own bare mirror
+ * and run there instead of having nowhere to go.
+ *
+ * That tree is the LAST SYNCED state, not the client's current one, so this is
+ * deliberately a separate entry point rather than a widening of the mirror
+ * resolver: a caller must choose the stale-but-real tree knowingly, and say so.
+ * Returns 1 and fills out[out_cap] when `cwd` is in a detached workspace with
+ * both inputs recorded; 0 otherwise (out emptied). */
+int workspace_turn_resolve_detached_mirror_cwd(const char *cwd, char *out, size_t out_cap);
+
 /* AC #6 — the worktree_cwd-trust hole. A turn carries a client-supplied `cwd`.
  * For a co-located peer (trusted_local) it is a real server-side path; for a
  * detached workspace (detached_bound) it is acted on via the provider on the

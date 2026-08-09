@@ -4,6 +4,7 @@
 /aimee-server
 aimee-forwarder
 /aimee-mcp
+/aimee-webchat
 /aimee-kb
 /aimee-witness-verify
 /aimee-kb-resolver
@@ -216,3 +217,14 @@ scratchpad/
 .ship.sh
 .mt.tgz
 .mt.b64
+
+# Benchmark scratch: analysis scripts and deploy helpers for the ponytail codex
+# comparison. These are working files for one investigation, not product code —
+# they were committed by mistake and belong with the bench notes, not the repo.
+/.deploytmp/
+/*.py
+/*.sh
+
+# Transient deploy/sync bundles for the test container.
+.synctmp/
+src/.testlogs/

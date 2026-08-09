@@ -23,6 +23,7 @@ int memory_embed_texts(const char *const *texts, int n, const char *command,
 #define NTEXT 4
 
 static int s_posts;
+static int s_last_timeout_ms;
 static char s_last_url[512];
 static char s_last_body[4096];
 
@@ -31,8 +32,8 @@ static int post_batch_ok(const char *url, const char *auth_header, const char *b
                          char **response_buf, int timeout_ms, const char *extra_headers)
 {
    (void)auth_header;
-   (void)timeout_ms;
    (void)extra_headers;
+   s_last_timeout_ms = timeout_ms;
    s_posts++;
    snprintf(s_last_url, sizeof(s_last_url), "%s", url ? url : "");
    snprintf(s_last_body, sizeof(s_last_body), "%s", body ? body : "");
@@ -86,6 +87,57 @@ static int post_fail(const char *url, const char *auth_header, const char *body,
    (void)extra_headers;
    s_posts++;
    return 500;
+}
+
+/* ---- embed round-trip bound --------------------------------------------------
+ *
+ * RED-GREEN. This was hardcoded at 30 s. That is ~20x an UNLOADED 128-text batch
+ * (1.5 s measured against bekko-a25m) but not 20x a loaded one: the kb embeds
+ * from up to KB_WORKER_MAX threads against a ThreadingHTTPServer, each request
+ * running torch with EMBEDDER_THREADS threads on a 4-CPU container. Every
+ * in-flight batch slows together and the first past 30 s makes the kb drop the
+ * connection -- surfacing as BrokenPipeError in the embedder and
+ * "knowledge service /v1/code/build did not respond" from `kb build`, which is
+ * what killed the first full-capability cell.
+ *
+ * A bound below the real cost turns a slow build into a FAILED one. Assert the
+ * headroom, and that the transport is actually handed the tunable value rather
+ * than a constant that drifts away from it. */
+static void test_embed_timeout_clears_a_loaded_batch(void)
+{
+   unsetenv("AIMEE_EMBED_HTTP_TIMEOUT_MS");
+   /* 30 s is what broke it; demand real headroom over a loaded 128-batch. */
+   assert(memory_embed_http_timeout_ms() >= 60000);
+}
+
+static void test_embed_timeout_is_operator_tunable(void)
+{
+   setenv("AIMEE_EMBED_HTTP_TIMEOUT_MS", "45000", 1);
+   assert(memory_embed_http_timeout_ms() == 45000);
+   /* Garbage and out-of-range fall back rather than disabling the bound. */
+   setenv("AIMEE_EMBED_HTTP_TIMEOUT_MS", "0", 1);
+   assert(memory_embed_http_timeout_ms() >= 60000);
+   setenv("AIMEE_EMBED_HTTP_TIMEOUT_MS", "banana", 1);
+   assert(memory_embed_http_timeout_ms() >= 60000);
+   unsetenv("AIMEE_EMBED_HTTP_TIMEOUT_MS");
+}
+
+/* The bound is only real if the transport receives it. A constant left behind at
+ * a call site is exactly how the 30 s survived unnoticed. */
+static void test_transport_receives_the_configured_bound(void)
+{
+   setenv("AIMEE_EMBED_HTTP_TIMEOUT_MS", "77000", 1);
+   mock_agent_http_reset();
+   mock_agent_http_set_post_handler(post_batch_ok);
+   s_posts = 0;
+   s_last_timeout_ms = -1;
+   const char *texts[NTEXT] = {"a", "b", "c", "d"};
+   float out[NTEXT * DIM];
+   assert(memory_embed_texts(texts, NTEXT, "http://embedder:8760", EMBED_INPUT_DOCUMENT, out,
+                             DIM) == NTEXT);
+   assert(s_posts == 1);
+   assert(s_last_timeout_ms == 77000);
+   unsetenv("AIMEE_EMBED_HTTP_TIMEOUT_MS");
 }
 
 int main(void)
@@ -162,6 +214,9 @@ int main(void)
                              DIM) == 0);
    assert(s_posts == 0);
 
+   test_embed_timeout_clears_a_loaded_batch();
+   test_embed_timeout_is_operator_tunable();
+   test_transport_receives_the_configured_bound();
    printf("test_memory_embed_batch: OK\n");
    return 0;
 }

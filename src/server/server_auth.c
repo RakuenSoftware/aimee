@@ -97,6 +97,8 @@ const method_policy_t method_registry[] = {
     {"roundtable.review", CAP_DELEGATE, "Go roundtable review transport"},
     {"dev.sweep", CAP_DELEGATE, "deepening sweep (spawns proposer delegates; analysis-only)"},
     {"delegate.status", CAP_DELEGATE, "delegate status"},
+    {"delegate.reservation.forget", CAP_DELEGATE, "release a delegate replay reservation"},
+    {"delegate.cancel_unassigned", CAP_DELEGATE, "cancel an unassigned delegate job"},
     /* Credential vault (WP-C.1): UDS-only in practice — the service layer refuses
      * any non-ATTEST_UDS_PEERCRED principal — but gated here as CAP_DELEGATE so a
      * scoped/read-only TCP bearer cannot even reach the route. */
@@ -119,6 +121,7 @@ const method_policy_t method_registry[] = {
     {"aux.config_show", CAP_SESSION_READ, "auxiliary model config"},
     {"config.show", CAP_SESSION_READ, "show configuration"},
     {"config.get", CAP_SESSION_READ, "read configuration value"},
+    {"config.deploy_env", CAP_SESSION_READ, "emit compose env for the backend record"},
     {"config.set", CAP_SESSION_ADMIN, "set configuration value"},
     {"pipeline.status", CAP_SESSION_READ, "roundtable authoring pipeline status"},
     {"pipeline.list", CAP_SESSION_READ, "list roundtable authoring pipelines"},

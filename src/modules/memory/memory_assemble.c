@@ -15,6 +15,7 @@
 #include "db2/anti_patterns.h"
 #include "db2/entity_edges.h"
 #include "db2/memory_query.h"
+#include "db2/memory_vectors.h"
 #include "db2/memory_relations.h"
 #include "db2/memory_scope_query.h"
 #include "db2/rules.h"
@@ -25,6 +26,11 @@
 #include <strings.h>
 #include <time.h>
 #include <unistd.h>
+
+/* Cosine at which two memories are treated as the same fact. High on purpose:
+ * wrongly suppressing a DISTINCT memory silently loses evidence, while admitting
+ * a redundant one merely spends budget. */
+#define ASSEMBLE_NEAR_DUPLICATE_COSINE 0.94
 
 #if defined(AIMEE_DB2_DISABLED)
 static char *memory_empty_context(void)
@@ -105,6 +111,41 @@ static int context_split_tokens(const char *norm, char tokens[][64], int max_tok
    return count;
 }
 
+/* Does `text` restate something already emitted in this section?
+ *
+ * WHY THIS EXISTS HERE AND NOT ONLY IN THE EXPLAIN PATH. Read-time
+ * near-duplicate suppression was added to memory_assemble_context_explain(),
+ * whose header comment claims it "runs a candidate scoring pass (identical to
+ * memory_assemble_context)". That claim is false: they are two separate
+ * implementations, and the explain one has a single production caller -- the
+ * `memory improve` diagnostic. So the suppression never ran for `aimee memory
+ * read`, for the agent-runtime fallback context, or anywhere else real.
+ *
+ * Found by storing two memories that were pure word-order reorderings of each
+ * other and reading the context back: both appeared, though their token sets are
+ * identical and the lexical threshold is 0.85.
+ *
+ * Lexical only, deliberately, and for the reason the explain path already gives:
+ * this is the read path, where an embedder round-trip per candidate pair would
+ * add latency to every assembly. Token overlap catches the case that actually
+ * occurs -- the same fact stored twice in slightly different words.
+ *
+ * Scoped to ONE section. Two memories of different kinds are different sections
+ * and saying related things there is not restatement; suppressing across
+ * sections would be more aggressive than the evidence supports. The asymmetry
+ * governs everything here: admitting a redundant line wastes budget, wrongly
+ * dropping a distinct one silently loses evidence. */
+static int assemble_section_is_near_duplicate(const char *text, const char *const *emitted,
+                                              int emitted_n)
+{
+   if (!text || !text[0])
+      return 0;
+   for (int i = 0; i < emitted_n; i++)
+      if (assemble_texts_near_duplicate(text, emitted[i]))
+         return 1;
+   return 0;
+}
+
 static int append_section(char *buf, int pos, int cap, const char *header,
                           const db2_memory_kv_row_t *rows, int row_count, int max_chars,
                           int max_items)
@@ -115,6 +156,12 @@ static int append_section(char *buf, int pos, int cap, const char *header,
    int items = 0;
    int section_len = 0;
 
+   /* Emitted texts, for read-time near-duplicate suppression (see
+    * assemble_section_is_near_duplicate). Points into `rows`, which outlives
+    * this loop. */
+   const char *emitted[MAX_CONTEXT_MEMS];
+   int emitted_n = 0;
+
    for (int i = 0; i < row_count && items < max_items; i++)
    {
       const char *key = rows[i].key;
@@ -123,6 +170,11 @@ static int append_section(char *buf, int pos, int cap, const char *header,
          continue;
 
       const char *text = content[0] ? content : key;
+
+      if (assemble_section_is_near_duplicate(text, emitted, emitted_n))
+         continue;
+      if (emitted_n < MAX_CONTEXT_MEMS)
+         emitted[emitted_n++] = text;
 
       char truncated[MAX_MEM_CONTENT_LEN + 8];
       if ((int)strlen(text) > MAX_MEM_CONTENT_LEN)
@@ -618,6 +670,8 @@ static int append_untasked_context(char *buf, int pos, int cap)
 
       char *seed_keys[MAX_CONTEXT_MEMS];
       int seed_count = 0;
+      const char *emitted[MAX_CONTEXT_MEMS];
+      int emitted_n = 0;
 
       for (int i = 0; i < kf_n && items < MAX_CONTEXT_MEMS; i++)
       {
@@ -626,6 +680,13 @@ static int append_untasked_context(char *buf, int pos, int cap)
          const char *supersede_ts = kf_rows[i].supersede_date;
          const char *provenance = kf_rows[i].provenance;
          const char *text = content[0] ? content : (key[0] ? key : "");
+
+         /* Before seed_keys: a restatement would seed the graph with a key whose
+          * neighbours the original already contributes. */
+         if (assemble_section_is_near_duplicate(text, emitted, emitted_n))
+            continue;
+         if (emitted_n < MAX_CONTEXT_MEMS)
+            emitted[emitted_n++] = text;
 
          if (key[0])
             seed_keys[seed_count++] = strdup(key);
@@ -993,6 +1054,21 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
          /* In budget mode: skip if remaining token budget is too small */
          if (budget_mode && tokens_used + section_tokens + c->estimated_tokens > token_budget)
             continue;
+
+         /* A restatement admitted here is evidence displaced: the budget is
+          * finite, so it pushes a genuinely different memory out of the block. */
+         {
+            const char *ctext = c->content[0] ? c->content : c->key;
+            int dup = 0;
+            for (int s2 = 0; s2 < selected_count && !dup; s2++)
+            {
+               const context_candidate_t *sel = &candidates[selected[s2]];
+               dup =
+                   assemble_texts_near_duplicate(ctext, sel->content[0] ? sel->content : sel->key);
+            }
+            if (dup)
+               continue;
+         }
 
          selected[selected_count++] = i;
          section_tokens += c->estimated_tokens;
@@ -1363,10 +1439,105 @@ char *memory_assemble_context_explain(const char *task_hint,
 
    int ecount = 0;
    int tokens_used = 0;
+   /* Indices of candidates already admitted, for the near-duplicate check below.
+    * Comparing against the admitted set keeps the work bounded (at most this many
+    * comparisons per candidate) and means suppression is judged against what the
+    * model will actually see, not against every candidate considered. */
+#define ASSEMBLE_DEDUP_TRACKED 64
+   int selected_idx[ASSEMBLE_DEDUP_TRACKED];
+   int selected_n = 0;
+
+   /* Semantic near-duplicates, resolved once for the whole candidate set.
+    *
+    * Memories are embedded at write time, so the vectors already exist: this is a
+    * single query that lets pgvector compute the cosines where the vectors live,
+    * NOT an embedder call per pair. That distinction is what makes a semantic
+    * check affordable on the read path.
+    *
+    * Embeddings catch what token overlap cannot -- "deploy to staging first" and
+    * "ship through the pre-prod matrix" share no vocabulary and mean the same
+    * thing. The lexical check below remains as the fallback for rows that have no
+    * vector yet (written but not yet embedded), where the vector answer is
+    * "unknown" rather than "distinct". */
+   int64_t dup_a[ASSEMBLE_DEDUP_TRACKED * 4];
+   int64_t dup_b[ASSEMBLE_DEDUP_TRACKED * 4];
+   double dup_cos[ASSEMBLE_DEDUP_TRACKED * 4];
+   int dup_n = 0;
+   {
+      int64_t cand_ids[ASSEMBLE_DEDUP_TRACKED];
+      int cand_n = 0;
+      for (int i = 0; i < scored_count && cand_n < ASSEMBLE_DEDUP_TRACKED; i++)
+         if (scored[i].id > 0)
+            cand_ids[cand_n++] = scored[i].id;
+      if (cand_n > 1)
+      {
+         int rc = pgvec_memory_vector_near_duplicate_pairs(
+             cand_ids, cand_n, ASSEMBLE_NEAR_DUPLICATE_COSINE, dup_a, dup_b, dup_cos,
+             (int)(sizeof(dup_a) / sizeof(dup_a[0])));
+         dup_n = rc > 0 ? rc : 0; /* no collection / no pairs: fall back to lexical */
+      }
+   }
    for (int i = 0; i < scored_count && ecount < explain_max; i++)
    {
       context_assemble_explain_entry_t *e = &explain[ecount];
       const context_candidate_t *c = &scored[i];
+
+      /* Read-time near-duplicate suppression.
+       *
+       * Candidates are deduplicated by memory id upstream, and a similarity floor
+       * drops weak hits -- but neither notices two DIFFERENT rows that say the
+       * same thing. The budget is finite, so a restatement admitted here is
+       * evidence displaced: rejected_for_budget then counts real context pushed
+       * out by a paraphrase of context already present. Dense, redundant
+       * injections also give a model concrete grounds to distrust the recall
+       * block as a whole.
+       *
+       * Lexical, not embedding-based, and deliberately so: this is the read path,
+       * where an embedder round-trip per candidate pair would add latency to
+       * every turn. Token overlap catches the case that actually occurs -- the
+       * same fact stored twice in slightly different words -- and costs a set
+       * comparison. The threshold is high on purpose: this suppresses
+       * restatements, not merely related memories, because wrongly dropping a
+       * distinct fact is far worse than admitting a redundant one. */
+      int duplicate_of = -1;
+      for (int s = 0; s < selected_n; s++)
+      {
+         const context_candidate_t *sel = &scored[selected_idx[s]];
+         /* Semantic first (it catches paraphrase), lexical as the fallback for
+          * rows the vector store does not know about yet. */
+         int same = 0;
+         for (int d = 0; d < dup_n && !same; d++)
+            if ((dup_a[d] == c->id && dup_b[d] == sel->id) ||
+                (dup_b[d] == c->id && dup_a[d] == sel->id))
+               same = 1;
+         if (!same)
+            same = assemble_texts_near_duplicate(c->content[0] ? c->content : c->key,
+                                                 sel->content[0] ? sel->content : sel->key);
+         if (same)
+         {
+            duplicate_of = selected_idx[s];
+            break;
+         }
+      }
+      if (duplicate_of >= 0)
+      {
+         memset(e, 0, sizeof(*e));
+         e->id = c->id;
+         snprintf(e->tier, sizeof(e->tier), "%s", c->tier);
+         snprintf(e->key, sizeof(e->key), "%.*s", (int)(sizeof(e->key) - 1), c->key);
+         snprintf(e->kind, sizeof(e->kind), "%s", c->kind);
+         snprintf(e->scope, sizeof(e->scope), "%s", c->scope[0] ? c->scope : "global");
+         e->tokens = c->estimated_tokens;
+         e->score = c->score;
+         e->score_per_token = c->score_per_token;
+         e->selected = 0;
+         snprintf(e->rejection_reason, sizeof(e->rejection_reason), "near_duplicate of memory %lld",
+                  (long long)scored[duplicate_of].id);
+         if (metrics)
+            metrics->suppressed_near_duplicates++;
+         ecount++;
+         continue;
+      }
       memset(e, 0, sizeof(*e));
       e->id = c->id;
       snprintf(e->tier, sizeof(e->tier), "%s", c->tier);
@@ -1383,6 +1554,8 @@ char *memory_assemble_context_explain(const char *task_hint,
          {
             e->selected = 1;
             tokens_used += e->tokens;
+            if (selected_n < (int)(sizeof(selected_idx) / sizeof(selected_idx[0])))
+               selected_idx[selected_n++] = i;
             if (metrics)
                metrics->used_tokens = tokens_used;
          }
@@ -1398,6 +1571,8 @@ char *memory_assemble_context_explain(const char *task_hint,
       else
       {
          e->selected = (ecount < MAX_CONTEXT_MEMS) ? 1 : 0;
+         if (e->selected && selected_n < (int)(sizeof(selected_idx) / sizeof(selected_idx[0])))
+            selected_idx[selected_n++] = i;
          if (!e->selected)
             snprintf(e->rejection_reason, sizeof(e->rejection_reason), "count_cap (MAX=%d)",
                      MAX_CONTEXT_MEMS);

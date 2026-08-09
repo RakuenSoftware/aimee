@@ -727,17 +727,15 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          }
       }
 
-      /* console-admin containment: the web console's scope:console-admin bearer
-       * is authorized ONLY for its fixed route allowlist (kb_route_acl.c); every
-       * other route is a 403 regardless of scope target. Server-side enforcement,
-       * defence-in-depth with the console's own role gate. */
-      if (vr.scope_kind[0] && strcmp(vr.scope_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) == 0 &&
-          !kb_route_acl_console_admin_allows(method, path))
+      /* Event-bus control-web decisions are authoritative and fail closed. */
+      if (vr.scope_kind[0] && strcmp(vr.scope_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) == 0)
       {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"forbidden: console-admin credential not permitted for %s %s\"}",
-                  method, path);
-         return 403;
+         int allowed = 0;
+         if (kb_route_acl_console_admin_authorize(method, path, &allowed) != 0)
+            return json_body_error(out_buf, out_cap, 503, "control-web authorization unavailable");
+         if (!allowed)
+            return json_body_error(out_buf, out_cap, 403,
+                                   "forbidden: console-admin credential not permitted");
       }
    }
    /* Tenancy routes (P1 slice 4): /v1/team*, /v1/project*. Reachable for any
@@ -1600,49 +1598,41 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return 503;
       }
 
-      kb_stats_t stats;
-      if (kb_build(kb_path, project, embed_cmd, force, &stats) != 0)
+      /* Queue it. Do not do it here.
+       *
+       * A build is a scan plus doc embedding plus code embedding, and its cost
+       * is a property of the corpus, not of the service being healthy: on a
+       * 3825-file checkout that is minutes of embedder time. Doing it inline
+       * made the caller hold an HTTP request open for the whole of it, and the
+       * first bound to expire anywhere in that chain turned a build that was
+       * progressing normally into a hard failure -- observed as
+       * "knowledge service /v1/code/build did not respond" with the embedder
+       * logging BrokenPipeError, after the kb dropped a connection whose embed
+       * batch had simply taken longer than the client's patience.
+       *
+       * Embedding is asynchronous by design. It completes when it completes,
+       * a second from now or a day from now, and nothing waits on it. The
+       * queue worker performs the SAME build -- doc vectors, canonical index,
+       * and code vectors -- so queueing loses no work.
+       *
+       * INTERACTIVE priority is what makes this safe to queue: an explicit
+       * build request jumps the periodic sweep instead of sitting behind it.
+       * Starvation behind the global backlog is what made someone inline this
+       * work in the first place; priority is the fix for that, not blocking. */
+      int queued =
+          db2_kb_ingest_queue_enqueue(project, kb_path, "", force, DB2_KB_INGEST_PRIO_INTERACTIVE);
+      if (queued < 0)
       {
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"kb build failed\"}");
-         return 500;
-      }
-      /* Canonical code index scan (symbols/definitions), mirroring the async
-       * ingest worker so build and ingest produce the same index. */
-      int inspected = 0;
-      /* >= 0 is the scanned-file count (success); only a negative is an error. */
-      if (canonical_index_scan_project(project, kb_path, force, &inspected) < 0)
-      {
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"canonical index scan failed\"}");
-         return 500;
-      }
-
-      /* A thin client pushes source into the canonical index because this KB
-       * process cannot see the client's path.  `kb build` used to stop after the
-       * inaccessible filesystem scan above and report a misleading all-zero
-       * success, leaving the requested project behind the global curator backlog.
-       * Finish this project from its canonical DB2 copy now: code vectors and
-       * prose/document vectors are part of a completed build, not eventual
-       * side-effects of unrelated background sweeps. */
-      kb_code_embed_result_t code_embed;
-      memset(&code_embed, 0, sizeof(code_embed));
-      if (kb_code_embed_refresh(project, "changed_files", NULL, 0, 0, 0, 0, &code_embed) != 0 ||
-          code_embed.embedded + code_embed.skipped_unchanged < code_embed.estimated_points)
-      {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"project code embedding refresh failed\"}");
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"could not queue build\"}");
          return 503;
       }
-      int doc_refreshed = kb_doc_refresh(project, embed_cmd, 200);
-      int doc_backfilled = kb_doc_embed_backfill(project, embed_cmd, 200);
-      if (doc_refreshed < 0 || doc_backfilled < 0)
-      {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"project document embedding refresh failed\"}");
-         return 503;
-      }
-      stats.embeddings_added += (int)code_embed.embedded + doc_refreshed + doc_backfilled;
-      db2_kb_runtime_state_set_now("last_ingest_at");
-      kb_http_write_build_stats(out_buf, out_cap, project, &stats);
+      /* No explicit wake: the workers park on a 2s timed wait and drain the
+       * queue, which is how /v1/code/scan already hands off. */
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"status\":\"ok\",\"queued\":true,\"project\":\"%s\","
+               "\"files_indexed\":0,\"chunks_added\":0,\"embeddings_added\":0,"
+               "\"reason\":\"queued\"}",
+               project);
       return 200;
    }
 
@@ -1997,12 +1987,17 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge store unavailable\"}");
          return 503;
       }
+      /* Repair queues for the same reason build does: it embeds, and embedding is
+       * asynchronous, full stop. An operator asking for a repair gets a durable
+       * commitment that it will happen, not an HTTP request held open across
+       * minutes of embedder time that reports failure the moment any bound in
+       * the chain expires. force=1 is preserved as the queued job's force flag. */
       kb_stats_t stats;
       memset(&stats, 0, sizeof(stats));
-      if (kb_build(kb_path, project, embed_cmd, 1, &stats) != 0)
+      if (db2_kb_ingest_queue_enqueue(project, kb_path, "", 1, DB2_KB_INGEST_PRIO_INTERACTIVE) < 0)
       {
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge repair failed\"}");
-         return 500;
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"could not queue knowledge repair\"}");
+         return 503;
       }
       int pos = 0;
       pos = js_appendf(out_buf, pos, out_cap, "{\"status\":\"ok\",\"project\":\"");

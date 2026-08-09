@@ -53,8 +53,13 @@ static int dir_has_plaintext(const char *dir, const char *needle)
    return hit;
 }
 
+/* webuser_runtime fails closed until a name validator is registered; the agent
+ * socket lives under its runtime dir. See tests/support/webuser_name_validator.c. */
+void webuser_test_install_name_validator(void);
+
 int main(void)
 {
+   webuser_test_install_name_validator();
    if (!have("ssh-agent") || !have("ssh-add") || !have("ssh-keygen"))
    {
       printf("git_ssh_agent: SKIP (openssh tooling unavailable)\n");

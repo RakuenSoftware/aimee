@@ -263,6 +263,20 @@ func (documentedNoopAgents) DelegateGroup(_ context.Context, requests []Delegate
 	return make([]DelegateGroupResult, len(requests))
 }
 
+type implementationSatisfiedNoopAgents struct{}
+
+func (implementationSatisfiedNoopAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{
+		Response: "Partial result; delegate ended with error: delegate code: no owned files changed; " +
+			"result treated as incomplete\n\nTask already complete on the current branch. No changes made.",
+		Partial: true,
+	}, nil
+}
+
+func (implementationSatisfiedNoopAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return make([]DelegateGroupResult, len(requests))
+}
+
 func (a partialNoCommitAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
 	out := make([]DelegateGroupResult, len(requests))
 	for i := range requests {
@@ -271,14 +285,28 @@ func (a partialNoCommitAgents) DelegateGroup(_ context.Context, requests []Deleg
 	return out
 }
 
-type rejectDelegateAgents struct{ calls int }
+type rejectDelegateAgents struct {
+	calls int
+	last  DelegateRequest
+}
 
-func (a *rejectDelegateAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
+func (a *rejectDelegateAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
 	a.calls++
+	a.last = request
 	return DelegateResult{}, errors.New("delegate must not run for an already-repaired reviewed tree")
 }
 
-func TestDocumentResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *testing.T) {
+type recordingVerifier struct {
+	calls int
+	err   error
+}
+
+func (v *recordingVerifier) Verify(context.Context, string) error {
+	v.calls++
+	return v.err
+}
+
+func TestReviewResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *testing.T) {
 	root := t.TempDir()
 	repo := filepath.Join(root, "repo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
@@ -338,7 +366,61 @@ func TestDocumentResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *tes
 	gitRun(t, workdir, "add", "runbook.md")
 	gitRun(t, workdir, "commit", "-m", "human repair")
 	agents.calls = 0
-	result, err := runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
+	verifier := &recordingVerifier{err: errors.New("repair still fails verification")}
+	runner.verifier = verifier
+	implementationRequest := StepRequest{WorkItem: item, Node: wfe.Node{ID: "impl"},
+		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}}
+	result, err := runner.mutate(ctx, implementationRequest, false)
+	if err != nil || result.Status != StepChanges ||
+		!strings.Contains(result.Detail, "repair still fails verification") {
+		t.Fatalf("unverified implementation repair result=%+v err=%v", result, err)
+	}
+	if agents.calls != 0 || verifier.calls != 1 {
+		t.Fatalf("unverified repair delegate calls=%d verifier calls=%d", agents.calls, verifier.calls)
+	}
+
+	verifier.err = nil
+	result, err = runner.mutate(ctx, implementationRequest, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agents.calls != 0 || verifier.calls != 2 {
+		t.Fatalf("verified repair delegate calls=%d verifier calls=%d", agents.calls, verifier.calls)
+	}
+	if result.Status != StepAdvanced || result.Artifact != branch ||
+		!strings.Contains(result.Detail, "verified and re-freezing exact repair") {
+		t.Fatalf("implementation repair result=%+v", result)
+	}
+
+	// A failed mechanical repair verification loops back to implementation.
+	// That retry must call a delegate; otherwise the fast path just reruns the
+	// identical failing verifier until retry_limit without giving anything a
+	// chance to fix the checkout.
+	if err := store.Move(ctx, item.ID, "document", "impl", "advance", "", reviewedHash, 0); err != nil {
+		t.Fatal(err)
+	}
+	if parked, err := store.RecordRetry(ctx, item.ID, "impl", "impl", "verify failed", 3, 0); err != nil || parked {
+		t.Fatalf("record implementation retry: parked=%v err=%v", parked, err)
+	}
+	item, _ = store.WorkItem(ctx, item.ID)
+	item.ContentHash = reviewedHash
+	item.Worktree = workdir
+	agents.calls = 0
+	verifierCalls := verifier.calls
+	_, err = runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "impl"},
+		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}, RetryDetail: "verify failed: clang-format violation"}, false)
+	if err == nil || agents.calls != 1 {
+		t.Fatalf("failed verification retry bypassed delegate: calls=%d err=%v", agents.calls, err)
+	}
+	if !strings.Contains(agents.last.Prompt, "PREVIOUS ATTEMPT FAILURE TO FIX:\nverify failed: clang-format violation") {
+		t.Fatalf("repair delegate did not receive verifier failure: %q", agents.last.Prompt)
+	}
+	if verifier.calls != verifierCalls {
+		t.Fatalf("failed verification retry replayed verifier: calls=%d, want %d", verifier.calls, verifierCalls)
+	}
+
+	agents.calls = 0
+	result, err = runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
 		Feedback: &wfe.ReviewFeedback{ArtifactHash: reviewedHash}}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -423,6 +505,85 @@ func TestPartialImplementWithNoCommitDoesNotAdvance(t *testing.T) {
 	if !strings.Contains(out.Detail, "was not created by delegate") {
 		t.Fatalf("delegate's own diagnosis must survive into the step detail: %q", out.Detail)
 	}
+
+	// The write-role guard also reports a legitimate sibling-satisfied no-op as
+	// partial. The implementation prompt requires the delegate to state that the
+	// task is already complete; accept only that explicit report, and still run
+	// the mechanical verifier before advancing the unchanged HEAD.
+	verifier := &recordingVerifier{}
+	satisfiedRunner := &NativeRunner{agents: implementationSatisfiedNoopAgents{},
+		worktrees: manager, db: store, verifier: verifier}
+	out, err = satisfiedRunner.mutate(ctx, StepRequest{WorkItem: child, Node: wfe.Node{ID: "impl"}}, false)
+	if err != nil {
+		t.Fatalf("sibling-satisfied mutate: %v", err)
+	}
+	if out.Status != StepAdvanced {
+		t.Fatalf("explicit completed no-op status=%q detail=%q, want advanced", out.Status, out.Detail)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("explicit completed no-op verifier calls=%d, want 1", verifier.calls)
+	}
+
+	// Existing branch work must not excuse a later partial correction attempt
+	// when the exact reviewed artifact still carries blocking feedback. Without
+	// this check the old commit made branchHasWorkOverBase true, so the unchanged
+	// retry advanced to freeze and immediately re-served the same findings.
+	workdir, _, err := manager.Ensure(ctx, child, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "implementation.go"), []byte("package implementation\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, workdir, "add", "implementation.go")
+	gitRun(t, workdir, "commit", "-m", "initial reviewed implementation")
+	child, _ = store.WorkItem(ctx, "wi_child")
+	reviewedDiff, err := frozenWorktreeDiff(ctx, child, workdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewedHash := wfe.Hash([]byte(reviewedDiff))
+	verifier = &recordingVerifier{}
+	runner.verifier = verifier
+	blockingFeedback := &wfe.ReviewFeedback{ArtifactHash: reviewedHash, Findings: []wfe.Finding{{
+		ID: "still-broken", Severity: "blocking", Summary: "the reviewed implementation is still broken",
+	}}}
+	out, err = runner.mutate(ctx, StepRequest{WorkItem: child, Node: wfe.Node{ID: "impl"},
+		Feedback: blockingFeedback}, false)
+	if err != nil {
+		t.Fatalf("review correction mutate: %v", err)
+	}
+	if out.Status != StepChanges {
+		t.Fatalf("partial correction of unchanged reviewed artifact status=%q, want changes", out.Status)
+	}
+	if verifier.calls != 0 {
+		t.Fatalf("unchanged partial correction reached verifier: calls=%d", verifier.calls)
+	}
+
+	// The inverse is equally important: a prior correction attempt may have
+	// committed the requested repair before its delegate result was lost or
+	// downgraded to partial. Once the frozen diff differs from the reviewed
+	// artifact, the retry may advance after mechanical verification even if it
+	// makes no additional commit of its own.
+	if err := os.WriteFile(filepath.Join(workdir, "implementation.go"),
+		[]byte("package implementation\n\nconst repaired = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, workdir, "add", "implementation.go")
+	gitRun(t, workdir, "commit", "-m", "repair reviewed implementation")
+	repairedHead := strings.TrimSpace(gitRun(t, workdir, "rev-parse", "HEAD"))
+	child, _ = store.WorkItem(ctx, "wi_child")
+	out, err = runner.mutate(ctx, StepRequest{WorkItem: child, Node: wfe.Node{ID: "impl"},
+		Feedback: blockingFeedback}, false)
+	if err != nil {
+		t.Fatalf("changed review correction mutate: %v", err)
+	}
+	if out.Status != StepAdvanced || out.ContentHash != repairedHead {
+		t.Fatalf("partial correction after changed reviewed artifact result=%+v, want advanced HEAD %s", out, repairedHead)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("changed partial correction verifier calls=%d, want 1", verifier.calls)
+	}
 }
 
 func TestDocumentPartialNoChangeAdvancesUnchangedHead(t *testing.T) {
@@ -467,10 +628,17 @@ func TestDocumentPartialNoChangeAdvancesUnchangedHead(t *testing.T) {
 	gitRun(t, workdir, "commit", "-m", "accepted implementation")
 	head := strings.TrimSpace(gitRun(t, workdir, "rev-parse", "HEAD"))
 	item, _ = store.WorkItem(ctx, "wi_root")
+	reviewedDiff, err := frozenWorktreeDiff(ctx, item, workdir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	runner := &NativeRunner{agents: documentedNoopAgents{}, worktrees: manager, db: store}
 	out, err := runner.mutate(ctx, StepRequest{WorkItem: item, Node: wfe.Node{ID: "document"},
-		Proposal: "Document the accepted implementation."}, true)
+		Proposal: "Document the accepted implementation.",
+		Feedback: &wfe.ReviewFeedback{ArtifactHash: wfe.Hash([]byte(reviewedDiff)), Findings: []wfe.Finding{{
+			ID: "optional-polish", Severity: "suggestion", Summary: "consider optional wording polish",
+		}}}}, true)
 	if err != nil {
 		t.Fatalf("mutate: %v", err)
 	}

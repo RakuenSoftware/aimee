@@ -7,6 +7,9 @@
 typedef int (*git_ops_classifier_fn)(const char *op, aimee_git_classification_t *classification);
 void git_ops_register_classifier(git_ops_classifier_fn classifier);
 
+typedef int (*git_ops_ref_validator_fn)(const char *ref, int *allowed);
+void git_ops_register_ref_validator(git_ops_ref_validator_fn validator);
+
 /* git_ops — run a git operation on a webchat user's project (webchat-git WP-E).
  * The project dir is resolved + validated by workspace_scope (must already
  * exist, no cross-tenant escape), the op is checked against a fixed allowlist,

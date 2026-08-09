@@ -16,6 +16,8 @@
 #include "cli_client.h"
 #include "platform_process.h"
 #include "workspace_provider_detached.h"
+#include "util.h" /* safe_exec_capture: the client's own vcs coordinates */
+#include <aimee/workspace/client_diff.h>
 #include "cJSON.h"
 
 #include <signal.h>
@@ -306,6 +308,112 @@ static void *rc_thread_main(void *arg)
 }
 #endif
 
+/* The VCS coordinates the mirror tier seeds from: the fetch URL of `origin` and
+ * the current HEAD commit. BOTH are required — the server reconstructs the tree
+ * by fetching THIS head from THIS remote — so a directory that is not a repo,
+ * has no `origin`, or has no commit yet cannot be mirrored. Returns 1 only when
+ * both resolved. POSIX-only: the thin Windows client cannot fork git, so the
+ * helper below lives inside the guard too — outside it, it is an unused static
+ * and this tree builds with -Werror. */
+#if !defined(_WIN32) && !defined(_WIN64)
+/* Strip trailing whitespace/newline from a captured git one-liner in place. */
+static void rc_chomp(char *s)
+{
+   size_t n = strlen(s);
+   while (n > 0 && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ' || s[n - 1] == '\t'))
+      s[--n] = '\0';
+}
+
+static int rc_mirror_coords(const char *root, char *remote, size_t rcap, char *head, size_t hcap)
+{
+   remote[0] = '\0';
+   head[0] = '\0';
+   char *out = NULL;
+   const char *ru[] = {"git", "-C", root, "remote", "get-url", "origin", NULL};
+   if (safe_exec_capture(ru, &out, 1024) == 0 && out)
+   {
+      snprintf(remote, rcap, "%s", out);
+      rc_chomp(remote);
+   }
+   free(out);
+   /* The head we register is the mirror BASE — the newest ancestor of HEAD that
+    * a remote already has — not HEAD itself. The server reconstructs by fetching
+    * this commit, so registering an unpushed HEAD would name something it can
+    * never resolve. Local commits are not lost: they ride along in the patch
+    * shipped below, which is computed against this same base. */
+   if (workspace_client_mirror_base(root, head, hcap) != 0)
+      head[0] = '\0';
+   return remote[0] && head[0];
+}
+#else
+static int rc_mirror_coords(const char *root, char *remote, size_t rcap, char *head, size_t hcap)
+{
+   (void)root;
+   (void)rcap;
+   (void)hcap;
+   remote[0] = '\0';
+   head[0] = '\0';
+   return 0;
+}
+#endif
+
+/* Ship the client's working-tree patch for `root` so the server's reconstruct
+ * matches what the client actually has: everything between `base` and the
+ * working tree, which is unpushed commits AND uncommitted edits AND untracked
+ * files. Without it the reconstruct is a clean checkout at base and all of that
+ * is silently missing from the tree the agent works in — the failure this whole
+ * path exists to avoid.
+ *
+ * `base` is the commit just registered as the workspace head. Passed in rather
+ * than re-resolved so the patch cannot be computed against a different commit
+ * than the one the server will check out; a patch and its base are one fact.
+ *
+ * Best-effort: a failure is reported, never fatal, because a tree at base is
+ * still a usable (if stale) sandbox and the drift report will say so. */
+static void rc_ship_client_diff(const char *endpoint, const char *bearer, const char *root,
+                                const char *base)
+{
+   char *patch = workspace_client_diff_compute(root, base);
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+   {
+      free(patch);
+      return;
+   }
+   cJSON_AddStringToObject(req, "method", "workspace.mirror-sync");
+   cJSON *args = cJSON_CreateArray();
+   cJSON_AddItemToArray(args, cJSON_CreateString(root));
+   cJSON_AddItemToObject(req, "args", args);
+   cJSON_AddStringToObject(req, "head", base ? base : "");
+   cJSON_AddStringToObject(req, "diff", patch ? patch : "");
+   free(patch);
+   char *body = cJSON_PrintUnformatted(req);
+   cJSON_Delete(req);
+   if (!body)
+      return;
+   /* Resolve the route rather than hardcode it: the method->path table is the
+    * one place that mapping is maintained, and a stale copy here would fail as a
+    * 404 the operator would have to trace back to a literal in this file. */
+   const char *verb = "POST";
+   const char *path = cli_v1_route_for_method("workspace.mirror-sync", &verb);
+   if (!path)
+   {
+      free(body);
+      fprintf(stderr, "aimee: no route for workspace.mirror-sync; the server-side sandbox will "
+                      "NOT contain uncommitted work\n");
+      return;
+   }
+   int status = 0;
+   cJSON *resp = cli_http_request(endpoint, verb, path, body, bearer, 60000, &status);
+   free(body);
+   if (status < 200 || status >= 300)
+      fprintf(stderr,
+              "aimee: could not ship the working-tree diff for %s (HTTP %d); the server-side "
+              "sandbox will be a clean checkout at HEAD and will NOT contain uncommitted work\n",
+              root, status);
+   cJSON_Delete(resp);
+}
+
 int cli_workspace_reverse_channel_start(void)
 {
    if (g_rc_active || !cli_v1_has_remote_endpoint())
@@ -319,11 +427,48 @@ int cli_workspace_reverse_channel_start(void)
    char *bearer = cli_v1_client_bearer();
    int should_unregister = 0;
 
-   /* Register the detached workspace. Treat "already registered" as an
-    * idempotent attach, but only tear down registrations created by this bridge. */
+   /* Register as `mirror`: the server seeds a bare mirror from this repo's
+    * remote, reconstructs a worktree at this head, applies the client diff
+    * shipped below, and delegates work THERE.
+    *
+    * That placement is the point. The thin client is always remote from
+    * aimee-server (mTLS), but a delegate runs LOCAL to the server — so the tree
+    * it needs must exist on the server's own filesystem, which is exactly what
+    * the mirror reconstructs. `detached` produces the opposite: the tree stays
+    * on this machine and every file and shell op marshals back to it, so an
+    * agent edits the developer's live working copy. The delegate path refuses
+    * that rather than reach across — a detached workspace is never given a
+    * container (server_compute.c) — which is why such a delegate landed in an
+    * empty scratch dir and could not see the repo at all.
+    *
+    * So there is no `detached` fallback here. A root the mirror cannot seed is
+    * refused: the reverse channel does not start and the operator is told what
+    * is missing. Failing closed leaves a delegate with no workspace, which is
+    * visible; failing open leaves it editing the developer's files, which is
+    * not.
+    *
+    * (`aimee workspace serve` still registers `detached` explicitly. That is an
+    * operator deliberately serving a tree, not an automatic default.) */
+   char ws_remote[512] = "", ws_head[128] = "";
+   if (!rc_mirror_coords(cwd, ws_remote, sizeof(ws_remote), ws_head, sizeof(ws_head)))
+   {
+      fprintf(stderr,
+              "aimee: %s cannot be mirrored (needs a git repository with an `origin` remote and at "
+              "least one commit), so no workspace was registered. Agents get no sandbox rather "
+              "than access to this working tree. Add an origin remote and commit, then reattach.\n",
+              cwd);
+      free(endpoint);
+      free(bearer);
+      return 0;
+   }
+
+   /* Register the workspace. Treat "already registered" as an idempotent attach,
+    * but only tear down registrations created by this bridge. */
    cJSON *reg = cJSON_CreateObject();
    cJSON_AddStringToObject(reg, "root", cwd);
-   cJSON_AddStringToObject(reg, "provider", "detached");
+   cJSON_AddStringToObject(reg, "provider", "mirror");
+   cJSON_AddStringToObject(reg, "remote", ws_remote);
+   cJSON_AddStringToObject(reg, "head", ws_head);
    char *body = cJSON_PrintUnformatted(reg);
    cJSON_Delete(reg);
    if (!body)
@@ -356,6 +501,13 @@ int cli_workspace_reverse_channel_start(void)
       }
       cJSON_Delete(resp);
    }
+
+   /* Ship the working-tree patch before any turn can bind the workspace: the
+    * first reconstruct applies whatever diff is on the server at that moment,
+    * and an absent one is a silent clean checkout at head. Runs on the attach
+    * path too ("already registered"), because a re-attaching client's tree has
+    * usually moved on since the registration that created it. */
+   rc_ship_client_diff(endpoint, bearer, cwd, ws_head);
 
    struct rc_args *a = calloc(1, sizeof(*a));
    if (!a)

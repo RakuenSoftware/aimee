@@ -385,107 +385,6 @@ static void print_cron_run(cJSON *resp)
       printf("error: %s\n", json_str(resp, "error"));
 }
 
-static void print_memory_row(cJSON *m)
-{
-   if (!cJSON_IsObject(m))
-      return;
-   cJSON *id = cJSON_GetObjectItemCaseSensitive(m, "id");
-   const char *tier = json_str(m, "tier");
-   const char *kind = json_str(m, "kind");
-   const char *key = json_str(m, "key");
-   const char *content = json_str(m, "content");
-   printf("%lld  %-3s %-12s %s", cJSON_IsNumber(id) ? (long long)id->valuedouble : 0, tier, kind,
-          key[0] ? key : "(no key)");
-   if (content[0])
-      printf(": %s", content);
-   putchar('\n');
-}
-
-static void print_memory_search(cJSON *resp)
-{
-   cJSON *facts = cJSON_GetObjectItemCaseSensitive(resp, "facts");
-   cJSON *windows = cJSON_GetObjectItemCaseSensitive(resp, "windows");
-   int fact_count = cJSON_IsArray(facts) ? cJSON_GetArraySize(facts) : 0;
-   int window_count = cJSON_IsArray(windows) ? cJSON_GetArraySize(windows) : 0;
-   if (fact_count == 0 && window_count == 0)
-   {
-      printf("No memories found.\n");
-      return;
-   }
-   if (fact_count > 0)
-   {
-      printf("Facts:\n");
-      cJSON *m;
-      cJSON_ArrayForEach(m, facts)
-      {
-         printf("  ");
-         print_memory_row(m);
-      }
-   }
-   if (window_count > 0)
-   {
-      printf("Conversation windows:\n");
-      cJSON *w;
-      cJSON_ArrayForEach(w, windows)
-      {
-         cJSON *score = cJSON_GetObjectItemCaseSensitive(w, "score");
-         printf("  %.4f  %s:%lld  %s\n", cJSON_IsNumber(score) ? score->valuedouble : 0.0,
-                json_str(w, "session_id"),
-                (long long)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(w, "seq")),
-                json_str(w, "summary"));
-      }
-   }
-}
-
-static void print_memory_list(cJSON *resp)
-{
-   cJSON *memories = cJSON_GetObjectItemCaseSensitive(resp, "memories");
-   if (!cJSON_IsArray(memories) || cJSON_GetArraySize(memories) == 0)
-   {
-      printf("No memories.\n");
-      return;
-   }
-   cJSON *m;
-   cJSON_ArrayForEach(m, memories)
-   {
-      print_memory_row(m);
-   }
-}
-
-static void print_memory_stats(cJSON *resp)
-{
-   cJSON *stats = cJSON_GetObjectItemCaseSensitive(resp, "stats");
-   if (!cJSON_IsObject(stats))
-   {
-      printf("No memory statistics available.\n");
-      return;
-   }
-   cJSON *total = cJSON_GetObjectItemCaseSensitive(stats, "total");
-   cJSON *conflicts = cJSON_GetObjectItemCaseSensitive(stats, "conflicts");
-   printf("Memory statistics:\n");
-   printf("  total:     %lld\n", (long long)(cJSON_IsNumber(total) ? total->valuedouble : 0));
-   printf("  conflicts: %lld\n",
-          (long long)(cJSON_IsNumber(conflicts) ? conflicts->valuedouble : 0));
-   cJSON *tiers = cJSON_GetObjectItemCaseSensitive(stats, "tier_counts");
-   if (cJSON_IsArray(tiers) && cJSON_GetArraySize(tiers) > 0)
-   {
-      printf("  tier counts:");
-      cJSON *t;
-      cJSON_ArrayForEach(t, tiers)
-          printf(" %lld", (long long)(cJSON_IsNumber(t) ? t->valuedouble : 0));
-      printf("\n");
-   }
-   cJSON *kinds = cJSON_GetObjectItemCaseSensitive(stats, "kind_counts");
-   if (cJSON_IsArray(kinds) && cJSON_GetArraySize(kinds) > 0)
-   {
-      printf("  kind counts:");
-      cJSON *k;
-      cJSON_ArrayForEach(k, kinds)
-          printf(" %lld", (long long)(cJSON_IsNumber(k) ? k->valuedouble : 0));
-      printf("\n");
-   }
-}
-
 static void print_index_scan(cJSON *resp)
 {
    /* An error response (e.g. KB unavailable) carries no projects/files counts;
@@ -1175,36 +1074,6 @@ void pt_print_rules_delete(const char *method, cJSON *resp)
 {
    print_rules_delete(resp);
 }
-void pt_print_memory_search(const char *method, cJSON *resp)
-{
-   print_memory_search(resp);
-}
-void pt_print_memory_store(const char *method, cJSON *resp)
-{
-   cJSON *id = cJSON_GetObjectItemCaseSensitive(resp, "id");
-   if (cJSON_IsNumber(id))
-      printf("stored memory %lld\n", (long long)id->valuedouble);
-   else
-      printf("stored memory\n");
-}
-void pt_print_memory_list(const char *method, cJSON *resp)
-{
-   print_memory_list(resp);
-}
-void pt_print_memory_get(const char *method, cJSON *resp)
-{
-   print_memory_row(resp);
-}
-void pt_print_memory_read(const char *method, cJSON *resp)
-{
-   cJSON *context = cJSON_GetObjectItemCaseSensitive(resp, "context");
-   if (cJSON_IsString(context))
-      printf("%s", context->valuestring);
-}
-void pt_print_memory_stats(const char *method, cJSON *resp)
-{
-   print_memory_stats(resp);
-}
 void pt_print_index_scan(const char *method, cJSON *resp)
 {
    print_index_scan(resp);
@@ -1746,6 +1615,13 @@ void pt_print_kb_status(const char *method, cJSON *resp)
          printf(" (%d running)", n_running);
       printf(", %d done last 24h\n", n_done24);
    }
+
+   /* Shown even though the verdict above stays "ok": an undrainable queue and a
+    * busy one print the same pending count, and only this says which one it is. */
+   cJSON *warn = cJSON_GetObjectItemCaseSensitive(resp, "warnings");
+   for (cJSON *w = warn ? warn->child : NULL; w; w = w->next)
+      if (cJSON_IsString(w))
+         printf("WARNING: %s\n", w->valuestring);
 }
 void pt_print_audit(const char *method, cJSON *resp)
 {
@@ -2313,11 +2189,56 @@ void pt_print_roundtable_review(const char *method, cJSON *resp)
    cJSON *art = cJSON_GetObjectItemCaseSensitive(resp, "artifact");
    if (cJSON_IsString(art) && art->valuestring[0])
       printf("%s\n", art->valuestring);
+   else
+   {
+      /* A review that produced no artifact is the case that matters most, and it
+       * printed NOTHING while exiting 0 -- so asking for a review, getting none,
+       * and being told nothing was indistinguishable from an approval. The panel
+       * reports exactly why in status/pause_reason/detail; say it.
+       *
+       * Measured against a real server: a review with no saved roundtable
+       * returned status=pending, pause_reason=panel_unreachable, detail="a
+       * roundtable review must name a saved roundtable" -- and the operator saw
+       * a silent success. */
+      cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+      cJSON *reason = cJSON_GetObjectItemCaseSensitive(resp, "pause_reason");
+      cJSON *detail = cJSON_GetObjectItemCaseSensitive(resp, "detail");
+      const char *st = cJSON_IsString(status) ? status->valuestring : "";
+      const char *rs = cJSON_IsString(reason) ? reason->valuestring : "";
+      const char *dt = cJSON_IsString(detail) ? detail->valuestring : "";
+      if (st[0] || rs[0] || dt[0])
+      {
+         fprintf(stderr, "aimee: roundtable produced no review");
+         if (st[0])
+            fprintf(stderr, " (%s)", st);
+         if (rs[0])
+            fprintf(stderr, ": %s", rs);
+         fprintf(stderr, "\n");
+         if (dt[0])
+            fprintf(stderr, "  %s\n", dt);
+      }
+      else
+         fprintf(stderr, "aimee: roundtable produced no review and gave no reason\n");
+   }
    cJSON *rounds = cJSON_GetObjectItemCaseSensitive(resp, "rounds_run");
    cJSON *converged = cJSON_GetObjectItemCaseSensitive(resp, "converged");
    if (cJSON_IsNumber(rounds))
       fprintf(stderr, "[roundtable: %d round(s)%s]\n", (int)rounds->valuedouble,
               cJSON_IsTrue(converged) ? ", converged" : "");
+}
+
+/* A review is a failure for exit-status purposes unless it actually produced
+ * one. `pending` (the panel could not be reached or seated) and any error status
+ * both mean no review happened, and a caller that gates on the exit code -- a
+ * pre-merge hook, CI, an agent -- must not read that as approval. */
+int roundtable_review_response_is_failure(cJSON *resp)
+{
+   if (!resp)
+      return 1;
+   cJSON *art = cJSON_GetObjectItemCaseSensitive(resp, "artifact");
+   if (cJSON_IsString(art) && art->valuestring[0])
+      return 0;
+   return 1;
 }
 
 /* --- kb grant printers. These four commands succeeded but printed NOTHING in text

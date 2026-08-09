@@ -141,6 +141,10 @@ func TestWorkflowOperatorCapabilityCannotBeSpoofedByBrowserHeader(t *testing.T) 
 }
 
 func TestWorkflowTriggersReadCarriesWebuserIdentity(t *testing.T) {
+	// A deployed test process inherits the production WFE environment. The fake
+	// server's explicit config must win so this test cannot mutate live state.
+	t.Setenv("AIMEE_WFE_ENGINE", "go")
+	t.Setenv("AIMEE_WFE_HTTP_SOCKET", filepath.Join(t.TempDir(), "hostile-live.sock"))
 	var gotMethod, gotUser, gotOperator string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/workflow/triggers", func(w http.ResponseWriter, r *http.Request) {

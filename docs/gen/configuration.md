@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects: e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (92)
+## CLI-settable keys (94)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
@@ -58,6 +58,8 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `embedder_dims` | int | Embedding vector width. Leave unset for a bundled embedder - it declares its own width and the kb derives it (pinned > recorded > probed). REQUIRED for an external endpoint, whose width cannot be derived; valid to 4000, the DB2 column ceiling. A ONE-WAY DOOR once anything is embedded: DB2 records the width and refuses to start on drift. |
 | `embedder_model` | string | Embedder identity. Written for a bundled model too, not just an external one: it is the registry key pooling and prefixes resolve from, and the value recorded against the corpus. |
 | `embedder_url` | string | External embedder endpoint. A non-empty value IS the external embedder; empty means the model baked into this image variant (bekko-a25m at 384, or nomic-v2 at 768 on the -nomic images). |
+| `extended_thinking_budget_tokens` | int | Reasoning budget when extended_thinking_enabled is on. Anthropic requires it below max_tokens, so the request builder raises the output cap to fit rather than emitting a request the provider would reject. |
+| `extended_thinking_enabled` | bool | Ask for extended thinking on aimee's OWN Anthropic requests (default off). Without it a turn aimee originates carries no thinking config at all, so a reasoning-capable model is never asked to reason. Off by default because thinking tokens are billed: enabling it changes spend, not just visibility. |
 | `fidelity_check_enabled` | bool | Run the answer-fidelity judge on terminal-text turns (default off; requires kb_evidence_emit_enabled + ingress_preinject_enabled). |
 | `gateway_pin_model` | bool | Gateway forces the proxied /v1/messages served model to the configured primary's model, overriding the client-requested model. Default off (the passthrough honors the client model); enable for single-model Anthropic-compatible shims. |
 | `gateway_prevent_subagents` | bool | Gateway strips subagent-spawning tools (Task/Agent/etc.) from proxied requests so the served model cannot spawn subagents. Default off. |
@@ -222,7 +224,7 @@ Internal dogfood/QA knobs; not part of the user surface.
 | `dogfood_inline_tagging` | bool | Inline-tag dogfood events during the session. |
 | `dogfood_log_dir` | string | Directory for dogfood logs. |
 
-## Config-file sections (53)
+## Config-file sections (54)
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
@@ -242,6 +244,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`dedup`**: _Response deduplication._ Keys: `enabled`, `window_seconds`
 - **`dogfood`**: _Session capture for dogfood data._ Keys: `commit_raw`, `enabled`, `inline_tagging`, `log_dir`
 - **`ensemble`**: _Roundtable ensemble panel + aggregator._ Keys: `aggregator`, `max_cost_usd`, `min_successful`, `reference_models`, `reference_personas`
+- **`extended_thinking`**: `budget_tokens`, `enabled`
 - **`fold`**: `enabled`, `excerpt_bytes`, `freeze`, `min_fold_msgs`, `recall`, `register_enabled`, `retained_msgs`
 - **`guardrails`**: _Semantic guardrail policy._ Keys: `blast_radius`, `semantic`
 - **`identity`**: _Working-profile identity injection._ Keys: `working_profile_injection`
@@ -288,7 +291,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 224 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 227 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -391,10 +394,12 @@ The binaries read 224 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_CODE_INDEX_SOURCE` | Source label recorded for code-index ingestion. |
 | `AIMEE_EMBEDDERS_FILE` | Path to the embedder registry the server reads for GET /v1/embedders (the setup wizard's embedder picker). Defaults to /opt/aimee/embedders.json, then scripts/embedders.json in a source checkout. The same file the in-container embedder reads, so one declaration drives the picker, the loading and the serving flags. |
 | `AIMEE_EMBEDDER_HOST` | DNS name of the embedder sidecar container (aimee-embedder-a25m or aimee-embedder-nomic). Setting it makes aimee-kb issue the mTLS identities for the kb -> embedder hop into $AIMEE_HOME/embedder-tls at startup, independently of the synthesis hop. Unset for an external embedder reached over plain HTTPS, or when no embedder is deployed. The sidecar refuses to start without this material. |
+| `AIMEE_EMBED_HTTP_TIMEOUT_MS` | Deadline for one embedding HTTP call, default 180000. The previous hardcoded 30s was shorter than a cold model load plus a large batch, so the first request of a run could fail on a healthy embedder. |
 | `AIMEE_KB_API_CA_BUNDLE` | CA bundle path for verifying the aimee-kb TLS certificate. |
 | `AIMEE_KB_API_URL` | aimee-kb HTTP API base URL. |
 | `AIMEE_KB_CACHE_TTL_S` | KB client cache TTL (seconds). |
 | `AIMEE_KB_CONN` | First-boot KB connection string; sealed into the server Vault before long-lived startup. |
+| `AIMEE_KB_EMBED_ALL_FILES` | Set to 1 to give EVERY indexed file a dense document vector, including source. Off by default because source files are already embedded by the code path, and embedding them a second time as prose was 82% of the doc-embedding token budget on a real corpus. Chunk rows are written either way, so lexical and FTS search over source is unaffected by this setting; only the redundant vector is skipped. |
 | `AIMEE_KB_EMIT_ENROLL` | Emit a client enrollment token on KB start. |
 | `AIMEE_KB_EMIT_SCOPE` | Scope for the emitted enrollment token. |
 | `AIMEE_KB_HARDENED` | Require the hardened KB custody and transport posture at startup. |
@@ -416,7 +421,9 @@ The binaries read 224 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_OIDC_MAX_TOKEN_AGE` | Maximum accepted age in seconds for a KB OIDC token. |
 | `AIMEE_KB_OIDC_SCOPE_CLAIM` | OIDC claim carrying the scope. |
 | `AIMEE_KB_OIDC_SCOPE_KIND` | OIDC scope-kind interpretation. |
+| `AIMEE_KB_READ_TIMEOUT_MS` | Deadline for a single KB read issued by the client, in milliseconds. |
 | `AIMEE_KB_RUNTIME_UID` | Numeric runtime user allowed to receive the management token-authority socket. |
+| `AIMEE_KB_SCAN_TIMEOUT_MS` | Deadline for a code-index scan request, in milliseconds. Scans are queued and drained by the ingest workers, so this bounds the REQUEST rather than the work. |
 | `AIMEE_KB_STATUS_BIND` | Bind address for the management-status authority. |
 | `AIMEE_KB_STATUS_DSN` | Runtime database URL used by the management-status authority; secret. |
 | `AIMEE_KB_STATUS_PORT` | Listen port for the management-status authority. |
@@ -525,7 +532,6 @@ The binaries read 224 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_ORCH_WORKFLOWS` | Enable workflow orchestration surfaces. |
 | `AIMEE_PANEL_SEAT_WAIT_SECS` | Maximum wait for a roundtable seat to acquire an eligible agent. |
 | `AIMEE_WFE_ENGINE` | Workflow runtime selector; current server images require `go`. |
-| `AIMEE_WFE_HTTP_SOCKET` | Unix socket for the Go workflow control plane. |
 | `AIMEE_WFE_WORKTREE_GC_GRACE_SECS` | Grace period before an unowned workflow worktree can be collected. |
 | `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER` | Enable automatic scheduling of admitted autonomous work items. |
 | `AIMEE_WORKFLOW_BASE` | Legacy C workflow fallback for the freeze/diff base. It does not set the Go WFE integration branch. |

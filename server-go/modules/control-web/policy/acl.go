@@ -4,13 +4,13 @@ package policy
 
 import "strings"
 
-// Entry is one exact HTTP-method and route-pattern authorization rule.
-type Entry struct {
+// entry is one exact HTTP-method and route-pattern authorization rule.
+type entry struct {
 	Method  string
 	Pattern string
 }
 
-var consoleAdminACL = []Entry{
+var consoleAdminACL = []entry{
 	{"GET", "/v1/console/overview"},
 	{"GET", "/v1/console/typed_facts"},
 	{"POST", "/v1/console/typed_facts/config"},
@@ -35,17 +35,12 @@ var consoleAdminACL = []Entry{
 	{"GET", "/v1/audit/actions"},
 }
 
-var fleetACL = []Entry{
+var fleetACL = []entry{
 	{"GET", "/v1/servers"},
 	{"GET", "/v1/servers/{id}/health"},
 	{"GET", "/v1/servers/{id}/agents"},
 	{"GET", "/v1/servers/{id}/config"},
 	{"POST", "/v1/servers/{id}/actions"},
-}
-
-// ConsoleAdminEntries returns a copy for the KB-side C allowlist drift test.
-func ConsoleAdminEntries() []Entry {
-	return append([]Entry(nil), consoleAdminACL...)
 }
 
 func segmentMatches(pattern, segment string) bool {
@@ -75,7 +70,7 @@ func pathMatches(pattern, path string) bool {
 	return true
 }
 
-func allows(entries []Entry, method, path string) bool {
+func allows(entries []entry, method, path string) bool {
 	if method == "" || path == "" || path[0] != '/' || len(path) >= 512 {
 		return false
 	}
@@ -88,8 +83,8 @@ func allows(entries []Entry, method, path string) bool {
 }
 
 // ConsoleAdminAllows reports whether control-web may proxy the request with its
-// scoped console-admin credential. One trailing slash is normalized to match
-// the KB's independent defence-in-depth C allowlist.
+// scoped console-admin credential. One trailing slash is normalized before the
+// decision is returned over the event bus.
 func ConsoleAdminAllows(method, path string) bool {
 	return allows(consoleAdminACL, method, path)
 }

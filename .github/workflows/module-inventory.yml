@@ -5,11 +5,15 @@ name: Module inventory
 # classic Team-plan check, their workflow/script definitions are reviewable PR
 # content. Do not present proposal-ordering as an isolated trusted executor; a
 # stronger guarantee requires Enterprise required workflows or an external app.
+# These filters match the BASE branch. `feature/core-modularization` alone meant
+# every gate below ran on nothing for a PR into `testing` -- not a weaker gate, no
+# gate at all, which is the exact failure ci.yml warns about in its own filter.
+# Module work now merges to `testing`, so this list tracks ci.yml's.
 on:
   pull_request:
-    branches: [feature/core-modularization]
+    branches: [main, testing, feature/core-modularization, 'aimee/feat/**', 'agent/**']
   push:
-    branches: [feature/core-modularization]
+    branches: [main, testing, feature/core-modularization]
   workflow_dispatch:
 
 concurrency:
@@ -70,6 +74,10 @@ jobs:
         run: python3 -I -S scripts/check_module_source_ownership.py
       - name: Test module source ownership failure modes
         run: python3 -I scripts/tests/test_check_module_source_ownership.py -v
+      - name: Enforce module bus boundary
+        run: python3 -I -S scripts/check_module_bus_boundary.py
+      - name: Test module bus-boundary failure modes
+        run: python3 -I scripts/tests/test_check_module_bus_boundary.py -v
       - name: Enforce panel contract boundary
         run: python3 -I -S scripts/check_panel_contract_boundary.py
       - name: Test panel contract boundary failure modes
@@ -184,7 +192,17 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # scan_history walks every commit since the historical cutoff -- 2397 of them
+    # against this tip -- and spends two git subprocesses on each, so one run is
+    # about two minutes and this job performs three plus the suite. The 5-minute
+    # budget was set when the job only ran on feature/core-modularization; on
+    # testing it cancels the job mid-step. Raised to fit the real cost.
+    #
+    # This grows with history. Making scan_history a single git-log pass would
+    # remove it, but that means reimplementing rename/copy detection and the
+    # blob claim scan in a gate that governs the Git core contract, so it is
+    # deliberately left as separate, reviewable work rather than folded in here.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:

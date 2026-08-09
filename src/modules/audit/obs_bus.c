@@ -29,9 +29,10 @@
 #include <aimee/core/event_bus/bus_region.h> /* bus_control_epoch */
 #include <aimee/core/event_bus/bus_runtime.h>
 #include <aimee/core/event_bus/module_client.h>
+#include <errno.h>
 #include "config.h"     /* config_default_dir */
 #include "log.h"
-#include "wfe_def.h" /* wfe_sha256_raw — obs_bus_key_fingerprint */
+#include "headers/aimee_sha256.h" /* aimee_sha256_raw — obs_bus_key_fingerprint */
 
 #define KIND_AUDIT_ACTION    OBS_BUS_KIND_ACTION
 #define KIND_GUARDRAIL_EVENT OBS_BUS_KIND_GUARDRAIL
@@ -52,13 +53,34 @@
  * a drop means the consumer is genuinely stuck, not merely busy. */
 #define AB_PUB_MAX 25000
 
+/* Concurrent C->module calls. Sized for the short fixed-contract stages the
+ * gateway makes per request plus room for a few long-running ones. */
+#define OBS_BUS_MODULE_CLIENTS 8
+
 static struct
 {
    bus_host_t host;
    bus_client_t producer;
    bus_client_t consumer;
-   bus_client_t module_bus;
-   aimee_module_client_t module_client;
+   /* A module call is synchronous and holds its client for the whole
+    * request/reply, so one shared client serializes every C->module call in the
+    * process. That is fatal for a long stage: a roundtable review holds the
+    * client for minutes while the module it is running calls back into this
+    * server to launch its seats -- and that callback needs a client too. The
+    * review waits on its own callback and nothing moves until something times
+    * out. Each concurrent call therefore gets its own client, which is what the
+    * module client's "dedicated client" contract assumed all along. */
+   struct
+   {
+      bus_client_t bus;
+      aimee_module_client_t client;
+      int attached;
+      int in_use;
+   } module_clients[OBS_BUS_MODULE_CLIENTS];
+   pthread_mutex_t module_client_lock;
+   pthread_cond_t module_client_free;
+   int module_in_flight;   /* calls currently holding a client */
+   int module_peak_in_flight; /* high-water mark, for diagnosing serialization */
    pthread_t thread;
    pthread_mutex_t pub_lock; /* serializes the single producer ring */
    pthread_mutex_t host_lock; /* serializes pump/reap with external admission */
@@ -421,7 +443,9 @@ static void *consumer_main(void *arg)
       uint64_t now = bus_runtime_monotonic_ns();
       bus_client_heartbeat(&g.producer, now);
       bus_client_heartbeat(&g.consumer, now);
-      bus_client_heartbeat(&g.module_bus, now);
+      for (int i = 0; i < OBS_BUS_MODULE_CLIENTS; ++i)
+         if (g.module_clients[i].attached)
+            bus_client_heartbeat(&g.module_clients[i].bus, now);
       pthread_mutex_lock(&g.host_lock);
       if (g.runtime)
          (void)bus_runtime_maintain(g.runtime, now);
@@ -466,6 +490,69 @@ static void *serve_thread(void *p)
 /* Attach one client over a socketpair the host serves on a short-lived thread
  * (the attach handshake passes the region fds via SCM_RIGHTS; after that the
  * rings live in shared memory and the sockets are no longer needed). */
+static void module_clients_destroy(void)
+{
+   for (int i = 0; i < OBS_BUS_MODULE_CLIENTS; ++i)
+   {
+      if (!g.module_clients[i].attached)
+         continue;
+      aimee_module_client_destroy(&g.module_clients[i].client);
+      bus_client_detach(&g.module_clients[i].bus);
+      g.module_clients[i].attached = 0;
+   }
+}
+
+/* Check out a client for one call. A caller waits only within its own deadline:
+ * blocking past it is what turned a busy pool into the hang this pool exists to
+ * prevent, so exhaustion is reported as a deadline rather than absorbed. */
+static int module_client_acquire(uint64_t deadline_ns)
+{
+   pthread_mutex_lock(&g.module_client_lock);
+   for (;;)
+   {
+      for (int i = 0; i < OBS_BUS_MODULE_CLIENTS; ++i)
+      {
+         if (g.module_clients[i].attached && !g.module_clients[i].in_use)
+         {
+            g.module_clients[i].in_use = 1;
+            if (++g.module_in_flight > g.module_peak_in_flight)
+               g.module_peak_in_flight = g.module_in_flight;
+            pthread_mutex_unlock(&g.module_client_lock);
+            return i;
+         }
+      }
+      if (atomic_load(&g.module_stop))
+         break;
+      struct timespec wait;
+      if (deadline_ns)
+      {
+         wait.tv_sec = (time_t)(deadline_ns / 1000000000ULL);
+         wait.tv_nsec = (long)(deadline_ns % 1000000000ULL);
+      }
+      else
+      {
+         /* No caller deadline still gets a bound: an unbounded wait here is
+          * indistinguishable from the deadlock this replaced. */
+         if (clock_gettime(CLOCK_MONOTONIC, &wait) != 0)
+            break;
+         wait.tv_sec += 30;
+      }
+      if (pthread_cond_timedwait(&g.module_client_free, &g.module_client_lock, &wait) == ETIMEDOUT)
+         break;
+   }
+   pthread_mutex_unlock(&g.module_client_lock);
+   return -1;
+}
+
+static void module_client_release(int index)
+{
+   pthread_mutex_lock(&g.module_client_lock);
+   g.module_clients[index].in_use = 0;
+   g.module_in_flight--;
+   pthread_cond_signal(&g.module_client_free);
+   pthread_mutex_unlock(&g.module_client_lock);
+}
+
 static int attach(bus_client_t *c)
 {
    int sv[2];
@@ -494,6 +581,17 @@ static int start_locked(void)
    memset(&g, 0, sizeof g);
    pthread_mutex_init(&g.pub_lock, NULL);
    pthread_mutex_init(&g.host_lock, NULL);
+   pthread_mutex_init(&g.module_client_lock, NULL);
+   {
+      /* Module deadlines are CLOCK_MONOTONIC, so the wait for a free client must
+       * be too. A default condvar waits on CLOCK_REALTIME, which a clock step
+       * would make honour the wrong instant. */
+      pthread_condattr_t attr;
+      pthread_condattr_init(&attr);
+      pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+      pthread_cond_init(&g.module_client_free, &attr);
+      pthread_condattr_destroy(&attr);
+   }
 
    bus_host_config_t cfg;
    memset(&cfg, 0, sizeof cfg);
@@ -510,12 +608,19 @@ static int start_locked(void)
       pthread_mutex_destroy(&g.pub_lock);
       return -1;
    }
-   if (attach(&g.producer) != 0 || attach(&g.consumer) != 0 || attach(&g.module_bus) != 0 ||
-       aimee_module_client_init(&g.module_client, &g.module_bus) != 0)
+   int module_clients_ready = 1;
+   for (int i = 0; i < OBS_BUS_MODULE_CLIENTS && module_clients_ready; ++i)
+   {
+      if (attach(&g.module_clients[i].bus) != 0 ||
+          aimee_module_client_init(&g.module_clients[i].client, &g.module_clients[i].bus) != 0)
+         module_clients_ready = 0;
+      else
+         g.module_clients[i].attached = 1;
+   }
+   if (attach(&g.producer) != 0 || attach(&g.consumer) != 0 || !module_clients_ready)
    {
       aimee_log(LOG_ERROR, "obs_bus", "audit bus client attach failed");
-      aimee_module_client_destroy(&g.module_client);
-      bus_client_detach(&g.module_bus);
+      module_clients_destroy();
       bus_client_detach(&g.consumer);
       bus_client_detach(&g.producer);
       bus_host_destroy(&g.host);
@@ -575,8 +680,7 @@ start_fail:
    bus_capture_free(&g.capture);
    bus_client_detach(&g.producer);
    bus_client_detach(&g.consumer);
-   aimee_module_client_destroy(&g.module_client);
-   bus_client_detach(&g.module_bus);
+   module_clients_destroy();
    bus_host_destroy(&g.host);
    pthread_mutex_destroy(&g.host_lock);
    pthread_mutex_destroy(&g.pub_lock);
@@ -618,12 +722,27 @@ aimee_module_call_result_t obs_bus_module_call(
       atomic_fetch_sub(&g.module_callers, 1);
       return AIMEE_MODULE_CALL_TRANSPORT;
    }
+   int slot = module_client_acquire(deadline_ns);
+   if (slot < 0)
+   {
+      atomic_fetch_sub(&g.module_callers, 1);
+      return AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+   }
    module_cancel_context_t state = {.external = cancelled, .context = cancel_context};
    aimee_module_call_result_t result = aimee_module_client_call(
-       &g.module_client, event_kind, stage_id, trace_id, deadline_ns, request_body, request_len,
-       response_body, response_capacity, response_len, module_call_cancelled, &state);
+       &g.module_clients[slot].client, event_kind, stage_id, trace_id, deadline_ns, request_body,
+       request_len, response_body, response_capacity, response_len, module_call_cancelled, &state);
+   module_client_release(slot);
    atomic_fetch_sub(&g.module_callers, 1);
    return result;
+}
+
+int obs_bus_module_peak_concurrency(void)
+{
+   pthread_mutex_lock(&g.module_client_lock);
+   int peak = g.module_peak_in_flight;
+   pthread_mutex_unlock(&g.module_client_lock);
+   return peak;
 }
 
 int obs_bus_module_available(uint32_t event_kind)
@@ -879,8 +998,7 @@ void obs_bus_stop(void)
    bus_capture_free(&g.capture);
    bus_client_detach(&g.producer);
    bus_client_detach(&g.consumer);
-   aimee_module_client_destroy(&g.module_client);
-   bus_client_detach(&g.module_bus);
+   module_clients_destroy();
    bus_host_destroy(&g.host);
    bus_runtime_policy_free(&g.runtime_policy);
    pthread_mutex_destroy(&g.host_lock);
@@ -930,7 +1048,7 @@ void obs_bus_key_fingerprint(const char *kind, const char *key, char *out, size_
    int n = snprintf(buf, sizeof buf, "%s\x1f%s", kind ? kind : "", key ? key : "");
    size_t len = (n < 0) ? 0 : ((size_t)n < sizeof buf ? (size_t)n : sizeof buf);
    unsigned char dig[32];
-   if (wfe_sha256_raw(buf, len, dig) != 0)
+   if (aimee_sha256_raw(buf, len, dig) != 0)
    {
       snprintf(out, out_len, "mk:?");
       return;

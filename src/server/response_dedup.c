@@ -26,13 +26,17 @@ void response_dedup_register_key_provider(response_dedup_key_provider_fn provide
    g_key_provider = provider;
 }
 
-void response_dedup_key(const response_dedup_key_inputs_t *in, char *out, size_t out_cap)
+int response_dedup_key(const response_dedup_key_inputs_t *in, char *out, size_t out_cap)
 {
    if (!out || out_cap == 0)
-      return;
+      return -1;
    out[0] = '\0';
-   if (in && g_key_provider)
-      (void)g_key_provider(in, out, out_cap);
+   if (!in || !g_key_provider || g_key_provider(in, out, out_cap) != 0 || !out[0])
+   {
+      out[0] = '\0';
+      return -1;
+   }
+   return 0;
 }
 
 int response_dedup_get(const char *key, long now, char **resp_out, double *cost_out)

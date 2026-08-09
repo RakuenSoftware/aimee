@@ -221,7 +221,7 @@ extern "C"
    cJSON *db2_kb_service_dashboard_directives_json(void);
    cJSON *db2_kb_service_memory_find_facts_json(const char *query, int limit);
    cJSON *db2_kb_service_memory_list_json(const char *tier, const char *kind, int limit);
-   cJSON *db2_kb_service_memory_get_json(int64_t id);
+   cJSON *db2_kb_service_memory_get_json(int64_t id, const char *as_of);
    cJSON *db2_kb_service_memory_load_eval_corpus_json(int max);
    cJSON *db2_kb_service_memory_top_l2_facts_json(int max);
    cJSON *db2_kb_service_session_briefing_commitments_json(int limit);

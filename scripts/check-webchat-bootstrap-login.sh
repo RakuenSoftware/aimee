@@ -15,6 +15,11 @@ trap 'find "$test_dir" -depth -delete 2>/dev/null || true' EXIT
 export AIMEE_HOME="$test_dir/home"
 mkdir -p "$AIMEE_HOME/webchat"
 
+# Minimal containers do not have to export USER.  Resolve the account before the
+# fixture replaces id() below so set -u cannot turn an environment detail into a
+# release-check failure.
+fixture_process_user=${USER:-$(id -un 2>/dev/null || printf '%s' aimee)}
+
 sealed_dir="$test_dir/sealed-vault-fixture"
 mkdir -p "$sealed_dir"
 cleared_users="$test_dir/cleared-users"
@@ -46,7 +51,7 @@ runuser() {
 # unconditionally, so provisioning always took the already-exists branch and the
 # useradd path — the one a FRESH appliance actually walks — was never exercised.
 existing_users="$test_dir/existing-users"
-printf '%s\n' operator legacy aimee "$USER" > "$existing_users"
+printf '%s\n' operator legacy aimee "$fixture_process_user" > "$existing_users"
 id() {
   case ${1:-} in
     -nG|-gn|-u) shift ;;
@@ -59,16 +64,21 @@ id() {
 # membership and loses only its shadow verifier, and a container recreate drops
 # the accounts while the group definition ships in the image.
 group_members="$test_dir/group-members"
-# A FRESH appliance: the group ships in the image with no members. The old stub
-# answered only for "aimee", never the login group, so this matches what the
-# generation checks below have always seen.
+# A FRESH appliance. The group does NOT ship in the image -- verified against
+# ghcr.io/rakuensoftware/aimee-server:testing, which has no aimee-webchat group and
+# no admin account. The old fixture asserted the opposite (getent group always
+# succeeded), which is exactly why it could not see a restore path whose usermod
+# failed for want of the group. Absent marker = no group yet; groupadd creates it.
 printf '' > "$group_members"
+group_exists="$test_dir/group-exists"
+rm -f "$group_exists"
 shadow_hashes="$test_dir/shadow-hashes"   # "<user> <hash>"; absent => a usable hash
 : > "$shadow_hashes"
 getent() {
   case ${1:-} in
     group)
       [[ ${2:-} == "${WEBCHAT_LOGIN_GROUP:-aimee}" ]] || return 1
+      [[ -f $group_exists ]] || return 1
       printf '%s:x:999:%s\n' "$2" "$(cat "$group_members")"
       ;;
     passwd)
@@ -90,8 +100,11 @@ usermod() {
     return 0
   fi
   printf '%s\n' "$*" >> "$cleared_users"
-  # -aG <group> <user>: reflect the membership so getent group agrees.
+  # -aG <group> <user>: reflect the membership so getent group agrees. Real usermod
+  # FAILS on an unknown group; modelling that is what exposes a restore that runs
+  # before the group is created.
   if [[ ${1:-} == -aG ]]; then
+    [[ -f $group_exists ]] || return 1
     printf '%s,%s\n' "$(cat "$group_members")" "${3:-}" > "$group_members"
   fi
 }
@@ -103,7 +116,7 @@ useradd() {
   # Provisioning adds the supplementary group separately (usermod -aG); model
   # that here so group membership reflects what actually happened.
 }
-groupadd() { :; }
+groupadd() { printf 'x' > "$group_exists"; }
 chpasswd() {
   # -e means the payload is a hash, not a plaintext password (the restore path).
   if [[ ${1:-} == -e ]]; then
@@ -171,7 +184,7 @@ unset AIMEE_WEBCHAT_USER AIMEE_WEBCHAT_PASSWORD
 # section above provisioned a real login and put it in the group; leaving it
 # there would (correctly) suppress generation and this section would be testing
 # nothing. The old stub hid that by never answering for the login group.
-printf '%s\n' operator legacy aimee "$USER" > "$existing_users"
+printf '%s\n' operator legacy aimee "$fixture_process_user" > "$existing_users"
 printf '' > "$group_members"
 : > "$shadow_hashes"
 
@@ -222,7 +235,7 @@ second_log=$(webchat_provision_bootstrap_account 2>&1)
 #
 # Model exactly that: markers intact, accounts and group membership gone.
 : > "$cleared_users"
-printf '%s\n' operator legacy aimee "$USER" > "$existing_users"   # the image's own users
+printf '%s\n' operator legacy aimee "$fixture_process_user" > "$existing_users"   # the image's own users
 printf '' > "$group_members"                                       # group ships empty
 printf 'generated:%s\n' "$gen_user" > "$WEBCHAT_BOOTSTRAP_USER"
 printf 'jbailes\n' > "$WEBCHAT_BOOTSTRAP_REPLACED"
@@ -244,8 +257,9 @@ upgrade_user=$(sed -n 's/.*username: //p' <<<"$upgrade_log" | tr -d ' ' | head -
 # records the managed accounts and their verifiers; restore them instead.
 rm -rf "$AIMEE_HOME/webchat"; mkdir -p "$AIMEE_HOME/webchat"
 : > "$cleared_users"
-printf '%s\n' operator legacy aimee "$USER" > "$existing_users"   # the image's own users
+printf '%s\n' operator legacy aimee "$fixture_process_user" > "$existing_users"   # the image's own users
 printf '' > "$group_members"                                       # group ships empty
+rm -f "$group_exists"          # ...and does NOT ship at all: a replaced container
 printf 'admin:$6$salt$operatorverifier\n' > "$AIMEE_HOME/webchat/identities"
 printf 'generated:aimee-000000000000\n' > "$WEBCHAT_BOOTSTRAP_USER"
 printf 'admin\n' > "$WEBCHAT_BOOTSTRAP_REPLACED"
@@ -253,6 +267,14 @@ restore_log=$(webchat_provision_bootstrap_account 2>&1)
 # The operator's own account is back, with its own verifier...
 grep -Fq 'useradd' "$cleared_users"
 grep -Fq -- "-aG $WEBCHAT_LOGIN_GROUP admin" "$cleared_users"
+# ...and is actually IN the group. Assert the RESULT, not the invocation: usermod
+# records its arguments before it can fail, so the line above passed even while the
+# restore ran ahead of any groupadd and every membership silently failed. An
+# unmanaged account is invisible to UserManager.List(), so the next
+# snapshotManagedIdentities() rewrites this record without it and the following
+# container replacement deletes the operator's account outright. Observed on the
+# testing appliance: `admin` lived only in this record and was one snapshot from gone.
+getent group "$WEBCHAT_LOGIN_GROUP" | grep -Fq admin
 grep -Fq 'chpasswd -e admin:$6$salt$operatorverifier' "$cleared_users"
 grep -Fxq admin "$existing_users"
 # ...so no replacement credential is minted, and the marker naming them stands.
@@ -271,7 +293,7 @@ survivor_log=$(webchat_provision_bootstrap_account 2>&1)
 # an account nobody can authenticate as, and then suppress minting a real one.
 rm -rf "$AIMEE_HOME/webchat"; mkdir -p "$AIMEE_HOME/webchat"
 : > "$cleared_users"
-printf '%s\n' operator legacy aimee "$USER" > "$existing_users"
+printf '%s\n' operator legacy aimee "$fixture_process_user" > "$existing_users"
 printf '' > "$group_members"
 printf 'retired:!$y$locked\n' > "$AIMEE_HOME/webchat/identities"
 locked_record_log=$(webchat_provision_bootstrap_account 2>&1)
@@ -288,7 +310,7 @@ rm -f "$AIMEE_HOME/webchat/identities"
 # authenticate as — observed after deleting a probe account left exactly this.
 rm -rf "$AIMEE_HOME/webchat"; mkdir -p "$AIMEE_HOME/webchat"
 : > "$cleared_users"
-printf '%s\n' operator legacy aimee "$USER" retired-acct > "$existing_users"
+printf '%s\n' operator legacy aimee "$fixture_process_user" retired-acct > "$existing_users"
 printf 'retired-acct\n' > "$group_members"
 printf 'retired-acct !$y$locked\n' > "$shadow_hashes"
 locked_log=$(webchat_provision_bootstrap_account 2>&1)
@@ -302,7 +324,7 @@ usable_log=$(webchat_provision_bootstrap_account 2>&1)
 ! grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"$usable_log"
 
 # Restore the baseline table for the checks below.
-printf '%s\n' operator legacy aimee "$USER" > "$existing_users"
+printf '%s\n' operator legacy aimee "$fixture_process_user" > "$existing_users"
 printf '' > "$group_members"
 : > "$shadow_hashes"
 

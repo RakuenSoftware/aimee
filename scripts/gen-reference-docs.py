@@ -157,6 +157,17 @@ CFG_KEY_DESC = {
     "cache_aware_rewrite_enabled": "Rewrite prompts to align with the provider's prompt cache.",
     "cache_min_chars": "Minimum prompt size (chars) before cache-shaping applies.",
     "cache_shaping_enabled": "Enable prompt cache-shaping.",
+    "extended_thinking_enabled": (
+        "Ask for extended thinking on aimee's OWN Anthropic requests (default off). "
+        "Without it a turn aimee originates carries no thinking config at all, so a "
+        "reasoning-capable model is never asked to reason. Off by default because "
+        "thinking tokens are billed: enabling it changes spend, not just visibility."
+    ),
+    "extended_thinking_budget_tokens": (
+        "Reasoning budget when extended_thinking_enabled is on. Anthropic requires it "
+        "below max_tokens, so the request builder raises the output cap to fit rather "
+        "than emitting a request the provider would reject."
+    ),
     "delegate_graph_context_enabled": "Prepend a structural code-graph context block (callers/dependencies of files a delegate task references) to the delegate prompt (advisory, fail-open, default off).",
     "memory_md_retire": "Retire the agent file-memory surface into aimee (default on): a Write under ~/.claude/projects/<slug>/memory/<name>.md is intercepted into aimee's db1 and the .md is never materialized; session-start skips .md hydration. Set false for the legacy re-materialized .md mirrors.",
     "claude_model": "Default Claude model (empty = CLI default).",
@@ -777,6 +788,29 @@ ENV_DESC = {
         "kb -> embedder hop into $AIMEE_HOME/embedder-tls at startup, independently of the "
         "synthesis hop. Unset for an external embedder reached over plain HTTPS, or when no "
         "embedder is deployed. The sidecar refuses to start without this material.",
+    ),
+    "AIMEE_KB_EMBED_ALL_FILES": (
+        "Knowledge base (aimee-kb)",
+        "Set to 1 to give EVERY indexed file a dense document vector, including source. "
+        "Off by default because source files are already embedded by the code path, and "
+        "embedding them a second time as prose was 82% of the doc-embedding token budget "
+        "on a real corpus. Chunk rows are written either way, so lexical and FTS search "
+        "over source is unaffected by this setting; only the redundant vector is skipped.",
+    ),
+    "AIMEE_EMBED_HTTP_TIMEOUT_MS": (
+        "Knowledge base (aimee-kb)",
+        "Deadline for one embedding HTTP call, default 180000. The previous hardcoded 30s "
+        "was shorter than a cold model load plus a large batch, so the first request of a "
+        "run could fail on a healthy embedder.",
+    ),
+    "AIMEE_KB_READ_TIMEOUT_MS": (
+        "Knowledge base (aimee-kb)",
+        "Deadline for a single KB read issued by the client, in milliseconds.",
+    ),
+    "AIMEE_KB_SCAN_TIMEOUT_MS": (
+        "Knowledge base (aimee-kb)",
+        "Deadline for a code-index scan request, in milliseconds. Scans are queued and "
+        "drained by the ingest workers, so this bounds the REQUEST rather than the work.",
     ),
     "AIMEE_KB_EMIT_ENROLL": ("Knowledge base (aimee-kb)", "Emit a client enrollment token on KB start."),
     "AIMEE_KB_EMIT_SCOPE": ("Knowledge base (aimee-kb)", "Scope for the emitted enrollment token."),

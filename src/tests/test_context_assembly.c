@@ -247,6 +247,61 @@ static void test_classify_feature(void)
    assert(task_type_classify("build webhook support") == TASK_TYPE_FEATURE);
 }
 
+/* The real panel prompt, abridged but keeping the vocabulary that matters: it
+ * contains bug-fix words ("fail closed", "fixed") alongside "Review". The
+ * keyword table is scanned in its own order with bug-fix terms first, so
+ * classifying this prose calls it a bug fix -- which is exactly why every
+ * roundtable seat was handed execution-agent instructions and died without
+ * emitting its verdict. */
+static const char *panel_prompt(void)
+{
+   return "Review the complete artifact against the complete original request.\n"
+          "ARTIFACT STAGE: frozen_diff\n"
+          "This frozen diff is the implemented deliverable. Required edits that are "
+          "absent are drift and must fail closed. A requirement of the original request "
+          "that is unmet must be fixed before this passes.\n";
+}
+
+static void test_declared_role_beats_classifying_the_prose(void)
+{
+   /* Prose classification gets this wrong, and that is the point. */
+   assert(task_type_classify(panel_prompt()) != TASK_TYPE_REVIEW);
+
+   /* The declared role is authoritative. */
+   assert(agent_task_type_for_role("review", panel_prompt()) == TASK_TYPE_REVIEW);
+   assert(strstr(agent_exec_instructions(agent_task_type_for_role("review", panel_prompt())),
+                 "final message IS the deliverable"));
+
+   /* Without a role, classification still decides, so other callers keep their
+    * existing behaviour. */
+   assert(agent_task_type_for_role(NULL, "review the PR changes") == TASK_TYPE_REVIEW);
+   assert(agent_task_type_for_role("code", "implement the endpoint") != TASK_TYPE_REVIEW);
+}
+
+/* A reviewer's deliverable is its final message. The execution-agent
+ * instruction "always invoke tools, never write as plain text" forbids exactly
+ * that, and a reviewer given it spends its whole turn budget calling tools and
+ * dies with "max turns exhausted without final response". */
+static void test_review_instructions_do_not_forbid_a_final_answer(void)
+{
+   const char *review = agent_exec_instructions(TASK_TYPE_REVIEW);
+   assert(strstr(review, "review agent"));
+   assert(strstr(review, "final message IS the deliverable"));
+   assert(!strstr(review, "Always invoke tools"));
+   assert(!strstr(review, "Never write shell commands"));
+
+   /* Acting agents keep their own instruction: they must call tools rather than
+    * narrate shell commands. */
+   for (task_type_t t = TASK_TYPE_GENERAL; t < TASK_TYPE_COUNT; t++)
+   {
+      if (t == TASK_TYPE_REVIEW)
+         continue;
+      const char *acting = agent_exec_instructions(t);
+      assert(strstr(acting, "execution agent"));
+      assert(strstr(acting, "Always invoke tools"));
+   }
+}
+
 static void test_classify_review(void)
 {
    assert(task_type_classify("review the PR changes") == TASK_TYPE_REVIEW);
@@ -417,8 +472,60 @@ static void test_agent_context_budget_caps_unpinned_output_reserve(void)
    assert(small > (size_t)(1000000 - 1000000 / 4) * 4u);
 }
 
+/* A restatement must not be assembled twice, on the PRODUCTION path.
+ *
+ * Read-time near-duplicate suppression was added to
+ * memory_assemble_context_explain(), whose comment claims it "runs a candidate
+ * scoring pass (identical to memory_assemble_context)". They are two separate
+ * implementations, and the explain one has a single production caller (the
+ * `memory improve` diagnostic) -- so the suppression never ran for `aimee memory
+ * read` or the agent-runtime fallback context.
+ *
+ * Reproduced on a live deployment before this fix: two memories that are pure
+ * word-order reorderings of each other -- identical token sets, so far above the
+ * 0.85 lexical threshold -- BOTH appeared in the assembled context.
+ *
+ * The second assertion is the one that keeps the fix honest. Suppressing a
+ * DISTINCT fact silently loses evidence, which is worse than admitting a
+ * redundant line, so a memory that merely shares vocabulary must survive. */
+static void test_restatements_are_suppressed_but_distinct_facts_survive(void)
+{
+   setup();
+   memory_t m;
+
+   memory_insert(TIER_L2, KIND_FACT, "release-a",
+                 "The release checklist requires the changelog to be regenerated before any tag "
+                 "is pushed to the origin remote",
+                 0.9, "s1", &m);
+   /* Same sentence, reordered: nothing new is said. */
+   memory_insert(TIER_L2, KIND_FACT, "release-b",
+                 "Before any tag is pushed to the origin remote, the release checklist requires "
+                 "the changelog to be regenerated",
+                 0.9, "s1", &m);
+   /* Heavy vocabulary overlap, DIFFERENT claim. Must not be suppressed. */
+   memory_insert(TIER_L2, KIND_FACT, "release-c",
+                 "The release checklist forbids pushing any tag to the origin remote on a Friday",
+                 0.9, "s1", &m);
+
+   char *ctx = memory_assemble_context(NULL);
+   assert(ctx != NULL);
+
+   /* Count how many of the two restatements survived. */
+   int a = strstr(ctx, "requires the changelog to be regenerated before any tag") != NULL;
+   int b = strstr(ctx, "Before any tag is pushed to the origin remote, the release") != NULL;
+   assert(a + b == 1); /* exactly one, not both */
+
+   /* The distinct fact is still there. */
+   assert(strstr(ctx, "on a Friday") != NULL);
+
+   free(ctx);
+   teardown();
+   printf("  restatement suppressed, distinct fact kept\n");
+}
+
 int main(void)
 {
+   test_restatements_are_suppressed_but_distinct_facts_survive();
    test_null_hint_produces_same_as_original();
    test_task_hint_prioritizes_relevant_memories();
    test_task_hint_respects_budget();
@@ -430,6 +537,8 @@ int main(void)
    test_classify_refactor();
    test_classify_feature();
    test_classify_review();
+   test_declared_role_beats_classifying_the_prose();
+   test_review_instructions_do_not_forbid_a_final_answer();
    test_classify_test();
    test_classify_general();
    test_task_type_name_strings();

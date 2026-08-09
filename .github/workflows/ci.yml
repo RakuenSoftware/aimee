@@ -6,9 +6,21 @@ on:
   push:
     branches: [main, testing, feature/core-modularization]
   pull_request:
-    branches: [main, testing, feature/core-modularization, 'aimee/feat/**']
-    # Slice sub-PRs target aimee/feat/<work-item-id>; include them so each slice
-    # must pass the same complete gate as the final feature PR.
+    branches: [main, testing, feature/core-modularization, 'aimee/feat/**', 'agent/**']
+    # NOTE this filter matches the BASE branch, so anything missing from it does
+    # not get a weaker gate — it gets NO gate, and merges with zero checks
+    # recorded. That is not hypothetical: PRs based on agent/<topic> integration
+    # branches ran no CI at all and merged a broken build.
+    #
+    # Slice sub-PRs target aimee/feat/<work-item-id>; agent/<topic> branches are
+    # used the same way, as integration bases that sub-PRs stack onto before the
+    # whole thing reaches testing. Both are included so every sub-PR passes the
+    # same complete gate as the final feature PR.
+    #
+    # Adding 'agent/**' here does NOT double-run anything: a PR FROM agent/x INTO
+    # testing already matched on its base. This only adds PRs whose base is an
+    # agent branch, which previously matched nothing.
+    #
     # `edited` re-runs the gate when a PR title/body is edited after open, so
     # attribution can't be added post-hoc without failing CI.
     types: [opened, synchronize, reopened, edited]
@@ -905,6 +917,20 @@ jobs:
       # server-identity one-shot cannot run.
       - name: KB entrypoint embedder gate
         run: cd src && make kb-entrypoint-test
+
+      # The managed deployment's identity must be reconstructible from config, not
+      # only from the running container's env. An unset AIMEE_KB_VARIANT resolves the
+      # kb image to the EMBEDDERLESS aimee-kb with no error anywhere, so a recreate
+      # (which every image upgrade performs) could silently drop a deployment's
+      # embedder. This asserts the .env is derived at start.
+      - name: Managed compose env derived from config
+        run: cd src && make deploy-compose-env-test
+
+      # `workflow list` prints names that `workflow show` must accept. Two
+      # commands in the same family disagreeing about what a name means is the
+      # kind of thing people work around silently rather than report.
+      - name: Workflow name resolution
+        run: cd src && make workflow-name-resolution-test
 
   windows-cmake:
     needs: change-scope

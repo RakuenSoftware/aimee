@@ -31,7 +31,6 @@
 
 #include "agent_config.h"
 #include "config.h"
-#include "delegate_ensemble.h"
 #include "log.h"
 #include "roundtable_verify.h"
 

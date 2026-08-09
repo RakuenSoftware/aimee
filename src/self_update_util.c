@@ -75,6 +75,66 @@ int aimee_version_is_safe(const char *s)
    return 1;
 }
 
+/* Strip a leading 'v' so callers never render "vv0.3.0". */
+static const char *notice_vnum(const char *s)
+{
+   return (s && (s[0] == 'v' || s[0] == 'V')) ? s + 1 : s;
+}
+
+int aimee_self_update_notice_for(const char *server_ver, long server_time, const char *client_ver,
+                                 long client_time, char *out, size_t cap)
+{
+   if (!out || cap == 0)
+      return 0;
+   out[0] = '\0';
+   if (!server_ver || !server_ver[0])
+      return 0;
+   if (!client_ver)
+      client_ver = "";
+
+   /* A released server is orderable by semver, and `self-update` can fetch the
+    * exact matching release asset -- so semver stays the authority whenever the
+    * server reports one. */
+   if (aimee_version_is_semver(server_ver))
+   {
+      if (aimee_version_compare(server_ver, client_ver) <= 0)
+         return 0;
+      snprintf(out, cap,
+               "aimee-server is v%s but this client is v%s. Run `aimee self-update` to "
+               "catch up (keeps client and server in lockstep).",
+               notice_vnum(server_ver), notice_vnum(client_ver));
+      return 1;
+   }
+
+   /* The server is a dev/branch build ("testing-<sha>"), whose version string is
+    * deliberately not orderable -- and returning 0 here is what made a week-old
+    * client invisible against a :testing deployment. Version strings are not the
+    * only orderable thing both sides carry: each binary is stamped with its HEAD
+    * commit time precisely for stale-binary detection, so use it.
+    *
+    * Timestamps decide only whether to SPEAK. They deliberately do not steer the
+    * reader to `aimee self-update`, which resolves a release asset by version and
+    * has no artifact to fetch for a "testing-<sha>" server. Naming a remedy that
+    * cannot work would be worse than the silence this replaces. */
+   if (server_time <= 0 || client_time <= 0 || server_time <= client_time)
+      return 0;
+
+   long days = (server_time - client_time) / 86400;
+   if (days > 0)
+      snprintf(out, cap,
+               "aimee-server runs development build %s, built %ld day(s) ahead of this client "
+               "(%s). Where the two disagree, command output can be wrong or silently empty; "
+               "install a client from the server's own build.",
+               server_ver, days, notice_vnum(client_ver));
+   else
+      snprintf(out, cap,
+               "aimee-server runs development build %s, built ahead of this client (%s). Where "
+               "the two disagree, command output can be wrong or silently empty; install a "
+               "client from the server's own build.",
+               server_ver, notice_vnum(client_ver));
+   return 1;
+}
+
 const char *aimee_self_update_asset(void)
 {
 #ifdef _WIN32

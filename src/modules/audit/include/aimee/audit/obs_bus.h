@@ -89,6 +89,15 @@ extern "C"
        uint32_t response_capacity, uint32_t *response_len, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   /* Highest number of module calls that have held a client at the same time.
+    *
+    * Serialization here is not a throughput matter: while every caller shared
+    * one client, a long stage could block the very callback it was waiting on.
+    * This high-water mark is how that condition is observable at all -- from
+    * outside, a call that is waiting for a client is indistinguishable from one
+    * that is doing work. */
+   int obs_bus_module_peak_concurrency(void);
+
    /* Return nonzero only while a live local process is attached and registered
     * to serve event_kind. Intended for daemon readiness sampling; no network I/O
     * is performed. */

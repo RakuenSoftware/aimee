@@ -189,6 +189,31 @@ func (m *WorktreeManager) Cleanup(ctx context.Context, item db1.WorkItem) error 
 	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return errors.New("refusing to clean worktree outside managed root")
 	}
+	// Cleanup is a two-step lifecycle operation: remove the checkout, then clear
+	// its durable path. If the database write fails after removal, the scheduler
+	// retries with the old row. Treat that already-completed physical step as
+	// success so the retry can finish clearing durable state.
+	if _, statErr := os.Stat(abs); errors.Is(statErr, os.ErrNotExist) {
+		return nil
+	} else if statErr != nil {
+		return fmt.Errorf("stat managed worktree: %w", statErr)
+	}
+	// The repository can be gone while its worktrees remain -- a deleted webuser
+	// workspace leaves exactly that. Every `git -C <repo>` below then fails with
+	// "cannot change to <repo>", Cleanup returns an error forever, and the item
+	// never reaches a terminal state: observed on a live server retrying one work
+	// item ~92 times a minute against a repo directory that no longer existed.
+	//
+	// There is nothing to deregister in that case. The administrative entry lived
+	// in the repo's .git/worktrees and went with it, so the checkout is an orphan
+	// and removing the directory IS the cleanup. Safe because abs was already
+	// validated to sit inside the managed root above.
+	if _, repoErr := os.Stat(item.Repo); errors.Is(repoErr, os.ErrNotExist) {
+		if rmErr := os.RemoveAll(abs); rmErr != nil {
+			return fmt.Errorf("remove orphaned worktree %s: %w", abs, rmErr)
+		}
+		return nil
+	}
 	// Ensure creates every managed tree with --lock so external GC cannot race a
 	// live workflow. Explicit lifecycle deletion owns this path, so unlock it
 	// before the validated removal; a missing lock is harmless.

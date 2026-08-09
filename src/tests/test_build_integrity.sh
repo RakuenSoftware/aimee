@@ -343,6 +343,19 @@ else
     fail "server plane supervisor can deadlock on an exited zombie child"
 fi
 
+# The optional-module gate decides which processes attach to the bus. Both
+# entrypoints must ship it, and it must honour AIMEE_MODULE_<ID> in BOTH
+# directions -- an enable-only gate cannot turn anything off.
+if sh tests/test_optional_modules.sh > /dev/null 2>&1 &&
+   grep -qF 'apply_optional_modules server' ../deploy/container/server-entrypoint.sh &&
+   grep -qF 'apply_optional_modules kb' ../deploy/container/aimee-kb-entrypoint.sh &&
+   grep -qF 'optional-modules-lib.sh' ../Dockerfile.server &&
+   grep -qF 'optional-modules-lib.sh' ../Dockerfile; then
+    pass "operator can enable and disable optional modules in both placements"
+else
+    fail "optional-module gate is missing, one-directional, or not shipped in an image"
+fi
+
 if grep -q 'go|c' ../deploy/container/server-entrypoint.sh ||
    grep -q 'wfe_autonomy_register();' server/server.c ||
    grep -q 'wfe_scheduler_init();' server/server.c; then
@@ -419,15 +432,26 @@ else
     fail "verify-local can race lint against a partial shipping build"
 fi
 
+if sed -n '/^verify-local:/,/^[^[:space:]#].*:/p' Makefile |
+   grep -qF 'python3 -I scripts/check_c_repository_lock.py'; then
+    pass "verify-local rejects stale extracted-repository source pins"
+else
+    fail "verify-local can pass with stale extracted-repository source pins"
+fi
+
 # Verification runs inside the server image, whose deployment posture is
 # expressed through AIMEE_* environment overrides. Those values are correct for
 # the live daemon but must not override config fixtures in repository unit tests.
-if sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
-   grep -qF 'unset AIMEE_HOME AIMEE_API_REMOTE_WRITES AIMEE_API_MTLS AIMEE_API_BEARER_TOKEN' &&
-   sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
-       grep -qF 'AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL' &&
-   sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
-       grep -qF 'AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'; then
+# Match in-shell rather than piping into grep -q. Under `set -o pipefail` such
+# a pipeline reports the SIGPIPE that grep's early exit sends back to its
+# writer, so the check starts failing purely because the recipe grew past a
+# 4KiB pipe block -- a false red that says nothing about the overrides.
+unit_tests_recipe=$(sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk)
+go_unit_tests_recipe=$(sed -n '/^go-unit-tests:/,/^verify-local:/p' Makefile)
+if [[ "$unit_tests_recipe" == *'unset AIMEE_HOME AIMEE_API_REMOTE_WRITES AIMEE_API_MTLS AIMEE_API_BEARER_TOKEN'* &&
+      "$unit_tests_recipe" == *'AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL'* &&
+      "$unit_tests_recipe" == *'AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'* &&
+      "$go_unit_tests_recipe" == *'unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'* ]]; then
     pass "unit verification removes server deployment overrides"
 else
     fail "unit verification inherits server deployment overrides"
@@ -1586,6 +1610,19 @@ if [ "$scan_enqueues" -eq 0 ] && [ "$embed_enqueues" -ge 1 ] && [ "$embed_gated"
     pass "curator work is enqueued by the embed stage, not by the scan handler"
 else
     fail "curation must be enqueued after embedding, not during scan (scan=$scan_enqueues, embed=$embed_enqueues, gated=$embed_gated)"
+fi
+
+# A hook aimee never registers is not a guard. `aimee hooks` implements the
+# PreToolUse contract and require_aimee_git is ON by default, but the codex plugin
+# shipped no hooks file at all -- so across the benchmark's aimee cells the agent
+# made 98 shell `git` calls and zero calls to the aimee git tool. The manifest
+# entry and the emitted file must both exist, and must name the same path.
+hooks_decl=$(grep -c 'hooks/codex-hooks.json' ../src/client_integrations.c 2>/dev/null || true)
+hooks_cmd=$(grep -c '%s hooks' ../src/client_integrations.c 2>/dev/null || true)
+if [ "${hooks_decl:-0}" -ge 2 ] && [ "${hooks_cmd:-0}" -ge 1 ]; then
+    pass "codex plugin registers a PreToolUse hook and emits the file it declares"
+else
+    fail "codex plugin must declare hooks/codex-hooks.json in the manifest AND write it (decl=$hooks_decl cmd=$hooks_cmd)"
 fi
 
 if [ "$FAIL" = "0" ]; then

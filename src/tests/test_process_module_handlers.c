@@ -89,20 +89,75 @@ static void test_learning(void)
    assert(learning_mask("unknown") == 0);
 }
 
-static void test_delegates(void)
+/* Canonicalize `in` by going through the REAL bus module handler (encode ->
+ * handler -> decode), writing the result into `out`. */
+static void delegates_canonicalize_over_handler(const char *in, char *out, size_t out_cap)
 {
    uint8_t request[AIMEE_DELEGATES_MESSAGE_LEN], response[AIMEE_DELEGATES_MESSAGE_LEN];
    uint32_t response_len = 0;
    char role[AIMEE_DELEGATES_ROLE_MAX + 1];
    aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_INVOKE};
-   assert(aimee_delegates_message_encode(AIMEE_DELEGATES_REQUEST_MAGIC, "implement", request,
+   assert(aimee_delegates_message_encode(AIMEE_DELEGATES_REQUEST_MAGIC, in, request,
                                          sizeof(request)) == 0);
    assert(aimee_delegates_module_handler(&invocation, request, sizeof(request), response,
                                          sizeof(response), &response_len,
                                          NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_delegates_message_decode(response, response_len, AIMEE_DELEGATES_RESPONSE_MAGIC,
                                          role, sizeof(role)) == 0);
+   assert(strlen(role) < out_cap);
+   snprintf(out, out_cap, "%s", role);
+}
+
+static void test_delegates(void)
+{
+   char role[AIMEE_DELEGATES_ROLE_MAX + 1];
+
+   delegates_canonicalize_over_handler("implement", role, sizeof(role));
    assert(strcmp(role, "code") == 0);
+
+   /* The role alias table exists TWICE, byte-for-byte identical: here in the bus
+    * module handler (modules/delegates/module_adapter.c) and in delegate_role.c's
+    * local path, used by binaries that host no bus — the thin client. Nothing in
+    * the build keeps them in sync, so a one-sided edit would make the same role
+    * canonicalize differently depending on which binary ran it.
+    *
+    * Deduplicating them means editing delegates module source, which is a
+    * vendored mirror pinned by dependencies/aimee-repositories.lock.json — that
+    * needs a coordinated module release. Until then this table is the guard: it
+    * pins the handler's full mapping so a drifting edit fails here. The mirror of
+    * this expectation for the local path is test_delegate_role.c; the two must
+    * state the same pairs, and that is the invariant a reviewer should check when
+    * touching either table.
+    *
+    * Expectations are written out rather than computed FROM the table under test,
+    * so this cannot pass vacuously by reading the same array it is checking. */
+   static const struct
+   {
+      const char *alias;
+      const char *canonical;
+   } expected[] = {
+       {"implement", "code"},        {"build", "code"},
+       {"reviewer", "review"},       {"verifier", "validate"},
+       {"test", "validate"},         {"check", "validate"},
+       {"evaluate", "validate"},     {"evaluate-optimize", "validate"},
+       {"inspect", "diagnose"},      {"research", "execute"},
+       {"enforce", "execute"},       {"recall", "search"},
+       {"synthesize", "summarize"},  {"rank-fuse", "reason"},
+       {"classify-score", "reason"}, {"planner", "plan"},
+       {"planning", "plan"},
+   };
+   for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i)
+   {
+      delegates_canonicalize_over_handler(expected[i].alias, role, sizeof(role));
+      assert(strcmp(role, expected[i].canonical) == 0);
+      assert(strcmp(role, expected[i].alias) != 0); /* every entry really is an alias */
+   }
+
+   /* An already-canonical or unknown role passes through untouched. */
+   delegates_canonicalize_over_handler("code", role, sizeof(role));
+   assert(strcmp(role, "code") == 0);
+   delegates_canonicalize_over_handler("no-such-role", role, sizeof(role));
+   assert(strcmp(role, "no-such-role") == 0);
 }
 
 static aimee_tool_class_t tool_class(const char *name)
@@ -122,6 +177,9 @@ static aimee_tool_class_t tool_class(const char *name)
 static void test_tools(void)
 {
    assert(tool_class("bash") == AIMEE_TOOL_CLASS_EXEC);
+   assert(tool_class("execute_script") == AIMEE_TOOL_CLASS_EXEC);
+   assert(tool_class("test") == AIMEE_TOOL_CLASS_EXEC);
+   assert(tool_class("run_tests") == AIMEE_TOOL_CLASS_EXEC);
    assert(tool_class("read_file") == AIMEE_TOOL_CLASS_READ);
    assert(tool_class("mcp:remote") == AIMEE_TOOL_CLASS_REMOTE);
    assert(tool_class("not_registered") == AIMEE_TOOL_CLASS_UNKNOWN);
@@ -158,19 +216,53 @@ static void test_git(void)
                                    NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_git_response_decode(response, response_len, &result) == 0);
    assert(result.operation == AIMEE_GIT_OP_PUSH && result.needs_credentials);
+
+   uint8_t ref_request[AIMEE_GIT_REF_REQUEST_LEN];
+   int allowed = 0;
+   invocation.stage_id = AIMEE_GIT_STAGE_REF_VALIDATE;
+   assert(aimee_git_ref_request_encode("feature/topic-1", ref_request, sizeof(ref_request)) == 0);
+   assert(aimee_git_module_handler(&invocation, ref_request, sizeof(ref_request), response,
+                                   sizeof(response), &response_len,
+                                   NULL) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_git_ref_response_decode(response, response_len, &allowed) == 0 && allowed);
+   assert(
+       aimee_git_ref_request_encode("aimee/wi/wi_57186250728b511961573e5afb37cc93.s4263a4834d.g0.0",
+                                    ref_request, sizeof(ref_request)) == 0);
+   assert(aimee_git_module_handler(&invocation, ref_request, sizeof(ref_request), response,
+                                   sizeof(response), &response_len,
+                                   NULL) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_git_ref_response_decode(response, response_len, &allowed) == 0 && allowed);
+   assert(aimee_git_ref_request_encode("-evil", ref_request, sizeof(ref_request)) == 0);
+   assert(aimee_git_module_handler(&invocation, ref_request, sizeof(ref_request), response,
+                                   sizeof(response), &response_len,
+                                   NULL) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_git_ref_response_decode(response, response_len, &allowed) == 0 && !allowed);
 }
 
 static void test_skills(void)
 {
-   uint8_t request[AIMEE_SKILLS_REQUEST_LEN], response[AIMEE_SKILLS_RESPONSE_LEN];
+   uint8_t request[512], response[AIMEE_SKILLS_TRIGGER_RESPONSE_LEN];
    uint32_t response_len = 0;
    int fire = 0;
    aimee_module_invocation_t invocation = {.stage_id = AIMEE_SKILLS_STAGE_CONTEXT};
    assert(aimee_skills_request_encode(12, 6, request, sizeof(request)) == 0);
-   assert(aimee_skills_module_handler(&invocation, request, sizeof(request), response,
+   assert(aimee_skills_module_handler(&invocation, request, AIMEE_SKILLS_REQUEST_LEN, response,
                                       sizeof(response), &response_len,
                                       NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_skills_response_decode(response, response_len, &fire) == 0 && fire);
+
+   const char *content = "---\nname: wait\ntriggers:\n  tool: [Bash]\n"
+                         "  arg_pattern: [\"sleep \", \"curl \"]\n---\nWait safely.\n";
+   size_t request_len = aimee_skills_trigger_request_size(content, "Bash", "sleep 5");
+   assert(request_len > 0 && request_len <= sizeof(request));
+   assert(aimee_skills_trigger_request_encode(content, "Bash", "sleep 5", request,
+                                              sizeof(request)) == 0);
+   invocation.stage_id = AIMEE_SKILLS_STAGE_TRIGGER;
+   int match = 0;
+   assert(aimee_skills_module_handler(&invocation, request, (uint32_t)request_len, response,
+                                      sizeof(response), &response_len,
+                                      NULL) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_skills_trigger_response_decode(response, response_len, &match) == 0 && match);
 }
 
 static void test_governance(void)
@@ -450,6 +542,22 @@ static void test_benchmarks(void)
       assert(fabs(scores.ndcg - cases[i].ndcg) < 1e-12);
       assert(fabs(scores.recall - cases[i].recall) < 1e-12);
    }
+
+   static const double latencies[] = {10.0, 1.0, 5.0, 3.0, 8.0};
+   uint8_t latency_request[AIMEE_BENCHMARKS_LATENCY_REQUEST_LEN];
+   uint8_t latency_response[AIMEE_BENCHMARKS_LATENCY_RESPONSE_LEN];
+   uint32_t latency_response_len = 0;
+   aimee_benchmarks_latency_summary_t summary;
+   aimee_module_invocation_t latency_invocation = {.stage_id = AIMEE_BENCHMARKS_STAGE_LATENCY};
+   assert(aimee_benchmarks_latency_request_encode(latencies, 5, latency_request,
+                                                  sizeof(latency_request)) == 0);
+   assert(aimee_benchmarks_module_handler(
+              &latency_invocation, latency_request, sizeof(latency_request), latency_response,
+              sizeof(latency_response), &latency_response_len, NULL) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_benchmarks_latency_response_decode(latency_response, latency_response_len,
+                                                   &summary) == 0);
+   assert(summary.queries == 5 && summary.p50_ms == 5.0 && summary.p95_ms == 10.0 &&
+          summary.p99_ms == 10.0 && summary.min_ms == 1.0 && summary.max_ms == 10.0);
 }
 
 int main(void)

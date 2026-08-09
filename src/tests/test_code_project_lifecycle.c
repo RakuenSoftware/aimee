@@ -336,12 +336,41 @@ static void test_gc_audit(void)
    puts("  PASS: retention GC is manifest-fenced, audited, and fail-closed");
 }
 
+/* A checkout claimed by another project is a RE-INDEX under a new name, not an
+ * error. This used to roll the whole upsert back and return -1, which the HTTP
+ * route rendered as "canonical index scan failed" with nothing logged -- and it
+ * was permanent, so a caller that mints a fresh project name per attempt could
+ * scan a directory exactly once, ever. */
+static void test_reindex_under_new_name_takes_the_alias(void)
+{
+   const char *root = "/checkout/shared";
+   int64_t owner = db2_code_index_project_upsert("first-owner", root);
+   assert(owner > 0);
+   assert(scalar("SELECT COUNT(*) FROM code_project_aliases WHERE alias='/checkout/shared'"
+                 " AND is_current=1 AND project_id=(SELECT id FROM projects"
+                 " WHERE name='first-owner')") == 1);
+
+   /* Same checkout, different project name: accepted, not refused. */
+   int64_t taker = db2_code_index_project_upsert("second-owner", root);
+   assert(taker > 0);
+   assert(taker != owner);
+
+   /* The alias now points at the new project, and only at it. */
+   assert(scalar("SELECT COUNT(*) FROM code_project_aliases WHERE alias='/checkout/shared'") == 1);
+   assert(scalar("SELECT COUNT(*) FROM code_project_aliases WHERE alias='/checkout/shared'"
+                 " AND project_id=(SELECT id FROM projects WHERE name='second-owner')") == 1);
+
+   /* The previous project still exists; only the checkout moved on. */
+   assert(scalar("SELECT COUNT(*) FROM projects WHERE name='first-owner'") == 1);
+}
+
 int main(void)
 {
    db2_test_shim_open();
    test_move_detach_readd();
    test_manifest_confirmation_and_audit();
    test_gc_audit();
+   test_reindex_under_new_name_takes_the_alias();
    db2_test_shim_close();
    puts("code_project_lifecycle: all tests passed");
    return 0;

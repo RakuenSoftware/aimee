@@ -1190,8 +1190,8 @@ typedef struct config
     * workflows (orchestration hooks), and optional roundtable panels. Each is a TRISTATE:
     *   -1  unspecified — the config does not set it; the resolver falls back to the module's
     *       deprecated env toggle (AIMEE_STAGE_MEMORY / _GOVERNANCE / AIMEE_ORCH_DELEGATES /
-    *       _WORKFLOWS / AIMEE_MODULE_ROUNDTABLE) and then to its descriptor default (roundtable
-    *       defaults OFF; the legacy gateway-stage modules default ON).
+    *       _WORKFLOWS / AIMEE_MODULE_ROUNDTABLE) and then to its descriptor default (governance
+    *       and roundtable default OFF; the remaining legacy gateway-stage modules default ON).
     *    0  user-disabled.    1  user-enabled.
     * Resolution is centralized in config_module_enabled() so the future admin/governance FORCE
     * tier (aimee-kb governance state that can pin a module on or off over the user's choice)
@@ -1417,6 +1417,20 @@ typedef struct config
     * provider caches the stable system prompt across calls. Anthropic-only; never
     * alters the stateless /v1/messages proxy or any non-Anthropic provider. */
    int cache_shaping_enabled;
+
+   /* Extended thinking on aimee's OWN Anthropic requests (extended_thinking.*).
+    * extended_thinking_enabled: 0 = off (default), 1 = on. The IR request builder
+    *   never set the Anthropic `thinking` config, so ir->thinking was populated
+    *   only by an inbound client request and an aimee-originated turn asked for no
+    *   reasoning at all -- measured 2026-08-09: reasoning appears only when a
+    *   provider volunteers it unprompted. Default-OFF because thinking tokens are
+    *   billed: turning this on changes what aimee spends, not just what it reads.
+    * extended_thinking_budget_tokens: reasoning budget when enabled. Anthropic
+    *   requires budget < max_tokens, and rejects temperature != 1 and any top_p /
+    *   top_k alongside thinking, so the builder raises max_tokens and suppresses
+    *   sampling to match rather than emitting a request the provider would 4xx. */
+   int extended_thinking_enabled;
+   int extended_thinking_budget_tokens;
 
    /* Ingress cost-accounting rollout knobs (ingress.*; §2/§4/#3).
     * ingress_usage_accounting_enabled: 1 = on (default), 0 = off. Master gate for

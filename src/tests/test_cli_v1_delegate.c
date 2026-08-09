@@ -11,6 +11,7 @@
 #include "cli_client.h"
 #include "platform_path.h"
 #include "cJSON.h"
+#include "server.h" /* SHTTP_MAX_BODY: the cap the CLI mirrors */
 
 #define V1_PROTOCOL_VERSION 1
 
@@ -20,6 +21,7 @@
 #include "../cli_v1_routes_b.c"
 #include "../cli_v1_routes_c.c"
 #include "../cli_v1_routes_d.c"
+#include "../cli_v1_routes_e.c"
 
 static void test_delegate_max_turns_marshaled(void)
 {
@@ -831,6 +833,36 @@ static void test_server_status_route_lookup(void)
    assert(strcmp(verb, "GET") == 0);
 
    printf("  PASS: test_server_status_route_lookup\n");
+}
+
+/* Asking for a review and not getting one must not look like approval.
+ *
+ * Measured against a real aimee-server with the roundtable module attached: a
+ * review with no saved roundtable came back status=pending,
+ * pause_reason=panel_unreachable, artifact="" -- and `aimee roundtable review`
+ * printed zero bytes and exited 0. A pre-merge hook, CI job or agent gating on
+ * that exit code would have read "no review happened" as "the panel approved
+ * it", which is the one conclusion it must never draw. */
+static void test_roundtable_review_without_an_artifact_is_a_failure(void)
+{
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "pending");
+   cJSON_AddStringToObject(resp, "pause_reason", "panel_unreachable");
+   cJSON_AddStringToObject(resp, "artifact", "");
+   assert(roundtable_review_response_is_failure(resp) == 1);
+
+   /* An actual review is a success, whatever else the envelope carries. */
+   cJSON_ReplaceItemInObject(resp, "artifact", cJSON_CreateString("## Findings\n- one"));
+   assert(roundtable_review_response_is_failure(resp) == 0);
+
+   /* A missing artifact field is the same as an empty one: no review. */
+   cJSON_DeleteItemFromObject(resp, "artifact");
+   assert(roundtable_review_response_is_failure(resp) == 1);
+   cJSON_Delete(resp);
+
+   /* No response at all cannot be an approval either. */
+   assert(roundtable_review_response_is_failure(NULL) == 1);
+   printf("  PASS: a review without an artifact fails\n");
 }
 
 static void test_agent_probe_failure_controls_exit_status(void)
@@ -2044,8 +2076,21 @@ static void test_grant_show_shares_the_list_renderer(void)
    assert(strstr(out, "full") != NULL);
 }
 
+/* The CLI refuses an oversized /v1 body itself, because the listener drops one
+ * before parsing and the client could otherwise only report it as "could not
+ * reach the endpoint" -- blaming a server that is up and answering. That refusal
+ * is only correct while the mirrored cap equals the server's real one. */
+static void test_cli_v1_body_cap_matches_server(void)
+{
+   assert(CLI_V1_MAX_BODY == SHTTP_MAX_BODY);
+   assert(CLI_V1_MAX_ROUNDTABLE_BODY == SHTTP_MAX_ROUNDTABLE_BODY);
+   printf("  cli_v1_body_cap_matches_server: ok (%d / %d)\n", (int)CLI_V1_MAX_BODY,
+          (int)CLI_V1_MAX_ROUNDTABLE_BODY);
+}
+
 int main(void)
 {
+   test_cli_v1_body_cap_matches_server();
    printf("test_cli_v1_delegate\n");
    test_remote_workspace_hidden_roots_are_rejected();
    test_json_error_envelopes_remain_structured();
@@ -2080,6 +2125,7 @@ int main(void)
    test_memory_delete_and_supersede_routes();
    test_server_status_route_lookup();
    test_agent_probe_failure_controls_exit_status();
+   test_roundtable_review_without_an_artifact_is_a_failure();
    test_kb_docs_push_route_and_marshal();
    test_kb_remote_status_routes();
    test_git_verify_failure_detection();

@@ -356,7 +356,13 @@ static void test_role_default_tools(void)
    assert(delegate_role_enable_tools_by_default("test") == 1);
    assert(delegate_role_enable_tools_by_default("check") == 1);
    assert(delegate_role_enable_tools_by_default("research") == 1);
-   assert(delegate_role_enable_tools_by_default("code") == 0);
+   /* Write roles need a filesystem to do the job at all. This asserted 0 until a
+    * `code` delegate with no file tools answered with a per-file diff summary of
+    * code it never wrote -- see test_delegate_role.c. */
+   assert(delegate_role_enable_tools_by_default("code") == 1);
+   assert(delegate_role_enable_tools_by_default("refactor") == 1);
+   /* Prose generation is not a write role. */
+   assert(delegate_role_enable_tools_by_default("draft") == 0);
    assert(delegate_role_enable_tools_by_default(NULL) == 0);
    assert(delegate_role_enable_tools_by_default("") == 0);
    printf("  PASS: test_role_default_tools\n");

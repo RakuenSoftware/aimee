@@ -1350,7 +1350,10 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       if (!ag)
          fatal("no agent available for role '%s'", role);
 
-      char *assembled = agent_build_exec_context(ag, &cfg.network, sys_prompt);
+      /* Pass the role: the real run selects instructions from it, so a dry run
+       * that omitted it would preview a different system prompt than the one
+       * the delegate actually receives. */
+      char *assembled = agent_build_exec_context_for_role(ag, &cfg.network, role, sys_prompt, 0);
       fprintf(stderr, "--- Dry Run ---\n");
       fprintf(stderr, "Agent:  %s\n", ag->name);
       fprintf(stderr, "Model:  %s\n", ag->model);

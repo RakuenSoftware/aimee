@@ -13,7 +13,6 @@
 #include "memory_context_internal.h"
 #include "memory_ontology.h"
 #include "platform_process.h"
-#include <aimee/workspace/workspace.h>
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>
@@ -21,28 +20,11 @@
 #include <time.h>
 #include <unistd.h>
 
-#if !defined(AIMEE_DB2_DISABLED)
-static time_t memory_conflict_parse_utc_timestamp(const char *s)
-{
-   if (!s || !s[0])
-      return (time_t)0;
-
-   int year = 0, month = 0, day = 0, hour = 0, min = 0, sec = 0;
-   if (sscanf(s, "%d-%d-%dT%d:%d:%dZ", &year, &month, &day, &hour, &min, &sec) != 6)
-      return (time_t)0;
-
-   struct tm tm_buf;
-   memset(&tm_buf, 0, sizeof(tm_buf));
-   tm_buf.tm_year = year - 1900;
-   tm_buf.tm_mon = month - 1;
-   tm_buf.tm_mday = day;
-   tm_buf.tm_hour = hour;
-   tm_buf.tm_min = min;
-   tm_buf.tm_sec = sec;
-   tm_buf.tm_isdst = 0;
-   return timegm(&tm_buf);
-}
-#endif
+/* Timestamp parsing is shared (parse_utc_ts in util.c). The copy that lived here
+ * matched only the ISO spelling, and these columns also hold the canonical text
+ * form that pg_now_text() writes -- the exact mirror of the space-only copy that
+ * used to live in db2/demotion.c. Both returned 0 for the spelling they did not
+ * know, and 0 is a real timestamp, so neither failed loudly. */
 
 /* --- Session Folding --- */
 
@@ -187,7 +169,7 @@ static int retro_scan_due(void)
    char last[64];
    if (!db2_memory_last_retro_scan(last, sizeof(last)))
       return 1;
-   time_t last_scan = memory_conflict_parse_utc_timestamp(last);
+   time_t last_scan = parse_utc_ts(last);
    time_t now = time(NULL);
    if (last_scan > (time_t)0 && now > last_scan && (now - last_scan) < RETRO_CONFLICT_INTERVAL)
       return 0;

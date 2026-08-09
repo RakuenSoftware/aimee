@@ -249,23 +249,8 @@ static cJSON *build_aimee_plugin_entry(void)
    return entry;
 }
 
-/* Under the "solo" tool profile the delegate tools are withheld, so instructing
- * the agent to delegate would point it at something it cannot see -- and the
- * point of that profile is that no second agent touches the work. Tell it to do
- * the work itself instead of naming a tool that is absent. */
-/* The profile name only; deliberately not linking the protocol module into the
- * client, which would cross a module boundary for one string comparison. */
-static int client_solo_profile(void)
-{
-   const char *profile = getenv("AIMEE_MCP_TOOL_PROFILE");
-   return profile && strcmp(profile, "solo") == 0;
-}
-
 static const char *codex_delegate_policy_prompt(void)
 {
-   if (client_solo_profile())
-      return "Do not spawn or delegate to sub-agents of any kind, including Codex "
-             "spawn_agent, Claude Agent, or aimee delegate; do this work yourself";
    return "Do not spawn provider-native sub-agents such as Codex spawn_agent or "
           "Claude Agent; use the aimee delegate MCP tool for every delegated or "
           "parallel sub-task";
@@ -317,51 +302,205 @@ static const char *codex_skill_markdown(void)
           "`. It answers from the index in one call, and it is exact where a "
           "recursive text search is a guess that also matches comments, strings "
           "and unrelated names. It REPLACES that search — do not also grep for "
-          "the same symbol to confirm it.\n"
+          "the same symbol to confirm it. Looking up several names? Pass them "
+          "together as `identifiers` — one call, one section per name.\n"
           "- Before changing anything shared, or editing more than one file: use "
           "`" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS
           "` to see what depends on it. A grep for the symbol will not tell you "
           "what breaks.\n"
+          /* The composed packet existed as /v1/code/context and was wired ONLY as
+           * automatic pre-injection for aimee's own ingress and for delegates --
+           * an agent over MCP could not reach it at all. That is why the measured
+           * opening move is four hybrid queries followed by four structure calls
+           * and then reads: the one-call answer was there and was never offered. */
+          "- STARTING on an unfamiliar area, or you do not yet know which files "
+          "matter: use `" AIMEE_CODE_TOOL_INDEX
+          "` with command=" AIMEE_CODE_INDEX_COMMAND_INVESTIGATE
+          " and a plain-words question. It returns ranked evidence with the code "
+          "already attached and an explicit answerable/no_answer verdict, capped "
+          "so it cannot flood the context. One call where searching, mapping and "
+          "reading would be three. If it says no_answer, stop probing the index "
+          "and go read the files it named.\n"
+          "- Looking for a PHRASE rather than a symbol -- an error string, a config "
+          "key, a concept like \"config cache\" or \"pool lease\": use `" AIMEE_CODE_TOOL_INDEX
+          "` with command=" AIMEE_CODE_INDEX_COMMAND_HYBRID
+          " and a query. It fuses lexical and semantic retrieval over the index and "
+          "returns a bounded, ranked result set (max_results, default 20), where a "
+          "recursive search returns every line that matched in whatever order the "
+          "filesystem walk found them.\n"
+          /* THE MEASURED FAILURE MODE IS UNDER-SCOPING, NOT BAD RETRIEVAL.
+           * On two benchmark tasks that every arm failed, aimee's retrieval was
+           * correct and its patch was too narrow. On a leaked-connection task it
+           * ran find_callers on the acquire and release functions, read the
+           * owning module -- then patched ONE consumer to hold the lease for less
+           * time, where the reference made the pool reclaim a lease that is never
+           * returned. On a wedged-fan-out task whose ticket names a three-link
+           * chain, it changed two of the five files the reference changes. Both
+           * fixes were reasoned and both left the defect reachable. */
+          "- Fix the OWNER, not one caller. If something is acquired and never "
+          "released, or handed out and never reclaimed, the durable fix belongs "
+          "with whatever hands it out — a fix in one caller leaves every other "
+          "caller able to reproduce it. Run `" AIMEE_CODE_TOOL_INDEX
+          "` command=find_callers on the function at fault: if it has more than "
+          "one caller, a caller-side fix is incomplete by construction.\n"
+          /* Third instance of the same failure, and the sharpest: the ticket
+           * opens "Two bugs that made ..." and names both. aimee fixed the
+           * second (a request shape) and never touched the first -- an
+           * over-broad provider/endpoint/model test that had to be narrowed to
+           * one model. It edited the right FILE for an unrelated reason, so file
+           * overlap with the reference looked like coverage and was not. */
+          "- If the ticket states a COUNT — \"two bugs\", \"both paths\", "
+          "\"three call sites\" — your patch must address that many DISTINCT "
+          "defects. Name them to yourself before you start and check them off at "
+          "the end. Editing a file the second defect happens to live in is not "
+          "fixing it.\n"
+          "- Before you finish, re-read the ticket and account for every symptom "
+          "it names. A ticket that describes a CHAIN (\"X did A, which collided "
+          "with B, so C never ran\") is describing several places that must "
+          "agree; fixing the first link usually leaves the rest wedged. Check "
+          "your changed symbols with `" AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS
+          "` and ask what else participates.\n"
+          /* A completeness check was nearly built as a new tool before noticing
+           * roundtable_review already IS one: every seat is an ordinary delegate,
+           * `original_request` exists precisely to detect goal drift, `brief`
+           * takes focus/invariants/questions, and `workdir` gives the reviewer
+           * the checkout. A one-seat preset is a single reviewer with a persona.
+           * Reuse it rather than shipping a parallel path that would have thrown
+           * away chairman synthesis, evidence requirements and cost caps. */
+          "- Before you report the work done, get a second pair of eyes on it: "
+          "`roundtable_review` with `diff` set to your change and "
+          "`original_request` set to the FULL ticket text. It runs reviewers as "
+          "delegates and uses the original request to catch goal drift — the "
+          "case where the change is reasonable but is not the change that was "
+          "asked for. The call returns the verdict itself; it blocks until the "
+          "review finishes, which can take several minutes. Self-review misses "
+          "omissions because you already believe you are finished.\n"
           "- Use `search_memory` for stored project facts or prior decisions.\n"
-          "- Reading a file the index has already pointed you at: just read it, "
-          "and read the range you need rather than the whole file.\n"
+          "- Do not read this file, or anything else under the plugin cache. You "
+          "are already reading it; spending a call to fetch it again tells you "
+          "nothing new.\n"
+          /* Reading is the largest remaining category. Measured on one cell:
+           * 15 reads carrying 660k tokens, 17.7% of that run's whole input --
+           * more than search, build and git. `sed -n '1,280p'` is a guess at a
+           * range; span is the range the index already knows. */
+          "- Reading a file the index has already pointed you at: read the RANGE, "
+          "never the whole file. `" AIMEE_CODE_TOOL_INDEX
+          "` with command=span and file_path + line_start/line_end returns exactly "
+          "that slice; use it when you know the lines, and a plain read only when "
+          "you do not.\n"
+          /* Build output is almost entirely echoed compiler command lines: each
+           * one repeats the full -I/-D flag set, hundreds of characters, per
+           * translation unit. Measured on one cell: 6 builds carrying 241k
+           * tokens for a handful of real diagnostics. */
+          "- Building or running tests: silence the command echo (`make -s`, or "
+          "redirect stdout and keep stderr) and build only the target you need. "
+          "A default `make` echoes every compiler invocation with its whole flag "
+          "set, which is thousands of characters per file and tells you nothing "
+          "the diagnostics do not.\n"
           "- Recursive grep is for text that is not a code symbol, or for when the "
           "index has no answer. Scope it to a path when you use it. Never run it "
           "over the whole tree to find out what the tree contains.\n"
+          /* An unbounded recursive search is the single most expensive thing an
+           * agent can do here, and it is invisible at the time: the output lands
+           * once but is re-sent on every later turn. Measured on one cell after
+           * the guidance above was already in place -- a single
+           * `rg -n "<alternation>" src --glob '*.[ch]'` with no cap returned
+           * 80,330 characters (~20k tokens) and rode the remaining ~13 model
+           * calls, about a fifth of that run's entire input. Plain codex capped
+           * every one of its five searches with `| head -n 100` unprompted and
+           * spent 15k characters on search in total against aimee's 93k. */
+          "- Cap what a search prints. Pipe it through `head` (say `| head -n 60`) "
+          "and prefer a narrow pattern over a wide alternation: an uncapped "
+          "recursive search can return tens of thousands of characters, and every "
+          "one of them is re-sent on every later turn of this session.\n"
+          /* The dominant remaining cost, and it is not bytes. Measured on one
+           * cell where all four arms passed: aimee moved the FEWEST tool-output
+           * characters of any arm (74k against baseline's 124k) and still paid
+           * 4.4x the tokens, because it took 47 tool calls against baseline's 9.
+           * Per call it was cheaper (41.0k input-tokens vs 49.1k); it simply took
+           * five times as many. Plain codex chained aggressively -- 16 `sed`
+           * reads inside 9 calls, up to five ranges joined with `&&` in a single
+           * command -- where aimee spread 7 reads across 22 calls. A round trip
+           * re-sends the whole conversation prefix, so an extra call costs far
+           * more than an extra command on a line that was already being sent. */
+          "- Put independent commands in ONE call, joined with `&&`. Every extra "
+          "round trip re-sends this entire conversation, so four reads chained "
+          "into one command cost a fraction of four separate calls. Batch your "
+          "reads, and fold `git status` / `git diff --check` / a cleanup into the "
+          "command you were already running rather than spending a turn on each.\n"
+          /* Every retrieval verb the agent uses in bulk now takes a plural form.
+           * Measured on one cell AFTER span batching landed: 4 separate hybrid
+           * queries and 4 separate structure calls over 4 different files, all
+           * independent, all a full round trip each. */
+          "- The same applies to every index lookup: `" AIMEE_CODE_TOOL_INDEX
+          "` takes `spans` ([{file_path, line_start, line_end}, ...]) for reads, "
+          "`file_paths` for command=structure, and `queries` for "
+          "command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ". `" AIMEE_CODE_TOOL_FIND_SYMBOL
+          "` takes `identifiers`. If you are about to ask the same question about "
+          "several files, ranges, symbols or topics, ask it ONCE with the plural "
+          "form -- independent lookups do not need separate turns.\n"
+          /* Measured on one cell: 4 of 9 shell searches returned 0-35 characters.
+           * Each is a full round trip bought for nothing, and the pattern is
+           * always the same -- a guessed regex misses, so the agent guesses a
+           * narrower or wider one instead of switching to the index. */
+          "- A search that comes back empty is a signal to change TOOL, not to "
+          "retry with another pattern. Two empty greps in a row means the thing "
+          "you are looking for is not literal text: use `" AIMEE_CODE_TOOL_INDEX
+          "` with command=" AIMEE_CODE_INDEX_COMMAND_HYBRID " or `" AIMEE_CODE_TOOL_FIND_SYMBOL
+          "` instead.\n"
           "- Do not call provider-native sub-agent tools such as `spawn_agent`; use "
           "the aimee `delegate` MCP tool for every delegated or parallel sub-task.\n"
           "- Use `delegate` only for bounded sub-tasks that materially advance the "
           "current work.\n";
 }
 
-/* Under "solo" the delegate tools are withheld, so the two delegation bullets
- * above would name a tool the agent cannot see. Swap them for the rule that
- * profile actually enforces: nobody else touches this work. */
+/* The skill is the same text for every run. There is no benchmark variant: a
+ * profile that hides shipped tools during measurement makes the measured thing a
+ * configuration nobody deploys. */
 static const char *codex_skill_markdown_effective(void)
 {
-   static const char *const SOLO_TAIL =
-       "- Do not call provider-native sub-agent tools such as `spawn_agent`; use "
-       "the aimee `delegate` MCP tool for every delegated or parallel sub-task.\n"
-       "- Use `delegate` only for bounded sub-tasks that materially advance the "
-       "current work.\n";
-   static char solo_buf[8192];
+   return codex_skill_markdown();
+}
 
-   const char *base = codex_skill_markdown();
-   if (!client_solo_profile())
-      return base;
-
-   const char *cut = strstr(base, SOLO_TAIL);
-   if (!cut)
-      return base; /* text moved: say nothing rather than emit a mangled skill */
-
-   size_t head = (size_t)(cut - base);
-   int n = snprintf(solo_buf, sizeof(solo_buf),
-                    "%.*s- Do all of this work yourself. Do not spawn or delegate to a "
-                    "sub-agent of any kind.\n",
-                    (int)head, base);
-   if (n < 0 || (size_t)n >= sizeof(solo_buf))
-      return base;
-   return solo_buf;
+/* The codex PreToolUse registration. aimee already HAS the guard -- `aimee hooks`
+ * implements the full wire contract (permissionDecision / permissionDecisionReason,
+ * and updatedInput where the client supports it), and require_aimee_git is ON by
+ * default with a deny that names git_status / git_log / git_diff_summary and the
+ * rest. It simply never ran under codex, because this plugin shipped no hooks at
+ * all: only .mcp.json and the skill.
+ *
+ * Measured consequence across the benchmark's aimee cells: 98 shell `git`
+ * invocations (48 of them full `git diff`) and ZERO calls to the aimee git tool --
+ * whose schema we pay ~1,000 tokens for on every single call. The rule was written,
+ * defaulted on, and left unwired.
+ *
+ * Codex does not honour updatedInput on PreToolUse, so the guard's codex path
+ * denies with an instruction to retry through the tool. That costs one turn and
+ * redirects the remaining ones. */
+static const char *codex_hooks_json(const char *aimee_bin)
+{
+   static char buf[1024];
+   snprintf(buf, sizeof(buf),
+            "{\n"
+            "  \"hooks\": {\n"
+            "    \"PreToolUse\": [\n"
+            "      {\n"
+            "        \"hooks\": [\n"
+            "          {\n"
+            "            \"type\": \"command\",\n"
+            /* `hooks` alone exits with "hooks requires 'pre' or 'post'" and codex then
+             * allows the tool. The subcommand is the whole difference between a
+             * registered hook and an enforcing one. */
+            "            \"command\": \"%s hooks pre\",\n"
+            "            \"timeout\": 10\n"
+            "          }\n"
+            "        ]\n"
+            "      }\n"
+            "    ]\n"
+            "  }\n"
+            "}\n",
+            aimee_bin && aimee_bin[0] ? aimee_bin : "aimee");
+   return buf;
 }
 
 static const char *codex_code_exploration_prompt(void)
@@ -376,7 +515,8 @@ static const char *codex_code_exploration_prompt(void)
           " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID
           ") instead of raw grep/read. Do not survey the repository first: no "
           "repo-wide file listings, no directory walks, no reading whole files to "
-          "orient. Ask the index, then read only what it points at.";
+          "orient. Ask the index, then read only what it points at. Cap what any "
+          "search prints (`| head -n 60`): its output is re-sent on every later turn.";
 }
 
 static void ensure_codex_marketplace(const char *path)
@@ -837,6 +977,14 @@ static void ensure_codex_plugin_files(const char *home)
             "%s/.agents/plugins/plugins/aimee/skills/.codex-plugin/plugin.json", home);
    snprintf(installed_compat_plugin_json, sizeof(installed_compat_plugin_json),
             "%s/.codex/plugins/cache/local/aimee/skills/.codex-plugin/plugin.json", home);
+   char hooks_json[MAX_PATH_LEN];
+   char marketplace_hooks_json[MAX_PATH_LEN];
+   char installed_hooks_json[MAX_PATH_LEN];
+   snprintf(hooks_json, sizeof(hooks_json), "%s/plugins/aimee/hooks/codex-hooks.json", home);
+   snprintf(marketplace_hooks_json, sizeof(marketplace_hooks_json),
+            "%s/.agents/plugins/plugins/aimee/hooks/codex-hooks.json", home);
+   snprintf(installed_hooks_json, sizeof(installed_hooks_json),
+            "%s/.codex/plugins/cache/local/aimee/hooks/codex-hooks.json", home);
    snprintf(skill_md, sizeof(skill_md), "%s/plugins/aimee/skills/aimee/SKILL.md", home);
    snprintf(marketplace_skill_md, sizeof(marketplace_skill_md),
             "%s/.agents/plugins/plugins/aimee/skills/aimee/SKILL.md", home);
@@ -869,6 +1017,7 @@ static void ensure_codex_plugin_files(const char *home)
             "  \"keywords\": [\"memory\", \"mcp\", \"coding\", \"search\", \"delegation\"],\n"
             "  \"skills\": \"./skills/\",\n"
             "  \"mcpServers\": \"./.mcp.json\",\n"
+            "  \"hooks\": \"./hooks/codex-hooks.json\",\n"
             "  \"interface\": {\n"
             "    \"displayName\": \"aimee\",\n"
             "    \"shortDescription\": \"Memory, search, and delegation for Codex\",\n"
@@ -957,6 +1106,10 @@ static void ensure_codex_plugin_files(const char *home)
    write_text_file(compat_mcp_json, mcp_buf, 0644);
    write_text_file(marketplace_compat_mcp_json, mcp_buf, 0644);
    write_text_file(installed_compat_mcp_json, mcp_buf, 0644);
+   const char *hooks_buf = codex_hooks_json(aimee_bin);
+   write_text_file(hooks_json, hooks_buf, 0644);
+   write_text_file(marketplace_hooks_json, hooks_buf, 0644);
+   write_text_file(installed_hooks_json, hooks_buf, 0644);
    write_text_file(skill_md, skill_buf, 0644);
    write_text_file(marketplace_skill_md, skill_buf, 0644);
    write_text_file(installed_skill_md, skill_buf, 0644);

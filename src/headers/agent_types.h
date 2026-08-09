@@ -1,6 +1,7 @@
 #ifndef DEC_AGENT_TYPES_H
 #define DEC_AGENT_TYPES_H 1
 
+#include <limits.h>
 #include <pthread.h>
 #include <sys/types.h>
 
@@ -98,6 +99,38 @@ static inline int agent_loop_per_call_timeout_ms(int agent_timeout_ms, int total
    if (remaining < min_call)
       return -1;
    return agent_timeout_ms < remaining ? agent_timeout_ms : remaining;
+}
+
+/* Would this delegate be refused before its first call? A workflow stage cap may
+ * be smaller than one viable call, in which case the loop stops immediately and
+ * blames a budget it never got to spend. Callers preflight with this so the
+ * refusal is stated honestly (and costs no model call). Pure -- unit-tested. */
+static inline int agent_loop_window_too_small(int agent_timeout_ms, int total_timeout_ms)
+{
+   return agent_loop_per_call_timeout_ms(agent_timeout_ms, total_timeout_ms, 0) < 0;
+}
+
+/* Whole tool-loop budget for one delegate. The configured per-call timeout keeps
+ * its existing four-call ceiling, while a positive request cap may only reduce
+ * that budget. Workflow callers use the cap to leave time for post-delegate
+ * verification before their stage deadline. */
+static inline int agent_loop_total_timeout_ms(int agent_timeout_ms, int request_cap_ms)
+{
+   int configured =
+       agent_timeout_ms > INT_MAX / 4 ? INT_MAX : (agent_timeout_ms > 0 ? agent_timeout_ms * 4 : 0);
+   if (request_cap_ms > 0 && (configured <= 0 || request_cap_ms < configured))
+      return request_cap_ms;
+   return configured;
+}
+
+/* Apply a positive enclosing-request cap to one backend wait. Unlike the
+ * configured timeout resolver above, a cap may replace an otherwise unbounded
+ * CLI wait but can never lengthen a shorter configured timeout. */
+static inline int agent_timeout_cap_ms(int timeout_ms, int request_cap_ms)
+{
+   if (request_cap_ms > 0 && (timeout_ms <= 0 || request_cap_ms < timeout_ms))
+      return request_cap_ms;
+   return timeout_ms;
 }
 
 /* Effective per-call timeout for a delegate run. A delegate must NEVER run with
@@ -329,6 +362,9 @@ typedef struct
    int cost_tier;
    int max_tokens;
    int timeout_ms;
+   /* Per-invocation whole tool-loop cap supplied by an enclosing workflow
+    * deadline. Runtime-only: never loaded from or written to agents.json. */
+   int tool_loop_timeout_ms_cap;
    int enabled;
    int tools_enabled;
    /* Per-invocation runtime policy (never serialized): require the first
@@ -391,6 +427,11 @@ typedef struct
    /* Transient per-request routing contract: an explicit agent/provider pin
     * must surface that agent's result and may never substitute a peer. */
    int route_pinned;
+   /* One absolute per-request budget shared by the primary route, credential
+    * retries, configured fallbacks, and same-tier fallbacks. Runtime-only: the
+    * deadline is CLOCK_MONOTONIC milliseconds and is never serialized. */
+   int tool_loop_timeout_ms_cap;
+   int64_t tool_loop_deadline_ms;
    agent_network_t network;
    agent_tunnel_mgr_t tunnel_mgr;
    agent_ablation_flags_t ablation;

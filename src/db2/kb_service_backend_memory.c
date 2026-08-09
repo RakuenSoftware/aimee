@@ -15,6 +15,7 @@
 #include "decision_log.h"
 #include "memory.h"
 #include "memory_export.h"
+#include "memory_lifecycle.h" /* db2_memory_valid_at (memory get --as-of) */
 #include "memory_payload.h"
 #include "memory_query.h"
 #include "memory_scope_query.h"
@@ -1134,7 +1135,7 @@ cJSON *db2_kb_service_memory_load_eval_corpus_json(int max)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_get_json(int64_t id)
+cJSON *db2_kb_service_memory_get_json(int64_t id, const char *as_of)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
@@ -1148,6 +1149,29 @@ cJSON *db2_kb_service_memory_get_json(int64_t id)
       return resp;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
+
+   /* EVENT time, when asked for. lifecycle_state answers "is this true now" and
+    * nothing else: a superseded row looks identically superseded whether it
+    * stopped being true yesterday or last year. db2_memory_valid_at reads the
+    * valid_from/valid_until interval instead, so "what did we believe on 12
+    * June" becomes answerable for rows the way it already is for relations.
+    *
+    * Only emitted when the caller asks. A `valid_at` key on every response would
+    * have to mean something for the overwhelmingly common no-as_of case, and the
+    * honest answer there is "you did not ask about a time".
+    *
+    * -1 (bad call / no connection) is reported as unknown rather than folded
+    * into false: "we could not tell" and "it was not in force" are different
+    * answers, and conflating them is how a bitemporal query lies. */
+   if (as_of && as_of[0])
+   {
+      int in_force = db2_memory_valid_at(id, as_of);
+      cJSON_AddStringToObject(resp, "as_of", as_of);
+      if (in_force < 0)
+         cJSON_AddStringToObject(resp, "valid_at", "unknown");
+      else
+         cJSON_AddBoolToObject(resp, "valid_at", in_force ? 1 : 0);
+   }
    cJSON *obj = kbs_memory_row_to_json(&m);
    if (!obj)
    {

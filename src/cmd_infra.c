@@ -620,6 +620,104 @@ static cJSON *git_sub_clone(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
    return handle_git_clone(args);
 }
 
+/* The history-integration commands. Each takes its target ref positionally and
+ * continue/abort/skip as a bare word, because that is how they are spoken:
+ * `aimee git merge origin/testing`, `aimee git rebase --continue`. */
+static cJSON *git_sub_integrate(cJSON *args, int argc, char **argv, cJSON *(*handler)(cJSON *),
+                                const char *what)
+{
+   for (int i = 0; i < argc; i++)
+   {
+      const char *a = argv[i];
+      while (*a == '-')
+         a++;
+      if (strcmp(a, "continue") == 0 || strcmp(a, "abort") == 0 || strcmp(a, "skip") == 0)
+         cJSON_AddStringToObject(args, "action", a);
+      else if (strcmp(argv[i], "--keep-conflicts") == 0)
+         cJSON_AddBoolToObject(args, "abort_on_conflict", 0);
+      else if (argv[i][0] != '-')
+         cJSON_AddStringToObject(args, "ref", argv[i]);
+   }
+   if (!cJSON_GetObjectItemCaseSensitive(args, "ref") &&
+       !cJSON_GetObjectItemCaseSensitive(args, "action"))
+   {
+      fprintf(stderr,
+              "Usage: aimee git %s <ref>            (start one)\n"
+              "       aimee git %s continue|abort   (drive one that hit a conflict)\n"
+              "Add --keep-conflicts to stop in the conflicted state instead of undoing.\n",
+              what, what);
+      return NULL;
+   }
+   return handler(args);
+}
+
+static cJSON *git_sub_merge(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   return git_sub_integrate(args, argc, argv, handle_git_merge, "merge");
+}
+
+static cJSON *git_sub_rebase(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   /* rebase's target is `base`; the handler accepts either name. */
+   return git_sub_integrate(args, argc, argv, handle_git_rebase, "rebase");
+}
+
+static cJSON *git_sub_cherry_pick(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   return git_sub_integrate(args, argc, argv, handle_git_cherry_pick, "cherry-pick");
+}
+
+static cJSON *git_sub_revert(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   return git_sub_integrate(args, argc, argv, handle_git_revert, "revert");
+}
+
+static cJSON *git_sub_sync(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--merge") == 0)
+         cJSON_AddStringToObject(args, "mode", "merge");
+      else if (argv[i][0] != '-')
+         cJSON_AddStringToObject(args, "base", argv[i]);
+   }
+   return handle_git_sync(args);
+}
+
+static cJSON *git_sub_add(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   cJSON *files = NULL;
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "-A") == 0 || strcmp(argv[i], "--all") == 0)
+         cJSON_AddBoolToObject(args, "all", 1);
+      else if (argv[i][0] != '-')
+      {
+         if (!files)
+            files = cJSON_AddArrayToObject(args, "files");
+         cJSON_AddItemToArray(files, cJSON_CreateString(argv[i]));
+      }
+   }
+   if (!files && !cJSON_GetObjectItemCaseSensitive(args, "all"))
+   {
+      fprintf(stderr, "Usage: aimee git add <paths...>\n"
+                      "       aimee git add -A\n");
+      return NULL;
+   }
+   return handle_git_add(args);
+}
+
+static cJSON *git_sub_switch(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   if (argc < 1)
+   {
+      fprintf(stderr, "Usage: aimee git switch <branch>\n");
+      return NULL;
+   }
+   cJSON_AddStringToObject(args, "ref", argv[0]);
+   return handle_git_switch(args);
+}
+
 typedef cJSON *(*git_sub_fn)(app_ctx_t *ctx, cJSON *args, int argc, char **argv);
 
 static const struct
@@ -643,6 +741,14 @@ static const struct
     {"reset", git_sub_reset},
     {"restore", git_sub_restore},
     {"clone", git_sub_clone},
+    {"merge", git_sub_merge},
+    {"rebase", git_sub_rebase},
+    {"cherry-pick", git_sub_cherry_pick},
+    {"cherry_pick", git_sub_cherry_pick},
+    {"revert", git_sub_revert},
+    {"sync", git_sub_sync},
+    {"add", git_sub_add},
+    {"switch", git_sub_switch},
     {NULL, NULL},
 };
 
@@ -651,7 +757,8 @@ void cmd_git(app_ctx_t *ctx, int argc, char **argv)
    if (argc < 1)
    {
       fprintf(stderr, "Usage: aimee git <status|commit|push|pull|fetch|branch|log|diff|"
-                      "pr|issue|stash|tag|reset|restore|clone|verify>\n");
+                      "pr|issue|stash|tag|reset|restore|clone|verify|\n"
+                      "                 merge|rebase|sync|cherry-pick|revert|add|switch>\n");
       return;
    }
 
@@ -1153,17 +1260,24 @@ static void repo_name_from_url(const char *url, char *out, size_t outlen)
 static int register_and_index(app_ctx_t *ctx, const char *abs_path)
 {
    int add_rc = config_workspace_add(abs_path, NULL, NULL, NULL);
+   /* Already registered is the state the caller asked for, so it is not an
+    * error. Failing here made `workspace add` non-idempotent, and scripted
+    * setup issues it unconditionally: re-running any automation that had
+    * already registered its path aborted at setup with exit 1, before doing
+    * any work. Fall through to discovery so a repeat run still re-indexes,
+    * which is the half of the command that actually matters on a second call.
+    *
+    * This is the same read-your-writes hazard documented for `workspace
+    * remove` in server_state.c -- a state change a caller cannot immediately
+    * act on is worse than a slow one. */
    if (add_rc == -2)
-   {
-      fprintf(stderr, "workspace: already registered: %s\n", abs_path);
-      return -1;
-   }
-   if (add_rc == -3)
+      fprintf(stderr, "workspace: already registered: %s (re-indexing)\n", abs_path);
+   else if (add_rc == -3)
    {
       fprintf(stderr, "workspace: maximum workspace count reached (64)\n");
       return -1;
    }
-   if (add_rc != 0)
+   if (add_rc != 0 && add_rc != -2)
    {
       fprintf(stderr, "workspace: failed to save config\n");
       return -1;
@@ -1178,7 +1292,8 @@ static int register_and_index(app_ctx_t *ctx, const char *abs_path)
       return -1;
    }
 
-   fprintf(stderr, "workspace: added %s (%d project(s) discovered)\n", abs_path, count);
+   fprintf(stderr, "workspace: %s %s (%d project(s) discovered)\n",
+           add_rc == -2 ? "re-indexed" : "added", abs_path, count);
 
    for (int i = 0; i < count; i++)
    {

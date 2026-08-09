@@ -189,6 +189,73 @@ static int gh_ctx_resolve(const char *principal, const char *repo_dir, gh_ctx_t 
    return 0;
 }
 
+/* As gh_ctx_resolve, but from an "owner/repo" slug the CALLER resolved, for the
+ * callers with no server-visible checkout to run git in. The credential is looked
+ * up against the slug's canonical https remote so per-host resolution still works;
+ * repo_dir is NULL because there is no such directory here. */
+static int gh_ctx_resolve_slug(const char *principal, const char *slug, gh_ctx_t *cx, char *err,
+                               size_t errlen)
+{
+   memset(cx, 0, sizeof(*cx));
+   if (!slug || !slug[0])
+   {
+      snprintf(err, errlen, "no repository");
+      return -1;
+   }
+   const char *sl = strchr(slug, '/');
+   if (!sl || sl == slug || !sl[1] || strchr(sl + 1, '/'))
+   {
+      snprintf(err, errlen, "requires an owner/repo slug");
+      return -1;
+   }
+   size_t ol = (size_t)(sl - slug);
+   if (ol >= sizeof(cx->owner) || strlen(sl + 1) >= sizeof(cx->repo))
+   {
+      snprintf(err, errlen, "repository name too long");
+      return -1;
+   }
+   memcpy(cx->owner, slug, ol);
+   cx->owner[ol] = '\0';
+   snprintf(cx->repo, sizeof(cx->repo), "%s", sl + 1);
+
+   char remote[512];
+   snprintf(remote, sizeof(remote), "https://github.com/%s/%s.git", cx->owner, cx->repo);
+   if (git_cred_inject_resolve_token(principal, remote, NULL, NULL, cx->token, sizeof(cx->token)) !=
+           1 ||
+       !cx->token[0])
+   {
+      wipe(cx->token, sizeof(cx->token));
+      snprintf(err, errlen, "no github credential — connect one in the Git panel");
+      return -1;
+   }
+   return 0;
+}
+
+/* "owner/repo" for a checkout THIS PROCESS can read. The repo_dir entry points use
+ * it to reach their _slug siblings, which hold the actual request. */
+static int gh_slug_from_repo_dir(const char *repo_dir, char *slug, size_t cap, char *err,
+                                 size_t errlen)
+{
+   char origin[1024];
+   if (git_cap(repo_dir, "config --get remote.origin.url", origin, sizeof(origin)) != 0)
+   {
+      snprintf(err, errlen, "no origin remote");
+      return -1;
+   }
+   char owner[128], repo[128];
+   if (parse_github_slug(origin, owner, sizeof(owner), repo, sizeof(repo)) != 0)
+   {
+      snprintf(err, errlen, "requires a github.com origin");
+      return -1;
+   }
+   if ((size_t)snprintf(slug, cap, "%s/%s", owner, repo) >= cap)
+   {
+      snprintf(err, errlen, "repository name too long");
+      return -1;
+   }
+   return 0;
+}
+
 static void gh_ctx_done(gh_ctx_t *cx)
 {
    wipe(cx->token, sizeof(cx->token));
@@ -412,6 +479,38 @@ int git_pr_create_via_api_ex_draft(const char *principal, const char *repo_dir, 
          title = head;
    }
 
+   /* Everything above needed the checkout; the request itself does not. Hand the
+    * resolved slug to the no-checkout path so there is one copy of the POST. The
+    * token is resolved again there, which costs one vault read and keeps this
+    * function from having to hand a live credential across the boundary. */
+   char slug[264];
+   snprintf(slug, sizeof(slug), "%s/%s", cx.owner, cx.repo);
+   gh_ctx_done(&cx);
+   return git_pr_create_via_api_slug(principal, slug, head, base, title, body, draft, out, out_cap,
+                                     err, errlen);
+}
+
+int git_pr_create_via_api_slug(const char *principal, const char *slug, const char *head,
+                               const char *base, const char *title, const char *body, int draft,
+                               char *out, size_t out_cap, char *err, size_t errlen)
+{
+   if (out && out_cap)
+      out[0] = '\0';
+   if (err && errlen)
+      err[0] = '\0';
+
+   /* No checkout to infer these from, and guessing is how a PR lands on the wrong
+    * base. Refuse instead. */
+   if (!head || !head[0] || !base || !base[0] || !title || !title[0])
+   {
+      snprintf(err, errlen, "head, base and title are required without a checkout");
+      return -1;
+   }
+
+   gh_ctx_t cx;
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
+      return -1;
+
    /* Standing directive: no AI co-authorship / "Generated with" attribution in
     * PR bodies — strip a copy before it reaches GitHub. */
    char *bclean = strdup(body ? body : "");
@@ -479,6 +578,21 @@ int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const 
       out[0] = '\0';
    if (number_out)
       *number_out = 0;
+   char slug[264];
+   if (gh_slug_from_repo_dir(repo_dir, slug, sizeof(slug), err, errlen) != 0)
+      return -1;
+   return git_pr_find_open_via_api_slug(principal, slug, head, base, out, out_cap, number_out, err,
+                                        errlen);
+}
+
+int git_pr_find_open_via_api_slug(const char *principal, const char *slug, const char *head,
+                                  const char *base, char *out, size_t out_cap, int *number_out,
+                                  char *err, size_t errlen)
+{
+   if (out && out_cap)
+      out[0] = '\0';
+   if (number_out)
+      *number_out = 0;
    if (!head || !head[0] || !base || !base[0] || strlen(head) > 200 || strlen(base) > 200 ||
        strchr(head, '&') || strchr(head, '?') || strchr(base, '&') || strchr(base, '?'))
    {
@@ -486,7 +600,7 @@ int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const 
       return -1;
    }
    gh_ctx_t cx;
-   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
    char path[700];
    snprintf(path, sizeof(path), "pulls?state=open&head=%s:%s&base=%s&per_page=1", cx.owner, head,
@@ -522,22 +636,57 @@ int git_pr_update_via_api(const char *principal, const char *repo_dir, int numbe
 {
    if (err && errlen)
       err[0] = '\0';
-   if (number <= 0 || !title || !title[0] || !body || !body[0])
+   char slug[264];
+   if (gh_slug_from_repo_dir(repo_dir, slug, sizeof(slug), err, errlen) != 0)
+      return -1;
+   return git_pr_update_via_api_slug(principal, slug, number, title, body, err, errlen);
+}
+
+int git_pr_update_via_api_slug(const char *principal, const char *slug, int number,
+                               const char *title, const char *body, char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   if (!title || !title[0] || !body || !body[0])
+   {
+      snprintf(err, errlen, "invalid PR update");
+      return -1;
+   }
+   return git_pr_edit_via_api_slug(principal, slug, number, title, body, NULL, err, errlen);
+}
+
+int git_pr_edit_via_api_slug(const char *principal, const char *slug, int number, const char *title,
+                             const char *body, const char *base, char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   int has_title = title && title[0];
+   int has_body = body && body[0];
+   int has_base = base && base[0];
+   if (number <= 0 || (!has_title && !has_body && !has_base))
    {
       snprintf(err, errlen, "invalid PR update");
       return -1;
    }
    gh_ctx_t cx;
-   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
 
-   char *clean = strdup(body);
-   if (clean)
-      strip_ai_attribution(clean);
+   /* Only the fields the caller supplied go in the payload: sending an empty
+    * string would blank the PR's title or body rather than leave it alone. */
    cJSON *json = cJSON_CreateObject();
-   cJSON_AddStringToObject(json, "title", title);
-   cJSON_AddStringToObject(json, "body", clean ? clean : body);
-   free(clean);
+   if (has_title)
+      cJSON_AddStringToObject(json, "title", title);
+   if (has_body)
+   {
+      char *clean = strdup(body);
+      if (clean)
+         strip_ai_attribution(clean);
+      cJSON_AddStringToObject(json, "body", clean ? clean : body);
+      free(clean);
+   }
+   if (has_base)
+      cJSON_AddStringToObject(json, "base", base);
    char *payload = cJSON_PrintUnformatted(json);
    cJSON_Delete(json);
    if (!payload)
@@ -563,8 +712,463 @@ int git_pr_update_via_api(const char *principal, const char *repo_dir, int numbe
    return 0;
 }
 
+/* Seconds since the epoch for "YYYY-MM-DDTHH:MM:SSZ", or -1 if it does not parse.
+ *
+ * Done by arithmetic rather than strptime/timegm: neither is available on every
+ * target this builds for (there is a Windows build), and the input is a fixed UTC
+ * format, so a civil-days conversion is both portable and exact. */
+static long long gh_iso8601_secs(const char *s)
+{
+   int y, mo, d, h, mi, se;
+   if (!s || sscanf(s, "%4d-%2d-%2dT%2d:%2d:%2dZ", &y, &mo, &d, &h, &mi, &se) != 6)
+      return -1;
+   /* days_from_civil (Howard Hinnant): shift the year so March starts the era,
+    * which removes the leap-day special case entirely. */
+   y -= mo <= 2;
+   long long era = (y >= 0 ? y : y - 399) / 400;
+   unsigned yoe = (unsigned)(y - era * 400);
+   unsigned doy = (unsigned)((153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1);
+   unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+   long long days = era * 146097 + (long long)doe - 719468;
+   return days * 86400 + h * 3600 + mi * 60 + se;
+}
+
+/* gh printed a bare "0" for anything not completed or of zero length, "<n>s"
+ * under a minute, and "<m>m<s>s" above it. */
+static void gh_elapsed(const char *started, const char *completed, int completed_state, char *out,
+                       size_t cap)
+{
+   long long a = gh_iso8601_secs(started), b = gh_iso8601_secs(completed);
+   if (!completed_state || a < 0 || b < 0 || b <= a)
+   {
+      snprintf(out, cap, "0");
+      return;
+   }
+   long long d = b - a;
+   if (d >= 60)
+      snprintf(out, cap, "%lldm%llds", d / 60, d % 60);
+   else
+      snprintf(out, cap, "%llds", d);
+}
+
+/* GitHub's conclusion vocabulary mapped to the four words gh printed. Anything
+ * unrecognised reports "pending" rather than inventing a word: a caller polling
+ * for completion keeps polling, which is the safe direction to be wrong in. */
+static const char *gh_check_word(const char *status, const char *conclusion)
+{
+   if (!status || strcmp(status, "completed") != 0)
+      return "pending";
+   if (!conclusion)
+      return "pending";
+   if (strcmp(conclusion, "success") == 0)
+      return "pass";
+   if (strcmp(conclusion, "failure") == 0 || strcmp(conclusion, "timed_out") == 0 ||
+       strcmp(conclusion, "action_required") == 0 || strcmp(conclusion, "startup_failure") == 0 ||
+       strcmp(conclusion, "cancelled") == 0)
+      return "fail";
+   if (strcmp(conclusion, "neutral") == 0 || strcmp(conclusion, "skipped") == 0 ||
+       strcmp(conclusion, "stale") == 0)
+      return "skipping";
+   return "pending";
+}
+
+/* By name, then by url.
+ *
+ * This is OUR order, not a reproduction of gh's. gh was observed grouping skipped
+ * checks ahead of passing ones on one PR, sorting plain alphabetically on another,
+ * and doing neither on a third whose CI was still running -- so there is no stable
+ * order to copy. Callers read these rows by field, and two calls on unchanged data
+ * returning the same order matters more than matching something gh does not hold
+ * still. The url tiebreak is what makes that true: a repository can run two checks
+ * under ONE name (observed: `pins` twice on the same commit) and qsort is not
+ * stable, so without it the duplicate pair could swap between calls. */
+static int gh_check_cmp(const void *a, const void *b)
+{
+   const git_pr_check_t *x = a, *y = b;
+   int c = strcmp(x->name, y->name);
+   return c ? c : strcmp(x->url, y->url);
+}
+
+int git_pr_checks_via_api_slug(const char *principal, const char *slug, int number, int max,
+                               git_pr_check_t *out, int *count, char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   if (count)
+      *count = 0;
+   if (!out || !count || max <= 0 || number <= 0)
+   {
+      snprintf(err, errlen, "invalid PR checks request");
+      return -1;
+   }
+
+   /* The checks belong to the head COMMIT, so the PR has to be read first. */
+   git_pr_info_t info;
+   if (git_pr_info_via_api_slug(principal, slug, number, &info, err, errlen) != 0)
+      return -1;
+   if (!info.head_sha[0])
+   {
+      snprintf(err, errlen, "pull request has no head commit");
+      return -1;
+   }
+
+   gh_ctx_t cx;
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
+      return -1;
+   char path[160];
+   snprintf(path, sizeof(path), "commits/%s/check-runs?per_page=100", info.head_sha);
+   char *resp = NULL;
+   int st = gh_get(&cx, path, &resp);
+   gh_ctx_done(&cx);
+   if (st < 200 || st >= 300 || !resp)
+   {
+      gh_err(resp, st, "pr checks", err, errlen);
+      free(resp);
+      return -1;
+   }
+   cJSON *j = cJSON_Parse(resp);
+   free(resp);
+   const cJSON *runs = j ? cJSON_GetObjectItem(j, "check_runs") : NULL;
+   if (!cJSON_IsArray(runs))
+   {
+      cJSON_Delete(j);
+      snprintf(err, errlen, "github API: unparseable check runs");
+      return -1;
+   }
+   int n = 0;
+   const cJSON *r = NULL;
+   cJSON_ArrayForEach(r, runs)
+   {
+      if (n >= max)
+         break;
+      const cJSON *name = cJSON_GetObjectItem(r, "name");
+      if (!cJSON_IsString(name) || !name->valuestring)
+         continue; /* an unnamed check cannot be reported usefully */
+      const cJSON *status = cJSON_GetObjectItem(r, "status");
+      const cJSON *concl = cJSON_GetObjectItem(r, "conclusion");
+      const cJSON *started = cJSON_GetObjectItem(r, "started_at");
+      const cJSON *done = cJSON_GetObjectItem(r, "completed_at");
+      const cJSON *url = cJSON_GetObjectItem(r, "details_url");
+      const char *status_s = cJSON_IsString(status) ? status->valuestring : NULL;
+      git_pr_check_t *row = &out[n];
+      memset(row, 0, sizeof(*row));
+      snprintf(row->name, sizeof(row->name), "%s", name->valuestring);
+      snprintf(row->status, sizeof(row->status), "%s",
+               gh_check_word(status_s, cJSON_IsString(concl) ? concl->valuestring : NULL));
+      gh_elapsed(cJSON_IsString(started) ? started->valuestring : NULL,
+                 cJSON_IsString(done) ? done->valuestring : NULL,
+                 status_s && strcmp(status_s, "completed") == 0, row->elapsed,
+                 sizeof(row->elapsed));
+      if (cJSON_IsString(url) && url->valuestring)
+         snprintf(row->url, sizeof(row->url), "%s", url->valuestring);
+      n++;
+   }
+   cJSON_Delete(j);
+   if (n > 1)
+      qsort(out, (size_t)n, sizeof(out[0]), gh_check_cmp); /* gh listed them by name */
+   *count = n;
+   return 0;
+}
+
+/* --- Why a check failed --- */
+
+/* A check run's details_url ends ".../actions/runs/<run>/job/<job>"; the job id is
+ * the only handle the steps and log endpoints take, and reading it from the URL
+ * we already have avoids listing every job in the run to match by name. */
+static long gh_job_id_from_details_url(const char *url)
+{
+   if (!url || !url[0])
+      return 0;
+   const char *seg = strstr(url, "/job/");
+   if (!seg)
+      return 0;
+   seg += 5;
+   char *end = NULL;
+   long id = strtol(seg, &end, 10);
+   if (end == seg || id <= 0)
+      return 0;
+   return id;
+}
+
+/* First failed step of a job: the name, and the 1-based position. For a step the
+ * workflow did not name, the forge reports the command line, which is exactly what
+ * a caller needs in order to run the same gate locally. */
+static void gh_failed_step(const gh_ctx_t *cx, long job_id, char *name, size_t name_cap,
+                           int *number)
+{
+   name[0] = '\0';
+   *number = 0;
+   char path[96];
+   snprintf(path, sizeof(path), "actions/jobs/%ld", job_id);
+   char *resp = NULL;
+   int st = gh_get(cx, path, &resp);
+   if (st < 200 || st >= 300 || !resp)
+   {
+      free(resp);
+      return;
+   }
+   cJSON *j = cJSON_Parse(resp);
+   free(resp);
+   const cJSON *steps = j ? cJSON_GetObjectItem(j, "steps") : NULL;
+   const cJSON *s = NULL;
+   cJSON_ArrayForEach(s, steps)
+   {
+      const cJSON *concl = cJSON_GetObjectItem(s, "conclusion");
+      if (!cJSON_IsString(concl) || !concl->valuestring)
+         continue;
+      if (strcmp(concl->valuestring, "failure") != 0 &&
+          strcmp(concl->valuestring, "timed_out") != 0)
+         continue;
+      const cJSON *nm = cJSON_GetObjectItem(s, "name");
+      const cJSON *num = cJSON_GetObjectItem(s, "number");
+      if (cJSON_IsString(nm) && nm->valuestring)
+         snprintf(name, name_cap, "%s", nm->valuestring);
+      if (cJSON_IsNumber(num))
+         *number = num->valueint;
+      break; /* the first failure is the cause; later ones are usually fallout */
+   }
+   cJSON_Delete(j);
+}
+
+/* The last `tail_bytes` of a job's log.
+ *
+ * Two requests, deliberately. The forge's log endpoint answers 302 to pre-signed
+ * blob storage, so the redirect is followed HERE rather than in the HTTP layer:
+ * the second request must carry the Range header but must NOT carry the
+ * Authorization header, because that would hand the forge token to a third-party
+ * host. Range asks for the tail so a multi-megabyte log costs one small read, and
+ * the tail is where the error is. Returns malloc'd text, or NULL. */
+static char *gh_job_log_tail(const gh_ctx_t *cx, long job_id, long tail_bytes)
+{
+   if (tail_bytes <= 0)
+      return NULL;
+
+   char url[512];
+   if ((size_t)snprintf(url, sizeof(url),
+                        "https://api.github.com/repos/%s/%s/actions/jobs/%ld/logs", cx->owner,
+                        cx->repo, job_id) >= sizeof(url))
+      return NULL;
+   char hdrs[480];
+   if ((size_t)snprintf(hdrs, sizeof(hdrs), "Authorization: Bearer %s\n" GH_ACCEPT, cx->token) >=
+       sizeof(hdrs))
+      return NULL;
+
+   char location[1024] = "";
+   char *body = NULL;
+   int st = agent_http_get_location(url, hdrs, location, sizeof(location), &body, 20000);
+   wipe(hdrs, sizeof(hdrs));
+
+   /* Some deployments answer the log inline instead of redirecting. */
+   if (st >= 200 && st < 300 && body && body[0])
+      return body;
+   free(body);
+   body = NULL;
+   if (st < 300 || st >= 400 || !location[0])
+      return NULL;
+
+   /* Signed URL: Range only. No Authorization — see above. */
+   char range[64];
+   snprintf(range, sizeof(range), "Range: bytes=-%ld", tail_bytes);
+   int st2 = agent_http_get(location, range, &body, 20000);
+   wipe(location, sizeof(location));
+   if ((st2 != 200 && st2 != 206) || !body)
+   {
+      free(body);
+      return NULL;
+   }
+   return body;
+}
+
+int git_pr_failures_via_api_slug(const char *principal, const char *slug, int number, int max,
+                                 int logs_for, long tail_bytes, git_pr_failure_t *out, int *count,
+                                 char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   if (count)
+      *count = 0;
+   if (!out || !count || max <= 0 || number <= 0)
+   {
+      snprintf(err, errlen, "invalid PR failures request");
+      return -1;
+   }
+
+   git_pr_info_t info;
+   if (git_pr_info_via_api_slug(principal, slug, number, &info, err, errlen) != 0)
+      return -1;
+   if (!info.head_sha[0])
+   {
+      snprintf(err, errlen, "pull request has no head commit");
+      return -1;
+   }
+
+   gh_ctx_t cx;
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
+      return -1;
+
+   char path[160];
+   snprintf(path, sizeof(path), "commits/%s/check-runs?per_page=100", info.head_sha);
+   char *resp = NULL;
+   int st = gh_get(&cx, path, &resp);
+   if (st < 200 || st >= 300 || !resp)
+   {
+      gh_err(resp, st, "pr failures", err, errlen);
+      free(resp);
+      gh_ctx_done(&cx);
+      return -1;
+   }
+   cJSON *j = cJSON_Parse(resp);
+   free(resp);
+   const cJSON *runs = j ? cJSON_GetObjectItem(j, "check_runs") : NULL;
+   if (!cJSON_IsArray(runs))
+   {
+      cJSON_Delete(j);
+      gh_ctx_done(&cx);
+      snprintf(err, errlen, "github API: unparseable check runs");
+      return -1;
+   }
+
+   int n = 0;
+   const cJSON *r = NULL;
+   cJSON_ArrayForEach(r, runs)
+   {
+      if (n >= max)
+         break;
+      const cJSON *concl = cJSON_GetObjectItem(r, "conclusion");
+      if (!cJSON_IsString(concl) || !concl->valuestring)
+         continue;
+      const char *c = concl->valuestring;
+      /* Only states a caller can act on. `cancelled` and `skipped` usually mean
+       * another job failed first, and `neutral` is not a failure. */
+      if (strcmp(c, "failure") != 0 && strcmp(c, "timed_out") != 0 &&
+          strcmp(c, "action_required") != 0)
+         continue;
+
+      const cJSON *name = cJSON_GetObjectItem(r, "name");
+      const cJSON *url = cJSON_GetObjectItem(r, "details_url");
+      git_pr_failure_t *row = &out[n];
+      memset(row, 0, sizeof(*row));
+      snprintf(row->conclusion, sizeof(row->conclusion), "%s", c);
+      if (cJSON_IsString(name) && name->valuestring)
+         snprintf(row->name, sizeof(row->name), "%s", name->valuestring);
+      if (cJSON_IsString(url) && url->valuestring)
+         snprintf(row->url, sizeof(row->url), "%s", url->valuestring);
+
+      long job_id = gh_job_id_from_details_url(row->url);
+      if (job_id > 0)
+      {
+         gh_failed_step(&cx, job_id, row->failed_step, sizeof(row->failed_step),
+                        &row->failed_step_number);
+         if (n < logs_for)
+            row->log_tail = gh_job_log_tail(&cx, job_id, tail_bytes);
+      }
+      n++;
+   }
+   cJSON_Delete(j);
+   gh_ctx_done(&cx);
+   *count = n;
+   return 0;
+}
+
+void git_pr_failures_free(git_pr_failure_t *rows, int count)
+{
+   if (!rows)
+      return;
+   for (int i = 0; i < count; i++)
+   {
+      free(rows[i].log_tail);
+      rows[i].log_tail = NULL;
+   }
+}
+
+int git_pr_list_open_via_api_slug(const char *principal, const char *slug, int limit,
+                                  git_pr_list_item_t *out, int *count, char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   if (count)
+      *count = 0;
+   if (!out || !count || limit <= 0)
+   {
+      snprintf(err, errlen, "invalid PR list request");
+      return -1;
+   }
+   if (limit > 100) /* one page; GitHub caps per_page at 100 */
+      limit = 100;
+
+   gh_ctx_t cx;
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
+      return -1;
+   char path[96];
+   snprintf(path, sizeof(path), "pulls?state=open&sort=updated&direction=desc&per_page=%d", limit);
+   char *resp = NULL;
+   int st = gh_get(&cx, path, &resp);
+   gh_ctx_done(&cx);
+   if (st < 200 || st >= 300 || !resp)
+   {
+      gh_err(resp, st, "pr list", err, errlen);
+      free(resp);
+      return -1;
+   }
+   cJSON *arr = cJSON_Parse(resp);
+   free(resp);
+   if (!cJSON_IsArray(arr))
+   {
+      cJSON_Delete(arr);
+      snprintf(err, errlen, "github API: unparseable pr list");
+      return -1;
+   }
+   int n = 0;
+   const cJSON *item = NULL;
+   cJSON_ArrayForEach(item, arr)
+   {
+      if (n >= limit)
+         break;
+      const cJSON *num = cJSON_GetObjectItem(item, "number");
+      const cJSON *state = cJSON_GetObjectItem(item, "state");
+      const cJSON *title = cJSON_GetObjectItem(item, "title");
+      const cJSON *headj = cJSON_GetObjectItem(item, "head");
+      const cJSON *headref = headj ? cJSON_GetObjectItem(headj, "ref") : NULL;
+      const cJSON *mat = cJSON_GetObjectItem(item, "merged_at");
+      if (!cJSON_IsNumber(num) || num->valueint <= 0)
+         continue; /* a row without a number is not addressable; skip it */
+      git_pr_list_item_t *row = &out[n];
+      memset(row, 0, sizeof(*row));
+      row->number = num->valueint;
+      /* gh spelled the state upper-case, and reported MERGED in place of the
+       * closed state a merged PR actually carries. */
+      if (cJSON_IsString(mat) && mat->valuestring)
+         snprintf(row->state, sizeof(row->state), "MERGED");
+      else if (cJSON_IsString(state) && state->valuestring)
+      {
+         snprintf(row->state, sizeof(row->state), "%s", state->valuestring);
+         for (char *p = row->state; *p; p++)
+            *p = (char)toupper((unsigned char)*p);
+      }
+      if (cJSON_IsString(headref) && headref->valuestring)
+         snprintf(row->head, sizeof(row->head), "%s", headref->valuestring);
+      if (cJSON_IsString(title) && title->valuestring)
+         snprintf(row->title, sizeof(row->title), "%s", title->valuestring);
+      n++;
+   }
+   cJSON_Delete(arr);
+   *count = n;
+   return 0;
+}
+
 int git_pr_info_via_api(const char *principal, const char *repo_dir, int number, git_pr_info_t *out,
                         char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   char slug[264];
+   if (gh_slug_from_repo_dir(repo_dir, slug, sizeof(slug), err, errlen) != 0)
+      return -1;
+   return git_pr_info_via_api_slug(principal, slug, number, out, err, errlen);
+}
+
+int git_pr_info_via_api_slug(const char *principal, const char *slug, int number,
+                             git_pr_info_t *out, char *err, size_t errlen)
 {
    if (err && errlen)
       err[0] = '\0';
@@ -574,7 +1178,7 @@ int git_pr_info_via_api(const char *principal, const char *repo_dir, int number,
    out->mergeable = -1;
 
    gh_ctx_t cx;
-   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
    char path[64];
    snprintf(path, sizeof(path), "pulls/%d", number);
@@ -615,6 +1219,29 @@ int git_pr_info_via_api(const char *principal, const char *repo_dir, int number,
    out->open =
        cJSON_IsString(state) && state->valuestring && strcmp(state->valuestring, "open") == 0;
    out->merged = cJSON_IsTrue(merged) ? 1 : 0;
+
+   /* Reviewer-facing fields, best-effort: a PR is still usable without them, so a
+    * missing or over-long value is left empty rather than failing the whole call
+    * the way a missing ref does above. */
+   const cJSON *title = cJSON_GetObjectItem(j, "title");
+   const cJSON *hurl = cJSON_GetObjectItem(j, "html_url");
+   const cJSON *mat = cJSON_GetObjectItem(j, "merged_at");
+   if (cJSON_IsString(title) && title->valuestring)
+      snprintf(out->title, sizeof(out->title), "%s", title->valuestring);
+   if (cJSON_IsString(hurl) && hurl->valuestring)
+      snprintf(out->html_url, sizeof(out->html_url), "%s", hurl->valuestring);
+   if (cJSON_IsString(mat) && mat->valuestring) /* null when never merged */
+      snprintf(out->merged_at, sizeof(out->merged_at), "%s", mat->valuestring);
+   const cJSON *mstate = cJSON_GetObjectItem(j, "mergeable_state");
+   if (cJSON_IsString(mstate) && mstate->valuestring)
+   {
+      /* REST spells it lowercase; gh reported the same values upper-cased as
+       * mergeStateStatus, and callers render that spelling. */
+      snprintf(out->merge_state, sizeof(out->merge_state), "%s", mstate->valuestring);
+      for (char *p = out->merge_state; *p; p++)
+         *p = (char)toupper((unsigned char)*p);
+   }
+
    if (cJSON_IsBool(mergeable))
       out->mergeable = cJSON_IsTrue(mergeable) ? 1 : 0; /* null stays -1 (computing) */
    if (strlen(sha_s) >= sizeof(out->head_sha) || strlen(head_s) >= sizeof(out->head) ||
@@ -636,13 +1263,24 @@ git_pr_ci_t git_pr_ci_via_api(const char *principal, const char *repo_dir, int n
 {
    if (err && errlen)
       err[0] = '\0';
+   char slug[264];
+   if (gh_slug_from_repo_dir(repo_dir, slug, sizeof(slug), err, errlen) != 0)
+      return GIT_PR_CI_ERROR;
+   return git_pr_ci_via_api_slug(principal, slug, number, err, errlen);
+}
+
+git_pr_ci_t git_pr_ci_via_api_slug(const char *principal, const char *slug, int number, char *err,
+                                   size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
    git_pr_info_t info;
-   if (git_pr_info_via_api(principal, repo_dir, number, &info, err, errlen) != 0 ||
+   if (git_pr_info_via_api_slug(principal, slug, number, &info, err, errlen) != 0 ||
        !info.head_sha[0])
       return GIT_PR_CI_ERROR;
 
    gh_ctx_t cx;
-   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return GIT_PR_CI_ERROR;
    char path[160];
    snprintf(path, sizeof(path), "commits/%s/check-runs?per_page=100", info.head_sha);
@@ -676,16 +1314,137 @@ int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number
 {
    if (err && errlen)
       err[0] = '\0';
+   char slug[264];
+   if (gh_slug_from_repo_dir(repo_dir, slug, sizeof(slug), err, errlen) != 0)
+      return -1;
+   return git_pr_merge_via_api_slug(principal, slug, number, err, errlen);
+}
+
+int git_pr_merge_via_api_slug(const char *principal, const char *slug, int number, char *err,
+                              size_t errlen)
+{
+   /* The squash-with-empty-body form the workflow forge and webchat rely on. */
+   return git_pr_merge_via_api_slug_ex(principal, slug, number, "squash", NULL, NULL, 0, err,
+                                       errlen);
+}
+
+/* Merge the base branch INTO the PR's head branch -- the REST equivalent of the
+ * "Update branch" button. A protected base that requires branches to be up to
+ * date reports its required checks as merely "expected" while the head is
+ * BEHIND, so the PR cannot merge however green those checks already are; this is
+ * the only call that clears that state. GitHub answers 202 (queued), so a 2xx
+ * means accepted, NOT that the new head has been built yet -- poll merge_status
+ * before merging. 422 is the benign "already up to date" case. */
+int git_pr_update_branch_via_api_slug(const char *principal, const char *slug, int number,
+                                      const char *expected_head_sha, char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
    if (number <= 0)
       return -1;
+
    gh_ctx_t cx;
-   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
+
+   /* Drift safety, same contract as the merge op: refuse if the head moved. */
+   char *payload = NULL;
+   if (expected_head_sha && expected_head_sha[0])
+   {
+      cJSON *j = cJSON_CreateObject();
+      cJSON_AddStringToObject(j, "expected_head_sha", expected_head_sha);
+      payload = cJSON_PrintUnformatted(j);
+      cJSON_Delete(j);
+      if (!payload)
+      {
+         gh_ctx_done(&cx);
+         snprintf(err, errlen, "internal error");
+         return -1;
+      }
+   }
+
+   char path[64];
+   snprintf(path, sizeof(path), "pulls/%d/update-branch", number);
+   char *resp = NULL;
+   int st = gh_put(&cx, path, payload ? payload : "{}", &resp);
+   free(payload);
+   gh_ctx_done(&cx);
+
+   int res;
+   if (st >= 200 && st < 300)
+      res = 0; /* accepted/queued */
+   else if (st == 422)
+      res = 1; /* nothing to do: head already contains base */
+   else
+   {
+      gh_err(resp, st, "pr update_branch", err, errlen);
+      res = -1;
+   }
+   free(resp);
+   return res;
+}
+
+int git_pr_merge_via_api_slug_ex(const char *principal, const char *slug, int number,
+                                 const char *merge_method, const char *expected_head_sha,
+                                 char *out_sha, size_t out_sha_cap, char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   if (out_sha && out_sha_cap)
+      out_sha[0] = '\0';
+   if (number <= 0)
+      return -1;
+
+   /* Default to a real merge commit. Silently squashing would rewrite history the
+    * caller did not ask to rewrite, so an unrecognised method is refused rather
+    * than coerced. */
+   const char *method = (merge_method && merge_method[0]) ? merge_method : "merge";
+   if (strcmp(method, "merge") != 0 && strcmp(method, "squash") != 0 &&
+       strcmp(method, "rebase") != 0)
+   {
+      snprintf(err, errlen, "unsupported merge_method '%s' (merge|squash|rebase)", method);
+      return -1;
+   }
+
+   gh_ctx_t cx;
+   if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
+      return -1;
+
+   cJSON *j = cJSON_CreateObject();
+   cJSON_AddStringToObject(j, "merge_method", method);
+   /* Only a squash synthesizes a body from the child commits, which is where the
+    * attribution trailers protected branches reject come back in -- see
+    * GIT_PR_SQUASH_MERGE_JSON. A merge or rebase has nothing to synthesize. */
+   if (strcmp(method, "squash") == 0)
+      cJSON_AddStringToObject(j, "commit_message", "");
+   /* Drift safety: GitHub refuses the merge if the head has moved. */
+   if (expected_head_sha && expected_head_sha[0])
+      cJSON_AddStringToObject(j, "sha", expected_head_sha);
+   char *payload = cJSON_PrintUnformatted(j);
+   cJSON_Delete(j);
+   if (!payload)
+   {
+      gh_ctx_done(&cx);
+      snprintf(err, errlen, "internal error");
+      return -1;
+   }
+
    char path[64];
    snprintf(path, sizeof(path), "pulls/%d/merge", number);
    char *resp = NULL;
-   int st = gh_put(&cx, path, GIT_PR_SQUASH_MERGE_JSON, &resp);
+   int st = gh_put(&cx, path, payload, &resp);
+   free(payload);
    gh_ctx_done(&cx);
+
+   /* The 200 body carries the merge commit, so the caller needs no second lookup. */
+   if (st >= 200 && st < 300 && resp && out_sha && out_sha_cap)
+   {
+      cJSON *jr = cJSON_Parse(resp);
+      const cJSON *sha = jr ? cJSON_GetObjectItem(jr, "sha") : NULL;
+      if (cJSON_IsString(sha) && sha->valuestring)
+         snprintf(out_sha, out_sha_cap, "%s", sha->valuestring);
+      cJSON_Delete(jr);
+   }
    int res;
    if (st >= 200 && st < 300)
       res = 0; /* merged */

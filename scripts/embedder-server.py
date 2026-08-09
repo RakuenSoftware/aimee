@@ -43,6 +43,7 @@ import json
 import os
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # ---- the embedder registry ----
@@ -168,12 +169,60 @@ def parse_input_type(value):
     if value is None or value == "":
         return INPUT_TYPE_DEFAULT
     return value if value in INPUT_TYPES else None
-PORT = int(os.environ.get("EMBEDDER_PORT", "8080"))
+def _env_int(name, default, fallback=None):
+    """Integer from the environment, treating EMPTY as unset.
+
+    Compose passes an unset variable through as an EMPTY STRING --
+    `EMBEDDER_THREADS: "${EMBEDDER_THREADS:-}"` yields "", not absence -- so
+    os.environ.get(name, "0") returns "" and int("") raises. That killed the
+    embedder at import on every deployment that did not explicitly set the
+    variable: the KB never bound its port, its health check failed forever, and
+    the wizard reported a KB that would not come up. The traceback named this
+    line, but the value looked unset, which is what made it puzzling.
+
+    A junk value is treated the same way. An embedder that refuses to start is
+    worse than one that ignores EMBEDDER_THREADS=banana and logs the default.
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            print("embedder-server: %s=%r is not an integer; using the default"
+                  % (name, raw), file=sys.stderr, flush=True)
+    return default() if callable(default) else default
+
+
+PORT = _env_int("EMBEDDER_PORT", 8080)
 # CPU serving tuning. A single short embed does not scale past ~8 intra-op
 # threads — on a 32-core host pplx-embed-0.6b is 269ms at 32 threads but 189ms at
 # 8 (per-call thread overhead dominates the tiny workload). Cap to a sane default;
 # an explicit EMBEDDER_THREADS wins. Set OMP before torch is imported.
-EMBEDDER_THREADS = int(os.environ.get("EMBEDDER_THREADS", "0")) or min(8, os.cpu_count() or 8)
+def _usable_cpus():
+    """CPUs this process may actually run on.
+
+    os.cpu_count() reports the HOST's CPUs and ignores the cgroup/affinity mask a
+    container is confined to. On the bench container it answers 8 while the
+    process is pinned to 4, so torch was told to run 8 intra-op threads on 4
+    usable cores -- and with several ingest workers issuing concurrent batches
+    that is dozens of threads contending for a handful of cores. Measured cost of
+    that thrash on bekko-a25m (a 25M-parameter model): 1727 ms for a single
+    ~512-token text, against tens of ms when the thread count matches reality.
+
+    sched_getaffinity is what nproc uses and what the scheduler honours.
+    """
+    try:
+        return len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        return os.cpu_count() or 1
+
+
+EMBEDDER_THREADS = _env_int("EMBEDDER_THREADS", lambda: min(8, _usable_cpus()))
+# onnx | torch | auto. "auto" prefers onnx and falls back; "onnx" refuses to serve
+# on the slow path, which is what a benchmark host wants -- silently serving fp32
+# torch is how a 50x regression went unnoticed.
+EMBEDDER_BACKEND = os.environ.get("EMBEDDER_BACKEND", "auto").strip().lower()
+_runtime = "unloaded"
 os.environ.setdefault("OMP_NUM_THREADS", str(EMBEDDER_THREADS))
 # Optional int8 dynamic quantization. Pure torch (no optimum/onnx) rather than the
 # q4 ONNX path.
@@ -217,7 +266,50 @@ def load_model():
     # custom modelling code on the Hub.
     # revision pinned from the registry: the weights are baked at build time, and a
     # floating ref would let an image rebuild change the vector space silently.
-    _model = SentenceTransformer(MODEL_NAME, revision=MODEL_REVISION, trust_remote_code=True)
+    # ONNX FIRST. onnxruntime is the CPU path this embedder was characterised on;
+    # fp32 torch is the fallback, not the intent. Measured on 4 cores with a
+    # 25M-parameter model, torch costs ~2000 ms for a single ~512-token text,
+    # which made one source file take 66 s to embed and corpus ingest run at
+    # ~20 s/file. The base onnx graph is baked alongside the safetensors.
+    #
+    # Fall back rather than fail: a deployment whose image predates the baked
+    # graph, or one built with a different embedder, must still serve. The path
+    # actually taken is reported in /health as `runtime`, so "is this the fast
+    # one?" is answerable without reading logs.
+    global _runtime
+    _model = None
+    if EMBEDDER_BACKEND in ("onnx", "auto"):
+        try:
+            # Load from the LOCAL SNAPSHOT DIRECTORY, not the repo id.
+            #
+            # Given a repo id, sentence-transformers lists the repo tree over the
+            # network to decide which onnx artefact to load -- before it honours
+            # file_name -- so under HF_HUB_OFFLINE=1 it fails with "Cannot reach
+            # https://huggingface.co/api/models/.../tree/main: offline mode is
+            # enabled" and silently drops onto fp32 torch. local_files_only and
+            # an explicit file_name do not prevent that listing.
+            #
+            # snapshot_download(local_files_only=True) resolves the already-baked
+            # directory without touching the network, and a local path gives ST
+            # nothing to enumerate. Loading through ST rather than driving
+            # onnxruntime directly keeps its pooling and normalisation exactly as
+            # the torch path had them, so the vector space does not move.
+            from huggingface_hub import snapshot_download
+
+            local_dir = snapshot_download(MODEL_NAME, revision=MODEL_REVISION,
+                                          local_files_only=True)
+            _model = SentenceTransformer(
+                local_dir, trust_remote_code=True, backend="onnx",
+                model_kwargs={"file_name": "onnx/model.onnx"})
+            _runtime = "onnx"
+        except Exception as exc:  # missing optimum/onnxruntime, or no baked graph
+            if EMBEDDER_BACKEND == "onnx":
+                raise
+            sys.stderr.write(f"embedder-server: onnx unavailable ({exc}); using torch\n")
+            _model = None
+    if _model is None:
+        _model = SentenceTransformer(MODEL_NAME, revision=MODEL_REVISION, trust_remote_code=True)
+        _runtime = "torch"
     _dim = _model.get_sentence_embedding_dimension() or 0  # read before quantizing
     if EMBEDDER_QUANTIZE == "int8":
         import torch.ao.quantization as ao_q
@@ -225,7 +317,7 @@ def load_model():
         _model = ao_q.quantize_dynamic(_model, {torch.nn.Linear}, dtype=torch.qint8)
     sys.stderr.write(
         f"embedder-server: loaded {MODEL_NAME} dim={_dim} threads={EMBEDDER_THREADS}"
-        f" quant={EMBEDDER_QUANTIZE}\n"
+        f" quant={EMBEDDER_QUANTIZE} runtime={_runtime}\n"
     )
     return _model
 
@@ -297,22 +389,162 @@ def embed(text: str, input_type=INPUT_TYPE_DEFAULT):
     prefixed = prefix_for(input_type) + text
     if EMBEDDER_STUB:
         return _stub_embed(prefixed)
-    vec = _model.encode(prefixed, normalize_embeddings=True)
-    return vec.tolist()
+    if EMBEDDER_BATCH_WINDOW_MS <= 0:
+        vec = _model.encode(prefixed, normalize_embeddings=True)
+        return vec.tolist()
+    # n=1 is the case the coalescer exists for: a lone text costs 58.7 ms on its
+    # own and 11.7 ms as part of a full batch. Joining whatever else is in flight
+    # is worth a bounded wait of a few milliseconds.
+    return _encode_coalesced([prefixed])[0]
+
+
+# --- dynamic batching -------------------------------------------------------
+#
+# Callers do not control how much work arrives per request, and the kb's document
+# ingest cannot: it embeds one file at a time, and a source file is usually 1-5
+# chunks. Measured on this model, batch size dominates everything else --
+#
+#     n=1   58.7 ms/text        n=32   13.0 ms/text
+#     n=8   15.3 ms/text        n=128  11.7 ms/text
+#
+# -- so a fleet of ingest workers each sending its own small batch pays a ~5x
+# penalty on nearly every chunk while the server sits underused. Coalescing here
+# fixes it for every caller at once, without each of them having to restructure
+# to accumulate work: several concurrent small requests become one large
+# model.encode(), which is what the GPU/CPU wants anyway.
+#
+# The window is short (default 15 ms) because it is pure added latency for a
+# request that arrives when the queue is empty -- an interactive query embed must
+# not wait meaningfully. Set EMBEDDER_BATCH_WINDOW_MS=0 to disable coalescing.
+EMBEDDER_BATCH_WINDOW_MS = _env_int("EMBEDDER_BATCH_WINDOW_MS", 15)
+EMBEDDER_BATCH_MAX = _env_int("EMBEDDER_BATCH_MAX", 128)
+
+_batch_lock = threading.Lock()
+_batch_cv = threading.Condition(_batch_lock)
+_batch_pending = []          # [_BatchItem]
+_batch_worker_started = False
+_tokenizer = None
+
+
+class _BatchItem:
+    __slots__ = ("prefixed", "vec", "error", "done")
+
+    def __init__(self, prefixed):
+        self.prefixed = prefixed
+        self.vec = None
+        self.error = None
+        self.done = threading.Event()
+
+
+def _token_count(texts):
+    """Real token count via the model's own tokenizer, cached after first use.
+
+    Chunking targets ~512 APPROXIMATE tokens; the tokenizer is the authority on
+    what the model actually processes, and the gap between the two is exactly
+    what this is here to expose.
+    """
+    global _tokenizer
+    if _tokenizer is None:
+        tok = getattr(_model, "tokenizer", None)
+        if tok is None:
+            return -1
+        _tokenizer = tok
+    return sum(len(_tokenizer(t)["input_ids"]) for t in texts)
+
+
+def _run_encode(items):
+    """One model call for a group of items; distribute or fail them together."""
+    _t0 = time.monotonic()
+    _chars = sum(len(i.prefixed) for i in items)
+    try:
+        vecs = _model.encode([i.prefixed for i in items], normalize_embeddings=True)
+        for item, vec in zip(items, vecs):
+            item.vec = vec.tolist()
+    except Exception as exc:  # noqa: BLE001 - surfaced per waiting request
+        for item in items:
+            item.error = exc
+    finally:
+        # INSTRUMENTATION: what is actually being handed to the model, and what it
+        # costs. Rate in production sat ~13x below a standalone benchmark of this
+        # same model, so the question is whether the inputs match what was
+        # benchmarked (batch size and, more importantly, sequence length -- the
+        # chunker targets "approximate tokens" and attention is quadratic).
+        _el = time.monotonic() - _t0
+        _n = len(items)
+        try:
+            _tok = _token_count([i.prefixed for i in items])
+        except Exception:  # noqa: BLE001 - never fail an embed to log it
+            _tok = -1
+        sys.stderr.write(
+            "embed-batch n=%d chars=%d tokens=%d %.3fs %.1f ms/text %.0f tok/s\n"
+            % (_n, _chars, _tok, _el, _el * 1000.0 / max(_n, 1),
+               (_tok / _el) if (_tok > 0 and _el > 0) else 0.0))
+        sys.stderr.flush()
+        for item in items:
+            item.done.set()
+
+
+def _batch_loop():
+    """Collect whatever arrived within the window, then encode it as one batch."""
+    while True:
+        with _batch_cv:
+            while not _batch_pending:
+                _batch_cv.wait()
+            # A short settle so sibling requests in flight join this batch. Bounded
+            # by EMBEDDER_BATCH_MAX so a burst cannot grow one call without limit.
+            deadline = time.monotonic() + (EMBEDDER_BATCH_WINDOW_MS / 1000.0)
+            while len(_batch_pending) < EMBEDDER_BATCH_MAX:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                _batch_cv.wait(remaining)
+            items = _batch_pending[:EMBEDDER_BATCH_MAX]
+            del _batch_pending[:len(items)]
+        _run_encode(items)
+
+
+def _ensure_batch_worker():
+    global _batch_worker_started
+    with _batch_lock:
+        if _batch_worker_started:
+            return
+        _batch_worker_started = True
+        threading.Thread(target=_batch_loop, name="embed-batcher", daemon=True).start()
+
+
+def _encode_coalesced(prefixed_list):
+    """Encode via the shared batcher so concurrent callers share one model call."""
+    _ensure_batch_worker()
+    items = [_BatchItem(p) for p in prefixed_list]
+    with _batch_cv:
+        _batch_pending.extend(items)
+        _batch_cv.notify()
+    out = []
+    for item in items:
+        item.done.wait()
+        if item.error is not None:
+            raise item.error
+        out.append(item.vec)
+    return out
 
 
 def embed_batch(texts, input_type=INPUT_TYPE_DEFAULT):
-    """Embed a list of texts in one batched model.encode() call — one HTTP
-    round-trip and one batched inference instead of N separate /embed calls.
-    Returns a list of float vectors aligned 1:1 with `texts`."""
+    """Embed a list of texts and return vectors aligned 1:1 with `texts`.
+
+    The caller's list is a lower bound on batch size, not the batch: requests in
+    flight from other callers are coalesced into the same model call. A caller
+    that can batch well still should -- it saves HTTP round trips -- but one that
+    cannot is no longer penalised for it."""
     prefix = prefix_for(input_type)
     prefixed = [prefix + t for t in texts]
     if EMBEDDER_STUB:
         return [_stub_embed(t) for t in prefixed]
     if not prefixed:
         return []
-    vecs = _model.encode(prefixed, normalize_embeddings=True)
-    return [v.tolist() for v in vecs]
+    if EMBEDDER_BATCH_WINDOW_MS <= 0:
+        vecs = _model.encode(prefixed, normalize_embeddings=True)
+        return [v.tolist() for v in vecs]
+    return _encode_coalesced(prefixed)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -339,6 +571,12 @@ class Handler(BaseHTTPRequestHandler):
                 "repo": MODEL_NAME,
                 "dim": _dim,
                 "quantize": EMBEDDER_QUANTIZE,
+                # Which runtime is actually serving. Reported because the fast
+                # path (onnx) and the ~50x slower fallback (fp32 torch) are
+                # otherwise indistinguishable from outside, and a silent fallback
+                # is exactly how corpus ingest ended up at ~20 s/file.
+                "runtime": _runtime,
+                "threads": EMBEDDER_THREADS,
             }
             # Registry data, not a measurement, so it is answerable while the model
             # loads — the kb reads it before it can embed anything.

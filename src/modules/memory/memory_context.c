@@ -14,7 +14,6 @@
 #include "cJSON.h"
 #include "log.h"
 #include "platform_process.h"
-#include <aimee/workspace/workspace.h>
 #include "kb.h"
 #include <ctype.h>
 #include <limits.h>

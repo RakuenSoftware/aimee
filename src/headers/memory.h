@@ -504,6 +504,20 @@ int memory_run_maintenance(int *promoted, int *demoted, int *expired);
 
 /* Health metrics: record maintenance cycle stats and prune old data. */
 void memory_record_health(int promotions, int demotions, int expirations);
+
+/* Consecutive maintenance cycles that produced no promotions, demotions or
+ * expirations. Reset by any cycle that produces output; process-local, so a
+ * restart legitimately clears it. */
+int memory_quiet_cycles(void);
+
+/* Should a quiet maintenance cycle alarm? Pure over its inputs so the rule is
+ * testable without a database or a log sink.
+ *
+ * Deliberately two-sided: zero output WITH a backlog is a wedged lane, zero
+ * output with an empty backlog is a healthy idle system. Alarming on the second
+ * teaches operators to ignore the first. Returns 1 only when a lane has produced
+ * nothing for enough consecutive cycles while memories were pending. */
+int memory_quiet_lane_alarm(int changes, int64_t pending, int consecutive_quiet);
 void memory_prune_health(void);
 
 /* Health query: rolling 7-day stats. */
@@ -821,6 +835,11 @@ typedef struct
    int budget_tokens;
    int used_tokens;
    int rejected_for_budget; /* items excluded because budget was full */
+   /* Items excluded as restatements of something already admitted. Distinct from
+    * rejected_for_budget: a suppressed duplicate FREES budget for real evidence,
+    * so the two moving in opposite directions is the intended effect and the way
+    * to tell whether the suppression is earning its place. */
+   int suppressed_near_duplicates;
 } context_budget_metrics_t;
 
 char *memory_assemble_context(const char *task_hint);
@@ -965,6 +984,14 @@ int memory_embed(int64_t memory_id, const char *command);
  * embed_input_type_t). It is required rather than defaulted so the compiler forces
  * every call site to state it — a query silently embedded as a document costs
  * retrieval quality and raises no error. */
+/* Bound on one embed round trip, in milliseconds.
+ *
+ * Env override AIMEE_EMBED_HTTP_TIMEOUT_MS; garbage and out-of-range values fall
+ * back to the default rather than disabling the bound. The cost of an embed is a
+ * property of batch size and host load, not of the service being healthy, so a
+ * bound below the real cost turns a slow build into a failed one. */
+int memory_embed_http_timeout_ms(void);
+
 int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
                       float *out, int max_dim);
 

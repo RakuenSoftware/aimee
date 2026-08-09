@@ -1365,6 +1365,79 @@ static void test_detached_skips_worktree_rewrite(void)
           rc_detached);
 }
 
+/* The guardrail redirects a shell command into the session worktree by returning
+ * 3 with the rewritten line ("cd <worktree> && <cmd>") — the command-shaped twin
+ * of the rc==1 path rewrite. cmd_hooks.c applies both; the delegate tool dispatch
+ * applied only rc==1, so a rewrite arrived as "not 0" and was reported as a
+ * refusal, with the rewritten command as the reason. Every shell command a
+ * delegate ran came back "guardrail blocked: cd <worktree> && <cmd>" — `pwd` and
+ * `echo hello` included — so a delegate could edit files and never run one
+ * command. This pins the verdict and that it is applied, not refused. */
+static void test_shell_worktree_rewrite_is_applied_not_refused(void)
+{
+   char repo[256];
+   snprintf(repo, sizeof(repo), "/tmp/shell_wt_rw.XXXXXX");
+   assert(mkdtemp(repo) != NULL);
+   char shellcmd[512];
+   snprintf(shellcmd, sizeof(shellcmd), "git init -q '%s' >/dev/null 2>&1", repo);
+   (void)system(shellcmd);
+
+   session_state_t state;
+   memset(&state, 0, sizeof(state));
+   strcpy(state.guardrail_mode, MODE_APPROVE);
+
+   workspace_provider_clear_active();
+   char msg[1024] = "";
+   int rc = pre_tool_check("bash", "{\"command\":\"pwd\"}", &state, MODE_APPROVE, repo, msg,
+                           sizeof(msg));
+
+   if (rc == 3)
+   {
+      /* The verdict carries a rewritten command, not a refusal reason. */
+      assert(strncmp(msg, "cd ", 3) == 0);
+      assert(strstr(msg, ".aimee") != NULL);
+      assert(strstr(msg, "pwd") != NULL);
+
+      /* End to end: the dispatch must APPLY that rewrite, not report it. Create
+       * the worktree the guardrail wants to redirect into, then run the same
+       * tool call through the real dispatch and require both that it was not
+       * refused and that the command actually ran there. Before the fix this
+       * returned "error: guardrail blocked: cd ... && pwd". */
+      char target[768] = "";
+      const char *start = msg + 3; /* past "cd " */
+      const char *end = strstr(start, " && ");
+      assert(end != NULL && (size_t)(end - start) < sizeof(target));
+      memcpy(target, start, (size_t)(end - start));
+      target[end - start] = '\0';
+      snprintf(shellcmd, sizeof(shellcmd), "mkdir -p '%s'", target);
+      assert(system(shellcmd) == 0);
+
+      run_cmd_set_cwd(repo);
+      char *out = dispatch_tool_call("bash", "{\"command\":\"pwd\"}", 10000);
+      run_cmd_set_cwd(NULL);
+      assert(out != NULL);
+      if (strstr(out, "guardrail blocked") != NULL)
+      {
+         fprintf(stderr, "  dispatch refused the rewrite instead of applying it: %s\n", out);
+         assert(0 && "shell worktree rewrite was reported as a refusal");
+      }
+      /* pwd ran inside the redirected worktree, so its output names that path. */
+      assert(strstr(out, target) != NULL);
+      free(out);
+      printf("  shell_worktree_rewrite: rc=3 applied; pwd ran in %.48s...\n", target);
+   }
+   else
+   {
+      /* Not every environment reaches the rewrite (it needs a session worktree
+       * to redirect into). Say so rather than pass silently on a case that never
+       * exercised the contract. */
+      printf("  shell_worktree_rewrite: skipped (rc=%d, no worktree to redirect into)\n", rc);
+   }
+
+   snprintf(shellcmd, sizeof(shellcmd), "rm -rf '%s'", repo);
+   (void)system(shellcmd);
+}
+
 static void test_tool_read_file(void)
 {
    /* Write a temp file */
@@ -3363,6 +3436,67 @@ static void test_agent_config_deletion_guard(void)
    printf("  PASS: agent_config_deletion_guard\n");
 }
 
+/* Saving a config must not seed the load cache with the caller's struct.
+ *
+ * Every writer (the setup wizard's /v1 agent-add included) builds an agent_t
+ * from request fields and calls agent_save_config(); NONE of them run the
+ * normalisation that agent_load_config() owns — provider defaulting, the wire
+ * rewrite, agent_derive_catalog_provider(), the tier/capability pass. The save
+ * path used to memcpy that raw struct into the cache and stamp it with the
+ * freshly written file's stat, so the very next load was a cache HIT on an
+ * unnormalised config and stayed one for the life of the process.
+ *
+ * The user-visible damage was silent: a wizard-added Kimi agent kept an empty
+ * catalog_provider, so agent_catalog_provider() fell back to the wire name
+ * "openai". That cost it the {moonshotai,k3,1.0} required-temperature row (the
+ * delegate's default 0.3 reached a model that accepts only 1, failing every
+ * call with "invalid temperature: only 1 is allowed for this model") and made
+ * model_capability_get() miss, so it advertised no tools and tool roles
+ * rejected it as unavailable. Only a restart cleared it. */
+static void test_agent_save_config_does_not_cache_underived_agents(void)
+{
+   /* The bug is invisible when the cache is bypassed, so assert on the cached
+    * path explicitly rather than inheriting whatever the harness set. */
+   platform_unsetenv("AIMEE_NO_CACHE");
+   unlink(agent_config_path());
+
+   /* Exactly what a writer hands to agent_save_config: endpoint and model set,
+    * no provider and no catalog_provider — both are load-side derivations. */
+   agent_config_t built;
+   memset(&built, 0, sizeof(built));
+   built.agent_count = 1;
+   snprintf(built.default_agent, sizeof(built.default_agent), "%s", "Kimi");
+   snprintf(built.agents[0].name, sizeof(built.agents[0].name), "%s", "Kimi");
+   snprintf(built.agents[0].endpoint, sizeof(built.agents[0].endpoint), "%s",
+            "https://api.kimi.com/coding/v1");
+   snprintf(built.agents[0].model, sizeof(built.agents[0].model), "%s", "kimi-k3");
+   snprintf(built.agents[0].auth_type, sizeof(built.agents[0].auth_type), "%s", "bearer");
+   snprintf(built.agents[0].api_key, sizeof(built.agents[0].api_key), "%s", "k");
+   snprintf(built.agents[0].roles[0], sizeof(built.agents[0].roles[0]), "%s", "review");
+   built.agents[0].role_count = 1;
+   built.agents[0].enabled = 1;
+   assert(built.agents[0].catalog_provider[0] == '\0');
+
+   assert(agent_save_config(&built) == 0);
+
+   agent_config_t loaded;
+   assert(agent_load_config(&loaded) == 0);
+   const agent_t *kimi = agent_find(&loaded, "Kimi");
+   assert(kimi != NULL);
+
+   /* The load must have re-parsed and derived. Asserting the raw field rather
+    * than agent_catalog_provider() is deliberate: the accessor falls back to
+    * ->provider, which would mask an empty field behind the wire name — and it
+    * is the RAW field that model_sampling.c's required-temperature gate reads. */
+   assert(strcmp(kimi->catalog_provider, "moonshotai") == 0);
+
+   /* The wire provider is still the load-side default, untouched by derivation. */
+   assert(strcmp(kimi->provider, "openai") == 0);
+
+   unlink(agent_config_path());
+   printf("  PASS: test_agent_save_config_does_not_cache_underived_agents\n");
+}
+
 int main(void)
 {
    char tmp_home[512];
@@ -3412,6 +3546,7 @@ int main(void)
    test_catalog_provider_explicit_round_trip();
    test_unknown_context_window_does_not_pass_min_context();
    test_context_window_table_covers_live_vendors();
+   test_agent_save_config_does_not_cache_underived_agents();
    test_catalog_provider_host_matching_is_label_anchored();
    test_catalog_provider_namespaced_model_ids();
    test_moonshot_heuristic_scopes_reasoning_to_known_families();
@@ -3499,6 +3634,7 @@ int main(void)
    test_compact_system_role();
    test_delegation_error_guidance();
    test_cancelled_durable_job_blocks_tool_dispatch();
+   test_shell_worktree_rewrite_is_applied_not_refused();
    test_delegate_bash_cancel_kills_running_tool();
    test_parent_write_guard_readonly_large_find();
    test_agent_trace_log_uses_db1_execution_trace();

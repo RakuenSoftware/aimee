@@ -33,29 +33,52 @@ static const char *const MCP_CORE_TOOLS[] = {
     AIMEE_CODE_TOOL_FIND_SYMBOL,
     AIMEE_CODE_TOOL_AST_GREP_SEARCH,
     AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS, /* direct adoption-critical code intel */
+    /* SAME REASONING AS delegate_status BELOW, AND THE SAME MEASUREMENT.
+     *
+     * `index` multiplexes the retrieval an agent needs when the question is not a
+     * symbol name: command=hybrid (lexical + dense, bounded by max_results,
+     * default 20), plus structure, find_callers, blast_radius and span. Leaving it
+     * out of the floor did not make agents use less retrieval -- it made them use
+     * a recursive text search instead, because that is one visible call while
+     * hybrid cost find_tools -> describe_tool -> call_tool.
+     *
+     * Measured across the benchmark's aimee cells: 87 shell searches emitting
+     * 2.4 MB, 49 of them wide alternations, one large enough to hit the client's
+     * 1 MB truncation. index_hybrid answers that class of question with a capped,
+     * ranked result set and was reachable the whole time -- just never in one
+     * call. A tool the agent cannot afford to reach is a tool it does not have. */
+    AIMEE_CODE_TOOL_INDEX,
     "git", /* all git/gh ops via one multiplexed tool (command=...) */
     "delegate",
+    /* SAME REASONING AS `index` ABOVE, AND THE SAME MEASUREMENT.
+     *
+     * The failure that loses the hard tasks is a patch that is reasonable but is
+     * not the change that was asked for. roundtable_review exists precisely for
+     * that -- `original_request` is documented as goal-drift detection, and every
+     * seat is an ordinary delegate, so a one-seat panel is a single reviewer.
+     *
+     * It was left out of the floor, so reaching it cost find_tools ->
+     * describe_tool -> call_tool. Measured on am_b84c9294aa: 74 tool calls, the
+     * skill telling the agent to review before reporting done, and roundtable
+     * NEVER invoked -- the MCP mix was find_symbol, index, preview_blast_radius,
+     * search_memory. The agent shipped the same one-file, 7-line caller-side fix
+     * as before, against a reference that changes four files in another module.
+     *
+     * That looked like guidance being ignored. It was the tool not being visible.
+     * A tool the agent cannot afford to reach is a tool it does not have. */
+    "roundtable_review", /* blocks and returns the verdict; there is no poller to pair with it */
     /* An MCP delegate call returns a job_id and runs in the background, so its
      * poller is not optional: without delegate_status in the floor, an agent
      * that follows our own instruction to delegate cannot read the result
      * without a find_tools -> describe_tool -> call_tool detour. Measured on a
      * real cell, five of fourteen tool calls went on exactly that. This is the
-     * same reasoning that already puts roundtable_status here. */
+     * same reasoning that puts roundtable_review here. */
     "delegate_status",
     "roundtable_review", /* multi-agent */
-    "roundtable_status", /* poll asynchronous roundtable_review */
     "ask_user",
     "send_message", /* interaction */
     "note",         /* capture (note family: create/list/search) */
     NULL,
-};
-
-/* Tools that hand work to a SECOND agent. Their cost, tool calls and edits land
- * outside the caller's transcript, so any measurement of "what did this agent
- * do" stops being attributable the moment one is used. The "solo" profile
- * withholds them; nothing else does. */
-static const char *const MCP_MULTI_AGENT_TOOLS[] = {
-    "delegate", "delegate_status", "roundtable_review", "roundtable_status", NULL,
 };
 
 static int mcp_name_in_set(const char *name, const char *const *set)
@@ -268,11 +291,15 @@ int mcp_filter_tools_for_profile(cJSON *tools, const char *profile)
    profile = mcp_tool_profile_effective(profile);
    /* "full" presents everything; an unknown profile fails OPEN to the full set so
     * a typo never silently hides tools. "core"/"lean" keep only the Tier-0 set.
-    * "solo" is core minus the tools that hand work to another agent -- it must be
-    * matched explicitly here, because failing open would grant delegation to a
-    * caller that asked for the opposite. */
-   int solo = strcmp(profile, "solo") == 0;
-   if (!solo && strcmp(profile, "core") != 0 && strcmp(profile, "lean") != 0)
+    *
+    * THERE IS NO "solo" PROFILE. It withheld delegate/roundtable so a run could
+    * be measured without a second agent's tokens landing outside the transcript.
+    * That makes the thing under measurement a configuration nobody deploys: the
+    * benchmark stops describing aimee and starts describing a variant built for
+    * the benchmark. If delegates should not run, do not configure them -- that is
+    * a real deployment state and it is honest. Hiding shipped tools to flatter a
+    * measurement is not. */
+   if (strcmp(profile, "core") != 0 && strcmp(profile, "lean") != 0)
       return 0;
 
    int removed = 0;
@@ -280,8 +307,7 @@ int mcp_filter_tools_for_profile(cJSON *tools, const char *profile)
    {
       cJSON *tool = cJSON_GetArrayItem(tools, i);
       cJSON *nm = cJSON_GetObjectItemCaseSensitive(tool, "name");
-      int keep = cJSON_IsString(nm) && mcp_name_in_set(nm->valuestring, MCP_CORE_TOOLS) &&
-                 !(solo && mcp_name_in_set(nm->valuestring, MCP_MULTI_AGENT_TOOLS));
+      int keep = cJSON_IsString(nm) && mcp_name_in_set(nm->valuestring, MCP_CORE_TOOLS);
       if (!keep)
       {
          cJSON_DeleteItemFromArray(tools, i);
