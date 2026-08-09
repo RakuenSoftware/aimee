@@ -42,7 +42,7 @@
      "  search           Search stored memory\n"
      "  store            Store a memory\n"
      "  list             List memories\n"
-     "  get              Read a memory by id\n"
+     "  get              Read a memory by id (--as-of <ts>: was it in force then?)\n"
      "  read             Assemble current memory context\n"},
     {"economizer", "Economizer telemetry", CLIENT_TIER_ADVANCED, 0,
      "  stats            Gateway-mutation counters, tool-condense savings, avoided-$\n"},

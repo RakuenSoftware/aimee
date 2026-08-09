@@ -347,9 +347,63 @@ static void test_config_deploy_env_is_routed(void)
    printf("  config deploy-env is routed to the thin client\n");
 }
 
+/* `memory get <id> --as-of <ts>` must reach the server, and its answer must be
+ * printed.
+ *
+ * db2_memory_valid_at() had no production caller at all: the supersession WRITE
+ * that closes valid_until was live, but nothing could ever READ the interval, so
+ * "was this true on 12 June" was unanswerable for rows though the data was being
+ * recorded. A DB2 primitive with only tests calling it is not a feature.
+ *
+ * The id must stay positional even with the flag present, and "unknown" has to
+ * survive as a third answer -- the server returns it when it could not tell, and
+ * folding that into "no" is how a bitemporal query lies. */
+static void test_memory_get_as_of_is_wired(void)
+{
+   char *argv[] = {(char *)"42", (char *)"--as-of=2026-06-12 00:00:00"};
+   cJSON *req = marshal_memory_get(2, argv);
+   assert(req);
+   cJSON *id = cJSON_GetObjectItemCaseSensitive(req, "id");
+   assert(cJSON_IsNumber(id) && (int)id->valuedouble == 42);
+   cJSON *as_of = cJSON_GetObjectItemCaseSensitive(req, "as_of");
+   assert(cJSON_IsString(as_of));
+   assert(strcmp(as_of->valuestring, "2026-06-12 00:00:00") == 0);
+   cJSON_Delete(req);
+
+   /* Without the flag the field is absent, not empty: the server only answers
+    * the time question when it was asked. */
+   char *plain[] = {(char *)"42"};
+   req = marshal_memory_get(1, plain);
+   assert(req);
+   assert(cJSON_GetObjectItemCaseSensitive(req, "as_of") == NULL);
+   cJSON_Delete(req);
+
+   char out[1024] = "";
+   capture_printer(pt_print_memory_get, "memory.get",
+                   "{\"status\":\"ok\",\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"},"
+                   "\"as_of\":\"2026-06-12 00:00:00\",\"valid_at\":false}",
+                   out, sizeof(out));
+   assert(strstr(out, "valid at 2026-06-12 00:00:00: no") != NULL);
+
+   capture_printer(pt_print_memory_get, "memory.get",
+                   "{\"status\":\"ok\",\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"},"
+                   "\"as_of\":\"2026-06-12 00:00:00\",\"valid_at\":\"unknown\"}",
+                   out, sizeof(out));
+   assert(strstr(out, "valid at 2026-06-12 00:00:00: unknown") != NULL);
+
+   /* A plain get prints no time line at all. */
+   capture_printer(pt_print_memory_get, "memory.get",
+                   "{\"status\":\"ok\",\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"}}",
+                   out, sizeof(out));
+   assert(strstr(out, "valid at") == NULL);
+
+   printf("  memory get --as-of reaches the server and prints its answer\n");
+}
+
 int main(void)
 {
    printf("test_cli_v1_subcommands\n");
+   test_memory_get_as_of_is_wired();
    test_config_deploy_env_is_routed();
    test_unknown_command_is_safe();
    test_known_command_lists_subcommands();

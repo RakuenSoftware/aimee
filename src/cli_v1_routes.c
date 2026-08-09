@@ -694,11 +694,26 @@ cJSON *marshal_memory_list(int argc, char **argv)
    return req;
 }
 
+/* `aimee memory get <id> [--as-of <timestamp>]`
+ *
+ * --as-of asks the EVENT-time question: was this memory in force then?
+ * lifecycle_state cannot answer it -- a superseded row looks identically
+ * superseded whether it stopped being true yesterday or last year -- so the
+ * server reads the valid_from/valid_until interval instead. rpc_parse keeps the
+ * id as positional[0], so the flag cannot be mistaken for it. */
 cJSON *marshal_memory_get(int argc, char **argv)
 {
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
+
    cJSON *req = marshal_no_args("memory.get");
-   if (argc > 0)
-      cJSON_AddNumberToObject(req, "id", atoll(argv[0]));
+   if (opts.pos_count > 0)
+      cJSON_AddNumberToObject(req, "id", atoll(opts.positional[0]));
+   const char *as_of = rpc_get(&opts, "as-of");
+   if (!as_of)
+      as_of = rpc_get(&opts, "as_of");
+   if (as_of && as_of[0])
+      cJSON_AddStringToObject(req, "as_of", as_of);
    return req;
 }
 
