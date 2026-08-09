@@ -151,6 +151,47 @@ int main(void)
    aimee_response_free(&resp);
    cJSON_Delete(rj);
 
+   /* --- (3b) a thinking response must survive parse -> render with its SIGNATURE.
+    *          Anthropic rejects a resubmitted thinking block whose signature does not
+    *          match, so dropping it anywhere on the response path yields a turn that
+    *          cannot be replayed. The request direction already modelled this; the
+    *          response direction dropped it at BOTH ends (parse and render). --- */
+   const char *THINK_RESP =
+       "{\"id\":\"msg_2\",\"model\":\"claude-3-5-sonnet\",\"role\":\"assistant\","
+       "\"content\":[{\"type\":\"thinking\",\"thinking\":\"let me check\","
+       "\"signature\":\"ErUBCkYIAxgCIkA\"},{\"type\":\"text\",\"text\":\"done\"}],"
+       "\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":3,\"output_tokens\":4}}";
+   cJSON *tj = cJSON_Parse(THINK_RESP);
+   aimee_response_t tresp;
+   assert(anthropic_backend_parse(tj, &tresp, err, sizeof err) == 0);
+   assert(tresp.n_content == 2 && tresp.content[0].type == AIMEE_BLK_THINKING);
+   assert(strcmp(tresp.content[0].text, "let me check") == 0);
+   assert(tresp.content[0].thinking_signature &&
+          strcmp(tresp.content[0].thinking_signature, "ErUBCkYIAxgCIkA") == 0);
+
+   cJSON *trendered = anthropic_frontend_render(&tresp);
+   assert(trendered);
+   cJSON *tc = cJSON_GetObjectItem(trendered, "content");
+   cJSON *tblk = cJSON_GetArrayItem(tc, 0);
+   assert(strcmp(cJSON_GetObjectItem(tblk, "type")->valuestring, "thinking") == 0);
+   assert(strcmp(cJSON_GetObjectItem(tblk, "thinking")->valuestring, "let me check") == 0);
+   assert(cJSON_GetObjectItem(tblk, "signature") &&
+          strcmp(cJSON_GetObjectItem(tblk, "signature")->valuestring, "ErUBCkYIAxgCIkA") == 0);
+   cJSON_Delete(trendered);
+
+   /* an unsigned thinking block omits the key rather than emitting an empty one --
+    * an empty signature would be rejected, where an absent one is merely unsigned. */
+   free(tresp.content[0].thinking_signature);
+   tresp.content[0].thinking_signature = NULL;
+   cJSON *tunsigned = anthropic_frontend_render(&tresp);
+   assert(tunsigned);
+   assert(!cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(tunsigned, "content"), 0),
+                               "signature"));
+   cJSON_Delete(tunsigned);
+
+   aimee_response_free(&tresp);
+   cJSON_Delete(tj);
+
    /* --- (4) OpenAI backend: Anthropic client -> IR -> OpenAI request -> re-parse
     *         == equal IR (cross-protocol build via OpenAI). --- */
    aimee_request_t bir;

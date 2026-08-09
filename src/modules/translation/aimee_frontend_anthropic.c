@@ -305,6 +305,11 @@ cJSON *anthropic_frontend_render(const aimee_response_t *r)
       {
          cJSON_AddStringToObject(el, "type", "thinking");
          cJSON_AddStringToObject(el, "thinking", b->text ? b->text : "");
+         /* Without the signature the client cannot echo the block back on the next
+          * turn, so rendering thinking without it produces an unusable turn. Omitted
+          * (not emitted empty) when absent, matching block_to_anthropic. */
+         if (b->thinking_signature)
+            cJSON_AddStringToObject(el, "signature", b->thinking_signature);
       }
       else if (b->type == AIMEE_BLK_TOOL_USE)
       {

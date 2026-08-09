@@ -81,11 +81,14 @@ int bedrock_converse_stream_to_deltas(const char *event_type, const struct cJSON
  * delta -- Anthropic always sends content_block_start before any delta, so no
  * implicit BLOCK_START is ever synthesised -- so capacity >=1 suffices.
  *
- * KNOWN GAPS, both pre-existing on this path and deliberately not papered over here:
+ * KNOWN GAPS, deliberately not papered over here:
  *   - `signature_delta` yields 0 deltas. aimee_delta_t has no signature field, and
- *     aimee_block_t.thinking_signature (which Anthropic REQUIRES echoed back on a
- *     resubmitted thinking turn) is likewise dropped by anthropic_backend_parse. A
- *     parsed thinking stream is therefore not resubmittable; fix both together.
+ *     giving it one would not help: a delta BORROWS into its event's payload, which
+ *     is gone by the time the block closes, so the signature cannot be carried to
+ *     the BLOCK_STOP it describes without copying into the state machine. The
+ *     NON-streaming path does model it (aimee_block_t.thinking_signature, captured
+ *     by anthropic_backend_parse); a stream reassembled through these deltas alone
+ *     is therefore not resubmittable.
  *   - the frontend renderer flattens AIMEE_BLK_THINKING to a `text` block, so a
  *     thinking delta parsed here does not round-trip as thinking on egress.
  * Both are safe for OBSERVING a stream (the relay emits provider bytes verbatim);
