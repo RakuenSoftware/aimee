@@ -134,6 +134,19 @@ check_output "unknown command --json" "\"message\"" $AIMEE --json foobarbaz
 check_output "wrong subcommand names the subcommand" "is not a subcommand of" \
     $AIMEE economizer status
 
+# --- Server-owned config over /v1 (roles, personas) ---
+# These moved off a hardcoded http_uds_request() onto cli_v1_path_request(), so
+# they follow whichever transport is configured. This run has no remote endpoint,
+# so it is the local-socket regression guard for that swap.
+check_output "roles list over local socket" "review" $AIMEE roles list
+check_output "roles list --json" "\"role_templates\"" $AIMEE --json roles list
+check_output "roles show" "max_turns" $AIMEE roles show review
+check_output "roles show unknown is a clean 404" "no such role template" \
+    $AIMEE roles show zzz-no-such-role
+check_output_not_contains "roles does not report the server unreachable" \
+    "is not reachable" $AIMEE roles list
+check_output "persona list over local socket" "engineer" $AIMEE persona list
+
 # --- Memory (read-only baseline; write/KB routing lives in service tests) ---
 check_output "memory list json" "[" $AIMEE --json memory list
 check_output "memory read json" "\"context\"" $AIMEE --json memory read
