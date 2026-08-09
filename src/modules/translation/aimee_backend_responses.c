@@ -24,6 +24,48 @@ static const char *ostr(const cJSON *o, const char *k)
    return (it && cJSON_IsString(it)) ? it->valuestring : NULL;
 }
 
+/* See aimee_backend.h: accepts `summary` as a bare string OR as an array of typed
+ * parts, so neither parser has to bet on which shape the wire uses. */
+char *responses_reasoning_summary_text(const cJSON *item)
+{
+   const cJSON *summary = item ? cJSON_GetObjectItemCaseSensitive((cJSON *)item, "summary") : NULL;
+   if (!summary)
+      return NULL;
+   if (cJSON_IsString(summary))
+      return (summary->valuestring && summary->valuestring[0]) ? strdup(summary->valuestring)
+                                                               : NULL;
+   if (!cJSON_IsArray(summary))
+      return NULL;
+
+   /* Join the parts' `text` with blank lines, mirroring how a message's content
+    * parts are read. Parts without text (a future part kind) are skipped rather
+    * than rendered as gaps. */
+   char *acc = NULL;
+   size_t len = 0;
+   const cJSON *part = NULL;
+   cJSON_ArrayForEach(part, summary)
+   {
+      const char *t = ostr(part, "text");
+      if (!t || !t[0])
+         continue;
+      size_t add = strlen(t);
+      size_t sep = len ? 2 : 0; /* "\n\n" between parts */
+      char *n = realloc(acc, len + sep + add + 1);
+      if (!n)
+      {
+         free(acc);
+         return NULL;
+      }
+      acc = n;
+      if (sep)
+         memcpy(acc + len, "\n\n", sep);
+      memcpy(acc + len + sep, t, add);
+      len += sep + add;
+      acc[len] = '\0';
+   }
+   return acc;
+}
+
 /* grow out->content by one; return the new zeroed block or NULL on OOM. */
 static aimee_block_t *grow_content(aimee_response_t *out)
 {
@@ -194,7 +236,7 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
                goto oom;
             b->type = AIMEE_BLK_THINKING;
             b->raw = cJSON_Duplicate(item, 1);
-            b->text = dupstr(ostr(item, "summary"));
+            b->text = responses_reasoning_summary_text(item);
          }
          else if (type && strcmp(type, "message") == 0)
          {

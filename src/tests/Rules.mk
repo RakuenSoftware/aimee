@@ -2209,6 +2209,7 @@ $(TESTPREFIX)/unit-test-aimee-frontend: $(OBJDIR)/tests/test_aimee_frontend.o \
                                        $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
                                        $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                                        $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
+                                       $(OBJDIR)/modules/translation/aimee_backend_responses.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -4086,7 +4087,7 @@ $(TESTPREFIX)/unit-test-sse-parser: $(OBJDIR)/tests/test_sse_parser.o $(OBJDIR)/
 $(TESTPREFIX)/unit-test-anthropic-ingress: $(OBJDIR)/tests/test_anthropic_ingress.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/tests/test_anthropic_http.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/modules/economizer/economizer_wire_snapshot.o $(OBJDIR)/modules/economizer/economizer_proof.o
+$(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/tests/test_anthropic_http.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/modules/economizer/economizer_wire_snapshot.o $(OBJDIR)/modules/economizer/economizer_proof.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # P2c (response-side tool policing) integration test: same source as
@@ -4095,7 +4096,7 @@ $(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/tests/test_anthropic_http.o $(
 # response. The shape tests stub the request-side policy helpers so they
 # don't have to deal with guardrails dependencies; this test exercises the
 # full wiring end-to-end.
-$(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/tests/test_anthropic_http_p2c.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/modules/economizer/economizer_wire_snapshot.o $(OBJDIR)/modules/economizer/economizer_proof.o
+$(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/tests/test_anthropic_http_p2c.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/modules/economizer/economizer_wire_snapshot.o $(OBJDIR)/modules/economizer/economizer_proof.o $(OBJDIR)/modules/translation/aimee_ir_stream.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # P2c streaming integration test: linked against the REAL modules/gateway/gateway_policy.o
@@ -4103,7 +4104,7 @@ $(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/tests/test_anthropic_http_
 # Same minimal-link pattern as the buffered P2c test above; the SSE replay
 # helper + police function exercise the buffered-fetch + replay flow when
 # `gateway_prevent_subagents` is ON.
-$(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/tests/test_anthropic_http_streaming_p2c.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/modules/economizer/economizer_wire_snapshot.o $(OBJDIR)/modules/economizer/economizer_proof.o
+$(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/tests/test_anthropic_http_streaming_p2c.o $(OBJDIR)/modules/memory/gw_stage_memory.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/modules/economizer/economizer_wire_snapshot.o $(OBJDIR)/modules/economizer/economizer_proof.o $(OBJDIR)/modules/translation/aimee_ir_stream.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-gateway-policy: $(OBJDIR)/tests/test_gateway_policy.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
