@@ -2188,6 +2188,584 @@ static void test_main_branch_delete_blocked(void)
    teardown_git_repo();
 }
 
+/* --- The integration operations: merge / rebase / cherry-pick / revert / sync --- */
+
+/* Two branches with a commit each, both touching file.txt, so a merge of one into
+ * the other conflicts. Leaves HEAD on `integration`. */
+static void setup_conflicting_branches(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b side && echo side > file.txt && "
+                 "git commit -q -am 'side change'") == 0);
+   assert(system("git checkout -q -b integration HEAD~1 && echo mine > file.txt && "
+                 "git commit -q -am 'my change'") == 0);
+}
+
+/* A clean merge reports what moved, not git's prose. */
+static void test_merge_clean_reports_the_change(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b side && echo side > side.txt && "
+                 "git add side.txt && git commit -q -m 'side commit'") == 0);
+   assert(system("git checkout -q -b integration HEAD~1") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "side");
+   cJSON *resp = handle_git_merge(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") == NULL);
+   assert(strstr(text, "merge side into integration") != NULL);
+   assert(strstr(text, "commit(s)") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+   assert(system("test -f side.txt") == 0);
+
+   teardown_git_repo();
+}
+
+/* The default on conflict: name the conflicted files AND undo the merge, so the
+ * caller is never left holding a tree it has to know how to clean up. */
+static void test_merge_conflict_aborts_and_names_files(void)
+{
+   setup_conflicting_branches();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "side");
+   cJSON *resp = handle_git_merge(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "conflict") != NULL);
+   assert(strstr(text, "file.txt") != NULL);
+   assert(strstr(text, "aborted") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   /* The tree really is clean: no MERGE_HEAD, no conflict markers. */
+   assert(system("git rev-parse --verify --quiet MERGE_HEAD >/dev/null 2>&1") != 0);
+   assert(system("git diff --name-only --diff-filter=U | grep -q .") != 0);
+   assert(system("grep -q '<<<<<<<' file.txt") != 0);
+
+   teardown_git_repo();
+}
+
+/* abort_on_conflict=false is the opt-in to resolving in place — and then
+ * action=continue finishes it. */
+static void test_merge_keep_conflicts_then_continue(void)
+{
+   setup_conflicting_branches();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "side");
+   cJSON_AddBoolToObject(args, "abort_on_conflict", 0);
+   cJSON *resp = handle_git_merge(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "conflict") != NULL);
+   assert(strstr(text, "left in progress") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+   assert(system("git rev-parse --verify --quiet MERGE_HEAD >/dev/null 2>&1") == 0);
+
+   /* Continuing before resolving must refuse rather than commit the markers. */
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "continue");
+   resp = handle_git_merge(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "still have conflict markers") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   assert(system("echo resolved > file.txt && git add file.txt") == 0);
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "continue");
+   resp = handle_git_merge(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "merge completed") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+   assert(system("git rev-parse --verify --quiet MERGE_HEAD >/dev/null 2>&1") != 0);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+/* action=abort backs the whole thing out. */
+static void test_merge_action_abort(void)
+{
+   setup_conflicting_branches();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "side");
+   cJSON_AddBoolToObject(args, "abort_on_conflict", 0);
+   cJSON *resp = handle_git_merge(args);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "abort");
+   resp = handle_git_merge(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "merge aborted") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+   assert(system("git rev-parse --verify --quiet MERGE_HEAD >/dev/null 2>&1") != 0);
+
+   teardown_git_repo();
+}
+
+/* A half-finished operation is reported as such, with the way out, instead of
+ * letting a second one start on top of it. */
+static void test_second_operation_refused_while_one_is_in_progress(void)
+{
+   setup_conflicting_branches();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "side");
+   cJSON_AddBoolToObject(args, "abort_on_conflict", 0);
+   cJSON *resp = handle_git_merge(args);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "base", "side");
+   resp = handle_git_rebase(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "merge is already in progress") != NULL);
+   assert(strstr(text, "action=continue") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+/* An uncommitted tree cannot be cleanly restored after a conflict, so the
+ * operation is refused before it starts rather than half-done. */
+static void test_integrate_refuses_dirty_tree(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b work && echo dirty >> file.txt") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "master");
+   cJSON *resp = handle_git_merge(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "uncommitted changes") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+static void test_integrate_blocked_on_main(void)
+{
+   setup_git_repo();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "HEAD");
+   cJSON *resp = handle_git_merge(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") != NULL);
+   assert(strstr(text, "main branch") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+static void test_integrate_requires_a_ref(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b work") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON *resp = handle_git_cherry_pick(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") != NULL);
+   assert(strstr(text, "cherry-pick") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+/* cherry-pick and revert run through the same driver, so one round-trip each is
+ * enough to show the wiring is right. */
+static void test_cherry_pick_and_revert(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b side && echo side > side.txt && "
+                 "git add side.txt && git commit -q -m 'side commit'") == 0);
+   char sha[64] = "";
+   FILE *fp = popen("git rev-parse --short HEAD", "r");
+   assert(fp != NULL);
+   assert(fgets(sha, sizeof(sha), fp) != NULL);
+   pclose(fp);
+   sha[strcspn(sha, "\r\n")] = '\0';
+   assert(system("git checkout -q -b picker HEAD~1") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", sha);
+   cJSON *resp = handle_git_cherry_pick(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") == NULL);
+   assert(system("test -f side.txt") == 0);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "HEAD");
+   resp = handle_git_revert(args);
+   text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") == NULL);
+   assert(system("test -f side.txt") != 0); /* the revert took it back out */
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+/* sync answers "am I current?" without a follow-up call. */
+static void test_sync_reports_already_current(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b work") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "base", "master");
+   cJSON *resp = handle_git_sync(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   /* No origin in this fixture, so the base resolves to the local ref and the
+    * answer is the gap: zero behind. */
+   assert(strstr(text, "already current") != NULL || strstr(text, "sync work") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+static void test_sync_rejects_unknown_mode(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b work") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "mode", "squash");
+   cJSON *resp = handle_git_sync(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "mode must be rebase") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+/* --- git_add --- */
+
+/* `all` stages new files (which git_commit cannot reach) but not secrets, and the
+ * screen runs against the index so a pattern-based add cannot slip one past. */
+static void test_add_all_stages_new_files_but_not_secrets(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b staging-test") == 0);
+
+   FILE *fp = fopen(".env", "w");
+   assert(fp != NULL);
+   fputs("SECRET=xyz\n", fp);
+   fclose(fp);
+   fp = fopen("normal.txt", "w");
+   assert(fp != NULL);
+   fputs("normal\n", fp);
+   fclose(fp);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddBoolToObject(args, "all", 1);
+   cJSON *resp = handle_git_add(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "staged") != NULL);
+   assert(strstr(text, ".env") != NULL); /* named in the unstaged warning */
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   assert(system("git diff --cached --name-only | grep -qx normal.txt") == 0);
+   assert(system("git diff --cached --name-only | grep -qx .env") != 0);
+
+   teardown_git_repo();
+}
+
+static void test_add_refuses_only_sensitive_paths(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b staging-test") == 0);
+   FILE *fp = fopen(".env", "w");
+   assert(fp != NULL);
+   fputs("SECRET=xyz\n", fp);
+   fclose(fp);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON *files = cJSON_AddArrayToObject(args, "files");
+   cJSON_AddItemToArray(files, cJSON_CreateString(".env"));
+   cJSON *resp = handle_git_add(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "sensitive") != NULL);
+   assert(strstr(text, "nothing was staged") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+static void test_add_requires_files_or_all(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b staging-test") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON *resp = handle_git_add(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") != NULL);
+   assert(strstr(text, "'all'") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+/* --- switch / checkout routing --- */
+
+static void test_switch_routes_to_branch_switch(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   assert(system("git branch -q target") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "ref", "target");
+   cJSON *resp = handle_git_switch(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "switched to target") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+/* A path-scoped checkout is a restore, and routes there rather than moving HEAD. */
+static void test_checkout_with_files_restores(void)
+{
+   setup_git_repo();
+   assert(system("git checkout -q -b work && echo changed > file.txt") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON *files = cJSON_AddArrayToObject(args, "files");
+   cJSON_AddItemToArray(files, cJSON_CreateString("file.txt"));
+   cJSON *resp = handle_git_checkout(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "restored") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+   assert(system("grep -q 'hello world' file.txt") == 0);
+
+   teardown_git_repo();
+}
+
+static void test_switch_requires_a_ref(void)
+{
+   setup_git_repo();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON *resp = handle_git_switch(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") != NULL);
+   assert(strstr(text, "'ref'") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+/* --- PR title/body derivation --- */
+
+/* One commit: the PR is that commit. No model call, no invented prose. */
+static void test_pr_create_derives_title_from_single_commit(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+   assert(system("git checkout -q -b feat/derive && echo x > x.txt && git add x.txt && "
+                 "git commit -q -m 'feat(thing): make it work' -m 'Because it did not.'") == 0);
+
+   /* No origin remote in the fixture, so create cannot reach the forge — but it
+    * must get PAST the title requirement, which is what this covers. The old
+    * behaviour was a hard 'title is required'. */
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "create");
+   cJSON_AddStringToObject(args, "base", "master");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "'title' parameter is required") == NULL);
+   cJSON *jtitle = cJSON_GetObjectItemCaseSensitive(args, "title");
+   assert(cJSON_IsString(jtitle));
+   assert(strcmp(jtitle->valuestring, "feat(thing): make it work") == 0);
+   cJSON *jbody = cJSON_GetObjectItemCaseSensitive(args, "body");
+   assert(cJSON_IsString(jbody));
+   assert(strstr(jbody->valuestring, "Because it did not.") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+/* Several commits: the shared conventional-commit prefix is kept and the body
+ * lists them, so the PR reads like the commits it contains. */
+static void test_pr_create_derives_title_from_many_commits(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+   assert(system("git checkout -q -b feat/many && echo a > a.txt && git add a.txt && "
+                 "git commit -q -m 'feat: first bit' && echo b > b.txt && git add b.txt && "
+                 "git commit -q -m 'feat: second bit'") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "create");
+   cJSON_AddStringToObject(args, "base", "master");
+   cJSON *resp = handle_git_pr(args);
+   cJSON *jtitle = cJSON_GetObjectItemCaseSensitive(args, "title");
+   assert(cJSON_IsString(jtitle));
+   assert(strstr(jtitle->valuestring, "feat: many") != NULL);
+   assert(strstr(jtitle->valuestring, "2 commits") != NULL);
+   cJSON *jbody = cJSON_GetObjectItemCaseSensitive(args, "body");
+   assert(cJSON_IsString(jbody));
+   assert(strstr(jbody->valuestring, "- feat: first bit") != NULL);
+   assert(strstr(jbody->valuestring, "- feat: second bit") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+/* Nothing to open a PR for is its own answer, not a derived-title crash. */
+static void test_pr_create_with_no_commits_says_so(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+   assert(system("git checkout -q -b feat/empty") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "create");
+   cJSON_AddStringToObject(args, "base", "master");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "no commits") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+/* --- pr action=ready --- */
+
+/* ready stops at the FIRST real failure and returns that step's own explanation,
+ * so the caller is never told "ready failed" with no idea which part. Here the
+ * sync conflicts, so the conflicted file must come back — and nothing must have
+ * been pushed. */
+static void test_pr_ready_stops_at_the_failing_step(void)
+{
+   setup_conflicting_branches();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "ready");
+   cJSON_AddStringToObject(args, "base", "side");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   /* sync's own conflict report, verbatim — not a generic ready failure. */
+   assert(strstr(text, "file.txt") != NULL);
+   assert(strstr(text, "push:") == NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+/* When the sync succeeds, the push is attempted next and its failure is what
+ * comes back (no origin in the fixture) — proving the steps run in order and the
+ * report is not fabricated. */
+static void test_pr_ready_runs_sync_then_push(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+   assert(system("git checkout -q -b feat/ready && echo x > x.txt && git add x.txt && "
+                 "git commit -q -m 'feat: work'") == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "ready");
+   cJSON_AddStringToObject(args, "base", "master");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   /* The push is the step that fails here, and its own message says so. */
+   assert(strstr(text, "push") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
+static void test_pr_unknown_action_lists_ready(void)
+{
+   setup_git_repo();
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "nonsense");
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "ready") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
 static void test_feature_branch_commit_allowed(void)
 {
    setup_git_repo();
@@ -2747,6 +3325,35 @@ int main(void)
    test_main_branch_reset_blocked();
    test_main_branch_delete_blocked();
    test_feature_branch_commit_allowed();
+
+   /* Integration operations */
+   test_merge_clean_reports_the_change();
+   test_merge_conflict_aborts_and_names_files();
+   test_merge_keep_conflicts_then_continue();
+   test_merge_action_abort();
+   test_second_operation_refused_while_one_is_in_progress();
+   test_integrate_refuses_dirty_tree();
+   test_integrate_blocked_on_main();
+   test_integrate_requires_a_ref();
+   test_cherry_pick_and_revert();
+   test_sync_reports_already_current();
+   test_sync_rejects_unknown_mode();
+
+   /* Staging and ref movement */
+   test_add_all_stages_new_files_but_not_secrets();
+   test_add_refuses_only_sensitive_paths();
+   test_add_requires_files_or_all();
+   test_switch_routes_to_branch_switch();
+   test_checkout_with_files_restores();
+   test_switch_requires_a_ref();
+
+   /* PR title/body derivation */
+   test_pr_create_derives_title_from_single_commit();
+   test_pr_create_derives_title_from_many_commits();
+   test_pr_create_with_no_commits_says_so();
+   test_pr_ready_stops_at_the_failing_step();
+   test_pr_ready_runs_sync_then_push();
+   test_pr_unknown_action_lists_ready();
 
    printf("all tests passed\n");
    return 0;

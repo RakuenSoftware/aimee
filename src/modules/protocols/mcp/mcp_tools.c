@@ -1107,10 +1107,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(cmd, "type", "string");
       cJSON_AddStringToObject(cmd, "description", "Git subcommand to run (required).");
       cJSON *en = cJSON_AddArrayToObject(cmd, "enum");
-      static const char *const git_cmds[] = {"status", "commit", "push",         "pull",  "fetch",
-                                             "branch", "log",    "diff_summary", "pr",    "issue",
-                                             "clone",  "stash",  "tag",          "reset", "restore",
-                                             "verify", NULL};
+      static const char *const git_cmds[] = {
+          "status",       "commit", "push",     "pull",   "fetch", "branch",      "log",
+          "diff_summary", "pr",     "issue",    "clone",  "stash", "tag",         "reset",
+          "restore",      "verify", "merge",    "rebase", "sync",  "cherry_pick", "revert",
+          "add",          "switch", "checkout", NULL};
       for (int i = 0; git_cmds[i]; i++)
          cJSON_AddItemToArray(en, cJSON_CreateString(git_cmds[i]));
 
@@ -1124,17 +1125,23 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       } git_params[] = {
           {"action", "string",
            "Sub-action for: branch (create/switch/list/delete/claim/orphan), pr "
-           "(create/view/list/edit/checks/merge_status/update_branch/merge), stash "
+           "(create/view/list/edit/checks/merge_status/update_branch/merge/ready), stash "
            "(push/pop/apply/list/drop), tag (create/list/delete), issue (list), verify "
-           "(run/check/conflicts/env/prepare-pr/status)."},
+           "(run/check/conflicts/env/prepare-pr/status), merge / rebase / sync / cherry_pick / "
+           "revert (omit to start one; continue/abort/skip to drive one that stopped on a "
+           "conflict)."},
           {"message", "string",
            "commit: commit message; stash: message; tag: annotated-tag message."},
-          {"files", "array", "commit / diff_summary / restore: file paths."},
+          {"files", "array", "commit / diff_summary / restore / add / checkout: file paths."},
           {"name", "string", "branch / tag: name."},
-          {"base", "string", "branch: base ref; pr / verify: base branch (default main)."},
+          {"base", "string",
+           "branch: base ref; pr / verify: base branch (default main); rebase: the branch to "
+           "rebase onto; sync: the branch to become current with (default: origin's default "
+           "branch)."},
           {"ref", "string",
            "log / diff_summary: ref or range; tag: ref to tag; reset: target ref (default "
-           "HEAD~1)."},
+           "HEAD~1); merge: branch or commit to merge in; cherry_pick / revert: the commit; "
+           "switch / checkout: the branch or ref to move to."},
           {"force", "boolean", "push: --force-with-lease; branch delete: -D."},
           {"mirror", "boolean", "push: --mirror (DESTRUCTIVE — replaces all remote refs)."},
           {"rebase", "boolean", "pull: use --rebase."},
@@ -1163,12 +1170,19 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
            "(clone: destination path; verify: repo path.)"},
           {"branch", "string", "clone: branch to checkout."},
           {"depth", "integer", "clone: shallow depth."},
-          {"mode", "string", "reset: soft / mixed (default) / hard."},
+          {"mode", "string",
+           "reset: soft / mixed (default) / hard; sync: rebase (default) / merge."},
           {"staged", "boolean", "restore: unstage (restore --staged)."},
           {"source", "string", "restore: restore from this ref."},
           {"async", "boolean", "verify run: run in background (default true)."},
           {"job_id", "integer", "verify: job id for action=status."},
           {"index", "integer", "stash: stash index for apply/drop."},
+          {"abort_on_conflict", "boolean",
+           "merge / rebase / sync / cherry_pick / revert: on a conflict, undo the operation and "
+           "report the conflicted files (default true — the tree is left untouched). Set false to "
+           "stop in the conflicted state and resolve in place, then action=continue."},
+          {"all", "boolean",
+           "add: stage every change including new files (sensitive files are unstaged again)."},
           {NULL, NULL, NULL},
       };
       for (int i = 0; git_params[i].key; i++)
@@ -1199,10 +1213,22 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
               "git",
               "Git + GitHub operations (use instead of the 'git'/'gh' CLIs via Bash). Set "
               "'command' to one of: status, commit, push, pull, fetch, branch, log, "
-              "diff_summary, pr, issue, clone, stash, tag, reset, restore, verify. Remaining "
+              "diff_summary, pr, issue, clone, stash, tag, reset, restore, verify, merge, rebase, "
+              "sync, cherry_pick, revert, add, switch, checkout. State the INTENT and aimee does "
+              "the mechanics: command=sync brings this branch current with its base (resolves the "
+              "base, fetches, rebases, reports the gap it closed) in one call; merge/rebase/"
+              "cherry_pick/revert fetch a remote ref first, never open an editor, and on a "
+              "conflict "
+              "report the conflicted files and undo the operation, so you are never handed a "
+              "half-applied tree (abort_on_conflict=false to resolve in place, then "
+              "action=continue). command=pr action=create writes its own title and body from the "
+              "branch's commits when you omit them. Remaining "
               "params apply per command (see each description); branch/pr/stash/tag/issue/"
               "verify also take an 'action' sub-selector. Use command=pr action=view to "
-              "check a PR's merge state before pushing. PASS 'path' WHENEVER YOU MEAN A "
+              "check a PR's merge state before pushing. command=pr action=ready is the whole \"put "
+              "this up for review\" errand: sync, lease-protected push, and open the PR (deriving "
+              "title and body), stopping at the first real failure with that step's own "
+              "explanation. PASS 'path' WHENEVER YOU MEAN A "
               "SPECIFIC CHECKOUT: without it the repository is inferred from session state, "
               "and a worktree-isolated session can silently act on the shared checkout — "
               "committing or pushing another branch's work.",
