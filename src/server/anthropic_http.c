@@ -713,12 +713,14 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
          cJSON *chunk = cJSON_Parse(p);
          if (chunk)
          {
-            /* A finish chunk closes EVERY open block (text + up to
+            /* A finish chunk closes EVERY open block (reasoning + text + up to
              * AIMEE_STREAM_MAX_TOOLS tool blocks) then TURN_STOP in one call, and
              * a chunk carrying many tool_calls opens as many; size the buffer to
              * hold the worst case so the terminal TURN_STOP is never truncated
-             * (which would hang the client's SSE reader). */
-            aimee_delta_t deltas[2 * AIMEE_STREAM_MAX_TOOLS + 4];
+             * (which would hang the client's SSE reader). The +8 headroom covers a
+             * reasoning block's START/DELTA/STOP on top of the text + tool worst
+             * case, since one chunk may carry reasoning and content together. */
+            aimee_delta_t deltas[2 * AIMEE_STREAM_MAX_TOOLS + 8];
             int n = openai_chunk_to_deltas(chunk, &c->ir_ost, deltas,
                                            (int)(sizeof deltas / sizeof deltas[0]));
             for (int i = 0; i < n; i++)
