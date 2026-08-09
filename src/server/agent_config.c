@@ -1125,15 +1125,45 @@ int agent_load_config(agent_config_t *cfg)
          /* isfinite() matters: a parser can yield +inf from an overflowing
           * literal, and a non-finite price defeats every ordered comparison in
           * the resolver, making an unset axis look set. */
+         /* A PRESENT, valid key is a declaration -- including a declared 0,
+          * which is how a free or subscription-priced seat says "genuinely
+          * nothing per token" rather than "I did not configure this". An absent
+          * key leaves both the value and its bit alone. */
          v = cJSON_GetObjectItem(a, "price_in_per_mtok");
          if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+         {
             ag->price_in_per_mtok = v->valuedouble;
+            ag->declared |= AGENT_DECL_PRICE_IN;
+         }
          v = cJSON_GetObjectItem(a, "price_out_per_mtok");
          if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+         {
             ag->price_out_per_mtok = v->valuedouble;
+            ag->declared |= AGENT_DECL_PRICE_OUT;
+         }
          v = cJSON_GetObjectItem(a, "price_cached_per_mtok");
          if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+         {
             ag->price_cached_per_mtok = v->valuedouble;
+            ag->declared |= AGENT_DECL_PRICE_CACHED;
+         }
+
+         /* Declared per-model limits. context_window has always lived on the
+          * middleware config (its "explicit override" field); max_output is new.
+          * Both are the operator stating what the model does, which is the
+          * authoritative source once the bundled catalog is gone. */
+         v = cJSON_GetObjectItem(a, "context_window");
+         if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+         {
+            ag->middleware.context_window = (int)v->valuedouble;
+            ag->declared |= AGENT_DECL_CONTEXT_WINDOW;
+         }
+         v = cJSON_GetObjectItem(a, "max_output");
+         if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+         {
+            ag->max_output = (int)v->valuedouble;
+            ag->declared |= AGENT_DECL_MAX_OUTPUT;
+         }
 
          /* An unrecognised value must not silently mean "no ceiling": that would
           * hand the hardest work to the seat the operator was trying to limit. */
@@ -1328,9 +1358,18 @@ int agent_load_config(agent_config_t *cfg)
             v = cJSON_GetObjectItem(mw, "stall_threshold");
             if (v && cJSON_IsNumber(v))
                ag->middleware.stall_threshold = v->valueint;
+            /* LEGACY LOCATION. context_window used to live only inside this
+             * middleware block; it is now a declared property of the model at
+             * the top level. Read the old spelling so existing configs keep
+             * working, but let an explicit top-level value win and do not
+             * re-write this one on save -- that is what migrates a config
+             * forward the first time it is persisted. */
             v = cJSON_GetObjectItem(mw, "context_window");
-            if (v && cJSON_IsNumber(v))
+            if (v && cJSON_IsNumber(v) && !(ag->declared & AGENT_DECL_CONTEXT_WINDOW))
+            {
                ag->middleware.context_window = v->valueint;
+               ag->declared |= AGENT_DECL_CONTEXT_WINDOW;
+            }
          }
 
          /* CLI backend config */
@@ -1705,12 +1744,19 @@ static int agent_save_config_impl(const agent_config_t *cfg, int emptied_by_remo
          JSON_ADD_STR(a, "catalog_provider", ag->catalog_provider);
       if (ag->tier_price_exempt[0])
          JSON_ADD_STR(a, "tier_price_exempt", ag->tier_price_exempt);
-      if (ag->price_in_per_mtok > 0.0)
+      /* Driven off the declared bits, not off "> 0". Writing only positive
+       * values silently dropped a declared 0 on every save, so a free seat
+       * reverted to "unset" the first time anything persisted the config. */
+      if (ag->declared & AGENT_DECL_PRICE_IN)
          cJSON_AddNumberToObject(a, "price_in_per_mtok", ag->price_in_per_mtok);
-      if (ag->price_out_per_mtok > 0.0)
+      if (ag->declared & AGENT_DECL_PRICE_OUT)
          cJSON_AddNumberToObject(a, "price_out_per_mtok", ag->price_out_per_mtok);
-      if (ag->price_cached_per_mtok > 0.0)
+      if (ag->declared & AGENT_DECL_PRICE_CACHED)
          cJSON_AddNumberToObject(a, "price_cached_per_mtok", ag->price_cached_per_mtok);
+      if (ag->declared & AGENT_DECL_CONTEXT_WINDOW)
+         cJSON_AddNumberToObject(a, "context_window", ag->middleware.context_window);
+      if (ag->declared & AGENT_DECL_MAX_OUTPUT)
+         cJSON_AddNumberToObject(a, "max_output", ag->max_output);
       if (ag->max_scope != AGENT_SCOPE_UNSET)
          JSON_ADD_STR(a, "max_scope", agent_scope_name(ag->max_scope));
       if (ag->registration[0])
@@ -1781,8 +1827,11 @@ static int agent_save_config_impl(const agent_config_t *cfg, int emptied_by_remo
       /* Middleware config: only write if any non-zero field is set */
       {
          const agent_middleware_cfg_t *mwc = &ag->middleware;
+         /* context_window is excluded: it now serializes at the top level, so
+          * including it here would emit an otherwise-empty middleware object for
+          * an agent whose only setting has moved out of this block. */
          if (mwc->cost_limit || mwc->context_warn_pct || mwc->auto_compact_pct ||
-             mwc->stall_threshold || mwc->context_window)
+             mwc->stall_threshold)
          {
             cJSON *mw = cJSON_CreateObject();
             if (mwc->cost_limit)
@@ -1793,8 +1842,9 @@ static int agent_save_config_impl(const agent_config_t *cfg, int emptied_by_remo
                cJSON_AddNumberToObject(mw, "auto_compact_pct", mwc->auto_compact_pct);
             if (mwc->stall_threshold)
                cJSON_AddNumberToObject(mw, "stall_threshold", mwc->stall_threshold);
-            if (mwc->context_window)
-               cJSON_AddNumberToObject(mw, "context_window", mwc->context_window);
+            /* context_window is deliberately NOT written here any more -- it is
+             * serialized once, at the top level, off AGENT_DECL_CONTEXT_WINDOW.
+             * Writing both would leave two spellings of one value free to drift. */
             cJSON_AddItemToObject(a, "middleware", mw);
          }
       }

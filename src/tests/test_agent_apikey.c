@@ -348,6 +348,112 @@ static void test_reasoning_timeout_default(void)
    printf("  PASS: test_reasoning_timeout_default\n");
 }
 
+/* A DECLARED value survives a save even when it is 0, and an undeclared field
+ * stays absent.
+ *
+ * The old convention was "0 = unset, fall back to the catalog", and the
+ * serializer wrote a price only when it was > 0. That silently discarded a
+ * deliberate 0 on the first save, so a free or subscription-priced seat
+ * reverted to "unset" -- harmless only while a catalog sat underneath to
+ * answer. With operator declaration as the authoritative source there is
+ * nothing underneath, so the two states must stay distinct across a round
+ * trip. */
+static void test_declared_zero_round_trips(void)
+{
+   const char *cfg_dir = config_default_dir();
+   assert(platform_mkdir_p(cfg_dir, 0700) == 0 || access(cfg_dir, F_OK) == 0);
+
+   {
+      FILE *f = fopen(agent_config_path(), "w");
+      assert(f != NULL);
+      /* "free" declares 0 on every axis; "quiet" declares nothing at all. */
+      fputs("{\"agents\":["
+            "{\"name\":\"free\",\"endpoint\":\"https://api.example/v1\",\"model\":\"m\","
+            "\"roles\":[\"code\"],\"price_in_per_mtok\":0,\"price_out_per_mtok\":0,"
+            "\"context_window\":0,\"max_output\":0},"
+            "{\"name\":\"quiet\",\"endpoint\":\"https://api.example/v1\",\"model\":\"m\","
+            "\"roles\":[\"code\"]}]}\n",
+            f);
+      fclose(f);
+   }
+
+   agent_config_t loaded;
+   assert(agent_load_config(&loaded) == 0);
+   agent_t *freebie = agent_find(&loaded, "free");
+   agent_t *quiet = agent_find(&loaded, "quiet");
+   assert(freebie && quiet);
+
+   /* Declared-as-zero is a declaration; silence is not. Both read 0 as a value,
+    * so only the bits tell them apart -- which is the point. */
+   assert(freebie->declared & AGENT_DECL_PRICE_IN);
+   assert(freebie->declared & AGENT_DECL_PRICE_OUT);
+   assert(freebie->declared & AGENT_DECL_CONTEXT_WINDOW);
+   assert(freebie->declared & AGENT_DECL_MAX_OUTPUT);
+   assert(freebie->price_in_per_mtok == 0.0);
+   assert(quiet->declared == 0);
+
+   assert(agent_save_config(&loaded) == 0);
+
+   agent_config_t reloaded;
+   assert(agent_load_config(&reloaded) == 0);
+   agent_t *free2 = agent_find(&reloaded, "free");
+   agent_t *quiet2 = agent_find(&reloaded, "quiet");
+   assert(free2 && quiet2);
+
+   /* The declaration survived the save rather than being dropped for being 0. */
+   assert(free2->declared & AGENT_DECL_PRICE_IN);
+   assert(free2->declared & AGENT_DECL_PRICE_OUT);
+   assert(free2->declared & AGENT_DECL_CONTEXT_WINDOW);
+   assert(free2->declared & AGENT_DECL_MAX_OUTPUT);
+   assert(free2->price_in_per_mtok == 0.0);
+   /* ...and silence was not turned into a declaration by the round trip. */
+   assert(quiet2->declared == 0);
+}
+
+/* The legacy spelling -- context_window nested inside "middleware" -- still
+ * loads, and is rewritten at the top level so a config migrates forward on its
+ * first save rather than carrying two spellings that can drift apart. */
+static void test_legacy_middleware_context_window_migrates(void)
+{
+   {
+      FILE *f = fopen(agent_config_path(), "w");
+      assert(f != NULL);
+      fputs("{\"agents\":[{\"name\":\"legacy\",\"endpoint\":\"https://api.example/v1\","
+            "\"model\":\"m\",\"roles\":[\"code\"],"
+            "\"middleware\":{\"context_window\":272000}}]}\n",
+            f);
+      fclose(f);
+   }
+
+   agent_config_t loaded;
+   assert(agent_load_config(&loaded) == 0);
+   agent_t *ag = agent_find(&loaded, "legacy");
+   assert(ag != NULL);
+   assert(ag->middleware.context_window == 272000);
+   assert(ag->declared & AGENT_DECL_CONTEXT_WINDOW);
+
+   assert(agent_save_config(&loaded) == 0);
+   {
+      FILE *f = fopen(agent_config_path(), "r");
+      assert(f != NULL);
+      char buf[8192] = {0};
+      size_t nread = fread(buf, 1, sizeof(buf) - 1, f);
+      fclose(f);
+      assert(nread > 0);
+      /* Written once, at the top level; the nested spelling is not re-emitted. */
+      assert(strstr(buf, "\"context_window\":\t272000") != NULL ||
+             strstr(buf, "\"context_window\": 272000") != NULL ||
+             strstr(buf, "\"context_window\":272000") != NULL);
+      assert(strstr(buf, "\"middleware\"") == NULL);
+   }
+
+   agent_config_t reloaded;
+   assert(agent_load_config(&reloaded) == 0);
+   agent_t *ag2 = agent_find(&reloaded, "legacy");
+   assert(ag2 && ag2->middleware.context_window == 272000);
+   assert(ag2->declared & AGENT_DECL_CONTEXT_WINDOW);
+}
+
 int main(void)
 {
    char tmp_template[] = "/tmp/aimee-agent-apikey-XXXXXX";
@@ -364,6 +470,8 @@ int main(void)
    test_reasoning_timeout_default();
    test_claude_cli_predicate();
    test_primary_only_migration_and_persist();
+   test_declared_zero_round_trips();
+   test_legacy_middleware_context_window_migrates();
    printf("agent_apikey: all tests passed\n");
    return 0;
 }

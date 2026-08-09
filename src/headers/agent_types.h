@@ -246,6 +246,20 @@ typedef struct agent_middleware_cfg
    int context_window;   /* explicit context window override; 0=auto-detect from model */
 } agent_middleware_cfg_t;
 
+/* Which per-model numbers the operator declared. See agent_t.declared.
+ *
+ * A bit means "the operator stated this value", NOT "the value is non-zero" --
+ * that distinction is the whole point: it lets a free model declare 0 and an
+ * unconfigured one stay silent, which one number cannot express on its own. */
+enum
+{
+   AGENT_DECL_PRICE_IN = 1u << 0,
+   AGENT_DECL_PRICE_OUT = 1u << 1,
+   AGENT_DECL_PRICE_CACHED = 1u << 2,
+   AGENT_DECL_CONTEXT_WINDOW = 1u << 3,
+   AGENT_DECL_MAX_OUTPUT = 1u << 4,
+};
+
 typedef struct agent_ablation_flags
 {
    int configured;        /* 0 = production/default path; treat all guardrails as enabled */
@@ -338,6 +352,27 @@ typedef struct
    double price_in_per_mtok;
    double price_out_per_mtok;
    double price_cached_per_mtok;
+   /* Which of the numeric fields above (and max_output / middleware.context_window
+    * below) the operator actually DECLARED, as AGENT_DECL_* bits.
+    *
+    * The fields alone cannot express this. Their documented convention is "0 =
+    * unset, fall back to the catalog", which conflates a genuinely free model
+    * with an undeclared one and caps a declared-as-0 value at unusable. That was
+    * survivable only while a catalog sat underneath to answer; once operator
+    * declaration is the authoritative source, "the operator said 0" and "the
+    * operator said nothing" have to be different states.
+    *
+    * Set at load from KEY PRESENCE in agents.json rather than from the value, so
+    * an existing config (no key) stays undeclared and nothing changes meaning
+    * under an upgrade. Serialization is driven off these bits, so a declared 0
+    * round-trips instead of vanishing on the next save. */
+   unsigned declared;
+   /* Output-token ceiling for this model, when the operator declares one.
+    * Meaningful only with AGENT_DECL_MAX_OUTPUT set -- 0 is a legal declared
+    * value in the same way a 0 price is. Distinct from max_tokens, which is the
+    * per-REQUEST cap this deployment asks for; this is what the model will
+    * actually emit. */
+   int max_output;
    /* Hardest work this agent may be given. UNSET (the default, so every existing
     * config is unchanged) means no ceiling. Declared by the operator, who knows
     * their local model's limits better than any benchmark would: a small local
