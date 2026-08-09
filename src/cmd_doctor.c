@@ -524,15 +524,19 @@ static void check_index(check_result_t *r, int db2_ready)
    char ts_buf[64] = {0};
    db2_code_index_project_last_scan(ts_buf, sizeof(ts_buf));
 
-   /* Parse timestamp and check if older than 24h */
+   /* Parse timestamp and check if older than 24h.
+    *
+    * parse_utc_ts rather than a local strptime: it reads both spellings the tree
+    * stores (this one matched only ISO, so a pg_now_text() row read as no
+    * timestamp at all), and it converts as UTC. mktime() interpreted these UTC
+    * fields as LOCAL time, so the age was wrong by the host's offset -- on a
+    * UTC+13 box a freshly indexed project reported as stale. */
    int stale = 0;
    if (ts_buf[0])
    {
-      struct tm tm_parsed;
-      memset(&tm_parsed, 0, sizeof(tm_parsed));
-      if (strptime(ts_buf, "%Y-%m-%dT%H:%M:%S", &tm_parsed))
+      time_t indexed_time = parse_utc_ts(ts_buf);
+      if (indexed_time > 0)
       {
-         time_t indexed_time = mktime(&tm_parsed);
          time_t now = time(NULL);
          double hours = difftime(now, indexed_time) / 3600.0;
          if (hours > 24.0)
@@ -704,15 +708,11 @@ static void check_kb_maintenance(check_result_t *r, int kb_rc, const kb_health_t
       snprintf(r->message, sizeof(r->message), "maintenance enabled but has never run");
       return;
    }
-   /* Warn if last run was more than 48 hours ago */
-   struct tm t;
-   memset(&t, 0, sizeof(t));
-   if (sscanf(h->last_maintenance_at, "%d-%d-%d %d:%d:%d", &t.tm_year, &t.tm_mon, &t.tm_mday,
-              &t.tm_hour, &t.tm_min, &t.tm_sec) >= 3)
+   /* Warn if last run was more than 48 hours ago. Shared parser: this copy read
+    * only the space form, and mktime() treated a UTC stamp as local time. */
+   time_t then = parse_utc_ts(h->last_maintenance_at);
+   if (then > 0)
    {
-      t.tm_year -= 1900;
-      t.tm_mon -= 1;
-      time_t then = mktime(&t);
       time_t now = time(NULL);
       double hours_since = difftime(now, then) / 3600.0;
       if (hours_since > 48.0)
