@@ -18,6 +18,7 @@
 #include "../db1/db1.h"
 #include "../db2/db2.h"
 #include "../db2/db2_internal.h"
+#include "support/git_module_fixture.h"
 
 /* --- Helpers --- */
 
@@ -3237,6 +3238,11 @@ static void test_git_verify_sync_rejects_same_session_overlap(void)
 
 int main(void)
 {
+   /* The verify gate reads its ledger from the git module, so the module has
+    * to be up or every verify assertion below fails on a correctly closed
+    * gate rather than on what it means to test. */
+   git_module_fixture_start();
+
    printf("mcp_git: ");
 
    test_git_status_clean();

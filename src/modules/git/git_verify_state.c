@@ -34,7 +34,7 @@
  * verified" rather than an error, which is the same thing a missing ledger has
  * always reported and is the safe direction: it forces a verify run, it never
  * lets one be skipped. */
-#define GIT_VERIFY_STATE_MAX_BODY (256u * 1024u)
+#define GIT_VERIFY_STATE_MAX_BODY   (256u * 1024u)
 #define GIT_VERIFY_STATE_TIMEOUT_MS 10000
 
 /* One round trip to the verify-state stage. Takes ownership of `request` the
@@ -45,9 +45,9 @@ static cJSON *verify_state_call(cJSON *request)
 {
    if (!request)
       return NULL;
-   cJSON *reply = aimee_module_json_call(AIMEE_GIT_EVENT_VERIFY_RUN, AIMEE_GIT_STAGE_VERIFY_RUN,
-                                         request, GIT_VERIFY_STATE_MAX_BODY,
-                                         GIT_VERIFY_STATE_TIMEOUT_MS, NULL);
+   cJSON *reply =
+       aimee_module_json_call(AIMEE_GIT_EVENT_VERIFY_RUN, AIMEE_GIT_STAGE_VERIFY_RUN, request,
+                              GIT_VERIFY_STATE_MAX_BODY, GIT_VERIFY_STATE_TIMEOUT_MS, NULL);
    if (!reply)
       return NULL;
    if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "ok")))
