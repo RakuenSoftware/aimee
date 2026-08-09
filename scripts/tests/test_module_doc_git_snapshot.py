@@ -393,6 +393,33 @@ class GitSnapshotTests(unittest.TestCase):
             ),
         )
 
+    def test_tree_scan_is_bounded_by_entries_not_by_the_clock(self) -> None:
+        """The scan budget must be deterministic.
+
+        The entry cap is the bound that decides a verdict, and the same tree must get
+        the same answer everywhere. The clock is only a stuck-filesystem backstop: at
+        0.1s it failed a few-dozen-file fixture on a contended CI runner and reported
+        it as rule=snapshot-disk, i.e. a contract violation, on two unrelated branches
+        while the identical tree passed locally.
+        """
+        tree = self.root / "scan"
+        tree.mkdir()
+        for index in range(8):
+            (tree / f"f{index}").write_bytes(b"x" * 16)
+
+        # A healthy tree is measured, not rejected -- and the clock does not decide it.
+        self.assertEqual(snapshot._tree_bytes(tree), 8 * 16)
+        with mock.patch.object(snapshot, "MAX_TREE_SCAN_SECONDS", 0.0):
+            self.assertEqual(
+                snapshot._tree_bytes(tree),
+                8 * 16,
+                "an already-expired clock must not fail a tree well under the entry cap",
+            )
+
+        # The deterministic cap still fires, and still as snapshot-disk.
+        with mock.patch.object(snapshot, "MAX_TREE_ENTRIES", 4):
+            self.assert_rule("snapshot-disk", lambda: snapshot._tree_bytes(tree))
+
     def test_sensitive_output_is_discarded_and_failure_is_fixed(self) -> None:
         secret = "Authorization: Bearer REFLECTED-SECRET"
         env = snapshot._base_env(self.root)
