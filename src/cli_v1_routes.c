@@ -574,12 +574,24 @@ cJSON *marshal_memory_recall(int argc, char **argv)
    const char *task = rpc_get(&opts, "task");
    if (!task && opts.pos_count > 0)
       task = opts.positional[0];
+   /* --query asks the same question task_hint answers, so it feeds the same
+    * field rather than a second one.
+    *
+    * It used to be marshalled as its own `query` key that NOTHING read:
+    * handle_memory_recall takes task_hint, limit_tokens and session_start, and
+    * the only other jo_str(req,"query") in the tree belongs to kb.search. So
+    * `aimee memory recall --query "..."` sent the text, had it ignored, and fell
+    * back to the "session start" hint -- returning the recency bundle while
+    * looking like it had searched. Verified live: a query matching three
+    * memories almost verbatim returned none of them.
+    *
+    * An explicit --task or positional still wins; --query only fills the hint
+    * when nothing else did, so no existing invocation changes. */
+   if (!task)
+      task = rpc_get(&opts, "query");
    cJSON_AddStringToObject(req, "task_hint", task && task[0] ? task : "session start");
    if (rpc_has_flag(&opts, "session-start"))
       cJSON_AddBoolToObject(req, "session_start", 1);
-   const char *q = rpc_get(&opts, "query");
-   if (q)
-      cJSON_AddStringToObject(req, "query", q);
    int lt = rpc_get_int(&opts, "limit-tokens", 0);
    if (lt > 0)
       cJSON_AddNumberToObject(req, "limit_tokens", lt);
