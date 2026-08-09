@@ -274,6 +274,7 @@ static const struct
     {"aux", "", "aux.config_show", NULL, NULL, 0},
     {"config", "show", "config.show", NULL, NULL, 0},
     {"config", "get", "config.get", NULL, NULL, 0},
+    {"config", "deploy-env", "config.deploy_env", NULL, NULL, 0},
     {"config", "set", "config.set", NULL, NULL, 0},
     {"config", "", "config.show", NULL, NULL, 0},
     {"vault", "unlock", "vault.unlock", NULL, NULL, 0},

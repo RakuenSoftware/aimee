@@ -19,6 +19,7 @@ Subcommands:
   show             Show all config values
   get <key>        Get one config value
   set <key> <val>  Set one config value
+  deploy-env       Emit the compose env for this backend record
 ```
 
 ### `aimee delegate`
