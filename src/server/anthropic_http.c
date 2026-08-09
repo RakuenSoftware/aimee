@@ -693,6 +693,13 @@ typedef struct
    int output_tokens;
    int cache_write_tokens;
    int cache_read_tokens;
+   /* Observation-only reasoning tap (see relay_observe_reasoning). Parsing the
+    * relayed SSE does not mutate it, so exact-parity passthrough is unaffected. */
+   anthropic_backend_stream_state_t ir_bst;
+   char *reasoning;         /* accumulated thinking text, NULL until any arrives */
+   size_t reasoning_len;    /* bytes used (excluding the NUL) */
+   int reasoning_truncated; /* hit RELAY_REASONING_MAX: present but incomplete */
+   int reasoning_giveup;    /* parser rejected the stream: nothing trustworthy */
 } anthropic_relay_ctx_t;
 
 static int prov_line_cb(const char *line, size_t len, void *ud)
@@ -774,6 +781,78 @@ static int relay_append_data(anthropic_relay_ctx_t *c, const char *data)
    return 0;
 }
 
+/* The model's reasoning is accumulated only to be MATCHED against, never replayed,
+ * so it is bounded: the cap costs recall of late thought, where an unbounded buffer
+ * would let a long chain grow the proxy's per-stream memory without limit. A capped
+ * buffer is FLAGGED, never silently short. */
+#define RELAY_REASONING_MAX 16384
+
+static void relay_append_reasoning(anthropic_relay_ctx_t *c, const char *s)
+{
+   size_t add = strlen(s);
+   if (!add)
+      return;
+   if (c->reasoning_len >= RELAY_REASONING_MAX)
+   {
+      c->reasoning_truncated = 1;
+      return;
+   }
+   if (add > RELAY_REASONING_MAX - c->reasoning_len)
+   {
+      add = RELAY_REASONING_MAX - c->reasoning_len;
+      c->reasoning_truncated = 1;
+   }
+   if (!c->reasoning)
+   {
+      /* allocated lazily: a turn with no thinking pays nothing */
+      c->reasoning = malloc(RELAY_REASONING_MAX + 1);
+      if (!c->reasoning)
+         return;
+      c->reasoning[0] = '\0';
+   }
+   memcpy(c->reasoning + c->reasoning_len, s, add);
+   c->reasoning_len += add;
+   c->reasoning[c->reasoning_len] = '\0';
+}
+
+/* Observation-only tap: feed the reassembled Anthropic SSE through the IR backend
+ * parser and accumulate the model's reasoning. PARSING IS NOT MUTATING -- the caller
+ * still emits the provider's bytes verbatim, so the exact-parity passthrough this
+ * relay exists to provide is untouched.
+ *
+ * On ANY parser rejection the accumulated text is discarded and the tap gives up for
+ * the rest of the stream. Half-parsed reasoning is worse than none: a consumer that
+ * acts on a fragment it cannot trust is exactly the failure this feature must avoid,
+ * so the tap abstains rather than hand on something questionable. */
+static void relay_observe_reasoning(anthropic_relay_ctx_t *c, const char *event, const char *data)
+{
+   if (c->reasoning_giveup || !data || !data[0])
+      return;
+   /* Hot path: a text content_block_delta arrives once per token chunk, and parsing
+    * every one would put a JSON parse in front of every streamed token. A real
+    * thinking event always contains the substring, so this pre-filter is
+    * conservative -- it can cost a needless parse, never a missed delta. */
+   if (strcmp(event, "content_block_delta") == 0 && !strstr(data, "thinking"))
+      return;
+   cJSON *payload = cJSON_Parse(data);
+   if (!payload)
+      return; /* unparseable: still relayed verbatim, just nothing to observe */
+   aimee_delta_t d[2];
+   int n = anthropic_stream_to_deltas(event, payload, &c->ir_bst, d, 2);
+   if (n < 0)
+   {
+      c->reasoning_giveup = 1;
+      free(c->reasoning);
+      c->reasoning = NULL;
+      c->reasoning_len = 0;
+   }
+   for (int i = 0; i < n; i++)
+      if (d[i].type == AIMEE_DELTA_BLOCK_DELTA && d[i].kind == AIMEE_BLK_THINKING &&
+          d[i].text_delta)
+         relay_append_reasoning(c, d[i].text_delta);
+   cJSON_Delete(payload);
+}
+
 /* Observe usage on the relayed Anthropic SSE without altering it. message_start
  * carries input + cache tokens under message.usage; message_delta carries the
  * final cumulative output_tokens under usage. */
@@ -810,7 +889,8 @@ static void relay_flush(anthropic_relay_ctx_t *c)
    if (c->data_len > 0 && strcmp(c->data, "[DONE]") != 0)
    {
       relay_capture_usage(c, event, c->data);
-      c->emit(c->emit_ctx, event, c->data);
+      relay_observe_reasoning(c, event, c->data);
+      c->emit(c->emit_ctx, event, c->data); /* provider bytes, unchanged */
       c->emitted++;
    }
    c->event[0] = '\0';
@@ -972,6 +1052,7 @@ static void messages_stream_native_relay(const char *url, const char *auth, cons
    int stream_status;
    memset(&relay, 0, sizeof(relay));
    sse_parser_init(&relay.parser);
+   anthropic_backend_stream_state_init(&relay.ir_bst);
    relay.emit = emit;
    relay.emit_ctx = ctx;
    stream_status =
@@ -991,8 +1072,17 @@ static void messages_stream_native_relay(const char *url, const char *auth, cons
                                 relay.output_tokens, relay.cache_write_tokens,
                                 relay.cache_read_tokens, "anthropic-ingress",
                                 stream_status == 200 ? "realized" : "partial");
+   /* Record what the reasoning tap saw. Nothing consumes the text yet -- these two
+    * counters ARE the deliverable of this step: they measure how often a relayed
+    * turn carries readable reasoning at all, which is what decides whether
+    * thought-triggered recall is worth building on this path. */
+   if (relay.reasoning_len > 0)
+      aimee_ir_metric_inc(AIMEE_IR_M_REASONING_OBSERVED, AIMEE_WIRE_ANTHROPIC);
+   if (relay.reasoning_truncated || relay.reasoning_giveup)
+      aimee_ir_metric_inc(AIMEE_IR_M_REASONING_INCOMPLETE, AIMEE_WIRE_ANTHROPIC);
    sse_parser_free(&relay.parser);
    free(relay.data);
+   free(relay.reasoning);
    return;
 }
 

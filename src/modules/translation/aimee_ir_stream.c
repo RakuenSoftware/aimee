@@ -471,7 +471,11 @@ static int anthropic_index(const cJSON *payload, int *out)
 {
    const cJSON *it = cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "index");
    if (!cJSON_IsNumber(it) || !isfinite(it->valuedouble) || it->valuedouble < 0 ||
-       it->valuedouble >= AIMEE_STREAM_MAX_TOOLS || floor(it->valuedouble) != it->valuedouble)
+       it->valuedouble >= AIMEE_STREAM_MAX_TOOLS)
+      return -1;
+   /* Integrality without floor(): the range check above makes the int cast safe, and
+    * avoiding libm here keeps every caller of this parser free of a -lm dependency. */
+   if ((double)(int)it->valuedouble != it->valuedouble)
       return -1;
    *out = (int)it->valuedouble;
    return 0;
