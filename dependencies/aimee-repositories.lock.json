@@ -49,7 +49,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "ed275a5b755e0db846487eb45e6f5ece323fbdc3cb709877b12751004ac31592"
+      "source_sha256": "b9d0e7b1c86981d684cbf33504e26c1a5b0118bd9447604aa082ed2c5e221d37"
     },
     {
       "id": "translation",
@@ -63,7 +63,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "1afa06491fddfb4014cdfefb487a42a059dd85d3a725a44a5999b4742dfd62d2"
+      "source_sha256": "f69cfd0ac7b9b84a5afaa18fb23174f1f4af4b1f5243e9c5b781e315c1384624"
     },
     {
       "id": "protocols",
