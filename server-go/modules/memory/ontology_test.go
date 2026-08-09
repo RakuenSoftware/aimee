@@ -9,10 +9,14 @@ import (
 )
 
 // The seed table is generated from src/rel_types.c. testdata/ontology_seed.tsv
-// is the C's own answer -- produced by linking rel_types.c and walking it
-// through rel_types_seed_count/rel_types_seed_at, not by parsing the source.
-// Parsing was tried first and silently produced a different row count, which is
-// exactly the failure this fixture exists to catch.
+// is the C's own answer -- produced by scripts/gen-memory-ontology-seed.c, which
+// links rel_types.c and walks rel_types_seed_count/rel_types_seed_at rather than
+// parsing the source. Parsing was tried first and silently produced a different
+// row count, which is exactly the failure this fixture exists to catch.
+//
+// The same walk writes ontology_seed.go, so this compares two outputs of one
+// generator. What it still catches is a hand-edit of either, and a regeneration
+// of one without the other.
 func TestSeedTableMatchesTheCAuthority(t *testing.T) {
 	file, err := os.Open("testdata/ontology_seed.tsv")
 	if err != nil {
@@ -23,6 +27,7 @@ func TestSeedTableMatchesTheCAuthority(t *testing.T) {
 	type row struct {
 		name       string
 		head, tail []NodeKind
+		sens       RelSensitivity
 	}
 	parseKinds := func(field string) []NodeKind {
 		out := []NodeKind{}
@@ -43,10 +48,15 @@ func TestSeedTableMatchesTheCAuthority(t *testing.T) {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		fields := strings.Split(scanner.Text(), "\t")
-		if len(fields) != 3 {
+		if len(fields) != 4 {
 			t.Fatalf("malformed fixture line %q", scanner.Text())
 		}
-		want = append(want, row{fields[0], parseKinds(fields[1]), parseKinds(fields[2])})
+		sens, err := strconv.Atoi(fields[3])
+		if err != nil {
+			t.Fatalf("bad sensitivity in %q: %v", scanner.Text(), err)
+		}
+		want = append(want, row{fields[0], parseKinds(fields[1]), parseKinds(fields[2]),
+			RelSensitivity(sens)})
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
@@ -69,6 +79,18 @@ func TestSeedTableMatchesTheCAuthority(t *testing.T) {
 		if !sameKinds(got.TailKinds, expected.tail) {
 			t.Errorf("%s: tail kinds %v, want %v", got.RelType, got.TailKinds, expected.tail)
 		}
+		if got.Sensitivity != expected.sens {
+			t.Errorf("%s: sensitivity %d, want %d", got.RelType, got.Sensitivity, expected.sens)
+		}
+	}
+	// The recall gate reads this column, so a table where every row shared one
+	// tier would let a broken sensitivity lookup pass unnoticed.
+	tiers := map[RelSensitivity]int{}
+	for _, got := range seedOntology {
+		tiers[got.Sensitivity]++
+	}
+	if len(tiers) < 2 {
+		t.Errorf("every seed row has the same sensitivity (%v); the tier is untested here", tiers)
 	}
 }
 

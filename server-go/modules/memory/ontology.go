@@ -57,14 +57,29 @@ const (
 	FactBadArg FactVerdict = 3
 )
 
-// relTypeDef is the slice of a seed row this gate reads. The C row carries more
-// (inverse, correction behaviour, category, sensitivity, status), but the only
-// production caller ignores the matched definition entirely — it re-derives
-// sensitivity separately — so carrying those here would be unused weight.
+// RelSensitivity is a relation's PII gating tier. Values match
+// rel_sensitivity_t; they are persisted as text and compared as integers, so
+// the numbering is assigned rather than derived.
+type RelSensitivity uint32
+
+const (
+	// SensNormal is an identity or operational fact: injected above the
+	// confidence floor.
+	SensNormal RelSensitivity = 0
+	// SensPII is a regulated identifier: injected only when the turn asks for it.
+	SensPII RelSensitivity = 1
+	// SensSecret is a credential: never injected, served through the vault.
+	SensSecret RelSensitivity = 2
+)
+
+// relTypeDef is the slice of a seed row this module reads. The C row carries
+// more (inverse, correction behaviour, category, hierarchy flag, status); those
+// belong to the DB-backed commit path in core, not to either gate here.
 type relTypeDef struct {
-	RelType   string
-	HeadKinds []NodeKind
-	TailKinds []NodeKind
+	RelType     string
+	HeadKinds   []NodeKind
+	TailKinds   []NodeKind
+	Sensitivity RelSensitivity
 }
 
 // relTypeNameMax mirrors REL_TYPE_NAME_MAX. Normalization truncates to it, so a
