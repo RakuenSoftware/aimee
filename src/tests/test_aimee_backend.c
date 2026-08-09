@@ -301,6 +301,58 @@ int main(void)
    aimee_response_free(&cresp);
    cJSON_Delete(crj);
 
+   /* --- (5b) Responses `reasoning` items: BOTH summary shapes yield the text.
+    *          The wire's shape is not settled here -- a bare string appears in some
+    *          payloads, an array of typed parts (the same idiom this file already
+    *          reads for a message's `content`) in others -- and the parser must not
+    *          bet on one. Betting wrong drops reasoning silently: ostr() on an array
+    *          returns NULL, leaving a THINKING block with no text at all. --- */
+   {
+      /* array of parts */
+      const char *R_ARR = "{\"id\":\"r1\",\"status\":\"completed\",\"output\":["
+                          "{\"type\":\"reasoning\",\"id\":\"rs_1\",\"summary\":["
+                          "{\"type\":\"summary_text\",\"text\":\"first thought\"},"
+                          "{\"type\":\"summary_text\",\"text\":\"second thought\"}]},"
+                          "{\"type\":\"message\",\"role\":\"assistant\",\"content\":["
+                          "{\"type\":\"output_text\",\"text\":\"answer\"}]}]}";
+      cJSON *j = cJSON_Parse(R_ARR);
+      aimee_response_t r;
+      assert(responses_backend_parse(j, &r, err, sizeof err) == 0);
+      assert(r.n_content == 2 && r.content[0].type == AIMEE_BLK_THINKING);
+      assert(r.content[0].text &&
+             strcmp(r.content[0].text, "first thought\n\nsecond thought") == 0);
+      /* the reasoning must not be confused with the answer */
+      assert(r.content[1].type == AIMEE_BLK_TEXT && strcmp(r.content[1].text, "answer") == 0);
+      aimee_response_free(&r);
+      cJSON_Delete(j);
+   }
+   {
+      /* bare string */
+      const char *R_STR = "{\"id\":\"r2\",\"status\":\"completed\",\"output\":["
+                          "{\"type\":\"reasoning\",\"summary\":\"a single thought\"}]}";
+      cJSON *j = cJSON_Parse(R_STR);
+      aimee_response_t r;
+      assert(responses_backend_parse(j, &r, err, sizeof err) == 0);
+      assert(r.n_content == 1 && r.content[0].type == AIMEE_BLK_THINKING);
+      assert(r.content[0].text && strcmp(r.content[0].text, "a single thought") == 0);
+      aimee_response_free(&r);
+      cJSON_Delete(j);
+   }
+   {
+      /* an absent or empty summary yields NO text rather than an empty thought */
+      const char *R_EMPTY = "{\"id\":\"r3\",\"status\":\"completed\",\"output\":["
+                            "{\"type\":\"reasoning\",\"summary\":[]},"
+                            "{\"type\":\"reasoning\"}]}";
+      cJSON *j = cJSON_Parse(R_EMPTY);
+      aimee_response_t r;
+      assert(responses_backend_parse(j, &r, err, sizeof err) == 0);
+      assert(r.n_content == 2);
+      assert(r.content[0].type == AIMEE_BLK_THINKING && r.content[0].text == NULL);
+      assert(r.content[1].type == AIMEE_BLK_THINKING && r.content[1].text == NULL);
+      aimee_response_free(&r);
+      cJSON_Delete(j);
+   }
+
    /* --- (6) tool_result SPLIT (grouping ruling, Option A): an Anthropic tool
     *         conversation -> IR -> OpenAI emits a role:tool message + Responses a
     *         function_call_output, both carrying the tool_id VERBATIM. --- */

@@ -2209,6 +2209,7 @@ $(TESTPREFIX)/unit-test-aimee-frontend: $(OBJDIR)/tests/test_aimee_frontend.o \
                                        $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
                                        $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                                        $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
+                                       $(OBJDIR)/modules/translation/aimee_backend_responses.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
