@@ -33,6 +33,21 @@ int openai_backend_parse(const struct cJSON *resp, aimee_response_t *out, char *
  * `instructions`; messages -> `input` items (message / function_call); tools ->
  * flat function tools; max_tokens -> max_output_tokens. Returns a new cJSON. */
 struct cJSON *responses_backend_build(const aimee_request_t *ir);
+/* Reasoning text out of a Responses `reasoning` output item, from its `summary`.
+ * SHARED by the backend (provider response) and frontend (client request) parsers,
+ * which had independently assumed `summary` is a bare string.
+ *
+ * The shape is deliberately NOT assumed here. Responses carries a message's `content`
+ * as an array of typed parts ({"type":"output_text","text":...}), and `summary`
+ * follows the same idiom ({"type":"summary_text","text":...}) -- but a bare string
+ * also appears. Both are accepted: a string is taken as-is, an array's part texts are
+ * joined with blank lines, anything else yields NULL (no reasoning rather than an
+ * empty thought). Read-side robustness only -- nothing about what aimee EMITS changes,
+ * so being liberal here cannot put a wrong shape on the wire.
+ *
+ * Returns a malloc'd string the caller frees, or NULL. Pure. */
+char *responses_reasoning_summary_text(const struct cJSON *item);
+
 /* Parse an OpenAI Responses API response (output items) into the IR. */
 int responses_backend_parse(const struct cJSON *resp, aimee_response_t *out, char *err,
                             size_t errn);
