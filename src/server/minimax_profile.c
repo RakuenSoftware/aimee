@@ -4,6 +4,7 @@
 #include "aimee.h"
 #include "agent_exec.h"
 #include "cJSON.h"
+#include "provider_model_parse.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -12,7 +13,7 @@ static const char *minimax_env_vars[] = {"MINIMAX_API_KEY", NULL};
 /* M2.7 is kept as the fallback model behind the M3 default. */
 static const char *minimax_fallback_models[] = {"MiniMax-M2.7", NULL};
 
-static int minimax_fetch_models(model_provider_t *p, char ***models_out, int *n_out)
+static int minimax_fetch_models(model_provider_t *p, provider_model_t **models_out, int *n_out)
 {
    (void)p;
    *models_out = NULL;
@@ -40,38 +41,12 @@ static int minimax_fetch_models(model_provider_t *p, char ***models_out, int *n_
    if (!root)
       return -1;
 
-   cJSON *data = cJSON_GetObjectItem(root, "data");
-   if (!data || !cJSON_IsArray(data))
-   {
-      cJSON_Delete(root);
-      return -1;
-   }
-
-   int n = cJSON_GetArraySize(data);
-   char **arr = calloc((size_t)n, sizeof(char *));
-   if (!arr)
-   {
-      cJSON_Delete(root);
-      return -1;
-   }
-
-   int count = 0;
-   cJSON *item;
-   cJSON_ArrayForEach(item, data)
-   {
-      cJSON *id = cJSON_GetObjectItem(item, "id");
-      if (id && cJSON_IsString(id) && id->valuestring)
-      {
-         arr[count] = strdup(id->valuestring);
-         if (arr[count])
-            count++;
-      }
-   }
-
+   /* This endpoint publishes ids only -- no context window, no output ceiling,
+    * no capabilities -- so every other field stays 0 = "not published" and the
+    * operator's declared values stand. */
+   int rc = provider_models_from_list_json(root, models_out, n_out);
    cJSON_Delete(root);
-   *models_out = arr;
-   *n_out = count;
-   return 0;
+   return rc;
 }
 
 static const char *minimax_routable_models[] = {"MiniMax-M3", NULL};

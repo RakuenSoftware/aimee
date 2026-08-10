@@ -995,18 +995,6 @@
       "ctest": false,
       "make": true,
       "module": "workspace",
-      "test": "src/tests/test_workspace_runner_queue.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workspace",
-      "test": "src/tests/test_workspace_runner_registry.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workspace",
       "test": "src/tests/test_workspace_scope.c"
     },
     {

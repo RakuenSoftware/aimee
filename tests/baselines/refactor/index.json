@@ -27,7 +27,7 @@
       "files": [
         {
           "path": "docs/gen/configuration.md",
-          "sha256": "69a876be6ca3066b22ce7c485c0e84d8e377eb31aafd0f58189cf725bcf5ff35"
+          "sha256": "e59be7eaf39122b6e06821a81c86ec4d56f73cba454676c4b5ad6e1ad369ca86"
         }
       ]
     },
@@ -47,7 +47,7 @@
         },
         {
           "path": "src/db1/schema.sql",
-          "sha256": "5407e977770c61ca3c10da346d9077988c0111ea4a510b41a2e34d725537f325"
+          "sha256": "bed9be96f874e0408ee957484d2ccb349ea1ddcbaa48476048a55ff7e1cc0b9c"
         },
         {
           "path": "src/db2/cases.sql",
@@ -163,7 +163,7 @@
         },
         {
           "path": "src/headers/agent_config.h",
-          "sha256": "e2c621c0d80cb42b548c481c68390db39ed33a4520b93d3e75f311048467f0e8"
+          "sha256": "91347370d07f20ba1dad231d8b96ac44ed2ad28b6fee1aefa6262bfc0a18043b"
         },
         {
           "path": "src/headers/agent_config_internal.h",
@@ -223,7 +223,7 @@
         },
         {
           "path": "src/headers/agent_types.h",
-          "sha256": "3350abb2b336236c03a021737364e2614afe66fcf676e99048e1baa5aa7fec0c"
+          "sha256": "dc09825aaabb5ca4a96ec901f74b288e8abc86937c0bddb085cb75233a135310"
         },
         {
           "path": "src/headers/aimee.h",
@@ -899,11 +899,11 @@
         },
         {
           "path": "src/headers/model_provider.h",
-          "sha256": "501d7156c8e4ac4327167e867a1dacb9bcac9180c7683ffd424a02bdb84dcc55"
+          "sha256": "7d0ff10b2d36ccc9dc1cd23765ebdf27d442fb8dcb6a3025e2e5853c8ac9590a"
         },
         {
           "path": "src/headers/model_registry.h",
-          "sha256": "fc7713b22de4a8c85fe42137414058c8abf12996f68a64bee08252028b741456"
+          "sha256": "3491fd0d463bdf873d53645b6b27bffb9050bb399ef15f9d308accd34215ff4f"
         },
         {
           "path": "src/headers/model_sampling.h",
@@ -1028,6 +1028,14 @@
         {
           "path": "src/headers/provider_client.h",
           "sha256": "071831cfeb385bf780fb1268faf367c63b02edf5c6463a8850c3116c803588bf"
+        },
+        {
+          "path": "src/headers/provider_model.h",
+          "sha256": "b6dcdee2630f15cab6b0c7528ddfc83fec9b143a5aa94f10f364f0f230504be1"
+        },
+        {
+          "path": "src/headers/provider_model_parse.h",
+          "sha256": "fb1e6f4efcf10445f1971369e66fc6758445b1c515cffe576fce243855fa3ed6"
         },
         {
           "path": "src/headers/proxy_bootstrap.h",
@@ -1534,6 +1542,10 @@
           "sha256": "1e7b46e80c0f30add6d761fba62537fac30cd63f1f70678c339f39a477c792ab"
         },
         {
+          "path": "src/modules/providers/include/aimee/providers/module_api.h",
+          "sha256": "e81371d07fa6d8405c630bbf1e0ed85de4ec67096687ec7cd8fd05d44d9b5f83"
+        },
+        {
           "path": "src/modules/response-composition/include/aimee/response-composition/module_api.h",
           "sha256": "5743e18c7775817814e44730badc5649fc49c60e44e3731e9dd16df2fda1c62f"
         },
@@ -1595,7 +1607,7 @@
         },
         {
           "path": "src/modules/workspace/include/aimee/workspace/module_api.h",
-          "sha256": "b89ecae9e001b3349ec3e35fcb79ebf0c56b194f525b64e13ce78af1bebc7c3f"
+          "sha256": "78f6d9343b9ccd83f590419d915e5bf79e81359edd40c960d912cbfa3ca5f4de"
         },
         {
           "path": "src/modules/workspace/include/aimee/workspace/workspace.h",
@@ -1604,7 +1616,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "8578a0774bfc1094591004a7353f748e7f25816edae226b37d75553499a77257",
+      "sha256": "69c225846dfef5f4682d5d8645181188134cbecfd9b0d223d84ba8de1839cbd4",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

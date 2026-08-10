@@ -279,6 +279,11 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents/roles", s.requireAuth(s.agentOpHandler("agent.roles")))
 	mux.HandleFunc("POST /api/agents/personas", s.requireAuth(s.agentOpHandler("agent.personas")))
 	mux.HandleFunc("POST /api/agents/set", s.requireAuth(s.agentOpHandler("agent.set")))
+	// Provider registry: the menu of providers and the models each one offers,
+	// backing the Providers tab. Read-only -- configuring a model still goes
+	// through agent.add/agent.set above.
+	mux.HandleFunc("GET /api/providers", s.requireAuth(s.handleProviderList))
+	mux.HandleFunc("POST /api/providers/models", s.requireAuth(s.handleProviderModels))
 	// Subscription-OAuth setup (Claude / Codex). `start` may install the vendor
 	// CLI server-side, so it carries a much longer timeout than the poll/code hops.
 	mux.HandleFunc("POST /api/agents/oauth/start", s.requireAuth(s.cliOauthHandler("agent.cli_oauth_start", 180*time.Second)))

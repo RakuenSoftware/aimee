@@ -7,6 +7,7 @@
 #include "runtime_secret.h"
 #include "vault_service.h" /* vault_service_* : the permanent credential store (P4) */
 #include "model_registry.h"
+#include "models_dev.h"
 #include "model_provider.h"
 #include "platform_path.h"
 #include "provider_cli_adapter.h"
@@ -635,6 +636,58 @@ const char *agent_catalog_provider(const agent_t *ag)
    return ag->catalog_provider[0] ? ag->catalog_provider : ag->provider;
 }
 
+/* Effective per-model limits, in one place.
+ *
+ * Precedence is DECLARED first, then the model catalog. Declaration is tested
+ * by its AGENT_DECL_* bit, not by "> 0": callers used to key on the value, so a
+ * deliberately-declared 0 fell through to the catalog and the operator was
+ * silently overruled by a number they had explicitly replaced.
+ *
+ * These exist so the catalog branch is written once. It is being removed --
+ * operator declaration and the provider's own reply are becoming the only
+ * sources -- and a single call site is the difference between deleting three
+ * lines and auditing every consumer again. Returns 0 for "unknown", which every
+ * caller already models. */
+/* NOTE the asymmetry with prices, which is deliberate. A declared 0 PRICE is a
+ * real statement ("this seat costs nothing per token") and must survive. A
+ * declared 0 CAPACITY is not a capacity at all -- there is no such thing as a
+ * model with a zero-token window -- so here 0 reads as "unknown" and resolution
+ * continues to the catalog. The declared BIT still matters: it is what keeps the
+ * key in agents.json across a save. Only the resolved MEANING differs. */
+int agent_declared_context_window(const agent_t *ag)
+{
+   if (!ag)
+      return 0;
+   /* Keyed on the VALUE, not on AGENT_DECL_CONTEXT_WINDOW. The bit records that
+    * a value came from config so it round-trips on save; it is not the test for
+    * whether one is set. Several paths assign this field directly on an agent_t
+    * -- ag_probe_slots' auto-detection, and callers building an agent in memory
+    * -- and requiring the bit made every one of those silently ignored. A
+    * capacity needs no such bit anyway: 0 is not a capacity, so "> 0" carries
+    * exactly the same information. Prices are the opposite and do need theirs,
+    * because a declared 0 there is a real statement. */
+   /* Loaded agents have already adopted the catalog's figure at load
+    * (agent_migrate_declare_from_catalog), so this normally answers from the
+    * agent itself. The catalog lookup remains for an agent built in memory
+    * rather than read from config -- and it is the single place left to delete
+    * when the snapshot finally goes. */
+   if (ag->middleware.context_window > 0)
+      return ag->middleware.context_window;
+   model_capability_t cap;
+   if (model_capability_get(agent_catalog_provider(ag), ag->model, &cap) && cap.context_window > 0)
+      return cap.context_window;
+   return 0;
+}
+
+int agent_declared_max_output(const agent_t *ag)
+{
+   if (!ag)
+      return 0;
+   if (ag->max_output > 0)
+      return ag->max_output;
+   return model_max_output(agent_catalog_provider(ag), ag->model);
+}
+
 static int agent_provider_requires_credentials(const char *provider)
 {
    return agent_provider_env_vars(provider) != NULL;
@@ -930,6 +983,71 @@ static void agent_config_stat_remember(const struct stat *st)
    g_agent_config_ino = st->st_ino;
 }
 
+/* Materialize catalog figures as the agent's OWN values, once, at load.
+ *
+ * The bundled catalog is going away: it was a third-party snapshot that aged
+ * out of date and silently outranked what operators had set. Everything that
+ * consumes a per-model limit now reads the agent, so each agent has to carry
+ * the numbers it has in fact been running on rather than looking them up.
+ *
+ * Follows the primary_only migration's shape deliberately: derive in MEMORY at
+ * load and let the next agent_save_config persist it, rather than writing the
+ * operator's config as a side effect of reading it. Resolution therefore works
+ * on this boot, and the file catches up the first time anything saves.
+ *
+ * Strictly additive. A value the operator has already stated is never touched --
+ * the catalog is what we are removing precisely because it is not authoritative.
+ * A price is copied only when the catalog actually published one, because
+ * writing a 0 would assert "this model is free", which is a different and much
+ * worse claim than leaving it unstated. */
+static void agent_migrate_declare_from_catalog(agent_config_t *cfg)
+{
+   if (!cfg)
+      return;
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      agent_t *ag = &cfg->agents[i];
+      if (!ag->model[0])
+         continue; /* a CLI seat with no model id has nothing to look up */
+
+      /* The CATALOG only -- deliberately not model_capability_get(), which falls
+       * through to a heuristic that infers a window for any unknown name and
+       * always succeeds. Adopting that would stamp a guess into the operator's
+       * config as though they had chosen it, which is worse than leaving the
+       * value unknown: a guess nobody can trace is exactly what this whole
+       * change is removing. Only a figure a provider actually published is
+       * worth writing down. */
+      model_capability_t cap;
+      memset(&cap, 0, sizeof cap);
+      if (!models_dev_cache_lookup(agent_catalog_provider(ag), ag->model, &cap))
+         continue;
+
+      if (ag->middleware.context_window <= 0 && cap.context_window > 0)
+      {
+         ag->middleware.context_window = cap.context_window;
+         ag->declared |= AGENT_DECL_CONTEXT_WINDOW;
+         aimee_log(LOG_INFO, "agent_config", "%s: adopting context_window %d from the catalog",
+                   ag->name, cap.context_window);
+      }
+      if (ag->max_output <= 0 && cap.max_output > 0)
+      {
+         ag->max_output = cap.max_output;
+         ag->declared |= AGENT_DECL_MAX_OUTPUT;
+         aimee_log(LOG_INFO, "agent_config", "%s: adopting max_output %d from the catalog",
+                   ag->name, cap.max_output);
+      }
+      /* PRICES ARE DELIBERATELY NOT ADOPTED. Copying a catalog price into the
+       * agent marks it declared, which is what price_overridden and the Providers
+       * UI read as "the operator chose this" -- so a vendor list price would
+       * start presenting itself as the operator's own decision. That is the exact
+       * confusion this work exists to remove, and it would also silently change
+       * what the tier lint treats as an operator exemption. Prices stay resolved
+       * through the existing path until someone decides how they should be
+       * carried; only the LIMITS, which are plain facts about the model, migrate.
+       */
+   }
+}
+
 int agent_load_config(agent_config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
@@ -1125,15 +1243,45 @@ int agent_load_config(agent_config_t *cfg)
          /* isfinite() matters: a parser can yield +inf from an overflowing
           * literal, and a non-finite price defeats every ordered comparison in
           * the resolver, making an unset axis look set. */
+         /* A PRESENT, valid key is a declaration -- including a declared 0,
+          * which is how a free or subscription-priced seat says "genuinely
+          * nothing per token" rather than "I did not configure this". An absent
+          * key leaves both the value and its bit alone. */
          v = cJSON_GetObjectItem(a, "price_in_per_mtok");
          if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+         {
             ag->price_in_per_mtok = v->valuedouble;
+            ag->declared |= AGENT_DECL_PRICE_IN;
+         }
          v = cJSON_GetObjectItem(a, "price_out_per_mtok");
          if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+         {
             ag->price_out_per_mtok = v->valuedouble;
+            ag->declared |= AGENT_DECL_PRICE_OUT;
+         }
          v = cJSON_GetObjectItem(a, "price_cached_per_mtok");
          if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+         {
             ag->price_cached_per_mtok = v->valuedouble;
+            ag->declared |= AGENT_DECL_PRICE_CACHED;
+         }
+
+         /* Declared per-model limits. context_window has always lived on the
+          * middleware config (its "explicit override" field); max_output is new.
+          * Both are the operator stating what the model does, which is the
+          * authoritative source once the bundled catalog is gone. */
+         v = cJSON_GetObjectItem(a, "context_window");
+         if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+         {
+            ag->middleware.context_window = (int)v->valuedouble;
+            ag->declared |= AGENT_DECL_CONTEXT_WINDOW;
+         }
+         v = cJSON_GetObjectItem(a, "max_output");
+         if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+         {
+            ag->max_output = (int)v->valuedouble;
+            ag->declared |= AGENT_DECL_MAX_OUTPUT;
+         }
 
          /* An unrecognised value must not silently mean "no ceiling": that would
           * hand the hardest work to the seat the operator was trying to limit. */
@@ -1328,9 +1476,18 @@ int agent_load_config(agent_config_t *cfg)
             v = cJSON_GetObjectItem(mw, "stall_threshold");
             if (v && cJSON_IsNumber(v))
                ag->middleware.stall_threshold = v->valueint;
+            /* LEGACY LOCATION. context_window used to live only inside this
+             * middleware block; it is now a declared property of the model at
+             * the top level. Read the old spelling so existing configs keep
+             * working, but let an explicit top-level value win and do not
+             * re-write this one on save -- that is what migrates a config
+             * forward the first time it is persisted. */
             v = cJSON_GetObjectItem(mw, "context_window");
-            if (v && cJSON_IsNumber(v))
+            if (v && cJSON_IsNumber(v) && !(ag->declared & AGENT_DECL_CONTEXT_WINDOW))
+            {
                ag->middleware.context_window = v->valueint;
+               ag->declared |= AGENT_DECL_CONTEXT_WINDOW;
+            }
          }
 
          /* CLI backend config */
@@ -1607,6 +1764,10 @@ int agent_load_config(agent_config_t *cfg)
 
    cJSON_Delete(root);
 
+   /* Before the cache snapshot, so every reader of the cached config sees the
+    * migrated values rather than only the first caller. */
+   agent_migrate_declare_from_catalog(cfg);
+
    /* Update mtime cache */
    {
       struct stat st;
@@ -1705,12 +1866,21 @@ static int agent_save_config_impl(const agent_config_t *cfg, int emptied_by_remo
          JSON_ADD_STR(a, "catalog_provider", ag->catalog_provider);
       if (ag->tier_price_exempt[0])
          JSON_ADD_STR(a, "tier_price_exempt", ag->tier_price_exempt);
-      if (ag->price_in_per_mtok > 0.0)
+      /* Driven off the declared bits, not off "> 0". Writing only positive
+       * values silently dropped a declared 0 on every save, so a free seat
+       * reverted to "unset" the first time anything persisted the config. */
+      if (ag->declared & AGENT_DECL_PRICE_IN)
          cJSON_AddNumberToObject(a, "price_in_per_mtok", ag->price_in_per_mtok);
-      if (ag->price_out_per_mtok > 0.0)
+      if (ag->declared & AGENT_DECL_PRICE_OUT)
          cJSON_AddNumberToObject(a, "price_out_per_mtok", ag->price_out_per_mtok);
-      if (ag->price_cached_per_mtok > 0.0)
+      if (ag->declared & AGENT_DECL_PRICE_CACHED)
          cJSON_AddNumberToObject(a, "price_cached_per_mtok", ag->price_cached_per_mtok);
+      /* Capacities serialize on value: an explicit 0 carries no information a
+       * reader could act on, and writing one would only make configs noisier. */
+      if (ag->middleware.context_window > 0)
+         cJSON_AddNumberToObject(a, "context_window", ag->middleware.context_window);
+      if (ag->max_output > 0)
+         cJSON_AddNumberToObject(a, "max_output", ag->max_output);
       if (ag->max_scope != AGENT_SCOPE_UNSET)
          JSON_ADD_STR(a, "max_scope", agent_scope_name(ag->max_scope));
       if (ag->registration[0])
@@ -1781,8 +1951,11 @@ static int agent_save_config_impl(const agent_config_t *cfg, int emptied_by_remo
       /* Middleware config: only write if any non-zero field is set */
       {
          const agent_middleware_cfg_t *mwc = &ag->middleware;
+         /* context_window is excluded: it now serializes at the top level, so
+          * including it here would emit an otherwise-empty middleware object for
+          * an agent whose only setting has moved out of this block. */
          if (mwc->cost_limit || mwc->context_warn_pct || mwc->auto_compact_pct ||
-             mwc->stall_threshold || mwc->context_window)
+             mwc->stall_threshold)
          {
             cJSON *mw = cJSON_CreateObject();
             if (mwc->cost_limit)
@@ -1793,8 +1966,9 @@ static int agent_save_config_impl(const agent_config_t *cfg, int emptied_by_remo
                cJSON_AddNumberToObject(mw, "auto_compact_pct", mwc->auto_compact_pct);
             if (mwc->stall_threshold)
                cJSON_AddNumberToObject(mw, "stall_threshold", mwc->stall_threshold);
-            if (mwc->context_window)
-               cJSON_AddNumberToObject(mw, "context_window", mwc->context_window);
+            /* context_window is deliberately NOT written here any more -- it is
+             * serialized once, at the top level, off AGENT_DECL_CONTEXT_WINDOW.
+             * Writing both would leave two spellings of one value free to drift. */
             cJSON_AddItemToObject(a, "middleware", mw);
          }
       }

@@ -467,6 +467,40 @@ static cJSON *server_agent_to_json(const agent_t *ag)
       cJSON_AddNumberToObject(obj, "active_delegates", active);
    if (ag->middleware.context_window > 0)
       cJSON_AddNumberToObject(obj, "context_window", ag->middleware.context_window);
+
+   /* Per-model limits, and WHERE EACH ONE CAME FROM.
+    *
+    * The raw value alone is not enough for an operator surface: a window the
+    * catalog guessed and a window the operator typed look identical once
+    * rendered, which is exactly how a stale figure went unquestioned. The
+    * effective_* fields are what the fleet actually uses; the *_source fields
+    * say whether that is the operator's own number ("declared"), something a
+    * provider or catalog supplied ("resolved"), or nobody's ("unknown").
+    *
+    * Emitted unconditionally, including 0, because "unknown" is a state a UI
+    * must be able to show. Absent would be indistinguishable from zero. */
+   {
+      int eff_ctx = agent_declared_context_window(ag);
+      int eff_out = agent_declared_max_output(ag);
+      cJSON_AddNumberToObject(obj, "effective_context_window", eff_ctx);
+      cJSON_AddNumberToObject(obj, "effective_max_output", eff_out);
+      cJSON_AddStringToObject(
+          obj, "context_window_source",
+          ag->middleware.context_window > 0 ? "declared" : (eff_ctx > 0 ? "resolved" : "unknown"));
+      cJSON_AddStringToObject(obj, "max_output_source",
+                              ag->max_output > 0 ? "declared"
+                                                 : (eff_out > 0 ? "resolved" : "unknown"));
+      if (ag->max_output > 0)
+         cJSON_AddNumberToObject(obj, "max_output", ag->max_output);
+      /* The declared mask itself, so a form can tell "the operator set this to
+       * 0" (a free seat) from "the operator never said" -- the one distinction
+       * a bare number cannot carry. */
+      cJSON_AddBoolToObject(obj, "price_in_declared", (ag->declared & AGENT_DECL_PRICE_IN) != 0);
+      cJSON_AddBoolToObject(obj, "price_out_declared", (ag->declared & AGENT_DECL_PRICE_OUT) != 0);
+      cJSON_AddBoolToObject(obj, "price_cached_declared",
+                            (ag->declared & AGENT_DECL_PRICE_CACHED) != 0);
+   }
+
    cJSON *roles = cJSON_CreateArray();
    for (int j = 0; j < ag->role_count; j++)
       cJSON_AddItemToArray(roles, cJSON_CreateString(ag->roles[j]));
@@ -827,6 +861,57 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    ag->timeout_ms = opt_get_int(&opts, "timeout-ms", opt_get_int(&opts, "timeout", ag->timeout_ms));
    ag->middleware.context_window =
        opt_get_int(&opts, "ctx", opt_get_int(&opts, "context-window", 0));
+
+   /* Declared per-model values. NAMING THE OPTION IS THE DECLARATION -- the bit
+    * comes from opt_has(), not from the value being non-zero, so "--price-in 0"
+    * states that a seat is free instead of reading as "unset". Without this the
+    * server could accept a declaration the config layer would then drop on its
+    * next save, and an operator's 0 would silently become "ask the catalog".
+    *
+    * Absent options clear their bit, matching this handler's existing
+    * reset-the-record semantics: agent.add/set describe the agent's whole
+    * desired state, so an omitted field is "no longer declared". */
+   ag->declared = 0;
+   /* CAPACITIES declare only a usable number. Unlike a price, a 0 window is not
+    * a statement -- it is the absence of one -- and the existing edit form
+    * always sends "--context-window 0" for an unset field, so keying the bit on
+    * presence alone would write an explicit 0 into every config it touched and
+    * assert a declaration nobody made. */
+   if (ag->middleware.context_window > 0)
+      ag->declared |= AGENT_DECL_CONTEXT_WINDOW;
+   ag->max_output = opt_get_int(&opts, "max-output", 0);
+   if (ag->max_output > 0)
+      ag->declared |= AGENT_DECL_MAX_OUTPUT;
+   {
+      static const struct
+      {
+         const char *opt;
+         size_t offset;
+         unsigned bit;
+      } price_opts[] = {
+          {"price-in", offsetof(agent_t, price_in_per_mtok), AGENT_DECL_PRICE_IN},
+          {"price-out", offsetof(agent_t, price_out_per_mtok), AGENT_DECL_PRICE_OUT},
+          {"price-cached", offsetof(agent_t, price_cached_per_mtok), AGENT_DECL_PRICE_CACHED},
+      };
+      for (size_t i = 0; i < sizeof(price_opts) / sizeof(price_opts[0]); ++i)
+      {
+         double *slot = (double *)((char *)ag + price_opts[i].offset);
+         const char *raw = opt_get(&opts, price_opts[i].opt);
+         if (!raw || !raw[0])
+         {
+            *slot = 0.0;
+            continue;
+         }
+         char *end = NULL;
+         double v = strtod(raw, &end);
+         /* A price that does not parse, is negative, or is not finite must not
+          * be accepted as 0 -- that would assert "free" from a typo. */
+         if (end == raw || (end && *end) || !(v >= 0.0) || v != v || v > 1e12)
+            continue;
+         *slot = v;
+         ag->declared |= price_opts[i].bit;
+      }
+   }
 
    /* Primary-only: a flagged agent is never a delegation target (replaces the
     * former global claude_cli_delegate_enabled opt-in with a per-agent choice).
@@ -1209,8 +1294,67 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       ag->max_turns = atoi(v);
    if ((v = opt_get(&opts, "max-parallel")) != NULL)
       ag->max_parallel = atoi(v);
+   /* Declared per-model values, under this handler's PATCH semantics: an option
+    * that is absent changes nothing, while an option that is present and empty
+    * (or a non-positive capacity) WITHDRAWS the declaration. The withdraw case
+    * is load-bearing -- the operator clearing a field in the UI has to be able
+    * to say "I no longer state this", and with patch semantics an omitted
+    * option cannot express that.
+    *
+    * A capacity declares only a usable number: there is no zero-token window,
+    * so 0 means "unset it", not "this model holds nothing". */
    if ((v = opt_get(&opts, "context-window")) != NULL || (v = opt_get(&opts, "ctx")) != NULL)
-      ag->middleware.context_window = atoi(v);
+   {
+      int n = atoi(v);
+      ag->middleware.context_window = n > 0 ? n : 0;
+      if (n > 0)
+         ag->declared |= AGENT_DECL_CONTEXT_WINDOW;
+      else
+         ag->declared &= ~(unsigned)AGENT_DECL_CONTEXT_WINDOW;
+   }
+   if ((v = opt_get(&opts, "max-output")) != NULL)
+   {
+      int n = atoi(v);
+      ag->max_output = n > 0 ? n : 0;
+      if (n > 0)
+         ag->declared |= AGENT_DECL_MAX_OUTPUT;
+      else
+         ag->declared &= ~(unsigned)AGENT_DECL_MAX_OUTPUT;
+   }
+   {
+      static const struct
+      {
+         const char *opt;
+         size_t offset;
+         unsigned bit;
+      } price_opts[] = {
+          {"price-in", offsetof(agent_t, price_in_per_mtok), AGENT_DECL_PRICE_IN},
+          {"price-out", offsetof(agent_t, price_out_per_mtok), AGENT_DECL_PRICE_OUT},
+          {"price-cached", offsetof(agent_t, price_cached_per_mtok), AGENT_DECL_PRICE_CACHED},
+      };
+      for (size_t i = 0; i < sizeof(price_opts) / sizeof(price_opts[0]); ++i)
+      {
+         const char *raw = opt_get(&opts, price_opts[i].opt);
+         if (!raw)
+            continue; /* absent: patch semantics, leave the declaration alone */
+         double *slot = (double *)((char *)ag + price_opts[i].offset);
+         if (!raw[0])
+         {
+            *slot = 0.0;
+            ag->declared &= ~(unsigned)price_opts[i].bit;
+            continue; /* present and empty: withdraw */
+         }
+         char *end = NULL;
+         double parsed = strtod(raw, &end);
+         /* Unparseable, negative or non-finite is IGNORED, never taken as 0: a
+          * typo must not assert that a model is free. Unlike the empty string,
+          * which is a deliberate withdrawal, this leaves the prior value. */
+         if (end == raw || (end && *end) || !(parsed >= 0.0) || parsed != parsed || parsed > 1e12)
+            continue;
+         *slot = parsed;
+         ag->declared |= price_opts[i].bit;
+      }
+   }
    if ((v = opt_get(&opts, "tools")) != NULL)
    {
       ag->tools_enabled = (strcmp(v, "on") == 0 || strcmp(v, "true") == 0 || strcmp(v, "1") == 0);

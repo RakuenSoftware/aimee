@@ -17,7 +17,7 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		{"routing", 9, []uint32{6401}},
 		{"delegates", 10, []uint32{6657}},
 		{"tools", 11, []uint32{6913}},
-		{"workspace", 12, []uint32{7169}},
+		{"workspace", 12, []uint32{7169, 7170, 7171}},
 		{"git", 13, []uint32{7425, 7426, 7427, 7430}},
 		{"skills", 14, []uint32{7681, 7682}},
 		{"response-composition", 15, []uint32{7937}},

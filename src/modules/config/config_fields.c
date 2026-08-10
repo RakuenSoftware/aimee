@@ -332,8 +332,6 @@ const config_field_t config_fields[] = {
     {"cache_shaping_enabled", offsetof(config_t, cache_shaping_enabled), sizeof(int), 0, CFG_BOOL},
     {"extended_thinking_enabled", offsetof(config_t, extended_thinking_enabled), sizeof(int), 0,
      CFG_BOOL},
-    {"extended_thinking_budget_tokens", offsetof(config_t, extended_thinking_budget_tokens),
-     sizeof(int), 0, CFG_INT},
     {"ingress_usage_accounting_enabled", offsetof(config_t, ingress_usage_accounting_enabled),
      sizeof(int), 0, CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
     {"ingress_audit_async", offsetof(config_t, ingress_audit_async), sizeof(int), 0, CFG_BOOL},

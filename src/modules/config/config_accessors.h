@@ -251,7 +251,6 @@ int config_reasoning_cap_enabled(void);
 int config_dedup_enabled(void);
 int config_cache_shaping_enabled(void);
 int config_extended_thinking_enabled(void);
-int config_extended_thinking_budget_tokens(void);
 int config_dedup_window_seconds(void);
 int config_cache_min_chars(void);
 double config_guardrails_semantic_warn_threshold(void);

@@ -13,6 +13,7 @@
 #include <aimee/kb-synthesis/module_api.h>
 #include <aimee/learning/module_api.h>
 #include <aimee/memory/module_api.h>
+#include <aimee/providers/module_api.h>
 #include <aimee/roundtable/module_api.h>
 #include <aimee/runtime-web/module_api.h>
 #include <aimee/skills/module_api.h>
@@ -25,6 +26,7 @@
                                      uint8_t *, uint32_t, uint32_t *, void *)
 
 DECLARE_HANDLER(aimee_memory_module_handler);
+DECLARE_HANDLER(aimee_providers_module_handler);
 DECLARE_HANDLER(aimee_learning_module_handler);
 DECLARE_HANDLER(aimee_delegates_module_handler);
 DECLARE_HANDLER(aimee_tools_module_handler);
@@ -202,6 +204,89 @@ static void test_workspace(void)
                                          sizeof(response), &response_len,
                                          NULL) == AIMEE_MODULE_STATUS_OK);
    assert(aimee_workspace_response_decode(response, response_len, &allowed) == 0 && allowed);
+}
+
+/* The runner frames are written here and read in Go, so the layout is pinned on
+ * both sides. A field that moves silently would not fail a build; it would fail
+ * as a workspace that resolves to the wrong client. */
+static void test_workspace_runner_frames(void)
+{
+   uint8_t request[AIMEE_WS_RUNNER_REQUEST_LEN];
+   assert(aimee_ws_runner_request_encode(AIMEE_WS_RUNNER_OP_RESOLVE, "/srv/repo/src", 13, request,
+                                         sizeof(request)) == 0);
+   assert(aimee_workspace_get_u32(request) == AIMEE_WS_RUNNER_REQUEST_MAGIC);
+   assert(request[4] == AIMEE_WORKSPACE_WIRE_VERSION);
+   assert(request[5] == AIMEE_WS_RUNNER_OP_RESOLVE);
+   assert(aimee_workspace_get_u16(request + 6) == 13);
+   assert(memcmp(request + 8, "/srv/repo/src", 13) == 0);
+
+   /* A registered id is the key the handoff is looked up by, so it is bounded to
+    * that key even though a path being asked about is not. */
+   char long_id[AIMEE_WS_RUNNER_ID_MAX + 2];
+   memset(long_id, 'a', sizeof(long_id) - 1);
+   long_id[sizeof(long_id) - 1] = '\0';
+   assert(aimee_ws_runner_request_encode(AIMEE_WS_RUNNER_OP_REGISTER, long_id,
+                                         AIMEE_WS_RUNNER_ID_MAX + 1, request, sizeof(request)) < 0);
+   assert(aimee_ws_runner_request_encode(AIMEE_WS_RUNNER_OP_RESOLVE, long_id,
+                                         AIMEE_WS_RUNNER_ID_MAX + 1, request,
+                                         sizeof(request)) == 0);
+
+   /* Nobody serving the tree decodes as an empty id, not as a failure. */
+   uint8_t reply[AIMEE_WS_RUNNER_RESPONSE_LEN];
+   memset(reply, 0, sizeof(reply));
+   aimee_workspace_put_u32(reply, AIMEE_WS_RUNNER_RESPONSE_MAGIC);
+   char id[AIMEE_WS_RUNNER_ID_MAX + 1] = "stale";
+   assert(aimee_ws_runner_response_decode(reply, sizeof(reply), id, sizeof(id)) == 0);
+   assert(id[0] == '\0');
+
+   aimee_workspace_put_u32(reply + 4, 9);
+   memcpy(reply + 8, "/srv/repo", 9);
+   assert(aimee_ws_runner_response_decode(reply, sizeof(reply), id, sizeof(id)) == 0);
+   assert(strcmp(id, "/srv/repo") == 0);
+
+   /* An id longer than the frame allows is refused rather than truncated. */
+   aimee_workspace_put_u32(reply + 4, AIMEE_WS_RUNNER_ID_MAX + 1);
+   assert(aimee_ws_runner_response_decode(reply, sizeof(reply), id, sizeof(id)) < 0);
+}
+
+static void test_workspace_runner_io_frames(void)
+{
+   uint8_t request[AIMEE_WS_IO_HEADER_LEN + AIMEE_WS_RUNNER_ID_MAX + 32];
+   const char *body = "{\"op\":\"read\"}";
+   size_t n = aimee_ws_io_request_encode(AIMEE_WS_IO_OP_SUBMIT, "/srv/repo", body, strlen(body),
+                                         request, sizeof(request));
+   assert(n == AIMEE_WS_IO_HEADER_LEN + 9 + strlen(body));
+   assert(aimee_workspace_get_u32(request) == AIMEE_WS_IO_REQUEST_MAGIC);
+   assert(request[5] == AIMEE_WS_IO_OP_SUBMIT);
+   assert(aimee_workspace_get_u16(request + 6) == 9);
+   assert(aimee_workspace_get_u32(request + 8) == strlen(body));
+   assert(memcmp(request + AIMEE_WS_IO_HEADER_LEN, "/srv/repo", 9) == 0);
+   assert(memcmp(request + AIMEE_WS_IO_HEADER_LEN + 9, body, strlen(body)) == 0);
+
+   /* Too small a buffer reports 0 rather than writing past it. */
+   assert(aimee_ws_io_request_encode(AIMEE_WS_IO_OP_SUBMIT, "/srv/repo", body, strlen(body),
+                                     request, AIMEE_WS_IO_HEADER_LEN) == 0);
+
+   /* "another chunk follows" is what tells a streaming caller to drain again;
+    * reading it off the wrong word would end a stream early. */
+   uint8_t reply[AIMEE_WS_IO_RESP_HEADER_LEN + 4];
+   aimee_workspace_put_u32(reply, AIMEE_WS_IO_RESPONSE_MAGIC);
+   aimee_workspace_put_u32(reply + 4, AIMEE_WS_IO_MORE);
+   aimee_workspace_put_u32(reply + 8, 4);
+   memcpy(reply + AIMEE_WS_IO_RESP_HEADER_LEN, "tok1", 4);
+   const uint8_t *chunk = NULL;
+   size_t chunk_len = 0;
+   int more = 0;
+   assert(aimee_ws_io_response_decode(reply, sizeof(reply), &chunk, &chunk_len, &more) == 0);
+   assert(more && chunk_len == 4 && memcmp(chunk, "tok1", 4) == 0);
+
+   aimee_workspace_put_u32(reply + 4, 0);
+   assert(aimee_ws_io_response_decode(reply, sizeof(reply), &chunk, &chunk_len, &more) == 0);
+   assert(!more);
+
+   /* A length that disagrees with the frame is refused, not trusted. */
+   aimee_workspace_put_u32(reply + 8, 64);
+   assert(aimee_ws_io_response_decode(reply, sizeof(reply), &chunk, &chunk_len, &more) < 0);
 }
 
 static void test_git(void)
@@ -560,6 +645,138 @@ static void test_benchmarks(void)
           summary.p99_ms == 10.0 && summary.min_ms == 1.0 && summary.max_ms == 10.0);
 }
 
+/* Providers: the precedence rules that used to be four hand-written copies.
+ *
+ * Each case pins a rule that a "value > 0" check gets wrong, which is how the
+ * copies drifted apart in the first place. */
+static void providers_call(uint32_t stage, const uint8_t *req, uint32_t req_len, uint8_t *resp,
+                           uint32_t *resp_len)
+{
+   aimee_module_invocation_t invocation = {.stage_id = stage};
+   assert(aimee_providers_module_handler(&invocation, req, req_len, resp,
+                                         AIMEE_PROVIDERS_RESPONSE_LEN, resp_len,
+                                         NULL) == AIMEE_MODULE_STATUS_OK);
+   assert(*resp_len == AIMEE_PROVIDERS_RESPONSE_LEN);
+   assert(aimee_providers_get_u32(resp) == AIMEE_PROVIDERS_RESPONSE_MAGIC);
+}
+
+static void providers_init(uint8_t *req, uint32_t len)
+{
+   memset(req, 0, len);
+   aimee_providers_put_u32(req, AIMEE_PROVIDERS_REQUEST_MAGIC);
+   aimee_providers_put_u32(req + 4, AIMEE_PROVIDERS_WIRE_VERSION);
+}
+
+static void test_providers(void)
+{
+   uint8_t req[AIMEE_PROVIDERS_RESOLVE_REQUEST_LEN];
+   uint8_t resp[AIMEE_PROVIDERS_RESPONSE_LEN];
+   uint32_t resp_len = 0;
+   const uint8_t *rec = resp + AIMEE_PROVIDERS_RESPONSE_HEADER_LEN;
+
+   /* 1. A DECLARED ZERO PRICE WINS. The seat is free; a "> 0" test would have
+    *    discarded the statement and reported the price as unknown. */
+   providers_init(req, sizeof req);
+   uint8_t *decl = req + AIMEE_PROVIDERS_OFF_DECLARED_RECORD;
+   uint8_t *fetch = req + AIMEE_PROVIDERS_OFF_FETCHED_RECORD;
+   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_PROVIDER, AIMEE_PROVIDERS_NAME_MAX,
+                                  "anthropic") == 0);
+   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "claude-sonnet-5") == 0);
+   aimee_providers_put_u64(decl + AIMEE_PROVIDERS_OFF_PRICE_IN, 0ull);
+   aimee_providers_put_u32(decl + AIMEE_PROVIDERS_OFF_DECLARED, AIMEE_PROVIDERS_DECL_PRICE_IN);
+   providers_call(AIMEE_PROVIDERS_STAGE_RESOLVE, req, sizeof req, resp, &resp_len);
+   assert(aimee_providers_get_u32(resp + 8) == AIMEE_PROVIDERS_OK);
+   assert(aimee_providers_get_u64(rec + AIMEE_PROVIDERS_OFF_PRICE_IN) == 0ull);
+   assert(rec[AIMEE_PROVIDERS_OFF_PRICE_SRC] == AIMEE_PROVIDERS_SRC_DECLARED);
+
+   /* 2. A DECLARED ZERO CAPACITY DOES NOT WIN -- the opposite rule, on purpose.
+    *    There is no zero-token window, so the provider's real number stands. */
+   providers_init(req, sizeof req);
+   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "m") == 0);
+   aimee_providers_put_u32(decl + AIMEE_PROVIDERS_OFF_CONTEXT, 0u);
+   aimee_providers_put_u32(decl + AIMEE_PROVIDERS_OFF_DECLARED,
+                           AIMEE_PROVIDERS_DECL_CONTEXT_WINDOW);
+   assert(aimee_providers_put_str(fetch + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "m") == 0);
+   aimee_providers_put_u32(fetch + AIMEE_PROVIDERS_OFF_CONTEXT, 1000000u);
+   providers_call(AIMEE_PROVIDERS_STAGE_RESOLVE, req, sizeof req, resp, &resp_len);
+   assert(aimee_providers_get_u32(rec + AIMEE_PROVIDERS_OFF_CONTEXT) == 1000000u);
+   assert(rec[AIMEE_PROVIDERS_OFF_CONTEXT_SRC] == AIMEE_PROVIDERS_SRC_FETCHED);
+
+   /* 3. A real declared capacity outranks the provider, and says so. */
+   aimee_providers_put_u32(decl + AIMEE_PROVIDERS_OFF_CONTEXT, 200000u);
+   providers_call(AIMEE_PROVIDERS_STAGE_RESOLVE, req, sizeof req, resp, &resp_len);
+   assert(aimee_providers_get_u32(rec + AIMEE_PROVIDERS_OFF_CONTEXT) == 200000u);
+   assert(rec[AIMEE_PROVIDERS_OFF_CONTEXT_SRC] == AIMEE_PROVIDERS_SRC_DECLARED);
+
+   /* 4. Nobody knows: unknown, not a confident zero. */
+   providers_init(req, sizeof req);
+   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "m") == 0);
+   providers_call(AIMEE_PROVIDERS_STAGE_RESOLVE, req, sizeof req, resp, &resp_len);
+   assert(aimee_providers_get_u32(rec + AIMEE_PROVIDERS_OFF_CONTEXT) == 0u);
+   assert(rec[AIMEE_PROVIDERS_OFF_CONTEXT_SRC] == AIMEE_PROVIDERS_SRC_UNKNOWN);
+
+   /* 5. Two records naming DIFFERENT models are refused rather than merged --
+    *    merging attributes one model's limits to another. */
+   providers_init(req, sizeof req);
+   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "sonnet") == 0);
+   assert(aimee_providers_put_str(fetch + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "opus") == 0);
+   providers_call(AIMEE_PROVIDERS_STAGE_RESOLVE, req, sizeof req, resp, &resp_len);
+   assert(aimee_providers_get_u32(resp + 8) == AIMEE_PROVIDERS_ERR_IDENTITY_MISMATCH);
+   assert(aimee_providers_get_u32(resp + 12) == 0u); /* no record on a refusal */
+
+   /* 6. Deprecation is the union: either side is enough to retire a model. */
+   providers_init(req, sizeof req);
+   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "m") == 0);
+   assert(aimee_providers_put_str(fetch + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "m") == 0);
+   fetch[AIMEE_PROVIDERS_OFF_DEPRECATED] = 1;
+   providers_call(AIMEE_PROVIDERS_STAGE_RESOLVE, req, sizeof req, resp, &resp_len);
+   assert(rec[AIMEE_PROVIDERS_OFF_DEPRECATED] == 1);
+
+   /* 7. VALIDATE normalizes a cleared capacity to "not declared" rather than
+    *    rejecting it -- clearing a form field must remain expressible. */
+   uint8_t vreq[AIMEE_PROVIDERS_VALIDATE_REQUEST_LEN];
+   providers_init(vreq, sizeof vreq);
+   uint8_t *prop = vreq + 8;
+   assert(aimee_providers_put_str(prop + AIMEE_PROVIDERS_OFF_PROVIDER, AIMEE_PROVIDERS_NAME_MAX,
+                                  "anthropic") == 0);
+   assert(aimee_providers_put_str(prop + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "m") == 0);
+   aimee_providers_put_u32(prop + AIMEE_PROVIDERS_OFF_CONTEXT, 0u);
+   aimee_providers_put_u32(prop + AIMEE_PROVIDERS_OFF_DECLARED,
+                           AIMEE_PROVIDERS_DECL_CONTEXT_WINDOW);
+   providers_call(AIMEE_PROVIDERS_STAGE_VALIDATE, vreq, sizeof vreq, resp, &resp_len);
+   assert(aimee_providers_get_u32(resp + 8) == AIMEE_PROVIDERS_OK);
+   assert(!(aimee_providers_get_u32(rec + AIMEE_PROVIDERS_OFF_DECLARED) &
+            AIMEE_PROVIDERS_DECL_CONTEXT_WINDOW));
+
+   /* 8. ...but an output ceiling above the window is REFUSED, not shrunk: the
+    *    window bounds prompt and completion together, so it cannot be true, and
+    *    silently fixing it would hide the operator's mistake. */
+   aimee_providers_put_u32(prop + AIMEE_PROVIDERS_OFF_CONTEXT, 1000u);
+   aimee_providers_put_u32(prop + AIMEE_PROVIDERS_OFF_MAX_OUTPUT, 2000u);
+   aimee_providers_put_u32(prop + AIMEE_PROVIDERS_OFF_DECLARED,
+                           AIMEE_PROVIDERS_DECL_CONTEXT_WINDOW | AIMEE_PROVIDERS_DECL_MAX_OUTPUT);
+   providers_call(AIMEE_PROVIDERS_STAGE_VALIDATE, vreq, sizeof vreq, resp, &resp_len);
+   assert(aimee_providers_get_u32(resp + 8) == AIMEE_PROVIDERS_ERR_INVALID_DECLARATION);
+
+   /* 9. A malformed envelope is a TRANSPORT error, not a rule result. */
+   {
+      aimee_module_invocation_t bad = {.stage_id = AIMEE_PROVIDERS_STAGE_RESOLVE};
+      providers_init(req, sizeof req);
+      aimee_providers_put_u32(req, 0xdeadbeefu);
+      assert(aimee_providers_module_handler(&bad, req, sizeof req, resp, sizeof resp, &resp_len,
+                                            NULL) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   }
+}
+
 int main(void)
 {
    test_memory();
@@ -567,6 +784,8 @@ int main(void)
    test_delegates();
    test_tools();
    test_workspace();
+   test_workspace_runner_frames();
+   test_workspace_runner_io_frames();
    test_git();
    test_skills();
    test_governance();
@@ -576,6 +795,7 @@ int main(void)
    test_runtime_web();
    test_control_web();
    test_benchmarks();
+   test_providers();
    puts("process module handlers: PASS");
    return 0;
 }
