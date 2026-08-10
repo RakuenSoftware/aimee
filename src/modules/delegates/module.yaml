@@ -82,7 +82,9 @@
     "server-go/modules/delegates/rescue_stage.go",
     "server-go/modules/delegates/verify.go",
     "server-go/modules/delegates/economics.go",
-    "server-go/modules/delegates/economics_stage.go"
+    "server-go/modules/delegates/economics_stage.go",
+    "server-go/modules/delegates/patchcoord.go",
+    "server-go/modules/delegates/patchcoord_stage.go"
   ],
   "go_tests": [
     "server-go/modules/delegates/delegates_test.go",
@@ -95,7 +97,9 @@
     "server-go/modules/delegates/rescue_stage_test.go",
     "server-go/modules/delegates/verify_test.go",
     "server-go/modules/delegates/economics_test.go",
-    "server-go/modules/delegates/economics_stage_test.go"
+    "server-go/modules/delegates/economics_stage_test.go",
+    "server-go/modules/delegates/patchcoord_test.go",
+    "server-go/modules/delegates/patchcoord_stage_test.go"
   ],
   "tests": [
     "src/tests/test_aimee_ir_rescue.c",
