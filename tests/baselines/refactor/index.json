@@ -375,7 +375,7 @@
         },
         {
           "path": "src/headers/cmd_agent_delegate_impl.h",
-          "sha256": "092401b1242c4ef798632f98c5d53c94fee04214f3e7a4cb8a32e0856cd3a939"
+          "sha256": "b1e19a5e79e3350e0e2391ebec1e5e1d53aae796bfa0173039ba80eefff4f8da"
         },
         {
           "path": "src/headers/cmd_agent_delegate_internal.h",
@@ -1083,7 +1083,7 @@
         },
         {
           "path": "src/headers/sandbox.h",
-          "sha256": "61433cbfd4609047eb897b7d8e00c8d5f736ed5ecc1ff402c3009729d0aff84e"
+          "sha256": "3b67469ed83d214c253cb13a53079458e5fff8ea0ac77dc5762b016071ad5d8d"
         },
         {
           "path": "src/headers/script_rpc.h",
@@ -1463,7 +1463,7 @@
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/module_api.h",
-          "sha256": "05142c381f0a7881c3f5e072b7c4a850e3bc1b9cdc4bc48ab5001d263ce1dd6f"
+          "sha256": "7bb7b304134232ff16c2438e7e02726c3b4e6d822c49e8d82534a50105eb292e"
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/panel_provider.h",
@@ -1616,7 +1616,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "484304bc91195626897651fd3bcd177cabd315f40b87c82a365c648826f79fd7",
+      "sha256": "df9611a9b96bc533e75db05875d9c3e0da2a4cabc1b84871682dcb188d2d1272",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
