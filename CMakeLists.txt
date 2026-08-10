@@ -927,6 +927,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_v1_routes_e.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_c.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_b.c
+    ${AIMEE_SRC_DIR}/cli_index_bootstrap.c
     ${AIMEE_SRC_DIR}/cli_launch.c
     ${AIMEE_SRC_DIR}/cli_mcp_serve.c
     ${AIMEE_SRC_DIR}/cli_profile.c

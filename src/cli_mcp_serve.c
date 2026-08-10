@@ -11,6 +11,7 @@
 #include "client_session_worktree.h"
 #include "platform_path.h"
 #include "platform_random.h"
+#include "util.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <fcntl.h>
@@ -430,6 +431,37 @@ static int mcp_enter_session_worktree(char *out, size_t cap)
    return 1;
 }
 
+/* A remote MCP bridge starts in the developer's canonical checkout, then enters
+ * a hidden per-session worktree for isolation. If the first code-index request
+ * is forwarded only after that chdir, the remote server sees a hidden
+ * `.aimee/worktrees/.../main` cwd while its KB has no canonical project to map
+ * it to. Bootstrap the canonical repository before isolation. The remote helper
+ * first asks index.list and uploads only when the project/root is absent, so an
+ * ordinary initialize is one cheap read rather than a full rescan. */
+static void mcp_ensure_remote_repo_index(void)
+{
+   if (!cli_v1_remote_endpoint_is_network())
+      return;
+
+   char cwd[MAX_PATH_LEN];
+   if (!getcwd(cwd, sizeof(cwd)) || !cwd[0])
+      return;
+   const char *const argv[] = {"git", "-C", cwd, "rev-parse", "--show-toplevel", NULL};
+   char *root = NULL;
+   if (safe_exec_capture(argv, &root, MAX_PATH_LEN) != 0 || !root)
+   {
+      free(root);
+      return; /* not a repository: there is no project to index */
+   }
+   size_t len = strlen(root);
+   while (len > 0 && (root[len - 1] == '\n' || root[len - 1] == '\r' || root[len - 1] == ' ' ||
+                      root[len - 1] == '\t'))
+      root[--len] = '\0';
+   if (root[0] && cli_index_ensure_remote(root) != 0)
+      fprintf(stderr, "aimee: warning: could not bootstrap the remote code index for %s\n", root);
+   free(root);
+}
+
 static void handle_initialize(cJSON *id)
 {
    cJSON *result = cJSON_CreateObject();
@@ -481,6 +513,10 @@ static void handle_initialize(cJSON *id)
        "build, conventions — when you are unsure; it is not a required first step. "
        "Do not use provider-native sub-agent tools such as spawn_agent or Agent; "
        "use the aimee delegate tool for delegated work.";
+
+   /* The canonical checkout must be known to the remote index before isolation
+    * moves this process underneath its hidden .aimee/worktrees directory. */
+   mcp_ensure_remote_repo_index();
 
    /* Isolate before serving any tool call, and tell the caller where its work
     * will land — the host's own idea of the cwd is now stale for aimee's tools. */
