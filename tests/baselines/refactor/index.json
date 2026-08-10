@@ -1511,7 +1511,7 @@
         },
         {
           "path": "src/modules/memory/include/aimee/memory/module_api.h",
-          "sha256": "6b63e62a50842288154003ea21589d3dc9cf39cdda7be63679c32657c38ca4c9"
+          "sha256": "72911100dcb6ed5846d88205c0d452139822c3c64ecb8daa8e4f8c52271eef6b"
         },
         {
           "path": "src/modules/module-runtime/include/aimee/module-runtime/pre_llm_hook.h",
@@ -1604,7 +1604,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "59412708dffad9abc82290fdbf17e29fbd25bb12310be9f9c2090a3aab783182",
+      "sha256": "8578a0774bfc1094591004a7353f748e7f25816edae226b37d75553499a77257",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

@@ -10,6 +10,25 @@
 
 #define FR_ERRBUF    256
 #define FR_MAX_FACTS 32
+#define FR_LINE_MAX  256
+
+/* One row that survived formatting, held between the query and the §7 gate.
+ *
+ * The gate runs over the whole set rather than inside the row loop because the
+ * sensitivity lookup is the memory module's to answer, and a call per row would
+ * put a round trip per candidate fact on the turn's hot path.
+ *
+ * The relation is copied out rather than left as a span inside the line: the
+ * batch classifier takes an array of C strings, so a span would have to be
+ * copied at the call anyway. A row whose line fits FR_LINE_MAX has a relation
+ * that fits it too, so one bound serves both. */
+typedef struct
+{
+   char rel[FR_LINE_MAX];
+   char line[FR_LINE_MAX];
+   int line_len;
+   double confidence;
+} fr_candidate_t;
 
 int db2_fact_recall_block(const char *entity, int turn_requests_sensitive, char *out, size_t cap)
 {
@@ -34,35 +53,60 @@ int db2_fact_recall_block(const char *entity, int turn_requests_sensitive, char 
    aimee_pg_bind_text(st, "?1", entity);
    aimee_pg_bind_int(st, "?2", FR_MAX_FACTS);
 
-   int written = 0;
-   size_t used = 0;
-   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   /* Pass 1: read and format the candidate rows. Nothing is gated here. */
+   fr_candidate_t candidates[FR_MAX_FACTS];
+   int ncandidates = 0;
+   while (ncandidates < FR_MAX_FACTS && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
       const char *rel = aimee_pg_column_text(st, 0);
       const char *tgt = aimee_pg_column_text(st, 1);
       double conf = aimee_pg_column_double(st, 2);
       if (!rel || !rel[0] || !tgt || !tgt[0])
          continue;
-      /* §7 PII gate: sensitivity comes from the rel_type (fail-closed to PII for
-       * unknown types); withhold unless the turn asks. */
-      rel_sensitivity_t sens = memory_pii_rel_sensitivity(rel);
-      if (!memory_pii_should_inject(sens, conf, turn_requests_sensitive))
-         continue;
-      char line[256];
-      int n = snprintf(line, sizeof(line), "- %s: %s\n", rel, tgt);
+      fr_candidate_t *c = &candidates[ncandidates];
+      int n = snprintf(c->line, sizeof(c->line), "- %s: %s\n", rel, tgt);
       /* Skip empty or over-long lines: snprintf returns the would-be length, so a
        * line >= sizeof(line) was truncated — never memcpy that length (it would
-       * over-read the stack buffer) and never inject a truncated fact. */
-      if (n <= 0 || (size_t)n >= sizeof(line))
+       * over-read the stack buffer) and never inject a truncated fact. Doing this
+       * before the gate rather than after changes no outcome: the gate is pure,
+       * and a row rejected for length is rejected either way. */
+      if (n <= 0 || (size_t)n >= sizeof(c->line))
          continue;
-      if (used + (size_t)n >= cap) /* respect the caller's buffer */
+      c->line_len = n;
+      snprintf(c->rel, sizeof(c->rel), "%s", rel);
+      c->confidence = conf;
+      ncandidates++;
+   }
+   aimee_pg_finalize(st);
+
+   if (ncandidates == 0)
+      return 0;
+
+   /* Pass 2: classify every candidate's relation in one go. Sensitivity comes
+    * from the rel_type (unknown types are classified by name). */
+   const char *rel_ptrs[FR_MAX_FACTS];
+   rel_sensitivity_t sens[FR_MAX_FACTS];
+   for (int i = 0; i < ncandidates; i++)
+      rel_ptrs[i] = candidates[i].rel;
+   if (memory_pii_rel_sensitivity_batch(rel_ptrs, ncandidates, sens) != 0)
+      return -1; /* no tiers: withhold the block rather than guess at it */
+
+   /* Pass 3: apply the gate and fill the caller's buffer. Withhold unless the
+    * turn asks. */
+   int written = 0;
+   size_t used = 0;
+   for (int i = 0; i < ncandidates; i++)
+   {
+      const fr_candidate_t *c = &candidates[i];
+      if (!memory_pii_should_inject(sens[i], c->confidence, turn_requests_sensitive))
+         continue;
+      if (used + (size_t)c->line_len >= cap) /* respect the caller's buffer */
          break;
-      memcpy(out + used, line, (size_t)n);
-      used += (size_t)n;
+      memcpy(out + used, c->line, (size_t)c->line_len);
+      used += (size_t)c->line_len;
       out[used] = '\0';
       written++;
    }
-   aimee_pg_finalize(st);
    return written;
 }
 
@@ -77,10 +121,14 @@ int db2_fact_recall_in_query(const char *query, int turn_requests_sensitive, cha
    if (!conn)
       return -1;
 
-   /* The user's own facts first. */
+   /* The user's own facts first. A negative here is not "no facts": it means the
+    * block could not be gated (or could not be read), and the difference matters
+    * now that the tiers come from a module. Reported rather than flattened to 0,
+    * so db2_typed_fact_ingress's warning fires instead of the turn quietly going
+    * out with the user's facts missing. */
    int total = db2_fact_recall_block("user", turn_requests_sensitive, out, cap);
    if (total < 0)
-      total = 0;
+      return -1;
    size_t used = strlen(out);
 
    /* Entities mentioned in the query: any active entity whose alias (>=3 chars,
