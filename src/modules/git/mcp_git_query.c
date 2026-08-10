@@ -177,14 +177,19 @@ char *mcp_git_run(const char *cmd, int *exit_code)
       {
          /* Resolve the git credential through the ONE policy
           * (git_cred_inject_build_env_for_repo) so the precedence never drifts
-          * from the other call sites: a client-handed per-workspace broker token
-          * (§4) is passed as preferred_token and wins, else per-host server vault
-          * → server identity → ambient. The policy injects GH_TOKEN + the
-          * GIT_ASKPASS shim and wipes its own token copy. */
-         char tok[4096] = {0};
-         const char *pref = NULL;
-         if (forge_cred_get(wsid, (long)time(NULL), tok, sizeof(tok)) == 0 && tok[0])
-            pref = tok;
+          * from the other call sites: per-host server vault → the principal's
+          * vaulted forge token → server identity → ambient.
+          *
+          * NO WORKSPACE BROKER TOKEN HERE, deliberately. It used to be fetched
+          * and passed as preferred_token, which outranks the vault — so this
+          * exec path authenticated as a different, weaker credential than the
+          * in-process forge calls next door, which pass none and get the vault.
+          * The result was a split personality against the same repository:
+          * `pr create` succeeded on the vaulted credential while `push` was
+          * refused with "Permission to <repo> denied to <user>", which reads as
+          * a permissions problem on an account that in fact has admin. Operator
+          * ruling: aimee git proxies through aimee's OWN vaulted credential, so
+          * that is the only thing this path may use. */
          int token_fd = -1;
          /* Hand the policy the workspace's RECORDED REMOTE, not just the cwd.
           * The per-host vault step keys on the remote's host, which it derives
@@ -200,10 +205,7 @@ char *mcp_git_run(const char *cmd, int *exit_code)
           * IS the real checkout and no remote may be recorded. */
          const char *ws_remote = workspace_remote_for_root(wsid);
          char **envp =
-             git_cred_inject_build_env_for_repo(NULL, ws_remote, cwd, pref, environ, &token_fd);
-         volatile char *p = (volatile char *)tok;
-         for (size_t i = 0; i < sizeof(tok); i++)
-            p[i] = 0;
+             git_cred_inject_build_env_for_repo(NULL, ws_remote, cwd, NULL, environ, &token_fd);
          if (envp)
          {
             /* FD mode: the token rides an inherited memfd, never the environ. */
