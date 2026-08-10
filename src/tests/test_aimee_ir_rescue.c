@@ -11,17 +11,8 @@
 
 #include <aimee/ir/aimee_ir_metrics.h>
 #include <aimee/delegates/aimee_ir_rescue.h>
+#include "support/rescue_fixture_provider.h"
 #include "cJSON.h"
-
-/* The dialect parser consults the tool registry only on its bare-JSON/bracket rescue
- * paths, to gate unknown tool names. These cases use the explicit <tool_call> form,
- * which accepts any name, so a NULL stub keeps the test self-contained -- same shape
- * as test_delegate_xml_fallback.c. */
-struct cJSON *agent_tool_get_schema_cached(const char *tool_name)
-{
-   (void)tool_name;
-   return NULL;
-}
 
 static aimee_response_t *resp_of(aimee_block_type_t t, const char *text)
 {
@@ -40,6 +31,7 @@ static aimee_response_t *resp_of(aimee_block_type_t t, const char *text)
 int main(void)
 {
    printf("aimee-ir-rescue:\n");
+   delegate_register_rescue_provider(rescue_fixture_provider);
 
    /* 1. A prose XML tool call in a TEXT block becomes a real TOOL_USE block. */
    {

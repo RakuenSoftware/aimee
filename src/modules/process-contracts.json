@@ -151,6 +151,11 @@
           "id": 5,
           "name": "delegate-handoff-validation",
           "event_kind": 6661
+        },
+        {
+          "id": 6,
+          "name": "delegate-tool-call-rescue",
+          "event_kind": 6662
         }
       ]
     },

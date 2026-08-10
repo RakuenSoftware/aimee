@@ -17,6 +17,19 @@
  * Any text before the first <tool_call> is stored in out->content.
  * Returns the number of tool calls found (0 if none).
  */
+/*
+ * The rescue rule lives in the delegates module
+ * (server-go/modules/delegates/rescue*.go). This is the seam the C side calls
+ * through; with no provider registered every entry point below reports that
+ * nothing was rescued.
+ *
+ * detect_only asks the cheap question -- "does this look like a call at all" --
+ * which runs on every model response; `out` is then unused.
+ */
+typedef int (*delegate_rescue_provider_fn)(const char *text, int allow_json, int detect_only,
+                                           parsed_response_t *out);
+void delegate_register_rescue_provider(delegate_rescue_provider_fn provider);
+
 int xml_parse_tool_calls(const char *text, parsed_response_t *out);
 
 /*

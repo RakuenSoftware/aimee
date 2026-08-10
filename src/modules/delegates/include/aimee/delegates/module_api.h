@@ -260,4 +260,57 @@ static inline void aimee_delegates_handoff_field(const uint8_t *in, size_t at, s
    }
 }
 
+/* --- Tool-call rescue (stage 6) --- */
+
+#define AIMEE_DELEGATES_EVENT_RESCUE          6662u
+#define AIMEE_DELEGATES_STAGE_RESCUE          6u
+#define AIMEE_DELEGATES_RESCUE_REQUEST_MAGIC  0x51535244u /* "DRSQ" */
+#define AIMEE_DELEGATES_RESCUE_RESPONSE_MAGIC 0x52535244u /* "DRSR" */
+#define AIMEE_DELEGATES_RESCUE_REQ_HEADER_LEN 16u
+#define AIMEE_DELEGATES_RESCUE_RESP_HEADER_LEN 16u
+#define AIMEE_DELEGATES_RESCUE_TEXT_MAX       (1u << 20)
+#define AIMEE_DELEGATES_RESCUE_KNOWN_MAX      4096u
+#define AIMEE_DELEGATES_RESCUE_MODE_PARSE     0u
+#define AIMEE_DELEGATES_RESCUE_MODE_DETECT    1u
+
+/* Encode a rescue request: the response text, then the caller's tool
+ * inventory as u16-length-prefixed names. The inventory travels with the
+ * request because whether a rescued name is real is the caller's knowledge,
+ * not something the module may go and ask another module for. */
+static inline size_t aimee_delegates_rescue_request_encode(const char *text, size_t text_len,
+                                                           const char *const *names, size_t name_count,
+                                                           int allow_json, unsigned mode,
+                                                           uint8_t *out, size_t cap)
+{
+   size_t at, i;
+   if (!out || text_len > AIMEE_DELEGATES_RESCUE_TEXT_MAX ||
+       name_count > AIMEE_DELEGATES_RESCUE_KNOWN_MAX ||
+       cap < AIMEE_DELEGATES_RESCUE_REQ_HEADER_LEN + text_len)
+      return 0;
+
+   memset(out, 0, AIMEE_DELEGATES_RESCUE_REQ_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_RESCUE_REQUEST_MAGIC);
+   out[4] = 1; /* wire version */
+   out[5] = allow_json ? 1 : 0;
+   out[6] = (uint8_t)mode;
+   aimee_delegates_put_u32(out + 8, (uint32_t)text_len);
+   aimee_delegates_put_u32(out + 12, (uint32_t)name_count);
+   if (text_len)
+      memcpy(out + AIMEE_DELEGATES_RESCUE_REQ_HEADER_LEN, text, text_len);
+
+   at = AIMEE_DELEGATES_RESCUE_REQ_HEADER_LEN + text_len;
+   for (i = 0; i < name_count; i++)
+   {
+      size_t n = names[i] ? strlen(names[i]) : 0;
+      if (n > 0xffffu || at + 2 + n > cap)
+         return 0;
+      out[at] = (uint8_t)(n & 0xffu);
+      out[at + 1] = (uint8_t)((n >> 8) & 0xffu);
+      at += 2;
+      memcpy(out + at, names[i], n);
+      at += n;
+   }
+   return at;
+}
+
 #endif
