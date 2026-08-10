@@ -45,6 +45,14 @@ int main(void)
    assert(mkdtemp(dir) != NULL);
    setenv("AIMEE_WORKSPACES_DIR", dir, 1);
 
+   /* Both admission questions fail closed until the module that owns them is
+    * reachable. A name is a ref with no separator, so it is the same rule and
+    * the same owner: neither may answer "allowed" from a local guess just
+    * because the module cannot be asked. */
+   assert(!ws_scope_project_ref_valid("foo", 3));
+   assert(!ws_scope_name_valid("alice"));
+   ws_scope_register_ref_validator(validate_ref_via_module);
+
    /* --- name validation --- */
    assert(ws_scope_name_valid("alice"));
    assert(ws_scope_name_valid("a.b_c-1"));
@@ -64,12 +72,6 @@ int main(void)
    n65[65] = '\0';
    assert(ws_scope_name_valid(n64));
    assert(!ws_scope_name_valid(n65));
-
-   /* Project references fail closed until the event-bus provider is installed.
-    * The unit test then uses the C wire-parity fixture for the supervised Go
-    * workspace stage. */
-   assert(!ws_scope_project_ref_valid("foo", 3));
-   ws_scope_register_ref_validator(validate_ref_via_module);
 
    /* cap==0 / NULL out are rejected, not written */
    char tiny[1];
