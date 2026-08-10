@@ -23,6 +23,15 @@ static void db1_run_migrations(sqlite3 *db)
    static const char *migrations[] = {
        "ALTER TABLE payload_rewrite_state ADD COLUMN consecutive_deferred_count"
        " INTEGER NOT NULL DEFAULT 0",
+       /* The catalog carried context_window/tool_support/streaming_support from
+        * the start but the C API only ever read and wrote the model id, so every
+        * cached row defaulted to zero and per-model limits had to come from a
+        * bundled snapshot instead. These complete the row the provider fetch can
+        * now populate. 0 stays "provider did not publish", never zero-capacity. */
+       "ALTER TABLE model_catalog ADD COLUMN max_output INTEGER NOT NULL DEFAULT 0",
+       "ALTER TABLE model_catalog ADD COLUMN caps INTEGER NOT NULL DEFAULT 0",
+       "ALTER TABLE model_catalog ADD COLUMN display_name TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE model_catalog ADD COLUMN deprecated INTEGER NOT NULL DEFAULT 0",
        /* Concurrent delegates all wrote into one undifferentiated trace stream,
         * so their turns interleaved and no row could be attributed to the job
         * that produced it. Timing read off the mixed stream is meaningless. */

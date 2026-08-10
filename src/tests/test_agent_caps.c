@@ -551,7 +551,10 @@ void test_unknown_context_window_does_not_pass_min_context(void)
 void test_context_window_table_covers_live_vendors(void)
 {
    assert(model_context_window("MiniMax-M3") == 1000000);
-   assert(model_context_window("MiniMax-M2") == 200000);
+   /* 196608, not the round 200000 the prefix table used to report: that figure
+    * was itself the rounding this test was written to catch, just one model
+    * further down the list. The catalogue publishes the real window. */
+   assert(model_context_window("MiniMax-M2") == 196608);
    assert(model_context_window("kimi-k2.7-code") == 262144);
    /* The bare fallback still resolves the oldest known family, never a newer. */
    assert(model_context_window("minimax") == 200000);

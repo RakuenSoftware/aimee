@@ -89,18 +89,15 @@ static int server_provider_has_credentials(const model_provider_t *p)
    return 0;
 }
 
-static void server_provider_free_models(char **models, int n)
+static void server_provider_free_models(provider_model_t *models, int n)
 {
-   if (!models)
-      return;
-   for (int i = 0; i < n; i++)
-      free(models[i]);
-   free(models);
+   db1_model_catalog_free(models, n);
 }
 
 #define PROVIDER_MODEL_CATALOG_TTL_SECONDS 3600
 
-static int server_provider_models_cached(model_provider_t *p, char ***models_out, int *n_out)
+static int server_provider_models_cached(model_provider_t *p, provider_model_t **models_out,
+                                         int *n_out)
 {
    *models_out = NULL;
    *n_out = 0;
@@ -233,7 +230,7 @@ int handle_provider_models(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "provider not found", NULL);
    if (!p->fetch_models)
       return server_send_error(conn, "provider does not support model listing", NULL);
-   char **models = NULL;
+   provider_model_t *models = NULL;
    int n = 0;
    if (server_provider_models_cached(p, &models, &n) != 0)
       return server_send_error(conn, "failed to fetch models", NULL);
@@ -244,8 +241,35 @@ int handle_provider_models(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_AddBoolToObject(resp, "json", cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "json")));
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < n; i++)
-      cJSON_AddItemToArray(arr, cJSON_CreateString(models[i]));
+      cJSON_AddItemToArray(arr, cJSON_CreateString(models[i].id));
    cJSON_AddItemToObject(resp, "models", arr);
+
+   /* The same models with whatever the provider published ABOUT them. `models`
+    * stays a bare id array so existing callers are unaffected; this carries the
+    * limits the catalog record now holds.
+    *
+    * A field is emitted only when the provider actually published it: most
+    * OpenAI-compatible endpoints return ids and nothing else, and emitting 0
+    * would present "the provider did not say" as "this model has no context",
+    * which is the confusion this whole surface exists to remove. An operator
+    * reading this list needs to see which models come with real numbers and
+    * which they will have to state themselves. */
+   cJSON *details = cJSON_CreateArray();
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *m = cJSON_CreateObject();
+      cJSON_AddStringToObject(m, "id", models[i].id);
+      if (models[i].display_name[0])
+         cJSON_AddStringToObject(m, "display_name", models[i].display_name);
+      if (models[i].context_window > 0)
+         cJSON_AddNumberToObject(m, "context_window", models[i].context_window);
+      if (models[i].max_output > 0)
+         cJSON_AddNumberToObject(m, "max_output", models[i].max_output);
+      if (models[i].deprecated)
+         cJSON_AddBoolToObject(m, "deprecated", 1);
+      cJSON_AddItemToArray(details, m);
+   }
+   cJSON_AddItemToObject(resp, "details", details);
    cJSON_AddNumberToObject(resp, "count", n);
    server_provider_free_models(models, n);
    int rc = server_send_response(conn, resp);
@@ -270,7 +294,7 @@ int handle_provider_test(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       snprintf(message, sizeof(message), "%s: credentials available; no probe registered", p->name);
    else
    {
-      char **models = NULL;
+      provider_model_t *models = NULL;
       int n = 0;
       if (p->fetch_models(p, &models, &n) != 0)
          return server_send_error(conn, "provider probe failed", NULL);

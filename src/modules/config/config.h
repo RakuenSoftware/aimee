@@ -1425,12 +1425,15 @@ typedef struct config
     *   reasoning at all -- measured 2026-08-09: reasoning appears only when a
     *   provider volunteers it unprompted. Default-OFF because thinking tokens are
     *   billed: turning this on changes what aimee spends, not just what it reads.
-    * extended_thinking_budget_tokens: reasoning budget when enabled. Anthropic
-    *   requires budget < max_tokens, and rejects temperature != 1 and any top_p /
-    *   top_k alongside thinking, so the builder raises max_tokens and suppresses
-    *   sampling to match rather than emitting a request the provider would 4xx. */
+    *
+    * There is no budget knob. The shape this used to feed --
+    * {"type":"enabled", budget_tokens: N} -- was removed by Anthropic and is a
+    * 400 on Opus 4.7 and later; the builder now emits {"type":"adaptive"},
+    * which takes no budget, and only for a model whose capabilities report
+    * that it accepts that shape (MODEL_CAP_THINKING_ADAPTIVE). Enabling this
+    * against a model nobody has reported that for is a no-op by design: see
+    * agent_request_build.c. */
    int extended_thinking_enabled;
-   int extended_thinking_budget_tokens;
 
    /* Ingress cost-accounting rollout knobs (ingress.*; §2/§4/#3).
     * ingress_usage_accounting_enabled: 1 = on (default), 0 = off. Master gate for

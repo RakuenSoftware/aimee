@@ -888,11 +888,9 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
  * order in agent_satisfies_required_caps(). */
 static int agent_effective_context(const agent_t *ag)
 {
-   if (ag->middleware.context_window > 0)
-      return ag->middleware.context_window;
-   model_capability_t cap;
-   if (model_capability_get(agent_catalog_provider(ag), ag->model, &cap) && cap.context_window > 0)
-      return cap.context_window;
+   int declared = agent_declared_context_window(ag);
+   if (declared > 0)
+      return declared;
    if (ag->cli_kind[0])
    {
       const provider_cli_adapter_t *adapter = provider_cli_adapter_get(ag->cli_kind);

@@ -42,12 +42,37 @@ const char *agent_catalog_provider(const agent_t *agent)
       return "";
    return agent->catalog_provider[0] ? agent->catalog_provider : agent->provider;
 }
+/* Capability stub, driven per-test. The builder now asks the catalog whether a
+ * model accepts Anthropic's ADAPTIVE thinking shape, so what this returns is the
+ * decision under test: `g_caps_flags` is what a provider (or an operator's
+ * capability override) would have reported, and g_caps_known == 0 is the
+ * ordinary "nobody has said" case that must fail closed. */
+static unsigned g_caps_flags;
+static int g_caps_known;
+
 int model_capability_get(const char *provider, const char *model_id, model_capability_t *out)
 {
    (void)provider;
    (void)model_id;
-   (void)out;
-   return 0;
+   if (!g_caps_known || !out)
+      return 0;
+   memset(out, 0, sizeof(*out));
+   out->flags = g_caps_flags;
+   out->context_window = 200000;
+   out->max_output = 8192;
+   return 1;
+}
+
+static void declare_caps(unsigned flags)
+{
+   g_caps_flags = flags;
+   g_caps_known = 1;
+}
+
+static void clear_caps(void)
+{
+   g_caps_flags = 0;
+   g_caps_known = 0;
 }
 
 static agent_t mk_agent(const char *provider, const char *model)
@@ -130,76 +155,73 @@ static cJSON *build_with_thinking(const char *provider, const char *model, int e
    return req;
 }
 
-/* The whole point of the knob: an aimee-originated Anthropic turn asks the model to
- * reason. ir->thinking was previously populated ONLY by an inbound client request, so a
- * turn aimee started itself carried no thinking config at all. */
-static void test_thinking_enabled_anthropic(void)
+/* The knob asks a model to reason -- but ONLY a model that says it accepts this
+ * shape. The config it emits is `{"type":"adaptive"}`: Anthropic removed
+ * {"type":"enabled", budget_tokens: N}, which is a 400 on Opus 4.7/4.8/5,
+ * Sonnet 5 and Fable 5 and survives only on the 4.6 generation. */
+static void test_thinking_adaptive_when_model_supports_it(void)
 {
-   cJSON *req = build_with_thinking("anthropic", "claude-3-5-sonnet", 1, 2048, 100);
+   declare_caps(MODEL_CAP_REASONING | MODEL_CAP_THINKING_ADAPTIVE);
+   cJSON *req = build_with_thinking("anthropic", "claude-sonnet-4-6", 1, 2048, 100);
    cJSON *th = cJSON_GetObjectItemCaseSensitive(req, "thinking");
    assert(cJSON_IsObject(th) && "thinking config absent on an aimee-originated turn");
-   assert(strcmp(cJSON_GetObjectItemCaseSensitive(th, "type")->valuestring, "enabled") == 0);
-   assert(cJSON_GetObjectItemCaseSensitive(th, "budget_tokens")->valuedouble == 2048);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(th, "type")->valuestring, "adaptive") == 0);
+   /* The retired form must not reappear: budget_tokens is what 400s. */
+   assert(!cJSON_GetObjectItemCaseSensitive(th, "budget_tokens"));
 
-   /* Anthropic 4xxs a request pairing thinking with temperature != 1 or any top_p/top_k.
-    * model_sampling layers exactly those on AFTER the backend build, so this asserts the
-    * normalization that follows it -- not merely that the builder omitted them. */
-   cJSON *temp = cJSON_GetObjectItemCaseSensitive(req, "temperature");
-   assert(cJSON_IsNumber(temp) && temp->valuedouble == 1);
+   /* Sampling is REMOVED, not pinned to temperature=1 as it used to be. Every
+    * model reaching this branch is 4.6-or-later, and on 4.7+ any of
+    * temperature/top_p/top_k is itself a 400 -- so the old "fix" turned one
+    * rejection into two. Removal is valid across the whole range. */
+   assert(!cJSON_GetObjectItemCaseSensitive(req, "temperature"));
    assert(!cJSON_GetObjectItemCaseSensitive(req, "top_p"));
    assert(!cJSON_GetObjectItemCaseSensitive(req, "top_k"));
 
-   /* budget_tokens must be < max_tokens or the provider rejects it. */
+   /* max_tokens is the caller's, untouched: adaptive has no budget to fit under,
+    * so the old "raise the cap to clear budget_tokens" arithmetic is gone. */
    cJSON *mt = cJSON_GetObjectItemCaseSensitive(req, "max_tokens");
-   assert(cJSON_IsNumber(mt) && mt->valuedouble > 2048);
-   printf("  anthropic thinking enabled OK (max_tokens=%d)\n", (int)mt->valuedouble);
+   assert(cJSON_IsNumber(mt) && mt->valuedouble == 100);
+   printf("  adaptive thinking emitted for a capable model OK\n");
    cJSON_Delete(req);
+   clear_caps();
 }
 
-/* A budget at or above the caller's cap must RAISE the cap, keeping the caller's value as
- * answer headroom -- clearing the provider rule but leaving no room to reply would trade a
- * 4xx for a truncated answer. */
-static void test_thinking_budget_exceeds_cap(void)
+/* FAIL CLOSED. A model nobody has said accepts adaptive thinking gets no
+ * thinking config at all. Sending nothing costs a missed chance to reason;
+ * sending the wrong shape costs a 400 the operator sees as an agent failure. */
+static void test_thinking_absent_when_capability_unknown(void)
 {
-   cJSON *req = build_with_thinking("anthropic", "claude-3-5-sonnet", 1, 4096, 100);
-   cJSON *mt = cJSON_GetObjectItemCaseSensitive(req, "max_tokens");
-   assert(cJSON_IsNumber(mt));
-   assert(mt->valuedouble > 4096 && "max_tokens must exceed budget_tokens");
-   printf("  budget over cap raises max_tokens OK (%d)\n", (int)mt->valuedouble);
-   cJSON_Delete(req);
-}
-
-/* The top_p/top_k strip, actually exercised. The assertions in the test above are vacuous
- * on their own: mk_agent leaves recommended_sampling at 0, so sampling_for_agent returns no
- * row and model_sampling never adds top_p/top_k in the first place. Opting the agent in and
- * naming a model with a curated row (qwen3: top_p 0.95, top_k 20) is what makes
- * model_sampling emit them, so the normalization has something real to remove. The
- * pairing is synthetic -- the curated rows are local delegates -- but the code path that
- * would 4xx against Anthropic is the same one. */
-static void test_thinking_strips_curated_sampling(void)
-{
-   set_thinking(1, 2048);
-   agent_t a = mk_agent("anthropic", "qwen3");
-   a.recommended_sampling = 1;
-
-   /* Guard the guard: without thinking, the curated row must actually land, or the strip
-    * below would be proving nothing again. */
-   set_thinking(0, 2048);
-   cJSON *plain = agent_build_request(&a, "You are helpful.", "deploy the release", 100, -1);
-   assert(plain && cJSON_GetObjectItemCaseSensitive(plain, "top_p") &&
-          "curated row did not apply -- the strip assertion would be vacuous");
-   assert(cJSON_GetObjectItemCaseSensitive(plain, "top_k"));
-   cJSON_Delete(plain);
-
-   set_thinking(1, 2048);
-   cJSON *req = agent_build_request(&a, "You are helpful.", "deploy the release", 100, -1);
-   assert(req);
-   assert(!cJSON_GetObjectItemCaseSensitive(req, "top_p") && "top_p must be stripped");
-   assert(!cJSON_GetObjectItemCaseSensitive(req, "top_k") && "top_k must be stripped");
+   clear_caps();
+   cJSON *req = build_with_thinking("anthropic", "some-unknown-model-qqq", 1, 2048, 100);
+   assert(!cJSON_GetObjectItemCaseSensitive(req, "thinking"));
+   /* And sampling is left exactly as configured, because nothing was stripped. */
    cJSON *temp = cJSON_GetObjectItemCaseSensitive(req, "temperature");
-   assert(cJSON_IsNumber(temp) && temp->valuedouble == 1);
-   printf("  curated top_p/top_k stripped under thinking OK\n");
+   assert(cJSON_IsNumber(temp) && temp->valuedouble == 0.7);
+   printf("  unknown capability emits no thinking OK\n");
    cJSON_Delete(req);
+}
+
+/* THE PREDICATE BUG. `is_anth` is the WIRE FORMAT, not the vendor: MiniMax and
+ * Moonshot both ship Anthropic-compatible endpoints and are configured with
+ * provider="anthropic", catalog_provider="minimax". Enabling this knob used to
+ * send Anthropic thinking config to them and to nothing else, since the Claude
+ * seat is a provider-CLI agent that never reaches this builder. The capability
+ * check excludes them without having to name them. */
+static void test_thinking_skips_anthropic_compatible_third_party(void)
+{
+   /* The vendor is catalogued and reasoning-capable, but has never advertised
+    * Anthropic's adaptive thinking -- because it is not an Anthropic model. */
+   declare_caps(MODEL_CAP_REASONING | MODEL_CAP_TOOLS);
+   agent_t a = mk_agent("anthropic", "MiniMax-M3");
+   snprintf(a.catalog_provider, sizeof a.catalog_provider, "minimax");
+   set_thinking(1, 2048);
+   cJSON *req = agent_build_request(&a, "You are helpful.", "deploy the release", 100, 0.7);
+   assert(req);
+   assert(!cJSON_GetObjectItemCaseSensitive(req, "thinking") &&
+          "a third-party model on the anthropic wire must not receive thinking config");
+   printf("  anthropic-compatible third party gets no thinking OK\n");
+   cJSON_Delete(req);
+   clear_caps();
 }
 
 /* Anthropic-only. `thinking` is not a field on the OpenAI or Responses wires, so emitting
@@ -265,9 +287,9 @@ int main(void)
           "\"content\":[{\"type\":\"input_text\",\"text\":\"deploy the release\"}]}]}");
 
    printf("extended thinking:\n");
-   test_thinking_enabled_anthropic();
-   test_thinking_budget_exceeds_cap();
-   test_thinking_strips_curated_sampling();
+   test_thinking_adaptive_when_model_supports_it();
+   test_thinking_absent_when_capability_unknown();
+   test_thinking_skips_anthropic_compatible_third_party();
    test_thinking_is_anthropic_only();
    test_thinking_disabled_is_unchanged();
 

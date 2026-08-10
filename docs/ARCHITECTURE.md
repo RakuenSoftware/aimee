@@ -22,6 +22,13 @@ flowchart LR
     K --> D2[(DB2 PostgreSQL + pgvector)]
 ```
 
+The table below describes the **current** topology, which is mid-migration. It is not the
+target. aimee is moving off the C mono-application onto Go modules, and the ownership it
+records, such as `aimee-server` holding provider calls and `aimee-runtime-web` serving its own HTTP,
+It is what exists today, not what is being built toward. Read [the module
+doctrine](#module-doctrine) for the target before using this table to decide where code
+belongs.
+
 | Process | Owns | Does not own |
 | --- | --- | --- |
 | `aimee` | CLI parsing, local hooks, MCP/ACP stdio, client filesystem access | databases, server policy, provider credentials |
@@ -58,6 +65,39 @@ opens DB1.
 
 The event bus carries typed module events. It is not a network transport and does not replace
 authenticated `/v1` calls.
+
+## Module doctrine
+
+This is the target the migration is moving toward. Where it disagrees with the process table
+above, the doctrine is the design and the table is the current state.
+
+C owns exactly four things:
+
+1. the event bus, for inter- and intra-module communication;
+2. mTLS, MCP, and communication with the outside world;
+3. the HTTP and related APIs that expose internal information;
+4. the tap for auditing and governance.
+
+C ends up a small codebase. Everything else, meaning all logic and all state, including registries,
+queues, rendezvous, provider and turn binding, and policy, lives in a Go module under
+`server-go/modules/`. A concurrency primitive is not transport: a condition variable or a
+FIFO is logic, and belongs in Go as channels.
+
+Modules get no HTTP APIs. A module never binds a socket and never accepts a connection.
+`runtime-web` and `control-web` are modules and get no exemption: their HTTP surface belongs
+to C, while their logic stays in the module and speaks only the bus.
+
+Direct module-to-module communication is forbidden. Every exchange between modules goes over
+the event bus, so that governance and auditing see all of it.
+
+External communication is banned from every module, with two structural doors: communication
+initiated from outside arrives over the event bus through C, and communication a module
+initiates leaves through the `egress` module. Direction selects the door; it never grants a
+module the right to open a connection itself. Until `egress` exists, a module may make
+internally-initiated outbound calls (the delegate module reaching an LLM and the git module
+reaching its forge are both valid and load-bearing), but every such call must be logged to
+the event bus. There is no unmonitored external communication. See [One egress
+module](proposals/pending/module-egress-single-point.md).
 
 ```mermaid
 flowchart LR

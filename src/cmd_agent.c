@@ -879,6 +879,9 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
             ag_price_usage("--price-in", argv[i]);
             return;
          }
+         /* Naming the flag is a declaration, including "--price-in 0" for a
+          * free or subscription-priced seat. */
+         ag->declared |= AGENT_DECL_PRICE_IN;
       }
       else if (strcmp(argv[i], "--price-out") == 0 && i + 1 < argc)
       {
@@ -887,6 +890,9 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
             ag_price_usage("--price-out", argv[i]);
             return;
          }
+         /* Naming the flag is a declaration, including "--price-out 0" for a
+          * free or subscription-priced seat. */
+         ag->declared |= AGENT_DECL_PRICE_OUT;
       }
       else if (strcmp(argv[i], "--price-cached") == 0 && i + 1 < argc)
       {
@@ -895,6 +901,9 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
             ag_price_usage("--price-cached", argv[i]);
             return;
          }
+         /* Naming the flag is a declaration, including "--price-cached 0" for a
+          * free or subscription-priced seat. */
+         ag->declared |= AGENT_DECL_PRICE_CACHED;
       }
       else if (strcmp(argv[i], "--tools-enabled") == 0 || strcmp(argv[i], "--tools") == 0)
          ag->tools_enabled = 1;
@@ -904,9 +913,19 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
          ag->max_parallel = atoi(argv[++i]);
       else if ((strcmp(argv[i], "--ctx") == 0 || strcmp(argv[i], "--context-window") == 0) &&
                i + 1 < argc)
+      {
          ag->middleware.context_window = atoi(argv[++i]);
+         ag->declared |= AGENT_DECL_CONTEXT_WINDOW;
+      }
       else if (strcmp(argv[i], "--max-tokens") == 0 && i + 1 < argc)
          ag->max_tokens = atoi(argv[++i]);
+      /* The model's output ceiling, distinct from --max-tokens (what this
+       * deployment asks for per request). Declared, so 0 is a real value. */
+      else if (strcmp(argv[i], "--max-output") == 0 && i + 1 < argc)
+      {
+         ag->max_output = atoi(argv[++i]);
+         ag->declared |= AGENT_DECL_MAX_OUTPUT;
+      }
       else if ((strcmp(argv[i], "--timeout-ms") == 0 || strcmp(argv[i], "--timeout") == 0) &&
                i + 1 < argc)
          ag->timeout_ms = atoi(argv[++i]);

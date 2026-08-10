@@ -737,7 +737,8 @@ MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/kb_synthesis.o \
    $(OBJDIR)/tests/module_handlers/runtime_web.o \
    $(OBJDIR)/tests/module_handlers/control_web.o \
-   $(OBJDIR)/tests/module_handlers/benchmarks.o
+   $(OBJDIR)/tests/module_handlers/benchmarks.o \
+   $(OBJDIR)/tests/module_handlers/providers.o
 
 define module_handler_test_object
 $(OBJDIR)/tests/module_handlers/$(1).o: modules/$(2)/module_adapter.c
@@ -758,6 +759,7 @@ $(eval $(call module_handler_test_object,kb_synthesis,kb-synthesis))
 $(eval $(call module_handler_test_object,runtime_web,runtime-web))
 $(eval $(call module_handler_test_object,control_web,control-web))
 $(eval $(call module_handler_test_object,benchmarks,benchmarks))
+$(eval $(call module_handler_test_object,providers,providers))
 
 $(TESTPREFIX)/unit-test-process-module-handlers: \
    $(OBJDIR)/tests/test_process_module_handlers.o $(MODULE_HANDLER_TEST_OBJS) \
@@ -1724,7 +1726,7 @@ $(TESTPREFIX)/unit-test-primary-session-adapter: $(OBJDIR)/tests/test_primary_se
                                $(OBJDIR)/server/context_engine.o \
                                $(OBJDIR)/tests/support/mock_agent_http.o \
                                $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/primary_sessions.o \
-                               $(OBJDIR)/model_registry.o \
+                               $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -4315,7 +4317,7 @@ $(TESTPREFIX)/unit-test-economizer-anthropic: $(OBJDIR)/tests/test_economizer_an
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-fold-budget: $(OBJDIR)/tests/test_fold_budget.o $(OBJDIR)/modules/economizer/fold_budget.o \
-                                  $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
+                                  $(OBJDIR)/model_registry.o $(OBJDIR)/aimee_home.o $(OBJDIR)/models_dev.o \
                                   $(OBJDIR)/models_dev_cache.o $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -4348,7 +4350,7 @@ $(TESTPREFIX)/unit-test-compact-prune: $(OBJDIR)/tests/test_compact_prune.o \
                                           $(OBJDIR)/modules/delegates/delegate_driver.o \
                                           $(OBJDIR)/modules/delegates/delegate_openai.o \
                                           $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
-                                          $(OBJDIR)/model_registry.o \
+                                          $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                           $(OBJDIR)/server/agent_tools.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -4360,7 +4362,7 @@ $(TESTPREFIX)/unit-test-session-compact-focused: $(OBJDIR)/tests/test_session_co
                                           $(OBJDIR)/modules/delegates/delegate_driver.o \
                                           $(OBJDIR)/modules/delegates/delegate_openai.o \
                                           $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
-                                          $(OBJDIR)/model_registry.o \
+                                          $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                           $(OBJDIR)/server/agent_tools.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -4372,7 +4374,7 @@ $(TESTPREFIX)/unit-test-session-compact: $(OBJDIR)/tests/test_session_compact.o 
                                           $(OBJDIR)/modules/delegates/delegate_driver.o \
                                           $(OBJDIR)/modules/delegates/delegate_openai.o \
                                           $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
-                                          $(OBJDIR)/model_registry.o \
+                                          $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                           $(OBJDIR)/server/agent_tools.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -4385,7 +4387,7 @@ $(TESTPREFIX)/unit-test-rounds-to-resume: $(OBJDIR)/tests/test_rounds_to_resume.
                                           $(OBJDIR)/modules/delegates/delegate_driver.o \
                                           $(OBJDIR)/modules/delegates/delegate_openai.o \
                                           $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
-                                          $(OBJDIR)/model_registry.o \
+                                          $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                           $(OBJDIR)/server/agent_tools.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -5694,7 +5696,7 @@ $(TESTPREFIX)/unit-test-delegate-driver: $(OBJDIR)/tests/test_delegate_driver.o 
                                  $(OBJDIR)/server/agent_request_shaping.o \
                                  $(OBJDIR)/modules/delegates/delegate_openai.o \
                                  $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
-                                 $(OBJDIR)/model_registry.o \
+                                 $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                  $(OBJDIR)/server/agent_tools.o \
                                  $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -5740,7 +5742,7 @@ $(TESTPREFIX)/unit-test-mcp-native-surface: $(OBJDIR)/tests/test_mcp_native_surf
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-middleware: $(OBJDIR)/tests/test_middleware.o $(OBJDIR)/log.o \
-                                    $(OBJDIR)/model_registry.o \
+                                    $(OBJDIR)/model_registry.o $(OBJDIR)/aimee_home.o $(OBJDIR)/vendor/cJSON.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                     $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -6159,7 +6161,7 @@ $(TESTPREFIX)/unit-test-context-engine: $(OBJDIR)/tests/test_context_engine.o \
                      $(OBJDIR)/modules/delegates/delegate_driver.o \
                      $(OBJDIR)/modules/delegates/delegate_openai.o \
                      $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
-                     $(OBJDIR)/model_registry.o \
+                     $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                      $(OBJDIR)/server/agent_tools.o \
                      $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

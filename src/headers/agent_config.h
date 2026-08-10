@@ -186,6 +186,14 @@ int agent_routing_primary_turn(void);
  * Kimi over Anthropic). Never use it for auth, headers, or request building. */
 const char *agent_catalog_provider(const agent_t *agent);
 
+/* Effective per-model limits: the operator's DECLARED value when they set one
+ * (tested by AGENT_DECL_*, so a declared 0 counts), else the model catalog.
+ * 0 means unknown. Use these rather than reaching for model_context_window() /
+ * model_max_output() directly -- the catalog half is being removed, and these
+ * are where it lives. */
+int agent_declared_context_window(const agent_t *agent);
+int agent_declared_max_output(const agent_t *agent);
+
 /* Registration prefix of a route-target name: everything before the first ':'.
  * Provider-general registration names its targets `<registration>:<model>`, so
  * this identifies siblings sharing credentials, endpoint and wire protocol —

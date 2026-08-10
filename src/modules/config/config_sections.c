@@ -1229,11 +1229,11 @@ void config_parse_transport_section(config_t *cfg, cJSON *root)
       item = cJSON_GetObjectItemCaseSensitive(xth, "enabled");
       if (cJSON_IsBool(item))
          cfg->extended_thinking_enabled = cJSON_IsTrue(item) ? 1 : 0;
-      /* A budget of 0 would emit thinking the provider rejects, so require > 0
-       * rather than silently sending an unusable request. */
-      item = cJSON_GetObjectItemCaseSensitive(xth, "budget_tokens");
-      if (cJSON_IsNumber(item) && item->valuedouble > 0)
-         cfg->extended_thinking_budget_tokens = (int)item->valuedouble;
+      /* `budget_tokens` is deliberately no longer read. Anthropic removed the
+       * {"type":"enabled", budget_tokens: N} shape it fed -- it is a 400 on
+       * Opus 4.7 and later -- and the adaptive config that replaced it takes no
+       * budget. An existing key is ignored rather than rejected, so an old
+       * config still loads. */
    }
 
    cJSON *ing = cJSON_GetObjectItemCaseSensitive(root, "ingress");
