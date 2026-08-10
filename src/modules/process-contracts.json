@@ -141,6 +141,11 @@
           "id": 3,
           "name": "delegate-chain-depth",
           "event_kind": 6659
+        },
+        {
+          "id": 4,
+          "name": "delegate-named-paths",
+          "event_kind": 6660
         }
       ]
     },

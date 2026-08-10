@@ -152,4 +152,61 @@ static inline int aimee_delegates_chain_response_decode(const uint8_t *in, size_
    return 0;
 }
 
+/* Named-path extraction: which repo files a brief names as targets. The rule
+ * lives only in the Go module -- it is a long scan and a second copy would be
+ * drift waiting to happen -- so there is no C mirror and no parity fixture. */
+#define AIMEE_DELEGATES_EVENT_PATHS           6660u
+#define AIMEE_DELEGATES_STAGE_PATHS           4u
+#define AIMEE_DELEGATES_PATHS_REQUEST_MAGIC   0x54415044u /* "DPAT" */
+#define AIMEE_DELEGATES_PATHS_RESPONSE_MAGIC  0x53415044u /* "DPAS" */
+#define AIMEE_DELEGATES_PATHS_HEADER_LEN      12u
+#define AIMEE_DELEGATES_PATHS_RESP_HEADER_LEN 8u
+#define AIMEE_DELEGATES_PATHS_PROMPT_MAX      (1u << 20)
+
+static inline size_t aimee_delegates_paths_request_encode(const char *prompt, size_t prompt_len,
+                                                          unsigned max_paths, uint8_t *out,
+                                                          size_t cap)
+{
+   if (!out || max_paths == 0 || max_paths > 255 || prompt_len > AIMEE_DELEGATES_PATHS_PROMPT_MAX ||
+       cap < AIMEE_DELEGATES_PATHS_HEADER_LEN + prompt_len)
+      return 0;
+   memset(out, 0, AIMEE_DELEGATES_PATHS_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_PATHS_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   out[5] = (uint8_t)max_paths;
+   aimee_delegates_put_u32(out + 8, (uint32_t)prompt_len);
+   if (prompt_len)
+      memcpy(out + AIMEE_DELEGATES_PATHS_HEADER_LEN, prompt, prompt_len);
+   return AIMEE_DELEGATES_PATHS_HEADER_LEN + prompt_len;
+}
+
+/* Copy the returned paths into `paths`, each at most path_stride bytes
+ * including the terminator. Returns the count written, or -1 on a malformed
+ * response. Each path is length-prefixed on the wire, so nothing here scans for
+ * a terminator it would have to trust. */
+static inline int aimee_delegates_paths_response_decode(const uint8_t *in, size_t len, char *paths,
+                                                        size_t path_stride, unsigned max_paths)
+{
+   if (!in || len < AIMEE_DELEGATES_PATHS_RESP_HEADER_LEN || !paths || path_stride == 0 ||
+       aimee_delegates_get_u32(in) != AIMEE_DELEGATES_PATHS_RESPONSE_MAGIC)
+      return -1;
+   uint32_t count = aimee_delegates_get_u32(in + 4);
+   if (count > max_paths)
+      return -1;
+   size_t at = AIMEE_DELEGATES_PATHS_RESP_HEADER_LEN;
+   for (uint32_t i = 0; i < count; ++i)
+   {
+      if (at + 2u > len)
+         return -1;
+      size_t n = (size_t)in[at] | ((size_t)in[at + 1] << 8);
+      at += 2u;
+      if (at + n > len || n + 1u > path_stride)
+         return -1;
+      memcpy(paths + (size_t)i * path_stride, in + at, n);
+      paths[(size_t)i * path_stride + n] = '\0';
+      at += n;
+   }
+   return (int)count;
+}
+
 #endif
