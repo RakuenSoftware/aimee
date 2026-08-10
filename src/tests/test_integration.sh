@@ -660,6 +660,28 @@ check_output "reconstructed worktree keeps dirty patch" 'file.txt' git -C "$MIRR
 check_output "identical refresh reuses snapshot generation" '1 ' head -c 2 "$SNAPSHOT"
 check_output "identical refresh advances publication order" ' 2' tail -c 3 "$SNAPSHOT"
 
+# A clean checkout publishes an empty diff file. It must work on the FIRST Git
+# call for the new snapshot generation; previously git apply rejected the
+# zero-byte patch after creating the right checkout, making that first call fail.
+EMPTY_REQ=$(python3 - "$MIRROR_CLIENT" "$MIRROR_HEAD" <<'PY'
+import json, sys
+print(json.dumps({"method": "workspace.mirror-sync", "args": [sys.argv[1]],
+                  "transfer": "2123456789abcdef0123456789abcdef", "diff": "",
+                  "head": sys.argv[2], "branch": "feature.locked",
+                  "upstream": "origin/feature.locked"}))
+PY
+)
+RESP=$(http_rpc "$EMPTY_REQ")
+check_output "clean mirror-sync publishes a new generation" '"generation":2' echo "$RESP"
+
+RESP=$(mcp_initialized_req "$GIT_REQ")
+check_output "first MCP Git call accepts clean snapshot" 'feature.locked' echo "$RESP"
+MIRROR_CLEAN_WORK=$(find "$(dirname "$SNAPSHOT")" -maxdepth 1 -type d -name 'work-2-*' \
+    -print -quit)
+check "clean snapshot worktree materialized on first call" test -n "$MIRROR_CLEAN_WORK"
+check "clean snapshot worktree remains clean" test -z \
+    "$(git -C "$MIRROR_CLEAN_WORK" status --porcelain)"
+
 # ============================================================
 # 10. Server shutdown
 # ============================================================
