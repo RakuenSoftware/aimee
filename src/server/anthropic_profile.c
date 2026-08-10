@@ -126,6 +126,12 @@ static int anthropic_fetch_models(model_provider_t *p, provider_model_t **models
             m->caps |= MODEL_CAP_PDF;
          if (cap_supported(caps, path_thinking) || cap_supported(caps, path_adaptive))
             m->caps |= MODEL_CAP_REASONING;
+         /* The specific shape, not just "can reason". This is the only source
+          * that can tell adaptive from the retired budget_tokens form, and it is
+          * what lets the request builder pick a config the model accepts instead
+          * of one hardcoded years earlier. */
+         if (cap_supported(caps, path_adaptive))
+            m->caps |= MODEL_CAP_THINKING_ADAPTIVE;
       }
       /* Tool use is not a key in the published capability tree, so it cannot be
        * derived here; it stays clear and consumers must read 0 as "unknown".

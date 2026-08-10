@@ -648,13 +648,6 @@ int config_extended_thinking_enabled(void)
    return v;
 }
 
-int config_extended_thinking_budget_tokens(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, extended_thinking_budget_tokens), sizeof(v), &v);
-   return v;
-}
-
 int config_dedup_window_seconds(void)
 {
    int v = 0;
