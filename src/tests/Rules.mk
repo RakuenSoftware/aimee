@@ -307,7 +307,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-client-cache \
                $(TESTPREFIX)/unit-test-openai-runs-store \
                $(TESTPREFIX)/unit-test-cli-http-transport \
-               $(TESTPREFIX)/unit-test-delegate-xml-fallback \
                $(TESTPREFIX)/unit-test-http-retry \
                $(TESTPREFIX)/unit-test-cmd-doctor \
                $(TESTPREFIX)/unit-test-diff \
@@ -3885,28 +3884,11 @@ $(TESTPREFIX)/unit-test-cli-http-transport: $(OBJDIR)/tests/test_cli_http_transp
                                             $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-# Differential reference for the tool-call rescue parser. Emits the C parser's
-# output for tests/support/xml_fallback_corpus.h; the Go port in
-# server-go/modules/delegates is asserted against it, so a divergence names the
-# shape that diverged instead of surfacing in production.
-#
-#   make xml-fallback-golden      # refresh after an intentional parser change
-$(OBJDIR)/tests/gen_xml_fallback_golden.o: C_FLAGS += -Itests
-$(TESTPREFIX)/gen-xml-fallback-golden: $(OBJDIR)/tests/gen_xml_fallback_golden.o \
-                                       $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
-                                       $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-.PHONY: xml-fallback-golden
-xml-fallback-golden: $(TESTPREFIX)/gen-xml-fallback-golden
-	@mkdir -p ../server-go/modules/delegates/testdata
-	@$< > ../server-go/modules/delegates/testdata/xml_fallback_golden.json
-	@echo "xml-fallback-golden: refreshed"
-
-$(TESTPREFIX)/unit-test-delegate-xml-fallback: $(OBJDIR)/tests/test_delegate_xml_fallback.o \
-                                               $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
-                                               $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+# The tool-call rescue parser and its golden corpus moved with the rule to
+# server-go/modules/delegates (rescue*.go, testdata/xml_fallback_golden.json).
+# The generator that used to refresh that corpus from the C parser is gone with
+# it: C no longer implements the dialects, so regenerating would have quietly
+# emptied the very corpus the port is pinned against.
 
 $(TESTPREFIX)/unit-test-agent-policy-intercept: $(OBJDIR)/tests/test_agent_policy_intercept.o \
                                                 $(OBJDIR)/server/agent_policy_intercept.o

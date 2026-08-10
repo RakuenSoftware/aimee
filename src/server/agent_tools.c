@@ -1713,6 +1713,44 @@ cJSON *agent_tool_get_schema_cached(const char *tool_name)
    return NULL;
 }
 
+/* List the built-in tool names, for callers that must hand the inventory to
+ * someone who cannot look tools up themselves -- the rescue parser runs in the
+ * delegates module and is not allowed to ask the tools module directly.
+ *
+ * The names point into the cache, which lives for the process, so the caller
+ * borrows rather than owns them. Returns how many were written. */
+int agent_tool_known_names(const char **out, int max)
+{
+   int count = 0;
+   if (!out || max <= 0)
+      return 0;
+
+   if (!g_schema_cache_tools)
+   {
+      pthread_mutex_lock(&g_schema_cache_mu);
+      if (!g_schema_cache_tools)
+         g_schema_cache_tools = build_tools_array();
+      pthread_mutex_unlock(&g_schema_cache_mu);
+   }
+   if (!g_schema_cache_tools)
+      return 0;
+
+   cJSON *tool = NULL;
+   cJSON_ArrayForEach(tool, g_schema_cache_tools)
+   {
+      cJSON *fn = cJSON_GetObjectItemCaseSensitive(tool, "function");
+      if (!fn)
+         continue;
+      cJSON *name = cJSON_GetObjectItemCaseSensitive(fn, "name");
+      if (!cJSON_IsString(name) || !name->valuestring[0])
+         continue;
+      if (count >= max)
+         break;
+      out[count++] = name->valuestring;
+   }
+   return count;
+}
+
 static const char *agent_tools_schema_provider_for_agent(const agent_t *agent)
 {
    if (!agent)

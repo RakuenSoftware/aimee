@@ -3,6 +3,7 @@
 #include "module_stage_adapters.h"
 
 #include <aimee/tools/agent_tools.h>
+#include <aimee/delegates/delegate_xml_fallback.h>
 #include <aimee/git/git_ops.h>
 #include "gw_stage_governance.h"
 #include "ingress_preinject.h"
@@ -399,6 +400,118 @@ static int delegate_handoff(const char *text, const char *owned_files_json,
    return out->valid ? 0 : -1;
 }
 
+/* Recovering tool calls from prose: the caller's tool inventory is gathered
+ * here, at the boundary, because the module cannot look tools up itself and the
+ * call sites should not have to carry the list around. */
+static int delegate_rescue(const char *text, int allow_json, int detect_only,
+                           parsed_response_t *out)
+{
+   const char *names[AIMEE_DELEGATES_RESCUE_KNOWN_MAX];
+   size_t text_len = text ? strlen(text) : 0;
+   if (text_len == 0 || text_len > AIMEE_DELEGATES_RESCUE_TEXT_MAX)
+      return 0;
+
+   int name_count = agent_tool_known_names(names, (int)AIMEE_DELEGATES_RESCUE_KNOWN_MAX);
+   size_t request_cap = AIMEE_DELEGATES_RESCUE_REQ_HEADER_LEN + text_len;
+   for (int i = 0; i < name_count; i++)
+      request_cap += 2 + strlen(names[i]);
+
+   uint8_t *request = malloc(request_cap);
+   if (!request)
+      return 0;
+   size_t request_len = aimee_delegates_rescue_request_encode(
+       text, text_len, names, (size_t)name_count, allow_json,
+       detect_only ? AIMEE_DELEGATES_RESCUE_MODE_DETECT : AIMEE_DELEGATES_RESCUE_MODE_PARSE,
+       request, request_cap);
+   if (request_len == 0)
+   {
+      free(request);
+      return 0;
+   }
+
+   /* A rescued call cannot be larger than the text it was read out of, plus
+    * per-call framing. */
+   size_t response_cap = AIMEE_DELEGATES_RESCUE_RESP_HEADER_LEN + text_len +
+                         (size_t)AGENT_MAX_TOOL_CALLS * (8u + 64u + 32u) + 64u;
+   uint8_t *response = malloc(response_cap);
+   if (!response)
+   {
+      free(request);
+      return 0;
+   }
+
+   uint32_t response_len = 0;
+   int rc = call_module(AIMEE_DELEGATES_EVENT_RESCUE, AIMEE_DELEGATES_STAGE_RESCUE, request,
+                        (uint32_t)request_len, response, (uint32_t)response_cap, &response_len);
+   free(request);
+   if (rc != 0 || response_len < AIMEE_DELEGATES_RESCUE_RESP_HEADER_LEN ||
+       aimee_delegates_get_u32(response) != AIMEE_DELEGATES_RESCUE_RESPONSE_MAGIC)
+   {
+      free(response);
+      return 0;
+   }
+
+   int is_tool_call = (int)aimee_delegates_get_u32(response + 4);
+   if (detect_only)
+   {
+      free(response);
+      return is_tool_call;
+   }
+
+   uint32_t count = aimee_delegates_get_u32(response + 8);
+   uint32_t content_len = aimee_delegates_get_u32(response + 12);
+   size_t at = AIMEE_DELEGATES_RESCUE_RESP_HEADER_LEN;
+   if (count > AGENT_MAX_TOOL_CALLS || at + content_len > response_len)
+   {
+      free(response);
+      return 0;
+   }
+
+   if (content_len > 0 && !out->content)
+   {
+      out->content = malloc(content_len + 1);
+      if (out->content)
+      {
+         memcpy(out->content, response + at, content_len);
+         out->content[content_len] = '\0';
+      }
+   }
+   at += content_len;
+
+   for (uint32_t i = 0; i < count && out->call_count < AGENT_MAX_TOOL_CALLS; i++)
+   {
+      if (at + 8 > response_len)
+         break;
+      size_t id_len = (size_t)response[at] | ((size_t)response[at + 1] << 8);
+      size_t name_len = (size_t)response[at + 2] | ((size_t)response[at + 3] << 8);
+      size_t args_len = aimee_delegates_get_u32(response + at + 4);
+      at += 8;
+      if (at + id_len + name_len + args_len > response_len)
+         break;
+
+      parsed_tool_call_t *tc = &out->calls[out->call_count++];
+      memset(tc, 0, sizeof(*tc));
+      size_t n = id_len < sizeof(tc->id) ? id_len : sizeof(tc->id) - 1;
+      memcpy(tc->id, response + at, n);
+      at += id_len;
+      n = name_len < sizeof(tc->name) ? name_len : sizeof(tc->name) - 1;
+      memcpy(tc->name, response + at, n);
+      at += name_len;
+      tc->arguments = malloc(args_len + 1);
+      if (tc->arguments)
+      {
+         memcpy(tc->arguments, response + at, args_len);
+         tc->arguments[args_len] = '\0';
+      }
+      at += args_len;
+   }
+
+   if (is_tool_call && out->call_count > 0)
+      out->is_tool_call = 1;
+   free(response);
+   return (int)count;
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -610,6 +723,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_chain_provider(delegate_chain);
    delegate_register_paths_provider(delegate_paths);
    delegate_register_handoff_provider(delegate_handoff);
+   delegate_register_rescue_provider(delegate_rescue);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path

@@ -44,7 +44,6 @@ IR_SHARED_TYPE = {
 PENDING_BUS_MIGRATION = {
     ("src/modules/delegates/delegate_openai.c", "aimee/tools/agent_tools.h"),
     ("src/modules/delegates/delegate_run_phases.c", "aimee/workspace/workspace.h"),
-    ("src/modules/delegates/delegate_xml_fallback.c", "aimee/tools/agent_tools.h"),
     ("src/modules/execution-policy/execution_policy.c", "aimee/protocols/mcp/mcp_client_registry.h"),
     ("src/modules/guardrails/guardrails_action_audit.c", "aimee/audit/audit_action.h"),
     ("src/modules/guardrails/guardrails_action_audit.c", "aimee/audit/audit_worm.h"),

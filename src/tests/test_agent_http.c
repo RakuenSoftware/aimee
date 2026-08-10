@@ -19,13 +19,6 @@
 #include "platform_test_util.h"
 #include "cJSON.h"
 
-static cJSON *parse_json_or_die(const char *json)
-{
-   cJSON *root = cJSON_Parse(json);
-   assert(root != NULL);
-   return root;
-}
-
 static cJSON *make_dummy_tool(void)
 {
    cJSON *tools = cJSON_CreateArray();
@@ -536,139 +529,6 @@ static void test_parse_response_keeps_text_with_tool_use(void)
    printf("parse_response_keeps_text_with_tool_use OK\n");
 }
 
-static void test_delegate_rescue_parses_mistral_bracket(void)
-{
-   parsed_response_t parsed;
-   memset(&parsed, 0, sizeof(parsed));
-
-   const char *text = "[TOOL_CALLS]read_file{\"path\":\"x\",\"meta\":{\"brace\":\"{ok}\"}}";
-   assert(delegate_rescue_has_tool_calls_with_json(text, 1) == 1);
-   assert(xml_parse_tool_calls(text, &parsed) == 1);
-   assert(parsed.is_tool_call == 1);
-   assert(parsed.call_count == 1);
-   assert(strcmp(parsed.calls[0].name, "read_file") == 0);
-
-   cJSON *args = parse_json_or_die(parsed.calls[0].arguments);
-   cJSON *path = cJSON_GetObjectItemCaseSensitive(args, "path");
-   cJSON *meta = cJSON_GetObjectItemCaseSensitive(args, "meta");
-   cJSON *brace = cJSON_GetObjectItemCaseSensitive(meta, "brace");
-   assert(cJSON_IsString(path) && strcmp(path->valuestring, "x") == 0);
-   assert(cJSON_IsString(brace) && strcmp(brace->valuestring, "{ok}") == 0);
-   cJSON_Delete(args);
-   agent_free_parsed_response(&parsed);
-   printf("delegate_rescue_parses_mistral_bracket OK\n");
-}
-
-static void test_delegate_rescue_parses_fenced_json(void)
-{
-   parsed_response_t parsed;
-   memset(&parsed, 0, sizeof(parsed));
-
-   const char *text = "```json\n{\"name\":\"bash\",\"arguments\":{\"command\":\"ls\"}}\n```";
-   assert(delegate_rescue_has_tool_calls_with_json(text, 1) == 1);
-   assert(xml_parse_tool_calls(text, &parsed) == 1);
-   assert(parsed.is_tool_call == 1);
-   assert(parsed.call_count == 1);
-   assert(strcmp(parsed.calls[0].name, "bash") == 0);
-
-   cJSON *args = parse_json_or_die(parsed.calls[0].arguments);
-   cJSON *command = cJSON_GetObjectItemCaseSensitive(args, "command");
-   assert(cJSON_IsString(command) && strcmp(command->valuestring, "ls") == 0);
-   cJSON_Delete(args);
-   agent_free_parsed_response(&parsed);
-   printf("delegate_rescue_parses_fenced_json OK\n");
-}
-
-static void test_delegate_rescue_detects_invoke_markup(void)
-{
-   parsed_response_t parsed;
-   memset(&parsed, 0, sizeof(parsed));
-
-   const char *text = "<invoke name=\"bash\">\n"
-                      "<parameter name=\"command\">echo invoke-ok</parameter>\n"
-                      "</invoke>";
-   assert(delegate_rescue_has_tool_calls_with_json(text, 1) == 1);
-   assert(xml_parse_tool_calls(text, &parsed) == 1);
-   assert(parsed.is_tool_call == 1);
-   assert(parsed.call_count == 1);
-   assert(strcmp(parsed.calls[0].name, "bash") == 0);
-   assert(strstr(parsed.calls[0].arguments, "invoke-ok") != NULL);
-   agent_free_parsed_response(&parsed);
-   printf("delegate_rescue_detects_invoke_markup OK\n");
-}
-
-static void test_delegate_rescue_skips_malformed_invoke_markup(void)
-{
-   parsed_response_t parsed;
-   memset(&parsed, 0, sizeof(parsed));
-
-   const char *text = "<invoke>\n"
-                      "<parameter name=\"command\">echo ignored</parameter>\n"
-                      "</invoke>\n"
-                      "<invoke name=\"bash\">\n"
-                      "<parameter name=\"command\">echo parsed</parameter>\n"
-                      "</invoke>";
-   assert(delegate_rescue_has_tool_calls_with_json(text, 1) == 1);
-   assert(xml_parse_tool_calls(text, &parsed) == 1);
-   assert(parsed.is_tool_call == 1);
-   assert(parsed.call_count == 1);
-   assert(strcmp(parsed.calls[0].name, "bash") == 0);
-   assert(strstr(parsed.calls[0].arguments, "parsed") != NULL);
-   agent_free_parsed_response(&parsed);
-   printf("delegate_rescue_skips_malformed_invoke_markup OK\n");
-}
-
-static void test_delegate_rescue_channel_balances_braces(void)
-{
-   parsed_response_t parsed;
-   memset(&parsed, 0, sizeof(parsed));
-
-   const char *text = "<|channel>call: bash {command: \"echo } ok\"}<tool_call|>";
-   assert(delegate_rescue_has_tool_calls_with_json(text, 1) == 1);
-   assert(xml_parse_tool_calls(text, &parsed) == 1);
-   assert(parsed.is_tool_call == 1);
-   assert(parsed.call_count == 1);
-   assert(strcmp(parsed.calls[0].name, "bash") == 0);
-
-   cJSON *args = parse_json_or_die(parsed.calls[0].arguments);
-   cJSON *command = cJSON_GetObjectItemCaseSensitive(args, "command");
-   assert(cJSON_IsString(command) && strcmp(command->valuestring, "echo } ok") == 0);
-   cJSON_Delete(args);
-   agent_free_parsed_response(&parsed);
-   printf("delegate_rescue_channel_balances_braces OK\n");
-}
-
-static void test_delegate_rescue_strips_think_blocks(void)
-{
-   parsed_response_t parsed;
-   memset(&parsed, 0, sizeof(parsed));
-
-   const char *text =
-       "<think>I should call a tool.</think>[TOOL_CALLS]bash{\"command\":\"echo ok\"}";
-   assert(delegate_rescue_has_tool_calls_with_json(text, 1) == 1);
-   assert(xml_parse_tool_calls(text, &parsed) == 1);
-   assert(parsed.is_tool_call == 1);
-   assert(parsed.call_count == 1);
-   assert(strcmp(parsed.calls[0].name, "bash") == 0);
-   assert(strstr(parsed.calls[0].arguments, "echo ok") != NULL);
-   agent_free_parsed_response(&parsed);
-   printf("delegate_rescue_strips_think_blocks OK\n");
-}
-
-static void test_delegate_rescue_rejects_unknown_json_tool(void)
-{
-   parsed_response_t parsed;
-   memset(&parsed, 0, sizeof(parsed));
-
-   const char *text = "{\"tool\":\"definitely_not_a_tool\",\"args\":{\"x\":1}}";
-   assert(delegate_rescue_has_tool_calls_with_json(text, 1) == 0);
-   assert(xml_parse_tool_calls(text, &parsed) == 0);
-   assert(parsed.is_tool_call == 0);
-   assert(parsed.call_count == 0);
-   agent_free_parsed_response(&parsed);
-   printf("delegate_rescue_rejects_unknown_json_tool OK\n");
-}
-
 static void test_parse_response_openai_mistral_content_array(void)
 {
    const char *json = "{"
@@ -1095,13 +955,6 @@ int main(void)
    test_parse_response_openai_sanitizes_invalid_tool_arguments();
    test_parse_response_captures_provider_model();
    test_parse_response_keeps_text_with_tool_use();
-   test_delegate_rescue_parses_mistral_bracket();
-   test_delegate_rescue_parses_fenced_json();
-   test_delegate_rescue_detects_invoke_markup();
-   test_delegate_rescue_skips_malformed_invoke_markup();
-   test_delegate_rescue_channel_balances_braces();
-   test_delegate_rescue_strips_think_blocks();
-   test_delegate_rescue_rejects_unknown_json_tool();
    test_parse_response_openai_mistral_content_array();
    test_parse_response_openai_stray_think_close();
    test_parse_response_openai_strips_thinking_block();

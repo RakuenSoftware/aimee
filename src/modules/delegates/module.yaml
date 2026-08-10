@@ -75,7 +75,11 @@
     "server-go/modules/delegates/capabilities.go",
     "server-go/modules/delegates/chain.go",
     "server-go/modules/delegates/paths.go",
-    "server-go/modules/delegates/handoff.go"
+    "server-go/modules/delegates/handoff.go",
+    "server-go/modules/delegates/rescue.go",
+    "server-go/modules/delegates/rescue_json.go",
+    "server-go/modules/delegates/rescue_parse.go",
+    "server-go/modules/delegates/rescue_stage.go"
   ],
   "go_tests": [
     "server-go/modules/delegates/delegates_test.go",
@@ -83,7 +87,9 @@
     "server-go/modules/delegates/capabilities_test.go",
     "server-go/modules/delegates/chain_test.go",
     "server-go/modules/delegates/paths_test.go",
-    "server-go/modules/delegates/handoff_test.go"
+    "server-go/modules/delegates/handoff_test.go",
+    "server-go/modules/delegates/rescue_test.go",
+    "server-go/modules/delegates/rescue_stage_test.go"
   ],
   "tests": [
     "src/tests/test_aimee_ir_rescue.c",
@@ -102,7 +108,6 @@
     "src/tests/test_delegate_plan.c",
     "src/tests/test_delegate_role.c",
     "src/tests/test_delegate_sandbox_image.c",
-    "src/tests/test_delegate_xml_fallback.c",
     "src/tests/test_gw_orch_delegates.c",
     "src/tests/test_panel_provider.c"
   ],
