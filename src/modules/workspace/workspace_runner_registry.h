@@ -16,6 +16,20 @@
 #define WS_RUNNER_REGISTRY_MAX   64
 #define WS_RUNNER_REGISTRY_IDLEN 128
 
+#include <stdint.h>
+
+/* One module call over the bus. Exposed so the handoff marshalling next door
+ * shares this one path rather than growing a second. */
+int ws_runner_bus_call(uint32_t event_kind, uint32_t stage_id, const void *request,
+                       uint32_t request_len, void *response, uint32_t response_capacity,
+                       uint32_t *response_len, uint64_t timeout_ms);
+
+/* One handoff op for tree `id`. On success and when `out` is non-NULL, *out is
+ * the returned chunk (malloc'd, NUL-terminated; caller frees) and *more says
+ * another chunk follows. */
+int ws_runner_io(unsigned op, const char *id, const char *payload, size_t payload_len, char **out,
+                 size_t *out_len, int *more, uint64_t timeout_ms);
+
 /* Return the queue for `id`, creating (and initializing) it on first use.
  * NULL only when `id` is invalid or the registry is full. */
 ws_runner_queue_t *ws_runner_registry_get_or_create(const char *id);
