@@ -7,6 +7,7 @@
 #include "runtime_secret.h"
 #include "vault_service.h" /* vault_service_* : the permanent credential store (P4) */
 #include "model_registry.h"
+#include "models_dev.h"
 #include "model_provider.h"
 #include "platform_path.h"
 #include "provider_cli_adapter.h"
@@ -665,6 +666,11 @@ int agent_declared_context_window(const agent_t *ag)
     * capacity needs no such bit anyway: 0 is not a capacity, so "> 0" carries
     * exactly the same information. Prices are the opposite and do need theirs,
     * because a declared 0 there is a real statement. */
+   /* Loaded agents have already adopted the catalog's figure at load
+    * (agent_migrate_declare_from_catalog), so this normally answers from the
+    * agent itself. The catalog lookup remains for an agent built in memory
+    * rather than read from config -- and it is the single place left to delete
+    * when the snapshot finally goes. */
    if (ag->middleware.context_window > 0)
       return ag->middleware.context_window;
    model_capability_t cap;
@@ -975,6 +981,71 @@ static void agent_config_stat_remember(const struct stat *st)
    g_agent_config_mtime = agent_config_stat_mtime(st);
    g_agent_config_size = st->st_size;
    g_agent_config_ino = st->st_ino;
+}
+
+/* Materialize catalog figures as the agent's OWN values, once, at load.
+ *
+ * The bundled catalog is going away: it was a third-party snapshot that aged
+ * out of date and silently outranked what operators had set. Everything that
+ * consumes a per-model limit now reads the agent, so each agent has to carry
+ * the numbers it has in fact been running on rather than looking them up.
+ *
+ * Follows the primary_only migration's shape deliberately: derive in MEMORY at
+ * load and let the next agent_save_config persist it, rather than writing the
+ * operator's config as a side effect of reading it. Resolution therefore works
+ * on this boot, and the file catches up the first time anything saves.
+ *
+ * Strictly additive. A value the operator has already stated is never touched --
+ * the catalog is what we are removing precisely because it is not authoritative.
+ * A price is copied only when the catalog actually published one, because
+ * writing a 0 would assert "this model is free", which is a different and much
+ * worse claim than leaving it unstated. */
+static void agent_migrate_declare_from_catalog(agent_config_t *cfg)
+{
+   if (!cfg)
+      return;
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      agent_t *ag = &cfg->agents[i];
+      if (!ag->model[0])
+         continue; /* a CLI seat with no model id has nothing to look up */
+
+      /* The CATALOG only -- deliberately not model_capability_get(), which falls
+       * through to a heuristic that infers a window for any unknown name and
+       * always succeeds. Adopting that would stamp a guess into the operator's
+       * config as though they had chosen it, which is worse than leaving the
+       * value unknown: a guess nobody can trace is exactly what this whole
+       * change is removing. Only a figure a provider actually published is
+       * worth writing down. */
+      model_capability_t cap;
+      memset(&cap, 0, sizeof cap);
+      if (!models_dev_cache_lookup(agent_catalog_provider(ag), ag->model, &cap))
+         continue;
+
+      if (ag->middleware.context_window <= 0 && cap.context_window > 0)
+      {
+         ag->middleware.context_window = cap.context_window;
+         ag->declared |= AGENT_DECL_CONTEXT_WINDOW;
+         aimee_log(LOG_INFO, "agent_config", "%s: adopting context_window %d from the catalog",
+                   ag->name, cap.context_window);
+      }
+      if (ag->max_output <= 0 && cap.max_output > 0)
+      {
+         ag->max_output = cap.max_output;
+         ag->declared |= AGENT_DECL_MAX_OUTPUT;
+         aimee_log(LOG_INFO, "agent_config", "%s: adopting max_output %d from the catalog",
+                   ag->name, cap.max_output);
+      }
+      /* PRICES ARE DELIBERATELY NOT ADOPTED. Copying a catalog price into the
+       * agent marks it declared, which is what price_overridden and the Providers
+       * UI read as "the operator chose this" -- so a vendor list price would
+       * start presenting itself as the operator's own decision. That is the exact
+       * confusion this work exists to remove, and it would also silently change
+       * what the tier lint treats as an operator exemption. Prices stay resolved
+       * through the existing path until someone decides how they should be
+       * carried; only the LIMITS, which are plain facts about the model, migrate.
+       */
+   }
 }
 
 int agent_load_config(agent_config_t *cfg)
@@ -1692,6 +1763,10 @@ int agent_load_config(agent_config_t *cfg)
    }
 
    cJSON_Delete(root);
+
+   /* Before the cache snapshot, so every reader of the cached config sees the
+    * migrated values rather than only the first caller. */
+   agent_migrate_declare_from_catalog(cfg);
 
    /* Update mtime cache */
    {

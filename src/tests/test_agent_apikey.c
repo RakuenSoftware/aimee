@@ -457,6 +457,75 @@ static void test_legacy_middleware_context_window_migrates(void)
    assert(ag2->declared & AGENT_DECL_CONTEXT_WINDOW);
 }
 
+
+/* The migration off the bundled catalog: an agent that states no limits adopts
+ * the catalog's published figures as its own, once, at load. That is what lets
+ * the snapshot eventually be deleted -- every consumer reads the agent, so the
+ * agent has to carry the numbers it has actually been running on. */
+static void test_catalog_limits_migrate_into_the_agent(void)
+{
+   {
+      FILE *f = fopen(agent_config_path(), "w");
+      assert(f != NULL);
+      /* "known" is in the bundled catalog; "guessy" is a name nothing publishes. */
+      fputs("{\"agents\":["
+            "{\"name\":\"known\",\"endpoint\":\"https://api.anthropic.com/v1\","
+            "\"model\":\"claude-sonnet-4-6\",\"provider\":\"anthropic\",\"roles\":[\"code\"]},"
+            "{\"name\":\"guessy\",\"endpoint\":\"https://x/v1\","
+            "\"model\":\"no-such-model-qqq\",\"provider\":\"openai\",\"roles\":[\"code\"]}]}\n",
+            f);
+      fclose(f);
+   }
+
+   agent_config_t cfg;
+   assert(agent_load_config(&cfg) == 0);
+   agent_t *known = agent_find(&cfg, "known");
+   agent_t *guessy = agent_find(&cfg, "guessy");
+   assert(known && guessy);
+
+   /* Adopted, and marked as the agent's own so it survives a save. */
+   assert(known->middleware.context_window == 1000000);
+   assert(known->max_output == 128000);
+   assert(known->declared & AGENT_DECL_CONTEXT_WINDOW);
+
+   /* NOT adopted. model_capability_get() would have answered here via its
+    * heuristic, which infers a window for any unknown name and always succeeds;
+    * writing that into config would stamp a guess in as though the operator had
+    * chosen it. The migration reads the catalog only, so an unpublished model
+    * stays honestly unknown. */
+   assert(guessy->middleware.context_window == 0);
+   assert(guessy->max_output == 0);
+   assert(guessy->declared == 0);
+
+   /* Idempotent, and it persists: save, reload, same answer and nothing new. */
+   assert(agent_save_config(&cfg) == 0);
+   agent_config_t again;
+   assert(agent_load_config(&again) == 0);
+   agent_t *known2 = agent_find(&again, "known");
+   assert(known2 && known2->middleware.context_window == 1000000);
+   assert(agent_find(&again, "guessy")->declared == 0);
+}
+
+/* An operator's own figure is never overwritten by the catalog. The catalog is
+ * being removed precisely because it is not authoritative. */
+static void test_migration_never_overwrites_a_stated_limit(void)
+{
+   {
+      FILE *f = fopen(agent_config_path(), "w");
+      assert(f != NULL);
+      fputs("{\"agents\":[{\"name\":\"pinned\",\"endpoint\":\"https://api.anthropic.com/v1\","
+            "\"model\":\"claude-sonnet-4-6\",\"provider\":\"anthropic\",\"roles\":[\"code\"],"
+            "\"context_window\":200000}]}\n",
+            f);
+      fclose(f);
+   }
+   agent_config_t cfg;
+   assert(agent_load_config(&cfg) == 0);
+   agent_t *ag = agent_find(&cfg, "pinned");
+   /* A deliberate policy ceiling below the model's capability stands. */
+   assert(ag && ag->middleware.context_window == 200000);
+}
+
 int main(void)
 {
    char tmp_template[] = "/tmp/aimee-agent-apikey-XXXXXX";
@@ -475,6 +544,8 @@ int main(void)
    test_primary_only_migration_and_persist();
    test_declared_zero_round_trips();
    test_legacy_middleware_context_window_migrates();
+   test_catalog_limits_migrate_into_the_agent();
+   test_migration_never_overwrites_a_stated_limit();
    printf("agent_apikey: all tests passed\n");
    return 0;
 }
