@@ -128,7 +128,10 @@ int ws_runner_queue_transport_stream(void *ctx, cJSON *request, ws_runner_partia
 
 cJSON *ws_runner_queue_poll(ws_runner_queue_t *q, int timeout_ms)
 {
-   return q ? ws_runner_registry_poll(q->id, timeout_ms) : NULL;
+   /* This wrapper has no way to report "unserved" to its caller, so it does not
+    * pretend to: the distinction is made and acted on at the two poll endpoints
+    * that own a retry loop. */
+   return q ? ws_runner_registry_poll(q->id, timeout_ms, NULL) : NULL;
 }
 
 int ws_runner_queue_respond(ws_runner_queue_t *q, cJSON *response)

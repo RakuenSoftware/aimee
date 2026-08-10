@@ -664,9 +664,12 @@ int handle_runner_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (argc < 1 || !argv[0][0])
       return server_send_error(conn, "usage: runner.poll <workspace_id>", NULL);
 
-   cJSON *op = ws_runner_registry_poll(argv[0], 25000);
+   /* ws_runner_registry_poll paces an unserved tree for us; see its header. */
+   int unserved = 0;
+   cJSON *op = ws_runner_registry_poll(argv[0], 25000, &unserved);
    cJSON *resp = jo_ok();
    jo_add_bool(resp, "have_op", op != NULL);
+   jo_add_bool(resp, "served", !unserved);
    if (op)
       cJSON_AddItemToObject(resp, "op", op); /* transfers ownership to resp */
    return send_and_free(conn, resp);

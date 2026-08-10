@@ -273,7 +273,15 @@ func handleRunnerIO(invocation bus.ModuleInvocation, request []byte) ([]byte, bu
 	if point == nil {
 		// Nobody is serving this tree. Say so rather than parking the caller on a
 		// rendezvous that will never be drained.
-		return nil, bus.ModuleStatusInvalidRequest
+		//
+		// CAPABILITY_ABSENT, not INVALID_REQUEST. The request was perfectly well
+		// formed; what is missing is a runner. A caller cannot tell a malformed
+		// request from an unserved tree if both arrive as INVALID_REQUEST, and
+		// that mattered: the poll path treated "unserved" as "nothing pending
+		// yet" and re-polled immediately, forever, because the wait that paces
+		// the loop only happens once a rendezvous exists. Naming the condition
+		// is what lets the caller stop, back off, or say so.
+		return nil, bus.ModuleStatusCapabilityAbsent
 	}
 
 	switch op {

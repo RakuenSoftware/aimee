@@ -79,13 +79,26 @@ func TestRunnerIOCarriesAnOpToTheClientAndItsResultBack(t *testing.T) {
 
 // A tree nobody is serving must fail fast. Parking the caller on a rendezvous
 // that will never be drained would wedge the turn instead of failing it.
+//
+// It must fail as CAPABILITY_ABSENT, NOT as INVALID_REQUEST. The distinction is
+// load-bearing: the request is well formed, and a caller that cannot tell "you
+// sent nonsense" from "nobody is serving this tree" treats the second as
+// "nothing pending yet" and re-polls immediately. That is a permanent condition
+// driving an unbounded retry loop — observed on a live appliance as 664,408
+// identical log lines in 25 minutes, ~440/second, drowning every other line.
 func TestRunnerIORefusesATreeNobodyIsServing(t *testing.T) {
 	reset()
-	if _, status := io(IOOpSubmit, "/srv/unserved", []byte("op")); status != bus.ModuleStatusInvalidRequest {
-		t.Fatalf("submit to an unserved tree status = %d", status)
+	if _, status := io(IOOpSubmit, "/srv/unserved", []byte("op")); status != bus.ModuleStatusCapabilityAbsent {
+		t.Fatalf("submit to an unserved tree status = %d, want CapabilityAbsent", status)
 	}
-	if _, status := io(IOOpPoll, "/srv/unserved", nil); status != bus.ModuleStatusInvalidRequest {
-		t.Fatalf("poll on an unserved tree status = %d", status)
+	if _, status := io(IOOpPoll, "/srv/unserved", nil); status != bus.ModuleStatusCapabilityAbsent {
+		t.Fatalf("poll on an unserved tree status = %d, want CapabilityAbsent", status)
+	}
+	// A genuinely malformed request must still be INVALID_REQUEST, or the new
+	// signal is useless — both cases would collapse again, the other way.
+	if _, status := Handle(bus.ModuleInvocation{StageID: StageRunnerIO},
+		[]byte("not a runner-io frame")); status != bus.ModuleStatusInvalidRequest {
+		t.Fatalf("malformed frame status = %d, want InvalidRequest", status)
 	}
 }
 
