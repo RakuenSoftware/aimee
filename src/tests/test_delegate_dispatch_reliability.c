@@ -1,6 +1,5 @@
 /* test_delegate_dispatch_reliability.c: unit tests for delegate dispatch
  * reliability improvements (Phase 2):
- *   1. delegate_extract_named_paths — multi-file scope detection
  *   2. delegate_inject_code_context — context injection via code index */
 #include <assert.h>
 #include <stdio.h>
@@ -82,6 +81,22 @@ static void set_blast_radius(const char *const *deps, int ndeps, const char *con
 /* Drive the real config_load via a temp AIMEE_HOME/aimee.yaml (config.o is linked,
  * so config_load can't be stubbed). AIMEE_NO_CACHE defeats the config cache. */
 static char g_graph_home[256];
+/* The graph-context tests below feed a prompt that names a file and assert on
+ * the block built AROUND it. Finding that file is the delegates module's rule
+ * now (server-go/modules/delegates/paths.go) and this binary hosts no bus, so
+ * the referenced path is stated here. What the tokenizer yields for prompts like
+ * these is pinned in that module's own tests; the subject here is the block. */
+static int test_paths_provider(const char *prompt, unsigned max_paths, char *paths,
+                               size_t path_stride)
+{
+   if (!prompt || !paths || max_paths == 0)
+      return -1;
+   if (!strstr(prompt, "src/foo.c"))
+      return 0;
+   snprintf(paths, path_stride, "%s", "src/foo.c");
+   return 1;
+}
+
 static void graph_flag_setup(void)
 {
    snprintf(g_graph_home, sizeof(g_graph_home), "/tmp/aimee-gctx-%d", (int)getpid());
@@ -99,54 +114,6 @@ static void graph_flag_write(int on)
       fprintf(f, "delegate_graph_context_enabled: %s\n", on ? "true" : "false");
       fclose(f);
    }
-}
-
-/* ── 1. delegate_extract_named_paths tests ──────────────────────────────── */
-
-static void test_extract_no_paths(void)
-{
-   char paths[16][256];
-   int n = delegate_extract_named_paths("just some text with no file references", paths, 16);
-   assert(n == 0);
-   printf("  PASS: test_extract_no_paths\n");
-}
-
-static void test_extract_single_path(void)
-{
-   char paths[16][256];
-   int n = delegate_extract_named_paths("Edit src/foo.c to add error handling.", paths, 16);
-   assert(n == 1);
-   assert(strstr(paths[0], "src/foo.c") != NULL);
-   printf("  PASS: test_extract_single_path\n");
-}
-
-static void test_extract_multi_path(void)
-{
-   char paths[16][256];
-   int n = delegate_extract_named_paths(
-       "Update src/server/server.c and src/headers/server.h with the new field.", paths, 16);
-   assert(n == 2);
-   printf("  PASS: test_extract_multi_path (count=%d)\n", n);
-}
-
-static void test_extract_deduplicates(void)
-{
-   char paths[16][256];
-   int n = delegate_extract_named_paths("Edit src/foo.c — src/foo.c has the function you need.",
-                                        paths, 16);
-   assert(n == 1);
-   printf("  PASS: test_extract_deduplicates\n");
-}
-
-static void test_extract_skips_system_includes(void)
-{
-   char paths[16][256];
-   /* <sys/stat.h> should be skipped (angle-bracket system include) */
-   int n =
-       delegate_extract_named_paths("#include <sys/stat.h> — edit src/real.c instead.", paths, 16);
-   assert(n == 1);
-   assert(strstr(paths[0], "src/real.c") != NULL);
-   printf("  PASS: test_extract_skips_system_includes\n");
 }
 
 /* ── 2. delegate_inject_code_context tests ──────────────────────────────── */
@@ -277,13 +244,8 @@ static void test_worktree_has_changes_nonexistent_path(void)
 
 int main(void)
 {
+   delegate_register_paths_provider(test_paths_provider);
    printf("delegate_dispatch_reliability:\n");
-
-   test_extract_no_paths();
-   test_extract_single_path();
-   test_extract_multi_path();
-   test_extract_deduplicates();
-   test_extract_skips_system_includes();
 
    test_inject_returns_null_when_no_hits();
    test_inject_returns_context_block_with_hits();
