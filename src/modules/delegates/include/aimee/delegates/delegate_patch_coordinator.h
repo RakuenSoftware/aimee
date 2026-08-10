@@ -52,6 +52,15 @@ typedef struct
    delegate_patch_task_report_t tasks[DB1_COORD_MAX_TASKS];
 } delegate_patch_report_t;
 
+/* Where a run's patches stand is the delegates module's rule
+ * (server-go/modules/delegates/patchcoord.go). This is the seam the C side
+ * calls through; with no provider registered the report stays empty with a
+ * "not_run" reviewer status, so nothing is reported as reviewable. Declaring a
+ * packet ready to integrate is the one answer that must never be invented. */
+typedef void (*delegate_patch_provider_fn)(const db1_coord_task_t *tasks, int task_count,
+                                           delegate_patch_report_t *out);
+void delegate_register_patch_provider(delegate_patch_provider_fn provider);
+
 void delegate_patch_coordinator_build_report(const db1_coord_job_t *job,
                                              const db1_coord_task_t *tasks, int task_count,
                                              delegate_patch_report_t *out);

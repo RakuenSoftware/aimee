@@ -90,6 +90,14 @@ int attn_session_branch_blocked(const char *base_branch, const char *default_bra
  * default branch (`default_resolved` 0) blocks, as the registry path does. */
 int attn_unregistered_lineage_blocked(int default_resolved, int shares_foreign_session_history);
 
+/* Resolve the directory the lineage probes should run `git -C` in, given a mutation
+ * target that may be a directory, an existing file, or a file that does not exist yet.
+ * Walks up to the nearest EXISTING directory: a target inside a not-yet-created
+ * directory would otherwise yield a missing path, both probes would fail, and
+ * attn_unregistered_lineage_blocked would fail closed on a lineage that is actually
+ * fine. Exposed for testing alongside the other lineage helpers. */
+void attn_git_dir_for(const char *target, char *out, size_t outlen);
+
 /* 1 = BLOCK: a WRITING Bash command reaches outside every managed worktree -- `cd <abs>`
  * to an unmanaged directory, or a redirect to an absolute path outside one. The
  * isolation check judges the cwd for Bash, so without this a command starting in a good

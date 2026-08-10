@@ -479,7 +479,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-cmd-session \
                $(TESTPREFIX)/unit-test-model-registry \
                $(TESTPREFIX)/unit-test-models-dev $(TESTPREFIX)/unit-test-agent-tier-lint \
-               $(TESTPREFIX)/unit-test-delegate-verify \
                $(TESTPREFIX)/unit-test-p3b-spend \
                $(TESTPREFIX)/unit-test-model-provider \
                $(TESTPREFIX)/unit-test-delegate-driver \
@@ -5656,10 +5655,6 @@ $(TESTPREFIX)/unit-test-agent-tier-lint: $(OBJDIR)/tests/test_agent_tier_lint.o 
                                 $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-delegate-verify: $(OBJDIR)/tests/test_delegate_verify.o \
-                                $(OBJDIR)/modules/delegates/delegate_verify.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
-
 $(TESTPREFIX)/unit-test-models-dev: $(OBJDIR)/tests/test_models_dev.o \
                                 $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                                 $(OBJDIR)/models_dev_cache.o $(OBJDIR)/aimee_home.o \
@@ -6915,3 +6910,29 @@ TEST_KB_RUNTIME_TARGETS = \
   $(TESTPREFIX)/unit-test-witness-tamper-pg
 $(filter-out $(TEST_KB_RUNTIME_TARGETS),$(TEST_TARGETS)): \
   $(OBJDIR)/modules/vault/runtime_secret.o
+
+# ---------------------------------------------------------------- benchmark probes
+# Compaction retention probe: measures how much load-bearing detail survives a
+# compaction boundary under each summary derivation. Deliberately NOT in
+# TEST_TARGETS -- it is a measurement, not a gate, and a derivation scoring badly
+# is a result to read rather than a build failure. Run it explicitly:
+#   make -C src compaction-retention-probe
+#   src/build/obj/tests/compaction-retention-probe benchmarks/compaction-quality/corpus.json
+$(OBJDIR)/tests/retention_probe.o: ../benchmarks/compaction-quality/retention_probe.c
+	@mkdir -p $(dir $@)
+	$(CC) -c $(TEST_C_FLAGS) -o $@ $<
+
+$(TESTPREFIX)/compaction-retention-probe: $(OBJDIR)/tests/retention_probe.o \
+                                          $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
+                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                                          $(OBJDIR)/server/agent_request_shaping.o \
+                                          $(OBJDIR)/modules/delegates/delegate_driver.o \
+                                          $(OBJDIR)/modules/delegates/delegate_openai.o \
+                                          $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
+                                          $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
+                                          $(OBJDIR)/server/agent_tools.o \
+                                          $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+.PHONY: compaction-retention-probe
+compaction-retention-probe: $(TESTPREFIX)/compaction-retention-probe

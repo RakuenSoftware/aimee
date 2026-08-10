@@ -221,7 +221,7 @@ static void job_status_cmd(app_ctx_t *ctx, int argc, char **argv)
       printf("\n");
 
       printf("\nDelegation report\n");
-      printf("  Cost model: %s\n", delegate_economics_cost_model_label());
+      printf("  Cost model: %s\n", econ.cost_model_label);
       printf("  Delegates: %d total, %d tier-0, %d tier-1, %d tier-2, %d tier-3",
              econ.delegate_count, econ.tier_counts[0], econ.tier_counts[1], econ.tier_counts[2],
              econ.tier_counts[3]);
@@ -243,7 +243,7 @@ static void job_status_cmd(app_ctx_t *ctx, int argc, char **argv)
       printf("  Reviewer delegates found: %d blocking\n", econ.reviewer_findings_blocking);
       printf("  Supervisor work remaining: %d decision%s\n", econ.supervisor_actions_required,
              econ.supervisor_actions_required == 1 ? "" : "s");
-      printf("  Verdict: %s\n", delegate_economics_verdict_text(econ.verdict));
+      printf("  Verdict: %s\n", econ.verdict_label);
       printf("  Recommendation: %s\n", econ.recommendation);
 
       char patch_brief[1024];

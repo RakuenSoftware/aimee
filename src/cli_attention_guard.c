@@ -1448,7 +1448,7 @@ static int attn_git_shares_foreign_session_history(const char *dir, const char *
  * then silently fell back to "main" -- so on a repo whose default is anything else, the
  * refusal named the wrong branch AND compared the base against it. Observed on one repo
  * in one minute: "('testing')" for a Bash op, "('main')" for an Edit. */
-static void attn_git_dir_for(const char *target, char *out, size_t outlen)
+void attn_git_dir_for(const char *target, char *out, size_t outlen)
 {
    if (!out || !outlen)
       return;
@@ -1456,9 +1456,23 @@ static void attn_git_dir_for(const char *target, char *out, size_t outlen)
    struct stat st;
    if (out[0] && stat(out, &st) == 0 && S_ISDIR(st.st_mode))
       return;
-   char *slash = strrchr(out, '/');
-   if (slash && slash != out)
+   /* Walk UP to the nearest EXISTING directory. Stripping a single component is not
+    * enough when the target is a new file in a not-yet-created directory: the result
+    * is another missing path, so `git -C` cannot run there and BOTH lineage probes
+    * (current branch, default ref) fail. The caller reads default_resolved == 0 as an
+    * unverifiable lineage and fails closed — so creating a file in a new subdirectory
+    * was refused with a branch-lineage error that had nothing to do with the branch,
+    * for every session without a registry row (which is every Claude Code session,
+    * since EnterWorktree writes none). Failing closed on a genuinely unresolvable
+    * default branch is deliberate and is preserved; this only stops a MISSING
+    * DIRECTORY from being mistaken for one. */
+   char *slash;
+   while ((slash = strrchr(out, '/')) != NULL && slash != out)
+   {
       *slash = '\0';
+      if (stat(out, &st) == 0 && S_ISDIR(st.st_mode))
+         return;
+   }
 }
 
 /* Pure decision for the session-isolation guard (testable in isolation).

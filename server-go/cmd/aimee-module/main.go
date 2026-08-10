@@ -108,6 +108,9 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 			{EventKind: delegates.EventPaths, StageID: delegates.StagePaths},
 			{EventKind: delegates.EventHandoff, StageID: delegates.StageHandoff},
 			{EventKind: delegates.EventRescue, StageID: delegates.StageRescue},
+			{EventKind: delegates.EventVerify, StageID: delegates.StageVerify},
+			{EventKind: delegates.EventEconomics, StageID: delegates.StageEconomics},
+			{EventKind: delegates.EventPatchCoord, StageID: delegates.StagePatchCoord},
 		}
 		config.Handler = delegates.Handle
 	case "tools":
@@ -131,6 +134,8 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 			{EventKind: modulegit.EventKind, StageID: modulegit.StageOperation},
 			{EventKind: modulegit.EventRefValidate, StageID: modulegit.StageRefValidate},
 			{EventKind: modulegit.EventCIGrade, StageID: modulegit.StageCIGrade},
+			{EventKind: modulegit.EventForgeRequest, StageID: modulegit.StageForgeRequest},
+			{EventKind: modulegit.EventCredResolve, StageID: modulegit.StageCredResolve},
 			{EventKind: modulegit.EventVerifyRun, StageID: modulegit.StageVerifyRun},
 		}
 		config.Handler = modulegit.Handle

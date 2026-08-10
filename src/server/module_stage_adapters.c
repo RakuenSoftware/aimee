@@ -4,6 +4,9 @@
 
 #include <aimee/tools/agent_tools.h>
 #include <aimee/delegates/delegate_xml_fallback.h>
+#include "delegate_verify.h"
+#include <aimee/delegates/delegate_economics.h>
+#include <aimee/delegates/delegate_patch_coordinator.h>
 #include <aimee/git/git_ops.h>
 #include "gw_stage_governance.h"
 #include "ingress_preinject.h"
@@ -512,6 +515,243 @@ static int delegate_rescue(const char *text, int allow_json, int detect_only,
    return (int)count;
 }
 
+static int delegate_verify(int op, int a, int b, int max_signal_status, int *outcome_out,
+                           int *escalate_out)
+{
+   uint8_t request[AIMEE_DELEGATES_VERIFY_REQUEST_LEN];
+   uint8_t response[AIMEE_DELEGATES_VERIFY_RESPONSE_LEN];
+   uint32_t response_len = 0;
+
+   if (!outcome_out || !escalate_out ||
+       aimee_delegates_verify_request_encode((unsigned)op, a, b, max_signal_status, request,
+                                             sizeof(request)) != 0 ||
+       call_module(AIMEE_DELEGATES_EVENT_VERIFY, AIMEE_DELEGATES_STAGE_VERIFY, request,
+                   sizeof(request), response, sizeof(response), &response_len) != 0 ||
+       response_len != AIMEE_DELEGATES_VERIFY_RESPONSE_LEN ||
+       aimee_delegates_get_u32(response) != AIMEE_DELEGATES_VERIFY_RESPONSE_MAGIC)
+      return -1;
+
+   *outcome_out = (int)aimee_delegates_get_u32(response + 4);
+   *escalate_out = (int)aimee_delegates_get_u32(response + 8);
+   return 0;
+}
+
+/* A coordinated run's cost to the supervisor. The tasks and the agent tiers are
+ * gathered here because they are the caller's rows and the caller's config; the
+ * module reads the four fields the rule needs and forgets them. */
+static void delegate_economics(const db1_coord_task_t *tasks, int task_count,
+                               const agent_config_t *cfg, delegate_economics_report_t *out)
+{
+   if (!out || task_count < 0 || (uint32_t)task_count > AIMEE_DELEGATES_ECON_MAX_TASKS)
+      return;
+   int agent_count = cfg ? cfg->agent_count : 0;
+   if (agent_count < 0 || (uint32_t)agent_count > AIMEE_DELEGATES_ECON_MAX_AGENTS)
+      return;
+
+   size_t cap = AIMEE_DELEGATES_ECON_REQ_HEADER_LEN;
+   for (int i = 0; i < task_count; i++)
+   {
+      cap += 12 + strlen(tasks[i].status) + strlen(tasks[i].claimed_by) + strlen(tasks[i].files) +
+             strlen(tasks[i].result);
+   }
+   for (int i = 0; i < agent_count; i++)
+      cap += 2 + strlen(cfg->agents[i].name) + 4;
+
+   uint8_t *request = malloc(cap);
+   if (!request)
+      return;
+   size_t at = aimee_delegates_econ_request_begin((uint32_t)task_count, (uint32_t)agent_count,
+                                                  request, cap);
+   for (int i = 0; i < task_count && at; i++)
+   {
+      at = aimee_delegates_econ_put_task(tasks[i].status, tasks[i].claimed_by, tasks[i].files,
+                                         tasks[i].result, request, at, cap);
+   }
+   for (int i = 0; i < agent_count && at; i++)
+      at = aimee_delegates_econ_put_agent(cfg->agents[i].name, cfg->agents[i].cost_tier, request,
+                                          at, cap);
+   if (at == 0 || at > UINT32_MAX)
+   {
+      free(request);
+      return;
+   }
+
+   uint8_t response[AIMEE_DELEGATES_ECON_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   int rc = call_module(AIMEE_DELEGATES_EVENT_ECONOMICS, AIMEE_DELEGATES_STAGE_ECONOMICS, request,
+                        (uint32_t)at, response, sizeof(response), &response_len);
+   free(request);
+   if (rc != 0 || response_len != AIMEE_DELEGATES_ECON_RESPONSE_LEN ||
+       aimee_delegates_get_u32(response) != AIMEE_DELEGATES_ECON_RESPONSE_MAGIC)
+      return;
+
+   int *fields[] = {
+       &out->delegate_count,
+       &out->tier_counts[0],
+       &out->tier_counts[1],
+       &out->tier_counts[2],
+       &out->tier_counts[3],
+       &out->unknown_tier_count,
+       &out->prompt_tokens_total,
+       &out->completion_tokens_total,
+       &out->delegate_tokens_estimated,
+       &out->tokenized_delegate_results,
+       &out->supervisor_prompt_tokens_estimated,
+       &out->handoff_count,
+       &out->valid_handoffs,
+       &out->invalid_handoffs,
+       &out->focused_tests_run_by_delegates,
+       &out->delegates_with_focused_tests,
+       &out->manual_integration_events,
+       &out->supervisor_actions_required,
+       &out->reviewer_findings_blocking,
+   };
+   for (unsigned i = 0; i < AIMEE_DELEGATES_ECON_FIELD_COUNT; i++)
+      *fields[i] = (int)aimee_delegates_get_u32(response + 4 + i * 4);
+
+   size_t off = 4 + AIMEE_DELEGATES_ECON_FIELD_COUNT * 4;
+   aimee_delegates_handoff_field(response, off, AIMEE_DELEGATES_ECON_VERDICT_LEN, out->verdict,
+                                 sizeof(out->verdict));
+   off += AIMEE_DELEGATES_ECON_VERDICT_LEN;
+   aimee_delegates_handoff_field(response, off, AIMEE_DELEGATES_ECON_ADVICE_LEN,
+                                 out->recommendation, sizeof(out->recommendation));
+   off += AIMEE_DELEGATES_ECON_ADVICE_LEN;
+   aimee_delegates_handoff_field(response, off, AIMEE_DELEGATES_ECON_LABEL_LEN, out->verdict_label,
+                                 sizeof(out->verdict_label));
+   off += AIMEE_DELEGATES_ECON_LABEL_LEN;
+   aimee_delegates_handoff_field(response, off, AIMEE_DELEGATES_ECON_LABEL_LEN,
+                                 out->cost_model_label, sizeof(out->cost_model_label));
+}
+
+/* Where a run's patches stand. The task rows are gathered here; the module
+ * reads the six fields the rule needs and forgets them. */
+static void delegate_patch_coord(const db1_coord_task_t *tasks, int task_count,
+                                 delegate_patch_report_t *out)
+{
+   if (!out || task_count < 0 || (uint32_t)task_count > AIMEE_DELEGATES_PATCH_MAX_TASKS)
+      return;
+
+   size_t cap = AIMEE_DELEGATES_PATCH_REQ_HEADER_LEN;
+   for (int i = 0; i < task_count; i++)
+   {
+      cap += 20 + strlen(tasks[i].status) + strlen(tasks[i].error) + strlen(tasks[i].files) +
+             strlen(tasks[i].result);
+   }
+
+   uint8_t *request = malloc(cap);
+   if (!request)
+      return;
+   size_t at = aimee_delegates_patch_request_begin((uint32_t)task_count, request, cap);
+   for (int i = 0; i < task_count && at; i++)
+   {
+      at = aimee_delegates_patch_put_task(tasks[i].id, tasks[i].step_id, tasks[i].status,
+                                          tasks[i].error, tasks[i].files, tasks[i].result, request,
+                                          at, cap);
+   }
+   if (at == 0 || at > UINT32_MAX)
+   {
+      free(request);
+      return;
+   }
+
+   size_t response_cap = AIMEE_DELEGATES_PATCH_RESP_HEADER_LEN +
+                         AIMEE_DELEGATES_PATCH_MAX_TASKS * AIMEE_DELEGATES_PATCH_TASK_REC_LEN;
+   uint8_t *response = malloc(response_cap);
+   if (!response)
+   {
+      free(request);
+      return;
+   }
+
+   uint32_t response_len = 0;
+   int rc = call_module(AIMEE_DELEGATES_EVENT_PATCH, AIMEE_DELEGATES_STAGE_PATCH, request,
+                        (uint32_t)at, response, (uint32_t)response_cap, &response_len);
+   free(request);
+   if (rc != 0 || response_len < AIMEE_DELEGATES_PATCH_RESP_HEADER_LEN ||
+       aimee_delegates_get_u32(response) != AIMEE_DELEGATES_PATCH_RESPONSE_MAGIC)
+   {
+      free(response);
+      return;
+   }
+
+   int *run_fields[] = {
+       &out->task_count,
+       &out->implementation_packets,
+       &out->planned,
+       &out->running,
+       &out->returned,
+       &out->verified,
+       &out->reviewable,
+       &out->accepted,
+       &out->failed,
+       &out->needs_supervisor,
+       &out->invalid_handoffs,
+       &out->outside_ownership_touches,
+       &out->patch_overlaps,
+       &out->stale_worktrees,
+       &out->focused_tests_passed,
+       &out->reviewer_packets,
+       &out->reviewer_blocking_findings,
+       &out->reviewer_owner_packet_routes,
+   };
+   for (unsigned i = 0; i < AIMEE_DELEGATES_PATCH_RUN_FIELDS; i++)
+      *run_fields[i] = (int)aimee_delegates_get_u32(response + 4 + i * 4);
+
+   size_t off = 4 + AIMEE_DELEGATES_PATCH_RUN_FIELDS * 4;
+   aimee_delegates_handoff_field(response, off, AIMEE_DELEGATES_PATCH_STATE_LEN,
+                                 out->reviewer_status, sizeof(out->reviewer_status));
+   off += AIMEE_DELEGATES_PATCH_STATE_LEN;
+   aimee_delegates_handoff_field(response, off, AIMEE_DELEGATES_PATCH_NEXTCMD_LEN,
+                                 out->recommended_next_command,
+                                 sizeof(out->recommended_next_command));
+
+   int count = out->task_count;
+   if (count < 0 || (uint32_t)count > AIMEE_DELEGATES_PATCH_MAX_TASKS ||
+       response_len != AIMEE_DELEGATES_PATCH_RESP_HEADER_LEN +
+                           (uint32_t)count * AIMEE_DELEGATES_PATCH_TASK_REC_LEN)
+   {
+      /* The header and the body disagree: report nothing rather than a
+       * partially decoded run. */
+      memset(out, 0, sizeof(*out));
+      free(response);
+      return;
+   }
+
+   for (int i = 0; i < count; i++)
+   {
+      const uint8_t *rec = response + AIMEE_DELEGATES_PATCH_RESP_HEADER_LEN +
+                           (size_t)i * AIMEE_DELEGATES_PATCH_TASK_REC_LEN;
+      delegate_patch_task_report_t *tr = &out->tasks[i];
+      int *task_fields[] = {
+          &tr->task_id,
+          &tr->step_id,
+          &tr->handoff_valid,
+          &tr->changed_files_count,
+          &tr->passed_tests,
+          &tr->outside_ownership_count,
+          &tr->overlap_task_id,
+          &tr->stale_base,
+          &tr->supervisor_actions,
+      };
+      for (unsigned f = 0; f < AIMEE_DELEGATES_PATCH_TASK_FIELDS; f++)
+         *task_fields[f] = (int)aimee_delegates_get_u32(rec + f * 4);
+
+      size_t s_off = AIMEE_DELEGATES_PATCH_TASK_FIELDS * 4;
+      aimee_delegates_handoff_field(rec, s_off, AIMEE_DELEGATES_PATCH_STATE_LEN, tr->task_status,
+                                    sizeof(tr->task_status));
+      s_off += AIMEE_DELEGATES_PATCH_STATE_LEN;
+      aimee_delegates_handoff_field(rec, s_off, AIMEE_DELEGATES_PATCH_STATE_LEN, tr->patch_state,
+                                    sizeof(tr->patch_state));
+      s_off += AIMEE_DELEGATES_PATCH_STATE_LEN;
+      aimee_delegates_handoff_field(rec, s_off, AIMEE_DELEGATES_PATCH_STATE_LEN, tr->handoff_status,
+                                    sizeof(tr->handoff_status));
+      s_off += AIMEE_DELEGATES_PATCH_STATE_LEN;
+      aimee_delegates_handoff_field(rec, s_off, AIMEE_DELEGATES_PATCH_NOTE_LEN, tr->note,
+                                    sizeof(tr->note));
+   }
+   free(response);
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -724,6 +964,9 @@ void server_module_stage_adapters_configure(void)
    delegate_register_paths_provider(delegate_paths);
    delegate_register_handoff_provider(delegate_handoff);
    delegate_register_rescue_provider(delegate_rescue);
+   delegate_register_verify_provider(delegate_verify);
+   delegate_register_economics_provider(delegate_economics);
+   delegate_register_patch_provider(delegate_patch_coord);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path

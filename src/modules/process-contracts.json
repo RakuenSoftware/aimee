@@ -156,6 +156,21 @@
           "id": 6,
           "name": "delegate-tool-call-rescue",
           "event_kind": 6662
+        },
+        {
+          "id": 7,
+          "name": "delegate-verify-outcome",
+          "event_kind": 6663
+        },
+        {
+          "id": 8,
+          "name": "delegate-economics-report",
+          "event_kind": 6664
+        },
+        {
+          "id": 9,
+          "name": "delegate-patch-coordination",
+          "event_kind": 6665
         }
       ]
     },
