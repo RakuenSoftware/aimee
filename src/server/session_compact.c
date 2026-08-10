@@ -788,8 +788,8 @@ int session_compact(cJSON *messages, const session_compact_config_t *cfg,
    compact_prune_tool_results(messages, summary_start, summary_end, 0);
 
    /* Step 3: build summary of messages[summary_start..summary_end) */
-   build_summary(messages, summary_start, summary_end, local_out.summary,
-                 sizeof(local_out.summary), cfg ? cfg->from_record : 0);
+   build_summary(messages, summary_start, summary_end, local_out.summary, sizeof(local_out.summary),
+                 cfg ? cfg->from_record : 0);
 
    /* Step 4: insert a boundary marker message right after messages[0].
     * We build the JSON object first, then splice it in. */

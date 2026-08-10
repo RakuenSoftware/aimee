@@ -408,7 +408,8 @@ static cJSON *make_record_conversation(void)
        arr, make_msg("assistant", "[verdict] The retry budget is capped upstream at 4a7f19c2b8e30d1"
                                   "5f6a2c9b40e7d3814aa9c5162; nothing downstream can raise it."));
    cJSON_AddItemToArray(
-       arr, make_msg("assistant", "[hazard] Touching #778 without the migration will strand rows."));
+       arr,
+       make_msg("assistant", "[hazard] Touching #778 without the migration will strand rows."));
    for (int i = 0; i < 8; i++)
    {
       cJSON_AddItemToArray(arr, make_msg("user", "continue"));
