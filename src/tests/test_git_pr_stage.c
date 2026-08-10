@@ -215,6 +215,131 @@ int main(void)
                                      sizeof(urlbuf), err, sizeof(err)) == -1);
    assert(module_bus_stub_calls() == before);
 
+   /* --- pr_info --------------------------------------------------------- */
+
+   git_pr_info_t info;
+
+   module_bus_stub_reply(
+       "{\"status\":200,\"pull\":{\"number\":7,\"state\":\"closed\",\"title\":\"T\","
+       "\"merged\":true,\"merged_at\":\"2026-08-10T13:17:33Z\",\"merge_state\":\"CLEAN\","
+       "\"url\":\"https://github.com/acme/widgets/pull/7\",\"head\":\"feat\","
+       "\"head_sha\":\"deadbeef\",\"base\":\"testing\",\"mergeable\":true}}");
+   assert(git_pr_info_via_api_slug(NULL, SLUG, 7, &info, err, sizeof(err)) == 0);
+   assert(info.open == 0 && info.merged == 1);
+   assert(strcmp(info.head_sha, "deadbeef") == 0);
+   assert(strcmp(info.head, "feat") == 0 && strcmp(info.base, "testing") == 0);
+   assert(strcmp(info.merge_state, "CLEAN") == 0);
+   assert(strcmp(info.merged_at, "2026-08-10T13:17:33Z") == 0);
+   assert(strcmp(info.html_url, "https://github.com/acme/widgets/pull/7") == 0);
+   assert(info.mergeable == 1);
+
+   /* MERGEABLE IS THREE-VALUED. An ABSENT mergeable means the forge is still
+    * computing the merge; it must stay -1 rather than collapse to 0, or a caller
+    * reads "still computing" as "conflicted" and abandons a mergeable PR. */
+   module_bus_stub_reply("{\"status\":200,\"pull\":{\"number\":7,\"state\":\"open\","
+                         "\"head\":\"feat\",\"head_sha\":\"abc\",\"base\":\"testing\"}}");
+   assert(git_pr_info_via_api_slug(NULL, SLUG, 7, &info, err, sizeof(err)) == 0);
+   assert(info.mergeable == -1);
+   assert(info.open == 1 && info.merged == 0);
+   assert(info.merged_at[0] == '\0'); /* never merged -> no timestamp */
+
+   /* An explicit false is a real answer and must NOT read as "unknown". */
+   module_bus_stub_reply("{\"status\":200,\"pull\":{\"number\":7,\"state\":\"open\","
+                         "\"head\":\"feat\",\"head_sha\":\"abc\",\"base\":\"testing\","
+                         "\"mergeable\":false}}");
+   assert(git_pr_info_via_api_slug(NULL, SLUG, 7, &info, err, sizeof(err)) == 0);
+   assert(info.mergeable == 0);
+
+   /* Missing refs fail the whole call: head_sha is what a merge's drift check is
+    * made against, so proceeding without it would silently disable that. */
+   module_bus_stub_reply(
+       "{\"status\":200,\"pull\":{\"number\":7,\"state\":\"open\",\"head\":\"feat\"}}");
+   assert(git_pr_info_via_api_slug(NULL, SLUG, 7, &info, err, sizeof(err)) == -1);
+   assert(strstr(err, "missing required refs") != NULL);
+
+   /* A refusal carries the forge's own message. */
+   module_bus_stub_reply("{\"status\":404,\"error\":\"pr info: Not Found (HTTP 404)\"}");
+   assert(git_pr_info_via_api_slug(NULL, SLUG, 7, &info, err, sizeof(err)) == -1);
+   assert(strstr(err, "Not Found") != NULL);
+
+   module_bus_stub_absent();
+   assert(git_pr_info_via_api_slug(NULL, SLUG, 7, &info, err, sizeof(err)) == -1);
+   assert(strstr(err, "could not be reached") != NULL);
+
+   /* --- pr_find_open ---------------------------------------------------- */
+
+   int number = 0;
+
+   module_bus_stub_reply("{\"status\":200,\"pull\":{\"number\":5,\"url\":"
+                         "\"https://github.com/acme/widgets/pull/5\"},\"pulls\":[{\"number\":5}]}");
+   assert(git_pr_find_open_via_api_slug(NULL, SLUG, "feat", "testing", urlbuf, sizeof(urlbuf),
+                                        &number, err, sizeof(err)) == 1);
+   assert(number == 5);
+   assert(strcmp(urlbuf, "https://github.com/acme/widgets/pull/5") == 0);
+
+   /* NO MATCH IS NOT AN ERROR. 0 is the answer the caller acts on by opening a
+    * PR; returning -1 would make it give up instead. The stage omits `pull`
+    * entirely when nothing matched. */
+   module_bus_stub_reply("{\"status\":200}");
+   number = 7;
+   assert(git_pr_find_open_via_api_slug(NULL, SLUG, "feat", "testing", urlbuf, sizeof(urlbuf),
+                                        &number, err, sizeof(err)) == 0);
+   assert(number == 0 && urlbuf[0] == '\0');
+   assert(err[0] == '\0'); /* "not found" carries no error text */
+
+   /* A real refusal still is one. */
+   module_bus_stub_reply("{\"status\":404,\"error\":\"pr list: Not Found (HTTP 404)\"}");
+   assert(git_pr_find_open_via_api_slug(NULL, SLUG, "feat", "testing", urlbuf, sizeof(urlbuf),
+                                        &number, err, sizeof(err)) == -1);
+   assert(strstr(err, "Not Found") != NULL);
+
+   /* The head/base guards refuse before anything is sent. */
+   module_bus_stub_reply("{\"status\":200}");
+   before = module_bus_stub_calls();
+   assert(git_pr_find_open_via_api_slug(NULL, SLUG, "", "testing", urlbuf, sizeof(urlbuf), &number,
+                                        err, sizeof(err)) == -1);
+   assert(git_pr_find_open_via_api_slug(NULL, SLUG, "feat&x", "testing", urlbuf, sizeof(urlbuf),
+                                        &number, err, sizeof(err)) == -1);
+   assert(module_bus_stub_calls() == before);
+
+   /* --- pr_list_open ---------------------------------------------------- */
+
+   git_pr_list_item_t rows[4];
+   int count = -1;
+
+   module_bus_stub_reply("{\"status\":200,\"pulls\":["
+                         "{\"number\":9,\"state\":\"open\",\"title\":\"A\",\"head\":\"one\"},"
+                         "{\"number\":8,\"state\":\"closed\",\"title\":\"B\",\"head\":\"two\","
+                         "\"merged_at\":\"2026-08-10T00:00:00Z\"}]}");
+   assert(git_pr_list_open_via_api_slug(NULL, SLUG, 4, rows, &count, err, sizeof(err)) == 0);
+   assert(count == 2);
+   assert(rows[0].number == 9 && strcmp(rows[0].state, "OPEN") == 0);
+   assert(strcmp(rows[0].head, "one") == 0 && strcmp(rows[0].title, "A") == 0);
+   /* A merged PR carries the closed state; callers render MERGED. */
+   assert(rows[1].number == 8 && strcmp(rows[1].state, "MERGED") == 0);
+
+   /* AN EMPTY LIST IS A RESULT, NOT A FAILURE. The stage omits an empty `pulls`
+    * entirely, and reporting an error would turn "no open PRs" into "the
+    * listing is broken". */
+   module_bus_stub_reply("{\"status\":200}");
+   count = -1;
+   assert(git_pr_list_open_via_api_slug(NULL, SLUG, 4, rows, &count, err, sizeof(err)) == 0);
+   assert(count == 0);
+
+   /* The limit is honoured even if the stage returns more rows than asked. */
+   module_bus_stub_reply("{\"status\":200,\"pulls\":[{\"number\":1},{\"number\":2},"
+                         "{\"number\":3},{\"number\":4},{\"number\":5}]}");
+   assert(git_pr_list_open_via_api_slug(NULL, SLUG, 3, rows, &count, err, sizeof(err)) == 0);
+   assert(count == 3);
+
+   module_bus_stub_reply("{\"status\":403,\"error\":\"pr list: Forbidden (HTTP 403)\"}");
+   assert(git_pr_list_open_via_api_slug(NULL, SLUG, 4, rows, &count, err, sizeof(err)) == -1);
+   assert(strstr(err, "Forbidden") != NULL);
+
+   module_bus_stub_absent();
+   assert(git_pr_list_open_via_api_slug(NULL, SLUG, 4, rows, &count, err, sizeof(err)) == -1);
+   assert(strstr(err, "could not be reached") != NULL);
+
    printf("git_pr_stage: all tests passed\n");
    return 0;
 }
