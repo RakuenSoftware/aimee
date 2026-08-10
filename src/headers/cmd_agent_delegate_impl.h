@@ -3,6 +3,7 @@
 #ifndef DEC_CMD_AGENT_DELEGATE_IMPL_H
 #define DEC_CMD_AGENT_DELEGATE_IMPL_H 1
 
+#include <stdint.h>
 #include "aimee.h"
 #include "agent.h"
 #include "agent_config.h"
@@ -42,6 +43,14 @@ void delegate_worktree_restore(const char *orig_cwd, const char *git_root, const
  *   - Returns -1 without modifying the environment.
  *   - If errbuf is non-NULL, writes a human-readable message into it.
  */
+/* Answers the delegates module's chain questions. Returns 0 and fills *flag
+ * (should-clear, or depth-allowed) and, for the depth op, *current_depth.
+ * Non-zero means the module could not answer. */
+typedef int (*delegate_chain_provider_fn)(unsigned op, int has_depth, int has_parent,
+                                          int parent_known, int parent_active, int parent_depth,
+                                          int max_depth, int *flag, int32_t *current_depth);
+void delegate_register_chain_provider(delegate_chain_provider_fn provider);
+
 int delegate_check_chain_depth(int max_depth, char *errbuf, size_t errbuf_sz);
 int delegate_chain_env_should_clear(const char *depth_env, const char *parent_env,
                                     int parent_active_known, int parent_active);
@@ -215,6 +224,12 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
                                    int tier_override, const char *provider_override,
                                    const char *model_override, char *errbuf, size_t errbuf_sz);
 int delegate_route_preflight(agent_config_t *cfg, const char *role, char *errbuf, size_t errbuf_sz);
+/* Answers the delegates module's capability question. Returns 0 and fills both
+ * outputs, or non-zero when the module cannot be reached. */
+typedef int (*delegate_capability_provider_fn)(const char *prompt, int tools_enabled,
+                                               unsigned *required_caps, int *min_context);
+void delegate_routing_register_capability_provider(delegate_capability_provider_fn provider);
+
 void delegate_infer_capability_requirements(const char *prompt, int tools_enabled,
                                             unsigned *required_caps_out, int *min_context_out);
 /* Disable every agent whose declared max_scope ceiling cannot serve a packet of

@@ -252,6 +252,12 @@ char *cli_v1_client_bearer(void);
 int cli_workspace_add_remote(const char *path);
 int cli_index_scan_remote(int argc, char **argv);
 
+/* Ensure a local repository is present in a remote server's code index. This
+ * is intentionally narrower than `workspace add`: it does not register the
+ * caller's live tree as an executable workspace; it only pushes source files
+ * when the remote index does not already contain this project/root pair. */
+int cli_index_ensure_remote(const char *root);
+
 /* Launch metadata parsed from server output */
 typedef struct
 {

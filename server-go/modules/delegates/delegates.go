@@ -26,8 +26,15 @@ var aliases = map[string]string{
 	"planner": "plan", "planning": "plan",
 }
 
-// Handle canonicalizes a delegate role without invoking a delegate.
+// Handle canonicalizes a delegate role, or infers what a prompt needs of a
+// model, without invoking a delegate.
 func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+	if invocation.StageID == StageCapabilities {
+		return handleCapabilities(invocation, request)
+	}
+	if invocation.StageID == StageChain {
+		return handleChain(invocation, request)
+	}
 	if invocation.StageID != StageInvoke || len(request) != messageLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic || request[4] != wireVersion ||
 		request[5] != 0 || request[7] != 0 || request[6] == 0 || request[6] > roleMax {

@@ -8,46 +8,28 @@
 #include <ctype.h>
 #include <string.h>
 
+static delegate_capability_provider_fn g_capability_provider;
+
+void delegate_routing_register_capability_provider(delegate_capability_provider_fn provider)
+{
+   g_capability_provider = provider;
+}
+
+/* What a prompt implies a model must be able to do is the delegates module's
+ * rule; this asks it. It used to be restated here -- the marker lists, the
+ * four-chars-per-token estimate, the 4096 threshold -- with nothing keeping the
+ * two copies in step.
+ *
+ * Fails closed: no capabilities and no context floor when the module cannot be
+ * reached. Guessing would route work to a model that cannot see half its input,
+ * which is worse than routing nothing. */
 void delegate_infer_capability_requirements(const char *prompt, int tools_enabled,
                                             unsigned *required_caps_out, int *min_context_out)
 {
    unsigned required = 0;
    int min_context = 0;
-
-   if (tools_enabled)
-      required |= MODEL_CAP_TOOLS;
-
-   if (prompt && prompt[0])
-   {
-      /* Vision is INFERRED from text and is a SOFT routing preference (see
-       * MODEL_CAP_MODALITY_SOFT): the router relaxes it when no model qualifies.
-       * Markdown image syntax ("![") is deliberately NOT a trigger — it appears in
-       * any doc/diff under review and never means the model must decode an image. */
-      if (str_contains_ci(prompt, ".png") || str_contains_ci(prompt, ".jpg") ||
-          str_contains_ci(prompt, ".jpeg") || str_contains_ci(prompt, ".webp") ||
-          str_contains_ci(prompt, ".gif") || str_contains_ci(prompt, "screenshot") ||
-          str_contains_ci(prompt, "image_url"))
-         required |= MODEL_CAP_VISION;
-      if (str_contains_ci(prompt, ".pdf") || str_contains_ci(prompt, " pdf "))
-         required |= MODEL_CAP_PDF;
-      /* Require audio capability only when the prompt references actual audio
-       * file formats — not when it merely describes audio features in code.
-       * The bare word "audio" was removed because prompts implementing
-       * speech/audio features in code (e.g. gateway STT adapter) contain the
-       * word "audio" but do not need the model to process audio files. */
-      if (str_contains_ci(prompt, ".mp3") || str_contains_ci(prompt, ".wav") ||
-          str_contains_ci(prompt, ".m4a") || str_contains_ci(prompt, ".ogg") ||
-          str_contains_ci(prompt, ".flac") || str_contains_ci(prompt, ".aac"))
-         required |= MODEL_CAP_AUDIO;
-
-      /* Approximate 1 token ~= 4 chars. Only enforce minimum context on
-       * materially large prompts so short prompts do not over-filter. */
-      size_t chars = strlen(prompt);
-      int estimated_tokens = (int)(chars / 4) + 1;
-      if (estimated_tokens > 4096)
-         min_context = estimated_tokens + 1024;
-   }
-
+   if (g_capability_provider)
+      (void)g_capability_provider(prompt, tools_enabled, &required, &min_context);
    if (required_caps_out)
       *required_caps_out = required;
    if (min_context_out)

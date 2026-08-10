@@ -14,6 +14,7 @@
 #include "modules/memory/memory_fact_gate.h"
 #include "modules/memory/memory_pii_gate.h"
 #include "modules/skills/skill_trigger_policy.h"
+#include "cmd_agent_delegate_impl.h" /* delegate_routing_register_capability_provider */
 #include "modules/webuser/webuser_runtime.h"
 #include "modules/workspace/workspace_scope.h"
 #include <aimee/audit/obs_bus.h>
@@ -270,6 +271,51 @@ static int delegate_canonicalize(const char *role, char *out, size_t out_cap)
               : -1;
 }
 
+/* A prompt is carried whole, so the request is sized to it rather than to a
+ * fixed frame. Failure leaves the caller's outputs untouched and reports -1:
+ * guessing a capability set here would route work to a model that cannot see
+ * half its input, which is worse than refusing to route it. */
+static int delegate_infer_caps(const char *prompt, int tools_enabled, unsigned *required_caps,
+                               int *min_context)
+{
+   size_t prompt_len = prompt ? strlen(prompt) : 0;
+   if (prompt_len > AIMEE_DELEGATES_CAP_PROMPT_MAX)
+      return -1;
+   size_t request_cap = AIMEE_DELEGATES_CAP_HEADER_LEN + prompt_len;
+   uint8_t *request = malloc(request_cap);
+   if (!request)
+      return -1;
+   size_t request_len =
+       aimee_delegates_cap_request_encode(prompt, prompt_len, tools_enabled, request, request_cap);
+   uint8_t response[AIMEE_DELEGATES_CAP_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   int rc =
+       request_len > 0 &&
+               call_module(AIMEE_DELEGATES_EVENT_CAPABILITIES, AIMEE_DELEGATES_STAGE_CAPABILITIES,
+                           request, (uint32_t)request_len, response, sizeof(response),
+                           &response_len) == 0
+           ? aimee_delegates_cap_response_decode(response, response_len, required_caps, min_context)
+           : -1;
+   free(request);
+   return rc;
+}
+
+static int delegate_chain(unsigned op, int has_depth, int has_parent, int parent_known,
+                          int parent_active, int parent_depth, int max_depth, int *flag,
+                          int32_t *current_depth)
+{
+   uint8_t request[AIMEE_DELEGATES_CHAIN_REQUEST_LEN];
+   uint8_t response[AIMEE_DELEGATES_CHAIN_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   return aimee_delegates_chain_request_encode(op, has_depth, has_parent, parent_known,
+                                               parent_active, (int32_t)parent_depth,
+                                               (int32_t)max_depth, request, sizeof(request)) == 0 &&
+                  call_module(AIMEE_DELEGATES_EVENT_CHAIN, AIMEE_DELEGATES_STAGE_CHAIN, request,
+                              sizeof(request), response, sizeof(response), &response_len) == 0
+              ? aimee_delegates_chain_response_decode(response, response_len, flag, current_depth)
+              : -1;
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -477,6 +523,8 @@ void server_module_stage_adapters_configure(void)
    memory_pii_register_sensitivity_batch(memory_pii_sensitivity);
    learning_router_register_signal_classifier(learning_classify);
    delegate_role_register_canonicalizer(delegate_canonicalize);
+   delegate_routing_register_capability_provider(delegate_infer_caps);
+   delegate_register_chain_provider(delegate_chain);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path

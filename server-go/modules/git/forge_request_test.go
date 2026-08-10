@@ -224,3 +224,77 @@ func TestHandleForgeRequestRoutesThroughStageFour(t *testing.T) {
 		t.Fatalf("malformed JSON must be rejected, got %v", status)
 	}
 }
+
+// The 405/409 pair is the subtle one. A CONTENT conflict is a property of the
+// two trees: retrying reproduces it exactly, so it is terminal. A moved
+// head/base is a lost race a retry wins. Both arrive with the same statuses and
+// the message is the only discriminator the forge gives, so misreading it either
+// terminates a run that would have succeeded or spins on one that never will.
+func TestMergeSeparatesTerminalConflictFromLostRace(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		status          int
+		reply           string
+		conflict, retry bool
+		alreadyMerged   bool
+	}{
+		{"content conflict is terminal", 409,
+			`{"message":"Pull Request has merge conflicts"}`, true, false, false},
+		// HTTP 409 is literally named "Conflict"; the bare word must NOT
+		// terminate, or every lost race is misread as unmergeable.
+		{"bare conflict wording is a lost race", 409,
+			`{"message":"Conflict: head branch was modified"}`, false, true, false},
+		{"405 lost race", 405, `{"message":"Base branch was modified"}`, false, true, false},
+		{"already merged", 405, `{"message":"Pull Request is already merged"}`, false, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &forgeStub{status: tc.status, reply: tc.reply}
+			stub.start(t)
+			out := PerformForge(ForgeRequest{
+				Op: OpPRMerge, Owner: "o", Repo: "r", Token: "t", Number: 3,
+			})
+			if out.Merged {
+				t.Fatal("a refused merge must never report merged")
+			}
+			if out.Conflict != tc.conflict || out.Retryable != tc.retry ||
+				out.AlreadyMerged != tc.alreadyMerged {
+				t.Fatalf("conflict=%v retryable=%v already=%v, want %v/%v/%v",
+					out.Conflict, out.Retryable, out.AlreadyMerged,
+					tc.conflict, tc.retry, tc.alreadyMerged)
+			}
+		})
+	}
+}
+
+func TestMergeCarriesMethodDriftGuardAndReturnsTheSHA(t *testing.T) {
+	stub := &forgeStub{reply: `{"merged":true,"sha":"abc123"}`}
+	stub.start(t)
+	out := PerformForge(ForgeRequest{
+		Op: OpPRMerge, Owner: "o", Repo: "r", Token: "t", Number: 3,
+		MergeMethod: "squash", ExpectedHeadSHA: "deadbeef",
+	})
+	if !out.Merged || out.MergeSHA != "abc123" {
+		t.Fatalf("out = %+v", out)
+	}
+	// Only a squash synthesises a body from the child commits, which is where the
+	// attribution trailers protected branches reject come back in.
+	if !strings.Contains(stub.body, `"merge_method":"squash"`) ||
+		!strings.Contains(stub.body, `"commit_message":""`) {
+		t.Fatalf("squash body = %s", stub.body)
+	}
+	// Drift safety: the forge refuses if the head moved since it was read.
+	if !strings.Contains(stub.body, `"sha":"deadbeef"`) {
+		t.Fatalf("body missing the expected head sha: %s", stub.body)
+	}
+
+	// A plain merge has nothing to synthesise, so no commit_message is sent.
+	stub2 := &forgeStub{reply: `{"merged":true,"sha":"x"}`}
+	stub2.start(t)
+	PerformForge(ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Token: "t", Number: 3})
+	if strings.Contains(stub2.body, "commit_message") {
+		t.Fatalf("a plain merge must not synthesise a message: %s", stub2.body)
+	}
+	if !strings.Contains(stub2.body, `"merge_method":"merge"`) {
+		t.Fatalf("default method = %s", stub2.body)
+	}
+}

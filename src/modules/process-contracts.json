@@ -131,6 +131,16 @@
           "id": 1,
           "name": "delegate-invocation",
           "event_kind": 6657
+        },
+        {
+          "id": 2,
+          "name": "delegate-capability-inference",
+          "event_kind": 6658
+        },
+        {
+          "id": 3,
+          "name": "delegate-chain-depth",
+          "event_kind": 6659
         }
       ]
     },

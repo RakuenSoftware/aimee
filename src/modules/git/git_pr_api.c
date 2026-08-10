@@ -8,6 +8,9 @@
 #include "git_cred_inject.h" /* git_cred_inject_resolve_token — the ONE cred policy */
 #include "util.h"            /* run_cmd */
 
+#include "headers/module_json_call.h" /* forge operations run in the module */
+#include <aimee/git/module_api.h>
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -288,38 +291,63 @@ static int gh_get(const gh_ctx_t *cx, const char *path, char **resp)
  * was passed and the local origin/HEAD cache is unset/stale. Returns 0 with buf
  * filled, or -1 — callers must NOT fall back to guessing "main": a repo whose
  * default is e.g. "testing" would get its PR opened against the wrong branch. */
+#define FORGE_STAGE_MAX_BODY   (1024u * 1024u)
+#define FORGE_STAGE_TIMEOUT_MS 25000
+
+/* Run one forge operation in the git module (bus stage 4,
+ * server-go/modules/git/forge_request.go). Which endpoint, which method and
+ * what the answer means are decisions and live there; this carries the facts and
+ * applies the ruling.
+ *
+ * `extra` is merged into the request and consumed. Returns the reply (caller
+ * frees) or NULL when the module could not be reached. */
+static cJSON *forge_stage(const gh_ctx_t *cx, const char *op, cJSON *extra)
+{
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
+   {
+      cJSON_Delete(extra);
+      return NULL;
+   }
+   cJSON_AddStringToObject(request, "op", op);
+   cJSON_AddStringToObject(request, "owner", cx->owner);
+   cJSON_AddStringToObject(request, "repo", cx->repo);
+   cJSON_AddStringToObject(request, "token", cx->token);
+   if (extra)
+   {
+      cJSON *field = extra->child;
+      while (field)
+      {
+         cJSON *next = field->next;
+         cJSON_DetachItemViaPointer(extra, field);
+         cJSON_AddItemToObject(request, field->string, field);
+         field = next;
+      }
+      cJSON_Delete(extra);
+   }
+   return aimee_module_json_call(AIMEE_GIT_EVENT_FORGE_REQUEST, AIMEE_GIT_STAGE_FORGE_REQUEST,
+                                 request, FORGE_STAGE_MAX_BODY, FORGE_STAGE_TIMEOUT_MS, NULL);
+}
+
 static int gh_default_branch(const gh_ctx_t *cx, char *buf, size_t n)
 {
    if (!buf || n == 0)
       return -1;
    buf[0] = '\0';
-   /* Build the URL directly: gh_get() appends a trailing "/<path>", and GitHub
-    * 404s GET /repos/<owner>/<repo>/ (trailing slash) — only the bare form works. */
-   char url[512];
-   if ((size_t)snprintf(url, sizeof(url), "https://api.github.com/repos/%s/%s", cx->owner,
-                        cx->repo) >= sizeof(url))
+   cJSON *reply = forge_stage(cx, "default_branch", NULL);
+   if (!reply)
       return -1;
-   char hdrs[480];
-   if ((size_t)snprintf(hdrs, sizeof(hdrs), "Authorization: Bearer %s\n" GH_ACCEPT, cx->token) >=
-       sizeof(hdrs))
-      return -1;
-   char *resp = NULL;
-   int st = agent_http_get(url, hdrs, &resp, 20000);
-   wipe(hdrs, sizeof(hdrs));
+   const cJSON *branch = cJSON_GetObjectItemCaseSensitive(reply, "default_branch");
    int rc = -1;
-   if (st >= 200 && st < 300 && resp)
+   /* The answer is authoritative: a caller must NOT fall back to guessing
+    * "main", because a repo whose default is "testing" would get its PR opened
+    * against the wrong branch. An empty answer stays a failure. */
+   if (cJSON_IsString(branch) && branch->valuestring[0] && strlen(branch->valuestring) < n)
    {
-      cJSON *j = cJSON_Parse(resp);
-      const cJSON *db = j ? cJSON_GetObjectItem(j, "default_branch") : NULL;
-      if (cJSON_IsString(db) && db->valuestring && db->valuestring[0] &&
-          strlen(db->valuestring) < n)
-      {
-         snprintf(buf, n, "%s", db->valuestring);
-         rc = 0;
-      }
-      cJSON_Delete(j);
+      snprintf(buf, n, "%s", branch->valuestring);
+      rc = 0;
    }
-   free(resp);
+   cJSON_Delete(reply);
    if (rc != 0)
       buf[0] = '\0';
    return rc;

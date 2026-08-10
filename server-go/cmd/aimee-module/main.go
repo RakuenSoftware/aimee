@@ -101,7 +101,11 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 	case "delegates":
 		config.ModuleName = name
 		config.PrincipalRef = 10
-		config.Stages = []bus.ModuleStage{{EventKind: delegates.EventKind, StageID: delegates.StageInvoke}}
+		config.Stages = []bus.ModuleStage{
+			{EventKind: delegates.EventKind, StageID: delegates.StageInvoke},
+			{EventKind: delegates.EventCapabilities, StageID: delegates.StageCapabilities},
+			{EventKind: delegates.EventChain, StageID: delegates.StageChain},
+		}
 		config.Handler = delegates.Handle
 	case "tools":
 		config.ModuleName = name

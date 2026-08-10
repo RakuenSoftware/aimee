@@ -289,6 +289,124 @@ static void test_workspace_runner_io_frames(void)
    assert(aimee_ws_io_response_decode(reply, sizeof(reply), &chunk, &chunk_len, &more) < 0);
 }
 
+/* Capability inference is stated twice, here in the module's C mirror and in
+ * server-go/modules/delegates/capabilities.go, and nothing in the build keeps
+ * them in step. These pin the answers a drifting edit would change. */
+static void test_delegates_capability_inference(void)
+{
+   uint8_t response[AIMEE_DELEGATES_CAP_RESPONSE_LEN];
+   uint8_t request[AIMEE_DELEGATES_CAP_HEADER_LEN + 256];
+   uint32_t response_len = 0;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CAPABILITIES};
+
+   struct
+   {
+      const char *prompt;
+      int tools;
+      unsigned expect;
+   } cases[] = {
+       /* A file reference needs the modality; describing the work in code does not. */
+       {"Transcribe recording.mp3 into text.", 0, AIMEE_DELEGATES_CAP_AUDIO},
+       {"Implement an STT dispatcher and audio routing module.", 0, 0},
+       {"Analyze screenshot.png", 0, AIMEE_DELEGATES_CAP_VISION},
+       {"review this diff: ![alt](docs/diagram)", 0, 0},
+       {"read the spec.pdf", 0, AIMEE_DELEGATES_CAP_PDF},
+       /* Tools is asserted by the caller, never read out of the prompt. */
+       {"", 1, AIMEE_DELEGATES_CAP_TOOLS},
+       {"", 0, 0},
+   };
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+   {
+      size_t n = aimee_delegates_cap_request_encode(cases[i].prompt, strlen(cases[i].prompt),
+                                                    cases[i].tools, request, sizeof(request));
+      assert(n > 0);
+      assert(aimee_delegates_module_handler(&invocation, request, (uint32_t)n, response,
+                                            sizeof(response), &response_len,
+                                            NULL) == AIMEE_MODULE_STATUS_OK);
+      unsigned caps = 0;
+      int min_ctx = 0;
+      assert(aimee_delegates_cap_response_decode(response, response_len, &caps, &min_ctx) == 0);
+      assert(caps == cases[i].expect);
+      assert(min_ctx == 0); /* every prompt here is short */
+   }
+
+   /* Encode refuses a prompt the buffer cannot hold rather than overrunning it. */
+   char big[600];
+   memset(big, 'a', sizeof(big) - 1);
+   big[sizeof(big) - 1] = '\0';
+   assert(aimee_delegates_cap_request_encode(big, strlen(big), 0, request, sizeof(request)) == 0);
+}
+
+/* Chain depth is stated twice, here in the module's C mirror and in
+ * server-go/modules/delegates/chain.go. These pin both answers. */
+static void test_delegates_chain_depth(void)
+{
+   uint8_t request[AIMEE_DELEGATES_CHAIN_REQUEST_LEN];
+   uint8_t response[AIMEE_DELEGATES_CHAIN_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CHAIN};
+
+   /* An inherited depth is trustworthy only while its chain still exists. The
+    * UNKNOWN case must NOT clear: discarding the depth on a failed liveness
+    * check would quietly raise the ceiling for everything underneath it. */
+   struct
+   {
+      int has_depth, has_parent, known, active, want;
+   } clears[] = {
+       {1, 0, 0, 0, 1}, /* depth with no parent marker is a leftover */
+       {1, 1, 1, 0, 1}, /* parent known to have exited */
+       {1, 1, 1, 1, 0}, /* parent still running */
+       {1, 1, 0, 0, 0}, /* liveness unknown: leave it alone */
+       {0, 0, 0, 0, 0}, /* nothing inherited */
+   };
+   for (size_t i = 0; i < sizeof(clears) / sizeof(clears[0]); ++i)
+   {
+      int flag = -1;
+      assert(aimee_delegates_chain_request_encode(
+                 AIMEE_DELEGATES_CHAIN_OP_SHOULD_CLEAR, clears[i].has_depth, clears[i].has_parent,
+                 clears[i].known, clears[i].active, 0, 0, request, sizeof(request)) == 0);
+      assert(aimee_delegates_module_handler(&invocation, request, sizeof(request), response,
+                                            sizeof(response), &response_len,
+                                            NULL) == AIMEE_MODULE_STATUS_OK);
+      assert(aimee_delegates_chain_response_decode(response, response_len, &flag, NULL) == 0);
+      assert(flag == clears[i].want);
+   }
+
+   /* The depth reported is the CHILD's, so a delegation at the limit is refused
+    * before it runs rather than after. */
+   struct
+   {
+      int parent, max, want_depth, want_allowed;
+   } depths[] = {
+       {0, 3, 1, 1},
+       {2, 3, 3, 1},
+       {3, 3, 4, 0},
+       {0, 0, 1, 0},
+   };
+   for (size_t i = 0; i < sizeof(depths) / sizeof(depths[0]); ++i)
+   {
+      int flag = -1;
+      int32_t current = -1;
+      assert(aimee_delegates_chain_request_encode(AIMEE_DELEGATES_CHAIN_OP_CHECK_DEPTH, 0, 0, 0, 0,
+                                                  depths[i].parent, depths[i].max, request,
+                                                  sizeof(request)) == 0);
+      assert(aimee_delegates_module_handler(&invocation, request, sizeof(request), response,
+                                            sizeof(response), &response_len,
+                                            NULL) == AIMEE_MODULE_STATUS_OK);
+      assert(aimee_delegates_chain_response_decode(response, response_len, &flag, &current) == 0);
+      assert(flag == depths[i].want_allowed);
+      assert(current == depths[i].want_depth);
+   }
+
+   /* A flag byte that is neither 0 nor 1 is not a boolean: refused, not coerced. */
+   assert(aimee_delegates_chain_request_encode(AIMEE_DELEGATES_CHAIN_OP_SHOULD_CLEAR, 0, 0, 0, 0, 0,
+                                               0, request, sizeof(request)) == 0);
+   request[7] = 2;
+   assert(aimee_delegates_module_handler(&invocation, request, sizeof(request), response,
+                                         sizeof(response), &response_len,
+                                         NULL) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_git(void)
 {
    uint8_t request[AIMEE_GIT_REQUEST_LEN], response[AIMEE_GIT_RESPONSE_LEN];
@@ -786,6 +904,8 @@ int main(void)
    test_workspace();
    test_workspace_runner_frames();
    test_workspace_runner_io_frames();
+   test_delegates_capability_inference();
+   test_delegates_chain_depth();
    test_git();
    test_skills();
    test_governance();

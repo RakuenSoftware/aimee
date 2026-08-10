@@ -285,6 +285,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-git-verify-select \
                $(TESTPREFIX)/unit-test-git-verify-contract \
                $(TESTPREFIX)/unit-test-cli-mcp-serve \
+               $(TESTPREFIX)/unit-test-cli-index-bootstrap \
                $(TESTPREFIX)/unit-test-server-mcp-roundtable \
                $(TESTPREFIX)/unit-test-cli-v1-delegate \
                $(TESTPREFIX)/unit-test-cli-server-compat \
@@ -1282,6 +1283,12 @@ $(TESTPREFIX)/unit-test-context-discover: $(OBJDIR)/tests/test_context_discover.
 
 $(TESTPREFIX)/unit-test-cli-mcp-serve: $(OBJDIR)/tests/test_cli_mcp_serve.o $(OBJDIR)/cJSON.o \
                      $(OBJDIR)/posix/platform_random.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+# Includes cli_index_bootstrap.c directly so transport/index calls can be
+# controlled without linking the full thin-client closure.
+$(TESTPREFIX)/unit-test-cli-index-bootstrap: $(OBJDIR)/tests/test_cli_index_bootstrap.o \
+                     $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-server-mcp-roundtable: \
@@ -4041,6 +4048,7 @@ $(TESTPREFIX)/unit-test-cmd-delegate: $(OBJDIR)/tests/test_cmd_delegate.o \
                              $(OBJDIR)/role_templates.o \
                              $(OBJDIR)/modules/delegates/delegate_prompt.o $(OBJDIR)/modules/delegates/delegate_routing.o \
                              $(OBJDIR)/modules/delegates/delegate_checkout.o $(OBJDIR)/cJSON.o \
+                             $(OBJDIR)/tests/module_handlers/delegates.o \
                              $(OBJDIR)/util.o $(OBJDIR)/posix/platform_process.o $(OBJDIR)/posix/util.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 

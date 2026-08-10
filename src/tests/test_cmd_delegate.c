@@ -10,6 +10,44 @@
 #include <aimee/delegates/delegate_role.h>
 #include "model_registry.h"
 #include "log.h"
+#include <aimee/core/event_bus/module_runtime.h>
+#include <aimee/delegates/module_api.h>
+
+extern aimee_module_status_t aimee_delegates_module_handler(const aimee_module_invocation_t *,
+                                                            const uint8_t *, uint32_t, uint8_t *,
+                                                            uint32_t, uint32_t *, void *);
+
+int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+{
+   (void)invocation;
+   return 0;
+}
+
+/* Capability inference is the delegates module's rule now, so the unit test
+ * asks the module the same way production does, through the C wire-parity
+ * fixture, rather than reimplementing the answer locally. */
+static int capabilities_via_module(const char *prompt, int tools_enabled, unsigned *required_caps,
+                                   int *min_context)
+{
+   size_t prompt_len = prompt ? strlen(prompt) : 0;
+   size_t request_cap = AIMEE_DELEGATES_CAP_HEADER_LEN + prompt_len;
+   uint8_t *request = malloc(request_cap);
+   if (!request)
+      return -1;
+   size_t request_len =
+       aimee_delegates_cap_request_encode(prompt, prompt_len, tools_enabled, request, request_cap);
+   uint8_t response[AIMEE_DELEGATES_CAP_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CAPABILITIES};
+   int rc =
+       request_len > 0 && aimee_delegates_module_handler(
+                              &invocation, request, (uint32_t)request_len, response,
+                              sizeof(response), &response_len, NULL) == AIMEE_MODULE_STATUS_OK
+           ? aimee_delegates_cap_response_decode(response, response_len, required_caps, min_context)
+           : -1;
+   free(request);
+   return rc;
+}
 #include "modules/tools/agent_tools_internal.h"
 #include "provider_cli_adapter.h"
 #include "cJSON.h"
@@ -1242,8 +1280,36 @@ static void test_delegate_filter_route_scope(void)
    printf("  PASS: test_delegate_filter_route_scope\n");
 }
 
+static int chain_via_module(unsigned op, int has_depth, int has_parent, int parent_known,
+                            int parent_active, int parent_depth, int max_depth, int *flag,
+                            int32_t *current_depth)
+{
+   uint8_t request[AIMEE_DELEGATES_CHAIN_REQUEST_LEN];
+   uint8_t response[AIMEE_DELEGATES_CHAIN_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CHAIN};
+   return aimee_delegates_chain_request_encode(op, has_depth, has_parent, parent_known,
+                                               parent_active, (int32_t)parent_depth,
+                                               (int32_t)max_depth, request, sizeof(request)) == 0 &&
+                  aimee_delegates_module_handler(&invocation, request, sizeof(request), response,
+                                                 sizeof(response), &response_len,
+                                                 NULL) == AIMEE_MODULE_STATUS_OK
+              ? aimee_delegates_chain_response_decode(response, response_len, flag, current_depth)
+              : -1;
+}
+
 int main(void)
 {
+   /* Fails closed until the module is reachable: no capability is asserted from
+    * a local guess. */
+   {
+      unsigned caps = 0xffffffffu;
+      int min_ctx = -1;
+      delegate_infer_capability_requirements("screenshot.png", 1, &caps, &min_ctx);
+      assert(caps == 0 && min_ctx == 0);
+   }
+   delegate_routing_register_capability_provider(capabilities_via_module);
+   delegate_register_chain_provider(chain_via_module);
    printf("test_cmd_delegate\n");
    setup_role_templates();
    test_depth_zero_when_env_unset();
