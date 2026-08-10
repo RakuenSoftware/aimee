@@ -5,6 +5,7 @@
 #include "config.h"
 #include "guardrails.h"
 #include "git_verify.h"
+#include "log.h"
 #include "mcp_git.h"
 #include "platform_process.h"
 #include "util.h"
@@ -173,6 +174,14 @@ char *mcp_git_run(const char *cmd, int *exit_code)
     * sent at least one reader hunting for a broken OAuth that was never broken. */
    if (run_on_server)
    {
+      /* The other half of the same silence: if no workspace claims the cwd, the
+       * block below never runs and git executes with no credential at all. That
+       * is the exact condition this file's header describes, and it looked
+       * identical to a bad token from the outside. */
+      if (have_ws != 0)
+         LOG_WARN("git",
+                  "no registered workspace owns cwd \"%s\": git will run with no forge credential",
+                  cwd ? cwd : "");
       if (have_ws == 0)
       {
          /* Resolve the git credential through the ONE policy
@@ -186,6 +195,7 @@ char *mcp_git_run(const char *cmd, int *exit_code)
          if (forge_cred_get(wsid, (long)time(NULL), tok, sizeof(tok)) == 0 && tok[0])
             pref = tok;
          int token_fd = -1;
+         const char *ws_remote = workspace_remote_for_root(wsid);
          /* Hand the policy the workspace's RECORDED REMOTE, not just the cwd.
           * The per-host vault step keys on the remote's host, which it derives
           * from an explicit remote URL or, failing that, by running
@@ -198,12 +208,24 @@ char *mcp_git_run(const char *cmd, int *exit_code)
           * so ctx carries both"); this call site is the one that did not.
           * cwd is still passed as the fallback for a shared workspace, where it
           * IS the real checkout and no remote may be recorded. */
-         const char *ws_remote = workspace_remote_for_root(wsid);
          char **envp =
              git_cred_inject_build_env_for_repo(NULL, ws_remote, cwd, pref, environ, &token_fd);
          volatile char *p = (volatile char *)tok;
          for (size_t i = 0; i < sizeof(tok); i++)
             p[i] = 0;
+         /* SAY SO WHEN NO CREDENTIAL WAS STAGED. Resolution failing here is not
+          * an error at this layer -- we fall through to ambient creds on
+          * purpose, for a co-located dev with their own gh/SSH. But on a server
+          * there ARE no ambient creds, so the only symptom is git prompting:
+          * "could not read Username", which reads as a dead or expired token and
+          * sent more than one investigation after the vault. Naming the
+          * workspace and the remote we resolved by turns that into one log line.
+          * The token itself is never logged; the remote URL is not a secret. */
+         if (token_fd < 0)
+            LOG_WARN("git",
+                     "no forge credential staged for workspace \"%s\" (remote=%s): git will run "
+                     "unauthenticated and a push will fail asking for a username",
+                     wsid, (ws_remote && ws_remote[0]) ? ws_remote : "<none recorded>");
          if (envp)
          {
             /* FD mode: the token rides an inherited memfd, never the environ. */
