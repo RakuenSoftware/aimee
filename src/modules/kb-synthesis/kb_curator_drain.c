@@ -313,8 +313,7 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
    int e = kb_doc_refresh(projects[selected].name, embedder, CURATOR_DOC_SWEEP_BATCH);
    if (e > 0)
       total += e;
-   int b = kb_doc_embed_backfill(projects[selected].name, embedder,
-                                 CURATOR_DOC_SWEEP_BATCH);
+   int b = kb_doc_embed_backfill(projects[selected].name, embedder, CURATOR_DOC_SWEEP_BATCH);
    if (b > 0)
       total += b;
    if (total > 0)

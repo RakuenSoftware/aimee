@@ -324,8 +324,8 @@ static void compact_description(cJSON *owner, int cap, int point_at_describe)
 int mcp_tool_prose_lean(void)
 {
    const char *v = getenv("AIMEE_MCP_TOOL_PROSE");
-   return v && (strcasecmp(v, "lean") == 0 || strcasecmp(v, "1") == 0 ||
-                strcasecmp(v, "true") == 0);
+   return v &&
+          (strcasecmp(v, "lean") == 0 || strcasecmp(v, "1") == 0 || strcasecmp(v, "true") == 0);
 }
 
 int mcp_compact_tool_prose(cJSON *tools)
