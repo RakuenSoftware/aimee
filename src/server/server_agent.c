@@ -484,10 +484,9 @@ static cJSON *server_agent_to_json(const agent_t *ag)
       int eff_out = agent_declared_max_output(ag);
       cJSON_AddNumberToObject(obj, "effective_context_window", eff_ctx);
       cJSON_AddNumberToObject(obj, "effective_max_output", eff_out);
-      cJSON_AddStringToObject(obj, "context_window_source",
-                              ag->middleware.context_window > 0
-                                  ? "declared"
-                                  : (eff_ctx > 0 ? "resolved" : "unknown"));
+      cJSON_AddStringToObject(
+          obj, "context_window_source",
+          ag->middleware.context_window > 0 ? "declared" : (eff_ctx > 0 ? "resolved" : "unknown"));
       cJSON_AddStringToObject(obj, "max_output_source",
                               ag->max_output > 0 ? "declared"
                                                  : (eff_out > 0 ? "resolved" : "unknown"));
@@ -496,10 +495,8 @@ static cJSON *server_agent_to_json(const agent_t *ag)
       /* The declared mask itself, so a form can tell "the operator set this to
        * 0" (a free seat) from "the operator never said" -- the one distinction
        * a bare number cannot carry. */
-      cJSON_AddBoolToObject(obj, "price_in_declared",
-                            (ag->declared & AGENT_DECL_PRICE_IN) != 0);
-      cJSON_AddBoolToObject(obj, "price_out_declared",
-                            (ag->declared & AGENT_DECL_PRICE_OUT) != 0);
+      cJSON_AddBoolToObject(obj, "price_in_declared", (ag->declared & AGENT_DECL_PRICE_IN) != 0);
+      cJSON_AddBoolToObject(obj, "price_out_declared", (ag->declared & AGENT_DECL_PRICE_OUT) != 0);
       cJSON_AddBoolToObject(obj, "price_cached_declared",
                             (ag->declared & AGENT_DECL_PRICE_CACHED) != 0);
    }

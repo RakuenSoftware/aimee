@@ -441,7 +441,6 @@ static cJSON *args_request_array(const char *const *values, int count)
    return req;
 }
 
-
 /* The Providers UI writes per-model values through agent.set. The distinction
  * this pins is the one a bare number cannot carry: a price of 0 that the
  * operator STATED (a free or subscription seat) versus a price nobody stated.
@@ -455,8 +454,8 @@ static void test_set_declares_prices_and_limits(void)
    reset_capture();
    /* --price-in 0 is the statement "this seat is free"; --price-out is simply
     * not mentioned, which states nothing. */
-   const char *args[] = {"a1", "--context-window", "200000", "--max-output", "64000",
-                         "--price-in", "0"};
+   const char *args[] = {"a1",    "--context-window", "200000", "--max-output",
+                         "64000", "--price-in",       "0"};
    cJSON *req = args_request_array(args, 7);
    assert(handle_agent_set(NULL, NULL, req) == 0);
    cJSON_Delete(req);
@@ -470,12 +469,11 @@ static void test_set_declares_prices_and_limits(void)
    /* The declared capacities survive and report themselves as the operator's. */
    assert(cJSON_GetObjectItemCaseSensitive(a1, "effective_context_window")->valueint == 200000);
    assert(cJSON_GetObjectItemCaseSensitive(a1, "effective_max_output")->valueint == 64000);
-   assert(strcmp(cJSON_GetStringValue(
-                     cJSON_GetObjectItemCaseSensitive(a1, "context_window_source")),
-                 "declared") == 0);
-   assert(strcmp(
-              cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a1, "max_output_source")),
+   assert(
+       strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a1, "context_window_source")),
               "declared") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a1, "max_output_source")),
+                 "declared") == 0);
 
    /* The stated-free price is flagged; the unmentioned one is not. Without the
     * flag these two are the same byte. */
@@ -531,7 +529,6 @@ static void test_set_rejects_unparseable_price(void)
    assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(a1, "price_in_declared")));
    printf("  PASS: an unparseable price is not accepted as free\n");
 }
-
 
 /* Clearing a field in the UI must actually clear it. agent.set is a PATCH, so
  * an omitted option changes nothing -- which means "I no longer state this"

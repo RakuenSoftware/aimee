@@ -96,7 +96,8 @@ static void server_provider_free_models(provider_model_t *models, int n)
 
 #define PROVIDER_MODEL_CATALOG_TTL_SECONDS 3600
 
-static int server_provider_models_cached(model_provider_t *p, provider_model_t **models_out, int *n_out)
+static int server_provider_models_cached(model_provider_t *p, provider_model_t **models_out,
+                                         int *n_out)
 {
    *models_out = NULL;
    *n_out = 0;

@@ -7,8 +7,8 @@
 #include "agent.h"
 #include "agent_protocol.h"        /* agent_anthropic_set_system, agent_request_max_tokens */
 #include "agent_request_shaping.h" /* agent_request_shape_user_prompt */
-#include "agent_config.h"   /* agent_catalog_provider */
-#include "model_registry.h" /* model_capability_get, MODEL_CAP_* */
+#include "agent_config.h"          /* agent_catalog_provider */
+#include "model_registry.h"        /* model_capability_get, MODEL_CAP_* */
 #include "model_sampling.h"        /* model_sampling_apply_{openai,anthropic} */
 #include "config.h"
 #include <aimee/ir/aimee_ir.h>

@@ -562,7 +562,6 @@ static void test_benchmarks(void)
           summary.p99_ms == 10.0 && summary.min_ms == 1.0 && summary.max_ms == 10.0);
 }
 
-
 /* Providers: the precedence rules that used to be four hand-written copies.
  *
  * Each case pins a rule that a "value > 0" check gets wrong, which is how the
@@ -597,10 +596,10 @@ static void test_providers(void)
    providers_init(req, sizeof req);
    uint8_t *decl = req + AIMEE_PROVIDERS_OFF_DECLARED_RECORD;
    uint8_t *fetch = req + AIMEE_PROVIDERS_OFF_FETCHED_RECORD;
-   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_PROVIDER,
-                                  AIMEE_PROVIDERS_NAME_MAX, "anthropic") == 0);
-   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL,
-                                  AIMEE_PROVIDERS_MODEL_MAX, "claude-sonnet-5") == 0);
+   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_PROVIDER, AIMEE_PROVIDERS_NAME_MAX,
+                                  "anthropic") == 0);
+   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "claude-sonnet-5") == 0);
    aimee_providers_put_u64(decl + AIMEE_PROVIDERS_OFF_PRICE_IN, 0ull);
    aimee_providers_put_u32(decl + AIMEE_PROVIDERS_OFF_DECLARED, AIMEE_PROVIDERS_DECL_PRICE_IN);
    providers_call(AIMEE_PROVIDERS_STAGE_RESOLVE, req, sizeof req, resp, &resp_len);
@@ -611,13 +610,13 @@ static void test_providers(void)
    /* 2. A DECLARED ZERO CAPACITY DOES NOT WIN -- the opposite rule, on purpose.
     *    There is no zero-token window, so the provider's real number stands. */
    providers_init(req, sizeof req);
-   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL,
-                                  AIMEE_PROVIDERS_MODEL_MAX, "m") == 0);
+   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "m") == 0);
    aimee_providers_put_u32(decl + AIMEE_PROVIDERS_OFF_CONTEXT, 0u);
    aimee_providers_put_u32(decl + AIMEE_PROVIDERS_OFF_DECLARED,
                            AIMEE_PROVIDERS_DECL_CONTEXT_WINDOW);
-   assert(aimee_providers_put_str(fetch + AIMEE_PROVIDERS_OFF_MODEL,
-                                  AIMEE_PROVIDERS_MODEL_MAX, "m") == 0);
+   assert(aimee_providers_put_str(fetch + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "m") == 0);
    aimee_providers_put_u32(fetch + AIMEE_PROVIDERS_OFF_CONTEXT, 1000000u);
    providers_call(AIMEE_PROVIDERS_STAGE_RESOLVE, req, sizeof req, resp, &resp_len);
    assert(aimee_providers_get_u32(rec + AIMEE_PROVIDERS_OFF_CONTEXT) == 1000000u);
@@ -631,8 +630,8 @@ static void test_providers(void)
 
    /* 4. Nobody knows: unknown, not a confident zero. */
    providers_init(req, sizeof req);
-   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL,
-                                  AIMEE_PROVIDERS_MODEL_MAX, "m") == 0);
+   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "m") == 0);
    providers_call(AIMEE_PROVIDERS_STAGE_RESOLVE, req, sizeof req, resp, &resp_len);
    assert(aimee_providers_get_u32(rec + AIMEE_PROVIDERS_OFF_CONTEXT) == 0u);
    assert(rec[AIMEE_PROVIDERS_OFF_CONTEXT_SRC] == AIMEE_PROVIDERS_SRC_UNKNOWN);
@@ -640,20 +639,20 @@ static void test_providers(void)
    /* 5. Two records naming DIFFERENT models are refused rather than merged --
     *    merging attributes one model's limits to another. */
    providers_init(req, sizeof req);
-   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL,
-                                  AIMEE_PROVIDERS_MODEL_MAX, "sonnet") == 0);
-   assert(aimee_providers_put_str(fetch + AIMEE_PROVIDERS_OFF_MODEL,
-                                  AIMEE_PROVIDERS_MODEL_MAX, "opus") == 0);
+   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "sonnet") == 0);
+   assert(aimee_providers_put_str(fetch + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "opus") == 0);
    providers_call(AIMEE_PROVIDERS_STAGE_RESOLVE, req, sizeof req, resp, &resp_len);
    assert(aimee_providers_get_u32(resp + 8) == AIMEE_PROVIDERS_ERR_IDENTITY_MISMATCH);
    assert(aimee_providers_get_u32(resp + 12) == 0u); /* no record on a refusal */
 
    /* 6. Deprecation is the union: either side is enough to retire a model. */
    providers_init(req, sizeof req);
-   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL,
-                                  AIMEE_PROVIDERS_MODEL_MAX, "m") == 0);
-   assert(aimee_providers_put_str(fetch + AIMEE_PROVIDERS_OFF_MODEL,
-                                  AIMEE_PROVIDERS_MODEL_MAX, "m") == 0);
+   assert(aimee_providers_put_str(decl + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "m") == 0);
+   assert(aimee_providers_put_str(fetch + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "m") == 0);
    fetch[AIMEE_PROVIDERS_OFF_DEPRECATED] = 1;
    providers_call(AIMEE_PROVIDERS_STAGE_RESOLVE, req, sizeof req, resp, &resp_len);
    assert(rec[AIMEE_PROVIDERS_OFF_DEPRECATED] == 1);
@@ -663,10 +662,10 @@ static void test_providers(void)
    uint8_t vreq[AIMEE_PROVIDERS_VALIDATE_REQUEST_LEN];
    providers_init(vreq, sizeof vreq);
    uint8_t *prop = vreq + 8;
-   assert(aimee_providers_put_str(prop + AIMEE_PROVIDERS_OFF_PROVIDER,
-                                  AIMEE_PROVIDERS_NAME_MAX, "anthropic") == 0);
-   assert(aimee_providers_put_str(prop + AIMEE_PROVIDERS_OFF_MODEL,
-                                  AIMEE_PROVIDERS_MODEL_MAX, "m") == 0);
+   assert(aimee_providers_put_str(prop + AIMEE_PROVIDERS_OFF_PROVIDER, AIMEE_PROVIDERS_NAME_MAX,
+                                  "anthropic") == 0);
+   assert(aimee_providers_put_str(prop + AIMEE_PROVIDERS_OFF_MODEL, AIMEE_PROVIDERS_MODEL_MAX,
+                                  "m") == 0);
    aimee_providers_put_u32(prop + AIMEE_PROVIDERS_OFF_CONTEXT, 0u);
    aimee_providers_put_u32(prop + AIMEE_PROVIDERS_OFF_DECLARED,
                            AIMEE_PROVIDERS_DECL_CONTEXT_WINDOW);
@@ -681,8 +680,7 @@ static void test_providers(void)
    aimee_providers_put_u32(prop + AIMEE_PROVIDERS_OFF_CONTEXT, 1000u);
    aimee_providers_put_u32(prop + AIMEE_PROVIDERS_OFF_MAX_OUTPUT, 2000u);
    aimee_providers_put_u32(prop + AIMEE_PROVIDERS_OFF_DECLARED,
-                           AIMEE_PROVIDERS_DECL_CONTEXT_WINDOW |
-                               AIMEE_PROVIDERS_DECL_MAX_OUTPUT);
+                           AIMEE_PROVIDERS_DECL_CONTEXT_WINDOW | AIMEE_PROVIDERS_DECL_MAX_OUTPUT);
    providers_call(AIMEE_PROVIDERS_STAGE_VALIDATE, vreq, sizeof vreq, resp, &resp_len);
    assert(aimee_providers_get_u32(resp + 8) == AIMEE_PROVIDERS_ERR_INVALID_DECLARATION);
 

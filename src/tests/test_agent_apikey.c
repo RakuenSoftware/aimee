@@ -457,7 +457,6 @@ static void test_legacy_middleware_context_window_migrates(void)
    assert(ag2->declared & AGENT_DECL_CONTEXT_WINDOW);
 }
 
-
 /* The migration off the bundled catalog: an agent that states no limits adopts
  * the catalog's published figures as its own, once, at load. That is what lets
  * the snapshot eventually be deleted -- every consumer reads the agent, so the
