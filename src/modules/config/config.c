@@ -710,6 +710,15 @@ static void config_set_defaults(config_t *cfg)
     * parse below carries an env override), so the default lives here, not in
     * config_flat_defaults[]. */
    cfg->delegate_sandbox = 1;
+   /* Default-ON: co-located shell execution is namespace-isolated to the workspace.
+    * This is the mode the delegate shell guard in tool_bash() reads (it refuses a
+    * delegated shell when the mode is OFF), so leaving it at the SANDBOX_MODE_OFF
+    * zero value made that guard refuse EVERY co-located delegate shell on an
+    * unconfigured install — isolation-by-default and delegate-shells-work-by-default
+    * cannot both hold while `delegate_sandbox` defaults on and this defaults off.
+    * Non-flat (sandbox is a SCHEMA_OBJECT section), so the default lives here.
+    * Opt out with `sandbox: {"mode": "off"}` — config_save persists that opt-out. */
+   cfg->sandbox.mode = SANDBOX_MODE_WORKSPACE_ONLY;
    snprintf(cfg->delegate_sandbox_package_access, sizeof(cfg->delegate_sandbox_package_access),
             "proxy");
    cfg->compact_enabled = 1; /* default on; set before no-config early returns */

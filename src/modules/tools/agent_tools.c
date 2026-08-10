@@ -825,7 +825,7 @@ char *tool_bash(const char *command, int timeout_ms)
     * delegate — the trusted primary (operator) session, which has no active
     * delegation, is unaffected and still runs on the host. */
 #ifdef __linux__
-   const int host_unsandboxed = (sbox_cfg.mode == SANDBOX_MODE_OFF);
+   const int host_unsandboxed = (sandbox_effective_mode(&sbox_cfg) == SANDBOX_MODE_OFF);
 #else
    const int host_unsandboxed = !guarded_parent; /* guarded_parent already refused below */
 #endif
@@ -835,10 +835,15 @@ char *tool_bash(const char *command, int timeout_ms)
       close(stdout_pipe[1]);
       close(stderr_pipe[0]);
       close(stderr_pipe[1]);
+      /* Say DISABLED, not "unavailable": on Linux this branch tests the configured
+       * mode only — sandbox_available() is never consulted here (it is probed inside
+       * sandbox_exec_internal, which this refusal precedes). The old "off/unavailable"
+       * wording sent readers hunting for a broken kernel/namespace setup when the
+       * actual state is a config value. Name the setting so the fix is obvious. */
       return safe_strdup(
           "{\"stdout\":\"\",\"stderr\":\"refused: a delegated shell requires sandbox isolation, "
-          "but the sandbox is off/unavailable; running unsandboxed on the aimee-server host is "
-          "not permitted\",\"exit_code\":-1}");
+          "but the sandbox is disabled (sandbox.mode=off); running unsandboxed on the "
+          "aimee-server host is not permitted\",\"exit_code\":-1}");
    }
 #ifndef __linux__
    if (guarded_parent)
