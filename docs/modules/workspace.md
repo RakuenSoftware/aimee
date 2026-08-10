@@ -44,6 +44,8 @@ module-local source or module-root header without declaring it now fails CI on `
 
 ## Dependencies and consumers
 
+- `audit`: carries the runner questions to the module over the bus, which is how this module asks
+  who is serving a tree and hands work to that client.
 - `config`: supplies workspace registrations, provider metadata, mirrors, and sandbox overrides.
 - `execution-policy`: authorizes filesystem, process, network, and lifecycle effects within a workspace.
 - `module-runtime`: supplies required lifecycle and readiness contracts for resource access.

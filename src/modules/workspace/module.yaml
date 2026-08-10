@@ -2,6 +2,7 @@
   "descriptor_version": 1,
   "id": "workspace",
   "dependencies": [
+    "audit",
     "config",
     "execution-policy",
     "module-runtime",
