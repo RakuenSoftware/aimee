@@ -79,7 +79,8 @@
     "server-go/modules/delegates/rescue.go",
     "server-go/modules/delegates/rescue_json.go",
     "server-go/modules/delegates/rescue_parse.go",
-    "server-go/modules/delegates/rescue_stage.go"
+    "server-go/modules/delegates/rescue_stage.go",
+    "server-go/modules/delegates/verify.go"
   ],
   "go_tests": [
     "server-go/modules/delegates/delegates_test.go",
@@ -89,7 +90,8 @@
     "server-go/modules/delegates/paths_test.go",
     "server-go/modules/delegates/handoff_test.go",
     "server-go/modules/delegates/rescue_test.go",
-    "server-go/modules/delegates/rescue_stage_test.go"
+    "server-go/modules/delegates/rescue_stage_test.go",
+    "server-go/modules/delegates/verify_test.go"
   ],
   "tests": [
     "src/tests/test_aimee_ir_rescue.c",
