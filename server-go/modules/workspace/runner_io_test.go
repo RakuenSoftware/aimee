@@ -23,13 +23,20 @@ func ioRequest(op byte, id string, payload []byte) []byte {
 }
 
 func io(op byte, id string, payload []byte) ([]byte, bus.ModuleStatus) {
+	body, _, status := ioFull(op, id, payload)
+	return body, status
+}
+
+// ioFull also reports whether more chunks of this result are still coming.
+func ioFull(op byte, id string, payload []byte) ([]byte, bool, bus.ModuleStatus) {
 	response, status := Handle(bus.ModuleInvocation{StageID: StageRunnerIO},
 		ioRequest(op, id, payload))
 	if status != bus.ModuleStatusOK {
-		return nil, status
+		return nil, false, status
 	}
-	length := int(binary.LittleEndian.Uint32(response[4:8]))
-	return response[ioHeaderLen-4 : ioHeaderLen-4+length], status
+	more := binary.LittleEndian.Uint32(response[4:8])&ioMore != 0
+	length := int(binary.LittleEndian.Uint32(response[8:12]))
+	return response[ioRespHeaderLen : ioRespHeaderLen+length], more, status
 }
 
 // The whole point of the rendezvous: work the server needs done reaches the
@@ -121,6 +128,107 @@ func TestRunnerIOElapsedPollReportsCancelledSoTheClientRepolls(t *testing.T) {
 		ioRequest(IOOpPoll, "/srv/repo", nil))
 	if status != bus.ModuleStatusCancelled {
 		t.Fatalf("elapsed poll status = %d, want cancelled", status)
+	}
+}
+
+// A result that arrives in pieces. One response per request is the protocol, so
+// the submitter is told there is more and pulls the rest; the alternative is
+// buffering a whole LLM response before anyone sees a token of it.
+func TestRunnerIOStreamsAResultInChunks(t *testing.T) {
+	reset()
+	call(t, RunnerOpRegister, "/srv/repo")
+
+	type outcome struct {
+		chunks []string
+		ok     bool
+	}
+	got := make(chan outcome, 1)
+	go func() {
+		var chunks []string
+		body, more, status := ioFull(IOOpSubmit, "/srv/repo", []byte("run agent"))
+		if status != bus.ModuleStatusOK {
+			got <- outcome{nil, false}
+			return
+		}
+		chunks = append(chunks, string(body))
+		for more {
+			body, more, status = ioFull(IOOpDrain, "/srv/repo", nil)
+			if status != bus.ModuleStatusOK {
+				got <- outcome{nil, false}
+				return
+			}
+			chunks = append(chunks, string(body))
+		}
+		got <- outcome{chunks, true}
+	}()
+
+	// Client side: claim the op, then emit two partials and a final.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if next, status := io(IOOpPoll, "/srv/repo", nil); status == bus.ModuleStatusOK && len(next) > 0 {
+			break
+		}
+	}
+	for _, part := range []string{"tok1", "tok2"} {
+		if _, status := io(IOOpRespondPartial, "/srv/repo", []byte(part)); status != bus.ModuleStatusOK {
+			t.Fatalf("partial %q status = %d", part, status)
+		}
+	}
+	if _, status := io(IOOpRespond, "/srv/repo", []byte("done")); status != bus.ModuleStatusOK {
+		t.Fatalf("final status = %d", status)
+	}
+
+	select {
+	case result := <-got:
+		if !result.ok {
+			t.Fatal("submitter failed mid-stream")
+		}
+		want := []string{"tok1", "tok2", "done"}
+		if len(result.chunks) != len(want) {
+			t.Fatalf("chunks = %v, want %v", result.chunks, want)
+		}
+		for i := range want {
+			if result.chunks[i] != want[i] {
+				t.Fatalf("chunks = %v, want %v", result.chunks, want)
+			}
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("submitter never finished draining")
+	}
+
+	// The stream is over, so there is nothing left to pull.
+	if _, _, status := ioFull(IOOpDrain, "/srv/repo", nil); status == bus.ModuleStatusOK {
+		t.Fatal("drain after the final chunk succeeded")
+	}
+}
+
+// A partial keeps the claim: the client is still producing, so the tree is not
+// free for the next op yet.
+func TestRunnerIOPartialKeepsTheClaimAndFinalReleasesIt(t *testing.T) {
+	reset()
+	call(t, RunnerOpRegister, "/srv/repo")
+
+	go func() { _, _, _ = ioFull(IOOpSubmit, "/srv/repo", []byte("op")) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if next, status := io(IOOpPoll, "/srv/repo", nil); status == bus.ModuleStatusOK && len(next) > 0 {
+			break
+		}
+	}
+	if _, status := io(IOOpRespondPartial, "/srv/repo", []byte("a")); status != bus.ModuleStatusOK {
+		t.Fatalf("first partial status = %d", status)
+	}
+	// Still claimed, so a second partial is accepted.
+	if _, status := io(IOOpRespondPartial, "/srv/repo", []byte("b")); status != bus.ModuleStatusOK {
+		t.Fatalf("second partial status = %d", status)
+	}
+	if _, status := io(IOOpRespond, "/srv/repo", []byte("z")); status != bus.ModuleStatusOK {
+		t.Fatalf("final status = %d", status)
+	}
+	// Released: a further response belongs to no claim.
+	if _, status := io(IOOpRespond, "/srv/repo", []byte("extra")); status == bus.ModuleStatusOK {
+		t.Fatal("a response after the final one was accepted")
 	}
 }
 
