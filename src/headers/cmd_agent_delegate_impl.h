@@ -215,6 +215,12 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
                                    int tier_override, const char *provider_override,
                                    const char *model_override, char *errbuf, size_t errbuf_sz);
 int delegate_route_preflight(agent_config_t *cfg, const char *role, char *errbuf, size_t errbuf_sz);
+/* Answers the delegates module's capability question. Returns 0 and fills both
+ * outputs, or non-zero when the module cannot be reached. */
+typedef int (*delegate_capability_provider_fn)(const char *prompt, int tools_enabled,
+                                               unsigned *required_caps, int *min_context);
+void delegate_routing_register_capability_provider(delegate_capability_provider_fn provider);
+
 void delegate_infer_capability_requirements(const char *prompt, int tools_enabled,
                                             unsigned *required_caps_out, int *min_context_out);
 /* Disable every agent whose declared max_scope ceiling cannot serve a packet of
