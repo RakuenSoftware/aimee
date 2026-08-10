@@ -45,6 +45,7 @@ typedef struct
    const char *id;       /* workspace id */
    const char *endpoint; /* remote /v1 endpoint (NULL when local) */
    const char *bearer;   /* bearer for the remote endpoint */
+   int warned_unserved;  /* the "no runner registered" notice is said once */
 } serve_ctx_t;
 
 static volatile sig_atomic_t g_serve_stop = 0;
@@ -89,6 +90,21 @@ static cJSON *serve_fetch(void *vctx)
          cJSON *o = cJSON_GetObjectItemCaseSensitive(resp, "op");
          if (cJSON_IsObject(o))
             op = cJSON_Duplicate(o, 1);
+      }
+      /* `served:false` means the server has no runner registered for this tree,
+       * so nothing will ever be handed to us. Say so once rather than polling
+       * in silence: this loop has no backoff of its own by design (it relies on
+       * the server capping the wait), and the operator's real problem is that
+       * this serve loop is pointed at a tree the server does not know about.
+       * Older servers omit the field, so absence is treated as served. */
+      const cJSON *served = resp ? cJSON_GetObjectItemCaseSensitive(resp, "served") : NULL;
+      if (cJSON_IsBool(served) && !cJSON_IsTrue(served) && !c->warned_unserved)
+      {
+         c->warned_unserved = 1;
+         fprintf(stderr,
+                 "aimee workspace serve: the server has no runner registered for \"%s\"; "
+                 "it will hand this loop no work. Re-register the workspace, or stop serving it.\n",
+                 c->id);
       }
       cJSON_Delete(resp);
       return op;
@@ -162,7 +178,7 @@ static int serve_post(void *vctx, cJSON *response)
 int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const char *endpoint,
                              const char *bearer, volatile sig_atomic_t *stop)
 {
-   serve_ctx_t ctx = {sock, workspace_id, endpoint, bearer};
+   serve_ctx_t ctx = {sock, workspace_id, endpoint, bearer, 0};
    int rc = 0;
    int consecutive_errors = 0;
    while (!*stop)

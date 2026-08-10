@@ -1737,7 +1737,8 @@ static int rh_runner_poll(const route_req_t *rq, char *resp, int cap)
       cJSON_Delete(body);
       return err_json(resp, cap, 400, "missing workspace_id");
    }
-   cJSON *op = ws_runner_registry_poll(wsid, V1_RUNNER_POLL_MS);
+   int unserved = 0; /* poll paces an unserved tree itself; see its header */
+   cJSON *op = ws_runner_registry_poll(wsid, V1_RUNNER_POLL_MS, &unserved);
    cJSON_Delete(body);
 
    cJSON *out = cJSON_CreateObject();
@@ -1748,6 +1749,10 @@ static int rh_runner_poll(const route_req_t *rq, char *resp, int cap)
    }
    cJSON_AddBoolToObject(out, "ok", 1);
    cJSON_AddBoolToObject(out, "have_op", op != NULL);
+   /* Distinct from have_op: "there is no work" vs "there is no runner". A
+    * client that knows the difference can stop or warn instead of polling a
+    * tree that will never answer. */
+   cJSON_AddBoolToObject(out, "served", !unserved);
    if (op)
       cJSON_AddItemToObject(out, "op", op); /* transfers ownership */
    char *s = cJSON_PrintUnformatted(out);

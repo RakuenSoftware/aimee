@@ -192,7 +192,11 @@ int ws_runner_io(unsigned op, const char *id, const char *payload, size_t payloa
    if (rc != 0)
    {
       free(response);
-      return -1;
+      /* Keep "nobody is serving this tree" distinguishable from every other
+       * failure. The module answers it as CAPABILITY_ABSENT precisely so this
+       * layer can pass it on; collapsing it into -1 here is what let the poll
+       * loop treat a permanent condition as a transient one. */
+      return (rc == (int)AIMEE_MODULE_CALL_CAPABILITY_ABSENT) ? WS_RUNNER_IO_UNSERVED : -1;
    }
 
    const uint8_t *body = NULL;
@@ -220,15 +224,41 @@ int ws_runner_io(unsigned op, const char *id, const char *payload, size_t payloa
    return 0;
 }
 
-cJSON *ws_runner_registry_poll(const char *id, int timeout_ms)
+cJSON *ws_runner_registry_poll(const char *id, int timeout_ms, int *unserved)
 {
    char *body = NULL;
    size_t body_len = 0;
+   if (unserved)
+      *unserved = 0;
    if (!id || !id[0])
       return NULL;
-   if (ws_runner_io(AIMEE_WS_IO_OP_POLL, id, NULL, 0, &body, &body_len, NULL,
-                    timeout_ms > 0 ? (uint64_t)timeout_ms : 1000ULL) != 0)
-      return NULL; /* elapsed with nothing pending, or the tree is unserved */
+   int rc = ws_runner_io(AIMEE_WS_IO_OP_POLL, id, NULL, 0, &body, &body_len, NULL,
+                         timeout_ms > 0 ? (uint64_t)timeout_ms : 1000ULL);
+   if (rc != 0)
+   {
+      /* Report the two apart: WS_RUNNER_IO_UNSERVED came back immediately and
+       * will keep doing so, while any other failure includes the ordinary
+       * "waited, nothing arrived". */
+      if (rc == WS_RUNNER_IO_UNSERVED)
+      {
+         if (unserved)
+            *unserved = 1;
+         /* PACE IT HERE, so every poll caller is covered by construction. Both
+          * poll endpoints are long polls whose clients re-poll the instant they
+          * answer; the wait IS the pacing, and an unserved tree is refused
+          * without one. Absorbing the caller's own budget costs a correct
+          * client nothing and bounds an incorrect one — including clients too
+          * old to know about the `served` flag. Capped, because a 25s socket
+          * budget spent sleeping would read as a hang and would delay noticing
+          * a runner that arrives late. */
+         long pace_ms = (timeout_ms > 0 && (uint64_t)timeout_ms < WS_RUNNER_UNSERVED_PACE_MS)
+                            ? (long)timeout_ms
+                            : (long)WS_RUNNER_UNSERVED_PACE_MS;
+         struct timespec pace = {.tv_sec = pace_ms / 1000, .tv_nsec = (pace_ms % 1000) * 1000000L};
+         nanosleep(&pace, NULL);
+      }
+      return NULL;
+   }
    cJSON *op = body_len ? cJSON_Parse(body) : NULL;
    free(body);
    return op;
