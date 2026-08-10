@@ -320,14 +320,12 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-workspace-mirror \
                $(TESTPREFIX)/unit-test-workspace-client-base \
                $(TESTPREFIX)/unit-test-workspace-provider-detached \
-               $(TESTPREFIX)/unit-test-workspace-runner-queue \
                $(TESTPREFIX)/unit-test-cli-kb-smoke \
                $(TESTPREFIX)/unit-test-kb-sidecar-identity \
                $(TESTPREFIX)/unit-test-synthesis-mtls-client \
                $(TESTPREFIX)/unit-test-workspace-scope \
                $(TESTPREFIX)/unit-test-workspace-migration \
                $(TESTPREFIX)/unit-test-webuser-runtime \
-               $(TESTPREFIX)/unit-test-workspace-runner-registry \
                $(TESTPREFIX)/unit-test-workspace-turn \
                $(TESTPREFIX)/unit-test-notes \
                $(TESTPREFIX)/unit-test-cmd-cancel \
@@ -4017,23 +4015,10 @@ $(TESTPREFIX)/unit-test-workspace-migration: \
                       $(OBJDIR)/aimee_home.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-workspace-runner-queue: \
-                      $(OBJDIR)/tests/test_workspace_runner_queue.o \
-                      $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
-                      $(OBJDIR)/modules/workspace/workspace_provider_detached.o \
-                      $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o $(OBJDIR)/cJSON.o
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
-
-$(TESTPREFIX)/unit-test-workspace-runner-registry: \
-                      $(OBJDIR)/tests/test_workspace_runner_registry.o \
-                      $(OBJDIR)/modules/workspace/workspace_runner_registry.o \
-                      $(OBJDIR)/modules/workspace/workspace_runner_queue.o $(OBJDIR)/cJSON.o
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
-
 $(TESTPREFIX)/unit-test-workspace-turn: $(OBJDIR)/tests/test_workspace_turn.o \
                       $(OBJDIR)/modules/workspace/workspace_turn.o $(OBJDIR)/modules/workspace/workspace_provider_container.o $(OBJDIR)/modules/delegates/delegate_backend.o $(OBJDIR)/tests/support/git_cred_inject_stub.o \
                       $(OBJDIR)/modules/workspace/workspace_provider_detached.o \
-                      $(OBJDIR)/modules/workspace/workspace_runner_registry.o \
+                      $(OBJDIR)/modules/workspace/workspace_runner_registry.o $(OBJDIR)/tests/support/obs_bus_module_call_stub.o \
                       $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
                       $(OBJDIR)/modules/workspace/workspace_mirror.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o \
                       $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/posix/util.o $(TEST_CORE_OBJS)

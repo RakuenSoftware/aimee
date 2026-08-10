@@ -2,6 +2,7 @@
   "descriptor_version": 1,
   "id": "workspace",
   "dependencies": [
+    "audit",
     "config",
     "execution-policy",
     "module-runtime",
@@ -59,8 +60,6 @@
     "src/tests/test_workspace_provider.c",
     "src/tests/test_workspace_provider_container.c",
     "src/tests/test_workspace_provider_detached.c",
-    "src/tests/test_workspace_runner_queue.c",
-    "src/tests/test_workspace_runner_registry.c",
     "src/tests/test_workspace_scope.c",
     "src/tests/test_workspace_turn.c"
   ],

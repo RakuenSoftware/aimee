@@ -11,11 +11,52 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "util.h"
+#include <aimee/workspace/module_api.h>
+#include <stdint.h>
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* ── fake workspace module ────────────────────────────────────────────────────
+ *
+ * Which client is serving which tree is the module's answer now, so a turn that
+ * binds a detached provider has to ask for it. There is no bus in a unit test,
+ * so this stands in for the module and reports that every tree asked about is
+ * being served by itself. */
+
+typedef int (*ws_test_module_responder_fn)(uint32_t, uint32_t, const void *, uint32_t, void *,
+                                           uint32_t, uint32_t *);
+void ws_test_set_module_responder(ws_test_module_responder_fn fn);
+
+static int fake_module(uint32_t event_kind, uint32_t stage_id, const void *request,
+                       uint32_t request_len, void *response, uint32_t response_capacity,
+                       uint32_t *response_len)
+{
+   (void)stage_id;
+   (void)request_len;
+   if (event_kind != AIMEE_WORKSPACE_EVENT_RUNNER ||
+       response_capacity < AIMEE_WS_RUNNER_RESPONSE_LEN)
+      return -1;
+   const uint8_t *in = (const uint8_t *)request;
+   uint8_t *out = (uint8_t *)response;
+   memset(out, 0, AIMEE_WS_RUNNER_RESPONSE_LEN);
+   aimee_workspace_put_u32(out, AIMEE_WS_RUNNER_RESPONSE_MAGIC);
+   /* Register and forget only need to succeed; resolve answers with the tree
+    * that was asked about, which is what a client serving it would look like. */
+   if (in[5] == AIMEE_WS_RUNNER_OP_RESOLVE)
+   {
+      uint16_t len = aimee_workspace_get_u16(in + 6);
+      if (len > AIMEE_WS_RUNNER_ID_MAX)
+         len = AIMEE_WS_RUNNER_ID_MAX;
+      aimee_workspace_put_u32(out + 4, len);
+      memcpy(out + 8, in + 8, len);
+   }
+   if (response_len)
+      *response_len = AIMEE_WS_RUNNER_RESPONSE_LEN;
+   return 0;
+}
 
 /* ── fake docker backend for the delegate-sandbox cases ───────────────────── */
 
@@ -92,6 +133,8 @@ int main(void)
    snprintf(cfg.workspaces[1], MAX_PATH_LEN, "/tmp/ws-shared");
    cfg.workspace_providers[1][0] = '\0';
    assert(config_save(&cfg) == 0);
+
+   ws_test_set_module_responder(fake_module);
 
    const workspace_provider_t *shared = workspace_provider_shared();
 
