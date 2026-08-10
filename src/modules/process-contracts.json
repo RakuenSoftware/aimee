@@ -156,6 +156,11 @@
           "id": 6,
           "name": "delegate-tool-call-rescue",
           "event_kind": 6662
+        },
+        {
+          "id": 7,
+          "name": "delegate-verify-outcome",
+          "event_kind": 6663
         }
       ]
     },
