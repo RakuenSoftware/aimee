@@ -14,6 +14,7 @@
 #include "modules/memory/memory_fact_gate.h"
 #include "modules/memory/memory_pii_gate.h"
 #include "modules/skills/skill_trigger_policy.h"
+#include "cmd_agent_delegate_impl.h" /* delegate_routing_register_capability_provider */
 #include "modules/webuser/webuser_runtime.h"
 #include "modules/workspace/workspace_scope.h"
 #include <aimee/audit/obs_bus.h>
