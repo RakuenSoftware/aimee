@@ -173,12 +173,14 @@ int workspace_mirror_reconstruct(ws_git_runner_fn run, void *ctx, const char *mi
       run(ctx, clean, NULL, 0); /* best-effort: drop a prior turn's stray untracked */
    }
 
-   /* Apply the client's working-tree patch on top, if any. `--binary` so the
-    * git-binary hunks the client ships for binary files apply too; the same
-    * patch also carries tracked mods, deletions, and untracked-file additions. */
+   /* Apply the client's working-tree patch on top, if any. A clean client still
+    * publishes a zero-byte snapshot file, so --allow-empty makes that valid on
+    * the first Git call instead of leaving a correctly-created but rejected
+    * worktree behind. `--binary` covers binary hunks; the same patch also carries
+    * tracked mods, deletions, and untracked-file additions. */
    if (diff_path && diff_path[0])
    {
-      const char *apply[] = {"-C",       work_dir,  "apply", "--whitespace=nowarn",
+      const char *apply[] = {"-C",       work_dir,  "apply", "--allow-empty", "--whitespace=nowarn",
                              "--binary", diff_path, NULL};
       if (run(ctx, apply, NULL, 0) != 0)
          return -1;
@@ -216,7 +218,7 @@ int workspace_mirror_reconstruct_branch(ws_git_runner_fn run, void *ctx, const c
    }
    if (diff_path && diff_path[0])
    {
-      const char *apply[] = {"-C",       work_dir,  "apply", "--whitespace=nowarn",
+      const char *apply[] = {"-C",       work_dir,  "apply", "--allow-empty", "--whitespace=nowarn",
                              "--binary", diff_path, NULL};
       if (run(ctx, apply, NULL, 0) != 0)
          return -1;

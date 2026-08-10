@@ -109,7 +109,8 @@ int main(void)
    assert(workspace_mirror_reconstruct(mock_git, NULL, "/m", "/w", "abc123", "/w/.client.diff") ==
           0);
    assert(strstr(g_cmd_log, "-C /m worktree add --detach --force /w abc123") != NULL);
-   assert(strstr(g_cmd_log, "-C /w apply --whitespace=nowarn --binary /w/.client.diff") != NULL);
+   assert(strstr(g_cmd_log,
+                 "-C /w apply --allow-empty --whitespace=nowarn --binary /w/.client.diff") != NULL);
    assert(strstr(g_cmd_log, "checkout") == NULL); /* add succeeded → no fallback */
 
    /* --- reconstruct: no diff → clean checkout, NO apply --- */
@@ -148,6 +149,9 @@ int main(void)
    assert(strstr(g_cmd_log, "-C /w-2 remote set-url origin https://host/r.git") != NULL);
    assert(strstr(g_cmd_log, "-C /w-2 checkout -B fix/live abc123") != NULL);
    assert(strstr(g_cmd_log, "-C /w-2 branch --set-upstream-to origin/fix/live fix/live") != NULL);
+   assert(strstr(g_cmd_log,
+                 "-C /w-2 apply --allow-empty --whitespace=nowarn --binary /w/client.diff") !=
+          NULL);
 
    /* --- drift_report: surfaced summary lines for each verdict --- */
    char rep[256];
