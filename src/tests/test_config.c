@@ -1660,6 +1660,85 @@ int main(void)
       assert(strcmp(cfg2.sandbox.allow_paths[1], "/opt/b") == 0);
    }
 
+   /* --- sandbox mode: defaults, opt-out persistence, and bad input ---
+    *
+    * Read through config_sandbox() rather than a config_t. check-config-encapsulation
+    * ratchets config_t exposure in this file DOWNWARD — the baseline is debt, not
+    * headroom — so these cases go through the accessor the checker steers callers to.
+    * That is also the honest surface: the delegate shell guard in tool_bash() reads
+    * config_sandbox(), not a config_t.
+    *
+    * Deliberately NOT via config_reload(): publishing a snapshot makes every later
+    * config_load() in the process return that snapshot instead of the file
+    * (config.c:1128), which silently breaks any test after this one. With no snapshot
+    * live, config_sandbox() heap-loads from disk, which is what these cases want.
+    * AIMEE_NO_CACHE defeats the stat-keyed load cache so successive rewrites of the
+    * same path are always re-read. */
+   {
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+      sandbox_config_t sb;
+      setenv("AIMEE_NO_CACHE", "1", 1);
+
+      /* DEFAULT-ON with no sandbox section. The guard refuses a delegated shell
+       * whenever the mode is OFF, so while this defaulted to the zero value it
+       * refused every co-located delegate shell on an unconfigured install. */
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "provider: claude\n");
+      fclose(f);
+      memset(&sb, 0, sizeof(sb));
+      config_sandbox(&sb);
+      assert(sb.mode == SANDBOX_MODE_WORKSPACE_ONLY);
+
+      /* The explicit opt-out SURVIVES a save. config_save persists the sandbox block
+       * only when it differs from the default; with the default flipped, testing that
+       * predicate against OFF would drop an operator's "off" on the next save and
+       * silently re-enable the sandbox. config_set_* performs a real load/modify/save
+       * cycle, so it exercises the persistence path without naming config_t. */
+      f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "provider: claude\n"
+                 "sandbox:\n"
+                 "  mode: off\n");
+      fclose(f);
+      memset(&sb, 0, sizeof(sb));
+      config_sandbox(&sb);
+      assert(sb.mode == SANDBOX_MODE_OFF); /* opt-out parsed */
+
+      assert(config_set_fold_enabled(0) == 0); /* forces a save of the whole config */
+      memset(&sb, 0, sizeof(sb));
+      config_sandbox(&sb);
+      assert(sb.mode == SANDBOX_MODE_OFF); /* opt-out still honoured after the save */
+
+      /* An unknown mode string keeps the default and never downgrades.
+       * sandbox_mode_from_string() maps anything unrecognized to OFF, which would
+       * silently disable isolation on a typo now that the default is on. */
+      f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "provider: claude\n"
+                 "sandbox:\n"
+                 "  mode: wokspace_only\n");
+      fclose(f);
+      memset(&sb, 0, sizeof(sb));
+      config_sandbox(&sb);
+      assert(sb.mode == SANDBOX_MODE_WORKSPACE_ONLY);
+
+      /* The loose leading-character parse is preserved, so configs saying "allow"
+       * or "workspace" do not regress into the default. */
+      f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "provider: claude\n"
+                 "sandbox:\n"
+                 "  mode: allow\n");
+      fclose(f);
+      memset(&sb, 0, sizeof(sb));
+      config_sandbox(&sb);
+      assert(sb.mode == SANDBOX_MODE_ALLOWLIST);
+
+      unsetenv("AIMEE_NO_CACHE");
+   }
+
    /* --- compact config: defaults --- */
    {
       static config_t cfg;

@@ -1288,17 +1288,36 @@ static void test_tool_bash(void)
 
 /* Containment: a DELEGATE (untrusted model) must never run a shell UNSANDBOXED on
  * the aimee-server host — that host is uid 0 with the docker socket mounted, so an
- * unsandboxed command is a host-root escalation. The test config's sandbox mode is
- * OFF (default), so tool_bash would otherwise fork on the host; with a delegation
- * active it must refuse instead. The primary session (no delegation) still runs. */
+ * unsandboxed command is a host-root escalation. With a delegation active tool_bash
+ * must refuse instead of forking on the host. The primary session (no delegation)
+ * still runs.
+ *
+ * The sandbox is OPTED OUT explicitly here rather than relying on the config default:
+ * the default is now SANDBOX_MODE_WORKSPACE_ONLY, so an inherited default no longer
+ * reaches the unsandboxed branch at all, and a test that depends on it would silently
+ * stop exercising the containment it exists to prove. `sandbox: {mode: off}` is also
+ * the realistic shape of this risk — an operator who turned isolation off. */
+/* Containment: a DELEGATE (untrusted model) must never run a shell UNSANDBOXED on the
+ * aimee-server host — that host is uid 0 with the docker socket mounted, so an
+ * unsandboxed command is a host-root escalation. With a delegation active tool_bash
+ * must refuse rather than fork on the host; the primary session still runs.
+ *
+ * The mode is forced through the test seam rather than through config. The mode now
+ * defaults to WORKSPACE_ONLY, and this binary cannot redirect config in-process (the
+ * config path resolves before a test can move HOME), so without the override this
+ * fail-closed branch would silently stop being exercised. */
 static void test_tool_bash_delegate_unsandboxed_refused(void)
 {
+   sandbox_set_mode_override_for_test(SANDBOX_MODE_OFF);
+
    g_test_delegation_id = "test-deleg";
    char *result = tool_bash("echo escalated", 5000);
    assert(result != NULL);
    assert(strstr(result, "refused") != NULL);   /* fail-closed */
    assert(strstr(result, "escalated") == NULL); /* the command did NOT run */
    assert(strstr(result, "\"exit_code\":-1") != NULL);
+   /* Names the setting rather than blaming an "unavailable" sandbox. */
+   assert(strstr(result, "sandbox.mode=off") != NULL);
    free(result);
 
    /* The trusted primary (operator) session still runs on the host. */
@@ -1307,6 +1326,20 @@ static void test_tool_bash_delegate_unsandboxed_refused(void)
    assert(result != NULL);
    assert(strstr(result, "primary-ok") != NULL);
    free(result);
+
+   /* With the sandbox ON, the same delegated command is contained by ISOLATION
+    * instead of refusal — it runs, rather than being refused. This is the branch the
+    * new default puts real installs on, so it is asserted rather than assumed. */
+   sandbox_set_mode_override_for_test(SANDBOX_MODE_WORKSPACE_ONLY);
+   g_test_delegation_id = "test-deleg";
+   result = tool_bash("echo contained", 5000);
+   assert(result != NULL);
+   assert(strstr(result, "refused") == NULL);
+   assert(strstr(result, "\"exit_code\":0") != NULL);
+   free(result);
+
+   g_test_delegation_id = NULL;
+   sandbox_set_mode_override_for_test(-1); /* restore production behaviour */
 }
 
 /* A write into a source checkout is redirected into an aimee-managed worktree
