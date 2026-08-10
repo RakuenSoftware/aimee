@@ -252,13 +252,13 @@ int git_pr_ci_permits_merge(git_pr_ci_t ci);
  * over 3 hours on one run, holding the single active-root slot). Callers must
  * treat 3 as terminal. */
 
-/* Does this 405/409 merge error describe a content CONFLICT (terminal) rather
- * than a lost race (retryable)? Text-matching a forge message is unlovely, but
- * GitHub returns the same status for both and the message is the only signal it
- * gives. Fails SAFE: an unrecognised message is reported as NOT a conflict, so
- * an unfamiliar phrasing degrades to today's retry behaviour rather than
- * terminating a run that could have succeeded. Pure; unit-tested. */
-int git_pr_merge_err_is_conflict(const char *err);
+/* The conflict-vs-lost-race classification itself now happens in the git module
+ * (server-go/modules/git, isMergeConflict): the merge runs there, so the message
+ * is read where it arrives rather than re-derived from a rendered error string
+ * here. The stage reports the two apart as `conflict` and `retryable`, and the
+ * 2-vs-3 mapping above is a straight translation of those. The phrasings that
+ * must and must not terminate are pinned by
+ * TestMergeConflictClassificationFailsSafeTowardRetry. */
 int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number, char *err,
                          size_t errlen);
 int git_pr_merge_via_api_slug(const char *principal, const char *slug, int number, char *err,
