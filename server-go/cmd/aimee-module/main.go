@@ -109,6 +109,7 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 			{EventKind: delegates.EventHandoff, StageID: delegates.StageHandoff},
 			{EventKind: delegates.EventRescue, StageID: delegates.StageRescue},
 			{EventKind: delegates.EventVerify, StageID: delegates.StageVerify},
+			{EventKind: delegates.EventEconomics, StageID: delegates.StageEconomics},
 		}
 		config.Handler = delegates.Handle
 	case "tools":

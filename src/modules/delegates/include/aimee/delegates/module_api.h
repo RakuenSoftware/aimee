@@ -338,4 +338,86 @@ static inline int aimee_delegates_verify_request_encode(unsigned op, int a, int 
    return 0;
 }
 
+/* --- Delegate-run economics (stage 8) --- */
+
+#define AIMEE_DELEGATES_EVENT_ECONOMICS          6664u
+#define AIMEE_DELEGATES_STAGE_ECONOMICS          8u
+#define AIMEE_DELEGATES_ECON_REQUEST_MAGIC       0x51434544u /* "DECQ" */
+#define AIMEE_DELEGATES_ECON_RESPONSE_MAGIC      0x53434544u /* "DECS" */
+#define AIMEE_DELEGATES_ECON_REQ_HEADER_LEN      16u
+#define AIMEE_DELEGATES_ECON_VERDICT_LEN         32u
+#define AIMEE_DELEGATES_ECON_ADVICE_LEN          256u
+#define AIMEE_DELEGATES_ECON_LABEL_LEN           64u
+#define AIMEE_DELEGATES_ECON_FIELD_COUNT         19u
+#define AIMEE_DELEGATES_ECON_RESPONSE_LEN                                                          \
+   (4u + AIMEE_DELEGATES_ECON_FIELD_COUNT * 4u + AIMEE_DELEGATES_ECON_VERDICT_LEN +                \
+    AIMEE_DELEGATES_ECON_ADVICE_LEN + 2u * AIMEE_DELEGATES_ECON_LABEL_LEN)
+#define AIMEE_DELEGATES_ECON_MAX_TASKS  4096u
+#define AIMEE_DELEGATES_ECON_MAX_AGENTS 4096u
+
+/* Start a request; tasks and agents are appended with the helpers below. */
+static inline size_t aimee_delegates_econ_request_begin(uint32_t task_count, uint32_t agent_count,
+                                                        uint8_t *out, size_t cap)
+{
+   if (!out || cap < AIMEE_DELEGATES_ECON_REQ_HEADER_LEN ||
+       task_count > AIMEE_DELEGATES_ECON_MAX_TASKS ||
+       agent_count > AIMEE_DELEGATES_ECON_MAX_AGENTS)
+      return 0;
+   memset(out, 0, AIMEE_DELEGATES_ECON_REQ_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_ECON_REQUEST_MAGIC);
+   out[4] = 1; /* wire version */
+   aimee_delegates_put_u32(out + 8, task_count);
+   aimee_delegates_put_u32(out + 12, agent_count);
+   return AIMEE_DELEGATES_ECON_REQ_HEADER_LEN;
+}
+
+static inline size_t aimee_delegates_econ_put_task(const char *status, const char *claimed_by,
+                                                   const char *files, const char *result,
+                                                   uint8_t *out, size_t at, size_t cap)
+{
+   size_t status_len = status ? strlen(status) : 0;
+   size_t claimed_len = claimed_by ? strlen(claimed_by) : 0;
+   size_t files_len = files ? strlen(files) : 0;
+   size_t result_len = result ? strlen(result) : 0;
+   if (!out || at == 0 || status_len > 0xffffu || claimed_len > 0xffffu ||
+       at + 12 + status_len + claimed_len + files_len + result_len > cap)
+      return 0;
+
+   out[at] = (uint8_t)(status_len & 0xffu);
+   out[at + 1] = (uint8_t)((status_len >> 8) & 0xffu);
+   out[at + 2] = (uint8_t)(claimed_len & 0xffu);
+   out[at + 3] = (uint8_t)((claimed_len >> 8) & 0xffu);
+   aimee_delegates_put_u32(out + at + 4, (uint32_t)files_len);
+   aimee_delegates_put_u32(out + at + 8, (uint32_t)result_len);
+   at += 12;
+   if (status_len)
+      memcpy(out + at, status, status_len);
+   at += status_len;
+   if (claimed_len)
+      memcpy(out + at, claimed_by, claimed_len);
+   at += claimed_len;
+   if (files_len)
+      memcpy(out + at, files, files_len);
+   at += files_len;
+   if (result_len)
+      memcpy(out + at, result, result_len);
+   return at + result_len;
+}
+
+static inline size_t aimee_delegates_econ_put_agent(const char *name, int tier, uint8_t *out,
+                                                    size_t at, size_t cap)
+{
+   size_t name_len = name ? strlen(name) : 0;
+   if (!out || at == 0 || name_len > 0xffffu || at + 2 + name_len + 4 > cap)
+      return 0;
+   out[at] = (uint8_t)(name_len & 0xffu);
+   out[at + 1] = (uint8_t)((name_len >> 8) & 0xffu);
+   at += 2;
+   if (name_len)
+      memcpy(out + at, name, name_len);
+   at += name_len;
+   aimee_delegates_put_u32(out + at, (uint32_t)tier);
+   return at + 4;
+}
+
 #endif
