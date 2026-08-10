@@ -2503,11 +2503,16 @@ int config_sandbox_package_access_valid(const char *s);
 
 /* Resolve the embedding command actually used to embed text. Precedence:
  * a per-call `requested` command (e.g. from a request payload), then the
- * configured cfg->embedder_command, then "builtin". Either argument may be
- * NULL. "builtin" is a 384-dim deterministic hash that real halfvec(1024)/
- * (2560) columns reject, so it is only correct in a 384-dim shim/test setup;
- * every production path must carry a real embedder via config or request. This
- * is the single point of truth -- do not re-inline the ternary at call sites. */
+ * EMBEDDER_URL environment variable, then the configured cfg->embedder_command,
+ * then "" when nothing is selected. Either argument may be NULL.
+ *
+ * EMBEDDER_URL outranks config because it is how the RUNNING embedder announces
+ * itself: the kb entrypoint exports it when it starts the bundled in-container
+ * model, so a bundled model and an operator's external endpoint arrive by the
+ * same route. Callers asking "is an embedder available at all" must come through
+ * here for that reason -- the stored field alone is empty on every bundled
+ * deployment. This is the single point of truth -- do not re-inline the
+ * ternary at call sites. */
 const char *config_embedder_command(const config_t *cfg, const char *requested);
 
 /* As config_embedder_command, but the caller never holds a config_t. Prefer
@@ -2516,8 +2521,11 @@ const char *config_embedder_command(const config_t *cfg, const char *requested);
  * this thread. */
 const char *config_embedder_command_current(const char *requested);
 
-/* The raw configured value, empty when unset — unlike the resolving form
- * above, which never returns empty. */
+/* The raw configured value: empty when unset, and ALSO empty whenever the
+ * embedder came from EMBEDDER_URL rather than config — which is every bundled
+ * deployment. Use this only to answer "did the operator write this key", never
+ * "is an embedder available"; for that, call the resolving form above and test
+ * for empty. */
 const char *config_embedder_command_field(void);
 
 /* Copy one element of a config array out. For callers that pass the whole

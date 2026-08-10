@@ -148,11 +148,48 @@ static void test_bool_true_parses_as_true(void)
    printf("bool-true ");
 }
 
+/* A bundled embedder reaches the process as EMBEDDER_URL, never as the stored
+ * embedder_command: the kb entrypoint exports the URL when it starts the in-container
+ * model, and the wizard writes embedder_model. Anything asking "is an embedder
+ * available" must therefore go through the resolver.
+ *
+ * The curator drain asked the raw field instead, so on every bundled deployment its
+ * ingest_docs and embed_code stages saw "no embedder" and never ran -- while query
+ * embedding kept working, because that path resolves. The result was a KB that
+ * reported healthy, embedded every search query, and returned zero hits forever. */
+static void test_embedder_command_resolves_from_env(void)
+{
+   static config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+
+   platform_unsetenv("EMBEDDER_URL");
+   /* Nothing configured anywhere: the honest answer is empty, which is what makes
+    * the resolver safe to use as an availability gate. */
+   assert(config_embedder_command(&cfg, NULL)[0] == '\0');
+
+   /* The bundled case. The stored field stays empty -- that is the whole point. */
+   platform_setenv("EMBEDDER_URL", "http://127.0.0.1:8760");
+   assert(cfg.embedder_command[0] == '\0');
+   assert(strcmp(config_embedder_command(&cfg, NULL), "http://127.0.0.1:8760") == 0);
+
+   /* A per-call request still outranks the environment. */
+   assert(strcmp(config_embedder_command(&cfg, "http://other:9"), "http://other:9") == 0);
+
+   /* And the environment outranks a stored command, because the variable is how the
+    * RUNNING embedder announces itself. */
+   snprintf(cfg.embedder_command, sizeof(cfg.embedder_command), "http://stored:1");
+   assert(strcmp(config_embedder_command(&cfg, NULL), "http://127.0.0.1:8760") == 0);
+
+   platform_unsetenv("EMBEDDER_URL");
+   assert(strcmp(config_embedder_command(&cfg, NULL), "http://stored:1") == 0);
+}
+
 int main(void)
 {
    printf("config: ");
    test_kb_curator_tier();
    test_bool_true_parses_as_true();
+   test_embedder_command_resolves_from_env();
 
    /* Use isolated temp HOME */
    char tmpdir[512];
