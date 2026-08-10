@@ -262,21 +262,23 @@ static char *translate_sql(const char *sql_in)
          p += 9;
          continue;
       }
-      /* pg_now_text() -> datetime('now')  (sqlite has datetime built-in). */
+      /* pg_now_text() -> strftime in the SAME canonical ISO format the postgres
+       * function emits (schema.sql). datetime('now') would return the space
+       * separator, so the shim would write a spelling production never writes and
+       * every format-sensitive assertion here would be testing the wrong string. */
       if (starts_with(p, "pg_now_text()"))
       {
-         memcpy(out + o, "datetime('now')", 15);
-         o += 15;
+         memcpy(out + o, "strftime('%Y-%m-%dT%H:%M:%SZ','now')", 36);
+         o += 36;
          p += 13;
          continue;
       }
-      /* pg_now_text(<modifier>) -> datetime('now', <modifier>). The shim
-       * keeps the modifier verbatim; sqlite's datetime accepts the same
-       * '+/-N units' grammar postgres'  pg_now_text(modifier) does. */
+      /* pg_now_text(<modifier>) -> the same, plus the modifier verbatim; sqlite's
+       * strftime accepts the same '+/-N units' grammar postgres' overload does. */
       if (starts_with(p, "pg_now_text("))
       {
-         memcpy(out + o, "datetime('now', ", 16);
-         o += 16;
+         memcpy(out + o, "strftime('%Y-%m-%dT%H:%M:%SZ','now', ", 37);
+         o += 37;
          p += 12;
          continue;
       }
