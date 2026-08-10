@@ -10,14 +10,37 @@ memory subsystem.
 
 ### Go process stage
 
-The supervised memory process now uses the shared pure-Go module runtime. Its
-live `reranking` stage preserves the MRNK/MCNF fixed-point confidence contract
-and the existing 330000/660000 thresholds. The process still registers the
-four earlier memory event identities so grants and callers remain stable, but
-those unimplemented stage boundaries continue to fail closed exactly as the C
-handler did. The C adapter remains a parity fixture; storage, extraction,
-embedding, retrieval, graph, and lifecycle implementation units remain C
-relocation work.
+The supervised memory process now uses the shared pure-Go module runtime and
+serves four of the five stage identities. Its `reranking` stage preserves the
+MRNK/MCNF fixed-point confidence contract and the existing 330000/660000
+thresholds.
+
+| Stage | Event | What the module decides |
+| --- | --- | --- |
+| `write` | `5890` | the typed-fact write gate: whether a candidate triple may commit as a semantic edge |
+| `extract_index` | `5889` | pattern-first extraction, and the §4 retraction pre-scan (two request shapes, distinct magics) |
+| `retrieve` | `5892` | the §7 PII recall gate: whether a turn asks for sensitive data, and each relation's sensitivity tier (two request shapes) |
+| `reranking` | `5893` | the fixed-point confidence band |
+
+Only pure decisions moved. Each has a seam in the C: a registered provider that
+is authoritative and never falls back to the local implementation, because a
+silent fallback lets a broken module look healthy. What a failure does instead
+is chosen per seam: the write gate defers (nothing written, caller retries),
+extraction returns an error rather than "no facts", and both halves of the PII
+gate fail closed, withholding rather than exposing. The retraction scan does not
+retract, because that path deletes and a fact left behind is recoverable where
+one deleted by mistake is not.
+
+`embedding` (`5891`) is still unimplemented and continues to fail closed. It is
+not a pure decision (it needs a model and a DB handle), so there is no
+in-process core to relocate; moving it would relocate I/O, not logic. Storage,
+graph, and lifecycle units likewise remain C.
+
+Every ported decision is held to the C by differential fixtures generated from
+the C itself (`scripts/gen-memory-pattern-fixtures.c`,
+`scripts/gen-memory-ontology-seed.c`, `scripts/gen-memory-pii-fixtures.c`), not
+by expectations transcribed from reading it. Each generator's header carries its
+build and run line; regenerate rather than edit the fixtures.
 
 The server's context pre-injection path requests its `high`/`medium`/`low`
 confidence tier from that process over event `5893`. It no longer substitutes a

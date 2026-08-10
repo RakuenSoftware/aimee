@@ -1,0 +1,14 @@
+works_for	works_for
+worksFor	works_for
+Works For	works_for
+works-for	works_for
+WORKS_FOR	works_for
+  works for	works_for
+works__for	works_for
+works.for	works_for
+	
+_leading	leading
+trailing_	trailing
+HTTPServer	httpserver
+a1b2C3	a1b2_c3
+__overlong_len__	63

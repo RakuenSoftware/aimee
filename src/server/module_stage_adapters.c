@@ -10,6 +10,9 @@
 #include <aimee/learning/learning.h>
 #include "response_dedup.h"
 #include "server_error_kind.h"
+#include "modules/memory/memory_extract_patterns.h"
+#include "modules/memory/memory_fact_gate.h"
+#include "modules/memory/memory_pii_gate.h"
 #include "modules/skills/skill_trigger_policy.h"
 #include "modules/webuser/webuser_runtime.h"
 #include "modules/workspace/workspace_scope.h"
@@ -83,6 +86,164 @@ static int memory_confidence(double score, const char **confidence)
                  : result == AIMEE_MEMORY_CONFIDENCE_MEDIUM ? "medium"
                                                             : "low";
    return 0;
+}
+
+static int memory_fact_gate(memory_node_kind_t head_kind, const char *rel_type,
+                            memory_node_kind_t tail_kind, int *verdict)
+{
+   uint8_t request[AIMEE_MEMORY_GATE_REQUEST_LEN], response[AIMEE_MEMORY_GATE_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   aimee_memory_fact_verdict_t result;
+   if (!verdict)
+      return -1;
+   if (aimee_memory_gate_request_encode((uint32_t)head_kind, rel_type, (uint32_t)tail_kind, request,
+                                        sizeof(request)) != 0)
+   {
+      /* Only an over-long label can fail encoding here. That is a terminal
+       * answer, not a transport failure: BADARG so the caller drops it, where
+       * DEFER would ask it to retry a label that will never get shorter. */
+      *verdict = AIMEE_MEMORY_FACT_BADARG;
+      return 0;
+   }
+   if (call_module(AIMEE_MEMORY_EVENT_WRITE, AIMEE_MEMORY_STAGE_WRITE, request, sizeof(request),
+                   response, sizeof(response), &response_len) != 0 ||
+       aimee_memory_gate_response_decode(response, response_len, &result) != 0)
+      return -1;
+   *verdict = (int)result;
+   return 0;
+}
+
+/* The wire triple's field capacities have to be pattern_triple_t's own, or a
+ * value that fits one side is truncated or refused by the other. This is the
+ * only translation unit that sees both, so it is where they are checked. */
+_Static_assert(sizeof(((pattern_triple_t *)0)->subject) == AIMEE_MEMORY_TRIPLE_SUBJECT_MAX,
+               "wire subject capacity must match pattern_triple_t");
+_Static_assert(sizeof(((pattern_triple_t *)0)->rel_type) == AIMEE_MEMORY_TRIPLE_REL_TYPE_MAX,
+               "wire rel_type capacity must match pattern_triple_t");
+_Static_assert(sizeof(((pattern_triple_t *)0)->object) == AIMEE_MEMORY_TRIPLE_OBJECT_MAX,
+               "wire object capacity must match pattern_triple_t");
+
+static int memory_extract(const char *text, pattern_triple_t *out, int max, int *count)
+{
+   if (!text || !out || max <= 0 || !count)
+      return -1;
+   size_t request_len = aimee_memory_extract_request_size(text);
+   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+      return -1;
+
+   size_t response_cap = AIMEE_MEMORY_EXTRACT_RESPONSE_MAX(max);
+   uint8_t *request = malloc(request_len);
+   aimee_memory_triple_t *triples = calloc((size_t)max, sizeof(*triples));
+   uint8_t *response = malloc(response_cap);
+   uint32_t response_len = 0, found = 0;
+   int rc = -1;
+   if (request && triples && response && response_cap <= UINT32_MAX &&
+       aimee_memory_extract_request_encode(text, (uint32_t)max, request, request_len) == 0 &&
+       call_module(AIMEE_MEMORY_EVENT_EXTRACT_INDEX, AIMEE_MEMORY_STAGE_EXTRACT_INDEX, request,
+                   (uint32_t)request_len, response, (uint32_t)response_cap, &response_len) == 0 &&
+       aimee_memory_extract_response_decode(response, response_len, triples, (uint32_t)max,
+                                            &found) == 0)
+   {
+      for (uint32_t i = 0; i < found; ++i)
+      {
+         memset(&out[i], 0, sizeof(out[i]));
+         memcpy(out[i].subject, triples[i].subject, sizeof(out[i].subject));
+         memcpy(out[i].rel_type, triples[i].rel_type, sizeof(out[i].rel_type));
+         memcpy(out[i].object, triples[i].object, sizeof(out[i].object));
+         out[i].subject_kind = (memory_node_kind_t)triples[i].subject_kind;
+         out[i].object_kind = (memory_node_kind_t)triples[i].object_kind;
+      }
+      *count = (int)found;
+      rc = 0;
+   }
+   free(request);
+   free(triples);
+   free(response);
+   return rc;
+}
+
+_Static_assert(sizeof(((memory_pattern_turn_t *)0)->attr) == AIMEE_MEMORY_SCAN_ATTR_MAX,
+               "wire attribute capacity must match memory_pattern_turn_t");
+
+static int memory_scan_turn(const char *text, memory_pattern_turn_t *out)
+{
+   if (!text || !out)
+      return -1;
+   size_t request_len = aimee_memory_scan_request_size(text);
+   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+      return -1;
+   uint8_t *request = malloc(request_len);
+   uint8_t response[AIMEE_MEMORY_SCAN_RESPONSE_MAX];
+   uint32_t response_len = 0;
+   if (!request)
+      return -1;
+   int rc = aimee_memory_scan_request_encode(text, request, request_len) == 0 &&
+                    call_module(AIMEE_MEMORY_EVENT_EXTRACT_INDEX, AIMEE_MEMORY_STAGE_EXTRACT_INDEX,
+                                request, (uint32_t)request_len, response, sizeof(response),
+                                &response_len) == 0
+                ? aimee_memory_scan_response_decode(response, response_len, &out->is_retraction,
+                                                    &out->has_attr, out->attr, sizeof(out->attr))
+                : -1;
+   free(request);
+   return rc;
+}
+
+static int memory_pii_turn(const char *turn_text, int *requests_sensitive)
+{
+   if (!turn_text || !requests_sensitive)
+      return -1;
+   size_t request_len = aimee_memory_pii_request_size(turn_text);
+   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+      return -1;
+   uint8_t *request = malloc(request_len);
+   uint8_t response[AIMEE_MEMORY_PII_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (!request)
+      return -1;
+   int rc =
+       aimee_memory_pii_request_encode(turn_text, request, request_len) == 0 &&
+               call_module(AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, request,
+                           (uint32_t)request_len, response, sizeof(response), &response_len) == 0
+           ? aimee_memory_pii_response_decode(response, response_len, requests_sensitive)
+           : -1;
+   free(request);
+   return rc;
+}
+
+/* The wire tiers are compared against rel_sensitivity_t directly, so the two
+ * enums have to agree. Checked here, the one place that sees both. */
+_Static_assert((int)AIMEE_MEMORY_SENS_NORMAL == (int)SENS_NORMAL &&
+                   (int)AIMEE_MEMORY_SENS_PII == (int)SENS_PII &&
+                   (int)AIMEE_MEMORY_SENS_SECRET == (int)SENS_SECRET,
+               "wire sensitivity tiers must match rel_sensitivity_t");
+
+static int memory_pii_sensitivity(const char *const *rel_types, int count, rel_sensitivity_t *out)
+{
+   if (!rel_types || !out || count <= 0)
+      return -1;
+   size_t request_len = aimee_memory_sens_request_size(rel_types, count);
+   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+      return -1;
+   size_t response_cap = AIMEE_MEMORY_SENS_RESPONSE_MAX(count);
+   uint8_t *request = malloc(request_len);
+   uint8_t *response = malloc(response_cap);
+   aimee_memory_sensitivity_t *tiers = calloc((size_t)count, sizeof(*tiers));
+   uint32_t response_len = 0;
+   int rc = -1;
+   if (request && response && tiers && response_cap <= UINT32_MAX &&
+       aimee_memory_sens_request_encode(rel_types, count, request, request_len) == 0 &&
+       call_module(AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, request,
+                   (uint32_t)request_len, response, (uint32_t)response_cap, &response_len) == 0 &&
+       aimee_memory_sens_response_decode(response, response_len, tiers, count) == 0)
+   {
+      for (int i = 0; i < count; ++i)
+         out[i] = (rel_sensitivity_t)tiers[i];
+      rc = 0;
+   }
+   free(request);
+   free(response);
+   free(tiers);
+   return rc;
 }
 
 static int learning_classify(const char *signal, uint32_t *sink_mask)
@@ -309,6 +470,11 @@ static int response_key(const response_dedup_key_inputs_t *in, char *out, size_t
 void server_module_stage_adapters_configure(void)
 {
    ingress_preinject_register_confidence_provider(memory_confidence);
+   memory_fact_gate_register_checker(memory_fact_gate);
+   memory_extract_register_extractor(memory_extract);
+   memory_extract_register_turn_scanner(memory_scan_turn);
+   memory_pii_register_turn_classifier(memory_pii_turn);
+   memory_pii_register_sensitivity_batch(memory_pii_sensitivity);
    learning_router_register_signal_classifier(learning_classify);
    delegate_role_register_canonicalizer(delegate_canonicalize);
    agent_tools_register_classifier(tool_classify);

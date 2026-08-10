@@ -289,10 +289,43 @@ int memory_pattern_possessive_attr(const char *text, char *out, size_t out_len)
    return 0;
 }
 
+static memory_pattern_turn_scanner_fn g_turn_scanner;
+
+void memory_extract_register_turn_scanner(memory_pattern_turn_scanner_fn scanner)
+{
+   g_turn_scanner = scanner;
+}
+
+int memory_pattern_scan_turn(const char *text, memory_pattern_turn_t *out)
+{
+   if (!text || !out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   if (g_turn_scanner)
+      return g_turn_scanner(text, out) == 0 ? 0 : -1;
+   out->is_retraction = memory_pattern_is_retraction(text);
+   out->has_attr = memory_pattern_possessive_attr(text, out->attr, sizeof(out->attr));
+   return 0;
+}
+
+static memory_pattern_extractor_fn g_extractor;
+
+void memory_extract_register_extractor(memory_pattern_extractor_fn extractor)
+{
+   g_extractor = extractor;
+}
+
 int memory_extract_patterns(const char *text, pattern_triple_t *out, int max)
 {
    if (!text || !out || max <= 0)
       return -1;
+   if (g_extractor)
+   {
+      int count = 0;
+      if (g_extractor(text, out, max, &count) != 0)
+         return -1; /* no answer: never report "no facts" on the module's behalf */
+      return count;
+   }
    int n = 0, len = (int)strlen(text);
    for (int i = 0; i < len && n < max; i++)
    {
