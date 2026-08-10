@@ -1083,7 +1083,7 @@
         },
         {
           "path": "src/headers/sandbox.h",
-          "sha256": "3b67469ed83d214c253cb13a53079458e5fff8ea0ac77dc5762b016071ad5d8d"
+          "sha256": "61433cbfd4609047eb897b7d8e00c8d5f736ed5ecc1ff402c3009729d0aff84e"
         },
         {
           "path": "src/headers/script_rpc.h",
@@ -1616,7 +1616,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "4b89cebb396dc22c054df74968bd9762ef86f7cca8814b5873746fc94216f29f",
+      "sha256": "484304bc91195626897651fd3bcd177cabd315f40b87c82a365c648826f79fd7",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

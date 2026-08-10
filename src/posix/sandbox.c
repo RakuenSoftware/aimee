@@ -62,6 +62,20 @@ void sandbox_set_available_override_for_test(int (*fn)(const char **reason))
    g_sbx_avail_override = fn;
 }
 
+/* Test-only effective-mode override; <0 means "no override" (production). */
+static int g_sbx_mode_override = -1;
+void sandbox_set_mode_override_for_test(int mode)
+{
+   g_sbx_mode_override = mode;
+}
+
+int sandbox_effective_mode(const sandbox_config_t *cfg)
+{
+   if (g_sbx_mode_override >= 0)
+      return g_sbx_mode_override;
+   return cfg ? (int)cfg->mode : SANDBOX_MODE_OFF;
+}
+
 /* Characters allowed in a bare program path we are willing to surface verbatim.
  * A real program token is a plain path; anything else is refused (see below). */
 static int sbx_prog_char(char c)

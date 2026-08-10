@@ -1297,46 +1297,49 @@ static void test_tool_bash(void)
  * reaches the unsandboxed branch at all, and a test that depends on it would silently
  * stop exercising the containment it exists to prove. `sandbox: {mode: off}` is also
  * the realistic shape of this risk — an operator who turned isolation off. */
+/* Containment: a DELEGATE (untrusted model) must never run a shell UNSANDBOXED on the
+ * aimee-server host — that host is uid 0 with the docker socket mounted, so an
+ * unsandboxed command is a host-root escalation. With a delegation active tool_bash
+ * must refuse rather than fork on the host; the primary session still runs.
+ *
+ * The mode is forced through the test seam rather than through config. The mode now
+ * defaults to WORKSPACE_ONLY, and this binary cannot redirect config in-process (the
+ * config path resolves before a test can move HOME), so without the override this
+ * fail-closed branch would silently stop being exercised. */
 static void test_tool_bash_delegate_unsandboxed_refused(void)
 {
-   /* Which branch is reachable depends on the EFFECTIVE sandbox mode, which this
-    * binary cannot redirect: the config path is resolved before a test can move HOME,
-    * so an in-process opt-out does not reach config_sandbox(). Assert against the
-    * mode actually in force rather than assuming one. */
-   sandbox_config_t effective;
-   config_sandbox(&effective);
+   sandbox_set_mode_override_for_test(SANDBOX_MODE_OFF);
 
    g_test_delegation_id = "test-deleg";
    char *result = tool_bash("echo escalated", 5000);
    assert(result != NULL);
-
-   if (effective.mode == SANDBOX_MODE_OFF)
-   {
-      /* Containment: a DELEGATE (untrusted model) must never run a shell UNSANDBOXED
-       * on the aimee-server host — that host is uid 0 with the docker socket mounted,
-       * so an unsandboxed command is a host-root escalation. */
-      assert(strstr(result, "refused") != NULL);   /* fail-closed */
-      assert(strstr(result, "escalated") == NULL); /* the command did NOT run */
-      assert(strstr(result, "\"exit_code\":-1") != NULL);
-   }
-   else
-   {
-      /* Sandbox on (the default): the delegate is contained by isolation rather than
-       * by refusal, so the command legitimately runs — INSIDE the sandbox. What must
-       * still hold is that the refusal guard has not been bypassed into a host fork;
-       * a sandboxed run is the safe outcome, an unsandboxed one would not be
-       * distinguishable here, which is why the OFF branch above is the real proof and
-       * is exercised wherever the effective mode is OFF. */
-      assert(strstr(result, "\"exit_code\":0") != NULL);
-   }
+   assert(strstr(result, "refused") != NULL);   /* fail-closed */
+   assert(strstr(result, "escalated") == NULL); /* the command did NOT run */
+   assert(strstr(result, "\"exit_code\":-1") != NULL);
+   /* Names the setting rather than blaming an "unavailable" sandbox. */
+   assert(strstr(result, "sandbox.mode=off") != NULL);
    free(result);
 
-   /* The trusted primary (operator) session still runs. */
+   /* The trusted primary (operator) session still runs on the host. */
    g_test_delegation_id = NULL;
    result = tool_bash("echo primary-ok", 5000);
    assert(result != NULL);
    assert(strstr(result, "primary-ok") != NULL);
    free(result);
+
+   /* With the sandbox ON, the same delegated command is contained by ISOLATION
+    * instead of refusal — it runs, rather than being refused. This is the branch the
+    * new default puts real installs on, so it is asserted rather than assumed. */
+   sandbox_set_mode_override_for_test(SANDBOX_MODE_WORKSPACE_ONLY);
+   g_test_delegation_id = "test-deleg";
+   result = tool_bash("echo contained", 5000);
+   assert(result != NULL);
+   assert(strstr(result, "refused") == NULL);
+   assert(strstr(result, "\"exit_code\":0") != NULL);
+   free(result);
+
+   g_test_delegation_id = NULL;
+   sandbox_set_mode_override_for_test(-1); /* restore production behaviour */
 }
 
 /* A write into a source checkout is redirected into an aimee-managed worktree
