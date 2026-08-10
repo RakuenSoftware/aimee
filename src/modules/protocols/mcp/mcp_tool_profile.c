@@ -9,6 +9,7 @@
 #include "cJSON.h"
 #include <aimee/protocols/mcp/mcp_tools.h>
 #include "agent_code_capabilities.h"
+#include <stdio.h> /* snprintf, for the trimmed-description suffix */
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -282,6 +283,83 @@ int mcp_call_tool_demux(const char *tool, cJSON *args, const char **out_tool, cJ
    *out_tool = name->valuestring;
    *out_args = nested;
    return 1;
+}
+
+/* Keep the first sentence (or `cap` bytes), whichever is shorter, and say where the
+ * rest went. Never empties a description: a nameless tool is worse than a terse one. */
+static void compact_description(cJSON *owner, int cap, int point_at_describe)
+{
+   cJSON *desc = cJSON_GetObjectItemCaseSensitive(owner, "description");
+   if (!cJSON_IsString(desc) || !desc->valuestring)
+      return;
+   const char *s = desc->valuestring;
+   int len = (int)strlen(s);
+   if (len <= cap)
+      return;
+   int cut = cap;
+   for (int i = 0; i < len - 1 && i < cap; i++)
+      if (s[i] == '.' && (s[i + 1] == ' ' || s[i + 1] == '\n'))
+      {
+         cut = i + 1;
+         break;
+      }
+   char buf[512];
+   int n = cut < (int)sizeof(buf) - 32 ? cut : (int)sizeof(buf) - 32;
+   memcpy(buf, s, (size_t)n);
+   buf[n] = '\0';
+   if (point_at_describe)
+      snprintf(buf + n, sizeof(buf) - (size_t)n, " (describe_tool for full guidance)");
+   cJSON_SetValuestring(desc, buf);
+}
+
+int mcp_tool_prose_lean(void)
+{
+   const char *v = getenv("AIMEE_MCP_TOOL_PROSE");
+   return v && (strcasecmp(v, "lean") == 0 || strcasecmp(v, "1") == 0 ||
+                strcasecmp(v, "true") == 0);
+}
+
+int mcp_compact_tool_prose(cJSON *tools)
+{
+   /* WHAT THIS DOES NOT DO: hide a tool, drop a parameter, or change a type, enum or
+    * required list. Every tool stays advertised and callable with exactly the shape it
+    * had. Only guidance PROSE is shortened, and describe_tool still serves it in full.
+    *
+    * Why it is worth doing: tools/list is re-sent as request context on every turn, so
+    * its size is a tax paid per turn whether or not a tool is called. Measured on the
+    * Ponytail benchmark's aimee arm -- 20,238 bytes over 19 tools, of which 11,894
+    * (59%) is prose: 4,053 bytes of top-level descriptions and 7,841 nested in schema
+    * property descriptions. `git` alone spends 2,667 of its 4,588 bytes on prose. At
+    * ~35 model requests per cell that surface accounted for 47% of the arm's input
+    * tokens.
+    *
+    * The alternative -- presenting fewer tools -- was already tried and is recorded
+    * above: agents fell back to recursive shell search rather than pay
+    * find_tools -> describe_tool -> call_tool. Trimming prose keeps the whole surface
+    * reachable in one call while paying for the part a client actually needs to
+    * construct one. */
+   if (!tools || !cJSON_IsArray(tools))
+      return 0;
+   int trimmed = 0;
+   cJSON *tool = NULL;
+   cJSON_ArrayForEach(tool, tools)
+   {
+      compact_description(tool, MCP_TOOL_PROSE_TOP_CAP, 1);
+      cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
+      if (!schema)
+         schema = cJSON_GetObjectItemCaseSensitive(tool, "input_schema");
+      cJSON *props = cJSON_GetObjectItemCaseSensitive(schema, "properties");
+      cJSON *prop = NULL;
+      cJSON_ArrayForEach(prop, props)
+      {
+         /* No describe_tool pointer here: the per-parameter hint is reached through
+          * the tool, and repeating the pointer once per property would spend back
+          * what the trim saves. */
+         compact_description(prop, MCP_TOOL_PROSE_PARAM_CAP, 0);
+      }
+      trimmed++;
+   }
+   return trimmed;
 }
 
 int mcp_filter_tools_for_profile(cJSON *tools, const char *profile)

@@ -36,6 +36,22 @@ const char *mcp_tool_profile_effective(const char *explicit_profile);
  * or "lean" keeps only the Tier-0 set. Returns the number of tools removed. */
 int mcp_filter_tools_for_profile(cJSON *tools, const char *profile);
 
+/* Byte caps for the trimmed presentation. A top-level description keeps roughly a
+ * sentence; a parameter hint keeps less, because there are many more of them and the
+ * type/enum beside it already carries the callable meaning. */
+#define MCP_TOOL_PROSE_TOP_CAP   180
+#define MCP_TOOL_PROSE_PARAM_CAP 80
+
+/* Shorten guidance prose in a tools/list payload, in place. Hides no tool and alters
+ * no callable shape -- types, enums and required lists are untouched; describe_tool
+ * still returns the full text. Returns the number of tools visited.
+ *
+ * Opt-in via AIMEE_MCP_TOOL_PROSE=lean (default "full" leaves the payload as-is), so
+ * the two presentations can be measured against each other rather than swapped on a
+ * hunch. */
+int mcp_compact_tool_prose(cJSON *tools);
+int mcp_tool_prose_lean(void);
+
 /* Append the find_tools / describe_tool discovery meta-tools and the call_tool
  * bridge to a tools list. Called by mcp_build_tools_list so they are always
  * present (and in the core profile), keeping a lean presentation usable from
