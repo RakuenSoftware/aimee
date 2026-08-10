@@ -166,6 +166,11 @@
           "id": 8,
           "name": "delegate-economics-report",
           "event_kind": 6664
+        },
+        {
+          "id": 9,
+          "name": "delegate-patch-coordination",
+          "event_kind": 6665
         }
       ]
     },
