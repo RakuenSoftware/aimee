@@ -1146,6 +1146,15 @@ typedef struct config
    char compact_per_tool[CONFIG_COMPACT_MAX_PER_TOOL][128]; /* "tool_name=threshold" */
    int compact_per_tool_count;
 
+   /* Session-compaction summary derivation. 0 (default) = the legacy prose scan
+    * (guess paths by shape, match "error"/"decided" keywords). 1 = derive from the
+    * economizer's deterministic extractors instead: Coordinate Closet coordinates
+    * conserved VERBATIM, and fold_register's settled/hazard classification of the
+    * agent's own turns. Default-off because compaction quality is still unmeasured
+    * (docs/proposals/pending/compaction-quality-baseline.md); the legacy path stays
+    * selectable until that baseline can say which is better. */
+   int compact_from_record;
+
    /* Coordinate Closet (fold §2): conserve verbatim identifiers from compacted
     * tool results. Nested under the "compact" config section. Default-off.
     * coord_closet_enabled: 0 = off (default), 1 = on.
