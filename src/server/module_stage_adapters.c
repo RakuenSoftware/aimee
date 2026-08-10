@@ -350,6 +350,55 @@ static int delegate_paths(const char *prompt, unsigned max_paths, char *paths, s
    return rc;
 }
 
+static int delegate_handoff(const char *text, const char *owned_files_json,
+                            int require_verification, delegate_handoff_validation_t *out)
+{
+   size_t text_len = text ? strlen(text) : 0;
+   size_t owned_len = owned_files_json ? strlen(owned_files_json) : 0;
+   if (text_len > AIMEE_DELEGATES_HANDOFF_TEXT_MAX || owned_len > AIMEE_DELEGATES_HANDOFF_TEXT_MAX)
+      return -1;
+   size_t request_cap = AIMEE_DELEGATES_HANDOFF_HEADER_LEN + text_len + owned_len;
+   uint8_t *request = malloc(request_cap);
+   if (!request)
+      return -1;
+   size_t request_len = aimee_delegates_handoff_request_encode(
+       text, text_len, owned_files_json, owned_len, require_verification, request, request_cap);
+
+   uint8_t response[AIMEE_DELEGATES_HANDOFF_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   int rc =
+       request_len > 0 &&
+               call_module(AIMEE_DELEGATES_EVENT_HANDOFF, AIMEE_DELEGATES_STAGE_HANDOFF, request,
+                           (uint32_t)request_len, response, sizeof(response), &response_len) == 0
+           ? 0
+           : -1;
+   free(request);
+   if (rc != 0 || response_len != AIMEE_DELEGATES_HANDOFF_RESPONSE_LEN ||
+       aimee_delegates_get_u32(response) != AIMEE_DELEGATES_HANDOFF_RESPONSE_MAGIC)
+      return -1;
+
+   out->valid = (int)aimee_delegates_get_u32(response + 4);
+   out->repair_attempted = (int)aimee_delegates_get_u32(response + 8);
+   out->done_without_verification = (int)aimee_delegates_get_u32(response + 12);
+   out->needs_supervisor_review = (int)aimee_delegates_get_u32(response + 16);
+   out->changed_files_count = (int)aimee_delegates_get_u32(response + 20);
+   out->outside_ownership_count = (int)aimee_delegates_get_u32(response + 24);
+   out->passed_tests = (int)aimee_delegates_get_u32(response + 28);
+   out->commands_run = (int)aimee_delegates_get_u32(response + 32);
+   aimee_delegates_handoff_field(response, 36, AIMEE_DELEGATES_HANDOFF_STATUS_LEN, out->status,
+                                 sizeof(out->status));
+   aimee_delegates_handoff_field(response, 36 + AIMEE_DELEGATES_HANDOFF_STATUS_LEN,
+                                 AIMEE_DELEGATES_HANDOFF_STATUS_LEN, out->raw_status,
+                                 sizeof(out->raw_status));
+   aimee_delegates_handoff_field(response, 36 + 2 * AIMEE_DELEGATES_HANDOFF_STATUS_LEN,
+                                 AIMEE_DELEGATES_HANDOFF_ERROR_LEN, out->error, sizeof(out->error));
+   /* A malformed handoff is a verdict, not a transport failure: the module
+    * answered, and the answer is "not valid". The caller distinguishes the two
+    * by the return code, so an invalid handoff must report non-zero here while
+    * still carrying its reason in *out. */
+   return out->valid ? 0 : -1;
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -560,6 +609,7 @@ void server_module_stage_adapters_configure(void)
    delegate_routing_register_capability_provider(delegate_infer_caps);
    delegate_register_chain_provider(delegate_chain);
    delegate_register_paths_provider(delegate_paths);
+   delegate_register_handoff_provider(delegate_handoff);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path
