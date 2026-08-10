@@ -16,8 +16,10 @@
  *
  * Container detection:
  *   Checks /.dockerenv, /run/.containerenv, and /proc/1/cgroup for container
- *   markers.  When detected, sandbox_available() returns 0 because nested user
- *   namespaces are often blocked by the outer container's seccomp policy.
+ *   markers.  Detection is DIAGNOSTIC, not a verdict: nested user namespaces work
+ *   inside many containers, so availability is decided by actually attempting
+ *   unshare(CLONE_NEWUSER).  Container-ness only shapes the reason string when that
+ *   real probe fails, so the message points at the container rather than the kernel.
  */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -221,12 +223,19 @@ int sandbox_available(const char **reason)
       *reason = "Linux namespaces not available on this platform";
    return 0;
 #else
-   if (sandbox_detect_container())
-   {
-      if (reason)
-         *reason = "running inside a container — nested namespaces may be blocked";
-      return 0;
-   }
+   /* Being in a container is NOT a verdict. Nested user namespaces work inside many
+    * containers, and this function already ends with an authoritative test: fork a
+    * child and actually call unshare(CLONE_NEWUSER). Returning early on detection made
+    * that test dead code in precisely the deployments that need it — aimee-server ships
+    * as a container, so every co-located delegate shell was refused ("sandbox fallback
+    * could not start") on a capability that was never measured, only inferred from
+    * /.dockerenv.
+    *
+    * Container-ness is kept as DIAGNOSIS: when the real probe below fails, saying so in
+    * container terms points at the right fix (grant the container the capability) rather
+    * than at the kernel. Fail-closed is unchanged — an environment that genuinely cannot
+    * create a user namespace still reports unavailable. */
+   const int in_container = sandbox_detect_container();
 
    /* Probe whether unprivileged user namespaces are permitted.
     * The kernel sysctl /proc/sys/kernel/unprivileged_userns_clone (Debian/Ubuntu)
@@ -241,8 +250,10 @@ int sandbox_available(const char **reason)
          if (rc == 1 && val == 0)
          {
             if (reason)
-               *reason = "unprivileged user namespaces disabled "
-                         "(kernel.unprivileged_userns_clone=0)";
+               *reason = in_container ? "unprivileged user namespaces disabled in this container "
+                                        "(kernel.unprivileged_userns_clone=0)"
+                                      : "unprivileged user namespaces disabled "
+                                        "(kernel.unprivileged_userns_clone=0)";
             return 0;
          }
       }
@@ -269,8 +280,11 @@ int sandbox_available(const char **reason)
    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
    {
       if (reason)
-         *reason = "unshare(CLONE_NEWUSER) failed — kernel may not support "
-                   "unprivileged user namespaces";
+         *reason = in_container ? "unshare(CLONE_NEWUSER) failed inside this container — grant it "
+                                  "unprivileged user namespaces (or run delegates in their own "
+                                  "container) to enable isolated execution"
+                                : "unshare(CLONE_NEWUSER) failed — kernel may not support "
+                                  "unprivileged user namespaces";
       return 0;
    }
 
