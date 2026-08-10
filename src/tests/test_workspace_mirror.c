@@ -3,6 +3,7 @@
  * helpers are exercised through a MOCK git runner (no real git), so the test is
  * hermetic. The point of AC #5: drift is detected and SURFACED, never merged. */
 #include "modules/workspace/workspace_mirror.h"
+#include "modules/workspace/workspace_provider.h" /* workspace_root_contains_path */
 
 #include <assert.h>
 #include <stdio.h>
@@ -59,8 +60,72 @@ static int mock_git(void *ctx, const char *const args[], char *out, size_t out_c
    return 0;
 }
 
+/* workspace_root_contains_path: "is this path inside that workspace", answered
+ * where the layout is known.
+ *
+ * The question has a wrong-but-plausible answer -- prefix-match the registered
+ * root -- and callers reached for it. For a `mirror` workspace the registered
+ * root is the CLIENT's path, which does not exist on this server at all, while
+ * the work happens in a reconstruction under <base>/<hash(root)>/. The prefix
+ * test therefore said "not my workspace" about the live checkout, and the caller
+ * that asked (git credential injection) concluded there was no workspace and ran
+ * git with no credential: "could not read Username", indistinguishable from a
+ * dead token.
+ *
+ * So this asserts the reconstruction resolves, including the generation-qualified
+ * form the server actually uses -- an exact "<base>/<hash>/work" comparison
+ * misses "work-1-<digest>" -- and that unrelated paths still miss, because a
+ * containment test that says yes too often hands one workspace's credential to
+ * work outside it. */
+static void test_root_contains_path_covers_the_server_side_tree(void)
+{
+   const char *root = "/home/someone/proj/.aimee/worktrees/076a64f1-deadbeef/main";
+
+   /* In place, for every provider that works at its registered root. */
+   assert(workspace_root_contains_path(root, root) == 1);
+   assert(workspace_root_contains_path(root, "/home/someone/proj/.aimee/worktrees/"
+                                             "076a64f1-deadbeef/main/src/x.c") == 1);
+
+   char base[512], mdir[512], wdir[512];
+   assert(workspace_mirror_base(base, sizeof(base)) == 0);
+   assert(workspace_mirror_paths(base, root, mdir, sizeof(mdir), wdir, sizeof(wdir)) == 0);
+
+   /* The reconstruction, plain and generation-qualified. */
+   assert(workspace_root_contains_path(root, wdir) == 1);
+   char parent[512];
+   snprintf(parent, sizeof(parent), "%s", wdir);
+   char *slash = strrchr(parent, '/');
+   assert(slash);
+   *slash = '\0';
+   char gen[640];
+   snprintf(gen, sizeof(gen), "%s/work-1-7df53596872a77b213ab54022a810bc7", parent);
+   assert(workspace_root_contains_path(root, gen) == 1);
+   snprintf(gen, sizeof(gen), "%s/work-2-33265f6f97729ac86a284ce69a6c5f45/src/x.c", parent);
+   assert(workspace_root_contains_path(root, gen) == 1);
+   assert(workspace_root_contains_path(root, mdir) == 1); /* the bare mirror too */
+
+   /* Misses. A different workspace's reconstruction hashes elsewhere, and a
+    * sibling that merely shares a textual prefix is not inside anything. */
+   assert(workspace_root_contains_path(root, "/var/tmp/not-a-workspace") == 0);
+   char other[512], omd[512], owd[512];
+   assert(workspace_mirror_paths(base, "/home/someone/other/main", omd, sizeof(omd), owd,
+                                 sizeof(owd)) == 0);
+   assert(workspace_root_contains_path(root, owd) == 0);
+   snprintf(other, sizeof(other), "%s-sibling", root);
+   assert(workspace_root_contains_path(root, other) == 0);
+
+   /* Bad args are a miss, never a match. */
+   assert(workspace_root_contains_path(NULL, wdir) == 0);
+   assert(workspace_root_contains_path(root, NULL) == 0);
+   assert(workspace_root_contains_path("", wdir) == 0);
+
+   printf("  root_contains_path: server-side tree resolves, unrelated paths do not\n");
+}
+
 int main(void)
 {
+   test_root_contains_path_covers_the_server_side_tree();
+
    /* --- pure classifier --- */
    assert(ws_mirror_drift_classify("abc", "abc", 0, 0) == WS_MIRROR_IN_SYNC);
    assert(ws_mirror_drift_classify("c2", "c1", 0, 1) ==

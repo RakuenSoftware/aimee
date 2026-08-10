@@ -39,11 +39,9 @@ int mcp_git_get_worktree(void)
    return s_in_worktree;
 }
 
-/* Route a git/gh shell command-line to where aimee's git rails live. SHARED and
- * CONTAINER both run server-side (run_cmd) — a container-sandboxed delegate has no
- * git and no creds, so its git must run on the server against the path-identity
- * bind-mounted worktree; only a `detached` workspace marshals to its client-held
- * filesystem authority. See mcp_git_run for the rationale. */
+/* Route a git/gh shell command-line to where aimee's git rails live: on the
+ * server, for every workspace except a `detached` one, which marshals to its
+ * client-held filesystem authority. See mcp_git_run for the rationale. */
 /* The registered workspace root containing `cwd`, copied into out[outsz].
  * Returns 0 on a match, -1 otherwise. */
 static int forge_workspace_for_cwd(const char *cwd, char *out, size_t outsz)
@@ -56,7 +54,12 @@ static int forge_workspace_for_cwd(const char *cwd, char *out, size_t outsz)
       size_t len = ws ? strlen(ws) : 0;
       if (len == 0)
          continue;
-      if (strncmp(cwd, ws, len) == 0 && (cwd[len] == '/' || cwd[len] == '\0'))
+      /* Ask the workspace module whether the path is inside that workspace. A
+       * prefix test here was wrong for any provider whose registered root is not
+       * where work happens, and answered "no workspace" for a live checkout --
+       * so the credential below was never injected and git ran bare. Where a
+       * workspace puts its files is not this module's business. */
+      if (workspace_root_contains_path(ws, cwd))
       {
          snprintf(out, outsz, "%s", ws);
          return 0;
@@ -77,10 +80,22 @@ char *mcp_git_run(const char *cmd, int *exit_code)
     * need the network the sandbox deliberately removes, and running git there would
     * push the forge credential into the sandbox this design exists to keep it out of.
     * The delegate's worktree is bind-mounted path-identically, so the server sees the
-    * delegate's edits at the same path. Run git on the server for SHARED and
-    * CONTAINER alike; only a DETACHED workspace (the client holds both the filesystem
-    * and its own creds) marshals git to the client and stays on the provider path. */
-   int run_on_server = (ws->kind == WS_PROVIDER_SHARED || ws->kind == WS_PROVIDER_CONTAINER);
+    * delegate's edits at the same path.
+    *
+    * So: state the rule, rather than listing the kinds that happen to satisfy it.
+    * Only DETACHED marshals git to the client, which holds both the filesystem
+    * authority and its own credentials. Everything else runs here and therefore
+    * needs the server-side credential below.
+    *
+    * Written as a list, this silently excluded MIRROR, whose git runs on the
+    * server like any other: every push from a mirror workspace exec'd with no
+    * GIT_ASKPASS and no tty and reported "could not read Username" —
+    * indistinguishable from a dead token, while reads kept working because
+    * git_pr_api.c uses the token in-process and never execs git. A list fails the
+    * same way for the next provider added; the negative form makes the
+    * credentialed path the default and leaves only the deliberate exception to
+    * state. */
+   int run_on_server = (ws->kind != WS_PROVIDER_DETACHED);
    const workspace_provider_t *exec_ws = run_on_server ? workspace_provider_shared() : ws;
 
    /* Credential injection: for a server-run command whose cwd is inside a registered

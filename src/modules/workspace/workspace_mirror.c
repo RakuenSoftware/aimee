@@ -3,6 +3,7 @@
  * injected (ws_git_runner_fn) so this TU is pure of process/credential plumbing
  * and unit-tests with a mock; production binds the forge-credential exec env. */
 #include "workspace_mirror.h"
+#include "workspace_provider.h" /* workspace_root_contains_path is declared on the provider surface */
 #include "aimee_home.h"
 
 #include <limits.h>
@@ -296,6 +297,42 @@ int workspace_mirror_paths(const char *base_dir, const char *root, char *mirror_
    if (m < 0 || (size_t)m >= md_cap || w < 0 || (size_t)w >= wd_cap)
       return -1;
    return 0;
+}
+
+/* Does `path` sit at `prefix`, or beneath it? Never a bare strncmp: that lets
+ * "/srv/work-other" match the workspace "/srv/work". */
+static int path_at_or_under(const char *path, const char *prefix)
+{
+   size_t n = prefix ? strlen(prefix) : 0;
+   if (!path || !n)
+      return 0;
+   return strncmp(path, prefix, n) == 0 && (path[n] == '/' || path[n] == '\0');
+}
+
+int workspace_root_contains_path(const char *root, const char *path)
+{
+   if (!root || !root[0] || !path || !path[0])
+      return 0;
+   /* The registered root itself, for every provider that works in place. */
+   if (path_at_or_under(path, root))
+      return 1;
+
+   /* Otherwise the server-side materialisation of that root. Matching the hashed
+    * PARENT rather than the "work" directory is deliberate: a live worktree is
+    * generation-qualified ("work-1-<digest>", and second generations do occur --
+    * three exist on the deployment this was found on), so comparing against
+    * "<base>/<hash>/work" would miss the very directory the work happens in. */
+   char base[PATH_MAX];
+   if (workspace_mirror_base(base, sizeof(base)) != 0)
+      return 0;
+   char mdir[PATH_MAX], wdir[PATH_MAX];
+   if (workspace_mirror_paths(base, root, mdir, sizeof(mdir), wdir, sizeof(wdir)) != 0)
+      return 0;
+   char *slash = strrchr(wdir, '/'); /* -> "<base>/<hash(root)>" */
+   if (!slash)
+      return 0;
+   *slash = '\0';
+   return path_at_or_under(path, wdir);
 }
 
 int workspace_mirror_diff_path(const char *base_dir, const char *root, char *out, size_t out_cap)

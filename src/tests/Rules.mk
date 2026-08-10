@@ -2842,7 +2842,7 @@ $(TESTPREFIX)/unit-test-trace-analysis: $(OBJDIR)/tests/test_trace_analysis.o $(
 
 $(TESTPREFIX)/unit-test-cmd-branch: $(OBJDIR)/tests/test_cmd_branch.o $(OBJDIR)/cmd_branch.o \
                            $(OBJDIR)/cmd_util.o $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
-                           $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
+                           $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/modules/workspace/workspace_mirror.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
                            $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_pr_ci_grade.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -2851,14 +2851,14 @@ $(TESTPREFIX)/unit-test-cmd-core: $(OBJDIR)/tests/test_cmd_core.o $(TEST_DATA_OB
                          $(OBJDIR)/cmd_util.o \
                          $(OBJDIR)/cmd_infra.o \
                          $(OBJDIR)/cmd_init.o \
-                         $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
+                         $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/modules/workspace/workspace_mirror.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
                          $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_pr_ci_grade.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-client-integrations: $(OBJDIR)/tests/test_client_integrations.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-mcp-git: $(OBJDIR)/tests/test_mcp_git.o $(OBJDIR)/tests/support/git_module_fixture.o $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
+$(TESTPREFIX)/unit-test-mcp-git: $(OBJDIR)/tests/test_mcp_git.o $(OBJDIR)/tests/support/git_module_fixture.o $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/modules/workspace/workspace_mirror.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
                         $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_pr_ci_grade.o $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o \
                         $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o \
                         $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
@@ -3909,7 +3909,7 @@ $(TESTPREFIX)/unit-test-cmd-doctor: $(OBJDIR)/tests/test_cmd_doctor.o $(OBJDIR)/
                             $(OBJDIR)/cmd_util.o $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                             $(OBJDIR)/client_integrations.o $(OBJDIR)/db1/secrets.o \
                             $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o $(OBJDIR)/modules/kb_client/kb_client_data.o $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
-                            $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
+                            $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/modules/workspace/workspace_mirror.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
                             $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_pr_ci_grade.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3920,7 +3920,7 @@ $(TESTPREFIX)/unit-test-cmd-onboard: $(OBJDIR)/tests/test_cmd_onboard.o \
                             $(DB2_OBJS) \
                             $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                             $(OBJDIR)/client_integrations.o $(OBJDIR)/db1/secrets.o \
-                            $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
+                            $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/modules/workspace/workspace_mirror.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
                             $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o $(OBJDIR)/tests/support/git_pr_api_stub.o $(OBJDIR)/modules/git/git_pr_ci_grade.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

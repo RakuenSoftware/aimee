@@ -168,4 +168,21 @@ void ws_provider_free_list(char **entries, int count);
 ws_provider_kind_t ws_provider_kind_from_string(const char *name);
 const char *ws_provider_kind_to_string(ws_provider_kind_t kind);
 
+/* 1 iff `path` lies inside the workspace registered as `root` — including the
+ * server-side tree that root is materialised into.
+ *
+ * A caller holding a registered root and a live cwd cannot answer this with a
+ * prefix test, because a registered root is not always where work happens. A
+ * `mirror` root is the CLIENT's path, registered verbatim and never resolved
+ * here (server_runner_endpoints.c); the server reconstructs a worktree under
+ * <mirror base>/<hash(root)>/ and runs there. A prefix test therefore says "not
+ * my workspace" about the very directory the workspace is working in.
+ *
+ * This exists so callers do not have to know that. Where a workspace puts its
+ * files is this module's business: a consumer asking "is this path mine" should
+ * not be enumerating provider kinds or rebuilding hashed paths, and every one
+ * that did would need editing again the next time a provider materialises a root
+ * somewhere new. Pure string work; no I/O. */
+int workspace_root_contains_path(const char *root, const char *path);
+
 #endif /* WORKSPACE_PROVIDER_H */
