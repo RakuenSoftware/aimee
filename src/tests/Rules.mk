@@ -4048,6 +4048,7 @@ $(TESTPREFIX)/unit-test-cmd-delegate: $(OBJDIR)/tests/test_cmd_delegate.o \
                              $(OBJDIR)/role_templates.o \
                              $(OBJDIR)/modules/delegates/delegate_prompt.o $(OBJDIR)/modules/delegates/delegate_routing.o \
                              $(OBJDIR)/modules/delegates/delegate_checkout.o $(OBJDIR)/cJSON.o \
+                             $(OBJDIR)/tests/module_handlers/delegates.o \
                              $(OBJDIR)/util.o $(OBJDIR)/posix/platform_process.o $(OBJDIR)/posix/util.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 

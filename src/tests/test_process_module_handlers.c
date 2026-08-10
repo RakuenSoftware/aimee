@@ -289,6 +289,54 @@ static void test_workspace_runner_io_frames(void)
    assert(aimee_ws_io_response_decode(reply, sizeof(reply), &chunk, &chunk_len, &more) < 0);
 }
 
+/* Capability inference is stated twice, here in the module's C mirror and in
+ * server-go/modules/delegates/capabilities.go, and nothing in the build keeps
+ * them in step. These pin the answers a drifting edit would change. */
+static void test_delegates_capability_inference(void)
+{
+   uint8_t response[AIMEE_DELEGATES_CAP_RESPONSE_LEN];
+   uint8_t request[AIMEE_DELEGATES_CAP_HEADER_LEN + 256];
+   uint32_t response_len = 0;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CAPABILITIES};
+
+   struct
+   {
+      const char *prompt;
+      int tools;
+      unsigned expect;
+   } cases[] = {
+       /* A file reference needs the modality; describing the work in code does not. */
+       {"Transcribe recording.mp3 into text.", 0, AIMEE_DELEGATES_CAP_AUDIO},
+       {"Implement an STT dispatcher and audio routing module.", 0, 0},
+       {"Analyze screenshot.png", 0, AIMEE_DELEGATES_CAP_VISION},
+       {"review this diff: ![alt](docs/diagram)", 0, 0},
+       {"read the spec.pdf", 0, AIMEE_DELEGATES_CAP_PDF},
+       /* Tools is asserted by the caller, never read out of the prompt. */
+       {"", 1, AIMEE_DELEGATES_CAP_TOOLS},
+       {"", 0, 0},
+   };
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+   {
+      size_t n = aimee_delegates_cap_request_encode(cases[i].prompt, strlen(cases[i].prompt),
+                                                    cases[i].tools, request, sizeof(request));
+      assert(n > 0);
+      assert(aimee_delegates_module_handler(&invocation, request, (uint32_t)n, response,
+                                            sizeof(response), &response_len,
+                                            NULL) == AIMEE_MODULE_STATUS_OK);
+      unsigned caps = 0;
+      int min_ctx = 0;
+      assert(aimee_delegates_cap_response_decode(response, response_len, &caps, &min_ctx) == 0);
+      assert(caps == cases[i].expect);
+      assert(min_ctx == 0); /* every prompt here is short */
+   }
+
+   /* Encode refuses a prompt the buffer cannot hold rather than overrunning it. */
+   char big[600];
+   memset(big, 'a', sizeof(big) - 1);
+   big[sizeof(big) - 1] = '\0';
+   assert(aimee_delegates_cap_request_encode(big, strlen(big), 0, request, sizeof(request)) == 0);
+}
+
 static void test_git(void)
 {
    uint8_t request[AIMEE_GIT_REQUEST_LEN], response[AIMEE_GIT_RESPONSE_LEN];
@@ -786,6 +834,7 @@ int main(void)
    test_workspace();
    test_workspace_runner_frames();
    test_workspace_runner_io_frames();
+   test_delegates_capability_inference();
    test_git();
    test_skills();
    test_governance();
