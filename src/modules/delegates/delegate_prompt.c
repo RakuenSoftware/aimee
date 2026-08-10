@@ -52,100 +52,11 @@ int delegate_resolve_prompt_inputs(const char *cli_prompt, const char *file_prom
    return -1;
 }
 
-static void handoff_set_error(delegate_handoff_validation_t *out, const char *msg)
-{
-   if (!out)
-      return;
-   snprintf(out->error, sizeof(out->error), "%s", msg ? msg : "invalid handoff");
-   snprintf(out->status, sizeof(out->status), "%s", "needs_supervisor_review");
-   out->needs_supervisor_review = 1;
-}
+static delegate_handoff_provider_fn g_handoff_provider;
 
-static int handoff_status_allowed(const char *status)
+void delegate_register_handoff_provider(delegate_handoff_provider_fn provider)
 {
-   return status && (strcmp(status, "done") == 0 || strcmp(status, "partial") == 0 ||
-                     strcmp(status, "blocked") == 0 || strcmp(status, "failed") == 0);
-}
-
-static int json_array_string_count(cJSON *arr)
-{
-   if (!cJSON_IsArray(arr))
-      return 0;
-   int count = 0;
-   cJSON *item;
-   cJSON_ArrayForEach(item, arr)
-   {
-      if (cJSON_IsString(item) && item->valuestring[0])
-         count++;
-   }
-   return count;
-}
-
-static int json_array_entry_count(cJSON *arr)
-{
-   return cJSON_IsArray(arr) ? cJSON_GetArraySize(arr) : 0;
-}
-
-static int json_array_contains_string(cJSON *arr, const char *needle)
-{
-   if (!cJSON_IsArray(arr) || !needle || !needle[0])
-      return 0;
-   cJSON *item;
-   cJSON_ArrayForEach(item, arr)
-   {
-      if (cJSON_IsString(item) && strcmp(item->valuestring, needle) == 0)
-         return 1;
-   }
-   return 0;
-}
-
-static int handoff_passed_test_count(cJSON *tests)
-{
-   if (!cJSON_IsArray(tests))
-      return 0;
-   int passed = 0;
-   cJSON *item;
-   cJSON_ArrayForEach(item, tests)
-   {
-      if (!cJSON_IsObject(item))
-         continue;
-      cJSON *status = cJSON_GetObjectItemCaseSensitive(item, "status");
-      if (cJSON_IsString(status) &&
-          (strcmp(status->valuestring, "passed") == 0 || strcmp(status->valuestring, "pass") == 0))
-         passed++;
-   }
-   return passed;
-}
-
-static int handoff_outside_owned_count(cJSON *changed, cJSON *outside, cJSON *owned)
-{
-   int count = json_array_string_count(outside);
-   if (!cJSON_IsArray(changed) || !cJSON_IsArray(owned) || cJSON_GetArraySize(owned) == 0)
-      return count;
-
-   cJSON *item;
-   cJSON_ArrayForEach(item, changed)
-   {
-      if (!cJSON_IsString(item) || !item->valuestring[0])
-         continue;
-      if (!json_array_contains_string(owned, item->valuestring) &&
-          !json_array_contains_string(outside, item->valuestring))
-         count++;
-   }
-   return count;
-}
-
-static int handoff_string_blank(const char *s)
-{
-   if (!s)
-      return 1;
-   while (*s)
-   {
-      if (*s != ' ' && *s != '\t' && *s != '\n' && *s != '\r')
-         return 0;
-      s++;
-   }
-   return 1;
+   g_handoff_provider = provider;
 }
 
 char *delegate_handoff_append_contract(const char *prompt, const char *packet_id)
@@ -195,6 +106,15 @@ char *delegate_handoff_repair_prompt(const char *previous_response, const char *
    return out;
 }
 
+/* Whether a delegate's report can be believed is the delegates module's rule.
+ * It was ~150 lines here -- schema and status admission, required-field shape,
+ * the passed-test count, and the two downgrades -- and it is stated once, in
+ * the module, now.
+ *
+ * Fails closed as NEEDS-REVIEW. With no answer the handoff is neither accepted
+ * nor silently dropped: it goes to a human. Treating an unanswerable check as
+ * "valid" would let an unverified delegate report through, which is the exact
+ * thing the two downgrades exist to prevent. */
 int delegate_handoff_validate_text(const char *text, const char *owned_files_json,
                                    int require_verification, delegate_handoff_validation_t *out)
 {
@@ -203,78 +123,14 @@ int delegate_handoff_validate_text(const char *text, const char *owned_files_jso
    memset(out, 0, sizeof(*out));
    snprintf(out->status, sizeof(out->status), "%s", "needs_supervisor_review");
 
-   if (!text || !text[0])
+   if (!g_handoff_provider)
    {
-      handoff_set_error(out, "empty delegate handoff");
-      return -1;
-   }
-
-   cJSON *root = cJSON_Parse(text);
-   if (!cJSON_IsObject(root))
-   {
-      cJSON_Delete(root);
-      handoff_set_error(out, "handoff is not valid JSON object");
-      return -1;
-   }
-
-   cJSON *schema = cJSON_GetObjectItemCaseSensitive(root, "schema_version");
-   if (!cJSON_IsString(schema) || strcmp(schema->valuestring, "delegate_result_v1") != 0)
-   {
-      cJSON_Delete(root);
-      handoff_set_error(out, "missing schema_version delegate_result_v1");
-      return -1;
-   }
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(root, "status");
-   if (!cJSON_IsString(status) || !handoff_status_allowed(status->valuestring))
-   {
-      cJSON_Delete(root);
-      handoff_set_error(out, "invalid handoff status");
-      return -1;
-   }
-   snprintf(out->raw_status, sizeof(out->raw_status), "%s", status->valuestring);
-   snprintf(out->status, sizeof(out->status), "%s", status->valuestring);
-
-   cJSON *changed = cJSON_GetObjectItemCaseSensitive(root, "changed_files");
-   cJSON *tests = cJSON_GetObjectItemCaseSensitive(root, "tests");
-   cJSON *supervisor = cJSON_GetObjectItemCaseSensitive(root, "supervisor_actions");
-   cJSON *summary = cJSON_GetObjectItemCaseSensitive(root, "summary");
-   if (!cJSON_IsArray(changed) || !cJSON_IsArray(tests) ||
-       (supervisor && !cJSON_IsArray(supervisor)) || !cJSON_IsString(summary) ||
-       handoff_string_blank(summary->valuestring))
-   {
-      cJSON_Delete(root);
-      handoff_set_error(out, "handoff missing required fields");
-      return -1;
-   }
-
-   cJSON *commands = cJSON_GetObjectItemCaseSensitive(root, "commands_run");
-   cJSON *outside = cJSON_GetObjectItemCaseSensitive(root, "outside_ownership_touches");
-   out->changed_files_count = json_array_string_count(changed);
-   out->commands_run = json_array_entry_count(commands);
-   out->passed_tests = handoff_passed_test_count(tests);
-
-   cJSON *owned = owned_files_json && owned_files_json[0] ? cJSON_Parse(owned_files_json) : NULL;
-   out->outside_ownership_count = handoff_outside_owned_count(changed, outside, owned);
-   cJSON_Delete(owned);
-
-   out->valid = 1;
-   if (out->outside_ownership_count > 0)
-   {
-      snprintf(out->status, sizeof(out->status), "%s", "needs_supervisor_review");
-      snprintf(out->error, sizeof(out->error), "%s", "handoff touched files outside owned_files");
-      out->needs_supervisor_review = 1;
-   }
-   else if (strcmp(out->raw_status, "done") == 0 && require_verification && out->passed_tests == 0)
-   {
-      snprintf(out->status, sizeof(out->status), "%s", "partial");
       snprintf(out->error, sizeof(out->error), "%s",
-               "status=done without passed focused verification; downgraded to partial");
-      out->done_without_verification = 1;
+               "handoff cannot be validated (delegates module unavailable)");
+      out->needs_supervisor_review = 1;
+      return -1;
    }
-
-   cJSON_Delete(root);
-   return 0;
+   return g_handoff_provider(text, owned_files_json, require_verification, out);
 }
 
 void delegate_handoff_add_validation_json(cJSON *obj, const delegate_handoff_validation_t *v)
