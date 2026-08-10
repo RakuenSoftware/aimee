@@ -881,7 +881,25 @@ void config_parse_sandbox_section(config_t *cfg, cJSON *root)
    {
       item = cJSON_GetObjectItemCaseSensitive(sbox, "mode");
       if (cJSON_IsString(item) && item->valuestring[0])
-         cfg->sandbox.mode = sandbox_mode_from_string(item->valuestring);
+      {
+         /* sandbox_mode_from_string() maps ANY unrecognized string to
+          * SANDBOX_MODE_OFF. That was harmless while OFF was also the default, but
+          * the default is now WORKSPACE_ONLY, so a typo ("wokspace_only") would
+          * SILENTLY DISABLE isolation. Recognize exactly what that parser accepts —
+          * leading 'o'+"off", 'w', 'a' — and on anything else warn and keep the
+          * default rather than downgrading. The loose leading-character match is
+          * preserved deliberately: tightening it to exact strings would regress
+          * existing configs that say "workspace" or "allow". */
+         const char *ms = item->valuestring;
+         const int known = (strcmp(ms, "off") == 0) || ms[0] == 'w' || ms[0] == 'a';
+         if (known)
+            cfg->sandbox.mode = sandbox_mode_from_string(ms);
+         else
+            fprintf(stderr,
+                    "aimee: config warning: sandbox.mode: unknown value \"%s\" — keeping "
+                    "default \"%s\" (valid: off, workspace_only, allowlist)\n",
+                    ms, sandbox_mode_to_string(cfg->sandbox.mode));
+      }
 
       item = cJSON_GetObjectItemCaseSensitive(sbox, "network");
       if (cJSON_IsBool(item))

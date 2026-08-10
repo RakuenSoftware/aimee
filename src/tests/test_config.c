@@ -1660,6 +1660,87 @@ int main(void)
       assert(strcmp(cfg2.sandbox.allow_paths[1], "/opt/b") == 0);
    }
 
+   /* --- sandbox: DEFAULT-ON with no sandbox section ---
+    * The delegate shell guard in tool_bash() refuses a delegated shell whenever the
+    * mode is SANDBOX_MODE_OFF. While this defaulted to the zero value that guard
+    * refused every co-located delegate shell on an unconfigured install. */
+   {
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "provider: claude\n");
+      fclose(f);
+
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      assert(config_load(&cfg) == 0);
+      assert(cfg.sandbox.mode == SANDBOX_MODE_WORKSPACE_ONLY);
+   }
+
+   /* --- sandbox: the explicit opt-out SURVIVES a save round-trip ---
+    * config_save persists the sandbox block only when it differs from the default.
+    * With the default flipped to WORKSPACE_ONLY, testing that predicate against
+    * SANDBOX_MODE_OFF would drop an operator's "off" on the next save and silently
+    * re-enable the sandbox. */
+   {
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "provider: claude\n"
+                 "sandbox:\n"
+                 "  mode: off\n");
+      fclose(f);
+
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      assert(config_load(&cfg) == 0);
+      assert(cfg.sandbox.mode == SANDBOX_MODE_OFF); /* opt-out parsed */
+      config_save(&cfg);
+
+      static config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      assert(config_load(&cfg2) == 0);
+      assert(cfg2.sandbox.mode == SANDBOX_MODE_OFF); /* opt-out still honoured */
+   }
+
+   /* --- sandbox: an unknown mode string keeps the default, never downgrades ---
+    * sandbox_mode_from_string() maps anything unrecognized to SANDBOX_MODE_OFF, which
+    * would silently disable isolation on a typo now that the default is on. */
+   {
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "provider: claude\n"
+                 "sandbox:\n"
+                 "  mode: wokspace_only\n");
+      fclose(f);
+
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      assert(config_load(&cfg) == 0);
+      assert(cfg.sandbox.mode == SANDBOX_MODE_WORKSPACE_ONLY);
+   }
+
+   /* --- sandbox: the loose leading-character parse is preserved --- */
+   {
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "provider: claude\n"
+                 "sandbox:\n"
+                 "  mode: allow\n");
+      fclose(f);
+
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      assert(config_load(&cfg) == 0);
+      assert(cfg.sandbox.mode == SANDBOX_MODE_ALLOWLIST);
+   }
+
    /* --- compact config: defaults --- */
    {
       static config_t cfg;
