@@ -1166,8 +1166,13 @@ int config_save(const config_t *cfg)
          cJSON_AddNumberToObject(sess, "max_worktrees", cfg->max_worktrees);
    }
 
-   /* Sandbox config (only save if non-default) */
-   if (cfg->sandbox.mode != SANDBOX_MODE_OFF || cfg->sandbox.network_isolated ||
+   /* Sandbox config (only save if non-default). The default is now
+    * SANDBOX_MODE_WORKSPACE_ONLY, so the value that MUST survive a save is the
+    * explicit opt-out (`mode: "off"`) — mirroring delegate_sandbox above, which
+    * persists only its opt-out. Testing against SANDBOX_MODE_OFF here (the old
+    * predicate) would drop an operator's "off" on the next save and silently
+    * re-enable the sandbox from the default. */
+   if (cfg->sandbox.mode != SANDBOX_MODE_WORKSPACE_ONLY || cfg->sandbox.network_isolated ||
        cfg->sandbox.allow_path_count > 0)
    {
       cJSON *sbox = cJSON_AddObjectToObject(root, "sandbox");
