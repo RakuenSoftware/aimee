@@ -313,4 +313,29 @@ static inline size_t aimee_delegates_rescue_request_encode(const char *text, siz
    return at;
 }
 
+/* --- Verification outcome and escalation policy (stage 7) --- */
+
+#define AIMEE_DELEGATES_EVENT_VERIFY          6663u
+#define AIMEE_DELEGATES_STAGE_VERIFY          7u
+#define AIMEE_DELEGATES_VERIFY_REQUEST_MAGIC  0x51524556u /* "VERQ" */
+#define AIMEE_DELEGATES_VERIFY_RESPONSE_MAGIC 0x53524556u /* "VERS" */
+#define AIMEE_DELEGATES_VERIFY_REQUEST_LEN    20u
+#define AIMEE_DELEGATES_VERIFY_RESPONSE_LEN   12u
+
+static inline int aimee_delegates_verify_request_encode(unsigned op, int a, int b,
+                                                        int max_signal_status, uint8_t *out,
+                                                        size_t cap)
+{
+   if (!out || cap < AIMEE_DELEGATES_VERIFY_REQUEST_LEN)
+      return -1;
+   memset(out, 0, AIMEE_DELEGATES_VERIFY_REQUEST_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_VERIFY_REQUEST_MAGIC);
+   out[4] = 1; /* wire version */
+   out[5] = (uint8_t)op;
+   aimee_delegates_put_u32(out + 8, (uint32_t)a);
+   aimee_delegates_put_u32(out + 12, (uint32_t)b);
+   aimee_delegates_put_u32(out + 16, (uint32_t)max_signal_status);
+   return 0;
+}
+
 #endif

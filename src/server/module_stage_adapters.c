@@ -4,6 +4,7 @@
 
 #include <aimee/tools/agent_tools.h>
 #include <aimee/delegates/delegate_xml_fallback.h>
+#include "delegate_verify.h"
 #include <aimee/git/git_ops.h>
 #include "gw_stage_governance.h"
 #include "ingress_preinject.h"
@@ -512,6 +513,27 @@ static int delegate_rescue(const char *text, int allow_json, int detect_only,
    return (int)count;
 }
 
+static int delegate_verify(int op, int a, int b, int max_signal_status, int *outcome_out,
+                           int *escalate_out)
+{
+   uint8_t request[AIMEE_DELEGATES_VERIFY_REQUEST_LEN];
+   uint8_t response[AIMEE_DELEGATES_VERIFY_RESPONSE_LEN];
+   uint32_t response_len = 0;
+
+   if (!outcome_out || !escalate_out ||
+       aimee_delegates_verify_request_encode((unsigned)op, a, b, max_signal_status, request,
+                                             sizeof(request)) != 0 ||
+       call_module(AIMEE_DELEGATES_EVENT_VERIFY, AIMEE_DELEGATES_STAGE_VERIFY, request,
+                   sizeof(request), response, sizeof(response), &response_len) != 0 ||
+       response_len != AIMEE_DELEGATES_VERIFY_RESPONSE_LEN ||
+       aimee_delegates_get_u32(response) != AIMEE_DELEGATES_VERIFY_RESPONSE_MAGIC)
+      return -1;
+
+   *outcome_out = (int)aimee_delegates_get_u32(response + 4);
+   *escalate_out = (int)aimee_delegates_get_u32(response + 8);
+   return 0;
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -724,6 +746,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_paths_provider(delegate_paths);
    delegate_register_handoff_provider(delegate_handoff);
    delegate_register_rescue_provider(delegate_rescue);
+   delegate_register_verify_provider(delegate_verify);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path

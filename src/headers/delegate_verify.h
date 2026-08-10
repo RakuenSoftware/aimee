@@ -47,6 +47,26 @@ extern "C"
     * withholds a placement warning, whereas treating an OOM kill, a timeout or a
     * missing binary as a work-product failure blames the model for its
     * environment. */
+   /* The classification and the escalation policy both live in the delegates
+    * module (server-go/modules/delegates/verify.go). This is the seam the C
+    * side calls through; with no provider registered, classification reports
+    * INFRA_ERROR and no escalation is raised -- unable to judge, this must not
+    * claim a work-product failure, because that is the direction that blames
+    * the model for its environment. */
+#define DELEGATE_VERIFY_OP_CLASSIFY 0
+#define DELEGATE_VERIFY_OP_ESCALATE 1
+
+   /* op CLASSIFY: a=exec_rc,  b unused,      max_signal_status=platform ceiling
+    * op ESCALATE: a=outcome,  b=delegate_rc, max_signal_status unused */
+   typedef int (*delegate_verify_provider_fn)(int op, int a, int b, int max_signal_status,
+                                              int *outcome_out, int *escalate_out);
+   void delegate_register_verify_provider(delegate_verify_provider_fn provider);
+
+   /* The highest status this PLATFORM can report as "killed by signal N". A
+    * compile-time property of the host, so it travels with the request rather
+    * than being guessed by the module. */
+   int delegate_verify_max_signal_status(void);
+
    verify_outcome_t verify_classify(int exec_rc);
 
    const char *verify_outcome_name(verify_outcome_t o);
