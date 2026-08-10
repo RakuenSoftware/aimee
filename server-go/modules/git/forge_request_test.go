@@ -174,6 +174,51 @@ func TestPRFindOpenQualifiesTheHeadWithTheOwner(t *testing.T) {
 	}
 }
 
+// THE BASE IS PART OF THE QUESTION. "Is there already an open PR for this
+// branch?" is only answerable per target branch: the same head can have an open
+// PR into one base and none into another. Filtering by head alone answers yes
+// for the wrong one, and the caller then declines to open a PR it needed.
+func TestPRFindOpenFiltersByBaseAsWellAsHead(t *testing.T) {
+	stub := &forgeStub{reply: `[{"number":5,"state":"open","head":{"ref":"feat"},
+		"base":{"ref":"testing"}}]`}
+	stub.start(t)
+	PerformForge(ForgeRequest{
+		Op: OpPRFindOpen, Owner: "acme", Repo: "r", Token: "t", Head: "feat", Base: "testing",
+	})
+	if !strings.Contains(stub.path, "head=acme%3Afeat") {
+		t.Fatalf("path = %q, want an owner-qualified head filter", stub.path)
+	}
+	if !strings.Contains(stub.path, "base=testing") {
+		t.Fatalf("path = %q, want a base filter", stub.path)
+	}
+
+	// Without a base there must be no base filter at all — an empty base=&
+	// would match nothing rather than "any base".
+	stub2 := &forgeStub{reply: `[]`}
+	stub2.start(t)
+	PerformForge(ForgeRequest{Op: OpPRFindOpen, Owner: "acme", Repo: "r", Token: "t", Head: "feat"})
+	if strings.Contains(stub2.path, "base=") {
+		t.Fatalf("path = %q, want no base filter when none was asked for", stub2.path)
+	}
+}
+
+// A "latest open PRs" listing that silently shows the OLDEST ones is worse than
+// no listing: it reads as authoritative.
+func TestPRListOpenAsksForMostRecentlyUpdatedFirst(t *testing.T) {
+	stub := &forgeStub{reply: `[]`}
+	stub.start(t)
+	PerformForge(ForgeRequest{Op: OpPRListOpen, Owner: "o", Repo: "r", Token: "t", Limit: 20})
+	for _, want := range []string{"sort=updated", "direction=desc", "per_page=20", "state=open"} {
+		if !strings.Contains(stub.path, want) {
+			t.Fatalf("path = %q, missing %s", stub.path, want)
+		}
+	}
+	// The head/base filters belong to find, not to a full listing.
+	if strings.Contains(stub.path, "head=") || strings.Contains(stub.path, "base=") {
+		t.Fatalf("path = %q, a listing must not be filtered by head/base", stub.path)
+	}
+}
+
 func TestGuardsRejectBadInputBeforeAnyCall(t *testing.T) {
 	previous := forgeBaseURL
 	forgeBaseURL = "http://127.0.0.1:1" // any call would fail loudly

@@ -266,9 +266,25 @@ func PerformForge(request ForgeRequest) ForgeResponse {
 
 	case OpPRFindOpen, OpPRListOpen:
 		query := url.Values{"state": {"open"}}
-		if request.Op == OpPRFindOpen && request.Head != "" {
-			// GitHub wants owner-qualified head for this filter.
-			query.Set("head", request.Owner+":"+request.Head)
+		if request.Op == OpPRFindOpen {
+			if request.Head != "" {
+				// GitHub wants owner-qualified head for this filter.
+				query.Set("head", request.Owner+":"+request.Head)
+			}
+			// The BASE matters as much as the head. "Is there already an open PR
+			// for this branch?" is only answered correctly per target branch: the
+			// same head can have an open PR into one base and none into another,
+			// and filtering by head alone answers yes for the wrong one.
+			if request.Base != "" {
+				query.Set("base", request.Base)
+			}
+		}
+		if request.Op == OpPRListOpen {
+			// Most recently updated first. Without this the forge returns
+			// creation order, so a "latest open PRs" listing silently shows the
+			// OLDEST ones once there are more than one page's worth.
+			query.Set("sort", "updated")
+			query.Set("direction", "desc")
 		}
 		if request.Limit > 0 {
 			query.Set("per_page", fmt.Sprint(request.Limit))
