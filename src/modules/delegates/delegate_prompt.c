@@ -297,217 +297,29 @@ void delegate_handoff_add_validation_json(cJSON *obj, const delegate_handoff_val
 
 /* ---- Named-file drift detection ---- */
 
-static const char *const drift_src_exts[] = {
-    ".c",  ".h",    ".cpp", ".cc",   ".cxx",  ".py", ".js",  ".ts", ".go",   ".rs",  ".java", ".rb",
-    ".sh", ".yaml", ".yml", ".json", ".toml", ".md", ".sql", ".mk", ".conf", ".cfg", NULL};
+static delegate_paths_provider_fn g_paths_provider;
 
-static int drift_is_src_extension(const char *ext)
+void delegate_register_paths_provider(delegate_paths_provider_fn provider)
 {
-   for (int i = 0; drift_src_exts[i]; i++)
-      if (strcmp(ext, drift_src_exts[i]) == 0)
-         return 1;
-   return 0;
+   g_paths_provider = provider;
 }
 
-static int drift_path_char(char c)
-{
-   return isalnum((unsigned char)c) || c == '.' || c == '/' || c == '_' || c == '-';
-}
-
-static size_t drift_task_surface_len(const char *prompt)
-{
-   if (!prompt)
-      return 0;
-
-   size_t limit = strlen(prompt);
-   static const char *const markers[] = {
-       "\n\n# Prompt File\n",
-       "\n# Prompt File\n",
-       "\n\n---\n## Parent Worktree Diff Evidence\n",
-       "\n---\n## Parent Worktree Diff Evidence\n",
-       "\n\n---\n## Validation Evidence Bundle\n",
-       "\n---\n## Validation Evidence Bundle\n",
-       NULL,
-   };
-
-   for (int i = 0; markers[i]; i++)
-   {
-      const char *marker = strstr(prompt, markers[i]);
-      if (marker)
-      {
-         size_t pos = (size_t)(marker - prompt);
-         if (pos < limit)
-            limit = pos;
-      }
-   }
-
-   return limit;
-}
-
-/* Briefs commonly say things like "Do NOT touch src/agent_jobs.c" or
- * "skip src/foo.c — it is owned by another delegate". Treating those
- * negated mentions as required outputs leads to spurious "named file was
- * not created" warnings even on a successful run. We scan backwards from
- * the path token to the start of the current line looking for negation
- * cues; if any matches, the path is dropped. The heuristic is
- * intentionally conservative — false positives here just mean the
- * drift check skips a path it should have flagged, which is far less
- * noisy than the current false-negative pattern. */
-static int drift_path_is_negated(const char *prompt, const char *path_start)
-{
-   const char *line_start = path_start;
-   while (line_start > prompt && line_start[-1] != '\n')
-      line_start--;
-
-   size_t span = (size_t)(path_start - line_start);
-   if (span == 0)
-      return 0;
-
-   char buf[256];
-   if (span >= sizeof(buf))
-      span = sizeof(buf) - 1;
-   memcpy(buf, path_start - span, span);
-   buf[span] = '\0';
-   for (size_t i = 0; i < span; i++)
-      buf[i] = (char)tolower((unsigned char)buf[i]);
-
-   static const char *negations[] = {
-       "do not ",     "don't ",     "does not ",   "doesn't ",   "must not ",    "mustn't ",
-       "cannot ",     "can't ",     "should not ", "shouldn't ", "will not ",    "won't ",
-       "skip ",       "off-limits", "off limits",  "no touch",   "do not touch", "not touch",
-       "leave alone", "ignore ",    NULL};
-   for (int i = 0; negations[i]; i++)
-      if (strstr(buf, negations[i]))
-         return 1;
-
-   return 0;
-}
-
-/* Briefs frequently embed an illustrative JSON schema or example
- * (e.g. `"owned_files":["src/x.c"]`) to show a delegate the *shape* of its
- * output. Those quoted paths are documentation, not real output targets, and
- * scraping them produced spurious "named file was not created" failures. A path
- * is treated as such an example value when it is a double-quoted token whose
- * enclosing context is a JSON value position — the opening quote follows (past
- * whitespace) a '[', ',', or ':'. Prose instructions like `create "src/foo.c"`
- * are preserved because the char before the opening quote is a word/space, not a
- * JSON structural delimiter. Conservatively dropping here matches the rest of
- * this check: a missed flag is far quieter than a false failure. */
-static int drift_path_is_json_example_value(const char *prompt, const char *tok_start,
-                                            const char *tok_end)
-{
-   if (tok_start <= prompt || tok_start[-1] != '"')
-      return 0;
-   if (*tok_end != '"')
-      return 0;
-   const char *b = tok_start - 2; /* char before the opening quote */
-   while (b > prompt && (*b == ' ' || *b == '\t' || *b == '\n' || *b == '\r'))
-      b--;
-   if (b < prompt)
-      return 0;
-   return (*b == '[' || *b == ',' || *b == ':');
-}
-
+/* Which repo files a brief names as targets is the delegates module's rule, and
+ * it lives only there. The scan it replaced was long -- an extension table, a
+ * negation table, a JSON-example test and an evidence-section bound -- and a
+ * second copy of that would drift silently.
+ *
+ * Fails closed as EMPTY: with no answer, nothing is named, so the drift check
+ * raises no warning. That is the quiet direction. Guessing a path instead would
+ * tell an operator a successful run failed, which teaches them to ignore the
+ * check entirely. */
 int delegate_extract_named_paths(const char *prompt, char paths[][DELEGATE_DRIFT_PATH_MAX],
                                  int max_paths)
 {
-   if (!prompt || !paths || max_paths <= 0)
+   if (!prompt || !paths || max_paths <= 0 || !g_paths_provider)
       return 0;
-
-   int count = 0;
-   const char *p = prompt;
-   const char *end = prompt + drift_task_surface_len(prompt);
-
-   while (p < end && *p && count < max_paths)
-   {
-      if (!drift_path_char(*p))
-      {
-         p++;
-         continue;
-      }
-
-      const char *start = p;
-      while (p < end && drift_path_char(*p))
-         p++;
-      size_t len = (size_t)(p - start);
-      while (len > 0 && start[len - 1] == '.')
-         len--;
-      if (len == 0)
-         continue;
-      /* Skip angle-bracket system includes: `#include <sys/stat.h>` — the '<'
-       * immediately precedes the token, making it a system path, not a repo path. */
-      if (start > prompt && start[-1] == '<')
-         continue;
-
-      /* Skip paths the brief explicitly negates ("Do NOT touch X", "skip Y"). */
-      if (drift_path_is_negated(prompt, start))
-         continue;
-
-      /* Skip paths that are JSON string-values inside an illustrative example
-       * (e.g. a schema shown to the delegate), not real output targets. */
-      if (drift_path_is_json_example_value(prompt, start, p))
-         continue;
-
-      const char *path_start = start;
-      size_t path_len = len;
-      if (path_len > 2 && (path_start[0] == 'a' || path_start[0] == 'b') && path_start[1] == '/')
-      {
-         path_start += 2;
-         path_len -= 2;
-      }
-
-      /* Require at least one '/' to look like a path */
-      int has_slash = 0;
-      for (size_t i = 0; i < path_len; i++)
-      {
-         if (path_start[i] == '/')
-         {
-            has_slash = 1;
-            break;
-         }
-      }
-      if (!has_slash)
-         continue;
-
-      /* Require a known source extension */
-      const char *last_dot = NULL;
-      for (size_t i = 0; i < path_len; i++)
-         if (path_start[i] == '.')
-            last_dot = path_start + i;
-      if (!last_dot)
-         continue;
-
-      size_t ext_len = (size_t)((path_start + path_len) - last_dot);
-      if (ext_len == 0 || ext_len >= 16)
-         continue;
-      char ext[16];
-      memcpy(ext, last_dot, ext_len);
-      ext[ext_len] = '\0';
-      if (!drift_is_src_extension(ext))
-         continue;
-
-      /* Skip duplicates */
-      int dup = 0;
-      for (int i = 0; i < count; i++)
-      {
-         if (strlen(paths[i]) == path_len && memcmp(paths[i], path_start, path_len) == 0)
-         {
-            dup = 1;
-            break;
-         }
-      }
-      if (dup)
-         continue;
-
-      if (path_len < DELEGATE_DRIFT_PATH_MAX)
-      {
-         memcpy(paths[count], path_start, path_len);
-         paths[count][path_len] = '\0';
-         count++;
-      }
-   }
-
-   return count;
+   int n = g_paths_provider(prompt, (unsigned)max_paths, &paths[0][0], DELEGATE_DRIFT_PATH_MAX);
+   return n > 0 ? n : 0;
 }
 
 /* Returns 1 if prompt contains an explicit intent to create a new file. */

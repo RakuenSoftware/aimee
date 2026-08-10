@@ -316,6 +316,40 @@ static int delegate_chain(unsigned op, int has_depth, int has_parent, int parent
               : -1;
 }
 
+static int delegate_paths(const char *prompt, unsigned max_paths, char *paths, size_t path_stride)
+{
+   size_t prompt_len = prompt ? strlen(prompt) : 0;
+   if (prompt_len > AIMEE_DELEGATES_PATHS_PROMPT_MAX)
+      return -1;
+   size_t request_cap = AIMEE_DELEGATES_PATHS_HEADER_LEN + prompt_len;
+   uint8_t *request = malloc(request_cap);
+   if (!request)
+      return -1;
+   size_t request_len =
+       aimee_delegates_paths_request_encode(prompt, prompt_len, max_paths, request, request_cap);
+
+   /* Bounded by what the module can return: a count it caps, each path bounded
+    * by the caller's stride, plus a two-byte length prefix each. */
+   uint32_t response_cap =
+       (uint32_t)(AIMEE_DELEGATES_PATHS_RESP_HEADER_LEN + max_paths * (path_stride + 2));
+   uint8_t *response = malloc(response_cap);
+   if (!response)
+   {
+      free(request);
+      return -1;
+   }
+   uint32_t response_len = 0;
+   int rc = request_len > 0 &&
+                    call_module(AIMEE_DELEGATES_EVENT_PATHS, AIMEE_DELEGATES_STAGE_PATHS, request,
+                                (uint32_t)request_len, response, response_cap, &response_len) == 0
+                ? aimee_delegates_paths_response_decode(response, response_len, paths, path_stride,
+                                                        max_paths)
+                : -1;
+   free(request);
+   free(response);
+   return rc;
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -525,6 +559,7 @@ void server_module_stage_adapters_configure(void)
    delegate_role_register_canonicalizer(delegate_canonicalize);
    delegate_routing_register_capability_provider(delegate_infer_caps);
    delegate_register_chain_provider(delegate_chain);
+   delegate_register_paths_provider(delegate_paths);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path

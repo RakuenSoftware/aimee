@@ -139,6 +139,13 @@ int platform_trace_run_task(agent_config_t *cfg, const char *role, const char *s
  * extension) from a delegate prompt string.  Populates paths[0..max_paths-1]
  * and returns the number of distinct paths found.  Each entry in paths must be
  * at least DELEGATE_DRIFT_PATH_MAX bytes. */
+/* Fills a contiguous paths buffer of `max_paths` rows, each `path_stride` bytes
+ * including the terminator. Returns the count written, or negative when the
+ * module could not answer. */
+typedef int (*delegate_paths_provider_fn)(const char *prompt, unsigned max_paths, char *paths,
+                                          size_t path_stride);
+void delegate_register_paths_provider(delegate_paths_provider_fn provider);
+
 int delegate_extract_named_paths(const char *prompt, char paths[][DELEGATE_DRIFT_PATH_MAX],
                                  int max_paths);
 
