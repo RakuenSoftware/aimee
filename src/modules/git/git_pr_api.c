@@ -1205,33 +1205,44 @@ int git_pr_info_via_api_slug(const char *principal, const char *slug, int number
    gh_ctx_t cx;
    if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
-   char path[64];
-   snprintf(path, sizeof(path), "pulls/%d", number);
-   char *resp = NULL;
-   int st = gh_get(&cx, path, &resp);
-   gh_ctx_done(&cx);
-   if (st < 200 || st >= 300 || !resp)
+   cJSON *extra = cJSON_CreateObject();
+   if (!extra)
    {
-      gh_err(resp, st, "pr info", err, errlen);
-      free(resp);
+      gh_ctx_done(&cx);
+      snprintf(err, errlen, "internal error");
       return -1;
    }
-   cJSON *j = cJSON_Parse(resp);
-   free(resp);
+   cJSON_AddNumberToObject(extra, "number", number);
+   cJSON *reply = forge_stage(&cx, "pr_info", extra);
+   gh_ctx_done(&cx);
+   if (!reply)
+   {
+      snprintf(err, errlen, "pr info: the git module could not be reached");
+      return -1;
+   }
+   const cJSON *message = cJSON_GetObjectItemCaseSensitive(reply, "error");
+   cJSON *j = cJSON_DetachItemFromObjectCaseSensitive(reply, "pull");
    if (!j)
    {
-      snprintf(err, errlen, "github API: unparseable pr info");
+      if (cJSON_IsString(message) && message->valuestring)
+         snprintf(err, errlen, "%s", message->valuestring);
+      else
+         snprintf(err, errlen, "github API: unparseable pr info");
+      cJSON_Delete(reply);
       return -1;
    }
+   cJSON_Delete(reply);
+
    const cJSON *state = cJSON_GetObjectItem(j, "state");
    const cJSON *merged = cJSON_GetObjectItem(j, "merged");
+   /* ABSENT means the forge is still computing the merge, which is not the same
+    * as "cannot merge": out->mergeable stays -1 in that case, and only an
+    * explicit boolean moves it to 1/0. */
    const cJSON *mergeable = cJSON_GetObjectItem(j, "mergeable");
-   const cJSON *headj = cJSON_GetObjectItem(j, "head");
-   const cJSON *sha = headj ? cJSON_GetObjectItem(headj, "sha") : NULL;
-   const cJSON *headref = headj ? cJSON_GetObjectItem(headj, "ref") : NULL;
-   const cJSON *basej = cJSON_GetObjectItem(j, "base");
-   const cJSON *baseref = basej ? cJSON_GetObjectItem(basej, "ref") : NULL;
-   const char *sha_s = cJSON_IsString(sha) ? sha->valuestring : NULL;
+   const cJSON *shaj = cJSON_GetObjectItem(j, "head_sha");
+   const cJSON *headref = cJSON_GetObjectItem(j, "head");
+   const cJSON *baseref = cJSON_GetObjectItem(j, "base");
+   const char *sha_s = cJSON_IsString(shaj) ? shaj->valuestring : NULL;
    const char *head_s = cJSON_IsString(headref) ? headref->valuestring : NULL;
    const char *base_s = cJSON_IsString(baseref) ? baseref->valuestring : NULL;
    if (!cJSON_IsString(state) || !state->valuestring || !sha_s || !sha_s[0] || !head_s ||
@@ -1249,23 +1260,20 @@ int git_pr_info_via_api_slug(const char *principal, const char *slug, int number
     * missing or over-long value is left empty rather than failing the whole call
     * the way a missing ref does above. */
    const cJSON *title = cJSON_GetObjectItem(j, "title");
-   const cJSON *hurl = cJSON_GetObjectItem(j, "html_url");
+   const cJSON *hurl = cJSON_GetObjectItem(j, "url");
    const cJSON *mat = cJSON_GetObjectItem(j, "merged_at");
    if (cJSON_IsString(title) && title->valuestring)
       snprintf(out->title, sizeof(out->title), "%s", title->valuestring);
    if (cJSON_IsString(hurl) && hurl->valuestring)
       snprintf(out->html_url, sizeof(out->html_url), "%s", hurl->valuestring);
-   if (cJSON_IsString(mat) && mat->valuestring) /* null when never merged */
+   if (cJSON_IsString(mat) && mat->valuestring) /* absent when never merged */
       snprintf(out->merged_at, sizeof(out->merged_at), "%s", mat->valuestring);
-   const cJSON *mstate = cJSON_GetObjectItem(j, "mergeable_state");
+   /* Already upper-cased by the module: REST spells mergeable_state lowercase
+    * while callers render the gh mergeStateStatus spelling, and normalising it
+    * in one place beats every caller remembering to. */
+   const cJSON *mstate = cJSON_GetObjectItem(j, "merge_state");
    if (cJSON_IsString(mstate) && mstate->valuestring)
-   {
-      /* REST spells it lowercase; gh reported the same values upper-cased as
-       * mergeStateStatus, and callers render that spelling. */
       snprintf(out->merge_state, sizeof(out->merge_state), "%s", mstate->valuestring);
-      for (char *p = out->merge_state; *p; p++)
-         *p = (char)toupper((unsigned char)*p);
-   }
 
    if (cJSON_IsBool(mergeable))
       out->mergeable = cJSON_IsTrue(mergeable) ? 1 : 0; /* null stays -1 (computing) */

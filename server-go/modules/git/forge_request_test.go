@@ -199,6 +199,91 @@ func TestGuardsRejectBadInputBeforeAnyCall(t *testing.T) {
 	}
 }
 
+// MERGEABLE IS THREE-VALUED. The forge answers null while it is still computing
+// the merge, which is NOT "cannot merge". Flattening null to false tells a
+// caller a perfectly mergeable PR is conflicted, and it abandons a merge that
+// would have succeeded a moment later — so absent, true and false are asserted
+// as three distinct outcomes.
+func TestPRInfoKeepsMergeableThreeValued(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want *bool
+	}{
+		{"still computing", `{"number":1,"state":"open","mergeable":null,
+			"head":{"ref":"f","sha":"abc"},"base":{"ref":"testing"}}`, nil},
+		{"mergeable", `{"number":1,"state":"open","mergeable":true,
+			"head":{"ref":"f","sha":"abc"},"base":{"ref":"testing"}}`, boolPtr(true)},
+		{"not mergeable", `{"number":1,"state":"open","mergeable":false,
+			"head":{"ref":"f","sha":"abc"},"base":{"ref":"testing"}}`, boolPtr(false)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &forgeStub{reply: tc.body}
+			stub.start(t)
+			out := PerformForge(ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Token: "t", Number: 1})
+			if out.Error != "" || out.Pull == nil {
+				t.Fatalf("unexpected: %+v", out)
+			}
+			got := out.Pull.Mergeable
+			if (got == nil) != (tc.want == nil) {
+				t.Fatalf("mergeable = %v, want %v", got, tc.want)
+			}
+			if got != nil && *got != *tc.want {
+				t.Fatalf("mergeable = %v, want %v", *got, *tc.want)
+			}
+			// And it must survive the wire the same way.
+			encoded, _ := json.Marshal(out.Pull)
+			hasKey := strings.Contains(string(encoded), `"mergeable"`)
+			if hasKey != (tc.want != nil) {
+				t.Fatalf("encoded %s: mergeable key present=%v, want %v", encoded, hasKey, tc.want != nil)
+			}
+		})
+	}
+}
+
+func TestPRInfoCarriesTheRefsAndStateACallerNeeds(t *testing.T) {
+	stub := &forgeStub{reply: `{"number":7,"state":"closed","title":"T","merged":true,
+		"merged_at":"2026-08-10T13:17:33Z","mergeable_state":"clean","html_url":"u",
+		"head":{"ref":"feat","sha":"deadbeef"},"base":{"ref":"testing"}}`}
+	stub.start(t)
+	out := PerformForge(ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Token: "t", Number: 7})
+	if out.Error != "" || out.Pull == nil {
+		t.Fatalf("unexpected: %+v", out)
+	}
+	p := out.Pull
+	// head_sha is what drift-safety on a merge is checked against, so losing it
+	// silently disables that protection.
+	if p.HeadSHA != "deadbeef" || p.Head != "feat" || p.Base != "testing" {
+		t.Fatalf("refs = %+v", p)
+	}
+	if !p.Merged || p.MergedAt != "2026-08-10T13:17:33Z" {
+		t.Fatalf("merge facts = %+v", p)
+	}
+	// REST spells it lowercase; callers render the upper-cased gh spelling, and
+	// normalising here means no caller has to remember to.
+	if p.MergeState != "CLEAN" {
+		t.Fatalf("merge_state = %q, want CLEAN", p.MergeState)
+	}
+}
+
+// A PR that was never merged has merged_at null; it must not become the string
+// "null" or an empty-but-present value a caller might render.
+func TestNeverMergedHasNoMergedAt(t *testing.T) {
+	stub := &forgeStub{reply: `{"number":1,"state":"open","merged":false,"merged_at":null,
+		"head":{"ref":"f","sha":"abc"},"base":{"ref":"testing"}}`}
+	stub.start(t)
+	out := PerformForge(ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Token: "t", Number: 1})
+	if out.Pull == nil || out.Pull.MergedAt != "" {
+		t.Fatalf("merged_at = %+v, want empty", out.Pull)
+	}
+	encoded, _ := json.Marshal(out.Pull)
+	if strings.Contains(string(encoded), "merged_at") {
+		t.Fatalf("merged_at must be omitted entirely: %s", encoded)
+	}
+}
+
+func boolPtr(v bool) *bool { return &v }
+
 func TestHandleForgeRequestRoutesThroughStageFour(t *testing.T) {
 	stub := &forgeStub{reply: `{"default_branch":"testing"}`}
 	stub.start(t)

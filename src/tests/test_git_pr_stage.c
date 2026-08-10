@@ -215,6 +215,57 @@ int main(void)
                                      sizeof(urlbuf), err, sizeof(err)) == -1);
    assert(module_bus_stub_calls() == before);
 
+   /* --- pr_info --------------------------------------------------------- */
+
+   git_pr_info_t info;
+
+   module_bus_stub_reply(
+       "{\"status\":200,\"pull\":{\"number\":7,\"state\":\"closed\",\"title\":\"T\","
+       "\"merged\":true,\"merged_at\":\"2026-08-10T13:17:33Z\",\"merge_state\":\"CLEAN\","
+       "\"url\":\"https://github.com/acme/widgets/pull/7\",\"head\":\"feat\","
+       "\"head_sha\":\"deadbeef\",\"base\":\"testing\",\"mergeable\":true}}");
+   assert(git_pr_info_via_api_slug(NULL, SLUG, 7, &info, err, sizeof(err)) == 0);
+   assert(info.open == 0 && info.merged == 1);
+   assert(strcmp(info.head_sha, "deadbeef") == 0);
+   assert(strcmp(info.head, "feat") == 0 && strcmp(info.base, "testing") == 0);
+   assert(strcmp(info.merge_state, "CLEAN") == 0);
+   assert(strcmp(info.merged_at, "2026-08-10T13:17:33Z") == 0);
+   assert(strcmp(info.html_url, "https://github.com/acme/widgets/pull/7") == 0);
+   assert(info.mergeable == 1);
+
+   /* MERGEABLE IS THREE-VALUED. An ABSENT mergeable means the forge is still
+    * computing the merge; it must stay -1 rather than collapse to 0, or a caller
+    * reads "still computing" as "conflicted" and abandons a mergeable PR. */
+   module_bus_stub_reply("{\"status\":200,\"pull\":{\"number\":7,\"state\":\"open\","
+                         "\"head\":\"feat\",\"head_sha\":\"abc\",\"base\":\"testing\"}}");
+   assert(git_pr_info_via_api_slug(NULL, SLUG, 7, &info, err, sizeof(err)) == 0);
+   assert(info.mergeable == -1);
+   assert(info.open == 1 && info.merged == 0);
+   assert(info.merged_at[0] == '\0'); /* never merged -> no timestamp */
+
+   /* An explicit false is a real answer and must NOT read as "unknown". */
+   module_bus_stub_reply("{\"status\":200,\"pull\":{\"number\":7,\"state\":\"open\","
+                         "\"head\":\"feat\",\"head_sha\":\"abc\",\"base\":\"testing\","
+                         "\"mergeable\":false}}");
+   assert(git_pr_info_via_api_slug(NULL, SLUG, 7, &info, err, sizeof(err)) == 0);
+   assert(info.mergeable == 0);
+
+   /* Missing refs fail the whole call: head_sha is what a merge's drift check is
+    * made against, so proceeding without it would silently disable that. */
+   module_bus_stub_reply(
+       "{\"status\":200,\"pull\":{\"number\":7,\"state\":\"open\",\"head\":\"feat\"}}");
+   assert(git_pr_info_via_api_slug(NULL, SLUG, 7, &info, err, sizeof(err)) == -1);
+   assert(strstr(err, "missing required refs") != NULL);
+
+   /* A refusal carries the forge's own message. */
+   module_bus_stub_reply("{\"status\":404,\"error\":\"pr info: Not Found (HTTP 404)\"}");
+   assert(git_pr_info_via_api_slug(NULL, SLUG, 7, &info, err, sizeof(err)) == -1);
+   assert(strstr(err, "Not Found") != NULL);
+
+   module_bus_stub_absent();
+   assert(git_pr_info_via_api_slug(NULL, SLUG, 7, &info, err, sizeof(err)) == -1);
+   assert(strstr(err, "could not be reached") != NULL);
+
    printf("git_pr_stage: all tests passed\n");
    return 0;
 }
