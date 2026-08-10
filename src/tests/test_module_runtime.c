@@ -15,6 +15,7 @@
 #include <aimee/kb-synthesis/module_api.h>
 #include <aimee/learning/module_api.h>
 #include <aimee/memory/module_api.h>
+#include "modules/memory/memory_ontology.h" /* NODE_* for the write-gate case */
 #include <aimee/response-composition/module_api.h>
 #include <aimee/roundtable/module_api.h>
 #include <aimee/routing/module_api.h>
@@ -208,6 +209,109 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
    return 0;
 }
 
+/* The memory module's four decision stages, over the real bus and the real
+ * module binary.
+ *
+ * Everything else that tests these stages does it in process: the Go side
+ * against fixtures, the C side against a registered stand-in for the module.
+ * Both halves can agree with each other and still not meet in the middle, which
+ * is what this crosses. Each call goes through the same encoder the production
+ * adapter uses and the same decoder, so an offset either side got wrong shows up
+ * as a failed decode rather than as a plausible wrong answer.
+ *
+ * One case per stage, chosen so the answer could not come from an empty or
+ * zeroed response. */
+static void smoke_memory_decision_stages(aimee_module_client_t *client)
+{
+   uint8_t request[1024] = {0};
+   uint8_t response[1024] = {0};
+   uint32_t response_len = 0;
+
+   /* WRITE: a seeded relation whose ends satisfy it. ACCEPT is 0, so pair it
+    * with a rejection below -- a zeroed response would read as ACCEPT. */
+   aimee_memory_fact_verdict_t verdict = AIMEE_MEMORY_FACT_BADARG;
+   assert(aimee_memory_gate_request_encode(NODE_PERSON, "works_for", NODE_ORG, request,
+                                           sizeof(request)) == 0);
+   assert(aimee_module_client_call(client, AIMEE_MEMORY_EVENT_WRITE, AIMEE_MEMORY_STAGE_WRITE, 2100,
+                                   0, request, AIMEE_MEMORY_GATE_REQUEST_LEN, response,
+                                   sizeof(response), &response_len, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_memory_gate_response_decode(response, response_len, &verdict) == 0);
+   assert(verdict == AIMEE_MEMORY_FACT_ACCEPT);
+
+   assert(aimee_memory_gate_request_encode(NODE_DEVICE, "works_for", NODE_ORG, request,
+                                           sizeof(request)) == 0);
+   assert(aimee_module_client_call(client, AIMEE_MEMORY_EVENT_WRITE, AIMEE_MEMORY_STAGE_WRITE, 2101,
+                                   0, request, AIMEE_MEMORY_GATE_REQUEST_LEN, response,
+                                   sizeof(response), &response_len, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_memory_gate_response_decode(response, response_len, &verdict) == 0);
+   assert(verdict == AIMEE_MEMORY_FACT_REJECT_KIND); /* a printer does not work for an org */
+
+   /* EXTRACT_INDEX: the canonical template, with the object typed by its shape. */
+   aimee_memory_triple_t triples[4];
+   uint32_t found = 0;
+   assert(aimee_memory_extract_request_encode("my home ip is 192.168.1.254", 4, request,
+                                              sizeof(request)) == 0);
+   assert(aimee_module_client_call(
+              client, AIMEE_MEMORY_EVENT_EXTRACT_INDEX, AIMEE_MEMORY_STAGE_EXTRACT_INDEX, 2102, 0,
+              request, (uint32_t)aimee_memory_extract_request_size("my home ip is 192.168.1.254"),
+              response, sizeof(response), &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_memory_extract_response_decode(response, response_len, triples, 4, &found) == 0);
+   assert(found == 1);
+   assert(strcmp(triples[0].subject, "user") == 0);
+   assert(strcmp(triples[0].rel_type, "home_ip") == 0);
+   assert(strcmp(triples[0].object, "192.168.1.254") == 0);
+   assert(triples[0].subject_kind == NODE_PERSON && triples[0].object_kind == NODE_IP);
+
+   /* EXTRACT_INDEX, second shape: the retraction scan. Same stage, different
+    * magic, so this also proves the two are told apart on the far side. */
+   int is_retraction = -1, has_attr = -1;
+   char attr[AIMEE_MEMORY_SCAN_ATTR_MAX] = {0};
+   assert(aimee_memory_scan_request_encode("forget my email", request, sizeof(request)) == 0);
+   assert(aimee_module_client_call(
+              client, AIMEE_MEMORY_EVENT_EXTRACT_INDEX, AIMEE_MEMORY_STAGE_EXTRACT_INDEX, 2103, 0,
+              request, (uint32_t)aimee_memory_scan_request_size("forget my email"), response,
+              sizeof(response), &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_memory_scan_response_decode(response, response_len, &is_retraction, &has_attr, attr,
+                                            sizeof(attr)) == 0);
+   assert(is_retraction == 1 && has_attr == 1 && strcmp(attr, "email") == 0);
+
+   /* RETRIEVE: the turn classifier, both answers, so a stage stuck on one of
+    * them cannot pass. */
+   int requests_sensitive = -1;
+   assert(aimee_memory_pii_request_encode("what is my email address", request, sizeof(request)) ==
+          0);
+   assert(aimee_module_client_call(
+              client, AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, 2104, 0, request,
+              (uint32_t)aimee_memory_pii_request_size("what is my email address"), response,
+              sizeof(response), &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_memory_pii_response_decode(response, response_len, &requests_sensitive) == 0);
+   assert(requests_sensitive == 1);
+
+   assert(aimee_memory_pii_request_encode("what is the weather", request, sizeof(request)) == 0);
+   assert(aimee_module_client_call(
+              client, AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, 2105, 0, request,
+              (uint32_t)aimee_memory_pii_request_size("what is the weather"), response,
+              sizeof(response), &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_memory_pii_response_decode(response, response_len, &requests_sensitive) == 0);
+   assert(requests_sensitive == 0);
+
+   /* RETRIEVE, second shape: a batch of relations spanning all three tiers, in
+    * an order where returning them shuffled or short would be visible. */
+   const char *rels[3] = {"works_for", "ssn", "home_password"};
+   aimee_memory_sensitivity_t tiers[3] = {0};
+   assert(aimee_memory_sens_request_encode(rels, 3, request, sizeof(request)) == 0);
+   assert(aimee_module_client_call(
+              client, AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, 2106, 0, request,
+              (uint32_t)aimee_memory_sens_request_size(rels, 3), response, sizeof(response),
+              &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(aimee_memory_sens_response_decode(response, response_len, tiers, 3) == 0);
+   assert(tiers[0] == AIMEE_MEMORY_SENS_NORMAL);
+   assert(tiers[1] == AIMEE_MEMORY_SENS_PII);
+   assert(tiers[2] == AIMEE_MEMORY_SENS_SECRET);
+}
+
 static void smoke_production_module(aimee_module_client_t *client, const char *name, uint32_t kind)
 {
    uint8_t request[AIMEE_KB_SYNTHESIS_REQUEST_LEN] = {0};
@@ -223,6 +327,7 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_memory_response_decode(response, response_len, &confidence) == 0);
       assert(confidence == AIMEE_MEMORY_CONFIDENCE_HIGH);
+      smoke_memory_decision_stages(client);
    }
    else if (strcmp(name, "learning") == 0)
    {
