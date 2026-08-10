@@ -9,7 +9,11 @@ import (
 )
 
 const (
-	EventKind     uint32 = 7169
+	EventKind uint32 = 7169
+	// One kind per stage: the bus maps an event kind to exactly one stage, so
+	// stages cannot share a kind and be told apart by their magic.
+	EventRunner   uint32 = 7170
+	EventRunnerIO uint32 = 7171
 	StageAccess   uint32 = 1
 	StageRunner   uint32 = 2
 	requestMagic  uint32 = 0x46455257

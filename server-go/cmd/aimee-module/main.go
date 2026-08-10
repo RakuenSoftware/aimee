@@ -111,7 +111,11 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 	case "workspace":
 		config.ModuleName = name
 		config.PrincipalRef = 12
-		config.Stages = []bus.ModuleStage{{EventKind: workspace.EventKind, StageID: workspace.StageAccess}}
+		config.Stages = []bus.ModuleStage{
+			{EventKind: workspace.EventKind, StageID: workspace.StageAccess},
+			{EventKind: workspace.EventRunner, StageID: workspace.StageRunner},
+			{EventKind: workspace.EventRunnerIO, StageID: workspace.StageRunnerIO},
+		}
 		config.Handler = workspace.Handle
 	case "git":
 		config.ModuleName = name

@@ -163,6 +163,16 @@
           "id": 1,
           "name": "workspace-access",
           "event_kind": 7169
+        },
+        {
+          "id": 2,
+          "name": "workspace-runner",
+          "event_kind": 7170
+        },
+        {
+          "id": 3,
+          "name": "workspace-runner-io",
+          "event_kind": 7171
         }
       ]
     },
