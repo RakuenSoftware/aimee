@@ -7,6 +7,25 @@
 typedef int (*delegate_role_canonicalizer_fn)(const char *role, char *out, size_t out_cap);
 void delegate_role_register_canonicalizer(delegate_role_canonicalizer_fn canonicalizer);
 
+/* Role POLICY -- what a role implies about how it is run -- lives in the
+ * delegates module (server-go/modules/delegates/rolepolicy.go). This is the
+ * seam the C side calls through; with no provider registered every answer
+ * below is the conservative one: not a write role, no implicit tools, not
+ * cacheable, no early-final turn. Inventing "cacheable" would serve a stale
+ * answer about a changed working tree, and inventing "tools on" would hand a
+ * filesystem to a role that was never meant to have one.
+ *
+ * op selects the question; `a` carries max_turns and `b` explicit_tools for the
+ * auto-tools op, and both are unused otherwise. */
+#define DELEGATE_ROLE_OP_IS_WRITE     0
+#define DELEGATE_ROLE_OP_TOOLS        1
+#define DELEGATE_ROLE_OP_CACHE        2
+#define DELEGATE_ROLE_OP_AUTO_TOOLS   3
+#define DELEGATE_ROLE_OP_FINAL_TURNS  4
+
+typedef int (*delegate_role_policy_fn)(int op, const char *role, int a, int b, int *out);
+void delegate_register_role_policy_provider(delegate_role_policy_fn provider);
+
 /* Returns 1 when the role should have tool use enabled even without
  * an explicit --tools flag. */
 int delegate_role_enable_tools_by_default(const char *role);

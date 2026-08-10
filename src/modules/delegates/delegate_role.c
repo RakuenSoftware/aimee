@@ -79,6 +79,51 @@ static const char *const g_known_roles[] = {"review",    "validate",   "diagnose
                                             "summarize", "format",     "search",     "reason",
                                             "plan",      "continuity", "beat-check", NULL};
 
+static delegate_role_policy_fn g_role_policy;
+
+void delegate_register_role_policy_provider(delegate_role_policy_fn provider)
+{
+   g_role_policy = provider;
+}
+
+/* Fails closed to `fallback`: with no answer, claim nothing about the role. */
+static int role_policy_ask(int op, const char *role, int a, int b, int fallback)
+{
+   int out = fallback;
+   if (!role || !role[0] || !g_role_policy)
+      return fallback;
+   if (g_role_policy(op, role, a, b, &out) != 0)
+      return fallback;
+   return out;
+}
+
+int delegate_role_is_write(const char *role)
+{
+   return role_policy_ask(DELEGATE_ROLE_OP_IS_WRITE, role, 0, 0, 0);
+}
+
+int delegate_role_enable_tools_by_default(const char *role)
+{
+   return role_policy_ask(DELEGATE_ROLE_OP_TOOLS, role, 0, 0, 0);
+}
+
+int delegate_role_result_cache_enabled(const char *role)
+{
+   return role_policy_ask(DELEGATE_ROLE_OP_CACHE, role, 0, 0, 0);
+}
+
+int delegate_role_auto_tools_for_invocation(const char *role, int max_turns, int explicit_tools)
+{
+   if (explicit_tools)
+      return 1;
+   return role_policy_ask(DELEGATE_ROLE_OP_AUTO_TOOLS, role, max_turns, explicit_tools, 0);
+}
+
+int delegate_final_after_turns_for_role(const char *role)
+{
+   return role_policy_ask(DELEGATE_ROLE_OP_FINAL_TURNS, role, 0, 0, -1);
+}
+
 int delegate_role_known(const char *project_root, const char *role)
 {
    if (!role || !role[0])
@@ -113,50 +158,6 @@ const char *delegate_role_canonicalize(const char *role)
    return role;
 }
 
-int delegate_role_is_write(const char *role)
-{
-   if (!role || !role[0])
-      return 0;
-   const char *canonical = delegate_role_canonicalize(role);
-   return strcmp(canonical, "code") == 0 || strcmp(canonical, "refactor") == 0;
-}
-
-int delegate_role_enable_tools_by_default(const char *role)
-{
-   if (!role || !role[0])
-      return 0;
-
-   role = delegate_role_canonicalize(role);
-   /* A write role cannot do its job without a filesystem, and left tools-off it
-    * cannot fail visibly either: asked to implement, an agent with no file tools
-    * returns a per-file diff summary of code it never wrote. Tools-on is the
-    * only honest default here; an explicit --no-tools still overrides it. */
-   return delegate_role_is_write(role) || strcmp(role, "review") == 0 ||
-          strcmp(role, "search") == 0 || strcmp(role, "execute") == 0 ||
-          strcmp(role, "diagnose") == 0 || strcmp(role, "validate") == 0 ||
-          /* Novel-mode read-only checks inspect the world bible by default. */
-          strcmp(role, "continuity") == 0 || strcmp(role, "beat-check") == 0;
-}
-
-int delegate_role_result_cache_enabled(const char *role)
-{
-   if (!role || !role[0])
-      return 0;
-
-   role = delegate_role_canonicalize(role);
-   return strcmp(role, "summarize") == 0 || strcmp(role, "format") == 0 ||
-          strcmp(role, "draft") == 0;
-}
-
-int delegate_role_auto_tools_for_invocation(const char *role, int max_turns, int explicit_tools)
-{
-   if (explicit_tools)
-      return 1;
-   if (max_turns == 1)
-      return 0;
-   return delegate_role_enable_tools_by_default(role);
-}
-
 void delegate_apply_max_turns_override(agent_config_t *cfg, int max_turns)
 {
    if (!cfg || max_turns < 0)
@@ -175,21 +176,6 @@ int delegate_default_max_turns_for_role(const char *role)
    if (!role || !role[0])
       return -1;
    return role_template_max_turns(delegate_role_canonicalize(role));
-}
-
-int delegate_final_after_turns_for_role(const char *role)
-{
-   if (!role || !role[0])
-      return -1;
-
-   role = delegate_role_canonicalize(role);
-   if (strcmp(role, "validate") == 0)
-      return 8;
-   if (strcmp(role, "search") == 0)
-      return 10;
-   if (strcmp(role, "diagnose") == 0)
-      return 12;
-   return -1;
 }
 
 void delegate_apply_max_turns_policy(agent_config_t *cfg, const char *role, int max_turns)
