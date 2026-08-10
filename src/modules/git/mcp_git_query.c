@@ -9,8 +9,11 @@
 #include "platform_process.h"
 #include "util.h"
 #include "modules/workspace/workspace_provider.h"
+#include "headers/module_json_call.h"
 #include "forge_credentials.h"
 #include "git_cred_inject.h"
+#include "aimee_home.h"
+#include <aimee/git/module_api.h>
 #include <time.h>
 
 extern char **environ;
@@ -39,30 +42,73 @@ int mcp_git_get_worktree(void)
    return s_in_worktree;
 }
 
-/* Route a git/gh shell command-line to where aimee's git rails live. SHARED and
- * CONTAINER both run server-side (run_cmd) — a container-sandboxed delegate has no
- * git and no creds, so its git must run on the server against the path-identity
- * bind-mounted worktree; only a `detached` workspace marshals to its client-held
- * filesystem authority. See mcp_git_run for the rationale. */
-/* The registered workspace root containing `cwd`, copied into out[outsz].
- * Returns 0 on a match, -1 otherwise. */
-static int forge_workspace_for_cwd(const char *cwd, char *out, size_t outsz)
+#define GIT_CRED_RESOLVE_MAX_BODY   (256u * 1024u)
+#define GIT_CRED_RESOLVE_TIMEOUT_MS 5000
+
+/* Ask the git module where this command runs, and which workspace owns its cwd.
+ *
+ * Both are DECISIONS, so neither is taken here. This carries the facts the
+ * module cannot see — the active workspace's provider kind, the registered
+ * roots, and the mirror base, whose resolution reads the environment and the
+ * instance home — and applies the ruling. The module is server-go/modules/git
+ * (cred_resolve.go), reached as bus stage AIMEE_GIT_STAGE_CRED_RESOLVE.
+ *
+ * Deciding it here is what broke. The server-run test was a LIST of provider
+ * kinds that omitted `mirror`, and the cwd was prefix-matched against the
+ * registered root — which for a mirror workspace is the CLIENT's path, a
+ * directory that does not exist on this server, while git runs in a
+ * reconstruction elsewhere. Both said "not ours" about a live checkout, so the
+ * credential below was never injected and git ran bare: "could not read
+ * Username", indistinguishable from a dead token, while reads kept working
+ * because git_pr_api.c never execs git.
+ *
+ * On a module failure `*runs_on_server` stays 1 and no workspace is reported, so
+ * the command still runs here with no injected credential — the same ambient
+ * fall-through already documented for "no token", rather than a new failure
+ * mode. Returns 0 with `out` set when a workspace owns the cwd, -1 otherwise. */
+static int forge_workspace_for_cwd(const char *cwd, int provider_kind, int *runs_on_server,
+                                   char *out, size_t outsz)
 {
-   if (!cwd || !cwd[0])
+   if (out && outsz)
+      out[0] = '\0';
+   if (runs_on_server)
+      *runs_on_server = 1;
+
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
       return -1;
-   for (int i = 0; i < config_workspace_count(); i++)
+   cJSON_AddStringToObject(request, "cwd", cwd ? cwd : "");
+   cJSON_AddNumberToObject(request, "provider_kind", provider_kind);
+   /* The instance home, not a mirror path: resolving where a provider puts its
+    * trees is the module's job, and reaching into the workspace module's headers
+    * to ask would be the cross-module coupling the bus exists to replace. */
+   const char *home = aimee_home();
+   cJSON_AddStringToObject(request, "aimee_home", home ? home : "");
+   cJSON *roots = cJSON_AddArrayToObject(request, "workspaces");
+   for (int i = 0; roots && i < config_workspace_count(); i++)
    {
-      const char *ws = config_workspaces(i);
-      size_t len = ws ? strlen(ws) : 0;
-      if (len == 0)
-         continue;
-      if (strncmp(cwd, ws, len) == 0 && (cwd[len] == '/' || cwd[len] == '\0'))
-      {
-         snprintf(out, outsz, "%s", ws);
-         return 0;
-      }
+      const char *root = config_workspaces(i);
+      if (root && root[0])
+         cJSON_AddItemToArray(roots, cJSON_CreateString(root));
    }
-   return -1;
+
+   cJSON *reply =
+       aimee_module_json_call(AIMEE_GIT_EVENT_CRED_RESOLVE, AIMEE_GIT_STAGE_CRED_RESOLVE, request,
+                              GIT_CRED_RESOLVE_MAX_BODY, GIT_CRED_RESOLVE_TIMEOUT_MS, NULL);
+   if (!reply)
+      return -1;
+   const cJSON *on_server = cJSON_GetObjectItemCaseSensitive(reply, "runs_on_server");
+   if (runs_on_server && cJSON_IsBool(on_server))
+      *runs_on_server = cJSON_IsTrue(on_server) ? 1 : 0;
+   const cJSON *owner = cJSON_GetObjectItemCaseSensitive(reply, "workspace");
+   int found = 0;
+   if (cJSON_IsString(owner) && owner->valuestring[0] && out && outsz)
+   {
+      snprintf(out, outsz, "%s", owner->valuestring);
+      found = 1;
+   }
+   cJSON_Delete(reply);
+   return found ? 0 : -1;
 }
 
 char *mcp_git_run(const char *cmd, int *exit_code)
@@ -77,10 +123,12 @@ char *mcp_git_run(const char *cmd, int *exit_code)
     * need the network the sandbox deliberately removes, and running git there would
     * push the forge credential into the sandbox this design exists to keep it out of.
     * The delegate's worktree is bind-mounted path-identically, so the server sees the
-    * delegate's edits at the same path. Run git on the server for SHARED and
-    * CONTAINER alike; only a DETACHED workspace (the client holds both the filesystem
-    * and its own creds) marshals git to the client and stays on the provider path. */
-   int run_on_server = (ws->kind == WS_PROVIDER_SHARED || ws->kind == WS_PROVIDER_CONTAINER);
+    * delegate's edits at the same path. Which kinds that covers is the module's
+    * ruling, not a list kept here — see forge_workspace_for_cwd. */
+   const char *cwd = run_cmd_get_cwd();
+   char wsid[MAX_PATH_LEN];
+   int run_on_server = 1;
+   int have_ws = forge_workspace_for_cwd(cwd, (int)ws->kind, &run_on_server, wsid, sizeof(wsid));
    const workspace_provider_t *exec_ws = run_on_server ? workspace_provider_shared() : ws;
 
    /* Credential injection: for a server-run command whose cwd is inside a registered
@@ -104,9 +152,7 @@ char *mcp_git_run(const char *cmd, int *exit_code)
     * sent at least one reader hunting for a broken OAuth that was never broken. */
    if (run_on_server)
    {
-      const char *cwd = run_cmd_get_cwd();
-      char wsid[MAX_PATH_LEN];
-      if (cwd && forge_workspace_for_cwd(cwd, wsid, sizeof(wsid)) == 0)
+      if (have_ws == 0)
       {
          /* Resolve the git credential through the ONE policy
           * (git_cred_inject_build_env_for_repo) so the precedence never drifts
