@@ -55,8 +55,8 @@ int agent_http_get(const char *url, const char *headers, char **resp, int timeou
    return -1;
 }
 
-int agent_http_put(const char *url, const char *auth, const char *body, char **resp,
-                   int timeout_ms, const char *accept)
+int agent_http_put(const char *url, const char *auth, const char *body, char **resp, int timeout_ms,
+                   const char *accept)
 {
    (void)url;
    (void)auth;
@@ -84,8 +84,8 @@ int main(void)
    char sha[128];
 
    /* A merge reports the commit from the stage reply, so no second lookup. */
-   assert(merge_with("{\"status\":200,\"merged\":true,\"merge_sha\":\"deadbeef\"}", sha, sizeof(sha),
-                     err, sizeof(err)) == 0);
+   assert(merge_with("{\"status\":200,\"merged\":true,\"merge_sha\":\"deadbeef\"}", sha,
+                     sizeof(sha), err, sizeof(err)) == 0);
    assert(strcmp(sha, "deadbeef") == 0);
 
    /* Already merged is NOT an error: a caller that retried would open a second
