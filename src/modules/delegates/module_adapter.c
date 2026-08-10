@@ -119,12 +119,64 @@ static aimee_module_status_t handle_capabilities(const aimee_module_invocation_t
    return AIMEE_MODULE_STATUS_OK;
 }
 
+/* Chain depth. Stated in Go as well (server-go/modules/delegates/chain.go) and
+ * pinned by test_process_module_handlers, because nothing in the build keeps
+ * the two in step. */
+static aimee_module_status_t handle_chain(const aimee_module_invocation_t *invocation,
+                                          const uint8_t *request_body, uint32_t request_len,
+                                          uint8_t *response_body, uint32_t response_capacity,
+                                          uint32_t *response_len)
+{
+   if (request_len != AIMEE_DELEGATES_CHAIN_REQUEST_LEN ||
+       response_capacity < AIMEE_DELEGATES_CHAIN_RESPONSE_LEN ||
+       aimee_delegates_get_u32(request_body) != AIMEE_DELEGATES_CHAIN_REQUEST_MAGIC ||
+       request_body[4] != AIMEE_DELEGATES_WIRE_VERSION)
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   unsigned op = request_body[5];
+   if (op != AIMEE_DELEGATES_CHAIN_OP_SHOULD_CLEAR && op != AIMEE_DELEGATES_CHAIN_OP_CHECK_DEPTH)
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   /* A flag that is neither 0 nor 1 is not a boolean; refuse rather than coerce
+    * it, since coercing would silently pick an answer. */
+   for (unsigned i = 6; i < 10; ++i)
+      if (request_body[i] > 1u)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   if (aimee_module_invocation_cancelled(invocation))
+      return AIMEE_MODULE_STATUS_CANCELLED;
+
+   memset(response_body, 0, AIMEE_DELEGATES_CHAIN_RESPONSE_LEN);
+   aimee_delegates_put_u32(response_body, AIMEE_DELEGATES_CHAIN_RESPONSE_MAGIC);
+   if (op == AIMEE_DELEGATES_CHAIN_OP_SHOULD_CLEAR)
+   {
+      int has_depth = request_body[6] == 1u, has_parent = request_body[7] == 1u;
+      int parent_known = request_body[8] == 1u, parent_active = request_body[9] == 1u;
+      /* A depth with no parent marker is a leftover from a process that is
+       * gone. A parent known to have exited is worse: it names an ancestor that
+       * no longer exists. An UNKNOWN liveness must not clear -- discarding the
+       * depth there would quietly raise the ceiling underneath it. */
+      int clear = (has_depth && !has_parent) || (has_parent && parent_known && !parent_active);
+      response_body[4] = clear ? 1u : 0u;
+   }
+   else
+   {
+      int32_t parent = (int32_t)aimee_delegates_get_u32(request_body + 12);
+      int32_t max = (int32_t)aimee_delegates_get_u32(request_body + 16);
+      int32_t current = parent + 1; /* the child's depth: refuse before running */
+      response_body[4] = current <= max ? 1u : 0u;
+      aimee_delegates_put_u32(response_body + 8, (uint32_t)current);
+   }
+   *response_len = AIMEE_DELEGATES_CHAIN_RESPONSE_LEN;
+   return AIMEE_MODULE_STATUS_OK;
+}
+
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
                                            const uint8_t *request_body, uint32_t request_len,
                                            uint8_t *response_body, uint32_t response_capacity,
                                            uint32_t *response_len, void *user_data)
 {
    (void)user_data;
+   if (invocation && response_len && invocation->stage_id == AIMEE_DELEGATES_STAGE_CHAIN)
+      return handle_chain(invocation, request_body, request_len, response_body, response_capacity,
+                          response_len);
    if (invocation && response_len && invocation->stage_id == AIMEE_DELEGATES_STAGE_CAPABILITIES)
       return handle_capabilities(invocation, request_body, request_len, response_body,
                                  response_capacity, response_len);
