@@ -3511,8 +3511,52 @@ static void test_codex_oauth_vault_server_principal_fallback(void)
    printf("PASS: codex oauth vault server-principal fallback + D15 locked hard-miss\n");
 }
 
+/* Judging a handoff is the delegates module's rule now
+ * (server-go/modules/delegates/handoff.go) and this binary hosts no bus. The
+ * subject of the three handoff tests here is COMPUTE'S REPAIR LOOP -- a valid
+ * handoff costs one agent call, a malformed one is repaired and retried, and a
+ * second malformed one is an error -- so the test states the one thing its
+ * fixtures vary: whether the agent's text is a well-formed handoff at all.
+ *
+ * This is deliberately NOT the rule. It does not check status admission, the
+ * required arrays, summary presence, ownership or the done-without-verification
+ * downgrade, so it cannot drift into a second copy of a rule that lives in
+ * exactly one place. */
+static int compute_test_handoff_provider(const char *text, const char *owned_files_json,
+                                         int require_verification,
+                                         delegate_handoff_validation_t *out)
+{
+   (void)owned_files_json;
+   (void)require_verification;
+   memset(out, 0, sizeof(*out));
+   snprintf(out->status, sizeof(out->status), "%s", "needs_supervisor_review");
+
+   cJSON *root = text ? cJSON_Parse(text) : NULL;
+   cJSON *schema = cJSON_GetObjectItemCaseSensitive(root, "schema_version");
+   if (!cJSON_IsObject(root) || !cJSON_IsString(schema) ||
+       strcmp(schema->valuestring, "delegate_result_v1") != 0)
+   {
+      cJSON_Delete(root);
+      snprintf(out->error, sizeof(out->error), "%s", "handoff is not valid JSON object");
+      out->needs_supervisor_review = 1;
+      return -1;
+   }
+
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(root, "status");
+   if (cJSON_IsString(status))
+   {
+      snprintf(out->raw_status, sizeof(out->raw_status), "%s", status->valuestring);
+      snprintf(out->status, sizeof(out->status), "%s", status->valuestring);
+   }
+   cJSON_Delete(root);
+   out->valid = 1;
+   out->passed_tests = 1;
+   return 0;
+}
+
 int main(void)
 {
+   delegate_register_handoff_provider(compute_test_handoff_provider);
    test_codex_oauth_vault_server_principal_fallback();
    /* DB1 owns delegation_spawns + delegation_messages. */
    assert(db1_init(":memory:") == 0);

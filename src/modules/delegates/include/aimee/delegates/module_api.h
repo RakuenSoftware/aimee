@@ -209,4 +209,55 @@ static inline int aimee_delegates_paths_response_decode(const uint8_t *in, size_
    return (int)count;
 }
 
+/* Handoff validation: whether a delegate's structured report can be believed.
+ * The rule lives only in the Go module; there is no C mirror. */
+#define AIMEE_DELEGATES_EVENT_HANDOFF          6661u
+#define AIMEE_DELEGATES_STAGE_HANDOFF          5u
+#define AIMEE_DELEGATES_HANDOFF_REQUEST_MAGIC  0x444e4844u /* "DHND" */
+#define AIMEE_DELEGATES_HANDOFF_RESPONSE_MAGIC 0x564e4844u /* "DHNV" */
+#define AIMEE_DELEGATES_HANDOFF_HEADER_LEN     16u
+#define AIMEE_DELEGATES_HANDOFF_STATUS_LEN     32u
+#define AIMEE_DELEGATES_HANDOFF_ERROR_LEN      256u
+#define AIMEE_DELEGATES_HANDOFF_RESPONSE_LEN                                                       \
+   (4u + 8u * 4u + AIMEE_DELEGATES_HANDOFF_STATUS_LEN * 2u + AIMEE_DELEGATES_HANDOFF_ERROR_LEN)
+#define AIMEE_DELEGATES_HANDOFF_TEXT_MAX (1u << 20)
+
+static inline size_t aimee_delegates_handoff_request_encode(const char *text, size_t text_len,
+                                                            const char *owned, size_t owned_len,
+                                                            int require_verification, uint8_t *out,
+                                                            size_t cap)
+{
+   if (!out || text_len > AIMEE_DELEGATES_HANDOFF_TEXT_MAX ||
+       owned_len > AIMEE_DELEGATES_HANDOFF_TEXT_MAX ||
+       cap < AIMEE_DELEGATES_HANDOFF_HEADER_LEN + text_len + owned_len)
+      return 0;
+   memset(out, 0, AIMEE_DELEGATES_HANDOFF_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_HANDOFF_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   out[5] = require_verification ? 1u : 0u;
+   aimee_delegates_put_u32(out + 8, (uint32_t)text_len);
+   aimee_delegates_put_u32(out + 12, (uint32_t)owned_len);
+   if (text_len)
+      memcpy(out + AIMEE_DELEGATES_HANDOFF_HEADER_LEN, text, text_len);
+   if (owned_len)
+      memcpy(out + AIMEE_DELEGATES_HANDOFF_HEADER_LEN + text_len, owned, owned_len);
+   return AIMEE_DELEGATES_HANDOFF_HEADER_LEN + text_len + owned_len;
+}
+
+/* Copy one fixed-width, NUL-padded field out of the response. */
+static inline void aimee_delegates_handoff_field(const uint8_t *in, size_t at, size_t width,
+                                                 char *out, size_t cap)
+{
+   size_t n = 0;
+   while (n < width && in[at + n] != 0)
+      ++n;
+   if (n >= cap)
+      n = cap ? cap - 1 : 0;
+   if (cap)
+   {
+      memcpy(out, in + at, n);
+      out[n] = '\0';
+   }
+}
+
 #endif
