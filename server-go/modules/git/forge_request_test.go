@@ -219,6 +219,46 @@ func TestPRListOpenAsksForMostRecentlyUpdatedFirst(t *testing.T) {
 	}
 }
 
+// TERMINAL CONFLICT vs RETRYABLE LOST RACE. Both arrive as 405/409 and the
+// message is the only discriminator the forge gives.
+//
+// A content conflict is identical on every retry, so it must be terminal; a
+// moved head/base is a lost race a retry wins. Getting it wrong in the
+// RETRYABLE direction wedges a run forever (observed in this repo: 15 attempts
+// over 3 hours); getting it wrong in the TERMINAL direction kills a run that
+// would have merged. So the predicate fails SAFE toward retry.
+//
+// These cases were previously pinned in C against git_pr_merge_err_is_conflict.
+// The classification now lives here, so the cases live here too — deleting the
+// C copy without this would drop the coverage on the floor.
+func TestMergeConflictClassificationFailsSafeTowardRetry(t *testing.T) {
+	for _, message := range []string{
+		"github API (pr merge, HTTP 405): Pull Request has merge conflicts",
+		"merge conflict",           // minimal phrasing
+		"MERGE CONFLICTS DETECTED", // case-insensitive
+	} {
+		if !isMergeConflict(message) {
+			t.Errorf("should be a TERMINAL conflict: %q", message)
+		}
+	}
+
+	for _, message := range []string{
+		// Lost races: a retry wins these.
+		"github API (pr merge, HTTP 409): Head branch was modified. Review and try the merge again.",
+		"github API (pr merge, HTTP 405): Base branch was modified. Review and try the merge again.",
+		// HTTP 409 is *named* "Conflict", so the bare word must not terminate a
+		// lost-race message that has no content conflict in it at all.
+		"github API (pr merge, HTTP 409): Conflict",
+		// Unrecognised and empty degrade to retry, never to a terminal kill.
+		"github API (pr merge, HTTP 405): failed",
+		"",
+	} {
+		if isMergeConflict(message) {
+			t.Errorf("should stay RETRYABLE: %q", message)
+		}
+	}
+}
+
 func TestGuardsRejectBadInputBeforeAnyCall(t *testing.T) {
 	previous := forgeBaseURL
 	forgeBaseURL = "http://127.0.0.1:1" // any call would fail loudly

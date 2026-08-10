@@ -99,30 +99,11 @@ int main(void)
    /* end to end: an unreadable answer must not reach a merge */
    assert(!git_pr_ci_permits_merge(grade_with("not json")));
 
-   /* --- terminal conflict vs retryable lost race (both arrive as 405/409) ---
-    * A content conflict is identical on every retry, so it must be terminal; a
-    * moved head/base is a lost race a retry wins. Getting this wrong in the
-    * retryable direction wedges a run forever (observed: 15 attempts over 3
-    * hours); getting it wrong in the terminal direction kills a run that would
-    * have merged. Hence the predicate fails SAFE toward retry. */
-   assert(git_pr_merge_err_is_conflict("github API (pr merge, HTTP 405): Pull Request has merge "
-                                       "conflicts"));
-   assert(git_pr_merge_err_is_conflict("merge conflict"));           /* minimal phrasing */
-   assert(git_pr_merge_err_is_conflict("MERGE CONFLICTS DETECTED")); /* case-insensitive */
-
-   /* Lost races must stay retryable — these are the messages a retry wins. */
-   assert(!git_pr_merge_err_is_conflict(
-       "github API (pr merge, HTTP 409): Head branch was modified. Review and try the merge "
-       "again."));
-   assert(!git_pr_merge_err_is_conflict("github API (pr merge, HTTP 405): Base branch was "
-                                        "modified. Review and try the merge again."));
-   /* The bare word must NOT terminate: HTTP 409 is named "Conflict", so a
-    * lost-race message can carry it with no content conflict involved. */
-   assert(!git_pr_merge_err_is_conflict("github API (pr merge, HTTP 409): Conflict"));
-   /* Unrecognised / empty degrade to retry, never to a terminal kill. */
-   assert(!git_pr_merge_err_is_conflict("github API (pr merge, HTTP 405): failed"));
-   assert(!git_pr_merge_err_is_conflict(""));
-   assert(!git_pr_merge_err_is_conflict(NULL));
+   /* The terminal-conflict vs retryable-lost-race classification moved into the
+    * git module with the merge itself. Its cases — including the ones that must
+    * NOT terminate, which is the direction that wedged a run for 15 attempts
+    * over 3 hours — are pinned in
+    * server-go/modules/git: TestMergeConflictClassificationFailsSafeTowardRetry. */
 
    printf("ok\n");
    return 0;
