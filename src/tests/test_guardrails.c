@@ -122,6 +122,9 @@ static void test_classify_sensitive(void)
 
    c = classify_path("server.key");
    assert(c.severity == SEV_BLOCK);
+
+   c = classify_path(".env.local");
+   assert(c.severity == SEV_BLOCK);
 }
 
 static void test_classify_database(void)
@@ -139,6 +142,15 @@ static void test_classify_safe(void)
    assert(c.severity == SEV_GREEN);
 
    c = classify_path("src/handler.c");
+   assert(c.severity == SEV_GREEN);
+
+   c = classify_path(".env.example");
+   assert(c.severity == SEV_GREEN);
+
+   c = classify_path("config/.env.sample");
+   assert(c.severity == SEV_GREEN);
+
+   c = classify_path("templates/.env.template");
    assert(c.severity == SEV_GREEN);
 }
 

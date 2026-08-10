@@ -34,7 +34,8 @@ cJSON *handle_git_branch(cJSON *args)
 {
    cJSON *jaction = cJSON_GetObjectItemCaseSensitive(args, "action");
    if (!cJSON_IsString(jaction))
-      return mcp_text("error: 'action' parameter is required (create/switch/list/delete/claim)");
+      return mcp_text(
+          "error: 'action' parameter is required (create/switch/list/delete/claim/release)");
 
    const char *action = jaction->valuestring;
    cJSON *jname = cJSON_GetObjectItemCaseSensitive(args, "name");
@@ -64,7 +65,7 @@ cJSON *handle_git_branch(cJSON *args)
    }
 
    if (!cJSON_IsString(jname) || !jname->valuestring[0])
-      return mcp_text("error: 'name' parameter is required for create/switch/delete");
+      return mcp_text("error: 'name' parameter is required for create/switch/delete/claim/release");
 
    char *esc_name = shell_escape(jname->valuestring);
 
@@ -165,22 +166,69 @@ cJSON *handle_git_branch(cJSON *args)
              "to create a new branch (it will be created without switching to it).");
       }
 
-      char cmd[512];
-      snprintf(cmd, sizeof(cmd), "git checkout '%s' 2>&1", esc_name);
-      int rc;
+      /* Prefer an existing local branch. If it does not exist but origin has a
+       * branch of that name, create the local branch explicitly from the
+       * remote-tracking ref and set its upstream. Do not rely on checkout's
+       * DWIM heuristic: its result changes when another remote is added. */
+      const char *requested = jname->valuestring;
+      const char *local_name = requested;
+      if (strncmp(requested, "refs/remotes/origin/", 20) == 0)
+         local_name = requested + 20;
+      else if (strncmp(requested, "refs/heads/", 11) == 0)
+         local_name = requested + 11;
+      else if (strncmp(requested, "origin/", 7) == 0)
+         local_name = requested + 7;
+      if (!local_name[0])
+      {
+         free(esc_name);
+         return mcp_text("error: branch name is required after origin/");
+      }
+      char *esc_local = shell_escape(local_name);
+      free(esc_name);
+      char probe[768];
+      int rc = 0;
+      snprintf(probe, sizeof(probe), "git show-ref --verify --quiet 'refs/heads/%s' 2>/dev/null",
+               esc_local);
+      char *probe_out = mcp_git_run(probe, &rc);
+      free(probe_out);
+      int local_exists = rc == 0;
+
+      int tracking_origin = 0;
+      if (!local_exists)
+      {
+         snprintf(probe, sizeof(probe),
+                  "git show-ref --verify --quiet 'refs/remotes/origin/%s' 2>/dev/null", esc_local);
+         probe_out = mcp_git_run(probe, &rc);
+         free(probe_out);
+         tracking_origin = rc == 0;
+      }
+
+      char cmd[1024];
+      if (tracking_origin)
+         snprintf(cmd, sizeof(cmd), "git checkout -b '%s' --track 'origin/%s' 2>&1", esc_local,
+                  esc_local);
+      else
+         snprintf(cmd, sizeof(cmd), "git checkout '%s' 2>&1", esc_local);
       char *out = mcp_git_run(cmd, &rc);
       if (rc != 0)
       {
          cJSON *r = mcp_error("error: git switch failed: %s", out ? out : "unknown");
          free(out);
-         free(esc_name);
+         free(esc_local);
          return r;
       }
       free(out);
 
-      char result[256];
-      snprintf(result, sizeof(result), "switched to %s", jname->valuestring);
-      free(esc_name);
+      int ownership_ok = !tracking_origin || branch_own_register(local_name) == 0;
+
+      char result[512];
+      if (tracking_origin)
+         snprintf(result, sizeof(result), "switched to %s (tracking origin/%s)%s", local_name,
+                  local_name,
+                  ownership_ok ? "" : "\nwarning: branch ownership could not be recorded");
+      else
+         snprintf(result, sizeof(result), "switched to %s", local_name);
+      free(esc_local);
       return mcp_text(result);
    }
 
@@ -264,13 +312,17 @@ cJSON *handle_git_branch(cJSON *args)
          return mcp_text("error: cannot claim main/master branches");
       }
       char owner[64];
-      if (!branch_own_check(jname->valuestring, owner, sizeof(owner)))
+      cJSON *jforce = cJSON_GetObjectItemCaseSensitive(args, "force");
+      int force = cJSON_IsTrue(jforce);
+      if (!branch_own_check(jname->valuestring, owner, sizeof(owner)) && !force)
       {
          char err[512];
-         snprintf(err, sizeof(err),
-                  "error: branch '%s' is owned by session %.20s. "
-                  "Cannot claim a branch owned by another session.",
-                  jname->valuestring, owner);
+         snprintf(
+             err, sizeof(err),
+             "error: branch '%s' is owned by session %s. "
+             "Use branch action=claim with force=true to transfer ownership, or action=release "
+             "from the owning session.",
+             jname->valuestring, owner);
          free(esc_name);
          return mcp_text(err);
       }
@@ -285,8 +337,31 @@ cJSON *handle_git_branch(cJSON *args)
       return mcp_text(result);
    }
 
+   if (strcmp(action, "release") == 0)
+   {
+      char owner[64] = "";
+      cJSON *jforce = cJSON_GetObjectItemCaseSensitive(args, "force");
+      int force = cJSON_IsTrue(jforce);
+      if (!branch_own_check(jname->valuestring, owner, sizeof(owner)) && !force)
+      {
+         char err[512];
+         snprintf(err, sizeof(err),
+                  "error: branch '%s' is owned by session %s. "
+                  "Use force=true to release another session's stale ownership record.",
+                  jname->valuestring, owner);
+         free(esc_name);
+         return mcp_text(err);
+      }
+      branch_own_delete(jname->valuestring);
+      char result[256];
+      snprintf(result, sizeof(result), "released ownership: %s%s", jname->valuestring,
+               force ? " (forced)" : "");
+      free(esc_name);
+      return mcp_text(result);
+   }
+
    free(esc_name);
-   return mcp_text("error: unknown action. Use create/switch/list/delete/claim");
+   return mcp_text("error: unknown action. Use create/switch/list/delete/claim/release");
 }
 
 /* --- git_stash --- */
@@ -492,6 +567,156 @@ cJSON *handle_git_tag(cJSON *args)
 
 /* --- git_fetch --- */
 
+typedef struct
+{
+   char *head_commit;
+   char *head_ref;
+   char *local_refs;
+   char *index_entries;
+   char *tracked_worktree;
+   char *untracked_contents;
+   char *status;
+} fetch_state_t;
+
+enum
+{
+   FETCH_STATE_OK = 0,
+   FETCH_STATE_HEAD_UNRESOLVED = 1,
+   FETCH_STATE_UNAVAILABLE = -1,
+};
+
+static void fetch_state_free(fetch_state_t *state)
+{
+   if (!state)
+      return;
+   free(state->head_commit);
+   free(state->head_ref);
+   free(state->local_refs);
+   free(state->index_entries);
+   free(state->tracked_worktree);
+   free(state->untracked_contents);
+   free(state->status);
+   memset(state, 0, sizeof(*state));
+}
+
+/* A fetch is allowed to move remote-tracking refs and FETCH_HEAD only. Capture
+ * every local checkout surface that must remain byte-for-byte unchanged:
+ * symbolic HEAD + its commit, every local branch ref, index entries, tracked
+ * worktree content, and untracked paths/content. Requiring a resolvable HEAD
+ * also refuses an unborn checkout before a network operation can make its
+ * recovery more confusing. */
+static void fetch_state_trim_eol(char *value)
+{
+   if (!value)
+      return;
+   size_t len = strlen(value);
+   while (len > 0 && (value[len - 1] == '\n' || value[len - 1] == '\r'))
+      value[--len] = '\0';
+}
+
+/* On success, the caller owns the allocations and must call
+ * fetch_state_free. On either failure the state is already empty. */
+static int fetch_state_capture(fetch_state_t *state)
+{
+   if (!state)
+      return -1;
+   memset(state, 0, sizeof(*state));
+
+   int rc = 0;
+   state->head_commit = mcp_git_run("git rev-parse --verify 'HEAD^{commit}' 2>/dev/null", &rc);
+   if (rc != 0 || !state->head_commit || !state->head_commit[0])
+   {
+      fetch_state_free(state);
+      char *git_dir = mcp_git_run("git rev-parse --git-dir 2>/dev/null", &rc);
+      int result = (rc == 0 && git_dir && git_dir[0]) ? FETCH_STATE_HEAD_UNRESOLVED
+                                                      : FETCH_STATE_UNAVAILABLE;
+      free(git_dir);
+      return result;
+   }
+
+   /* symbolic-ref fails for a detached HEAD; in that case the literal marker
+    * plus head_commit still distinguishes detached from attached state. */
+   state->head_ref = mcp_git_run("git symbolic-ref -q HEAD 2>/dev/null || printf DETACHED", &rc);
+   if (rc != 0 || !state->head_ref)
+      goto fail;
+
+   state->local_refs = mcp_git_run(
+       "LC_ALL=C git for-each-ref --sort=refname --format='%(refname) %(objectname)' refs/heads "
+       "2>/dev/null",
+       &rc);
+   if (rc != 0 || !state->local_refs)
+      goto fail;
+
+   state->index_entries = mcp_git_run(
+       "git ls-files --stage -z 2>/dev/null | git hash-object --stdin 2>/dev/null", &rc);
+   if (rc != 0 || !state->index_entries)
+      goto fail;
+
+   state->tracked_worktree = mcp_git_run(
+       "git diff --no-ext-diff --binary 2>/dev/null | git hash-object --stdin 2>/dev/null", &rc);
+   if (rc != 0 || !state->tracked_worktree)
+      goto fail;
+
+   /* status records the untracked path set; this additional digest detects a
+    * content change at an unchanged untracked path. -z/xargs keeps arbitrary
+    * filenames intact. Ignored files are outside Git's checkout state. */
+   state->untracked_contents = mcp_git_run(
+       "git ls-files --others --exclude-standard -z 2>/dev/null | "
+       "xargs -0 -r git hash-object -- 2>/dev/null | git hash-object --stdin 2>/dev/null",
+       &rc);
+   if (rc != 0 || !state->untracked_contents)
+      goto fail;
+
+   state->status =
+       mcp_git_run("LC_ALL=C git status --porcelain=v1 --untracked-files=all 2>/dev/null", &rc);
+   if (rc != 0 || !state->status)
+      goto fail;
+   fetch_state_trim_eol(state->head_commit);
+   fetch_state_trim_eol(state->head_ref);
+   fetch_state_trim_eol(state->local_refs);
+   fetch_state_trim_eol(state->index_entries);
+   fetch_state_trim_eol(state->tracked_worktree);
+   fetch_state_trim_eol(state->untracked_contents);
+   fetch_state_trim_eol(state->status);
+   return FETCH_STATE_OK;
+
+fail:
+   fetch_state_free(state);
+   return FETCH_STATE_UNAVAILABLE;
+}
+
+static int fetch_state_equal(const fetch_state_t *a, const fetch_state_t *b)
+{
+   return a && b && a->head_commit && b->head_commit && a->head_ref && b->head_ref &&
+          a->local_refs && b->local_refs && a->index_entries && b->index_entries &&
+          a->tracked_worktree && b->tracked_worktree && a->untracked_contents &&
+          b->untracked_contents && a->status && b->status &&
+          strcmp(a->head_commit, b->head_commit) == 0 && strcmp(a->head_ref, b->head_ref) == 0 &&
+          strcmp(a->local_refs, b->local_refs) == 0 &&
+          strcmp(a->index_entries, b->index_entries) == 0 &&
+          strcmp(a->tracked_worktree, b->tracked_worktree) == 0 &&
+          strcmp(a->untracked_contents, b->untracked_contents) == 0 &&
+          strcmp(a->status, b->status) == 0;
+}
+
+/* The remote name is also embedded below refs/remotes/<name>. Keep that ref
+ * namespace unambiguous and reject option-looking repository arguments. */
+static int fetch_remote_name_safe(const char *remote)
+{
+   if (!remote || !remote[0] || strlen(remote) > 200 || remote[0] == '-' || remote[0] == '.' ||
+       strcmp(remote, "HEAD") == 0 || strcmp(remote, "FETCH_HEAD") == 0 ||
+       strcmp(remote, "ORIG_HEAD") == 0 || strstr(remote, "..") || strstr(remote, "@{") ||
+       strstr(remote, "//"))
+      return 0;
+   size_t len = strlen(remote);
+   if (remote[len - 1] == '/' || remote[len - 1] == '.' || strstr(remote, ".lock"))
+      return 0;
+   for (const unsigned char *p = (const unsigned char *)remote; *p; p++)
+      if (!isalnum(*p) && *p != '-' && *p != '_' && *p != '.' && *p != '/' && *p != '+')
+         return 0;
+   return 1;
+}
+
 cJSON *handle_git_fetch(cJSON *args)
 {
    cJSON *jprune = cJSON_GetObjectItemCaseSensitive(args, "prune");
@@ -501,16 +726,53 @@ cJSON *handle_git_fetch(cJSON *args)
    const char *remote =
        (cJSON_IsString(jremote) && jremote->valuestring[0]) ? jremote->valuestring : "origin";
 
+   if (!fetch_remote_name_safe(remote))
+      return mcp_error("error: %s", "fetch remote name is invalid");
+
+   fetch_state_t before;
+   int before_rc = fetch_state_capture(&before);
+   if (before_rc == FETCH_STATE_HEAD_UNRESOLVED)
+      return mcp_error("error: %s", "fetch refused because HEAD does not resolve");
+   if (before_rc != FETCH_STATE_OK)
+      return mcp_error("error: %s", "fetch refused because checkout state cannot be captured");
+
    char *esc_remote = shell_escape(remote);
-   char cmd[512];
+   char refspec[512];
+   snprintf(refspec, sizeof(refspec), "+refs/heads/*:refs/remotes/%s/*", remote);
+   char *esc_refspec = shell_escape(refspec);
+   char cmd[1024];
+   /* A positional refspec is not enough to contain --prune: Git still consults
+    * remote.<name>.fetch for its prune map. An explicitly empty --refmap
+    * suppresses that configured mapping; the one positional refspec below is
+    * then the only fetch and prune destination. */
    if (prune)
-      snprintf(cmd, sizeof(cmd), "git fetch --prune '%s' 2>&1", esc_remote);
+      snprintf(cmd, sizeof(cmd),
+               "git fetch --no-tags --no-prune-tags --prune --refmap= '%s' '%s' 2>&1", esc_remote,
+               esc_refspec);
    else
-      snprintf(cmd, sizeof(cmd), "git fetch '%s' 2>&1", esc_remote);
+      snprintf(cmd, sizeof(cmd), "git fetch --no-tags --no-prune-tags --refmap= '%s' '%s' 2>&1",
+               esc_remote, esc_refspec);
    free(esc_remote);
+   free(esc_refspec);
 
    int rc;
    char *out = mcp_git_run(cmd, &rc);
+
+   fetch_state_t after;
+   int after_ok = fetch_state_capture(&after) == FETCH_STATE_OK;
+   int unchanged = after_ok && fetch_state_equal(&before, &after);
+   fetch_state_free(&after);
+   if (!unchanged)
+   {
+      cJSON *r = mcp_error(
+          "error: unsafe fetch detected: HEAD, a local branch, the index, or the worktree "
+          "changed (pre-fetch HEAD %s). Stop and inspect the checkout before continuing.",
+          before.head_commit ? before.head_commit : "unknown");
+      fetch_state_free(&before);
+      free(out);
+      return r;
+   }
+   fetch_state_free(&before);
    if (rc != 0)
    {
       cJSON *r = mcp_error("error: git fetch failed: %s", out ? out : "unknown");
@@ -519,7 +781,9 @@ cJSON *handle_git_fetch(cJSON *args)
    }
 
    char result[512];
-   snprintf(result, sizeof(result), "fetched from %s%s", remote, prune ? " (pruned)" : "");
+   snprintf(result, sizeof(result),
+            "fetched branches into refs/remotes/%s/*%s; HEAD and local checkout unchanged", remote,
+            prune ? " (pruned remote-tracking refs)" : "");
    free(out);
    return mcp_text(result);
 }

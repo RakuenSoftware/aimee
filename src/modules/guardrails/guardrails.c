@@ -418,6 +418,17 @@ static int is_sensitive_exact(const char *filename)
    return policy_list_matches_exact(&g_policy.sensitive_exact, filename);
 }
 
+/* These conventional files document configuration without carrying live
+ * credentials.  A substring rule for `.env` must not make tracked templates
+ * impossible to maintain; real environment variants (for example .env.local
+ * and .env.production) remain sensitive. */
+static int is_env_template(const char *filename)
+{
+   return filename &&
+          (strcmp(filename, ".env.example") == 0 || strcmp(filename, ".env.sample") == 0 ||
+           strcmp(filename, ".env.template") == 0);
+}
+
 static int has_db_extension(const char *filename)
 {
    const char *dot = strrchr(filename, '.');
@@ -431,6 +442,8 @@ int is_sensitive_file(const char *path)
 {
    if (!path)
       return 0;
+   if (is_env_template(basename_of(path)))
+      return 0;
    guardrails_policy_ensure_loaded();
    return policy_list_matches_substring(&g_policy.sensitive_patterns, path);
 }
@@ -443,6 +456,9 @@ classification_t classify_path(const char *file_path)
    result.severity = SEV_GREEN;
 
    const char *fname = basename_of(file_path);
+
+   if (is_env_template(fname))
+      return result;
 
    /* Check exact matches first */
    if (is_sensitive_exact(fname))

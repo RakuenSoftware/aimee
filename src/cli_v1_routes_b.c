@@ -526,6 +526,23 @@ static cJSON *marshal_workspace_mirror_sync(int argc, char **argv)
    cJSON_AddItemToObject(req, "args", args);
    cJSON_AddStringToObject(req, "head", base);
    cJSON_AddStringToObject(req, "diff", patch ? patch : "");
+   char *line = NULL;
+   const char *br[] = {"git", "-C", root, "symbolic-ref", "--quiet", "--short", "HEAD", NULL};
+   if (safe_exec_capture(br, &line, 512) == 0 && line)
+   {
+      line[strcspn(line, "\r\n")] = '\0';
+      cJSON_AddStringToObject(req, "branch", line);
+   }
+   free(line);
+   line = NULL;
+   const char *up[] = {
+       "git", "-C", root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}", NULL};
+   if (safe_exec_capture(up, &line, 512) == 0 && line)
+   {
+      line[strcspn(line, "\r\n")] = '\0';
+      cJSON_AddStringToObject(req, "upstream", line);
+   }
+   free(line);
    free(patch);
    return req;
 }

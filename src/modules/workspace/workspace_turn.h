@@ -18,6 +18,12 @@
  * pair it with workspace_turn_unbind_active after the turn), 0 otherwise. */
 int workspace_turn_bind_active(const char *cwd);
 
+/* Select the client-side repository location that a git MCP call names.
+ * `path` is authoritative for every operation except clone, where it is the
+ * destination rather than an existing repository. `cwd` remains the fallback.
+ * Pure policy seam so dispatch and tests cannot drift on path-vs-cwd priority. */
+const char *workspace_turn_git_target(const char *tool, const char *path, const char *cwd);
+
 /* Bind this thread's file/exec tools to a DELEGATE'S OWN CONTAINER for the turn:
  * acquire a container from the `docker` backend keyed by `task_id`, and route
  * td_bash / read / write / list through it. `image` may be NULL for the backend's

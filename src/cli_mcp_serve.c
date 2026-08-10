@@ -574,6 +574,27 @@ static void handle_tools_call(cJSON *id, cJSON *req)
     * The helper is idempotent, so subsequent tool calls are cheap. */
    cli_workspace_reverse_channel_start();
 
+   /* A remote Git tool runs in the server's reconstructed mirror. Refresh its
+    * immutable client snapshot on every call: unchanged trees reuse the same
+    * generation (preserving server-side commits/index state), while local
+    * commits or edits select a fresh worktree. Fail closed if the refresh cannot
+    * be acknowledged; forwarding would knowingly act on stale source. */
+   if (strcmp(tool, "git") == 0 && cli_workspace_reverse_channel_sync() != 0)
+   {
+      cJSON *result = cJSON_CreateObject();
+      cJSON *content = cJSON_AddArrayToObject(result, "content");
+      cJSON *block = cJSON_CreateObject();
+      cJSON_AddStringToObject(block, "type", "text");
+      cJSON_AddStringToObject(
+          block, "text",
+          "could not refresh the remote workspace mirror; refusing to run Git against a stale "
+          "checkout. Verify the Aimee server connection and retry.");
+      cJSON_AddItemToArray(content, block);
+      cJSON_AddBoolToObject(result, "isError", 1);
+      mcp_respond(id, result);
+      return;
+   }
+
    int timeout = DEFAULT_TIMEOUT_MS;
    if (strcmp(tool, "delegate") == 0)
       timeout = DELEGATE_TIMEOUT_MS;

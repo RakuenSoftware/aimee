@@ -306,7 +306,7 @@ typedef struct config
     * a server-side worktree) automatically. Empty for shared/detached entries.
     * Indexed alongside workspaces[]; persisted in the {path,provider,...} object. */
    char workspace_vcs_remote[64][512];
-   char workspace_vcs_head[64][64];
+   char workspace_vcs_head[64][65]; /* SHA-1/SHA-256 object id + NUL */
    /* Per-workspace delegate-sandbox image override ("" == none; fall through to the
     * global delegate_sandbox_image, then the backend default). Indexed alongside
     * workspaces[]; persisted in the {path,provider,...,sandbox_image} object. The

@@ -1624,35 +1624,49 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
    if (sid && sid[0])
       session_id_set_override(sid);
 
-   /* A `mirror`-workspace cwd points at the CLIENT's path, which does not exist
+   /* A `mirror`-workspace target points at the CLIENT's path, which does not exist
     * server-side; remap it to the reconstructed server-side worktree (driving the
     * mirror lifecycle: ensure + reconstruct) so the git tool — e.g. `/pr` from the
-    * gateway — operates on the real tree. No-op for shared/detached workspaces. */
+    * gateway — operates on the real tree. `path` is authoritative for every git
+    * operation except clone, whose path is a destination. No-op for
+    * shared/detached workspaces. */
+   cJSON *jpath = cJSON_GetObjectItemCaseSensitive(args, "path");
+   cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
+   const char *path_arg = cJSON_IsString(jpath) ? jpath->valuestring : NULL;
+   const char *cwd_arg = cJSON_IsString(jcwd) ? jcwd->valuestring : NULL;
+   const char *git_target = workspace_turn_git_target(tool, path_arg, cwd_arg);
+   int target_is_path = git_target && path_arg && git_target == path_arg;
+   int clone_has_destination = strcmp(tool, "git_clone") == 0 && path_arg && path_arg[0];
+   const char *git_target_key = target_is_path ? "path" : "cwd";
+   char mirror_target[MAX_PATH_LEN] = "";
+   if (git_target &&
+       workspace_turn_resolve_mirror_cwd(git_target, mirror_target, sizeof(mirror_target)))
    {
-      cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
-      if (cJSON_IsString(jcwd) && jcwd->valuestring[0])
-      {
-         char work_cwd[MAX_PATH_LEN];
-         if (workspace_turn_resolve_mirror_cwd(jcwd->valuestring, work_cwd, sizeof(work_cwd)))
-            cJSON_ReplaceItemInObject(args, "cwd", cJSON_CreateString(work_cwd));
-      }
+      cJSON_ReplaceItemInObject(args, git_target_key, cJSON_CreateString(mirror_target));
+      git_target = mirror_target;
    }
 
-   /* A `detached`-workspace cwd ALSO points at the CLIENT's path (the workspace
+   /* A `detached`-workspace target ALSO points at the CLIENT's path (the workspace
     * lives on the serving client), so there is nothing to chdir into locally.
-    * Bind the detached provider for this cwd's workspace — exactly as the
+    * Bind the detached provider for this target's workspace — exactly as the
     * chat-turn boundary does — so the git tool's rev-parse / exec marshal over
     * the runner channel to the serving client, which holds the real tree (and
-    * its own creds). No-op for shared/mirror/unregistered cwds (returns 0). */
-   int detached_bound = 0;
-   {
-      cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
-      if (cJSON_IsString(jcwd) && jcwd->valuestring[0])
-         detached_bound = workspace_turn_bind_active(jcwd->valuestring);
-   }
+    * its own creds). No-op for shared/mirror/unregistered targets (returns 0). */
+   int detached_bound = git_target ? workspace_turn_bind_active(git_target) : 0;
 
    char *mismatch_err = NULL;
-   int resolved = mcp_chdir_git_root(NULL, 0, args, &mismatch_err);
+   cJSON *resolve_args = args;
+   if (clone_has_destination)
+   {
+      resolve_args = cJSON_Duplicate(args, 1);
+      if (resolve_args)
+         cJSON_DeleteItemFromObjectCaseSensitive(resolve_args, "path");
+      else
+         resolve_args = args;
+   }
+   int resolved = mcp_chdir_git_root(NULL, 0, resolve_args, &mismatch_err);
+   if (resolve_args != args)
+      cJSON_Delete(resolve_args);
 
    if (resolved < 0)
    {
@@ -1663,6 +1677,12 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
          session_id_clear_override();
       if (is_verify)
          conn_active_verify(conn, verify_sid, 0);
+      if (resolved == -2)
+         return text_content(
+             "error: requested git path is outside the session checkout or unavailable through "
+             "the registered workspace runner. The explicit path was not ignored; refusing to "
+             "fall back to another checkout. Rebind/adopt that workspace, mount it into the "
+             "Aimee session, or serve it as a detached workspace.");
       return text_content("error: session worktree is unavailable (chdir failed). Refusing to run "
                           "git operation on the main repository.");
    }

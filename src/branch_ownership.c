@@ -164,8 +164,8 @@ cJSON *branch_own_guard_for(const char *branch, const char *operation)
    {
       char buf[512];
       snprintf(buf, sizeof(buf),
-               "error: %s blocked — branch '%s' is owned by session %.20s. "
-               "Use git_branch action=claim to take ownership.",
+               "error: %s blocked — branch '%s' is owned by session %s. "
+               "Use branch action=claim with force=true to transfer stale ownership.",
                operation, branch, owner);
       return mcp_text(buf);
    }

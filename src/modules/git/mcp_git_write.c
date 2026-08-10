@@ -52,15 +52,33 @@ static int mcp_git_config_reader(const char *key, char *out, size_t out_len, voi
       return 0;
    out[0] = '\0';
 
-   char cmd[256];
-   snprintf(cmd, sizeof(cmd), "git config --get %s 2>/dev/null", key);
+   char cmd[384];
+   snprintf(cmd, sizeof(cmd), "git config --local --get %s 2>/dev/null", key);
    int rc = 0;
    char *got = mcp_git_run(cmd, &rc);
-   if (!got)
-      return 0;
    if (rc == 0)
    {
-      snprintf(out, out_len, "%s", got);
+      snprintf(out, out_len, "%s", got ? got : "");
+      out[strcspn(out, "\r\n")] = '\0';
+   }
+   free(got);
+   if (out[0])
+      return 1;
+
+   /* Delegate launchers deliberately mask ambient Git config so untrusted raw
+    * git commands cannot inherit credential helpers, hooks, or transport
+    * settings. Identity is different: read only these caller-selected
+    * user.name/user.email keys from the operator's normal global config on the
+    * same workspace runner, then pass the values back as explicit `git -c`
+    * arguments. Unmasking this read cannot alter commit behaviour. */
+   snprintf(cmd, sizeof(cmd),
+            "unset GIT_CONFIG_NOSYSTEM GIT_CONFIG_SYSTEM GIT_CONFIG_GLOBAL; "
+            "git config --global --get %s 2>/dev/null",
+            key);
+   got = mcp_git_run(cmd, &rc);
+   if (rc == 0)
+   {
+      snprintf(out, out_len, "%s", got ? got : "");
       out[strcspn(out, "\r\n")] = '\0';
    }
    free(got);
