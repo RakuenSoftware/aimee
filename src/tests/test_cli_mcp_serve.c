@@ -21,6 +21,10 @@ static int g_reverse_channel_sync_rc;
 static int g_remote_active;
 static int g_remote_http_failures;
 static int g_remote_http_calls;
+static const char *g_git_root_to_return;
+static int g_index_ensure_calls;
+static int g_index_ensure_before_worktree;
+static char g_index_ensure_root[4096];
 
 const char *platform_home_dir(void)
 {
@@ -107,6 +111,25 @@ void cli_workspace_reverse_channel_stop(void)
 int cli_v1_has_remote_endpoint(void)
 {
    return g_remote_active;
+}
+int cli_v1_remote_endpoint_is_network(void)
+{
+   return g_remote_active;
+}
+int safe_exec_capture(const char *const argv[], char **out_buf, size_t max_out)
+{
+   (void)argv;
+   (void)max_out;
+   if (out_buf)
+      *out_buf = g_git_root_to_return ? strdup(g_git_root_to_return) : NULL;
+   return g_git_root_to_return ? 0 : 1;
+}
+int cli_index_ensure_remote(const char *root)
+{
+   g_index_ensure_calls++;
+   g_index_ensure_before_worktree = (g_worktree_ensure_calls == 0);
+   snprintf(g_index_ensure_root, sizeof(g_index_ensure_root), "%s", root ? root : "");
+   return 0;
 }
 char *cli_v1_client_endpoint(void)
 {
@@ -871,6 +894,38 @@ static void test_initialize_enters_session_worktree(void)
    g_worktree_to_return = NULL;
 }
 
+/* The remote server cannot infer or scan a thin client's checkout. Initialize
+ * must seed the canonical root before worktree isolation changes cwd to the
+ * hidden session path; otherwise the first find_symbol has no active project. */
+static void test_remote_initialize_bootstraps_canonical_index(void)
+{
+   g_remote_active = 1;
+   g_git_root_to_return = "/work/rakuen-blog\n";
+   g_index_ensure_calls = 0;
+   g_index_ensure_before_worktree = 0;
+   g_index_ensure_root[0] = '\0';
+   g_worktree_to_return = NULL;
+   g_worktree_ensure_calls = 0;
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+   cJSON_AddNumberToObject(req, "id", 12);
+   cJSON_AddStringToObject(req, "method", "initialize");
+   cJSON_AddObjectToObject(req, "params");
+
+   cJSON *resp = capture_response(req);
+   assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(resp, "result")));
+   assert(g_index_ensure_calls == 1);
+   assert(g_index_ensure_before_worktree == 1);
+   assert(strcmp(g_index_ensure_root, "/work/rakuen-blog") == 0);
+   assert(g_worktree_ensure_calls == 1);
+
+   cJSON_Delete(resp);
+   cJSON_Delete(req);
+   g_remote_active = 0;
+   g_git_root_to_return = NULL;
+}
+
 static void test_tools_list(void)
 {
    cJSON *req = cJSON_CreateObject();
@@ -1396,6 +1451,7 @@ int main(void)
    test_resources_read_unknown_uri();
    test_initialize();
    test_initialize_enters_session_worktree();
+   test_remote_initialize_bootstraps_canonical_index();
    test_session_id_is_shared_not_invented();
    test_tools_list();
    test_tools_list_preserves_server_error();
