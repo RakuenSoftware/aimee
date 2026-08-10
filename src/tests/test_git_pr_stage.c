@@ -37,6 +37,21 @@ int git_cred_inject_resolve_token(const char *principal, const char *remote_url,
    return 1;
 }
 
+/* The real one lives in util.c, which would drag run_cmd/safe_exec into this
+ * binary for a policy that is tested there. Counting the calls instead keeps the
+ * link small AND pins the thing that actually matters here: the standing
+ * no-AI-attribution strip must still run on the migrated path, before the body
+ * is handed to the stage. Moving code is exactly when such a step gets dropped.
+ */
+static int g_strip_calls;
+
+int strip_ai_attribution(char *text)
+{
+   (void)text;
+   g_strip_calls++;
+   return 0;
+}
+
 /* Any direct HTTP from a migrated op is a bug, so make it loud rather than let
  * the suite pass on a silent fallback. */
 static void http_forbidden(const char *which)
@@ -65,6 +80,20 @@ int agent_http_put(const char *url, const char *auth, const char *body, char **r
    (void)timeout_ms;
    (void)accept;
    http_forbidden("agent_http_put");
+   return -1;
+}
+
+int agent_http_post_content_type(const char *url, const char *auth, const char *content_type,
+                                 const char *body, char **resp, int timeout_ms, const char *accept)
+{
+   (void)url;
+   (void)auth;
+   (void)content_type;
+   (void)body;
+   (void)resp;
+   (void)timeout_ms;
+   (void)accept;
+   http_forbidden("agent_http_post_content_type");
    return -1;
 }
 
@@ -136,6 +165,54 @@ int main(void)
    before = module_bus_stub_calls();
    assert(git_pr_merge_via_api_slug_ex(NULL, SLUG, 0, "merge", NULL, sha, sizeof(sha), err,
                                        sizeof(err)) == -1);
+   assert(module_bus_stub_calls() == before);
+
+   /* --- pr_create ------------------------------------------------------- */
+
+   char urlbuf[512];
+
+   /* The created PR's URL comes from the stage reply's pull summary. */
+   module_bus_stub_reply("{\"status\":201,\"pull\":{\"number\":42,\"url\":"
+                         "\"https://github.com/acme/widgets/pull/42\"}}");
+   g_strip_calls = 0;
+   assert(git_pr_create_via_api_slug(NULL, SLUG, "feat", "testing", "A title", "body", 0, urlbuf,
+                                     sizeof(urlbuf), err, sizeof(err)) == 0);
+   assert(strcmp(urlbuf, "https://github.com/acme/widgets/pull/42") == 0);
+   /* The body was put through the attribution strip on the way to the stage. */
+   assert(g_strip_calls == 1);
+
+   /* A refusal must arrive as the forge's OWN words: "A pull request already
+    * exists" sends an operator somewhere useful, "HTTP 422" does not. */
+   module_bus_stub_reply(
+       "{\"status\":422,\"error\":\"pr create: A pull request already exists (HTTP 422)\"}");
+   assert(git_pr_create_via_api_slug(NULL, SLUG, "feat", "testing", "A title", "body", 0, urlbuf,
+                                     sizeof(urlbuf), err, sizeof(err)) == -1);
+   assert(strstr(err, "already exists") != NULL);
+   assert(urlbuf[0] == '\0'); /* a refused create reports no URL */
+
+   /* A 2xx carrying no URL is not a success: reporting one would hand the caller
+    * an empty link for a PR it cannot confirm was opened. */
+   module_bus_stub_reply("{\"status\":201,\"pull\":{\"number\":42}}");
+   assert(git_pr_create_via_api_slug(NULL, SLUG, "feat", "testing", "A title", "body", 0, urlbuf,
+                                     sizeof(urlbuf), err, sizeof(err)) == -1);
+   assert(err[0] != '\0');
+
+   /* Unreachable module is not a refused create. */
+   module_bus_stub_absent();
+   assert(git_pr_create_via_api_slug(NULL, SLUG, "feat", "testing", "A title", "body", 0, urlbuf,
+                                     sizeof(urlbuf), err, sizeof(err)) == -1);
+   assert(strstr(err, "could not be reached") != NULL);
+
+   /* Without a checkout there is nothing to infer head/base/title from, and
+    * guessing is how a PR lands on the wrong base. Refuse before sending. */
+   module_bus_stub_reply("{\"status\":201,\"pull\":{\"url\":\"u\"}}");
+   before = module_bus_stub_calls();
+   assert(git_pr_create_via_api_slug(NULL, SLUG, "", "testing", "A title", "body", 0, urlbuf,
+                                     sizeof(urlbuf), err, sizeof(err)) == -1);
+   assert(git_pr_create_via_api_slug(NULL, SLUG, "feat", "", "A title", "body", 0, urlbuf,
+                                     sizeof(urlbuf), err, sizeof(err)) == -1);
+   assert(git_pr_create_via_api_slug(NULL, SLUG, "feat", "testing", "", "body", 0, urlbuf,
+                                     sizeof(urlbuf), err, sizeof(err)) == -1);
    assert(module_bus_stub_calls() == before);
 
    printf("git_pr_stage: all tests passed\n");
