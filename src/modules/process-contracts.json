@@ -161,6 +161,11 @@
           "id": 7,
           "name": "delegate-verify-outcome",
           "event_kind": 6663
+        },
+        {
+          "id": 8,
+          "name": "delegate-economics-report",
+          "event_kind": 6664
         }
       ]
     },

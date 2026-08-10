@@ -582,8 +582,14 @@ static void test_empty_files(void)
 
 /* --- Test: DB-backed coordinated job economics report --- */
 
-static void test_delegate_economics_report_from_coord_job(void)
+static void test_coord_job_rows_carry_what_economics_reads(void)
 {
+   /* What a run COST is the delegates module's rule now
+    * (server-go/modules/delegates/economics.go). What this test uniquely covers
+    * is the seam beneath it: a claimed-and-completed coord job comes back from
+    * the store with the four fields that rule consumes, populated. If any of
+    * these is empty the report is computed over nothing, and no amount of
+    * correctness in the rule would show it. */
    sqlite3 *db = setup();
 
    int plan_id = create_test_plan(db);
@@ -603,29 +609,24 @@ static void test_delegate_economics_report_from_coord_job(void)
    make_handoff(h2, sizeof(h2), "src/free_b.c");
    assert(db1_coord_job_complete_task(t2, h2) == 0);
 
-   db1_coord_job_t job;
-   assert(db1_coord_job_get(job_id, &job) == 0);
    db1_coord_task_t tasks[DB1_COORD_MAX_TASKS];
    int count = db1_coord_job_list_tasks(job_id, tasks, DB1_COORD_MAX_TASKS);
    assert(count == 2);
 
-   agent_config_t cfg = {0};
-   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "%s", "free-a");
-   cfg.agents[0].cost_tier = 0;
-   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "%s", "free-b");
-   cfg.agents[1].cost_tier = 0;
-   cfg.agent_count = 2;
-
-   delegate_economics_report_t report;
-   delegate_economics_build_report(&job, tasks, count, &cfg, &report);
-   assert(report.delegate_count == 2);
-   assert(report.tier_counts[0] == 2);
-   assert(report.valid_handoffs == 2);
-   assert(report.delegates_with_focused_tests == 2);
-   assert(strcmp(report.verdict, "likely_net_win") == 0);
+   for (int i = 0; i < count; i++)
+   {
+      assert(strcmp(tasks[i].status, "done") == 0);
+      assert(tasks[i].claimed_by[0]);
+      /* owned files, for the handoff's ownership check */
+      assert(strstr(tasks[i].files, "src/free_") != NULL);
+      /* the handoff itself, which is what the rule reads */
+      assert(strstr(tasks[i].result, "delegate_result_v1") != NULL);
+   }
+   assert(strcmp(tasks[0].claimed_by, "free-a") == 0);
+   assert(strcmp(tasks[1].claimed_by, "free-b") == 0);
 
    teardown(db);
-   printf("  PASS: test_delegate_economics_report_from_coord_job\n");
+   printf("  PASS: test_coord_job_rows_carry_what_economics_reads\n");
 }
 
 /* Judging a handoff is the delegates module's rule now
@@ -726,7 +727,7 @@ int main(void)
    test_default_parallel();
    test_invalid_ops();
    test_empty_files();
-   test_delegate_economics_report_from_coord_job();
+   test_coord_job_rows_carry_what_economics_reads();
    printf("All coord_jobs tests passed.\n");
    return 0;
 }
