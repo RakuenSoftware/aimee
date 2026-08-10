@@ -1040,12 +1040,14 @@ int config_save(const config_t *cfg)
 
    /* Tool result compaction (only save non-default values) */
    if (!cfg->compact_enabled || cfg->compact_threshold || cfg->compact_head_bytes ||
-       cfg->compact_tail_bytes || cfg->compact_per_tool_count || !cfg->coord_closet_enabled ||
-       cfg->coord_closet_budget_bytes || cfg->coord_closet_max_ratio_pct ||
-       cfg->coord_closet_denylist[0])
+       cfg->compact_tail_bytes || cfg->compact_per_tool_count || cfg->compact_from_record ||
+       !cfg->coord_closet_enabled || cfg->coord_closet_budget_bytes ||
+       cfg->coord_closet_max_ratio_pct || cfg->coord_closet_denylist[0])
    {
       cJSON *cmpct = cJSON_AddObjectToObject(root, "compact");
       cJSON_AddBoolToObject(cmpct, "enabled", cfg->compact_enabled);
+      if (cfg->compact_from_record) /* default-off: persist only the opt-in */
+         cJSON_AddBoolToObject(cmpct, "from_record", cfg->compact_from_record);
       if (cfg->compact_threshold)
          cJSON_AddNumberToObject(cmpct, "threshold", cfg->compact_threshold);
       if (cfg->compact_head_bytes)

@@ -184,6 +184,7 @@ int config_search_max_results(void);
 int config_search_fetch_pages(void);
 int config_compact_enabled(void);
 int config_compact_threshold(void);
+int config_compact_from_record(void);
 int config_compact_head_bytes(void);
 int config_compact_tail_bytes(void);
 int config_compact_per_tool_count(void);

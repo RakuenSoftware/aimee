@@ -250,6 +250,9 @@ static void maybe_compact_before_request(const agent_t *agent, cJSON *messages,
    session_compact_config_t scfg;
    memset(&scfg, 0, sizeof(scfg));
    scfg.compact_pct = compact_pct;
+   /* session_compact stays a pure function of its inputs, so the derivation choice
+    * is resolved here rather than read from global config inside the compactor. */
+   scfg.from_record = config_compact_from_record();
 
    int estimated_tokens = request_prompt_token_estimate(messages, system_prompt);
    if (session_compact_pressure(estimated_tokens, 0, context_window, &scfg) !=
@@ -689,7 +692,10 @@ native_provider_http:
          {
             aimee_log(LOG_INFO, "agent", "middleware: compact requested: %s", mw_res.reason);
             session_compact_result_t sc_result;
-            session_compact(messages, NULL, &sc_result);
+            session_compact_config_t mw_scfg;
+            memset(&mw_scfg, 0, sizeof(mw_scfg));
+            mw_scfg.from_record = config_compact_from_record();
+            session_compact(messages, &mw_scfg, &sc_result);
             if (sc_result.compacted)
             {
                aimee_log(LOG_INFO, "agent",

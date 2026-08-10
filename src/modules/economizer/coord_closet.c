@@ -253,21 +253,43 @@ static size_t match_kv(const char *p, size_t n, char *lbl, size_t lblsz, size_t 
 }
 
 /* path: starts with '/' or './' or '../', contains a '/', no spaces. */
+/* Anchored paths (/x, ./x, ../x) are unambiguous: one slash is enough. A BARE
+ * repo-relative path (src/server/session_compact.c) has no such marker and shares its
+ * shape with ordinary prose — "and/or", "he/she", "24/7", "2026/08/10" — so it needs a
+ * stricter test, or the closet fills with noise and evicts real coordinates to stay
+ * inside its budget.
+ *
+ * Bare form requires ALL of:
+ *   - at least one letter          (rejects "2026/08/10", "24/7")
+ *   - a dot in the final segment, OR two or more slashes
+ *                                  (rejects "and/or", "he/she", "TODO/FIXME";
+ *                                   accepts "scripts/x.py" and "src/modules/git")
+ *
+ * The conservative casualty is a one-slash extensionless relative path ("src/server"),
+ * which stays unmatched rather than admitting every "and/or" in the transcript.
+ *
+ * This gap was measured, not guessed: with bare paths unmatched, the record-derived
+ * compaction summary retained 0/3 relative source paths that the legacy prose scan
+ * caught 3/3 (benchmarks/compaction-quality). The header has always documented this
+ * kind as "absolute / repo-relative path" — the matcher just never implemented the
+ * second half. */
 static size_t match_path(const char *p, size_t n)
 {
    if (n == 0)
       return 0;
-   int leading = (p[0] == '/') || (n >= 2 && p[0] == '.' && p[1] == '/') ||
-                 (n >= 3 && p[0] == '.' && p[1] == '.' && p[2] == '/');
-   if (!leading)
-      return 0;
+   int anchored = (p[0] == '/') || (n >= 2 && p[0] == '.' && p[1] == '/') ||
+                  (n >= 3 && p[0] == '.' && p[1] == '.' && p[2] == '/');
    size_t off = 0;
    int slashes = 0;
+   int letters = 0;
+   size_t last_slash = 0;
    while (off < n && (a_alnum((unsigned char)p[off]) || p[off] == '/' || p[off] == '.' ||
                       p[off] == '_' || p[off] == '-'))
    {
       if (p[off] == '/')
-         slashes++;
+         last_slash = off, slashes++;
+      else if (a_alpha((unsigned char)p[off]))
+         letters++;
       off++;
    }
    if (slashes < 1 || off < 3)
@@ -275,6 +297,19 @@ static size_t match_path(const char *p, size_t n)
    /* trim a trailing dot (sentence punctuation) */
    while (off > 0 && p[off - 1] == '.')
       off--;
+   if (!anchored)
+   {
+      /* Re-test the dot AFTER trimming: "src/foo." must not qualify on a dot that
+       * was only sentence punctuation. */
+      int dot_in_final = 0;
+      for (size_t i = last_slash + 1; i < off; i++)
+         if (p[i] == '.')
+            dot_in_final = 1;
+      if (letters == 0)
+         return 0;
+      if (!dot_in_final && slashes < 2)
+         return 0;
+   }
    return off;
 }
 
