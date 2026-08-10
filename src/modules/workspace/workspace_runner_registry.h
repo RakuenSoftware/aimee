@@ -23,6 +23,19 @@ ws_runner_queue_t *ws_runner_registry_get_or_create(const char *id);
 /* Return the queue for `id`, or NULL if none is registered. */
 ws_runner_queue_t *ws_runner_registry_lookup(const char *id);
 
+/* Return the queue of the runner serving `path` — the one whose id is `path` or
+ * the closest parent directory of it — or NULL if nobody is serving it.
+ *
+ * This is deliberately a LOOKUP, never a get_or_create: it answers "is a client
+ * here to do the work", and creating an empty queue would manufacture a false
+ * yes. It consults no workspace registry, because a client that is serving a
+ * tree right now is authority enough to act on it — registration records
+ * intent, a live queue records capability, and capability is what a turn needs.
+ * A queue whose client has since died still fails safely: the transport bounds
+ * how long it waits for a runner to claim the op (ws_runner_queue_t's
+ * pickup_timeout_ms), so a stale entry costs one timeout, not a wedged turn. */
+ws_runner_queue_t *ws_runner_registry_lookup_for_path(const char *path);
+
 /* Close + destroy + remove the queue for `id` (workspace/session teardown).
  * Closing wakes any blocked transport/poll and fails their ops. No-op if
  * `id` is absent. */

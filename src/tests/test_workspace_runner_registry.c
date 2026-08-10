@@ -122,6 +122,43 @@ int main(void)
    assert(ws_runner_registry_get_or_create("after-drain") != NULL);
    ws_runner_registry_remove("after-drain");
 
+   /* --- lookup_for_path: who is serving this tree? --- */
+   {
+      assert(ws_runner_registry_get_or_create("/srv/repo") != NULL);
+
+      /* The tree itself, and anything under it, is served by that runner. */
+      assert(ws_runner_registry_lookup_for_path("/srv/repo") ==
+             ws_runner_registry_lookup("/srv/repo"));
+      assert(ws_runner_registry_lookup_for_path("/srv/repo/src/main.c") ==
+             ws_runner_registry_lookup("/srv/repo"));
+
+      /* Component boundary: a sibling whose name merely starts the same is NOT
+       * served by it. Without the '/' check, /srv/repo-backup would be handed to
+       * the client serving /srv/repo and edits would land in the wrong tree. */
+      assert(ws_runner_registry_lookup_for_path("/srv/repo-backup") == NULL);
+      assert(ws_runner_registry_lookup_for_path("/srv/other") == NULL);
+
+      /* Nobody serving it is a clean no, not a manufactured queue. Answering
+       * "yes" here by creating one would strand the turn on an empty queue. */
+      assert(ws_runner_registry_lookup("/srv/other") == NULL);
+
+      /* Longest match wins, so a nested runner takes precedence over its parent. */
+      assert(ws_runner_registry_get_or_create("/srv/repo/vendor") != NULL);
+      assert(ws_runner_registry_lookup_for_path("/srv/repo/vendor/lib.c") ==
+             ws_runner_registry_lookup("/srv/repo/vendor"));
+      /* ...and the parent still serves what the child does not cover. */
+      assert(ws_runner_registry_lookup_for_path("/srv/repo/src/main.c") ==
+             ws_runner_registry_lookup("/srv/repo"));
+
+      assert(ws_runner_registry_lookup_for_path(NULL) == NULL);
+      assert(ws_runner_registry_lookup_for_path("") == NULL);
+
+      ws_runner_registry_remove("/srv/repo/vendor");
+      ws_runner_registry_remove("/srv/repo");
+      /* Once the client is gone, so is the answer. */
+      assert(ws_runner_registry_lookup_for_path("/srv/repo/src/main.c") == NULL);
+   }
+
    printf("workspace_runner_registry: all tests passed\n");
    return 0;
 }

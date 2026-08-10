@@ -347,6 +347,7 @@ int workspace_turn_bind_active(const char *cwd)
    t_turn_drift[0] = '\0';
    if (!cwd || !cwd[0])
       return 0;
+
    for (int i = 0; i < config_workspace_count(); i++)
    {
       if (!cwd_in_workspace(cwd, config_workspaces(i)))
@@ -387,7 +388,33 @@ int workspace_turn_bind_active(const char *cwd)
       }
       return 0; /* matched, but shared (or no queue) — stay on shared */
    }
-   return 0; /* cwd not in any registered workspace */
+
+   /* Not registered — but a client may be serving this tree right now, and one
+    * that is offering to do the work is authority enough to act on it. The queue
+    * was always keyed by the path, never by the registration; the loop above
+    * only asked whether someone had also filed paperwork. Without this, an
+    * ordinary checkout the client can see was unreachable: the turn fell out
+    * here and the caller refused rather than use the runner sitting right there.
+    * Registration records intent, a live queue records capability, and a turn
+    * needs capability.
+    *
+    * Deliberately LAST, not first. A registered mirror workspace also has a live
+    * queue at its root (its client serves one while the reverse channel is up),
+    * so checking here first would silently demote mirror turns to detached —
+    * running them against the developer's live working copy, which is the exact
+    * thing the mirror tier exists to avoid. A registered workspace keeps the
+    * provider it was registered with; this only answers for paths the registry
+    * has nothing to say about. */
+   ws_runner_queue_t *live = ws_runner_registry_lookup_for_path(cwd);
+   if (live)
+   {
+      ws_detached_provider_init_ex(&t_turn_detached, ws_runner_queue_transport,
+                                   ws_runner_queue_transport_stream, live);
+      workspace_provider_set_active(&t_turn_detached.base);
+      t_turn_bound = 1;
+      return 1;
+   }
+   return 0; /* nobody is serving it either — stay on shared */
 }
 
 const char *workspace_turn_git_target(const char *tool, const char *path, const char *cwd)

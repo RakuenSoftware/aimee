@@ -74,6 +74,42 @@ ws_runner_queue_t *ws_runner_registry_lookup(const char *id)
    return q;
 }
 
+/* 1 iff `id` is `path` itself or a parent directory of it. The '/' boundary
+ * check keeps /a/bc from matching a runner serving /a/b. */
+static int id_covers_path(const char *id, const char *path)
+{
+   size_t n = strlen(id);
+   if (n == 0 || strncmp(path, id, n) != 0)
+      return 0;
+   /* A trailing '/' on the id has already consumed the boundary. */
+   return path[n] == '\0' || path[n] == '/' || id[n - 1] == '/';
+}
+
+ws_runner_queue_t *ws_runner_registry_lookup_for_path(const char *path)
+{
+   if (!path || !path[0])
+      return NULL;
+   pthread_mutex_lock(&g_mu);
+   /* Longest match wins: with runners serving both /repo and /repo/sub, an op in
+    * /repo/sub belongs to the client that is closest to it. */
+   registry_slot_t *best = NULL;
+   size_t best_len = 0;
+   for (int i = 0; i < WS_RUNNER_REGISTRY_MAX; i++)
+   {
+      if (!g_slots[i].in_use || !id_covers_path(g_slots[i].id, path))
+         continue;
+      size_t len = strlen(g_slots[i].id);
+      if (!best || len > best_len)
+      {
+         best = &g_slots[i];
+         best_len = len;
+      }
+   }
+   ws_runner_queue_t *q = best ? best->queue : NULL;
+   pthread_mutex_unlock(&g_mu);
+   return q;
+}
+
 void ws_runner_registry_remove(const char *id)
 {
    if (!id || !id[0])
