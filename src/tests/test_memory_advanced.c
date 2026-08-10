@@ -12,6 +12,7 @@
 #include "db2.h"
 #include "db2_test_shim.h"
 #include "db2/memory_lifecycle.h" /* db2_memory_valid_at */
+#include "db2/memory_query.h"     /* db2_memory_count_orphaned_l0 */
 #include "modules/memory/memory_ontology.h"
 #include "../db2/bandit.h"
 #include "../db2/db2_internal.h"
@@ -2117,6 +2118,74 @@ int main(void)
       assert(db2_memory_valid_at(sup_src.id, spaced_after) == 0);
 
       printf("  bitemporal_rows: ok\n");
+   }
+
+   /* ONE WAY TO WRITE A TIMESTAMP.
+    *
+    * These columns are written from two places -- SQL via pg_now_text() and C via
+    * now_utc() -- and they used to disagree on the separator. That was not
+    * cosmetic: ~36 queries compare these columns AS TEXT against pg_now_text()
+    * ("... AND created_at < pg_now_text('-7 days')"), and a text compare decides
+    * at character 10 where 'T' (0x54) sorts above ' ' (0x20), so a row whose date
+    * equalled the threshold's date compared backwards.
+    *
+    * Asserting the two writers produce the SAME SHAPE is what holds them
+    * together. Checking either writer alone passes happily while they diverge --
+    * which is exactly how they diverged unnoticed. */
+   {
+      /* What C writes. */
+      char c_written[40] = "";
+      now_utc(c_written, sizeof(c_written));
+      assert(strlen(c_written) == 20);
+      assert(c_written[10] == 'T');
+      assert(c_written[19] == 'Z');
+
+      /* What SQL writes, observed through a real production path: the lifecycle
+       * transition stamps updated_at with pg_now_text(). */
+      memory_t probe;
+      assert(memory_insert(TIER_L0, KIND_FACT, "fmt:probe", "timestamp format probe", 0.9, "s-fmt",
+                           &probe) == 0);
+      assert(memory_transition_lifecycle(probe.id, MEMORY_LIFECYCLE_STATE_ARCHIVED, "fmt") == 0);
+      memory_t after;
+      assert(memory_get(probe.id, &after) == 0);
+      assert(strlen(after.updated_at) == 20);
+      assert(after.updated_at[10] == 'T');
+      assert(after.updated_at[19] == 'Z');
+
+      /* Same shape, character for character: digits where digits belong and the
+       * identical punctuation everywhere else. */
+      for (size_t i = 0; i < 20; i++)
+      {
+         int c_digit = (c_written[i] >= '0' && c_written[i] <= '9');
+         int s_digit = (after.updated_at[i] >= '0' && after.updated_at[i] <= '9');
+         assert(c_digit == s_digit);
+         if (!c_digit)
+            assert(c_written[i] == after.updated_at[i]);
+      }
+
+      /* The shared reader resolves what each writer produced to a real instant,
+       * not the epoch. */
+      assert(parse_utc_ts(c_written) > 0);
+      assert(parse_utc_ts(after.updated_at) > 0);
+
+      /* The modifier overload feeds the same text comparisons, so it must keep
+       * the format too. db2_memory_count_orphaned_l0 runs
+       * "created_at < pg_now_text('-7 days')": a row created moments ago must not
+       * be counted as seven days old. A modifier overload emitting a different
+       * shape shows up here as a fresh row being swept. */
+      memory_t fresh;
+      assert(memory_insert(TIER_L0, KIND_FACT, "fmt:fresh", "created just now", 0.9, "s-fmt",
+                           &fresh) == 0);
+      int orphaned_before = db2_memory_count_orphaned_l0();
+      assert(orphaned_before >= 0);
+      memory_t fresh2;
+      assert(memory_insert(TIER_L0, KIND_FACT, "fmt:fresh2", "also just now", 0.9, "s-fmt",
+                           &fresh2) == 0);
+      /* Adding another brand-new L0 row must not increase the "older than 7 days"
+       * count. */
+      assert(db2_memory_count_orphaned_l0() == orphaned_before);
+
+      printf("  timestamp_writers_agree: ok\n");
    }
 
    db2_test_shim_close();

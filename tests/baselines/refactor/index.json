@@ -59,7 +59,7 @@
         },
         {
           "path": "src/db2/schema.sql",
-          "sha256": "ea56a361dce7faf8972f79dcc257686b1415f2f52d02ecb94b5138dda68e4d8e"
+          "sha256": "adabc8c441bfeb264fc86902678513e896f9c98a10c1dc11b627bb4f2d5e40ac"
         },
         {
           "path": "src/db2/schema_grants.sql",
