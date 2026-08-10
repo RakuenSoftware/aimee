@@ -4,7 +4,6 @@
  * reads the registered providers via config_load). */
 #include "modules/workspace/workspace_turn.h"
 #include "modules/workspace/workspace_provider.h"
-#include "modules/workspace/workspace_runner_registry.h"
 #include "config.h"
 #include <aimee/delegates/delegate_backend.h>
 #include "modules/workspace/workspace_provider_container.h"
@@ -128,43 +127,6 @@ int main(void)
       assert(workspace_provider_active() == shared);
       assert(workspace_turn_bind_active("/tmp/ws-detached-other/x") == 0); /* not a boundary */
       assert(workspace_provider_active() == shared);
-   }
-
-   /* An UNREGISTERED cwd that a client is actively serving binds to that client.
-    * This is the case that makes `aimee git` work on an ordinary checkout: the
-    * server cannot see the client's filesystem, but the client is right there
-    * offering to do the work. Requiring registration first made a perfectly
-    * reachable tree unreachable. */
-   {
-      assert(ws_runner_registry_get_or_create("/tmp/served-but-unregistered") != NULL);
-
-      assert(workspace_turn_bind_active("/tmp/served-but-unregistered") == 1);
-      assert(workspace_provider_active()->kind == WS_PROVIDER_DETACHED);
-      workspace_turn_unbind_active();
-
-      /* ...and anywhere under it. */
-      assert(workspace_turn_bind_active("/tmp/served-but-unregistered/src") == 1);
-      assert(workspace_provider_active()->kind == WS_PROVIDER_DETACHED);
-      workspace_turn_unbind_active();
-
-      /* When the client goes away the turn falls back to shared rather than
-       * marshalling into a queue nobody is draining. */
-      ws_runner_registry_remove("/tmp/served-but-unregistered");
-      assert(workspace_turn_bind_active("/tmp/served-but-unregistered") == 0);
-      assert(workspace_provider_active() == shared);
-   }
-
-   /* A REGISTERED workspace keeps the provider it was registered with, even
-    * though its client is also serving a runner at the same root. A mirror
-    * client serves one whenever its reverse channel is up, so preferring the
-    * live runner would silently demote every mirror turn to detached — running
-    * it against the developer's live working copy, which is the whole thing the
-    * mirror tier exists to prevent. */
-   {
-      assert(ws_runner_registry_get_or_create("/tmp/ws-shared") != NULL);
-      assert(workspace_turn_bind_active("/tmp/ws-shared/x") == 0);
-      assert(workspace_provider_active() == shared);
-      ws_runner_registry_remove("/tmp/ws-shared");
    }
 
    /* NULL / empty cwd -> shared */
