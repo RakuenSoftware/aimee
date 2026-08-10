@@ -74,14 +74,16 @@
     "server-go/modules/delegates/plane/helpers.go",
     "server-go/modules/delegates/capabilities.go",
     "server-go/modules/delegates/chain.go",
-    "server-go/modules/delegates/paths.go"
+    "server-go/modules/delegates/paths.go",
+    "server-go/modules/delegates/handoff.go"
   ],
   "go_tests": [
     "server-go/modules/delegates/delegates_test.go",
     "server-go/modules/delegates/plane/client_test.go",
     "server-go/modules/delegates/capabilities_test.go",
     "server-go/modules/delegates/chain_test.go",
-    "server-go/modules/delegates/paths_test.go"
+    "server-go/modules/delegates/paths_test.go",
+    "server-go/modules/delegates/handoff_test.go"
   ],
   "tests": [
     "src/tests/test_aimee_ir_rescue.c",

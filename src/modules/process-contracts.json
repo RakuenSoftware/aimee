@@ -146,6 +146,11 @@
           "id": 4,
           "name": "delegate-named-paths",
           "event_kind": 6660
+        },
+        {
+          "id": 5,
+          "name": "delegate-handoff-validation",
+          "event_kind": 6661
         }
       ]
     },
