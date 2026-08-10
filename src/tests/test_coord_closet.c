@@ -346,6 +346,81 @@ static void test_disabled_returns_null(void)
    PASS("disabled_returns_null");
 }
 
+/* Bare repo-relative paths are conserved, and prose that merely contains a slash is
+ * not. Measured motivation: with bare paths unmatched, a record-derived compaction
+ * summary retained 0/3 relative source paths the legacy prose scan caught 3/3
+ * (benchmarks/compaction-quality). The header has always called this kind
+ * "absolute / repo-relative path"; only the anchored half was implemented. */
+static void test_bare_relative_paths(void)
+{
+   /* The closet is capped at raw_len by design (it may never exceed the bytes it came
+    * from), so an identifier-dense fixture must be padded or the cap evicts most of
+    * what is under test and the assertions measure the budget, not the matcher. */
+   char raw[4096];
+   int used = snprintf(raw, sizeof(raw),
+                       "Reading src/modules/git/retry.c and src/headers/retry.h plus "
+                       "scripts/check_retry.py, deploy/compose/aimee.gpu.yaml and src/modules/git "
+                       "-- and/or he/she 24/7 2026/08/10 TODO/FIXME notwithstanding. ");
+   memset(raw + used, ' ', sizeof(raw) - (size_t)used - 1);
+   raw[sizeof(raw) - 1] = '\0';
+
+   coord_set_t set;
+   coord_set_init(&set);
+   coord_provenance_t prov = {COORD_LANE_AGENT, 1, 1, 0};
+   coord_closet_nominate(raw, strlen(raw), &prov, &set);
+   coord_closet_config_t cfg = {.enabled = 1, .budget_bytes = 100000};
+   coord_evict_t why = COORD_EVICT_NONE;
+   char *out = coord_closet_render(&set, &cfg, strlen(raw), &why);
+   assert(out);
+   assert(why == COORD_EVICT_NONE); /* nothing evicted, so a miss is a real miss */
+
+   /* Conserved: dotted final segment, or two-plus segments. */
+   assert(contains(out, "src/modules/git/retry.c"));
+   assert(contains(out, "src/headers/retry.h"));
+   assert(contains(out, "scripts/check_retry.py"));
+   assert(contains(out, "deploy/compose/aimee.gpu.yaml"));
+   assert(contains(out, "src/modules/git")); /* two slashes, no extension */
+
+   /* Rejected: prose. A closet full of "and/or" evicts real coordinates to stay
+    * inside its byte budget, so these matter as much as the matches. */
+   assert(!contains(out, "and/or"));
+   assert(!contains(out, "he/she"));
+   assert(!contains(out, "24/7"));       /* no letters */
+   assert(!contains(out, "2026/08/10")); /* no letters, despite two slashes */
+   assert(!contains(out, "TODO/FIXME")); /* letters, but one slash and no extension */
+
+   free(out);
+   coord_set_free(&set);
+   printf("  PASS: bare_relative_paths\n");
+}
+
+/* Anchored paths keep their old, looser rule: one slash is enough and no letter or
+ * extension is required, because the leading /, ./ or ../ already disambiguates. */
+static void test_anchored_paths_unchanged(void)
+{
+   char raw[4096];
+   int used = snprintf(raw, sizeof(raw), "state /var/lib/aimee here ./x/y there ../z/w and /1/2 ");
+   memset(raw + used, ' ', sizeof(raw) - (size_t)used - 1);
+   raw[sizeof(raw) - 1] = '\0';
+
+   coord_set_t set;
+   coord_set_init(&set);
+   coord_provenance_t prov = {COORD_LANE_AGENT, 1, 1, 0};
+   coord_closet_nominate(raw, strlen(raw), &prov, &set);
+   coord_closet_config_t cfg = {.enabled = 1, .budget_bytes = 100000};
+   coord_evict_t why = COORD_EVICT_NONE;
+   char *out = coord_closet_render(&set, &cfg, strlen(raw), &why);
+   assert(out);
+   assert(why == COORD_EVICT_NONE);
+   assert(contains(out, "/var/lib/aimee"));
+   assert(contains(out, "./x/y"));
+   assert(contains(out, "../z/w"));
+   assert(contains(out, "/1/2")); /* digits only, still anchored -> still conserved */
+   free(out);
+   coord_set_free(&set);
+   printf("  PASS: anchored_paths_unchanged\n");
+}
+
 int main(void)
 {
    printf("coord_closet tests:\n");
@@ -361,6 +436,8 @@ int main(void)
    test_user_lane_divider();
    test_long_value_within_budget();
    test_boundary_and_punctuation_nits();
+   test_bare_relative_paths();
+   test_anchored_paths_unchanged();
    test_disabled_returns_null();
    printf("ALL PASS\n");
    return 0;

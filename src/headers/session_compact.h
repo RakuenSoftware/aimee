@@ -64,6 +64,22 @@ typedef struct
    int warn_pct;    /* warn threshold %; 0 = use default (70) */
    int compact_pct; /* compact threshold %; 0 = use default (80) */
    int retain_tail; /* recent messages to keep verbatim; 0 = use default (6) */
+
+   /* Summary derivation. 0 (default) = the legacy prose scan: guess which tokens
+    * are paths by shape, and match "error"/"decided"-style keywords. 1 = derive
+    * from the economizer's deterministic extractors instead —
+    *
+    *   Relevant Files  <- Coordinate Closet coordinates, conserved VERBATIM with
+    *                      provenance, secrets redacted, and inability to conserve
+    *                      REPORTED (COORD_EVICT_FAIL) rather than silently dropped.
+    *   Key Decisions   <- turns the agent itself tagged as settled (verdict).
+    *   Blocked         <- turns the agent itself tagged hazard / blocked.
+    *
+    * The point is that these are facts recorded as the turn happened, not facts
+    * re-derived by reading the transcript's residue afterwards. Supplied by the
+    * caller (config_compact_from_record()) so this module stays a pure function of
+    * its inputs and never reads global config. */
+   int from_record;
 } session_compact_config_t;
 
 typedef struct

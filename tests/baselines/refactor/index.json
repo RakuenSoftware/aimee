@@ -27,7 +27,7 @@
       "files": [
         {
           "path": "docs/gen/configuration.md",
-          "sha256": "e59be7eaf39122b6e06821a81c86ec4d56f73cba454676c4b5ad6e1ad369ca86"
+          "sha256": "3e54073262534d31b04a2cb0951c04f28aaae1949e9df1afe7a769f511fa8155"
         }
       ]
     },
@@ -1215,7 +1215,7 @@
         },
         {
           "path": "src/headers/session_compact.h",
-          "sha256": "627ac2af680a83d76243b23110d17f8b1f7058addd5068340fa8375d8e9cb54b"
+          "sha256": "68fbbe8ccba619bda6c7c5c86cd5655babe3ffb771c4e784d5835397af7d52cd"
         },
         {
           "path": "src/headers/session_search_tool.h",
@@ -1431,7 +1431,7 @@
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_patch_coordinator.h",
-          "sha256": "2874f272ffb76d1a32ca765f2b3a719bf5f8ecb7d88d7552912776cf6bd464e9"
+          "sha256": "fe0f5b87611fff9020ae141b2ba2cde3814bb9ca4addc27c9dfe0389b5f6b46a"
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_plan.h",
@@ -1463,7 +1463,7 @@
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/module_api.h",
-          "sha256": "ba6a868446393417605d595debf6a7d9b8d0e4183c6690f4b10f4f3f6d9b2450"
+          "sha256": "4eff975db056d964031bb8fffe618cd57216fbdbcf97a8d3d37b0ef45cdc4b5d"
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/panel_provider.h",
@@ -1616,7 +1616,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "eb1ed439d7ba172114394907f5bb48560a4eba2774d1de94753af2d1cd7e5140",
+      "sha256": "dde99e615465d5a705b536a8f0c464a8933fce1da9e1bb56fd29fce6519a0359",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
