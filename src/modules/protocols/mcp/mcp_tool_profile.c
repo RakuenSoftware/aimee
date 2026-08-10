@@ -82,6 +82,21 @@ static const char *const MCP_CORE_TOOLS[] = {
     NULL,
 };
 
+/* Floor entries that `index` already multiplexes, dropped only under the "merged"
+ * profile. Reachable as `index command=preview`, so dropping the standalone entry
+ * removes a duplicate, not a capability.
+ *
+ * find_symbol and ast_grep_search are NOT here, and adding them to the index family
+ * table is not the way to get them here: a family member is folded OUT of the flat
+ * tools/list, so that change silently removed both from the default surface for every
+ * client (the golden count went 53 -> 51). Multiplexing them is a change to what
+ * aimee presents by default, not a presentation-profile tweak, and it needs deciding
+ * as such. */
+static const char *const MCP_INDEX_MULTIPLEXED_TOOLS[] = {
+    AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS,
+    NULL,
+};
+
 static int mcp_name_in_set(const char *name, const char *const *set)
 {
    for (int i = 0; set[i]; i++)
@@ -386,7 +401,20 @@ int mcp_filter_tools_for_profile(cJSON *tools, const char *profile)
     * the benchmark. If delegates should not run, do not configure them -- that is
     * a real deployment state and it is honest. Hiding shipped tools to flatter a
     * measurement is not. */
-   if (strcmp(profile, "core") != 0 && strcmp(profile, "lean") != 0)
+   /* "merged" is "core" minus the code-intel tools that `index` now multiplexes:
+    * find_symbol -> index command=symbol, ast_grep_search -> command=ast_grep,
+    * preview_blast_radius -> command=preview (which already existed -- that entry was
+    * a straight duplicate of a subcommand the floor already carried).
+    *
+    * This is NOT the earlier hide-behind-discovery attempt. That removed the
+    * CAPABILITY from the floor, so reaching it cost find_tools -> describe_tool ->
+    * call_tool and agents used shell search instead. Here the capability stays in the
+    * floor inside `index`, one call away, and its subcommand names ride in the
+    * schema's enum -- which survives the prose trim, so a lean client still sees
+    * exactly which commands exist. Three definitions (2,483 bytes) become two enum
+    * entries. */
+   int merged = strcmp(profile, "merged") == 0;
+   if (strcmp(profile, "core") != 0 && strcmp(profile, "lean") != 0 && !merged)
       return 0;
 
    int removed = 0;
@@ -395,6 +423,8 @@ int mcp_filter_tools_for_profile(cJSON *tools, const char *profile)
       cJSON *tool = cJSON_GetArrayItem(tools, i);
       cJSON *nm = cJSON_GetObjectItemCaseSensitive(tool, "name");
       int keep = cJSON_IsString(nm) && mcp_name_in_set(nm->valuestring, MCP_CORE_TOOLS);
+      if (keep && merged && mcp_name_in_set(nm->valuestring, MCP_INDEX_MULTIPLEXED_TOOLS))
+         keep = 0;
       if (!keep)
       {
          cJSON_DeleteItemFromArray(tools, i);
