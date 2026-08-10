@@ -78,6 +78,8 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 		return handleExtract(invocation, request)
 	case StageRetrieve:
 		return handleRetrieve(invocation, request)
+	case StageEmbed:
+		return handleEmbed(invocation, request)
 	}
 	return handleRerank(invocation, request)
 }
