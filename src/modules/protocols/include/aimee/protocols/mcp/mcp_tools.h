@@ -37,10 +37,12 @@ const char *mcp_tool_profile_effective(const char *explicit_profile);
 int mcp_filter_tools_for_profile(cJSON *tools, const char *profile);
 
 /* Byte caps for the trimmed presentation. A top-level description keeps roughly a
- * sentence; a parameter hint keeps less, because there are many more of them and the
- * type/enum beside it already carries the callable meaning. */
+ * sentence. Parameter hints are dropped outright (cap 0): they were 7,841 of the
+ * surface's 11,894 prose bytes -- the largest single block -- and the type, enum and
+ * required list beside each one already carry everything needed to construct a call.
+ * describe_tool still returns the full text for a caller that wants the guidance. */
 #define MCP_TOOL_PROSE_TOP_CAP   180
-#define MCP_TOOL_PROSE_PARAM_CAP 80
+#define MCP_TOOL_PROSE_PARAM_CAP 0
 
 /* Shorten guidance prose in a tools/list payload, in place. Hides no tool and alters
  * no callable shape -- types, enums and required lists are untouched; describe_tool

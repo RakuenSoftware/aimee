@@ -286,12 +286,21 @@ int mcp_call_tool_demux(const char *tool, cJSON *args, const char **out_tool, cJ
 }
 
 /* Keep the first sentence (or `cap` bytes), whichever is shorter, and say where the
- * rest went. Never empties a description: a nameless tool is worse than a terse one. */
+ * rest went. cap == 0 removes the field outright, which is only ever used for
+ * parameter hints -- a tool's own description is never emptied, because a nameless
+ * tool is worse than a terse one. */
 static void compact_description(cJSON *owner, int cap, int point_at_describe)
 {
    cJSON *desc = cJSON_GetObjectItemCaseSensitive(owner, "description");
    if (!cJSON_IsString(desc) || !desc->valuestring)
       return;
+   if (cap == 0)
+   {
+      /* Deleting beats setting "": an empty string still costs the key, the quotes
+       * and a comma on every property of every tool, on every turn. */
+      cJSON_DeleteItemFromObjectCaseSensitive(owner, "description");
+      return;
+   }
    const char *s = desc->valuestring;
    int len = (int)strlen(s);
    if (len <= cap)
