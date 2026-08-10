@@ -15,5 +15,6 @@
 #include "context_reduce.h"   /* context_reduce(), reduce_config_t / reduce_result_t / seams */
 #include "context_fold.h"     /* context_fold_view / context_compress_view, fold_config_t */
 #include "tool_condense.h"    /* tool_condense_apply / _recall / _enabled, family parsers */
+#include "fold_register.h" /* fold_register_parse / _label: settled-vs-transient turn classes */
 
 #endif /* DEC_ECONOMIZER_H */

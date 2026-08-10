@@ -6,6 +6,7 @@
 #include "session_compact.h"
 #include "headers/compact_prune.h"
 #include "agent_protocol.h"
+#include "economizer.h" /* coord_closet_* / fold_register_parse — the record path */
 #include "cJSON.h"
 #include <ctype.h>
 #include <stdarg.h>
@@ -266,6 +267,116 @@ static void flashback_extract_from_text(cJSON *files, cJSON *errors, cJSON *deci
    }
 }
 
+/* ------------------------------------------------- record-derived extraction */
+
+/* The record path. Where flashback_build() GUESSES — token_looks_like_path() decides
+ * a token is a path by its shape, and a line is an error because it contains the
+ * substring "error" — this reads what the system already recorded exactly:
+ *
+ *   files      Coordinate Closet coordinates of kind PATH, conserved VERBATIM. A
+ *              path that survives here is byte-identical to the one the tool
+ *              emitted, not a token that looked path-shaped.
+ *   decisions  turns the agent itself tagged settled (verdict).
+ *   blocked    turns the agent itself tagged hazard or blocked.
+ *
+ * User-authored text is nominated in COORD_LANE_USER so pasted content stays
+ * quarantined and cannot mint an agent-trusted coordinate (the closet's
+ * prompt-injection guard). Register classification is only read from ASSISTANT
+ * turns — the register grammar describes the agent's own claim about its turn, so
+ * applying it to user text would let a user's message assert "verdict".
+ *
+ * Returns the same {files_modified, errors_encountered, decisions_made} shape as
+ * flashback_build() so the rendering below is identical for both paths. On
+ * allocation failure returns NULL and the caller falls back. */
+static cJSON *record_build(const cJSON *messages, int start_idx, int end_idx, char **closet_out,
+                           coord_evict_t *evict_out)
+{
+   if (closet_out)
+      *closet_out = NULL;
+   if (evict_out)
+      *evict_out = COORD_EVICT_NONE;
+
+   cJSON *root = cJSON_CreateObject();
+   cJSON *files = cJSON_CreateArray();
+   cJSON *errors = cJSON_CreateArray();
+   cJSON *decisions = cJSON_CreateArray();
+   if (!root || !files || !errors || !decisions)
+   {
+      cJSON_Delete(root);
+      cJSON_Delete(files);
+      cJSON_Delete(errors);
+      cJSON_Delete(decisions);
+      return NULL;
+   }
+   cJSON_AddItemToObject(root, "files_modified", files);
+   cJSON_AddItemToObject(root, "errors_encountered", errors);
+   cJSON_AddItemToObject(root, "decisions_made", decisions);
+
+   coord_set_t set;
+   coord_set_init(&set);
+   size_t raw_total = 0;
+
+   for (int i = start_idx; i < end_idx; i++)
+   {
+      cJSON *msg = cJSON_GetArrayItem((cJSON *)messages, i);
+      const char *text = msg_text(msg);
+      if (!text || !text[0])
+         continue;
+      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
+      const int is_user = role && strcmp(role, "user") == 0 && !msg_is_tool_result(msg);
+
+      coord_provenance_t prov;
+      memset(&prov, 0, sizeof(prov));
+      prov.lane = is_user ? COORD_LANE_USER : COORD_LANE_AGENT;
+      prov.turn_id = i;
+      prov.tool_call_id = -1;
+      prov.result_index = -1;
+
+      size_t len = strlen(text);
+      raw_total += len;
+      coord_closet_nominate(text, len, &prov, &set);
+
+      if (role && strcmp(role, "assistant") == 0)
+      {
+         switch (fold_register_parse(text))
+         {
+         case FOLD_REG_VERDICT:
+            flashback_add_unique(decisions, text, 180);
+            break;
+         case FOLD_REG_HAZARD:
+         case FOLD_REG_BLOCKED:
+            flashback_add_unique(errors, text, 180);
+            break;
+         default:
+            break; /* in-progress / executing: transient work, not a settled fact */
+         }
+      }
+   }
+
+   /* Paths are what the legacy path tried to guess, so they populate Relevant Files
+    * directly. Every other kind (sha, uuid, ref, handle, key=value) is conserved in
+    * the rendered closet block below rather than being flattened into a file list. */
+   for (size_t i = 0; i < set.count; i++)
+   {
+      if (set.items[i].kind == COORD_KIND_PATH && set.items[i].value)
+         flashback_add_unique(files, set.items[i].value, 160);
+   }
+
+   if (closet_out)
+   {
+      coord_closet_config_t ccfg;
+      memset(&ccfg, 0, sizeof(ccfg));
+      ccfg.enabled = 1; /* built-in budget/ratio defaults */
+      coord_evict_t why = COORD_EVICT_NONE;
+      *closet_out = coord_closet_render(&set, &ccfg, raw_total, &why);
+      if (evict_out)
+         *evict_out = why;
+   }
+
+   coord_set_free(&set);
+   return root;
+}
+
 static cJSON *flashback_build(const cJSON *messages, int start_idx, int end_idx)
 {
    cJSON *root = NULL;
@@ -336,7 +447,7 @@ static void append_flashback_json(char *buf, size_t *pos, size_t cap, cJSON *roo
 /* Build a structured text summary of messages[start_idx .. end_idx-1].
  * Writes the result into buf (length SESSION_COMPACT_SUMMARY_MAX). */
 static void build_summary(const cJSON *messages, int start_idx, int end_idx, char *buf,
-                          size_t buf_len)
+                          size_t buf_len, int from_record)
 {
    if (!buf || buf_len == 0)
       return;
@@ -389,7 +500,15 @@ static void build_summary(const cJSON *messages, int start_idx, int end_idx, cha
       }
    }
 
-   cJSON *flashback = flashback_build(messages, start_idx, end_idx);
+   /* The record path falls back to the prose scan if it cannot allocate, so a
+    * summary is never emptied by an allocation failure. */
+   char *closet_block = NULL;
+   coord_evict_t closet_evict = COORD_EVICT_NONE;
+   cJSON *flashback = NULL;
+   if (from_record)
+      flashback = record_build(messages, start_idx, end_idx, &closet_block, &closet_evict);
+   if (!flashback)
+      flashback = flashback_build(messages, start_idx, end_idx);
    cJSON *files = flashback ? cJSON_GetObjectItem(flashback, "files_modified") : NULL;
    cJSON *errors = flashback ? cJSON_GetObjectItem(flashback, "errors_encountered") : NULL;
    cJSON *decisions = flashback ? cJSON_GetObjectItem(flashback, "decisions_made") : NULL;
@@ -460,6 +579,23 @@ static void build_summary(const cJSON *messages, int start_idx, int end_idx, cha
 
    append_format(tmp, &pos, sizeof(tmp), "## Relevant Files\n");
    append_array_items(tmp, &pos, sizeof(tmp), files, "None recorded.");
+
+   /* Conserved coordinates: shas, uuids, refs, handles and key=value pairs kept
+    * BYTE-EXACT from the discarded turns, so the agent can still address what it
+    * can no longer see. A coordinate that did not fit is announced rather than
+    * silently dropped — that announcement is the whole point of COORD_EVICT_FAIL. */
+   if (closet_block && closet_block[0])
+   {
+      append_format(tmp, &pos, sizeof(tmp), "## Conserved Coordinates\n");
+      append_truncated(tmp, &pos, sizeof(tmp), closet_block, 1600);
+      append_format(tmp, &pos, sizeof(tmp), "\n\n");
+   }
+   if (closet_evict == COORD_EVICT_FAIL)
+      append_format(tmp, &pos, sizeof(tmp),
+                    "- NOTE: some identifiers could not be conserved within the budget; "
+                    "re-read the source before relying on any identifier not listed above.\n\n");
+   free(closet_block);
+
    append_flashback_json(tmp, &pos, sizeof(tmp), flashback);
    cJSON_Delete(flashback);
 
@@ -653,7 +789,7 @@ int session_compact(cJSON *messages, const session_compact_config_t *cfg,
 
    /* Step 3: build summary of messages[summary_start..summary_end) */
    build_summary(messages, summary_start, summary_end, local_out.summary,
-                 sizeof(local_out.summary));
+                 sizeof(local_out.summary), cfg ? cfg->from_record : 0);
 
    /* Step 4: insert a boundary marker message right after messages[0].
     * We build the JSON object first, then splice it in. */
@@ -740,7 +876,10 @@ int session_compact_focused(const char *topic, char *out, size_t out_len)
    cJSON_AddStringToObject(asst_msg, "content", "Acknowledged.");
    cJSON_AddItemToArray(messages, asst_msg);
 
-   build_summary(messages, 0, 1, out, out_len);
+   /* Legacy derivation: this builds a synthetic 2-message conversation purely to
+    * render an "Active Task" heading from a topic string. There is no recorded
+    * history behind it, so there is nothing for the record path to read. */
+   build_summary(messages, 0, 1, out, out_len, 0);
    cJSON_Delete(messages);
    return 0;
 }

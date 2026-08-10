@@ -721,7 +721,8 @@ static void config_set_defaults(config_t *cfg)
    cfg->sandbox.mode = SANDBOX_MODE_WORKSPACE_ONLY;
    snprintf(cfg->delegate_sandbox_package_access, sizeof(cfg->delegate_sandbox_package_access),
             "proxy");
-   cfg->compact_enabled = 1; /* default on; set before no-config early returns */
+   cfg->compact_enabled = 1;    /* default on; set before no-config early returns */
+   cfg->compact_from_record = 0; /* default-off until the quality baseline exists */
    cfg->coord_closet_enabled =
        1; /* fold §2: default-ON — conserves identifiers elided by the
            * default-on compress/fold so lossy reduction stays recoverable */

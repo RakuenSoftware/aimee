@@ -621,6 +621,10 @@ void config_parse_compact_section(config_t *cfg, cJSON *root)
       if (cJSON_IsBool(item))
          cfg->compact_enabled = cJSON_IsTrue(item) ? 1 : 0;
 
+      item = cJSON_GetObjectItemCaseSensitive(cmpct, "from_record");
+      if (cJSON_IsBool(item))
+         cfg->compact_from_record = cJSON_IsTrue(item) ? 1 : 0;
+
       item = cJSON_GetObjectItemCaseSensitive(cmpct, "threshold");
       if (cJSON_IsNumber(item) && item->valuedouble > 0)
          cfg->compact_threshold = (int)item->valuedouble;
