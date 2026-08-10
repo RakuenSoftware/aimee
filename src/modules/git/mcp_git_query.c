@@ -66,6 +66,27 @@ int mcp_git_get_worktree(void)
  * the command still runs here with no injected credential — the same ambient
  * fall-through already documented for "no token", rather than a new failure
  * mode. Returns 0 with `out` set when a workspace owns the cwd, -1 otherwise. */
+/* The remote URL the registry records for the workspace rooted at `root`, or
+ * NULL when unknown. Read from the same accessor the mirror lifecycle uses
+ * (workspace_turn.c), so the two cannot disagree about a workspace's remote.
+ * Returns a pointer into config storage: use it before any further config read.
+ */
+static const char *workspace_remote_for_root(const char *root)
+{
+   if (!root || !root[0])
+      return NULL;
+   for (int i = 0; i < config_workspace_count(); i++)
+   {
+      const char *candidate = config_workspaces(i);
+      if (candidate && strcmp(candidate, root) == 0)
+      {
+         const char *remote = config_workspace_vcs_remote(i);
+         return (remote && remote[0]) ? remote : NULL;
+      }
+   }
+   return NULL;
+}
+
 static int forge_workspace_for_cwd(const char *cwd, int provider_kind, int *runs_on_server,
                                    char *out, size_t outsz)
 {
@@ -165,8 +186,21 @@ char *mcp_git_run(const char *cmd, int *exit_code)
          if (forge_cred_get(wsid, (long)time(NULL), tok, sizeof(tok)) == 0 && tok[0])
             pref = tok;
          int token_fd = -1;
+         /* Hand the policy the workspace's RECORDED REMOTE, not just the cwd.
+          * The per-host vault step keys on the remote's host, which it derives
+          * from an explicit remote URL or, failing that, by running
+          * `git -C <repo_dir> config --get remote.origin.url`. For a mirror the
+          * cwd we were handed is the CLIENT's path: it does not exist on this
+          * server, so that lookup finds nothing, resolution falls through to no
+          * token, and git prompts — "could not read Username", the very failure
+          * this file's header describes. workspace_turn.c already passes the
+          * remote for exactly this reason ("remote URL (per-host vault lookup),
+          * so ctx carries both"); this call site is the one that did not.
+          * cwd is still passed as the fallback for a shared workspace, where it
+          * IS the real checkout and no remote may be recorded. */
+         const char *ws_remote = workspace_remote_for_root(wsid);
          char **envp =
-             git_cred_inject_build_env_for_repo(NULL, NULL, cwd, pref, environ, &token_fd);
+             git_cred_inject_build_env_for_repo(NULL, ws_remote, cwd, pref, environ, &token_fd);
          volatile char *p = (volatile char *)tok;
          for (size_t i = 0; i < sizeof(tok); i++)
             p[i] = 0;

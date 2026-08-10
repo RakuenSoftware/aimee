@@ -57,6 +57,25 @@ int main(void)
    assert(system(setup2) == 0);
    assert(git_host_resolve_token(NULL, dir2, tok, sizeof(tok)) == 0);
 
+   /* THE MIRROR CONDITION. A mirror workspace's server-side checkout is
+    * reconstructed under the mirror base, so the cwd the client handed over does
+    * NOT exist on this host. Resolving by that path finds no origin and yields
+    * no token — which upstream is indistinguishable from "no credential", and is
+    * how `aimee git push` came to fail with "could not read Username" while
+    * reads (which never exec git) kept working.
+    *
+    * So the caller must pass the workspace's RECORDED remote. These two
+    * assertions pin both halves: the path alone is not enough, the remote is. */
+   char absent[256];
+   snprintf(absent, sizeof(absent), "/tmp/aimee-ghr-absent-%d", (int)getpid());
+   assert(access(absent, F_OK) != 0); /* genuinely not present */
+
+   assert(git_host_resolve_token(NULL, absent, tok, sizeof(tok)) == 0);
+   assert(tok[0] == '\0');
+
+   assert(git_host_resolve_token("https://vault.example/a/b.git", absent, tok, sizeof(tok)) == 1);
+   assert(strcmp(tok, "TOK-vaulted") == 0);
+
    /* Dormant again after a NULL re-register. */
    git_host_resolve_register(NULL);
    assert(git_host_resolve_token("https://vault.example/x/y", NULL, tok, sizeof(tok)) == 0);
