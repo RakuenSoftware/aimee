@@ -174,6 +174,51 @@ func TestPRFindOpenQualifiesTheHeadWithTheOwner(t *testing.T) {
 	}
 }
 
+// THE BASE IS PART OF THE QUESTION. "Is there already an open PR for this
+// branch?" is only answerable per target branch: the same head can have an open
+// PR into one base and none into another. Filtering by head alone answers yes
+// for the wrong one, and the caller then declines to open a PR it needed.
+func TestPRFindOpenFiltersByBaseAsWellAsHead(t *testing.T) {
+	stub := &forgeStub{reply: `[{"number":5,"state":"open","head":{"ref":"feat"},
+		"base":{"ref":"testing"}}]`}
+	stub.start(t)
+	PerformForge(ForgeRequest{
+		Op: OpPRFindOpen, Owner: "acme", Repo: "r", Token: "t", Head: "feat", Base: "testing",
+	})
+	if !strings.Contains(stub.path, "head=acme%3Afeat") {
+		t.Fatalf("path = %q, want an owner-qualified head filter", stub.path)
+	}
+	if !strings.Contains(stub.path, "base=testing") {
+		t.Fatalf("path = %q, want a base filter", stub.path)
+	}
+
+	// Without a base there must be no base filter at all — an empty base=&
+	// would match nothing rather than "any base".
+	stub2 := &forgeStub{reply: `[]`}
+	stub2.start(t)
+	PerformForge(ForgeRequest{Op: OpPRFindOpen, Owner: "acme", Repo: "r", Token: "t", Head: "feat"})
+	if strings.Contains(stub2.path, "base=") {
+		t.Fatalf("path = %q, want no base filter when none was asked for", stub2.path)
+	}
+}
+
+// A "latest open PRs" listing that silently shows the OLDEST ones is worse than
+// no listing: it reads as authoritative.
+func TestPRListOpenAsksForMostRecentlyUpdatedFirst(t *testing.T) {
+	stub := &forgeStub{reply: `[]`}
+	stub.start(t)
+	PerformForge(ForgeRequest{Op: OpPRListOpen, Owner: "o", Repo: "r", Token: "t", Limit: 20})
+	for _, want := range []string{"sort=updated", "direction=desc", "per_page=20", "state=open"} {
+		if !strings.Contains(stub.path, want) {
+			t.Fatalf("path = %q, missing %s", stub.path, want)
+		}
+	}
+	// The head/base filters belong to find, not to a full listing.
+	if strings.Contains(stub.path, "head=") || strings.Contains(stub.path, "base=") {
+		t.Fatalf("path = %q, a listing must not be filtered by head/base", stub.path)
+	}
+}
+
 func TestGuardsRejectBadInputBeforeAnyCall(t *testing.T) {
 	previous := forgeBaseURL
 	forgeBaseURL = "http://127.0.0.1:1" // any call would fail loudly
@@ -198,6 +243,91 @@ func TestGuardsRejectBadInputBeforeAnyCall(t *testing.T) {
 		}
 	}
 }
+
+// MERGEABLE IS THREE-VALUED. The forge answers null while it is still computing
+// the merge, which is NOT "cannot merge". Flattening null to false tells a
+// caller a perfectly mergeable PR is conflicted, and it abandons a merge that
+// would have succeeded a moment later — so absent, true and false are asserted
+// as three distinct outcomes.
+func TestPRInfoKeepsMergeableThreeValued(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want *bool
+	}{
+		{"still computing", `{"number":1,"state":"open","mergeable":null,
+			"head":{"ref":"f","sha":"abc"},"base":{"ref":"testing"}}`, nil},
+		{"mergeable", `{"number":1,"state":"open","mergeable":true,
+			"head":{"ref":"f","sha":"abc"},"base":{"ref":"testing"}}`, boolPtr(true)},
+		{"not mergeable", `{"number":1,"state":"open","mergeable":false,
+			"head":{"ref":"f","sha":"abc"},"base":{"ref":"testing"}}`, boolPtr(false)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &forgeStub{reply: tc.body}
+			stub.start(t)
+			out := PerformForge(ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Token: "t", Number: 1})
+			if out.Error != "" || out.Pull == nil {
+				t.Fatalf("unexpected: %+v", out)
+			}
+			got := out.Pull.Mergeable
+			if (got == nil) != (tc.want == nil) {
+				t.Fatalf("mergeable = %v, want %v", got, tc.want)
+			}
+			if got != nil && *got != *tc.want {
+				t.Fatalf("mergeable = %v, want %v", *got, *tc.want)
+			}
+			// And it must survive the wire the same way.
+			encoded, _ := json.Marshal(out.Pull)
+			hasKey := strings.Contains(string(encoded), `"mergeable"`)
+			if hasKey != (tc.want != nil) {
+				t.Fatalf("encoded %s: mergeable key present=%v, want %v", encoded, hasKey, tc.want != nil)
+			}
+		})
+	}
+}
+
+func TestPRInfoCarriesTheRefsAndStateACallerNeeds(t *testing.T) {
+	stub := &forgeStub{reply: `{"number":7,"state":"closed","title":"T","merged":true,
+		"merged_at":"2026-08-10T13:17:33Z","mergeable_state":"clean","html_url":"u",
+		"head":{"ref":"feat","sha":"deadbeef"},"base":{"ref":"testing"}}`}
+	stub.start(t)
+	out := PerformForge(ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Token: "t", Number: 7})
+	if out.Error != "" || out.Pull == nil {
+		t.Fatalf("unexpected: %+v", out)
+	}
+	p := out.Pull
+	// head_sha is what drift-safety on a merge is checked against, so losing it
+	// silently disables that protection.
+	if p.HeadSHA != "deadbeef" || p.Head != "feat" || p.Base != "testing" {
+		t.Fatalf("refs = %+v", p)
+	}
+	if !p.Merged || p.MergedAt != "2026-08-10T13:17:33Z" {
+		t.Fatalf("merge facts = %+v", p)
+	}
+	// REST spells it lowercase; callers render the upper-cased gh spelling, and
+	// normalising here means no caller has to remember to.
+	if p.MergeState != "CLEAN" {
+		t.Fatalf("merge_state = %q, want CLEAN", p.MergeState)
+	}
+}
+
+// A PR that was never merged has merged_at null; it must not become the string
+// "null" or an empty-but-present value a caller might render.
+func TestNeverMergedHasNoMergedAt(t *testing.T) {
+	stub := &forgeStub{reply: `{"number":1,"state":"open","merged":false,"merged_at":null,
+		"head":{"ref":"f","sha":"abc"},"base":{"ref":"testing"}}`}
+	stub.start(t)
+	out := PerformForge(ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Token: "t", Number: 1})
+	if out.Pull == nil || out.Pull.MergedAt != "" {
+		t.Fatalf("merged_at = %+v, want empty", out.Pull)
+	}
+	encoded, _ := json.Marshal(out.Pull)
+	if strings.Contains(string(encoded), "merged_at") {
+		t.Fatalf("merged_at must be omitted entirely: %s", encoded)
+	}
+}
+
+func boolPtr(v bool) *bool { return &v }
 
 func TestHandleForgeRequestRoutesThroughStageFour(t *testing.T) {
 	stub := &forgeStub{reply: `{"default_branch":"testing"}`}
