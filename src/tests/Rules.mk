@@ -458,6 +458,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-tpm2-stub \
                $(TESTPREFIX)/unit-test-git-forge-vault \
                $(TESTPREFIX)/unit-test-git-host-resolve \
+               $(TESTPREFIX)/unit-test-git-pr-stage \
                $(TESTPREFIX)/unit-test-git-cred-inject \
                $(TESTPREFIX)/unit-test-git-ssh-agent \
                $(TESTPREFIX)/unit-test-webchat-git-leak \
@@ -2117,6 +2118,18 @@ $(TESTPREFIX)/unit-test-wfe-router: $(OBJDIR)/tests/test_wfe_router.o \
 $(OBJDIR)/tests/test_wfe_autonomous_route.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-wfe-autonomous-route: $(OBJDIR)/tests/test_wfe_autonomous_route.o \
                                     $(OBJDIR)/modules/workflows/wfe_autonomous_route.o \
+                                    $(OBJDIR)/module_json_call.o \
+                                    $(OBJDIR)/tests/support/module_bus_stub.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# The C side of the git-forge-request seam: the stage reply is canned through
+# module_bus_stub, so this pins the translation into the caller's return codes
+# without a forge, a credential or a repository. The HTTP entry points are
+# stubbed inside the test TU (and abort), which is why no agent_exec object is
+# linked here.
+$(TESTPREFIX)/unit-test-git-pr-stage: $(OBJDIR)/tests/test_git_pr_stage.o \
+                                    $(OBJDIR)/modules/git/git_pr_api.o \
+                                    $(OBJDIR)/modules/git/git_pr_ci_grade.o \
                                     $(OBJDIR)/module_json_call.o \
                                     $(OBJDIR)/tests/support/module_bus_stub.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
