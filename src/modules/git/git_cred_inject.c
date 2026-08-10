@@ -6,6 +6,7 @@
 #include "git_host_cred.h"     /* git_host_cred_list — "is git configured at all?" */
 #include "git_host_resolve.h"  /* git_host_resolve_token (per-host vault seam) */
 #include "git_ssh_agent.h"     /* git_ssh_agent_ensure */
+#include "log.h"               /* LOG_INFO — report which credential source won */
 #include "util.h"              /* GIT_AGENT_SSH_COMMAND */
 
 #include <stdio.h>
@@ -140,18 +141,32 @@ static void wipe(void *p, size_t n)
  * Returns 1 (token written) or 0 (none — caller may still have ssh/ambient).
  * `out` is always either a full token or empty; never a partial value. */
 static int resolve_token(const char *principal, const char *remote_url, const char *repo_dir,
-                         const char *preferred_token, char *out, size_t cap)
+                         const char *preferred_token, char *out, size_t cap, const char **source)
 {
+   if (source)
+      *source = "none";
    if (out && cap)
       out[0] = '\0';
    if (!out || cap == 0)
       return 0;
 
-   /* 1. A live caller-supplied token (inline clone token / workspace broker). */
+   /* 1. A live caller-supplied token (inline clone token / workspace broker).
+    *
+    * THIS WINS OVER THE VAULT, which is the point — a caller holding a live
+    * brokered credential means it. It also means two call sites asking about
+    * the SAME repo can authenticate as DIFFERENT tokens: an exec path that
+    * passes a broker token uses that, while an in-process forge call that
+    * passes none uses the vault. When one succeeds and the other is refused,
+    * that difference is the first thing to check, and until this reported its
+    * source there was no way to see it from outside. */
    if (preferred_token && preferred_token[0])
    {
       if ((size_t)snprintf(out, cap, "%s", preferred_token) < cap)
+      {
+         if (source)
+            *source = "caller-supplied (workspace broker / inline clone token)";
          return 1;
+      }
       wipe(out, cap); /* would truncate a secret → wipe the partial, fail closed */
       return 0;
    }
@@ -159,17 +174,29 @@ static int resolve_token(const char *principal, const char *remote_url, const ch
    /* 2. Per-host vault token, keyed by the repo's remote host (resolved from the
     * explicit remote URL, else the checkout's `origin`), via the shared seam. */
    if (git_host_resolve_token(remote_url, repo_dir, out, cap) == 1 && out[0])
+   {
+      if (source)
+         *source = "per-host vault entry";
       return 1;
+   }
    out[0] = '\0';
 
    /* 3. The environment's vaulted forge token. */
    if (git_forge_vault_token(principal, out, cap) == 1 && out[0])
+   {
+      if (source)
+         *source = "principal's vaulted forge token";
       return 1;
+   }
    out[0] = '\0';
 
    /* 4. The server's forge-App identity (AIMEE_FORGE_TOKEN). */
    if (forge_cred_server_identity(out, cap, NULL, 0) == 1 && out[0])
+   {
+      if (source)
+         *source = "server forge identity";
       return 1;
+   }
    out[0] = '\0';
    return 0;
 }
@@ -183,8 +210,21 @@ char **git_cred_inject_build_env_for_repo(const char *principal, const char *rem
    const int fd_mode = (out_token_fd != NULL);
 
    char token[GIT_CRED_TOKEN_MAX] = {0};
-   int have_token =
-       resolve_token(principal, remote_url, repo_dir, preferred_token, token, sizeof(token));
+   const char *source = "none";
+   int have_token = resolve_token(principal, remote_url, repo_dir, preferred_token, token,
+                                  sizeof(token), &source);
+
+   /* SAY WHICH CREDENTIAL THIS EXEC WILL AUTHENTICATE AS. The token is never
+    * logged; its SOURCE is, because that is the fact nobody could see. A forge
+    * call and a git exec against the same repo can resolve different tokens —
+    * the exec path supplies a workspace broker token, which outranks the vault —
+    * so "pr create works but push is denied" is a credential question that
+    * looks like a permissions question. One line here answers it. */
+   if (have_token)
+      LOG_INFO("git", "forge credential for %s resolved from: %s",
+               (remote_url && remote_url[0]) ? remote_url
+                                             : ((repo_dir && repo_dir[0]) ? repo_dir : "<unknown>"),
+               source);
 
    /* FD MODE: stage the token in an anonymous CLOEXEC memfd (never a named path,
     * never in the env). The askpass reads it via /proc/self/fd/<target>; the
@@ -236,7 +276,7 @@ int git_cred_inject_resolve_token(const char *principal, const char *remote_url,
                                   const char *repo_dir, const char *preferred_token, char *out,
                                   size_t cap)
 {
-   return resolve_token(principal, remote_url, repo_dir, preferred_token, out, cap);
+   return resolve_token(principal, remote_url, repo_dir, preferred_token, out, cap, NULL);
 }
 
 int git_cred_forge_configured(void)
