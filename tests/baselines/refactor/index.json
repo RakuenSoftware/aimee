@@ -299,7 +299,7 @@
         },
         {
           "path": "src/headers/cli_attention_guard.h",
-          "sha256": "37c917b5d973930dae150f31e0cc49ed76db94eb38b545a52c3496cdbc9a9e70"
+          "sha256": "139e1f340b1c42bb8edbe864b40f868e979c0e265be7db53d22ec2425a65fc8c"
         },
         {
           "path": "src/headers/cli_chat_stream.h",
@@ -1616,7 +1616,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "27c02ca7f28016f978ceb7ad35b0918610f30b192ca998ee0add8c4dcb4e00fb",
+      "sha256": "9281a0fce30fce8254c7e2612f274200ba7762592cae43f8403956711760a960",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
