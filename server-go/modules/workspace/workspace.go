@@ -40,7 +40,7 @@ const (
 // looks up by the id this returns.
 var (
 	runnersMu sync.Mutex
-	runners   = map[string]struct{}{}
+	runners   = map[string]*rendezvous{}
 )
 
 // covers reports whether a runner serving id also serves path — that is, id is
@@ -79,14 +79,26 @@ func runnerRegister(id string) bool {
 	if len(runners) >= runnerMax {
 		return false
 	}
-	runners[id] = struct{}{}
+	runners[id] = newRendezvous()
 	return true
 }
 
 func runnerUnregister(id string) {
 	runnersMu.Lock()
-	defer runnersMu.Unlock()
+	point := runners[id]
 	delete(runners, id)
+	runnersMu.Unlock()
+	// Outside the lock: closing wakes anyone blocked on the handoff and fails
+	// their op, rather than leaving them parked on a client that has gone.
+	if point != nil {
+		point.close()
+	}
+}
+
+func runnerFor(id string) *rendezvous {
+	runnersMu.Lock()
+	defer runnersMu.Unlock()
+	return runners[id]
 }
 
 func handleRunner(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
@@ -177,6 +189,9 @@ func refValid(ref []byte) bool {
 func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	if invocation.StageID == StageRunner {
 		return handleRunner(invocation, request)
+	}
+	if invocation.StageID == StageRunnerIO {
+		return handleRunnerIO(invocation, request)
 	}
 	if invocation.StageID != StageAccess || len(request) != requestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic || request[4] != wireVersion ||
