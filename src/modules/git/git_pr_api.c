@@ -3,7 +3,7 @@
 #include "git_pr_api.h"
 
 #include "aimee.h"           /* MAX_PATH_LEN (needed by agent_types.h) */
-#include "agent_exec.h"      /* agent_http_post_content_type */
+#include "agent_exec.h"      /* agent_http_get/put/patch — the ops still on HTTP */
 #include "cJSON.h"           /* request/response JSON */
 #include "git_cred_inject.h" /* git_cred_inject_resolve_token — the ONE cred policy */
 #include "util.h"            /* run_cmd */
@@ -545,56 +545,53 @@ int git_pr_create_via_api_slug(const char *principal, const char *slug, const ch
    if (bclean)
       strip_ai_attribution(bclean);
 
-   cJSON *j = cJSON_CreateObject();
-   cJSON_AddStringToObject(j, "title", title);
-   cJSON_AddStringToObject(j, "head", head);
-   cJSON_AddStringToObject(j, "base", base);
-   cJSON_AddStringToObject(j, "body", bclean ? bclean : "");
-   cJSON_AddBoolToObject(j, "draft", draft ? 1 : 0);
-   free(bclean);
-   char *jbody = cJSON_PrintUnformatted(j);
-   cJSON_Delete(j);
-   if (!jbody)
+   cJSON *extra = cJSON_CreateObject();
+   if (!extra)
    {
+      free(bclean);
       gh_ctx_done(&cx);
       snprintf(err, errlen, "internal error");
       return -1;
    }
+   cJSON_AddStringToObject(extra, "title", title);
+   cJSON_AddStringToObject(extra, "head", head);
+   cJSON_AddStringToObject(extra, "base", base);
+   cJSON_AddStringToObject(extra, "body", bclean ? bclean : "");
+   if (draft)
+      cJSON_AddBoolToObject(extra, "draft", 1);
+   free(bclean);
 
-   char url[512];
-   snprintf(url, sizeof(url), "https://api.github.com/repos/%s/%s/pulls", cx.owner, cx.repo);
-   char auth[PR_TOKEN_MAX + 32];
-   snprintf(auth, sizeof(auth), "Authorization: Bearer %s", cx.token);
-
-   char *resp = NULL;
-   int status =
-       agent_http_post_content_type(url, auth, "application/json", jbody, &resp, 20000, GH_ACCEPT);
-   /* The token only ever lived in aimee-server's memory; wipe both copies now. */
-   wipe(auth, sizeof(auth));
+   cJSON *reply = forge_stage(&cx, "pr_create", extra);
    gh_ctx_done(&cx);
-   free(jbody);
-
-   if (status < 200 || status >= 300 || !resp)
+   if (!reply)
    {
-      gh_err(resp, status, "pr create", err, errlen);
-      free(resp);
+      /* Not a refusal: say the module was unreachable, so a caller does not
+       * record "the forge rejected this PR" for a request never sent. */
+      snprintf(err, errlen, "pr create: the git module could not be reached");
       return -1;
    }
 
-   cJSON *jr = cJSON_Parse(resp);
+   const cJSON *pull = cJSON_GetObjectItemCaseSensitive(reply, "pull");
+   const cJSON *url = pull ? cJSON_GetObjectItemCaseSensitive(pull, "url") : NULL;
+   const cJSON *message = cJSON_GetObjectItemCaseSensitive(reply, "error");
+
    int ok = -1;
-   cJSON *hu = jr ? cJSON_GetObjectItem(jr, "html_url") : NULL;
-   if (cJSON_IsString(hu) && hu->valuestring)
+   if (cJSON_IsString(url) && url->valuestring && url->valuestring[0])
    {
-      snprintf(out, out_cap, "%s", hu->valuestring);
+      snprintf(out, out_cap, "%s", url->valuestring);
       ok = 0;
+   }
+   else if (cJSON_IsString(message) && message->valuestring)
+   {
+      /* The forge's own words -- "A pull request already exists" sends an
+       * operator somewhere useful; "HTTP 422" does not. */
+      snprintf(err, errlen, "%s", message->valuestring);
    }
    else
    {
       snprintf(err, errlen, "github API: unexpected response");
    }
-   cJSON_Delete(jr);
-   free(resp);
+   cJSON_Delete(reply);
    return ok;
 }
 
