@@ -382,6 +382,50 @@ int handle_get_code_context(const char *query_string, char *out_buf, int out_cap
    cJSON_AddNumberToObject(answerability, "top_confidence", top_confidence);
    cJSON_AddNumberToObject(answerability, "vector_floor", CODE_CONTEXT_VECTOR_MIN);
 
+   /* An abstention that names nothing is indistinguishable from a broken index, and
+    * the caller acts accordingly. Measured on the Ponytail benchmark: every cell got
+    * status=abstained with results=[] because the fixture's best vector evidence
+    * scores ~0.61 against a 0.70 floor and a natural-language question matches no
+    * `code`/`graph` signal. Two of three agents then said in their own words that the
+    * index was unavailable and fell back to shell -- 16 shell commands per cell
+    * against a toolless baseline's 9.3. The tool taught them not to trust it.
+    *
+    * So when nothing clears the floor, say what was NEAR it. The decision is
+    * unchanged -- status stays "abstained", results stays empty, nothing sub-floor is
+    * ever presented as evidence -- but the caller can now tell "I looked and the best
+    * was 0.61" from "I am not working", and can go read that file itself. */
+   if (!answerable && candidate_count > 0)
+   {
+      cJSON *near = cJSON_AddArrayToObject(answerability, "near_misses");
+      int listed = 0;
+      const cJSON *row = NULL;
+      cJSON_ArrayForEach(row, source_results)
+      {
+         if (listed >= CODE_CONTEXT_MAX_ITEMS)
+            break;
+         const cJSON *row_project = cJSON_GetObjectItemCaseSensitive(row, "project");
+         if (!cJSON_IsString(row_project) || strcmp(row_project->valuestring, project) != 0)
+            continue;
+         const cJSON *path = cJSON_GetObjectItemCaseSensitive(row, "file_path");
+         if (!cJSON_IsString(path) || !path->valuestring[0])
+            continue;
+         const cJSON *vscore = cJSON_GetObjectItemCaseSensitive(row, "vector_score");
+         cJSON *entry = cJSON_CreateObject();
+         if (!entry)
+            break;
+         cJSON_AddStringToObject(entry, "file_path", path->valuestring);
+         if (cJSON_IsNumber(vscore))
+            cJSON_AddNumberToObject(entry, "vector_score", vscore->valuedouble);
+         cJSON_AddItemToArray(near, entry);
+         listed++;
+      }
+      if (listed > 0)
+         cJSON_AddStringToObject(
+             answerability, "hint",
+             "no candidate cleared the vector floor; these files were the closest matches "
+             "and are worth reading directly");
+   }
+
    char *json = cJSON_PrintUnformatted(response);
    int status = 200;
    if (!json)
