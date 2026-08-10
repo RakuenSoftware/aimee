@@ -1438,62 +1438,67 @@ int git_pr_merge_via_api_slug_ex(const char *principal, const char *slug, int nu
    if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
 
-   cJSON *j = cJSON_CreateObject();
-   cJSON_AddStringToObject(j, "merge_method", method);
-   /* Only a squash synthesizes a body from the child commits, which is where the
-    * attribution trailers protected branches reject come back in -- see
-    * GIT_PR_SQUASH_MERGE_JSON. A merge or rebase has nothing to synthesize. */
-   if (strcmp(method, "squash") == 0)
-      cJSON_AddStringToObject(j, "commit_message", "");
-   /* Drift safety: GitHub refuses the merge if the head has moved. */
-   if (expected_head_sha && expected_head_sha[0])
-      cJSON_AddStringToObject(j, "sha", expected_head_sha);
-   char *payload = cJSON_PrintUnformatted(j);
-   cJSON_Delete(j);
-   if (!payload)
+   /* The merge itself, its payload shaping (a squash's synthesized body, the
+    * drift-safety sha) and the 405/409 classification all live in the module
+    * now. What stays here is the translation into this function's long-standing
+    * return codes, which callers switch on. */
+   cJSON *extra = cJSON_CreateObject();
+   if (!extra)
    {
       gh_ctx_done(&cx);
       snprintf(err, errlen, "internal error");
       return -1;
    }
+   cJSON_AddNumberToObject(extra, "number", number);
+   cJSON_AddStringToObject(extra, "merge_method", method);
+   if (expected_head_sha && expected_head_sha[0])
+      cJSON_AddStringToObject(extra, "expected_head_sha", expected_head_sha);
 
-   char path[64];
-   snprintf(path, sizeof(path), "pulls/%d/merge", number);
-   char *resp = NULL;
-   int st = gh_put(&cx, path, payload, &resp);
-   free(payload);
+   cJSON *reply = forge_stage(&cx, "pr_merge", extra);
    gh_ctx_done(&cx);
-
-   /* The 200 body carries the merge commit, so the caller needs no second lookup. */
-   if (st >= 200 && st < 300 && resp && out_sha && out_sha_cap)
+   if (!reply)
    {
-      cJSON *jr = cJSON_Parse(resp);
-      const cJSON *sha = jr ? cJSON_GetObjectItem(jr, "sha") : NULL;
-      if (cJSON_IsString(sha) && sha->valuestring)
-         snprintf(out_sha, out_sha_cap, "%s", sha->valuestring);
-      cJSON_Delete(jr);
+      /* Unreachable module is NOT a refused merge: say so, rather than letting a
+       * caller read it as "the forge said no" and stop retrying. */
+      snprintf(err, errlen, "pr merge: the git module could not be reached");
+      return -1;
    }
+
+   const cJSON *merged = cJSON_GetObjectItemCaseSensitive(reply, "merged");
+   const cJSON *already = cJSON_GetObjectItemCaseSensitive(reply, "already_merged");
+   const cJSON *conflict = cJSON_GetObjectItemCaseSensitive(reply, "conflict");
+   const cJSON *retryable = cJSON_GetObjectItemCaseSensitive(reply, "retryable");
+   const cJSON *message = cJSON_GetObjectItemCaseSensitive(reply, "error");
+   const cJSON *sha = cJSON_GetObjectItemCaseSensitive(reply, "merge_sha");
+
    int res;
-   if (st >= 200 && st < 300)
-      res = 0; /* merged */
-   else if (st == 405 && resp && strstr(resp, "already merged"))
-      res = 1;
-   else if (st == 405 || st == 409)
+   if (cJSON_IsTrue(merged))
    {
-      gh_err(resp, st, "pr merge", err, errlen);
-      /* Separate the terminal case from the retryable one. A content conflict is
-       * a property of the two trees: retrying reproduces it exactly. A moved
-       * head/base is a lost race that a retry wins. Both arrive as 405/409, so
-       * the body is the only discriminator GitHub gives us. Match on the message
-       * text produced by gh_err rather than the raw body so a conflict reported
-       * with different JSON framing still classifies. */
-      res = git_pr_merge_err_is_conflict(err) ? 3 : 2;
+      /* The 2xx body carried the merge commit, so no second lookup. */
+      if (out_sha && out_sha_cap && cJSON_IsString(sha) && sha->valuestring)
+         snprintf(out_sha, out_sha_cap, "%s", sha->valuestring);
+      res = 0;
+   }
+   else if (cJSON_IsTrue(already))
+   {
+      res = 1;
    }
    else
    {
-      gh_err(resp, st, "pr merge", err, errlen);
-      res = -1;
+      if (cJSON_IsString(message) && message->valuestring)
+         snprintf(err, errlen, "%s", message->valuestring);
+      else
+         snprintf(err, errlen, "pr merge: refused");
+      /* Terminal vs retryable, decided in the module: a content conflict is a
+       * property of the two trees and a retry reproduces it exactly, while a
+       * moved head/base is a lost race a retry wins. */
+      if (cJSON_IsTrue(conflict))
+         res = 3;
+      else if (cJSON_IsTrue(retryable))
+         res = 2;
+      else
+         res = -1;
    }
-   free(resp);
+   cJSON_Delete(reply);
    return res;
 }
