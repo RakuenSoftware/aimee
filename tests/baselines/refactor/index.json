@@ -1455,7 +1455,7 @@
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_xml_fallback.h",
-          "sha256": "3de97f29be9477a0318558fdff849b81cd84acf07ff2ba0754c138a38e1bca04"
+          "sha256": "f3dfd1db44896efe75b82a1385d7bd302f88d3d356ea86161f2a8440a86124a2"
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/gw_orch_delegates.h",
@@ -1463,7 +1463,7 @@
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/module_api.h",
-          "sha256": "7bb7b304134232ff16c2438e7e02726c3b4e6d822c49e8d82534a50105eb292e"
+          "sha256": "2fdf125435b0d37278d971c231619cd54be4d1aa2c153e84141587a2331c49fc"
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/panel_provider.h",
@@ -1579,7 +1579,7 @@
         },
         {
           "path": "src/modules/tools/include/aimee/tools/agent_tools.h",
-          "sha256": "44ab4c7baa38fa50d58d5bd67f4f979643a816d80df66e0cb9c629df00250f9a"
+          "sha256": "ef11512e82cb0a15a060184e8183d3f1845c60a6aaf41d89b4dcb0ecb6fab886"
         },
         {
           "path": "src/modules/tools/include/aimee/tools/module_api.h",
@@ -1616,7 +1616,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "a8dcb8178a269d6c08acb4d60d08734d54d78771aec09fa65172fad27a14ccce",
+      "sha256": "27c02ca7f28016f978ceb7ad35b0918610f30b192ca998ee0add8c4dcb4e00fb",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
