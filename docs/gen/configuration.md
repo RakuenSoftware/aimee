@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects: e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (94)
+## CLI-settable keys (93)
 
 The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys are still `aimee config set`-able but are filed into their own subsections below (and hidden from the Settings surface by default).
 
@@ -58,8 +58,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `embedder_dims` | int | Embedding vector width. Leave unset for a bundled embedder - it declares its own width and the kb derives it (pinned > recorded > probed). REQUIRED for an external endpoint, whose width cannot be derived; valid to 4000, the DB2 column ceiling. A ONE-WAY DOOR once anything is embedded: DB2 records the width and refuses to start on drift. |
 | `embedder_model` | string | Embedder identity. Written for a bundled model too, not just an external one: it is the registry key pooling and prefixes resolve from, and the value recorded against the corpus. |
 | `embedder_url` | string | External embedder endpoint. A non-empty value IS the external embedder; empty means the model baked into this image variant (bekko-a25m at 384, or nomic-v2 at 768 on the -nomic images). |
-| `extended_thinking_budget_tokens` | int | Reasoning budget when extended_thinking_enabled is on. Anthropic requires it below max_tokens, so the request builder raises the output cap to fit rather than emitting a request the provider would reject. |
-| `extended_thinking_enabled` | bool | Ask for extended thinking on aimee's OWN Anthropic requests (default off). Without it a turn aimee originates carries no thinking config at all, so a reasoning-capable model is never asked to reason. Off by default because thinking tokens are billed: enabling it changes spend, not just visibility. |
+| `extended_thinking_enabled` | bool | Ask for extended thinking on aimee's OWN Anthropic requests (default off). Sends the adaptive thinking config, and only to a model whose capabilities report that it accepts it -- a model nobody has reported that for is left alone rather than sent a shape the provider would reject. Off by default because thinking tokens are billed: enabling it changes spend, not just visibility. |
 | `fidelity_check_enabled` | bool | Run the answer-fidelity judge on terminal-text turns (default off; requires kb_evidence_emit_enabled + ingress_preinject_enabled). |
 | `gateway_pin_model` | bool | Gateway forces the proxied /v1/messages served model to the configured primary's model, overriding the client-requested model. Default off (the passthrough honors the client model); enable for single-model Anthropic-compatible shims. |
 | `gateway_prevent_subagents` | bool | Gateway strips subagent-spawning tools (Task/Agent/etc.) from proxied requests so the served model cannot spawn subagents. Default off. |
@@ -244,7 +243,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`dedup`**: _Response deduplication._ Keys: `enabled`, `window_seconds`
 - **`dogfood`**: _Session capture for dogfood data._ Keys: `commit_raw`, `enabled`, `inline_tagging`, `log_dir`
 - **`ensemble`**: _Roundtable ensemble panel + aggregator._ Keys: `aggregator`, `max_cost_usd`, `min_successful`, `reference_models`, `reference_personas`
-- **`extended_thinking`**: `budget_tokens`, `enabled`
+- **`extended_thinking`**: `enabled`
 - **`fold`**: `enabled`, `excerpt_bytes`, `freeze`, `min_fold_msgs`, `recall`, `register_enabled`, `retained_msgs`
 - **`guardrails`**: _Semantic guardrail policy._ Keys: `blast_radius`, `semantic`
 - **`identity`**: _Working-profile identity injection._ Keys: `working_profile_injection`
@@ -816,6 +815,8 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `tunnel` | Tunnel config. |
 | `tunnels` | Tunnel definitions. |
 | `user` | Remote user (ssh backend). |
+
+> **Undocumented agent fields** (add to `AGENT_FIELD_DESC`): `max_output`
 
 ### Toolsets: `AIMEE_TOOLSETS_CONFIG` (or the config `toolsets` map)
 

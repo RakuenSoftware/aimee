@@ -63,6 +63,16 @@ export const TAB_TUTORIALS: Record<string, Tutorial> = {
     ],
     seeAlso: '/edit-workflows',
   },
+  '/providers': {
+    title: 'Providers',
+    body: [
+      'Each provider is one endpoint and one set of credentials; its models are listed underneath.',
+      'Adding a second model to a provider reuses its endpoint and key — you do not enter them again.',
+      'Every figure is badged with where it came from: “declared” is a value you set, “resolved” came from the provider, “unknown” means nobody has supplied one.',
+      'Leave a field empty to state nothing about it. A price of 0 is different: it says the seat costs nothing per token.',
+    ],
+    seeAlso: '/agents',
+  },
   '/agents': {
     title: 'Agents',
     body: [

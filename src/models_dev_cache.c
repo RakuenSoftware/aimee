@@ -245,6 +245,14 @@ static void fill_cap_from_nested(cJSON *entry, const char *provider, const char 
    snprintf(out->provider, sizeof(out->provider), "%s", provider);
    snprintf(out->model_id, sizeof(out->model_id), "%s", model_id);
 
+   /* models.dev publishes no streaming field, so a catalogued entry would carry
+    * MODEL_CAP_STREAMING clear -- which reads as "this model cannot stream"
+    * rather than "the source does not say". Every heuristic path in
+    * model_registry.c ORs this flag in unconditionally, so streaming is already
+    * universal in this codebase's semantics; matching that here keeps a
+    * catalogue hit from silently dropping the capability a static row carried. */
+   out->flags |= MODEL_CAP_STREAMING;
+
    cJSON *limit = cJSON_GetObjectItemCaseSensitive(entry, "limit");
    if (cJSON_IsObject(limit))
    {
@@ -334,7 +342,37 @@ static int list_from_json(cJSON *root, model_capability_t *out, int max, unsigne
       char prov[128], mdl[256];
       const char *slash = strchr(key, '/');
       if (!slash)
+      {
+         /* NESTED shape: a bare provider key whose "models" object holds one
+          * entry per model. lookup_in_json() has always understood this root
+          * (via lookup_in_nested_json); this list walker did not, so it skipped
+          * every provider key and reported ZERO for the bundled snapshot. The
+          * two readers therefore disagreed about the same file: a single-model
+          * lookup resolved 1M context, while every consumer that enumerates --
+          * model_capability_list(), and the in-memory dynamic capability set --
+          * saw an empty catalogue and silently fell through to the stale
+          * hand-written table. */
+         cJSON *models = cJSON_GetObjectItemCaseSensitive(item, "models");
+         if (!cJSON_IsObject(models))
+            continue;
+         cJSON *entry;
+         cJSON_ArrayForEach(entry, models)
+         {
+            if (!entry->string || !cJSON_IsObject(entry))
+               continue;
+            model_capability_t ncap;
+            memset(&ncap, 0, sizeof ncap);
+            fill_cap_from_nested(entry, key, entry->string, &ncap);
+            if (required_flags && (ncap.flags & required_flags) != required_flags)
+               continue;
+            if (open_weights_only && !ncap.open_weights)
+               continue;
+            if (out && written < max)
+               out[written] = ncap;
+            written++;
+         }
          continue;
+      }
       size_t plen = (size_t)(slash - key);
       if (plen >= sizeof(prov))
          continue;

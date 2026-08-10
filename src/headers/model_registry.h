@@ -28,6 +28,17 @@ enum
    MODEL_CAP_PDF = 1 << 3,
    MODEL_CAP_AUDIO = 1 << 4,
    MODEL_CAP_STREAMING = 1 << 5,
+   /* The model accepts Anthropic's ADAPTIVE thinking config. Set only from a
+    * provider that positively says so -- Anthropic publishes it under
+    * capabilities.thinking.types.adaptive. models.dev carries a bare
+    * `reasoning` boolean and cannot distinguish adaptive from the older
+    * budget_tokens form, so a catalogued model leaves this CLEAR.
+    *
+    * Absent therefore means "not known to accept it", never "cannot reason".
+    * Callers must fail closed on that: emitting the wrong thinking shape is a
+    * 400 the operator sees as an agent failure, so sending nothing is strictly
+    * better than guessing. */
+   MODEL_CAP_THINKING_ADAPTIVE = 1 << 6,
 };
 
 /* Modality capabilities (vision/pdf/audio) are INFERRED from prompt TEXT

@@ -11,6 +11,7 @@
 #include "db1_cron_jobs.h"
 #include "../db2/db_schema.h"
 #include "platform_test_util.h"
+#include "model_registry.h" /* MODEL_CAP_* for the catalog round-trip */
 
 static void cleanup_test_db(const char *path);
 
@@ -500,16 +501,42 @@ static void test_model_catalog_cache(void)
    db1_shutdown();
 
    assert(db1_init(path) == 0);
-   char *models[] = {"zeta-model", "alpha-model"};
+   /* The catalog now caches what a provider publishes about a model, not just
+    * its id. "zeta" carries limits and capabilities (an Anthropic-style
+    * provider); "alpha" carries none (an OpenAI-compatible endpoint that lists
+    * ids only), so the round-trip covers both the populated and the
+    * deliberately-empty case. */
+   provider_model_t models[2];
+   memset(models, 0, sizeof(models));
+   snprintf(models[0].id, sizeof(models[0].id), "zeta-model");
+   snprintf(models[0].display_name, sizeof(models[0].display_name), "Zeta");
+   models[0].context_window = 1000000;
+   models[0].max_output = 128000;
+   models[0].caps = MODEL_CAP_REASONING | MODEL_CAP_STREAMING;
+   snprintf(models[1].id, sizeof(models[1].id), "alpha-model");
+
    assert(db1_model_catalog_replace("openrouter", models, 2) == 0);
    assert(db1_model_catalog_is_fresh("openrouter", 3600) == 1);
 
-   char **out = NULL;
+   provider_model_t *out = NULL;
    int n = 0;
    assert(db1_model_catalog_get("openrouter", &out, &n) == 0);
    assert(n == 2);
-   assert(strcmp(out[0], "alpha-model") == 0);
-   assert(strcmp(out[1], "zeta-model") == 0);
+   assert(strcmp(out[0].id, "alpha-model") == 0);
+   assert(strcmp(out[1].id, "zeta-model") == 0);
+
+   /* The populated row survives the round-trip intact... */
+   assert(out[1].context_window == 1000000);
+   assert(out[1].max_output == 128000);
+   assert(out[1].caps == (unsigned)(MODEL_CAP_REASONING | MODEL_CAP_STREAMING));
+   assert(strcmp(out[1].display_name, "Zeta") == 0);
+   /* ...and the unpublished one stays 0 rather than acquiring a invented value.
+    * 0 here means "the provider did not say", which is what lets an operator's
+    * declared limit stand instead of being overwritten by a confident zero. */
+   assert(out[0].context_window == 0);
+   assert(out[0].max_output == 0);
+   assert(out[0].caps == 0);
+   assert(out[0].display_name[0] == '\0');
    db1_model_catalog_free(out, n);
 
    db1_shutdown();

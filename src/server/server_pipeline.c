@@ -854,9 +854,7 @@ static int resolve_panel(rtp_panel_t *out)
       if (ag)
       {
          parts[i].provider = ag->provider;
-         parts[i].context_tokens = ag->middleware.context_window > 0
-                                       ? ag->middleware.context_window
-                                       : model_context_window(ag->model);
+         parts[i].context_tokens = agent_declared_context_window(ag);
       }
       else
       {

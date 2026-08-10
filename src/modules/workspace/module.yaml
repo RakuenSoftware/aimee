@@ -27,10 +27,13 @@
     "src/modules/workspace/module_adapter.c"
   ],
   "go_sources": [
-    "server-go/modules/workspace/workspace.go"
+    "server-go/modules/workspace/workspace.go",
+    "server-go/modules/workspace/runner_io.go"
   ],
   "go_tests": [
-    "server-go/modules/workspace/workspace_test.go"
+    "server-go/modules/workspace/workspace_test.go",
+    "server-go/modules/workspace/runner_test.go",
+    "server-go/modules/workspace/runner_io_test.go"
   ],
   "public_headers": [
     "src/modules/workspace/include/aimee/workspace/module_api.h",
