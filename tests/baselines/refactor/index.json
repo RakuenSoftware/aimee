@@ -1539,7 +1539,7 @@
         },
         {
           "path": "src/modules/protocols/include/aimee/protocols/mcp/mcp_tools.h",
-          "sha256": "a37df30bb9ccef6d963af6f8ab8deccda6f3bf09b9c37600304e022e227d1728"
+          "sha256": "b915c88c9a37c2b82cef7880b00387c8afac71534d3b532651d5663b9829e869"
         },
         {
           "path": "src/modules/providers/include/aimee/providers/module_api.h",
@@ -1616,7 +1616,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "dd644e83c6167a6d43e3a8b73c4600a663cc527de5ef5879a6442cdc80725b47",
+      "sha256": "c8c22be16d73f09ad534a360de8582950fa9c9cd69dcbb72caeadce2c5226883",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
