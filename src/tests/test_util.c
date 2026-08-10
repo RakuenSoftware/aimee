@@ -461,9 +461,55 @@ static void test_parse_utc_ts_accepts_both_spellings(void)
    printf("  parse_utc_ts accepts both stored spellings\n");
 }
 
+/* These stamps are UTC, and the parser must read them as UTC WHEREVER IT RUNS.
+ *
+ * Three call sites converted to this helper previously used mktime(), which
+ * interprets struct tm as LOCAL time. On a host that is not UTC the computed age
+ * was wrong by the whole offset -- cmd_doctor reported a project indexed minutes
+ * ago as stale, and kb freshness was off by the same amount. Nothing failed; the
+ * numbers were just wrong, and on a UTC build machine the bug is invisible.
+ *
+ * So pin the property that catches it: the same input must yield the same
+ * instant under a deliberately non-UTC TZ. With mktime this differs by 13 hours;
+ * with timegm it does not move at all. */
+static void test_parse_utc_ts_is_timezone_independent(void)
+{
+   const char *sample = "2026-08-09T19:07:23Z";
+   char *saved = getenv("TZ");
+   char saved_copy[64] = "";
+   if (saved)
+      snprintf(saved_copy, sizeof(saved_copy), "%s", saved);
+
+   setenv("TZ", "UTC", 1);
+   tzset();
+   time_t as_utc = parse_utc_ts(sample);
+
+   /* UTC+13, and a DST-observing zone so the offset is not a constant either. */
+   setenv("TZ", "Pacific/Auckland", 1);
+   tzset();
+   time_t as_nz = parse_utc_ts(sample);
+
+   setenv("TZ", "America/Los_Angeles", 1);
+   tzset();
+   time_t as_la = parse_utc_ts(sample);
+
+   if (saved_copy[0])
+      setenv("TZ", saved_copy, 1);
+   else
+      unsetenv("TZ");
+   tzset();
+
+   assert(as_utc == 1786302443);
+   assert(as_nz == as_utc);
+   assert(as_la == as_utc);
+
+   printf("  parse_utc_ts reads UTC regardless of host timezone\n");
+}
+
 int main(void)
 {
    test_parse_utc_ts_accepts_both_spellings();
+   test_parse_utc_ts_is_timezone_independent();
    test_normalize_key();
    test_trigram_similarity();
    test_stem_word();

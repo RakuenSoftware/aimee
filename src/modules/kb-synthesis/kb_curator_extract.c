@@ -370,7 +370,16 @@ static void ce_reclaim_stale_running(int max_attempts)
        "                       ELSE last_error END,"
        "     updated_at = pg_now_text()"
        " WHERE kind = 'extract_doc' AND status = 'running'"
-       "   AND claimed_at <> '' AND claimed_at < pg_now_text(?2)",
+       "   AND claimed_at <> ''"
+       /* Compare the lease by VALUE, not as raw text. pg_now_text() is canonical
+        * ISO, but a row claimed before that became canonical still carries the
+        * space separator, and a text compare decides at character 10 where ' '
+        * (0x20) sorts below 'T' (0x54) -- so a legacy row read as older than any
+        * same-date threshold and its live lease was reclaimed out from under it.
+        * Lease horizons are minutes, so "same date" is the normal case here, not
+        * an edge. */
+       "   AND rtrim(replace(claimed_at,'T',' '),'Z')"
+       "     < rtrim(replace(pg_now_text(?2),'T',' '),'Z')",
        err, sizeof(err));
    if (!st)
    {
