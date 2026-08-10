@@ -57,6 +57,10 @@ type ForgeRequest struct {
 	Body   string `json:"body,omitempty"`
 	Draft  bool   `json:"draft,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
+	// MergeMethod is "merge", "squash" or "rebase"; empty means merge.
+	MergeMethod string `json:"merge_method,omitempty"`
+	// ExpectedHeadSHA refuses the merge if the head has moved since it was read.
+	ExpectedHeadSHA string `json:"expected_head_sha,omitempty"`
 }
 
 // PullSummary is the subset of a pull request every caller here needs.
@@ -82,6 +86,28 @@ type ForgeResponse struct {
 	Pull          *PullSummary  `json:"pull,omitempty"`
 	Pulls         []PullSummary `json:"pulls,omitempty"`
 	Merged        bool          `json:"merged,omitempty"`
+	MergeSHA      string        `json:"merge_sha,omitempty"`
+	AlreadyMerged bool          `json:"already_merged,omitempty"`
+	// Conflict is TERMINAL, Retryable is a lost race. Both arrive as 405/409 and
+	// the message is the only discriminator the forge gives, so they are reported
+	// apart here rather than left for a caller to guess: retrying a conflict
+	// reproduces it exactly, and giving up on a lost race abandons a merge that
+	// would have succeeded.
+	Conflict  bool `json:"conflict,omitempty"`
+	Retryable bool `json:"retryable,omitempty"`
+}
+
+// isMergeConflict matches the forge's conflict wording, observed live as "Pull
+// Request has merge conflicts". The distinctive NOUN PHRASE is matched, not the
+// whole sentence, so a rewording ("has merge conflict", "merge conflicts
+// detected") still classifies.
+//
+// Bare "conflict" is deliberately NOT matched: HTTP 409 is literally named
+// Conflict and its lost-race messages carry the bare word — precisely the case
+// that must stay retryable. Requiring the pair keeps this from terminating runs
+// a retry would have won.
+func isMergeConflict(message string) bool {
+	return strings.Contains(strings.ToLower(message), "merge conflict")
 }
 
 func nameOK(s string) bool {
@@ -295,22 +321,49 @@ func PerformForge(request ForgeRequest) ForgeResponse {
 		if request.Number <= 0 {
 			return ForgeResponse{Error: "pr merge: a positive number is required"}
 		}
+		method := request.MergeMethod
+		if method == "" {
+			method = "merge"
+		}
+		body := map[string]any{"merge_method": method}
+		// Only a squash synthesises a body from the child commits, which is where
+		// the attribution trailers protected branches reject come back in. A merge
+		// or rebase has nothing to synthesise.
+		if method == "squash" {
+			body["commit_message"] = ""
+		}
+		if request.ExpectedHeadSHA != "" {
+			body["sha"] = request.ExpectedHeadSHA
+		}
 		status, payload, err := forgeCall(http.MethodPut,
-			fmt.Sprintf("%s/pulls/%d/merge", repo, request.Number), request.Token,
-			map[string]any{"merge_method": "merge"})
+			fmt.Sprintf("%s/pulls/%d/merge", repo, request.Number), request.Token, body)
 		if err != nil {
 			return ForgeResponse{Error: "forge: " + err.Error()}
 		}
-		if status < 200 || status > 299 {
-			// 405 and 409 are the forge refusing the merge (not mergeable /
-			// conflict), which callers surface verbatim rather than retrying.
-			return ForgeResponse{Status: status, Error: forgeError(status, payload, "pr merge")}
+		if status >= 200 && status <= 299 {
+			var decoded struct {
+				Merged bool   `json:"merged"`
+				SHA    string `json:"sha"`
+			}
+			_ = json.Unmarshal(payload, &decoded)
+			// The 2xx body carries the merge commit, so the caller needs no
+			// second lookup.
+			return ForgeResponse{Status: status, Merged: true, MergeSHA: decoded.SHA}
 		}
-		var decoded struct {
-			Merged bool `json:"merged"`
+		message := forgeError(status, payload, "pr merge")
+		if status == 405 && strings.Contains(strings.ToLower(string(payload)), "already merged") {
+			return ForgeResponse{Status: status, AlreadyMerged: true}
 		}
-		_ = json.Unmarshal(payload, &decoded)
-		return ForgeResponse{Status: status, Merged: decoded.Merged}
+		if status == 405 || status == 409 {
+			out := ForgeResponse{Status: status, Error: message}
+			if isMergeConflict(message) {
+				out.Conflict = true
+			} else {
+				out.Retryable = true
+			}
+			return out
+		}
+		return ForgeResponse{Status: status, Error: message}
 	}
 	return ForgeResponse{Error: "forge: unsupported operation " + strings.TrimSpace(request.Op)}
 }
