@@ -31,6 +31,18 @@
 #define AIMEE_DELEGATES_CAP_PDF    (1u << 3)
 #define AIMEE_DELEGATES_CAP_AUDIO  (1u << 4)
 
+/* Chain depth: how deep a delegation may nest, and when an inherited depth is
+ * stale. Depth crosses process boundaries in an environment variable; reading
+ * and writing it is the caller's business, what it implies is the module's. */
+#define AIMEE_DELEGATES_EVENT_CHAIN           6659u
+#define AIMEE_DELEGATES_STAGE_CHAIN           3u
+#define AIMEE_DELEGATES_CHAIN_REQUEST_MAGIC   0x4e484344u /* "DCHN" */
+#define AIMEE_DELEGATES_CHAIN_RESPONSE_MAGIC  0x52484344u /* "DCHR" */
+#define AIMEE_DELEGATES_CHAIN_REQUEST_LEN     20u
+#define AIMEE_DELEGATES_CHAIN_RESPONSE_LEN    12u
+#define AIMEE_DELEGATES_CHAIN_OP_SHOULD_CLEAR 1u
+#define AIMEE_DELEGATES_CHAIN_OP_CHECK_DEPTH  2u
+
 static inline void aimee_delegates_put_u32(uint8_t *p, uint32_t v)
 {
    for (unsigned i = 0; i < 4; ++i)
@@ -101,6 +113,42 @@ static inline int aimee_delegates_cap_response_decode(const uint8_t *in, size_t 
       *required_caps = (unsigned)aimee_delegates_get_u32(in + 4);
    if (min_context)
       *min_context = (int)aimee_delegates_get_u32(in + 8);
+   return 0;
+}
+
+/* Frame a chain question. Flags are booleans and must be 0 or 1; parent_depth
+ * and max_depth are only read by the depth op. */
+static inline int aimee_delegates_chain_request_encode(unsigned op, int has_depth, int has_parent,
+                                                       int parent_known, int parent_active,
+                                                       int32_t parent_depth, int32_t max_depth,
+                                                       uint8_t *out, size_t cap)
+{
+   if (!out || cap < AIMEE_DELEGATES_CHAIN_REQUEST_LEN)
+      return -1;
+   memset(out, 0, AIMEE_DELEGATES_CHAIN_REQUEST_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_CHAIN_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   out[5] = (uint8_t)op;
+   out[6] = has_depth ? 1u : 0u;
+   out[7] = has_parent ? 1u : 0u;
+   out[8] = parent_known ? 1u : 0u;
+   out[9] = parent_active ? 1u : 0u;
+   aimee_delegates_put_u32(out + 12, (uint32_t)parent_depth);
+   aimee_delegates_put_u32(out + 16, (uint32_t)max_depth);
+   return 0;
+}
+
+/* `flag` is the op's boolean answer: should-clear, or depth-allowed. */
+static inline int aimee_delegates_chain_response_decode(const uint8_t *in, size_t len, int *flag,
+                                                        int32_t *current_depth)
+{
+   if (!in || len != AIMEE_DELEGATES_CHAIN_RESPONSE_LEN ||
+       aimee_delegates_get_u32(in) != AIMEE_DELEGATES_CHAIN_RESPONSE_MAGIC || in[4] > 1u)
+      return -1;
+   if (flag)
+      *flag = in[4] == 1u;
+   if (current_depth)
+      *current_depth = (int32_t)aimee_delegates_get_u32(in + 8);
    return 0;
 }
 
