@@ -39,14 +39,37 @@
  * pairing is the whole point -- "find_symbol" means nothing to a model reaching
  * for grep, whereas "grep for a definition -> find_symbol" is actionable at the
  * moment the reflex fires. */
+/* EVERY NAME HERE MUST BE IN MCP_CORE_TOOLS. scripts/check_guidance_tool_parity.py
+ * fails the build otherwise, because this drifted and nothing noticed.
+ *
+ * It named lsp_references, get_context_block and memory_get. All three ARE
+ * registered in mcp_tool_table -- the command table covers them -- but none is in
+ * the PRESENTATION core, so reaching one costs find_tools -> describe_tool ->
+ * call_tool. mcp_tool_profile.c records the measurement twenty lines from that
+ * list: agents handed a tool at that price used a recursive text search instead.
+ * A tool the agent cannot afford to reach is a tool it does not have.
+ *
+ * Two lists are both called "core", which is how it hid: get_context_block is
+ * marked native="core,review_indexed" in mcp_tool_table -- aimee's OWN agents'
+ * toolset -- while absent from MCP_CORE_TOOLS, what an external client is shown.
+ *
+ * Confirmed behaviourally before the fix: told to use aimee, the model called
+ * memory_recall -- the name that IS shown -- not the memory_get named here. It was
+ * routing around the advice.
+ *
+ * get_context_block is the omission that matters and is NOT fixed by editing this
+ * string: it is the only tool returning CODE rather than a file:line pointer, so
+ * without it a "read this file and change it" task needs a shell read regardless.
+ * Promoting it into the shown surface changes what aimee presents by default and
+ * has to be decided as such. */
 #define AIMEE_GUIDANCE_EXPLORE_WITH_LINE                                                           \
    "explore-with: for CODE questions call these INSTEAD of a shell command -- "                    \
-   "grep/rg for a definition -> " AIMEE_CODE_TOOL_FIND_SYMBOL "; grep for callers -> "             \
-   "lsp_references; grep for a pattern or a repeated shape -> "                                    \
-   AIMEE_CODE_TOOL_AST_GREP_SEARCH "; find/ls to locate a file -> " AIMEE_CODE_TOOL_INDEX          \
-   " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID "; cat/sed a line range -> get_context_block; "     \
-   "what was decided before -> memory_get. Shell stays right for building, running "               \
-   "tests, and editing.\n"
+   "grep/rg for a definition -> " AIMEE_CODE_TOOL_FIND_SYMBOL                                      \
+   "; grep for a pattern or a repeated shape -> " AIMEE_CODE_TOOL_AST_GREP_SEARCH                  \
+   "; find/ls, or any search that is not a symbol name -> " AIMEE_CODE_TOOL_INDEX                  \
+   " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID "; what else depends on this -> "                   \
+   AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS "; what was decided before -> memory_recall. "             \
+   "Shell stays right for building, running tests, and editing.\n"
 
 /* The scope policy. explore-with names the tools; it does not say WHEN one
  * matters, and a list alone does not get reached for. Measured on t08_traversal
