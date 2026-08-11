@@ -87,7 +87,8 @@
     "server-go/modules/delegates/patchcoord_stage.go",
     "server-go/modules/delegates/rolepolicy.go",
     "server-go/modules/delegates/sandbox.go",
-    "server-go/modules/delegates/isolation.go"
+    "server-go/modules/delegates/isolation.go",
+    "server-go/modules/delegates/sandboximage.go"
   ],
   "go_tests": [
     "server-go/modules/delegates/delegates_test.go",
@@ -105,7 +106,8 @@
     "server-go/modules/delegates/patchcoord_stage_test.go",
     "server-go/modules/delegates/rolepolicy_test.go",
     "server-go/modules/delegates/sandbox_test.go",
-    "server-go/modules/delegates/isolation_test.go"
+    "server-go/modules/delegates/isolation_test.go",
+    "server-go/modules/delegates/sandboximage_test.go"
   ],
   "tests": [
     "src/tests/test_aimee_ir_rescue.c",
