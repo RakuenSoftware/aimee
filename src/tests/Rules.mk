@@ -5931,6 +5931,7 @@ $(TESTPREFIX)/unit-test-delegate-backend: $(OBJDIR)/tests/test_delegate_backend.
 $(TESTPREFIX)/unit-test-delegate-backend-docker: $(OBJDIR)/tests/test_delegate_backend_docker.o \
                      $(OBJDIR)/modules/delegates/delegate_backend.o \
                      $(OBJDIR)/modules/delegates/delegate_backend_docker.o $(OBJDIR)/log.o \
+                     $(OBJDIR)/modules/delegates/delegate_launch_args.o \
                      $(OBJDIR)/aimee_home.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
