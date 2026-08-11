@@ -86,6 +86,7 @@
     "server-go/modules/delegates/patchcoord.go",
     "server-go/modules/delegates/patchcoord_stage.go",
     "server-go/modules/delegates/rolepolicy.go",
+    "server-go/modules/delegates/sandbox.go",
     "server-go/modules/delegates/isolation.go"
   ],
   "go_tests": [
@@ -103,6 +104,7 @@
     "server-go/modules/delegates/patchcoord_test.go",
     "server-go/modules/delegates/patchcoord_stage_test.go",
     "server-go/modules/delegates/rolepolicy_test.go",
+    "server-go/modules/delegates/sandbox_test.go",
     "server-go/modules/delegates/isolation_test.go"
   ],
   "tests": [
