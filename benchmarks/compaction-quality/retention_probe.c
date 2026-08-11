@@ -67,34 +67,39 @@ static cJSON *build_messages(const cJSON *fixture)
    return arr;
 }
 
-/* Returns the number of planted facts present verbatim in `summary`, and writes the
- * misses into `missed` (comma separated, truncated) so a low score is explainable
- * rather than just a number. */
-static int count_retained(const cJSON *planted, const char *summary, char *missed, size_t cap)
+/* Count how many of `items` appear verbatim in `summary`, listing the interesting side
+ * into `report`.
+ *
+ * `list_hits` selects WHICH side is interesting, and the two callers want opposite
+ * things: for planted facts the useful diagnostic is what was MISSED, for distractors it
+ * is what was PULLED IN. Reporting the wrong side prints an empty string exactly when
+ * the score is worst, which is when the explanation matters most. */
+static int count_matches(const cJSON *items, const char *summary, int list_hits, char *report,
+                         size_t cap)
 {
-   int kept = 0;
+   int found = 0;
    size_t pos = 0;
    if (cap)
-      missed[0] = '\0';
+      report[0] = '\0';
    const cJSON *p = NULL;
-   cJSON_ArrayForEach(p, planted)
+   cJSON_ArrayForEach(p, items)
    {
       const char *want = cJSON_GetStringValue((cJSON *)p);
       if (!want || !want[0])
          continue;
-      if (strstr(summary, want))
-      {
-         kept++;
+      int hit = strstr(summary, want) != NULL;
+      if (hit)
+         found++;
+      if (hit != list_hits)
          continue;
-      }
       if (cap && pos + 3 < cap)
       {
-         int n = snprintf(missed + pos, cap - pos, "%s%.60s", pos ? ", " : "", want);
+         int n = snprintf(report + pos, cap - pos, "%s%.60s", pos ? ", " : "", want);
          if (n > 0)
             pos += (size_t)n < cap - pos ? (size_t)n : cap - pos - 1;
       }
    }
-   return kept;
+   return found;
 }
 
 static int run_one(const cJSON *fixture, int from_record, char *summary_out, size_t summary_cap)
@@ -153,11 +158,13 @@ int main(int argc, char **argv)
       return 2;
    }
 
-   printf("%-34s %-20s %8s %8s   %s\n", "fixture", "category", "legacy", "record", "expect");
+   printf("%-32s %-20s %7s %7s %7s %7s\n", "fixture", "category", "L:keep", "R:keep", "L:FP",
+          "R:FP");
    printf("---------------------------------------------------------------------------------"
           "-----\n");
 
    int tot_planted = 0, tot_legacy = 0, tot_record = 0;
+   int tot_distract = 0, tot_fp_legacy = 0, tot_fp_record = 0;
    int skipped = 0;
    static char sum_legacy[SESSION_COMPACT_SUMMARY_MAX];
    static char sum_record[SESSION_COMPACT_SUMMARY_MAX];
@@ -168,10 +175,13 @@ int main(int argc, char **argv)
    {
       const char *id = cJSON_GetStringValue(cJSON_GetObjectItem((cJSON *)fx, "id"));
       const char *cat = cJSON_GetStringValue(cJSON_GetObjectItem((cJSON *)fx, "category"));
-      const char *expect = cJSON_GetStringValue(cJSON_GetObjectItem((cJSON *)fx, "expect"));
       cJSON *planted = cJSON_GetObjectItem((cJSON *)fx, "planted");
+      cJSON *distract = cJSON_GetObjectItem((cJSON *)fx, "distractors");
       int n_planted = cJSON_IsArray(planted) ? cJSON_GetArraySize(planted) : 0;
-      if (!id || n_planted == 0)
+      int n_distract = cJSON_IsArray(distract) ? cJSON_GetArraySize(distract) : 0;
+      /* A fixture may plant nothing and only carry distractors: there, a perfect score
+       * is retaining NOTHING, which is a precision measurement rather than a recall one. */
+      if (!id || (n_planted == 0 && n_distract == 0))
          continue;
 
       int c1 = run_one(fx, 0, sum_legacy, sizeof(sum_legacy));
@@ -180,34 +190,58 @@ int main(int argc, char **argv)
       {
          /* No boundary means nothing was measured. Report it rather than scoring 0,
           * which would look like total loss. */
-         printf("%-34s %-20s %8s %8s   %s\n", id, cat ? cat : "?", "no-compact", "no-compact",
-                expect ? expect : "?");
+         printf("%-32s %-20s %7s %7s %7s %7s\n", id, cat ? cat : "?", "n/c", "n/c", "n/c", "n/c");
          skipped++;
          continue;
       }
 
-      int kept_legacy = count_retained(planted, sum_legacy, missed_legacy, sizeof(missed_legacy));
-      int kept_record = count_retained(planted, sum_record, missed_record, sizeof(missed_record));
+      int kept_legacy = count_matches(planted, sum_legacy, 0, missed_legacy, sizeof(missed_legacy));
+      int kept_record = count_matches(planted, sum_record, 0, missed_record, sizeof(missed_record));
+      /* A retained DISTRACTOR is a false positive: noise the derivation dragged in. Same
+       * containment check as recall, read with the opposite sign — and listing the HITS,
+       * since those are what needs explaining. */
+      char pulled_legacy[512], pulled_record[512];
+      int fp_legacy = count_matches(distract, sum_legacy, 1, pulled_legacy, sizeof(pulled_legacy));
+      int fp_record = count_matches(distract, sum_record, 1, pulled_record, sizeof(pulled_record));
 
-      char l[32], r[32];
+      char l[32], r[32], fl[32], fr[32];
       snprintf(l, sizeof(l), "%d/%d", kept_legacy, n_planted);
       snprintf(r, sizeof(r), "%d/%d", kept_record, n_planted);
-      printf("%-34s %-20s %8s %8s   %s\n", id, cat ? cat : "?", l, r, expect ? expect : "?");
+      snprintf(fl, sizeof(fl), "%d/%d", fp_legacy, n_distract);
+      snprintf(fr, sizeof(fr), "%d/%d", fp_record, n_distract);
+      printf("%-32s %-20s %7s %7s %7s %7s\n", id, cat ? cat : "?", l, r, fl, fr);
       if (kept_legacy < n_planted && missed_legacy[0])
          printf("      legacy missed: %s\n", missed_legacy);
       if (kept_record < n_planted && missed_record[0])
          printf("      record missed: %s\n", missed_record);
+      if (fp_legacy > 0)
+         printf("      legacy PULLED IN NOISE: %s\n", pulled_legacy);
+      if (fp_record > 0)
+         printf("      record PULLED IN NOISE: %s\n", pulled_record);
 
       tot_planted += n_planted;
       tot_legacy += kept_legacy;
       tot_record += kept_record;
+      tot_distract += n_distract;
+      tot_fp_legacy += fp_legacy;
+      tot_fp_record += fp_record;
    }
 
    printf("---------------------------------------------------------------------------------"
           "-----\n");
-   printf("TOTAL retained: legacy %d/%d (%.1f%%)   record %d/%d (%.1f%%)   skipped %d\n",
+   printf("RECALL    (planted retained, higher is better): legacy %d/%d (%.1f%%)   record %d/%d "
+          "(%.1f%%)\n",
           tot_legacy, tot_planted, tot_planted ? 100.0 * tot_legacy / tot_planted : 0.0,
-          tot_record, tot_planted, tot_planted ? 100.0 * tot_record / tot_planted : 0.0, skipped);
+          tot_record, tot_planted, tot_planted ? 100.0 * tot_record / tot_planted : 0.0);
+   printf("PRECISION (distractors pulled in, LOWER is better): legacy %d/%d (%.1f%%)   record "
+          "%d/%d (%.1f%%)\n",
+          tot_fp_legacy, tot_distract, tot_distract ? 100.0 * tot_fp_legacy / tot_distract : 0.0,
+          tot_fp_record, tot_distract, tot_distract ? 100.0 * tot_fp_record / tot_distract : 0.0);
+   printf("skipped (no compaction boundary): %d\n", skipped);
+   printf("\nRecall alone cannot separate 'kept what matters' from 'kept everything'; read the\n"
+          "two together. Ground truth is planted by hand in corpus.json, never extracted by\n"
+          "coord_closet or fold_register - deriving it with the code under test would score\n"
+          "that derivation perfectly by construction.\n");
 
    cJSON_Delete(root);
    return 0;
