@@ -303,7 +303,7 @@ int agent_ingress_accounting_enabled(void)
 }
 
 /* Pre-injection stubs. query_from_messages returns a non-NULL query when a turn
- * is present so messages_apply_preinject proceeds; build returns the per-test
+ * is present so pre-injection proceeds; build returns the per-test
  * envelope (default NULL = no-op, so the passthrough/shape tests are unaffected).
  * The injection-coverage test sets g_stub_preinject_env. */
 static char *g_stub_preinject_env = NULL;
@@ -1091,27 +1091,6 @@ static void test_messages_stream_chatgpt_buffered_replays_responses(void)
    PASS("messages_stream_chatgpt_buffered_replays_responses");
 }
 
-/* The pre-injection envelope is folded into the request `system` as a trailing
- * text block (array form), so a cached system prefix stays stable and both the
- * passthrough and translated paths inherit it. */
-static void test_messages_preinject_appends_system_block(void)
-{
-   g_stub_preinject_env = "<aimee-context>ENV</aimee-context>";
-   cJSON *req = parse("{\"system\":[{\"type\":\"text\",\"text\":\"SYS\"}],"
-                      "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
-   messages_apply_preinject(req);
-   char *flat = anthropic_system_to_text(req);
-   assert(flat);
-   const char *sys = strstr(flat, "SYS");
-   const char *env = strstr(flat, "<aimee-context>ENV</aimee-context>");
-   assert(sys && env);
-   assert(sys < env); /* envelope appended AFTER the (cacheable) prefix */
-   free(flat);
-   cJSON_Delete(req);
-   g_stub_preinject_env = NULL;
-   PASS("messages_preinject_appends_system_block");
-}
-
 static void test_proof_gated_ingress_wire_parity(void)
 {
    const char *request = "{\"model\":\"ignored\",\"max_tokens\":64,"
@@ -1162,7 +1141,6 @@ static void test_proof_gated_ingress_wire_parity(void)
 int main(void)
 {
    test_translate_request_anthropic_passthrough();
-   test_messages_preinject_appends_system_block();
    test_anthropic_relay_round_trip();
    test_anthropic_relay_usage_capture();
    test_anthropic_relay_reasoning_tap();
