@@ -89,6 +89,28 @@ int main(void)
       assert(prompt_tier_from_string(NULL) == PROMPT_STANDARD);
    }
 
+   /* --- prompt_turn_registers_text: gate and wording ---
+    * The register grammar has always been PARSED (fold_register_parse, and
+    * session_compact's record path reads it for Key Decisions) while nothing ever ASKED
+    * an agent to emit one — so real transcripts carry no tags and that extraction is
+    * empty in practice. This is the request half, and it must stay off by default. */
+   {
+      assert(prompt_turn_registers_text(0) == NULL); /* default-off changes nobody */
+
+      const char *t = prompt_turn_registers_text(1);
+      assert(t != NULL);
+      /* Names every tag the parser recognises as load-bearing; asking for a tag the
+       * record path ignores would train agents to emit noise. */
+      assert(strstr(t, "[verdict]") != NULL);
+      assert(strstr(t, "[hazard]") != NULL);
+      assert(strstr(t, "[blocked]") != NULL);
+      /* Biases AGAINST tagging. A mis-tagged [verdict] survives compaction as a settled
+       * fact while its reasoning is discarded, so it is worse than no tag at all — the
+       * text has to say that, not merely list the tags. */
+      assert(strstr(t, "Do NOT tag speculation") != NULL);
+      assert(strstr(t, "safe default") != NULL);
+   }
+
    /* --- prompt_tier_to_string --- */
    {
       assert(strcmp(prompt_tier_to_string(PROMPT_MINIMAL), "MINIMAL") == 0);

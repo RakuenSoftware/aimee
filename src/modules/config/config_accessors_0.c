@@ -263,13 +263,6 @@ int config_require_aimee_git(void)
    return v;
 }
 
-int config_delegate_sandbox(void)
-{
-   int v = 0;
-   config_field_read(offsetof(config_t, delegate_sandbox), sizeof(v), &v);
-   return v;
-}
-
 int config_delegate_sandbox_require_isolation(void)
 {
    int v = 0;

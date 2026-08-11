@@ -59,6 +59,9 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	if invocation.StageID == StageWorktreePlan {
 		return handleWorktreePlan(invocation, request)
 	}
+	if invocation.StageID == StageLaunchArgs {
+		return handleLaunchArgs(invocation, request)
+	}
 	if invocation.StageID != StageInvoke || len(request) != messageLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic || request[4] != wireVersion ||
 		request[5] != 0 || request[7] != 0 || request[6] == 0 || request[6] > roleMax {

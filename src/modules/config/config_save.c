@@ -899,8 +899,6 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "require_aimee_git", 0);
    if (!cfg->subagent_ban_enabled) /* default-on: persist only the opt-out */
       cJSON_AddBoolToObject(root, "subagent_ban_enabled", 0);
-   if (!cfg->delegate_sandbox) /* default-on: persist only the opt-out */
-      cJSON_AddBoolToObject(root, "delegate_sandbox", 0);
    if (cfg->delegate_sandbox_image[0])
       cJSON_AddStringToObject(root, "delegate_sandbox_image", cfg->delegate_sandbox_image);
    /* Persist only when non-default ("proxy"); absence means the default. */
@@ -1172,7 +1170,7 @@ int config_save(const config_t *cfg)
 
    /* Sandbox config (only save if non-default). The default is now
     * SANDBOX_MODE_WORKSPACE_ONLY, so the value that MUST survive a save is the
-    * explicit opt-out (`mode: "off"`) — mirroring delegate_sandbox above, which
+    * explicit opt-out (`mode: "off"`) — mirroring require_aimee_git above, which
     * persists only its opt-out. Testing against SANDBOX_MODE_OFF here (the old
     * predicate) would drop an operator's "off" on the next save and silently
     * re-enable the sandbox from the default. */

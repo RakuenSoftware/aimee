@@ -72,7 +72,6 @@ static const elig_row_t g_eligibility[] = {
     {"require_aimee_memory", 1},
     {"require_aimee_git", 1},
     {"subagent_ban_enabled", 1},
-    {"delegate_sandbox", 0},
     {"delegate_sandbox_package_access", 0},
     {"delegate_sandbox_require_isolation", 1},
     {"delegate_sandbox_learn_packages", 1},

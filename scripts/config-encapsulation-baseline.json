@@ -218,13 +218,13 @@
       "loads": 1
     },
     "src/tests/test_workspace_turn.c": {
-      "decls": 4,
-      "loads": 5
+      "decls": 2,
+      "loads": 3
     }
   },
   "totals": {
-    "decls": 241,
+    "decls": 239,
     "files": 55,
-    "loads": 149
+    "loads": 147
   }
 }

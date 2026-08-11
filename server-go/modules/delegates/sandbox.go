@@ -170,8 +170,17 @@ func BuildSandboxSpec(req SandboxRequest) (SandboxSpec, error) {
 		if !ok {
 			return spec, fmt.Errorf("repo root must be an absolute path, got %q", req.RepoRoot)
 		}
-		// The tree is readable; only the worktree below is writable.
-		spec.Mounts = append(spec.Mounts, SandboxMount{Source: repo, Target: repo, ReadOnly: true})
+		// A PLAIN checkout carries its own .git, so the repo root IS the
+		// worktree. It needs one writable mount, not a read-only mount of the
+		// same path with a writable one layered over it: two binds on one target
+		// is not a layering, and the delegate would get whichever docker
+		// resolved last -- a coin flip between a writable tree and a read-only
+		// one, discovered only when a write failed.
+		if repo != worktree {
+			// The tree is readable; only the worktree below is writable.
+			spec.Mounts = append(spec.Mounts,
+				SandboxMount{Source: repo, Target: repo, ReadOnly: true})
+		}
 		spec.Mounts = append(spec.Mounts,
 			SandboxMount{Source: worktree, Target: worktree, ReadOnly: false})
 		if gitDir, ok := cleanAbs(req.GitDir); ok {
