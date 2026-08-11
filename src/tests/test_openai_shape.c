@@ -384,13 +384,15 @@ int main(void)
 
    /* --- Codex parity: function_call output-item + argument events --- */
    {
-      int len = openai_format_responses_fc_item_added("resp_9-fc-0", "call_42", "exec_command", 0,
-                                                      resp, sizeof(resp));
+      int len = openai_format_responses_fc_item_added("resp_9-fc-0", "call_42", "exec_command",
+                                                      NULL, 0, resp, sizeof(resp));
       assert(len > 0);
       assert(strstr(resp, "\"type\":\"response.output_item.added\""));
       assert(strstr(resp, "\"type\":\"function_call\""));
       assert(strstr(resp, "\"call_id\":\"call_42\""));
       assert(strstr(resp, "\"name\":\"exec_command\""));
+      /* A plain tool has no group: the key must be absent, not empty. */
+      assert(!strstr(resp, "\"namespace\""));
 
       len = openai_format_responses_fc_args_delta("resp_9-fc-0", 0, "{\"cmd\":\"ls\"}", resp,
                                                   sizeof(resp));
@@ -403,19 +405,47 @@ int main(void)
       assert(len > 0);
       assert(strstr(resp, "\"type\":\"response.function_call_arguments.done\""));
 
-      len = openai_format_responses_fc_item_done("resp_9-fc-0", "call_42", "exec_command",
+      len = openai_format_responses_fc_item_done("resp_9-fc-0", "call_42", "exec_command", NULL,
                                                  "{\"cmd\":\"ls\"}", 0, resp, sizeof(resp));
       assert(len > 0);
       assert(strstr(resp, "\"type\":\"response.output_item.done\""));
       assert(strstr(resp, "\"type\":\"function_call\""));
       assert(strstr(resp, "\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\""));
+      assert(!strstr(resp, "\"namespace\""));
+   }
+
+   /* --- A namespaced call keeps its group on BOTH item events ---
+    *
+    * A Codex client offers its MCP tools inside a `namespace` group; the provider
+    * answers with the nested name BARE and the group beside it. The client routes
+    * on the pair, so dropping the group makes the call unroutable -- it answers
+    * "unsupported call: git". Both events carry it, because the client reads the
+    * name from `added` before the arguments stream. */
+   {
+      int len = openai_format_responses_fc_item_added("resp_9-fc-0", "call_7", "git", "mcp__aimee",
+                                                      0, resp, sizeof(resp));
+      assert(len > 0);
+      assert(strstr(resp, "\"name\":\"git\""));
+      assert(strstr(resp, "\"namespace\":\"mcp__aimee\""));
+
+      len = openai_format_responses_fc_item_done("resp_9-fc-0", "call_7", "git", "mcp__aimee",
+                                                 "{\"command\":\"status\"}", 0, resp, sizeof(resp));
+      assert(len > 0);
+      assert(strstr(resp, "\"name\":\"git\""));
+      assert(strstr(resp, "\"namespace\":\"mcp__aimee\""));
+
+      /* Empty is the same as absent -- it must not claim a group. */
+      len = openai_format_responses_fc_item_done("resp_9-fc-0", "call_7", "git", "",
+                                                 "{\"command\":\"status\"}", 0, resp, sizeof(resp));
+      assert(len > 0);
+      assert(!strstr(resp, "\"namespace\""));
    }
 
    /* --- Codex parity: completed with a function_call output item --- */
    {
       struct cJSON *out = cJSON_CreateArray();
       cJSON_AddItemToArray((cJSON *)out, openai_responses_function_call_item(
-                                             "resp_9-fc-0", "call_42", "exec_command",
+                                             "resp_9-fc-0", "call_42", "exec_command", NULL,
                                              "{\"cmd\":\"ls\"}", "completed"));
       int len = openai_format_responses_completed_items("resp_9", "aimee", 1700000000, out, 5, 2,
                                                         resp, sizeof(resp));

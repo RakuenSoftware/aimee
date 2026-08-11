@@ -230,6 +230,7 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
                b->type = AIMEE_BLK_TOOL_USE;
                b->raw = cJSON_Duplicate(call, 1);
                b->tool_id = dupstr(ostr(call, "id"));
+               b->tool_namespace = dupstr(ostr(call, "namespace"));
                const cJSON *fn = cJSON_GetObjectItemCaseSensitive((cJSON *)call, "function");
                b->tool_name = dupstr(fn ? ostr(fn, "name") : NULL);
                const char *args = fn ? ostr(fn, "arguments") : NULL;
@@ -358,6 +359,8 @@ cJSON *openai_frontend_render(const aimee_response_t *r)
             cJSON *call = cJSON_CreateObject();
             cJSON_AddStringToObject(call, "id", b->tool_id ? b->tool_id : "");
             cJSON_AddStringToObject(call, "type", "function");
+            if (b->tool_namespace && b->tool_namespace[0])
+               cJSON_AddStringToObject(call, "namespace", b->tool_namespace);
             cJSON *fn = cJSON_AddObjectToObject(call, "function");
             cJSON_AddStringToObject(fn, "name", b->tool_name ? b->tool_name : "");
             /* arguments STRING: serialize the parsed tool_input (cross-protocol) */

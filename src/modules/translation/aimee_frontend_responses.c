@@ -137,6 +137,9 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
             b->raw = cJSON_Duplicate(item, 1);
             b->tool_id = dupstr(ostr(item, "call_id"));
             b->tool_name = dupstr(ostr(item, "name"));
+            /* Present when the client grouped this tool under a `namespace`; the
+             * name is bare in that case and only the pair identifies the tool. */
+            b->tool_namespace = dupstr(ostr(item, "namespace"));
             const char *args = ostr(item, "arguments");
             b->tool_input = args ? cJSON_Parse(args) : NULL;
          }
@@ -270,6 +273,8 @@ cJSON *responses_frontend_render(const aimee_response_t *r)
          cJSON_AddStringToObject(item, "type", "function_call");
          cJSON_AddStringToObject(item, "call_id", b->tool_id ? b->tool_id : "");
          cJSON_AddStringToObject(item, "name", b->tool_name ? b->tool_name : "");
+         if (b->tool_namespace && b->tool_namespace[0])
+            cJSON_AddStringToObject(item, "namespace", b->tool_namespace);
          char *args = b->tool_input ? cJSON_PrintUnformatted(b->tool_input) : NULL;
          cJSON_AddStringToObject(item, "arguments", args ? args : "{}");
          free(args);

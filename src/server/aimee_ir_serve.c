@@ -335,6 +335,9 @@ void aimee_ir_response_to_parsed(const aimee_response_t *r, parsed_response_t *o
          snprintf(c->id, sizeof(c->id), "%s", b->tool_id);
       if (b->tool_name)
          snprintf(c->name, sizeof(c->name), "%s", b->tool_name);
+      /* Carried with the name: a namespaced call is only routable as the pair. */
+      if (b->tool_namespace)
+         snprintf(c->tool_namespace, sizeof(c->tool_namespace), "%s", b->tool_namespace);
       c->arguments = b->tool_input ? cJSON_PrintUnformatted(b->tool_input) : NULL;
       if (!c->arguments)
          c->arguments = strdup("{}");

@@ -1450,8 +1450,8 @@ cJSON *openai_responses_message_item(const char *item_id, const char *text, cons
 }
 
 cJSON *openai_responses_function_call_item(const char *item_id, const char *call_id,
-                                           const char *name, const char *arguments,
-                                           const char *status)
+                                           const char *name, const char *tool_namespace,
+                                           const char *arguments, const char *status)
 {
    cJSON *item = cJSON_CreateObject();
    if (!item)
@@ -1460,6 +1460,10 @@ cJSON *openai_responses_function_call_item(const char *item_id, const char *call
    cJSON_AddStringToObject(item, "type", "function_call");
    cJSON_AddStringToObject(item, "status", status ? status : "completed");
    cJSON_AddStringToObject(item, "name", name ? name : "");
+   /* Only when the call actually has one: a plain tool carries no `namespace`, and
+    * emitting an empty one would claim a group that does not exist. */
+   if (tool_namespace && tool_namespace[0])
+      cJSON_AddStringToObject(item, "namespace", tool_namespace);
    cJSON_AddStringToObject(item, "call_id", call_id ? call_id : "");
    cJSON_AddStringToObject(item, "arguments", arguments ? arguments : "");
    return item;
@@ -1504,25 +1508,28 @@ int openai_format_responses_msg_item_done(const char *item_id, const char *text,
 }
 
 int openai_format_responses_fc_item_added(const char *item_id, const char *call_id,
-                                          const char *name, int output_index, char *resp, int cap)
+                                          const char *name, const char *tool_namespace,
+                                          int output_index, char *resp, int cap)
 {
    if (!resp || cap <= 0)
       return -1;
-   return emit_output_item_event(
-       "response.output_item.added", output_index,
-       openai_responses_function_call_item(item_id, call_id, name, "", "in_progress"), resp, cap);
+   return emit_output_item_event("response.output_item.added", output_index,
+                                 openai_responses_function_call_item(
+                                     item_id, call_id, name, tool_namespace, "", "in_progress"),
+                                 resp, cap);
 }
 
 int openai_format_responses_fc_item_done(const char *item_id, const char *call_id, const char *name,
-                                         const char *arguments, int output_index, char *resp,
-                                         int cap)
+                                         const char *tool_namespace, const char *arguments,
+                                         int output_index, char *resp, int cap)
 {
    if (!resp || cap <= 0)
       return -1;
-   return emit_output_item_event(
-       "response.output_item.done", output_index,
-       openai_responses_function_call_item(item_id, call_id, name, arguments, "completed"), resp,
-       cap);
+   return emit_output_item_event("response.output_item.done", output_index,
+                                 openai_responses_function_call_item(item_id, call_id, name,
+                                                                     tool_namespace, arguments,
+                                                                     "completed"),
+                                 resp, cap);
 }
 
 int openai_format_responses_fc_args_delta(const char *item_id, int output_index, const char *delta,
@@ -1680,12 +1687,14 @@ void openai_responses_emit_policed(const parsed_response_t *parsed, const char *
       {
          const char *name = parsed->calls[i].name;
          const char *cid = parsed->calls[i].id;
+         const char *ns = parsed->calls[i].tool_namespace;
          const char *args = parsed->calls[i].arguments ? parsed->calls[i].arguments : "{}";
          char fc_id[80];
          snprintf(fc_id, sizeof(fc_id), "%s-fc-%d", id, i);
 
          char added[256];
-         if (openai_format_responses_fc_item_added(fc_id, cid, name, i, added, sizeof(added)) > 0)
+         if (openai_format_responses_fc_item_added(fc_id, cid, name, ns, i, added, sizeof(added)) >
+             0)
             emit(ctx, "response.output_item.added", added);
 
          size_t acap = strlen(args) * 6 + 256;
@@ -1699,26 +1708,29 @@ void openai_responses_emit_policed(const parsed_response_t *parsed, const char *
             free(af);
          }
 
-         size_t dcap = strlen(args) * 6 + strlen(name) + strlen(cid) + 512;
+         size_t dcap = strlen(args) * 6 + strlen(name) + strlen(ns) + strlen(cid) + 512;
          char *df = malloc(dcap);
          if (df)
          {
-            if (openai_format_responses_fc_item_done(fc_id, cid, name, args, i, df, (int)dcap) > 0)
+            if (openai_format_responses_fc_item_done(fc_id, cid, name, ns, args, i, df, (int)dcap) >
+                0)
                emit(ctx, "response.output_item.done", df);
             free(df);
          }
          if (output)
-            cJSON_AddItemToArray(
-                output, openai_responses_function_call_item(fc_id, cid, name, args, "completed"));
+            cJSON_AddItemToArray(output, openai_responses_function_call_item(fc_id, cid, name, ns,
+                                                                             args, "completed"));
       }
 
       /* ccap: 4096 base (envelope/usage) + id/model, plus per call: args worst-
-       * case JSON-escaped (×6 — a byte can expand to \uXXXX) + name + call_id +
-       * 256 slack for that item's JSON keys/braces/commas/status/fc_id suffix. */
+       * case JSON-escaped (×6 — a byte can expand to \uXXXX) + name + namespace +
+       * call_id + 256 slack for that item's JSON keys/braces/commas/status/fc_id
+       * suffix. */
       size_t ccap = 4096 + strlen(id ? id : "") + strlen(model ? model : "");
       for (int i = 0; i < n; i++)
          ccap += (parsed->calls[i].arguments ? strlen(parsed->calls[i].arguments) : 0) * 6 +
-                 strlen(parsed->calls[i].name) + strlen(parsed->calls[i].id) + 256;
+                 strlen(parsed->calls[i].name) + strlen(parsed->calls[i].tool_namespace) +
+                 strlen(parsed->calls[i].id) + 256;
       char *cf = malloc(ccap);
       if (cf)
       {
