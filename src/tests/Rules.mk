@@ -5632,6 +5632,7 @@ $(TESTPREFIX)/unit-test-openai-chat-policed: $(OBJDIR)/tests/test_openai_chat_po
 
 $(TESTPREFIX)/unit-test-command-registry: $(OBJDIR)/tests/test_command_registry.o \
                            $(OBJDIR)/command_registry.o $(OBJDIR)/log.o $(OBJDIR)/dstr.o \
+                           $(OBJDIR)/modules/protocols/mcp/mcp_group_tool.o \
                            $(OBJDIR)/modules/protocols/mcp/mcp_tools.o \
                            $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o \
                            $(OBJDIR)/modules/protocols/mcp/mcp_skill_tools.o \

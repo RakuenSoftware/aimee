@@ -249,8 +249,22 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *h = cJSON_AddObjectToObject(p, "handle");
       cJSON_AddStringToObject(h, "type", "string");
       cJSON_AddStringToObject(h, "description", "Handle emitted in previews, e.g. memory:123");
-      cJSON_AddItemToArray(
-          tools, mcp_tool_new("memory_get", "Fetch a full memory by id or memory:<id> handle.", s));
+      /* The EVENT-time question, which the CLI has had and agents did not.
+       * `aimee memory get --as-of <ts>` answers "was this in force then"; the tool
+       * form did not accept as_of and called the plain kb_client_memory_get, so an
+       * agent could only ever be told what a memory says NOW. A memory that was
+       * superseded last week read exactly like a current one -- the most confident
+       * possible wrong answer, and invisible because nothing errored. */
+      cJSON *ao = cJSON_AddObjectToObject(p, "as_of");
+      cJSON_AddStringToObject(ao, "type", "string");
+      cJSON_AddStringToObject(ao, "description",
+                              "Timestamp (ISO-8601) to evaluate validity at. Answers whether the "
+                              "memory was in force then, not just what it says now.");
+      cJSON_AddItemToArray(tools,
+                           mcp_tool_new("memory_get",
+                                        "Fetch a full memory by id or memory:<id> handle. Pass "
+                                        "as_of to ask whether it was in force at a past time.",
+                                        s));
    }
 
    /* list_facts */

@@ -63,7 +63,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "9381945d380f1190aeadf6db911f951dbae92945663f80e55094d32f879b65b2"
+      "source_sha256": "b3a941164c859f1f3583e5e8f7b862cc8d8d913ba3c309df9c01c442ae922374"
     },
     {
       "id": "protocols",
@@ -77,7 +77,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "7f015ccb7e153abe5a4711f2b96bdcd1acec00becefe8ca0459b46151679a79c"
+      "source_sha256": "ab04ec6cb8e846188057fa756b3c8b398922a92dbae3966950a26281d1d862ba"
     },
     {
       "id": "gateway",
@@ -104,7 +104,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "1ad2c402ad8d5dc4598ce3e958f8f2f8f06fecd259cfd34e24a66d65af9f36dc",
+      "source_sha256": "9fb1029f4286941ee67f711231a14ef597f65ac433595620a911df669590949a",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 7,
@@ -113,7 +113,8 @@
         5890,
         5891,
         5892,
-        5893
+        5893,
+        5894
       ]
     },
     {
