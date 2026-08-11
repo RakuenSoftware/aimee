@@ -171,6 +171,11 @@
           "id": 9,
           "name": "delegate-patch-coordination",
           "event_kind": 6665
+        },
+        {
+          "id": 10,
+          "name": "delegate-role-policy",
+          "event_kind": 6666
         }
       ]
     },
