@@ -9,12 +9,14 @@ import (
 
 // Tool-result body shrink — the single algorithm both reduction seams use.
 //
-// Ported from src/compact.c. NOTE FOR THE CUT-OVER: compact_body has TWO
-// production callers in C — the economizer's lazy lever (context_fold.c) and the
-// EAGER per-result seam (src/server/agent_policy.c:923), which is outside this
-// module. This Go copy must not go live until the eager seam also routes here,
-// or the algorithm exists in two languages — precisely the failure the migration
-// notes record as having already cost a review cycle on roundtable.
+// Ported from src/compact.c.
+//
+// CORRECTION to an earlier note in this file: compact_body does NOT have two
+// live callers. The eager per-result seam (agent_compress_tool_result in
+// src/server/agent_policy.c) is uncalled dead code — see eager.go — so the only
+// live caller is the economizer's lazy lever in context_fold.c. Moving this to
+// Go therefore creates no two-languages problem, provided the dead C seam is
+// deleted rather than left in place.
 //
 // Output byte-identity is load-bearing, not cosmetic: these bodies sit inside the
 // folded prefix, and a prefix that differs by one byte is a cold prompt cache. So
