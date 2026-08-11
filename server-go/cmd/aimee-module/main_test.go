@@ -31,6 +31,7 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		{"control-web", 24, []uint32{10241}},
 		{"benchmarks", 25, []uint32{10497, 10498}},
 		{"sandbox", 26, []uint32{10753, 10754}},
+		{"economizer", 27, []uint32{11009}},
 	}
 	for _, test := range tests {
 		config, ok := moduleConfig("/usr/local/libexec/aimee-modules/aimee-module-" + test.name)

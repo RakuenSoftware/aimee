@@ -63,6 +63,28 @@ func (ix *RecallIndex) Add(key string) {
 	ix.lastTurn[key] = -1
 }
 
+// LastTurn returns the turn a coordinate was last surfaced on, or -1 if never.
+func (ix *RecallIndex) LastTurn(key string) int {
+	if ix == nil || ix.lastTurn == nil {
+		return -1
+	}
+	if t, ok := ix.lastTurn[key]; ok {
+		return t
+	}
+	return -1
+}
+
+// SetLastTurn restores a coordinate's residency, so a page table carried across
+// runs does not re-hint everything it already surfaced in the previous run.
+func (ix *RecallIndex) SetLastTurn(key string, turn int) {
+	if ix == nil || ix.lastTurn == nil {
+		return
+	}
+	if _, ok := ix.lastTurn[key]; ok {
+		ix.lastTurn[key] = turn
+	}
+}
+
 // isCoordChar reports whether c can be part of a coordinate token.
 func isCoordChar(c byte) bool {
 	switch {

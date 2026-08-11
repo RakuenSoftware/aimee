@@ -316,7 +316,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "4191ec2d4c77106b6cbd5aabb3f28904951c55b919cf2201b003a497de140701"
+      "source_sha256": "5b22790427d8a5cdb1d7ae48eadc4c2806f6bc82ea4026a7a93f95152f644802"
     },
     {
       "id": "audit",
@@ -491,6 +491,25 @@
         10753,
         10754
       ]
+    },
+    {
+      "id": "economizer",
+      "classification": "optional",
+      "repository": "https://github.com/RakuenSoftware/aimee-module-economizer.git",
+      "ref": "v0.3.0",
+      "version": "0.3.0",
+      "commit": "7f66d5306a8511d057e011dc1080eb8b1479762c",
+      "execution": "process",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 27,
+      "serve": [
+        11009
+      ],
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "62697dc883145c3f0fa40a378e846107b0b66f9096d42113220905ec8cb80194"
     }
   ]
 }

@@ -26,7 +26,7 @@ REQUIRED_COUNT = 18
 # the learned sandbox toolchain to a Go module added `sandbox` back (1b0187e3de)
 # without updating the constant. The guard has been failing on testing ever since
 # — and because it is not wired into `make lint`, nothing surfaced it.
-OPTIONAL_COUNT = 8
+OPTIONAL_COUNT = 9
 PINNED_REQUIRED = {"git"}
 
 

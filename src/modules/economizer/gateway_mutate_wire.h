@@ -10,7 +10,7 @@
 #ifndef DEC_GATEWAY_MUTATE_WIRE_H
 #define DEC_GATEWAY_MUTATE_WIRE_H 1
 
-#include "economizer.h"
+#include "gateway_mutate.h"
 #include "msg_session_disable.h"
 #include <cJSON.h>
 
@@ -27,9 +27,9 @@ extern "C"
       int have_key;  /* a per-identity session key was resolvable */
       int mutated;   /* the reduced payload was actually installed + dispatched */
       char skey[MSG_SESSION_KEY_LEN];
-      cJSON *pristine;   /* owned deep copy of the original array (NULL once restored/freed) */
-      reduce_state_t st; /* provenance marker owner */
-      int ttl_ms;        /* disable-window TTL resolved from config */
+      cJSON *pristine;    /* owned deep copy of the original array (NULL once restored/freed) */
+      gw_provenance_t st; /* provenance marker owner */
+      int ttl_ms;         /* disable-window TTL resolved from config */
    } gw_mutate_ctx_t;
 
    void gw_mutate_ctx_init(gw_mutate_ctx_t *ctx);
@@ -111,7 +111,7 @@ extern "C"
     * a deliberate no-op; non-zero => hard bypass, out->messages NULL). No-op rc=1 when
     * `messages` is not a cJSON array or `out` is NULL. */
    int gw_economizer_measure(cJSON *messages, const char *system_prompt, const char *model,
-                             int retained_msgs, reduce_result_t *out);
+                             int retained_msgs, gw_reduce_report_t *out);
 
 #ifdef __cplusplus
 }

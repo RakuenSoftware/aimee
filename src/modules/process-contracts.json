@@ -512,6 +512,22 @@
           "event_kind": 10754
         }
       ]
+    },
+    {
+      "id": "economizer",
+      "execution": "process",
+      "runtime": "go",
+      "principal_ref": 27,
+      "placements": [
+        "server"
+      ],
+      "stages": [
+        {
+          "id": 1,
+          "name": "economizer-reduce",
+          "event_kind": 11009
+        }
+      ]
     }
   ],
   "clients": [

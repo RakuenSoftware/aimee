@@ -92,8 +92,8 @@ class DescriptorTests(unittest.TestCase):
 
     def test_complete_production_graph(self) -> None:
         required, optional = self.taxonomy()
-        self.assertEqual(len(required | optional), 26)
-        self.assertEqual(validator.validate_roots(REPO_ROOT, [Path("src/modules")]), 26)
+        self.assertEqual(len(required | optional), 27)
+        self.assertEqual(validator.validate_roots(REPO_ROOT, [Path("src/modules")]), 27)
 
     def test_schema_is_generated_byte_for_byte(self) -> None:
         validator.check_schema(REPO_ROOT)
@@ -501,7 +501,7 @@ class DescriptorTests(unittest.TestCase):
             public.parent.mkdir(parents=True, exist_ok=True)
             public.write_text("/* public contract */\n", encoding="utf-8")
             self.assertEqual(
-                validator.validate_roots(repo, [Path("src/modules")]), 26
+                validator.validate_roots(repo, [Path("src/modules")]), 27
             )
         finally:
             tmp.cleanup()
@@ -928,7 +928,7 @@ class OwnershipCliTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["schema_version"], 1)
         self.assertEqual(payload["result"], "PASS")
-        self.assertEqual(len(payload["descriptors"]), 26)
+        self.assertEqual(len(payload["descriptors"]), 27)
         for descriptor in payload["descriptors"]:
             self.assertEqual(
                 set(descriptor), {"id", "module_root", "ownership", "result"}

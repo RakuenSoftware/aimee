@@ -3,6 +3,8 @@
 #include "aimee.h"
 #include "gateway_mutate_wire.h"
 
+#include "economizer_module_client.h"
+
 #include <string.h>
 
 #include "agent_protocol.h" /* message_history_repair */
@@ -11,7 +13,7 @@
 #include "gw_mutate_stats.h"
 
 int gw_economizer_measure(cJSON *messages, const char *system_prompt, const char *model,
-                          int retained_msgs, reduce_result_t *out)
+                          int retained_msgs, gw_reduce_report_t *out)
 {
    if (!out)
       return 1;
@@ -19,13 +21,29 @@ int gw_economizer_measure(cJSON *messages, const char *system_prompt, const char
    if (!cJSON_IsArray(messages))
       return 1; /* nothing to measure; out is zeroed so the caller's free is safe */
 
-   reduce_config_t rcfg;
-   memset(&rcfg, 0, sizeof(rcfg));
-   rcfg.gateway_seam = 1;
-   rcfg.measure_only = 1; /* shadow mode: never mutates the request */
-   rcfg.fold.retained_msgs = retained_msgs;
-   return context_reduce(messages, system_prompt, model, NULL, REDUCE_SEAM_GATEWAY, &rcfg, NULL,
-                         out);
+   /* Shadow mode: the module measures and never mutates. Only the ledger fields
+    * the callers read are populated; a failed call leaves them zero, which reads
+    * as "no opportunity" rather than a fabricated one. */
+   econ_module_request_t mreq;
+   memset(&mreq, 0, sizeof mreq);
+   mreq.measure_only = 1;
+   mreq.retained_msgs = retained_msgs;
+
+   cJSON *ignored = NULL;
+   econ_module_result_t mres;
+   int rc = econ_module_reduce(messages, system_prompt, ECON_MODULE_SEAM_GATEWAY, &mreq, &ignored,
+                               &mres);
+   cJSON_Delete(ignored); /* measure_only never returns an array; defensive */
+   if (rc == 0)
+   {
+      out->baseline_tokens = mres.baseline_tokens;
+      out->reduced_tokens = mres.reduced_tokens;
+      out->removed_tokens = mres.removed_tokens;
+      out->foldable_tokens = mres.foldable_tokens;
+      out->reason = GW_REDUCE_REASON_MEASURED;
+   }
+   econ_module_result_free(&mres);
+   return rc;
 }
 
 void gw_mutate_ctx_init(gw_mutate_ctx_t *ctx)
@@ -109,39 +127,53 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
       return;
    }
 
-   reduce_config_t rc;
-   memset(&rc, 0, sizeof(rc));
-   rc.gateway_seam = 1;
-   rc.compress = 1; /* D3: compress-only at the gateway in v1 (fold deferred) */
-   rc.measure_only = 0;
-   rc.fold.retained_msgs = config_fold_retained_msgs();
+   /* The reduction itself lives in the Go economizer module now; this seam
+    * resolves config and owns the pristine/restore contract. Compress-only at the
+    * gateway: there is no per-conversation state here to hold a freeze boundary,
+    * so the fold has nothing to freeze. */
+   econ_module_request_t mreq;
+   memset(&mreq, 0, sizeof mreq);
+   mreq.compress = 1;
+   mreq.retained_msgs = config_fold_retained_msgs();
 
-   reduce_result_t res;
+   cJSON *reduced = NULL;
+   econ_module_result_t mres;
+   int rrc =
+       econ_module_reduce(msgs, system_prompt, ECON_MODULE_SEAM_GATEWAY, &mreq, &reduced, &mres);
+
+   /* Reuse the pure decision helper by handing it the module's ledger. An
+    * unreachable module is a no-op, not an internal error: the request is
+    * pristine and forwarding it is correct. */
+   gw_reduce_report_t res;
    memset(&res, 0, sizeof(res));
-   int rrc = context_reduce(msgs, system_prompt, model, NULL, REDUCE_SEAM_GATEWAY, &rc, NULL, &res);
+   res.messages = reduced;
+   res.mutated = mres.mutated;
+   res.reason = mres.mutated ? GW_REDUCE_REASON_REDUCED : GW_REDUCE_REASON_NONE;
+   res.baseline_tokens = mres.baseline_tokens;
+   res.reduced_tokens = mres.reduced_tokens;
 
-   gw_bypass_reason_t bypass = gw_should_apply(rrc, &res);
+   gw_bypass_reason_t bypass = gw_should_apply(rrc == 0 ? 0 : 1, &res);
    if (bypass != GW_BYPASS_NONE)
    {
       gw_stat_inc_reason("hard_bypass", gw_bypass_reason_str(bypass));
       gw_provenance_clear(&ctx->st);
-      context_reduce_result_free(&res);
+      cJSON_Delete(reduced);
+      econ_module_result_free(&mres);
       /* keep pristine: not mutated, but harmless; freed in ctx_free */
       return;
    }
 
-   /* Apply: install the reduced array (ownership transfers on success). */
-   if (gw_replace_messages(container, key, res.messages) != 0)
+   if (gw_replace_messages(container, key, reduced) != 0)
    {
       gw_stat_inc_reason("hard_bypass", "replace_failed");
       gw_provenance_clear(&ctx->st);
-      context_reduce_result_free(&res); /* res.messages still owned by res -> freed here */
+      cJSON_Delete(reduced);
+      econ_module_result_free(&mres);
       return;
    }
-   res.messages = NULL;                    /* ownership moved into container */
-   int baseline_tok = res.baseline_tokens; /* capture the token counts before freeing res */
-   int reduced_tok = res.reduced_tokens;
-   context_reduce_result_free(&res);
+   int baseline_tok = mres.baseline_tokens;
+   int reduced_tok = mres.reduced_tokens;
+   econ_module_result_free(&mres);
 
    gw_provenance_mark_reduced(&ctx->st); /* mark ONLY after replace succeeds */
    ctx->mutated = 1;

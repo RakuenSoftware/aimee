@@ -1346,6 +1346,10 @@
           "sha256": "7d792d1fbdeb583e258dd7954792f47da2af800a2900b80f4f3743c45c1ff1dc"
         },
         {
+          "path": "src/headers/wire_fence.h",
+          "sha256": "df6c3f815ceb8da90e79309acdba09c11a5cb099f43b6a6ce305bcde507fe459"
+        },
+        {
           "path": "src/headers/working_profile.h",
           "sha256": "d764f3348d4ceeb4abb552518656fa96bd79fc8e1d07ad901626f215ac09a54e"
         },
@@ -1624,7 +1628,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "4e3dae815268a84217abc7f96b0784440a758fe669beaba4c945b21b1df6a2db",
+      "sha256": "957d4e14f526695672fe06b64c11f1683b6d8be820e5d5fa5595a1dc0d6d552f",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

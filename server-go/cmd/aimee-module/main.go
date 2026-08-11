@@ -17,6 +17,7 @@ import (
 	controlweb "github.com/JBailes/aimee/server-go/modules/control-web"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
 	"github.com/JBailes/aimee/server-go/modules/delegates/plane"
+	"github.com/JBailes/aimee/server-go/modules/economizer"
 	modulegit "github.com/JBailes/aimee/server-go/modules/git"
 	"github.com/JBailes/aimee/server-go/modules/governance"
 	kbsynthesis "github.com/JBailes/aimee/server-go/modules/kb-synthesis"
@@ -219,6 +220,15 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 			return bus.ModuleProcessConfig{}, false
 		}
 		config.Handler = sandbox.NewHandler(store)
+	case "economizer":
+		config.ModuleName = name
+		config.PrincipalRef = 27
+		config.Stages = []bus.ModuleStage{
+			{EventKind: economizer.EventReduce, StageID: economizer.StageReduce},
+		}
+		// Stateless: per-conversation reducer state travels with each request, so
+		// there is no store to open and no failure mode before serving.
+		config.Handler = economizer.NewHandler()
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25

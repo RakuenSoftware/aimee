@@ -12,7 +12,7 @@ if grep -R -n 'aimee_backend_anthropic_set_cache_enabled' headers server posix >
 fi
 
 for source in posix/agent_runtime.c server/openai_chat.c server/anthropic_http.c; do
-    grep -q 'econ_wire_select' "$source" || fail "$source bypasses the wire snapshot selector"
+    grep -q 'wire_fence_select' "$source" || fail "$source bypasses the wire snapshot selector"
 done
 
 # SAFE has exactly one live transform: strict JSON compaction at the fresh local

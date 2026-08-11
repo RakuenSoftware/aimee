@@ -28,6 +28,7 @@
     "runtime-web",
     "control-web",
     "benchmarks",
-    "sandbox"
+    "sandbox",
+    "economizer"
   ]
 }

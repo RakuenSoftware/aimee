@@ -1,30 +1,14 @@
-#include "economizer_dispatch_lease.h"
+/* economizer_json is the last of this file's three units still written in C.
+ * The provenance capability moved to the Go economizer module (provenance.go, with
+ * its own tests) and the dispatch lease was deleted outright -- it had no caller
+ * anywhere in the tree, only this test. What remains is the JSON canonicaliser. */
 #include "economizer_json.h"
-#include "economizer_provenance.h"
 
 #include <assert.h>
-#include <pthread.h>
-#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-static void sleep_ms(long milliseconds)
-{
-   struct timespec delay = {.tv_sec = milliseconds / 1000,
-                            .tv_nsec = (milliseconds % 1000) * 1000000L};
-   while (nanosleep(&delay, &delay) != 0)
-      ;
-}
-
-static int scoped_lease_early_return(econ_dispatch_state_t *state,
-                                     const econ_dispatch_facts_t *facts)
-{
-   ECON_DISPATCH_LEASE_SCOPED(lease);
-   assert(econ_dispatch_lease_begin(state, facts, &lease) == 1);
-   return 17;
-}
 
 static void test_json_compaction_preserves_non_whitespace_bytes(void)
 {
@@ -111,127 +95,12 @@ static void test_json_deterministic_whitespace_property(void)
    }
 }
 
-typedef struct
-{
-   econ_provenance_t *cap;
-   econ_provenance_binding_t binding;
-   const char *source;
-   atomic_int *wins;
-} consume_arg_t;
-
-static void *consume_thread(void *opaque)
-{
-   consume_arg_t *a = opaque;
-   if (econ_provenance_consume(a->cap, &a->binding, a->source, strlen(a->source)) == 0)
-      atomic_fetch_add(a->wins, 1);
-   return NULL;
-}
-
-static void test_provenance_is_bound_and_one_shot(void)
-{
-   const char source[] = "{ \"large\": true }";
-   econ_provenance_binding_t binding = {1, 2, 3, 4, 5, 6};
-   econ_provenance_t *cap = NULL;
-   assert(econ_provenance_issue_local(&binding, source, strlen(source), &cap) == 0);
-   atomic_int wins;
-   atomic_init(&wins, 0);
-   consume_arg_t arg = {cap, binding, source, &wins};
-   pthread_t threads[8];
-   for (size_t i = 0; i < 8; i++)
-      assert(pthread_create(&threads[i], NULL, consume_thread, &arg) == 0);
-   for (size_t i = 0; i < 8; i++)
-      pthread_join(threads[i], NULL);
-   assert(atomic_load(&wins) == 1);
-   econ_provenance_destroy(cap);
-
-   assert(econ_provenance_issue_local(&binding, source, strlen(source), &cap) == 0);
-   econ_provenance_binding_t wrong = binding;
-   wrong.tenant_id++;
-   assert(econ_provenance_consume(cap, &wrong, source, strlen(source)) == -1);
-   assert(econ_provenance_consume(cap, &binding, "{}", 2) == -1);
-   assert(econ_provenance_consume(cap, &binding, source, strlen(source)) == 0);
-   econ_provenance_destroy(cap);
-
-   assert(econ_provenance_issue_local(&binding, source, ECON_PROVENANCE_MAX_SOURCE + 1u, &cap) ==
-          -1);
-}
-
-typedef struct
-{
-   econ_dispatch_state_t *state;
-   econ_dispatch_facts_t next;
-   atomic_int started;
-   atomic_int finished;
-} writer_arg_t;
-
-static void *replace_thread(void *opaque)
-{
-   writer_arg_t *a = opaque;
-   atomic_store(&a->started, 1);
-   assert(econ_dispatch_state_replace(a->state, &a->next) == 0);
-   atomic_store(&a->finished, 1);
-   return NULL;
-}
-
-static econ_dispatch_facts_t facts(void)
-{
-   econ_dispatch_facts_t f = {1, 2, 3, 4, 5, 6, 7, 8, 1};
-   return f;
-}
-
-static void test_first_write_lease_linearizes_invalidation(void)
-{
-   econ_dispatch_facts_t current = facts();
-   econ_dispatch_state_t *state = NULL;
-   assert(econ_dispatch_state_create(&current, &state) == 0);
-   econ_dispatch_lease_t lease = {0};
-   assert(econ_dispatch_lease_begin(state, &current, &lease) == 1);
-
-   writer_arg_t writer = {.state = state, .next = current};
-   writer.next.enabled = 0;
-   writer.next.kill_switch_generation++;
-   atomic_init(&writer.started, 0);
-   atomic_init(&writer.finished, 0);
-   pthread_t thread;
-   assert(pthread_create(&thread, NULL, replace_thread, &writer) == 0);
-   while (!atomic_load(&writer.started))
-      sleep_ms(1);
-   sleep_ms(20);
-   assert(atomic_load(&writer.finished) == 0);
-   econ_dispatch_lease_end(&lease);
-   pthread_join(thread, NULL);
-   assert(atomic_load(&writer.finished) == 1);
-
-   assert(econ_dispatch_lease_begin(state, &current, &lease) == 0);
-   econ_dispatch_facts_t disabled = writer.next;
-   assert(econ_dispatch_lease_begin(state, &disabled, &lease) == 0);
-   econ_dispatch_facts_t rollback = disabled;
-   rollback.kill_switch_generation--;
-   assert(econ_dispatch_state_replace(state, &rollback) == -1);
-   econ_dispatch_state_destroy(state);
-}
-
-static void test_scoped_lease_releases_on_early_return(void)
-{
-   econ_dispatch_facts_t current = facts();
-   econ_dispatch_state_t *state = NULL;
-   assert(econ_dispatch_state_create(&current, &state) == 0);
-   assert(scoped_lease_early_return(state, &current) == 17);
-   econ_dispatch_facts_t next = current;
-   next.registry_generation++;
-   assert(econ_dispatch_state_replace(state, &next) == 0);
-   econ_dispatch_state_destroy(state);
-}
-
 int main(void)
 {
    test_json_compaction_preserves_non_whitespace_bytes();
    test_json_rejects_ambiguity_and_invalid_syntax();
    test_json_depth_bound();
    test_json_deterministic_whitespace_property();
-   test_provenance_is_bound_and_one_shot();
-   test_first_write_lease_linearizes_invalidation();
-   test_scoped_lease_releases_on_early_return();
    puts("economizer_activation: ALL PASS");
    return 0;
 }
