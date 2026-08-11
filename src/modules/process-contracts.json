@@ -206,6 +206,11 @@
           "id": 15,
           "name": "delegate-may-write",
           "event_kind": 6671
+        },
+        {
+          "id": 16,
+          "name": "delegate-image-gc",
+          "event_kind": 6672
         }
       ]
     },

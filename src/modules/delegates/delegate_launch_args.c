@@ -133,3 +133,26 @@ int delegate_may_write(const char *role, const char *prompt)
                role ? role : "", by_role, by_prompt);
    return may;
 }
+
+static delegate_image_gc_fn g_image_gc;
+
+void delegate_register_image_gc_provider(delegate_image_gc_fn provider)
+{
+   g_image_gc = provider;
+}
+
+int delegate_image_gc_judge(const uint8_t *request, size_t request_len, uint8_t *response,
+                            size_t response_cap, size_t *response_len)
+{
+   if (!request || !response || !response_len)
+      return -1;
+   *response_len = 0;
+   if (!g_image_gc)
+   {
+      LOG_ERROR("delegate-sandbox-image",
+                "no image-gc provider registered; keeping every image rather than deleting on "
+                "a policy nothing applied");
+      return -1;
+   }
+   return g_image_gc(request, request_len, response, response_cap, response_len);
+}
