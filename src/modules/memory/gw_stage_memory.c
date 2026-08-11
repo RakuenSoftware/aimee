@@ -1,17 +1,26 @@
-/* gw_stage_memory.c: the ONE memory-injection stage shared by every aimee
- * ingress (universal-gateway P3). See gw_stage_memory.h for the contract.
+/* gw_stage_memory.c: memory/context injection on the IR.
  *
- * The three render targets are deliberately distinct because they were distinct
- * before P3 and MUST stay byte-identical: the Anthropic path appends a trailing
- * system block (cache-safe), the /v1/responses path merges env+"\n\n"+prior into
- * `instructions`, and the legacy text handlers set the system prompt to the RAW
- * env. Folding the legacy path through ingress_preinject_apply would add a
- * trailing "\n\n" and silently change the provider request bytes. */
+ * ir_stage_memory is THE injection point. Every protocol converges on the IR, so
+ * the CLI, MCP and the gateway get identical behaviour from one function --
+ * which is the whole reason the per-wire stage that used to live here is gone.
+ *
+ * What was deleted and why: gw_stage_memory() carried three render targets
+ * (Anthropic messages / responses instructions / legacy system prompt) that had
+ * to be kept byte-identical to each other by hand. Both structured arms were
+ * ported to the IR seam and their slot-catalog entries removed, leaving the
+ * function reachable only from a helper that built a throwaway cJSON object just
+ * to call it. Three hand-synchronised copies of one policy is how the guidance
+ * text itself drifted; one path cannot drift.
+ *
+ * gw_memory_system_prompt stays only until the four plain-chat handlers move onto
+ * the IR too -- it is now a direct call, not a stage. */
 #include "gw_stage_memory.h"
+#include "aimee_session_guidance.h"
 #include "ingress_preinject.h"
 #include <aimee/ir/aimee_ir.h>
 #include "cJSON.h"
 #include <assert.h>
+#include <stdio.h> /* snprintf */
 #include <stdlib.h>
 #include <strings.h> /* strcasecmp */
 #include <string.h>
@@ -21,147 +30,58 @@
  * not change what the model receives — only which memories are retrieved). */
 #define IR_MEMORY_QUERY_MAX 16384
 
-/* The Anthropic arm: build the <aimee-context> envelope from this turn's query
- * and fold it into the request's `system` so BOTH the Anthropic-native
- * passthrough (which duplicates `req`) and the translated-provider path (which
- * flattens `req`'s system via anthropic_system_to_text) carry it. Mutates `req`
- * in place, so it must run before translate_request / build_*_provider_body.
- * Appended as a trailing system text block (array form) so a cached system
- * prefix — Claude Code sends cache_control'd system blocks — stays stable and
- * prompt caching still hits. No-op when pre-injection is disabled or recall is
- * empty. Self-contained (ingress_preinject + cJSON only) so the stage TU has no
- * dependency on the anthropic ingress. Non-static so test_anthropic_http.c can
- * exercise it directly (declared in gw_stage_memory.h). */
-void messages_apply_preinject(cJSON *req)
-{
-   char *query =
-       ingress_preinject_query_from_messages(cJSON_GetObjectItemCaseSensitive(req, "messages"));
-   if (!query)
-      return;
-   char *env = ingress_preinject_build(query, 0);
-   free(query);
-   if (!env)
-      return;
-
-   cJSON *sys = cJSON_GetObjectItemCaseSensitive(req, "system");
-   if (cJSON_IsArray(sys))
-   {
-      cJSON *blk = cJSON_CreateObject();
-      if (blk)
-      {
-         cJSON_AddStringToObject(blk, "type", "text");
-         cJSON_AddStringToObject(blk, "text", env);
-         cJSON_AddItemToArray(sys, blk);
-      }
-   }
-   else if (cJSON_IsString(sys) && sys->valuestring && sys->valuestring[0])
-   {
-      size_t n = strlen(sys->valuestring) + 2 + strlen(env) + 1;
-      char *joined = malloc(n);
-      if (joined)
-      {
-         snprintf(joined, n, "%s\n\n%s", sys->valuestring, env);
-         cJSON_ReplaceItemInObjectCaseSensitive(req, "system", cJSON_CreateString(joined));
-         free(joined);
-      }
-   }
-   else
-   {
-      /* system absent or empty: the envelope becomes the system prompt. */
-      cJSON_DeleteItemFromObjectCaseSensitive(req, "system");
-      cJSON_AddStringToObject(req, "system", env);
-   }
-   free(env);
-}
-
-int gw_stage_memory(gw_request_t *r, void *ud)
-{
-   if (!r || !r->raw)
-      return 0;
-
-   switch (r->mem_target)
-   {
-   case GW_MEM_ANTHROPIC_MESSAGES:
-      /* Parity-gated: the Anthropic-native passthrough normally must not perturb
-       * the client's cached prefix, so injection is skipped under parity. P5
-       * (§2.3) adds an explicit opt-in (r->allow_anthropic_inject, set by the
-       * caller from config) to inject on that path too. messages_apply_preinject
-       * derives its own query from r->raw.messages and — via
-       * ingress_preinject_apply on the string-system path — honors the cache-prefix
-       * placement lever. Accounting-neutral (not counted as an intervention). */
-      if (!r->parity || r->allow_anthropic_inject)
-         messages_apply_preinject(r->raw);
-      return 0;
-
-   case GW_MEM_OPENAI_INSTRUCTIONS:
-   {
-      /* /v1/responses (Codex): derive the query from the chat-shape `messages`
-       * (ud), build the envelope, and merge it into raw.instructions as
-       * env+"\n\n"+prior — identical to the prior gw_stage_openai_memory. */
-      const cJSON *messages = (const cJSON *)ud;
-      char *query = ingress_preinject_query_from_messages(messages);
-      if (!query)
-         return 0; /* no query → no injection (matches the Anthropic arm's guard;
-                      ingress_preinject_build also NULL-guards, this is explicit) */
-      char *env = ingress_preinject_build(query, 0);
-      free(query);
-      if (!env)
-         return 0;
-      cJSON *cur = cJSON_GetObjectItemCaseSensitive(r->raw, "instructions");
-      /* ingress_preinject_apply internally honors the cache-prefix placement lever
-       * (§2): default prepend, or append after the stable prefix when
-       * ingress_cache_placement_enabled. Keeping the choice inside the applier
-       * leaves this stage config-free (so every gw_stage_memory consumer links
-       * unchanged). */
-      char *merged = ingress_preinject_apply(cur ? cur->valuestring : NULL, env);
-      free(env);
-      if (!merged)
-         return 0;
-      cJSON_ReplaceItemInObjectCaseSensitive(r->raw, "instructions", cJSON_CreateString(merged));
-      free(merged);
-      return 1;
-   }
-
-   case GW_MEM_OPENAI_SYSTEM_PROMPT:
-   {
-      /* Legacy text handlers: the RAW envelope becomes the system prompt. NO
-       * ingress_preinject_apply — byte-identical to the pre-P3 inline
-       * `ingress_preinject_build(query, 0)`. delete+add (rather than replace) so
-       * it works whether or not `raw` already carries an `instructions` key. */
-      const char *query = (const char *)ud;
-      char *env = ingress_preinject_build(query, 0);
-      if (!env)
-         return 0;
-      cJSON_DeleteItemFromObjectCaseSensitive(r->raw, "instructions");
-      cJSON_AddStringToObject(r->raw, "instructions", env);
-      free(env);
-      return 1;
-   }
-   }
-
-   assert(0 && "gw_stage_memory: unknown mem_target");
-   return 0;
-}
-
 int ir_stage_memory(aimee_request_t *ir, void *ud)
 {
    (void)ud; /* query comes from the IR, not per-call user data */
    if (!ir)
       return 0;
 
+   /* No assistant turn yet == the model has not spoken == start of session.
+    *
+    * NOT n_messages == 1. A real client does not open with a single message:
+    * Codex prepends environment/instructions items, so the opening turn arrives
+    * with several. Counting messages was tried on the box and never fired --
+    * the probe still answered "PREINJECT ABSENT" with the transform live and
+    * reached. What is invariant is that nothing the ASSISTANT said can be in the
+    * history before the assistant has said anything.
+    *
+    * This still covers compaction, which is the other moment guidance is needed:
+    * a compacted history is a carried-over summary with no assistant turn in it,
+    * so the rule fires again exactly when compaction discarded the first copy. */
+   int session_start = 1;
+   for (int i = 0; i < ir->n_messages; i++)
+   {
+      const char *role = ir->messages[i].role;
+      if (role && strcmp(role, "assistant") == 0)
+      {
+         session_start = 0;
+         break;
+      }
+   }
+
    char *query = malloc(IR_MEMORY_QUERY_MAX);
    if (!query)
       return 0;
    size_t qn = aimee_ir_last_user_text(ir, query, IR_MEMORY_QUERY_MAX);
-   if (qn == 0)
-   {
-      free(query); /* no user text -> no recall query -> no injection */
-      return 0;
-   }
-   char *env = ingress_preinject_build(query, 0);
+   char *env = (qn > 0) ? ingress_preinject_build(query, 0) : NULL;
    free(query);
-   if (!env)
-      return 0; /* pre-injection off or recall empty: byte-identical no-op */
+   if (!env && !session_start)
+      return 0; /* nothing to say this turn: byte-identical no-op */
+
+   if (session_start)
+   {
+      /* Guidance first, then this turn's retrieval block if there is one. */
+      size_t n = sizeof(AIMEE_GUIDANCE_BLOCK) + (env ? strlen(env) + 1 : 0);
+      char *both = malloc(n);
+      if (!both)
+      {
+         free(env);
+         return 0;
+      }
+      snprintf(both, n, "%s%s%s", AIMEE_GUIDANCE_BLOCK, env ? "\n" : "", env ? env : "");
+      free(env);
+      env = both;
+   }
 
    /* Append the envelope as a trailing system TEXT block. Grow the ordered block
     * array by one; the new block owns `env` (freed by aimee_request_free) and
@@ -184,23 +104,12 @@ int ir_stage_memory(aimee_request_t *ir, void *ud)
 
 char *gw_memory_system_prompt(const char *query)
 {
-   cJSON *raw = cJSON_CreateObject();
-   if (!raw)
-      return NULL;
-   gw_request_t r = {
-       .raw = raw,
-       .serving_api = GW_API_OPENAI,
-       .mem_target = GW_MEM_OPENAI_SYSTEM_PROMPT,
-       .parity = 0,
-   };
-   gw_stage_memory(&r, (void *)query);
-   /* NULL (not "") when the stage injected nothing, so callers see exactly what
-    * ingress_preinject_build(query, 0) returned before P3. */
-   const cJSON *instr = cJSON_GetObjectItemCaseSensitive(raw, "instructions");
-   char *out =
-       (instr && cJSON_IsString(instr) && instr->valuestring) ? strdup(instr->valuestring) : NULL;
-   cJSON_Delete(raw);
-   return out;
+   /* The four plain-chat handlers are the last callers that are not on the IR.
+    * This used to build a throwaway cJSON object, push it through
+    * gw_stage_memory's GW_MEM_OPENAI_SYSTEM_PROMPT arm, then read the string back
+    * out -- ceremony around one call, and the last thing keeping that stage
+    * alive. NULL (not "") when nothing was injected, exactly as before. */
+   return ingress_preinject_build(query, 0);
 }
 
 int gw_stage_memory_enabled(void)
