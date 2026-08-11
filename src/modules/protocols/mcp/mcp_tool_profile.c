@@ -97,6 +97,16 @@ static const char *const MCP_INDEX_MULTIPLEXED_TOOLS[] = {
     NULL,
 };
 
+/* The tools that only make sense when delegation runs. delegate_status is here
+ * for the reason the floor comment gives for including it: an MCP delegate call
+ * returns a job_id and its poller is not optional. With delegation off there are
+ * no jobs to poll, so the pair leaves together or not at all. */
+static const char *const MCP_DELEGATE_TOOLS[] = {
+    "delegate",
+    "delegate_status",
+    NULL,
+};
+
 static int mcp_name_in_set(const char *name, const char *const *set)
 {
    for (int i = 0; set[i]; i++)
@@ -386,7 +396,7 @@ int mcp_compact_tool_prose(cJSON *tools)
    return trimmed;
 }
 
-int mcp_filter_tools_for_profile(cJSON *tools, const char *profile)
+int mcp_filter_tools_for_profile(cJSON *tools, const char *profile, int delegates_enabled)
 {
    if (!tools || !cJSON_IsArray(tools))
       return 0;
@@ -413,11 +423,43 @@ int mcp_filter_tools_for_profile(cJSON *tools, const char *profile)
     * schema's enum -- which survives the prose trim, so a lean client still sees
     * exactly which commands exist. Three definitions (2,483 bytes) become two enum
     * entries. */
+   int removed = 0;
+
+   /* Delegation off is a DEPLOYMENT STATE, not a presentation profile -- exactly
+    * the distinction the comment above draws when it refuses a "solo" profile.
+    * A config that says delegates do not run is a configuration someone actually
+    * deploys, so the tools that drive them are genuinely absent and advertising
+    * them would be the dishonest half: the agent is told to delegate, calls the
+    * tool, and it cannot work.
+    *
+    * Applied before the profile early-return so it holds for "full" too. A
+    * profile decides how much of a working surface to SHOW; this decides what
+    * exists. `roundtable_review` is deliberately NOT withheld here -- the review
+    * levers change what the prompt DEMANDS, not whether the capability works, and
+    * hiding a tool that still functions is the flattery that comment warns
+    * against.
+    *
+    * Taken as a PARAMETER, not read from config here: a module may not reach a
+    * peer module directly (check_module_bus_boundary enforces it), and reading
+    * config_accessors.h from protocols/ is exactly that crossing. The server owns
+    * the config read and passes the answer down. */
+   if (!delegates_enabled)
+   {
+      for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
+      {
+         cJSON *tool = cJSON_GetArrayItem(tools, i);
+         cJSON *nm = cJSON_GetObjectItemCaseSensitive(tool, "name");
+         if (cJSON_IsString(nm) && mcp_name_in_set(nm->valuestring, MCP_DELEGATE_TOOLS))
+         {
+            cJSON_DeleteItemFromArray(tools, i);
+            removed++;
+         }
+      }
+   }
+
    int merged = strcmp(profile, "merged") == 0;
    if (strcmp(profile, "core") != 0 && strcmp(profile, "lean") != 0 && !merged)
-      return 0;
-
-   int removed = 0;
+      return removed;
    for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
    {
       cJSON *tool = cJSON_GetArrayItem(tools, i);

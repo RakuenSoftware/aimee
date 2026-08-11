@@ -876,6 +876,15 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "ingress_cache_placement_enabled", 1);
    if (cfg->ingress_compress_min_chars != 80)
       cJSON_AddNumberToObject(root, "ingress_compress_min_chars", cfg->ingress_compress_min_chars);
+   /* Written when FALSE, not when true: these three default ON, and the
+    * surrounding convention of "emit only if set" would silently drop the OFF
+    * state on save -- turning a deliberate disable back on at the next load. */
+   if (!cfg->delegates_enabled)
+      cJSON_AddBoolToObject(root, "delegates_enabled", 0);
+   if (!cfg->prompt_manager_block_enabled)
+      cJSON_AddBoolToObject(root, "prompt_manager_block_enabled", 0);
+   if (!cfg->prompt_manager_review_enabled)
+      cJSON_AddBoolToObject(root, "prompt_manager_review_enabled", 0);
    if (cfg->gateway_prevent_subagents)
       cJSON_AddBoolToObject(root, "gateway_prevent_subagents", 1);
    if (cfg->gateway_pin_model)

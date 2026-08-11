@@ -220,7 +220,9 @@ int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       const char *profile = mcp_tool_profile_effective(NULL);
       int total = cJSON_GetArraySize(tools);
-      int removed = mcp_filter_tools_for_profile(tools, NULL);
+      /* The server owns the config read: the protocols module may not reach the
+       * config module directly, so the delegation state arrives as an argument. */
+      int removed = mcp_filter_tools_for_profile(tools, NULL, config_delegates_enabled());
       if (removed > 0)
          LOG_INFO("mcp-tools", "tools/list profile '%s': presenting %d tools (hid %d)", profile,
                   total - removed, removed);

@@ -394,6 +394,9 @@ static const config_schema_entry_t config_schema[] = {
     {"synthesis_model", SCHEMA_STRING, 0},
     {"ingress_cache_placement_enabled", SCHEMA_BOOL, 0},
     {"ingress_compress_min_chars", SCHEMA_INT, 0},
+    {"delegates_enabled", SCHEMA_BOOL, 0},
+    {"prompt_manager_block_enabled", SCHEMA_BOOL, 0},
+    {"prompt_manager_review_enabled", SCHEMA_BOOL, 0},
     {"ingress_preinject_assembly_budget", SCHEMA_INT, 0},
     {"ingress_max_raw_scans", SCHEMA_INT, 0},
     {"code_span_max_lines", SCHEMA_INT, 0},
@@ -870,6 +873,11 @@ static void config_set_defaults(config_t *cfg)
     * is on, before the compress flag is read — so compress alone is a safe no-op).
     * Anthropic injection + failure-mining stay opt-in (separate gates). */
    cfg->ingress_cache_placement_enabled = 1;
+   /* All three default ON: this change adds off switches, it does not change what
+    * a default install does. */
+   cfg->delegates_enabled = 1;
+   cfg->prompt_manager_block_enabled = 1;
+   cfg->prompt_manager_review_enabled = 1;
    cfg->ingress_preinject_assembly_budget = 6144;
    cfg->ingress_max_raw_scans = 0;
    cfg->code_span_max_lines = 400;
@@ -1308,6 +1316,18 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "ingress_compress_min_chars");
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->ingress_compress_min_chars = (int)item->valuedouble;
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "delegates_enabled");
+   if (cJSON_IsBool(item))
+      cfg->delegates_enabled = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "prompt_manager_block_enabled");
+   if (cJSON_IsBool(item))
+      cfg->prompt_manager_block_enabled = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "prompt_manager_review_enabled");
+   if (cJSON_IsBool(item))
+      cfg->prompt_manager_review_enabled = cJSON_IsTrue(item);
 
    /* CSS migration assistant style-graph write path (WP-C). The field +
     * descriptor + save existed, but the YAML load parse was missing, so the
