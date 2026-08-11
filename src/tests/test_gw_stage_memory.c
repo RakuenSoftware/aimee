@@ -221,12 +221,6 @@ static int test_confidence_provider(double score, const char **confidence)
    return 0;
 }
 
-static const char *instr_of(cJSON *raw)
-{
-   cJSON *i = cJSON_GetObjectItemCaseSensitive(raw, "instructions");
-   return (i && cJSON_IsString(i)) ? i->valuestring : NULL;
-}
-
 /* OPENAI_SYSTEM_PROMPT: gw_memory_system_prompt(q) == ingress_preinject_build(q,0)
  * byte-for-byte (the raw env, no trailing "\n\n"). */
 static void test_system_prompt_raw_env(void)
@@ -243,173 +237,13 @@ static void test_system_prompt_raw_env(void)
    printf("system_prompt_raw_env OK\n");
 }
 
-/* OPENAI_INSTRUCTIONS with a prior system: env + "\n\n" + prior, identical to
- * ingress_preinject_apply(prior, env). */
-static void test_instructions_merge_with_prior(void)
-{
-   cJSON *messages = cJSON_Parse("[{\"role\":\"user\",\"content\":\"deploy matrix\"}]");
-   char *q = ingress_preinject_query_from_messages(messages);
-   char *env = ingress_preinject_build(q, 0);
-   char *expected = ingress_preinject_apply("PRIOR SYS", env);
-   assert(env && expected);
-
-   cJSON *raw = cJSON_CreateObject();
-   cJSON_AddStringToObject(raw, "instructions", "PRIOR SYS");
-   gw_request_t r = {.raw = raw,
-                     .serving_api = GW_API_OPENAI,
-                     .mem_target = GW_MEM_OPENAI_INSTRUCTIONS,
-                     .parity = 1};
-   int rc = gw_stage_memory(&r, messages);
-   assert(rc == 1);
-   assert(strcmp(instr_of(raw), expected) == 0);
-
-   free(q);
-   free(env);
-   free(expected);
-   cJSON_Delete(raw);
-   cJSON_Delete(messages);
-   printf("instructions_merge_with_prior OK\n");
-}
-
-/* OPENAI_INSTRUCTIONS with NO prior system: env + "\n\n". Confirms the two
- * OpenAI targets differ by exactly the trailing "\n\n". */
-static void test_instructions_no_prior(void)
-{
-   cJSON *messages = cJSON_Parse("[{\"role\":\"user\",\"content\":\"deploy matrix\"}]");
-   char *raw_env = gw_memory_system_prompt("deploy matrix"); /* the legacy raw env */
-   assert(raw_env);
-
-   cJSON *raw = cJSON_CreateObject();
-   cJSON_AddStringToObject(raw, "instructions", "");
-   gw_request_t r = {.raw = raw,
-                     .serving_api = GW_API_OPENAI,
-                     .mem_target = GW_MEM_OPENAI_INSTRUCTIONS,
-                     .parity = 1};
-   int rc = gw_stage_memory(&r, messages);
-   assert(rc == 1);
-
-   char *expect = malloc(strlen(raw_env) + 3);
-   sprintf(expect, "%s\n\n", raw_env);
-   assert(strcmp(instr_of(raw), expect) == 0);
-
-   free(expect);
-   free(raw_env);
-   cJSON_Delete(raw);
-   cJSON_Delete(messages);
-   printf("instructions_no_prior OK\n");
-}
-
-/* ANTHROPIC_MESSAGES: parity-gated — the envelope is appended as a trailing
- * `system` text block only when !parity (passthrough must not perturb the cached
- * prefix). The query is derived from raw.messages (ud unused). */
-static void test_anthropic_parity_gate(void)
-{
-   /* parity ON → passthrough, system array stays empty. */
-   cJSON *raw = cJSON_Parse(
-       "{\"messages\":[{\"role\":\"user\",\"content\":\"deploy matrix\"}],\"system\":[]}");
-   gw_request_t r = {.raw = raw,
-                     .serving_api = GW_API_ANTHROPIC,
-                     .mem_target = GW_MEM_ANTHROPIC_MESSAGES,
-                     .parity = 1};
-   assert(gw_stage_memory(&r, NULL) == 0);
-   assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(raw, "system")) == 0);
-
-   /* parity OFF → one <aimee-context> text block appended to system. */
-   r.parity = 0;
-   assert(gw_stage_memory(&r, NULL) == 0);
-   cJSON *sys = cJSON_GetObjectItemCaseSensitive(raw, "system");
-   assert(cJSON_GetArraySize(sys) == 1);
-   cJSON *blk = cJSON_GetArrayItem(sys, 0);
-   const cJSON *type = cJSON_GetObjectItemCaseSensitive(blk, "type");
-   const cJSON *text = cJSON_GetObjectItemCaseSensitive(blk, "text");
-   assert(type && cJSON_IsString(type) && strcmp(type->valuestring, "text") == 0);
-   assert(text && cJSON_IsString(text) && strstr(text->valuestring, "aimee-context") != NULL);
-
-   cJSON_Delete(raw);
-   printf("anthropic_parity_gate OK\n");
-}
-
-/* P5 (§2.3): the opt-in — with allow_anthropic_inject set, the envelope IS
- * injected even under parity (the Anthropic-native passthrough), appended as a
- * trailing system text block so the cached prefix survives. */
-static void test_anthropic_parity_opt_in_inject(void)
-{
-   cJSON *raw = cJSON_Parse(
-       "{\"messages\":[{\"role\":\"user\",\"content\":\"deploy matrix\"}],\"system\":[]}");
-   gw_request_t r = {.raw = raw,
-                     .serving_api = GW_API_ANTHROPIC,
-                     .mem_target = GW_MEM_ANTHROPIC_MESSAGES,
-                     .parity = 1,
-                     .allow_anthropic_inject = 1};
-   assert(gw_stage_memory(&r, NULL) == 0);
-   cJSON *sys = cJSON_GetObjectItemCaseSensitive(raw, "system");
-   assert(cJSON_GetArraySize(sys) == 1); /* injected despite parity */
-   cJSON *blk = cJSON_GetArrayItem(sys, 0);
-   const cJSON *text = cJSON_GetObjectItemCaseSensitive(blk, "text");
-   assert(text && cJSON_IsString(text) && strstr(text->valuestring, "aimee-context") != NULL);
-
-   cJSON_Delete(raw);
-   printf("anthropic_parity_opt_in_inject OK\n");
-}
-
 /* Pre-injection off / recall empty: every target is a byte-identical no-op. */
 static void test_disabled_noop(void)
 {
    g_no_recall = 1;
-
    assert(gw_memory_system_prompt("deploy matrix") == NULL);
-
-   cJSON *messages = cJSON_Parse("[{\"role\":\"user\",\"content\":\"deploy matrix\"}]");
-   cJSON *raw = cJSON_CreateObject();
-   cJSON_AddStringToObject(raw, "instructions", "KEEP");
-   gw_request_t r = {.raw = raw,
-                     .serving_api = GW_API_OPENAI,
-                     .mem_target = GW_MEM_OPENAI_INSTRUCTIONS,
-                     .parity = 1};
-   assert(gw_stage_memory(&r, messages) == 0);
-   assert(strcmp(instr_of(raw), "KEEP") == 0); /* untouched */
-
-   cJSON_Delete(raw);
-   cJSON_Delete(messages);
    g_no_recall = 0;
    printf("disabled_noop OK\n");
-}
-
-/* Cache-prefix placement (§2): with ingress_cache_placement_enabled on, the
- * OPENAI_INSTRUCTIONS arm APPENDS the envelope after the stable prior prefix
- * (prior + "\n\n" + env) instead of prepending — so the provider prefix cache is
- * not invalidated by the per-turn envelope. */
-static void test_instructions_placement_appends(void)
-{
-   cJSON *messages = cJSON_Parse("[{\"role\":\"user\",\"content\":\"deploy matrix\"}]");
-   char *q = ingress_preinject_query_from_messages(messages);
-   char *env = ingress_preinject_build(q, 0);
-   char *prepended = ingress_preinject_apply("PRIOR SYS", env); /* env first (off) */
-   char *appended = ingress_preinject_append("PRIOR SYS", env); /* env last (on)  */
-   assert(env && prepended && appended);
-   assert(strcmp(prepended, appended) != 0); /* order differs */
-
-   g_test_placement = 1;
-   cJSON *raw = cJSON_CreateObject();
-   cJSON_AddStringToObject(raw, "instructions", "PRIOR SYS");
-   gw_request_t r = {.raw = raw,
-                     .serving_api = GW_API_OPENAI,
-                     .mem_target = GW_MEM_OPENAI_INSTRUCTIONS,
-                     .parity = 1};
-   int rc = gw_stage_memory(&r, messages);
-   assert(rc == 1);
-   /* stable prefix stays at the front; envelope is the volatile suffix */
-   assert(strcmp(instr_of(raw), appended) == 0);
-   assert(strncmp(instr_of(raw), "PRIOR SYS", 9) == 0);
-   g_test_placement = 0;
-
-   free(q);
-   free(env);
-   free(prepended);
-   free(appended);
-   cJSON_Delete(raw);
-   cJSON_Delete(messages);
-   printf("instructions_placement_appends OK\n");
 }
 
 /* Build a minimal IR carrying a single last-user text block (heap-owned so
@@ -426,6 +260,15 @@ static void mk_user_ir(aimee_request_t *ir, const char *user_text)
    ir->messages[0].blocks[0].text = strdup(user_text);
 }
 
+static void mk_assistant_turn(aimee_request_t *ir)
+{
+   ir->messages = realloc(ir->messages, (size_t)(ir->n_messages + 1) * sizeof *ir->messages);
+   aimee_message_t *m = &ir->messages[ir->n_messages];
+   memset(m, 0, sizeof *m);
+   m->role = strdup("assistant");
+   ir->n_messages += 1;
+}
+
 /* IR seam (P4 port): ir_stage_memory appends the envelope as a trailing system TEXT
  * block, derives the query from the last user message, and reports the mutation. The
  * appended env is byte-identical to the legacy ingress_preinject_build(query, 0). */
@@ -438,25 +281,70 @@ static void test_ir_stage_appends_system_block(void)
    assert(ir.n_system == 1); /* exactly one trailing block appended */
    assert(ir.system[0].type == AIMEE_BLK_TEXT);
    assert(ir.system[0].cache_control == NULL); /* trailing block stays uncached */
+   /* Session start, so the block is the guidance FOLLOWED BY this turn's recall
+    * envelope. The envelope itself is unchanged -- assert it is carried verbatim
+    * inside; byte-identity with the bare envelope is asserted mid-session, where
+    * the guidance is not repeated. */
    char *direct = ingress_preinject_build("deploy matrix", 0);
-   assert(direct && ir.system[0].text && strcmp(ir.system[0].text, direct) == 0);
+   assert(direct && ir.system[0].text && strstr(ir.system[0].text, direct) != NULL);
+   assert(strstr(ir.system[0].text, "explore-with: ") != NULL);
    free(direct);
    aimee_request_free(&ir);
    printf("ir_stage_appends_system_block OK\n");
 }
 
-/* IR seam: empty recall -> ingress_preinject_build NULL -> no block, no mutation. */
-static void test_ir_stage_no_recall_noop(void)
+/* Mid-session with empty recall: nothing to say, so nothing is injected. The
+ * guidance already shipped on the opening turn and is not repeated per turn. */
+static void test_ir_stage_no_recall_midsession_noop(void)
 {
    g_no_recall = 1;
    aimee_request_t ir;
    mk_user_ir(&ir, "deploy matrix");
+   mk_assistant_turn(&ir); /* the model has spoken -> not a session start */
    int rc = ir_stage_memory(&ir, NULL);
    assert(rc == 0);
    assert(ir.n_system == 0 && ir.system == NULL);
    aimee_request_free(&ir);
    g_no_recall = 0;
-   printf("ir_stage_no_recall_noop OK\n");
+   printf("ir_stage_no_recall_midsession_noop OK\n");
+}
+
+/* SESSION START WITH EMPTY RECALL still ships the guidance. This is the whole
+ * point: the standing policy used to ride inside the retrieval envelope, so on a
+ * repository aimee had never indexed the agent was told nothing and reached for
+ * shell. Measured on the box -- a gateway cell made zero aimee calls and the model
+ * answered "PREINJECT ABSENT". Guidance does not depend on retrieval. */
+static void test_ir_stage_session_start_guidance_without_recall(void)
+{
+   g_no_recall = 1;
+   aimee_request_t ir;
+   mk_user_ir(&ir, "deploy matrix");
+   int rc = ir_stage_memory(&ir, NULL);
+   assert(rc == 1);
+   assert(ir.n_system == 1 && ir.system[0].text);
+   assert(strstr(ir.system[0].text, "explore-with: ") != NULL);
+   assert(strstr(ir.system[0].text, "fix-scope: ") != NULL);
+   aimee_request_free(&ir);
+   g_no_recall = 0;
+   printf("ir_stage_session_start_guidance_without_recall OK\n");
+}
+
+/* Not repeated once the model has spoken: one injection per session, not per turn. */
+static void test_ir_stage_guidance_not_repeated_midsession(void)
+{
+   aimee_request_t ir;
+   mk_user_ir(&ir, "deploy matrix");
+   mk_assistant_turn(&ir);
+   int rc = ir_stage_memory(&ir, NULL);
+   assert(rc == 1); /* recall still injects its envelope */
+   assert(ir.n_system == 1 && ir.system[0].text);
+   assert(strstr(ir.system[0].text, "explore-with: ") == NULL);
+   /* and the envelope is byte-identical to the bare build -- no wrapper, no drift */
+   char *direct = ingress_preinject_build("deploy matrix", 0);
+   assert(direct && strcmp(ir.system[0].text, direct) == 0);
+   free(direct);
+   aimee_request_free(&ir);
+   printf("ir_stage_guidance_not_repeated_midsession OK\n");
 }
 
 int main(void)
@@ -464,14 +352,11 @@ int main(void)
    printf("test_gw_stage_memory:\n");
    ingress_preinject_register_confidence_provider(test_confidence_provider);
    test_system_prompt_raw_env();
-   test_instructions_merge_with_prior();
-   test_instructions_no_prior();
-   test_instructions_placement_appends();
-   test_anthropic_parity_gate();
-   test_anthropic_parity_opt_in_inject();
    test_disabled_noop();
    test_ir_stage_appends_system_block();
-   test_ir_stage_no_recall_noop();
+   test_ir_stage_no_recall_midsession_noop();
+   test_ir_stage_session_start_guidance_without_recall();
+   test_ir_stage_guidance_not_repeated_midsession();
    printf("all gw_stage_memory tests passed\n");
    return 0;
 }

@@ -11,6 +11,7 @@
 #include "client_session_worktree.h" /* client_session_worktree_ensure */
 #include "cmd_self_update.h"         /* aimee_self_update_notice */
 #include "agent_code_capabilities.h"
+#include "aimee_session_guidance.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -479,9 +480,7 @@ int handle_user_prompt_submit(void)
       struct ss_sbuf ctx = {0};
       ss_add(&ctx, "<aimee-context>\n");
       ss_add(&ctx, b.p);
-      ss_add(&ctx, "explore-with: " AIMEE_CODE_TOOL_FIND_SYMBOL
-                   ", lsp_references, " AIMEE_CODE_TOOL_AST_GREP_SEARCH ", " AIMEE_CODE_TOOL_INDEX
-                   " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ", get_context_block\n");
+      ss_add(&ctx, AIMEE_GUIDANCE_BLOCK);
       ss_add(&ctx, "</aimee-context>");
 
       cJSON *out = cJSON_CreateObject();
