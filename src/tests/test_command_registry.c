@@ -7,7 +7,6 @@
  * two different lists both called "core", and standing guidance naming tools no
  * client could call. */
 #include "command_registry.h"
-#include "aimee/protocols/mcp/mcp_group_tool.h"
 #include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>
@@ -129,67 +128,6 @@ static void test_surface_view_is_derived(void)
    printf("surface_view_is_derived OK\n");
 }
 
-/* The MCP tool for a group is BUILT FROM the registry: one tool named for the
- * group, multiplexed by `command`, whose enum is exactly the verbs registered with
- * an MCP surface. `aimee memory get` and MCP `memory` command=get are then the
- * same command spelled the same way -- not memory_get, not search_memory, which
- * were two conventions for one group and could not be mapped mechanically. */
-static void test_group_tool_enumerates_registered_verbs(void)
-{
-   aimee_command_registry_reset();
-   aimee_command_t get = mk("memory", "get", AIMEE_SURFACE_ALL);
-   aimee_command_t search = mk("memory", "search", AIMEE_SURFACE_ALL);
-   aimee_command_t store = mk("memory", "store", AIMEE_SURFACE_CLI | AIMEE_SURFACE_RPC);
-   assert(aimee_command_register(&get) == 0);
-   assert(aimee_command_register(&search) == 0);
-   assert(aimee_command_register(&store) == 0);
-
-   cJSON *tool = mcp_group_tool_build("memory", "Memory operations.");
-   assert(tool);
-   const cJSON *name = cJSON_GetObjectItemCaseSensitive(tool, "name");
-   assert(name && strcmp(name->valuestring, "memory") == 0); /* the GROUP is the tool */
-
-   const cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
-   if (!schema)
-      schema = cJSON_GetObjectItemCaseSensitive(tool, "input_schema");
-   assert(schema);
-   const cJSON *props = cJSON_GetObjectItemCaseSensitive(schema, "properties");
-   const cJSON *cmd = cJSON_GetObjectItemCaseSensitive(props, "command");
-   const cJSON *en = cJSON_GetObjectItemCaseSensitive(cmd, "enum");
-   assert(en && cJSON_IsArray(en));
-
-   /* Exactly the MCP-surfaced verbs: store is CLI|RPC only and must NOT appear.
-    * A tool advertising a verb the registry will refuse is the same class of
-    * defect as guidance naming a tool that is not shown. */
-   assert(cJSON_GetArraySize(en) == 2);
-   int saw_get = 0, saw_search = 0, saw_store = 0;
-   const cJSON *v = NULL;
-   cJSON_ArrayForEach(v, en)
-   {
-      if (strcmp(v->valuestring, "get") == 0)
-         saw_get = 1;
-      if (strcmp(v->valuestring, "search") == 0)
-         saw_search = 1;
-      if (strcmp(v->valuestring, "store") == 0)
-         saw_store = 1;
-   }
-   assert(saw_get && saw_search && !saw_store);
-
-   cJSON_Delete(tool);
-   printf("group_tool_enumerates_registered_verbs OK\n");
-}
-
-/* A group with nothing on the MCP surface gets no tool at all: a `command` enum
- * that accepts nothing would cost the agent a call to learn it can do nothing. */
-static void test_group_tool_absent_when_no_mcp_verb(void)
-{
-   aimee_command_registry_reset();
-   aimee_command_t store = mk("memory", "store", AIMEE_SURFACE_CLI | AIMEE_SURFACE_RPC);
-   assert(aimee_command_register(&store) == 0);
-   assert(mcp_group_tool_build("memory", "Memory operations.") == NULL);
-   printf("group_tool_absent_when_no_mcp_verb OK\n");
-}
-
 int main(void)
 {
    printf("test_command_registry:\n");
@@ -199,8 +137,6 @@ int main(void)
    test_malformed_names_refused();
    test_unregistered_is_unroutable_everywhere();
    test_surface_view_is_derived();
-   test_group_tool_enumerates_registered_verbs();
-   test_group_tool_absent_when_no_mcp_verb();
    aimee_command_registry_reset();
    printf("all command_registry tests passed\n");
    return 0;

@@ -19,7 +19,6 @@
 #include "kb_client_ws.h"
 #include "db1.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"
-#include "modules/memory/memory_commands.h"
 #include "server.h"
 #include "server_http.h"
 #include "server_kb_heartbeat.h"
@@ -367,12 +366,11 @@ static int run_server(const char *socket_path, log_level_t log_level)
    presence_set_delivery_fn(presence_deliver_via_notify, NULL); /* outbound: ntfy/local */
    turn_registry_init(); /* per-turn cancel registry (server-owned turn lifecycle) */
 
-   /* Modules declare their commands to the core table BEFORE any surface starts
-    * accepting requests, so no surface can serve a request against a half-filled
-    * registry. Memory is the first group ported; the rest follow, one group at a
-    * time. See src/headers/command_registry.h. */
-   if (memory_commands_register() != 0)
-      LOG_WARN("commands", "memory commands unavailable: its verbs will not route");
+   /* Modules declare their commands over the EVENT BUS when they connect -- a
+    * module never links into core and never calls another module. The memory
+    * module answers stage 6 (event 5894) with its declaration; see
+    * server-go/modules/memory/commands.go. An earlier version of this called a C
+    * registration function in-process, which is the arrangement that replaced. */
 
    /* Wire the inference-backed OpenAI completion handlers before the listener
     * accepts requests (agent_http_init above must run first). */
