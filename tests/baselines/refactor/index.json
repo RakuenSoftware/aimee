@@ -19,7 +19,7 @@
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "8e5dea99b361a5540dd0ab4ce55fddedda27763ba627894e73745a18ca505a5a"
+          "sha256": "ab88ce20ebbac5f89b8e58410958751429d41bc506b33f6907f237e12cca62c3"
         }
       ]
     },
@@ -255,7 +255,7 @@
         },
         {
           "path": "src/headers/aimee_session_guidance.h",
-          "sha256": "3e7b558d6b91e2abff0f773a0e8e628cf7cd3b5534ecbd8100b35abcd6c8091b"
+          "sha256": "12cf31353a8acb10306641bbfaac395cd22e0d7817ad7755f767ddb26d342389"
         },
         {
           "path": "src/headers/aimee_sha256.h",
@@ -444,6 +444,10 @@
         {
           "path": "src/headers/collab_rules.h",
           "sha256": "ac3f289137fd3eaa68ccfadfdb41f72c0d20472ecf364304df5dd8b208117660"
+        },
+        {
+          "path": "src/headers/command_registry.h",
+          "sha256": "294d34107dd35d9a8e6946a4ff4773d70eea22769e2b0a768fe4eabde8bfc5bd"
         },
         {
           "path": "src/headers/commands.h",
@@ -1095,7 +1099,7 @@
         },
         {
           "path": "src/headers/server.h",
-          "sha256": "7fc9eb39956e99ec1790e4c2b3b4bbede40d4dd949e15752ef0cc7998a2bcc45"
+          "sha256": "a1fb249dc78445a73e431b6540935d6ff4bc6aa077e9eb35fddc43f63f5e425a"
         },
         {
           "path": "src/headers/server_cli_oauth.h",
@@ -1534,6 +1538,10 @@
           "sha256": "3e35decd59ed6a9178628ecff0b8b61a83c75256b1b8ccdc5ba0866edcb6026f"
         },
         {
+          "path": "src/modules/protocols/include/aimee/protocols/mcp/mcp_group_tool.h",
+          "sha256": "8e548fc21808e4143b7843653d6fff3e68d569f56c461dbbfbefcbf82ae5c249"
+        },
+        {
           "path": "src/modules/protocols/include/aimee/protocols/mcp/mcp_tools.h",
           "sha256": "b915c88c9a37c2b82cef7880b00387c8afac71534d3b532651d5663b9829e869"
         },
@@ -1612,7 +1620,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "8204bfe2b2af8bedebee873d7cc9b6995219847a32f3af975e3c4e9b94d7192d",
+      "sha256": "3323d15760208f042899cfcd09d4dbc85a192e6288d242113ab4e92644f26551",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

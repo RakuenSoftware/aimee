@@ -83,6 +83,11 @@
           "id": 5,
           "name": "reranking",
           "event_kind": 5893
+        },
+        {
+          "id": 6,
+          "name": "command-declaration",
+          "event_kind": 5894
         }
       ]
     },

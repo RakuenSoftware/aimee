@@ -18,6 +18,18 @@ int ir_stage_memory(aimee_request_t *ir, void *ud)
    return 0;
 }
 
+/* The first-turn shell block is registered on the same seam, so these suites link
+ * it too. Inert here for the same reason as ir_stage_memory: they assert on the
+ * BUILD and TRANSLATION bytes, and a stage that withheld a tool would change the
+ * tools array they compare. Returning 0 (nothing removed) keeps every byte-exact
+ * parity assertion measuring what it was written to measure. */
+int ir_stage_first_turn_shell_block(aimee_request_t *ir, void *ud)
+{
+   (void)ir;
+   (void)ud;
+   return 0;
+}
+
 int gw_stage_memory_enabled(void)
 {
    return 0;

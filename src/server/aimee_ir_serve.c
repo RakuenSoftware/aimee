@@ -60,6 +60,10 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
     * stay on gw_memory_system_prompt until agent_execute itself moves onto the IR. */
    const aimee_ir_transform_t stages[] = {
        {"memory", ir_stage_memory, NULL, memory_enabled},
+       /* Runs AFTER memory, so the opening turn already carries the guidance that
+        * names what replaces the shell it is about to lose. Always on: an agent
+        * that never reaches aimee's tools is not using aimee. */
+       {"first_turn_shell_block", ir_stage_first_turn_shell_block, NULL, 1},
    };
    aimee_ir_run_transforms(ir, stages, sizeof stages / sizeof stages[0]);
 }

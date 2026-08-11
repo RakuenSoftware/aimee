@@ -696,8 +696,18 @@ cJSON *tool_memory_get(cJSON *args)
    if (id <= 0)
       return text_content("error: missing memory id or memory:<id> handle");
 
+   /* The EVENT-time question. This used to call kb_client_memory_get, which only
+    * answers what the memory says NOW, and ignored as_of entirely -- the parameter
+    * was not even in the schema, so an agent could not ask. A memory superseded
+    * last week therefore read exactly like a current one: no error, no verdict,
+    * maximum confidence, wrong. The CLI has answered this since --as-of shipped;
+    * the agent surface silently did not. */
+   const cJSON *jas_of = cJSON_GetObjectItemCaseSensitive(args, "as_of");
+   const char *as_of = cJSON_IsString(jas_of) ? jas_of->valuestring : NULL;
+
    memory_t m;
-   int memory_rc = kb_client_memory_get(id, &m);
+   kb_valid_at_t verdict = KB_VALID_AT_UNASKED;
+   int memory_rc = kb_client_memory_get_as_of(id, as_of, &m, &verdict);
    if (memory_rc > 0)
       return kb_empty_result_content("memory not found");
    if (memory_rc < 0)
@@ -707,6 +717,13 @@ cJSON *tool_memory_get(cJSON *args)
    dstr_init(&d);
    dstr_appendf(&d, "Memory: memory:%lld\nTier: %s\nKind: %s\nKey: %s\nConfidence: %.3f\n",
                 (long long)m.id, m.tier, m.kind, m.key, m.confidence);
+   /* Answer beside the question: a verdict with no timestamp is unreadable, and
+    * "unknown" is kept distinct from "no" -- could not tell and was not in force
+    * are different answers, and collapsing them is how a hedge becomes a denial. */
+   if (verdict != KB_VALID_AT_UNASKED && as_of)
+      dstr_appendf(&d, "Valid at %s: %s\n", as_of,
+                   verdict == KB_VALID_AT_UNKNOWN ? "unknown"
+                                                  : (verdict == KB_VALID_AT_YES ? "yes" : "no"));
    if (m.headline[0])
       dstr_appendf(&d, "Headline: %s\n", m.headline);
    if (m.updated_at[0])

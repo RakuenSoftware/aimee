@@ -173,54 +173,57 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* THE command, in the shape the core command table can route.
+ *
+ * Every surface needs the same thing from a command -- a result -- but the RPC
+ * handlers were written to WRITE ONE to a connection and return int, so there was
+ * nothing for a table to hand back to MCP or ACP. That shape is why capability
+ * surface ended up declared four separate times: a command reachable over RPC had
+ * no result-returning form to register, so each surface grew its own list.
+ *
+ * Splitting it costs nothing at the wire: server_send_error and jo_err build the
+ * identical {status:"error", message} envelope, so the bytes on the RPC path are
+ * unchanged. handle_memory_store below is now only the connection write. */
+cJSON *memory_store_command(const cJSON *req)
+{
+   const char *key, *content;
+   if (jo_need_str((cJSON *)req, "key", &key) < 0 ||
+       jo_need_str((cJSON *)req, "content", &content) < 0)
+      return jo_err("missing key or content");
+
+   const char *tier = jo_str((cJSON *)req, "tier", TIER_L0);
+   const char *kind = jo_str((cJSON *)req, "kind", KIND_FACT);
+   double confidence = jo_num((cJSON *)req, "confidence", 1.0);
+   const char *sid = jo_str((cJSON *)req, "session_id", "");
+
+   memory_t out;
+   if (kb_client_memory_insert(tier, kind, key, content, confidence, sid, &out) != 0)
+      return jo_err("failed to store memory");
+
+   cJSON *resp = jo_ok();
+   jo_add_i64(resp, "id", out.id);
+   return resp;
+}
+
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-
-   const char *key, *content;
-   if (jo_need_str(req, "key", &key) < 0 || jo_need_str(req, "content", &content) < 0)
-      return server_send_error(conn, "missing key or content", NULL);
-
-   const char *tier = jo_str(req, "tier", TIER_L0);
-   const char *kind = jo_str(req, "kind", KIND_FACT);
-   double confidence = jo_num(req, "confidence", 1.0);
-   const char *sid = jo_str(req, "session_id", "");
-
-   memory_t out;
-   int rc = kb_client_memory_insert(tier, kind, key, content, confidence, sid, &out);
-
-   cJSON *resp;
-   if (rc == 0)
-   {
-      resp = jo_ok();
-      jo_add_i64(resp, "id", out.id);
-   }
-   else
-   {
-      resp = jo_err("failed to store memory");
-   }
-   return send_and_free(conn, resp);
+   return send_and_free(conn, memory_store_command(req));
 }
 
-int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+cJSON *memory_list_command(const cJSON *req)
 {
-   (void)ctx;
-
-   const char *tier = jo_str(req, "tier", NULL);
-   const char *kind = jo_str(req, "kind", NULL);
-   int limit = jo_int(req, "limit", 20);
-   int active_context_missing = server_memory_scope_begin(req);
+   const char *tier = jo_str((cJSON *)req, "tier", NULL);
+   const char *kind = jo_str((cJSON *)req, "kind", NULL);
+   int limit = jo_int((cJSON *)req, "limit", 20);
+   int active_context_missing = server_memory_scope_begin((cJSON *)req);
    memory_t results[64];
    int count = kb_client_memory_list(tier, kind, limit, results, 64);
+   kb_client_memory_scope_context_clear(); /* cleared on BOTH paths, as before */
    if (count < 0)
-   {
-      kb_client_memory_scope_context_clear();
-      return server_send_error(conn,
-                               "knowledge service unavailable; the memory store is unreachable "
-                               "(server-side maintenance is required)",
-                               NULL);
-   }
-   kb_client_memory_scope_context_clear();
+      return jo_err("knowledge service unavailable; the memory store is unreachable "
+                    "(server-side maintenance is required)");
+
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < count; i++)
       cJSON_AddItemToArray(arr, memory_to_json(&results[i]));
@@ -228,7 +231,13 @@ int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "memories", arr);
    jo_add_bool(resp, "active_context_missing", active_context_missing);
-   return send_and_free(conn, resp);
+   return resp;
+}
+
+int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_list_command(req));
 }
 
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -333,32 +342,35 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  *
  * Gated on CAP_MEMORY_WRITE, so it follows the same write-tier grant rules as
  * memory.store rather than inventing its own. */
-int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+cJSON *memory_delete_command(cJSON *req)
 {
-   (void)ctx;
-
    int64_t id = 0;
    if (memory_request_positive_id(req, "id", &id) != 0)
-      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.delete requires a positive integer id", NULL);
 
    if (kb_client_memory_delete(id) != 0)
-      return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND,
+      return server_error_kind_json(SERVER_ERR_NOT_FOUND,
                                     "no such memory, or the knowledge service refused", NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "id", (double)id);
    cJSON_AddBoolToObject(resp, "deleted", 1);
-   return server_send_ok(conn, resp);
+   return resp;
 }
 
-int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
+   return server_send_ok(conn, memory_delete_command(req));
+}
+
+cJSON *memory_get_command(cJSON *req)
+{
 
    cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "id");
    if (!cJSON_IsNumber(jid))
-      return server_send_error(conn, "missing id", NULL);
+      return jo_err("missing id");
 
    /* `memory get --as-of <ts>` asks the EVENT-time question, and this handler is
     * the only thing between the flag and aimee-kb, which owns the interval. It
@@ -415,7 +427,13 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       if (!resp)
          resp = jo_err("knowledge service unavailable");
    }
-   return send_and_free(conn, resp);
+   return resp;
+}
+
+int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_get_command(req));
 }
 
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

@@ -30,6 +30,88 @@
  * not change what the model receives — only which memories are retrieved). */
 #define IR_MEMORY_QUERY_MAX 16384
 
+int ir_session_start(const aimee_request_t *ir)
+{
+   /* No assistant turn yet == the model has not spoken == start of session.
+    *
+    * NOT n_messages == 1. A real client does not open with a single message:
+    * Codex prepends environment/instructions items, so the opening turn arrives
+    * with several. Counting messages was tried on the box and never fired -- the
+    * probe still answered "PREINJECT ABSENT" with the transform live and reached.
+    * What is invariant is that nothing the ASSISTANT said can be in the history
+    * before the assistant has said anything.
+    *
+    * This also covers COMPACTION, the other moment the guidance is needed: a
+    * compacted history is a carried-over summary with no assistant turn in it, so
+    * the rule fires again exactly when compaction discarded the first copy. */
+   if (!ir)
+      return 0;
+   for (int i = 0; i < ir->n_messages; i++)
+   {
+      const char *role = ir->messages[i].role;
+      if (role && strcmp(role, "assistant") == 0)
+         return 0;
+   }
+   return 1;
+}
+
+/* Codex's own shell tools. Everything else it carries -- apply_patch, update_plan
+ * -- is left alone: this is about how the agent LOOKS at code, not how it edits
+ * or plans. */
+static int ir_is_codex_shell_tool(const char *name)
+{
+   if (!name)
+      return 0;
+   static const char *const SHELL[] = {"exec_command", "local_shell", "shell",
+                                       "bash",         "run_command", "container.exec"};
+   for (size_t i = 0; i < sizeof SHELL / sizeof SHELL[0]; i++)
+      if (strcmp(name, SHELL[i]) == 0)
+         return 1;
+   return 0;
+}
+
+int ir_stage_first_turn_shell_block(aimee_request_t *ir, void *ud)
+{
+   (void)ud;
+   /* WITHHOLD THE SHELL FOR THE OPENING TURN, ONCE PER SESSION.
+    *
+    * Telling the agent which tool to use does not work on its own. Measured on
+    * CT 403 with the guidance demonstrably delivered -- the model quoted it back
+    * verbatim on request -- a gateway cell still made ZERO aimee calls, by MCP or
+    * CLI, and did all eight of its steps with find/cat/sed/grep. Advice loses to a
+    * shell the model already knows how to drive.
+    *
+    * So the opening turn is not offered one. The agent still has aimee's
+    * symbol-scoped tools and the guidance naming which shell reflex each replaces,
+    * so the turn it would have spent grepping is spent through aimee instead. From
+    * the second turn the shell is back, unconditionally: this redirects the FIRST
+    * look at a tree, it does not take the shell away.
+    *
+    * Deliberately not a config toggle, for the same reason the guidance is not
+    * one: an agent that never reaches aimee's tools is not using aimee. */
+   if (!ir || !ir_session_start(ir))
+      return 0;
+   int removed = 0;
+   for (int i = 0; i < ir->n_tools;)
+   {
+      if (!ir_is_codex_shell_tool(ir->tools[i].name))
+      {
+         i++;
+         continue;
+      }
+      free(ir->tools[i].name);
+      free(ir->tools[i].description);
+      cJSON_Delete(ir->tools[i].schema);
+      free(ir->tools[i].cache_control);
+      cJSON_Delete(ir->tools[i].raw);
+      for (int j = i; j + 1 < ir->n_tools; j++)
+         ir->tools[j] = ir->tools[j + 1];
+      ir->n_tools -= 1;
+      removed = 1;
+   }
+   return removed;
+}
+
 int ir_stage_memory(aimee_request_t *ir, void *ud)
 {
    (void)ud; /* query comes from the IR, not per-call user data */
@@ -48,16 +130,7 @@ int ir_stage_memory(aimee_request_t *ir, void *ud)
     * This still covers compaction, which is the other moment guidance is needed:
     * a compacted history is a carried-over summary with no assistant turn in it,
     * so the rule fires again exactly when compaction discarded the first copy. */
-   int session_start = 1;
-   for (int i = 0; i < ir->n_messages; i++)
-   {
-      const char *role = ir->messages[i].role;
-      if (role && strcmp(role, "assistant") == 0)
-      {
-         session_start = 0;
-         break;
-      }
-   }
+   int session_start = ir_session_start(ir);
 
    char *query = malloc(IR_MEMORY_QUERY_MAX);
    if (!query)

@@ -329,6 +329,57 @@ static void test_ir_stage_session_start_guidance_without_recall(void)
    printf("ir_stage_session_start_guidance_without_recall OK\n");
 }
 
+/* Tool-list fixtures for the first-turn shell block. */
+static void mk_tool(aimee_request_t *ir, const char *name)
+{
+   ir->tools = realloc(ir->tools, (size_t)(ir->n_tools + 1) * sizeof *ir->tools);
+   memset(&ir->tools[ir->n_tools], 0, sizeof ir->tools[0]);
+   ir->tools[ir->n_tools].name = strdup(name);
+   ir->n_tools += 1;
+}
+
+static int has_tool(const aimee_request_t *ir, const char *name)
+{
+   for (int i = 0; i < ir->n_tools; i++)
+      if (ir->tools[i].name && strcmp(ir->tools[i].name, name) == 0)
+         return 1;
+   return 0;
+}
+
+/* The opening turn is not offered a shell. Naming the tools in the guidance was
+ * measured NOT to be enough on its own -- with the guidance provably delivered, a
+ * gateway cell still made zero aimee calls and grepped its way through -- so the
+ * first look at a tree has to go through aimee. */
+static void test_first_turn_withholds_shell(void)
+{
+   aimee_request_t ir;
+   mk_user_ir(&ir, "fix the cache");
+   mk_tool(&ir, "exec_command");
+   mk_tool(&ir, "apply_patch");
+   mk_tool(&ir, "mcp__aimee__find_symbol");
+   assert(ir_stage_first_turn_shell_block(&ir, NULL) == 1);
+   assert(!has_tool(&ir, "exec_command"));           /* the shell is withheld */
+   assert(has_tool(&ir, "apply_patch"));             /* editing is untouched */
+   assert(has_tool(&ir, "mcp__aimee__find_symbol")); /* aimee's tools remain */
+   assert(ir.n_tools == 2);
+   aimee_request_free(&ir);
+   printf("first_turn_withholds_shell OK\n");
+}
+
+/* From the second turn the shell is back, unconditionally. This redirects the
+ * FIRST look at a tree; it does not take the shell away. */
+static void test_shell_returns_after_first_turn(void)
+{
+   aimee_request_t ir;
+   mk_user_ir(&ir, "fix the cache");
+   mk_assistant_turn(&ir);
+   mk_tool(&ir, "exec_command");
+   assert(ir_stage_first_turn_shell_block(&ir, NULL) == 0);
+   assert(has_tool(&ir, "exec_command"));
+   aimee_request_free(&ir);
+   printf("shell_returns_after_first_turn OK\n");
+}
+
 /* Not repeated once the model has spoken: one injection per session, not per turn. */
 static void test_ir_stage_guidance_not_repeated_midsession(void)
 {
@@ -357,6 +408,8 @@ int main(void)
    test_ir_stage_no_recall_midsession_noop();
    test_ir_stage_session_start_guidance_without_recall();
    test_ir_stage_guidance_not_repeated_midsession();
+   test_first_turn_withholds_shell();
+   test_shell_returns_after_first_turn();
    printf("all gw_stage_memory tests passed\n");
    return 0;
 }
