@@ -37,7 +37,8 @@ const (
 // launchArgsRequest is the wire form, kept as one struct so the decode below
 // reads in the same order the encoder writes.
 type launchArgsRequest struct {
-	Role          string
+	// WritesAllowed is the caller's composed answer, not the role's default.
+	WritesAllowed bool
 	RepoRoot      string
 	Worktree      string
 	GitDir        string
@@ -51,7 +52,13 @@ type launchArgsRequest struct {
 	Image      string
 	WorkDir    string
 	MountTable string
-	Command    []string
+	// RunAsUser is "<uid>:<gid>". The caller supplies it because the uid that
+	// owns the tree is a fact about the host, not about the delegate.
+	RunAsUser string
+	// ScratchDir/ScratchTarget describe a delegate with no repository at all.
+	ScratchDir    string
+	ScratchTarget string
+	Command       []string
 }
 
 // decodeLaunchArgsRequest reads the request, or reports that it is malformed.
@@ -63,10 +70,11 @@ func decodeLaunchArgsRequest(request []byte) (launchArgsRequest, bool) {
 	var req launchArgsRequest
 	if len(request) < launchArgsReqHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != launchArgsRequestMagic ||
-		request[4] != wireVersion || request[5] > 1 {
+		request[4] != wireVersion || request[5] > 3 {
 		return req, false
 	}
-	req.IsGitCheckout = request[5] == 1
+	req.IsGitCheckout = request[5]&1 != 0
+	req.WritesAllowed = request[5]&2 != 0
 	commandCount := int(binary.LittleEndian.Uint32(request[8:12]))
 	if commandCount > launchArgsMaxCommand {
 		return req, false
@@ -82,7 +90,6 @@ func decodeLaunchArgsRequest(request []byte) (launchArgsRequest, bool) {
 		return c.str(n)
 	}
 
-	req.Role = readString(roleMax)
 	req.RepoRoot = readString(launchArgsStringMax)
 	req.Worktree = readString(launchArgsStringMax)
 	req.GitDir = readString(launchArgsStringMax)
@@ -93,6 +100,9 @@ func decodeLaunchArgsRequest(request []byte) (launchArgsRequest, bool) {
 	req.Image = readString(launchArgsStringMax)
 	req.WorkDir = readString(launchArgsStringMax)
 	req.MountTable = readString(launchArgsMountTableMax)
+	req.RunAsUser = readString(launchArgsStringMax)
+	req.ScratchDir = readString(launchArgsStringMax)
+	req.ScratchTarget = readString(launchArgsStringMax)
 
 	req.Command = make([]string, 0, commandCount)
 	for i := 0; i < commandCount; i++ {
@@ -107,10 +117,15 @@ func decodeLaunchArgsRequest(request []byte) (launchArgsRequest, bool) {
 
 // handleLaunchArgs renders the create command for one delegate.
 //
-// The isolation of the plan is derived from the ROLE rather than carried in the
-// request. It is the same decision stage 11 made, and re-deriving it means the
-// two cannot disagree -- a caller that sent a stale "isolated" flag would
-// otherwise get a git directory mounted into a read-only delegate.
+// Whether the delegate writes is CARRIED, not re-derived from the role. The
+// role's default is only one input: the caller narrows it with a prompt rule
+// this module cannot see, so a module that re-derived from the role would
+// disagree with the decision the caller actually made -- and would hand a
+// writable tree, and a git directory, to a delegate already ruled read-only.
+//
+// The caller must therefore send the SAME flag it sent to stage 11. It is the
+// one fact that has to agree across the two calls, which is why it is a single
+// composed boolean rather than a set of inputs each side re-combines.
 func handleLaunchArgs(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	req, ok := decodeLaunchArgsRequest(request)
 	if !ok {
@@ -120,9 +135,12 @@ func handleLaunchArgs(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 		return nil, bus.ModuleStatusCancelled
 	}
 
-	plan := WorktreePlan{Isolated: RoleIsWrite(req.Role), ReadOnlyMount: !RoleIsWrite(req.Role)}
-	sandboxReq := SandboxRequestFor(plan, req.Role, req.RepoRoot, req.Worktree, req.GitDir,
+	plan := WorktreePlan{Isolated: req.WritesAllowed, ReadOnlyMount: !req.WritesAllowed}
+	sandboxReq := SandboxRequestFor(plan, req.RepoRoot, req.Worktree, req.GitDir,
 		req.IsGitCheckout, req.ParentSocketHost, req.ParentSocketTarget, req.EgressProxy)
+	sandboxReq.RunAsUser = req.RunAsUser
+	sandboxReq.ScratchDir = req.ScratchDir
+	sandboxReq.ScratchTarget = req.ScratchTarget
 
 	spec, err := BuildSandboxSpec(sandboxReq)
 	if err != nil {

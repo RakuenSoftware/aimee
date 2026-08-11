@@ -8,7 +8,7 @@ import (
 
 func writeReq() SandboxRequest {
 	return SandboxRequest{
-		Role:               "code",
+		WritesAllowed:      true,
 		RepoRoot:           "/srv/repo",
 		Worktree:           "/srv/repo/.aimee/worktrees/w1/main",
 		GitDir:             "/srv/repo/.git/worktrees/w1",
@@ -21,7 +21,7 @@ func writeReq() SandboxRequest {
 
 func readReq() SandboxRequest {
 	return SandboxRequest{
-		Role:               "review",
+		WritesAllowed:      false,
 		RepoRoot:           "/srv/repo",
 		Worktree:           "/srv/repo",
 		IsGitCheckout:      true,
@@ -233,7 +233,7 @@ func TestValidateRejectsHandBuiltViolations(t *testing.T) {
 // plain checkout exactly once.
 func TestPlainCheckoutGetsOneWritableMount(t *testing.T) {
 	spec, err := BuildSandboxSpec(SandboxRequest{
-		Role: "code", RepoRoot: "/repo", Worktree: "/repo", IsGitCheckout: true,
+		WritesAllowed: true, RepoRoot: "/repo", Worktree: "/repo", IsGitCheckout: true,
 	})
 	if err != nil {
 		t.Fatalf("err = %v", err)
@@ -259,7 +259,7 @@ func TestPlainCheckoutGetsOneWritableMount(t *testing.T) {
 // worktree writable over it, so a write outside the worktree fails.
 func TestLinkedWorktreeKeepsTheReadOnlyRepoBeneath(t *testing.T) {
 	spec, err := BuildSandboxSpec(SandboxRequest{
-		Role: "code", RepoRoot: "/repo", Worktree: "/repo/.aimee/worktrees/d1",
+		WritesAllowed: true, RepoRoot: "/repo", Worktree: "/repo/.aimee/worktrees/d1",
 		GitDir: "/repo/.git/worktrees/d1", IsGitCheckout: true,
 	})
 	if err != nil {

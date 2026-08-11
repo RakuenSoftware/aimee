@@ -394,19 +394,32 @@ int context_compress_view(const cJSON *messages, const fold_config_t *cfg, fold_
       return 0;
    }
 
-   /* Conserve any amputated identifiers in a Coordinate Closet, prepended as a
-    * synthetic user+assistant note pair (matching context_fold_view): a plain-text
-    * turn is valid input for every provider builder, and the PAIR keeps Anthropic
-    * role-alternation intact ahead of the (unchanged) original first turn. When the
-    * closet is disabled or empty, render returns NULL and we emit no note — the head
-    * excerpts still carry the leading bytes of each body. */
+   /* Conserve any amputated identifiers in a Coordinate Closet, APPENDED as a
+    * synthetic user note at the very end of the transcript. When the closet is
+    * disabled or empty, render returns NULL and we emit no note — the head excerpts
+    * still carry the leading bytes of each body.
+    *
+    * Tail placement is load-bearing, not cosmetic. This note summarizes the WHOLE
+    * compressed region (a body count, plus a closet that accumulates), so its text
+    * necessarily changes every turn as more messages age out of the retained band.
+    * At the head it sat inside the fold's frozen prefix, which made the reduced
+    * prefix differ on every single turn and silently defeated the §3 fold-freeze
+    * whenever compress and history_fold ran together (the shipping `aggressive`
+    * preset enables both) — every turn paying a provider cache WRITE where the
+    * freeze exists to buy a cache READ. The tail already varies each turn, so a
+    * growing note costs nothing there; this is the same placement argument
+    * context_reduce.h makes for the §4 recall hint, and it mirrors that injection's
+    * shape (a lone user-role note, no ack). "above" is now literally true, too.
+    *
+    * Downstream the note lands in the fold's RETAINED region, so conserved
+    * identifiers survive verbatim rather than being skeletonized. It is never
+    * written back to stored history, so successive turns do not accumulate notes. */
    char *closet = coord_closet_render(&set, &cfg->closet, compressed_raw, &out->closet_evict);
    coord_set_free(&set);
    if (closet)
    {
       cJSON *note = cJSON_CreateObject();
-      cJSON *ack = cJSON_CreateObject();
-      if (note && ack)
+      if (note)
       {
          dstr_t body;
          dstr_init(&body);
@@ -417,19 +430,30 @@ int context_compress_view(const cJSON *messages, const fold_config_t *cfg, fold_
          dstr_append_str(&body, closet);
          cJSON_AddStringToObject(note, "role", "user");
          cJSON_AddStringToObject(note, "content", dstr_cstr(&body));
-         cJSON_AddStringToObject(ack, "role", "assistant");
-         cJSON_AddStringToObject(
-             ack, "content",
-             "Understood — identifiers from the compressed tool results are conserved above.");
          dstr_free(&body);
-         /* insert ack first, then note before it, yielding [note, ack, ...original] */
-         cJSON_InsertItemInArray(arr, 0, ack);
-         cJSON_InsertItemInArray(arr, 0, note);
-      }
-      else
-      {
-         cJSON_Delete(note);
-         cJSON_Delete(ack);
+
+         /* Keep Anthropic role-alternation intact. The head insertion used a
+          * user+assistant PAIR for this reason; at the tail only the ends-with-user
+          * case needs a bridge, and the note must stay LAST so the transcript never
+          * ends on an assistant turn (which would read as a prefill). Deterministic:
+          * the bridge depends only on the input's final role. */
+         int tail_n = cJSON_GetArraySize(arr);
+         cJSON *tail_msg = tail_n > 0 ? cJSON_GetArrayItem(arr, tail_n - 1) : NULL;
+         const char *tail_role =
+             tail_msg ? cJSON_GetStringValue(cJSON_GetObjectItem(tail_msg, "role")) : NULL;
+         if (tail_role && strcmp(tail_role, "user") == 0)
+         {
+            cJSON *ack = cJSON_CreateObject();
+            if (ack)
+            {
+               cJSON_AddStringToObject(ack, "role", "assistant");
+               cJSON_AddStringToObject(ack, "content",
+                                       "Understood — identifiers from the compressed tool "
+                                       "results are conserved below.");
+               cJSON_AddItemToArray(arr, ack);
+            }
+         }
+         cJSON_AddItemToArray(arr, note);
       }
       free(closet);
    }

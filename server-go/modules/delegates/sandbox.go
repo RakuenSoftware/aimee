@@ -54,6 +54,10 @@ const (
 	SandboxWorkspace SandboxMountKind = iota
 	// SandboxControlSocket is the single outward channel to the parent.
 	SandboxControlSocket
+	// SandboxScratch is a working directory aimee created for a delegate that
+	// has no repository. It is not caller-supplied, which is the whole reason it
+	// is a separate kind -- see ScratchDir.
+	SandboxScratch
 )
 
 // SandboxMount is one bind mount in the container specification.
@@ -74,7 +78,15 @@ type SandboxEnv struct {
 // is supplied rather than discovered: this module does not stat the workspace,
 // because the workspace owns its files.
 type SandboxRequest struct {
-	Role string
+	// WritesAllowed is whether THIS delegate may write its worktree.
+	//
+	// Not derived from the role here, deliberately. The role's default is one
+	// input (stage 10), but the caller narrows it further -- a write role whose
+	// prompt does not ask for writes does not get a writable tree. Re-deriving
+	// from the role would make this module disagree with the decision the caller
+	// actually made, and the disagreement would show up as a delegate writing
+	// into a tree the caller had already ruled read-only.
+	WritesAllowed bool
 
 	// RepoRoot is the parent checkout. Mounted read-only for a write delegate
 	// so the tree is readable but only the worktree is writable.
@@ -97,6 +109,25 @@ type SandboxRequest struct {
 	// EgressProxy, when set, becomes http_proxy so a no-network delegate can
 	// still install software through the narrow update whitelist.
 	EgressProxy string
+
+	// ScratchDir is a directory AIMEE created for a delegate that has no
+	// repository at all, mounted at ScratchTarget.
+	//
+	// It is exempt from the git-checkout rule, and that exemption is safe only
+	// because of what the rule is for: refusing to bind an ARBITRARY HOST
+	// directory into a delegate. A path aimee just made under its own cache is
+	// categorically not that. To keep the exemption from becoming a way to
+	// smuggle one in, a scratch request may not also name a repository -- the
+	// two are mutually exclusive and the builder refuses a request with both.
+	ScratchDir    string
+	ScratchTarget string
+
+	// RunAsUser is "<uid>:<gid>" and must be set whenever a host tree is
+	// mounted. Containers run as root by default, so every file the delegate
+	// created in the caller's checkout would land root-owned: the user could not
+	// edit or delete their own files afterwards, and git would refuse the tree
+	// outright with "detected dubious ownership".
+	RunAsUser string
 }
 
 // SandboxSpec is the container specification. NetworkMode is not a field the
@@ -105,6 +136,8 @@ type SandboxSpec struct {
 	Mounts   []SandboxMount
 	Env      []SandboxEnv
 	ReadOnly bool // the role does not write, so nothing is mounted writable
+	// User is "<uid>:<gid>", empty to keep the image's own user.
+	User string
 }
 
 // NetworkMode is always "none". It is a method rather than a field so no caller
@@ -124,10 +157,24 @@ func isDockerSocket(p string) bool {
 	return false
 }
 
+// sandboxEnvAllowed names variables the container genuinely needs that would
+// otherwise trip the marker scan below.
+//
+// GIT_CONFIG_KEY_0 contains "KEY" and is not a secret: it carries the literal
+// string "safe.directory". Naming the exceptions explicitly keeps the scan as
+// broad as it should be -- narrowing the markers to let this through would let
+// a real key through with it.
+var sandboxEnvAllowed = map[string]bool{
+	"GIT_CONFIG_KEY_0": true,
+}
+
 // looksLikeCredential reports whether an environment name suggests a secret.
 // Deliberately broad: a false positive costs a delegate one variable it should
 // not have needed, a false negative puts a credential inside the sandbox.
 func looksLikeCredential(name string) bool {
+	if sandboxEnvAllowed[name] {
+		return false
+	}
 	upper := strings.ToUpper(name)
 	for _, marker := range credentialEnvMarkers {
 		if strings.Contains(upper, marker) {
@@ -144,6 +191,47 @@ func cleanAbs(p string) (string, bool) {
 	return path.Clean(p), true
 }
 
+// buildScratchSpec is the container for a delegate with no repository.
+//
+// One writable mount and nothing else: there is no repo to layer beneath it and
+// no git metadata to expose. Everything the sandbox guarantees still holds --
+// the network, the runtime socket and the credential rules are applied by the
+// shared tail below, not skipped here.
+func buildScratchSpec(req SandboxRequest) (SandboxSpec, error) {
+	var spec SandboxSpec
+
+	// The exemption is for aimee's OWN directory. A request that also names a
+	// repository is not that, and is refused rather than resolved in favour of
+	// one of them.
+	if req.Worktree != "" || req.RepoRoot != "" || req.GitDir != "" {
+		return spec, fmt.Errorf(
+			"a scratch container cannot also mount a repository (worktree=%q repo=%q gitdir=%q)",
+			req.Worktree, req.RepoRoot, req.GitDir)
+	}
+
+	source, ok := cleanAbs(req.ScratchDir)
+	if !ok {
+		return spec, fmt.Errorf("scratch dir must be an absolute path, got %q", req.ScratchDir)
+	}
+	target, ok := cleanAbs(req.ScratchTarget)
+	if !ok {
+		return spec, fmt.Errorf("scratch target must be an absolute path, got %q", req.ScratchTarget)
+	}
+
+	// Writable regardless of the role: the delegate has nowhere else to work,
+	// and nothing else can see this directory.
+	spec.Mounts = append(spec.Mounts,
+		SandboxMount{Source: source, Target: target, Kind: SandboxScratch})
+
+	if err := attachSandboxChannel(&spec, req); err != nil {
+		return SandboxSpec{}, err
+	}
+	if err := ValidateSandboxSpec(spec); err != nil {
+		return SandboxSpec{}, err
+	}
+	return spec, nil
+}
+
 // BuildSandboxSpec decides the container's shape for one delegate run.
 //
 // A write role gets three mounts: the repo read-only so the whole tree is
@@ -154,6 +242,10 @@ func cleanAbs(p string) (string, bool) {
 func BuildSandboxSpec(req SandboxRequest) (SandboxSpec, error) {
 	var spec SandboxSpec
 
+	if req.ScratchDir != "" {
+		return buildScratchSpec(req)
+	}
+
 	worktree, ok := cleanAbs(req.Worktree)
 	if !ok {
 		return spec, fmt.Errorf("worktree must be an absolute path, got %q", req.Worktree)
@@ -162,7 +254,7 @@ func BuildSandboxSpec(req SandboxRequest) (SandboxSpec, error) {
 		return spec, fmt.Errorf("%w: %s", ErrNotGitCheckout, worktree)
 	}
 
-	write := RoleIsWrite(req.Role)
+	write := req.WritesAllowed
 	spec.ReadOnly = !write
 
 	if write {
@@ -197,31 +289,75 @@ func BuildSandboxSpec(req SandboxRequest) (SandboxSpec, error) {
 			SandboxMount{Source: worktree, Target: worktree, ReadOnly: true})
 	}
 
+	if err := attachSandboxChannel(&spec, req); err != nil {
+		return SandboxSpec{}, err
+	}
+	if err := ValidateSandboxSpec(spec); err != nil {
+		return SandboxSpec{}, err
+	}
+	return spec, nil
+}
+
+// attachSandboxChannel adds everything that is true of EVERY delegate container
+// regardless of what it mounts: the one outward channel, the environment that
+// makes it usable, and the user it runs as.
+//
+// Shared by the repository and scratch shapes on purpose. These are the parts
+// whose absence is silent -- a container with no AIMEE_API_ENDPOINT starts and
+// looks healthy -- so a second copy that fell one variable behind would be
+// found by a delegate failing mysteriously, not by a test.
+func attachSandboxChannel(spec *SandboxSpec, req SandboxRequest) error {
 	if req.ParentSocketHost != "" {
 		host, ok := cleanAbs(req.ParentSocketHost)
 		if !ok {
-			return spec, fmt.Errorf("parent socket must be an absolute path, got %q",
+			return fmt.Errorf("parent socket must be an absolute path, got %q",
 				req.ParentSocketHost)
 		}
 		target, ok := cleanAbs(req.ParentSocketTarget)
 		if !ok {
-			return spec, fmt.Errorf("parent socket target must be an absolute path, got %q",
+			return fmt.Errorf("parent socket target must be an absolute path, got %q",
 				req.ParentSocketTarget)
 		}
 		spec.Mounts = append(spec.Mounts,
 			SandboxMount{Source: host, Target: target, Kind: SandboxControlSocket})
 	}
 
-	if req.EgressProxy != "" {
+	if req.ParentSocketTarget != "" {
+		// Without this the in-container CLI does not know where its only
+		// outward channel is, and every tool call it makes goes nowhere.
 		spec.Env = append(spec.Env,
-			SandboxEnv{Name: "http_proxy", Value: req.EgressProxy},
-			SandboxEnv{Name: "https_proxy", Value: req.EgressProxy})
+			SandboxEnv{Name: "AIMEE_API_ENDPOINT", Value: "unix:" + req.ParentSocketTarget})
 	}
 
-	if err := ValidateSandboxSpec(spec); err != nil {
-		return SandboxSpec{}, err
+	if req.EgressProxy != "" {
+		// Both spellings: package managers disagree about which one they read,
+		// and one honoured while the other is not is a fetch that silently
+		// bypasses the proxy. no_proxy keeps loopback direct so the forwarder
+		// does not try to proxy to itself.
+		spec.Env = append(spec.Env,
+			SandboxEnv{Name: "http_proxy", Value: req.EgressProxy},
+			SandboxEnv{Name: "https_proxy", Value: req.EgressProxy},
+			SandboxEnv{Name: "HTTP_PROXY", Value: req.EgressProxy},
+			SandboxEnv{Name: "HTTPS_PROXY", Value: req.EgressProxy},
+			SandboxEnv{Name: "no_proxy", Value: "localhost,127.0.0.1"},
+			SandboxEnv{Name: "NO_PROXY", Value: "localhost,127.0.0.1"})
 	}
-	return spec, nil
+
+	// Trust every tree inside the container for git. Even running as the tree's
+	// owner, a linked worktree resolves its .git to a SEPARATELY mounted gitdir
+	// whose ownership git checks independently, so a plain `git status` still
+	// trips "detected dubious ownership" and refuses -- which breaks the
+	// delegate's git-based inspection of its own worktree. The container is a
+	// single-purpose sandbox holding only the mounted trees, so trusting all of
+	// them is safe. These are inherited by every exec, so plain `git` works
+	// without the caller adding -c safe.directory.
+	spec.Env = append(spec.Env,
+		SandboxEnv{Name: "GIT_CONFIG_COUNT", Value: "1"},
+		SandboxEnv{Name: "GIT_CONFIG_KEY_0", Value: "safe.directory"},
+		SandboxEnv{Name: "GIT_CONFIG_VALUE_0", Value: "*"})
+
+	spec.User = req.RunAsUser
+	return nil
 }
 
 // ValidateSandboxSpec re-checks a specification against every invariant.
