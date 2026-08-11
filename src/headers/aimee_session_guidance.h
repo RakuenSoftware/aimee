@@ -23,12 +23,30 @@
 
 #include "agent_code_capabilities.h"
 
-/* Names aimee's retrieval tools so a co-registered agent fills a gap THROUGH
- * aimee -- symbol-scoped and graph-aware -- instead of raw-grepping the tree. */
+/* Fills a code gap THROUGH aimee -- symbol-scoped and graph-aware -- instead of
+ * raw-grepping the tree.
+ *
+ * NAMING THE TOOLS WAS NOT ENOUGH. This used to be a bare comma-separated list,
+ * `explore-with: find_symbol, lsp_references, ...`. Measured on CT 403 with the
+ * list demonstrably delivered (the model quoted it back on request): a gateway
+ * cell still made ZERO aimee calls by MCP or CLI and did all eight of its steps
+ * with find/cat/sed/grep. A list of unfamiliar names loses to a shell the model
+ * already knows how to drive.
+ *
+ * So each tool is stated as the SUBSTITUTION it makes, against the exact command
+ * it displaces. The agent is not being asked to learn a toolbox before it starts;
+ * it is being told which of its existing reflexes has a better answer here. The
+ * pairing is the whole point -- "find_symbol" means nothing to a model reaching
+ * for grep, whereas "grep for a definition -> find_symbol" is actionable at the
+ * moment the reflex fires. */
 #define AIMEE_GUIDANCE_EXPLORE_WITH_LINE                                                           \
-   "explore-with: " AIMEE_CODE_TOOL_FIND_SYMBOL ", lsp_references, "                               \
-   AIMEE_CODE_TOOL_AST_GREP_SEARCH ", " AIMEE_CODE_TOOL_INDEX                                      \
-   " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ", get_context_block, memory_get\n"
+   "explore-with: for CODE questions call these INSTEAD of a shell command -- "                    \
+   "grep/rg for a definition -> " AIMEE_CODE_TOOL_FIND_SYMBOL "; grep for callers -> "             \
+   "lsp_references; grep for a pattern or a repeated shape -> "                                    \
+   AIMEE_CODE_TOOL_AST_GREP_SEARCH "; find/ls to locate a file -> " AIMEE_CODE_TOOL_INDEX          \
+   " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID "; cat/sed a line range -> get_context_block; "     \
+   "what was decided before -> memory_get. Shell stays right for building, running "               \
+   "tests, and editing.\n"
 
 /* The scope policy. explore-with names the tools; it does not say WHEN one
  * matters, and a list alone does not get reached for. Measured on t08_traversal
