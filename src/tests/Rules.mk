@@ -518,8 +518,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-cli-session-pty \
                $(TESTPREFIX)/unit-test-cli-codex \
                $(TESTPREFIX)/unit-test-delegate-backend \
-               $(TESTPREFIX)/unit-test-delegate-backend-local \
-               $(TESTPREFIX)/unit-test-delegate-backend-ssh \
                $(TESTPREFIX)/unit-test-delegate-backend-docker \
                $(TESTPREFIX)/unit-test-session-compact \
                $(TESTPREFIX)/unit-test-embedder-catalog \
@@ -1873,8 +1871,7 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
 	                                $(OBJDIR)/cmd_init.o \
 	                                $(OBJDIR)/server/server_trigger.o $(OBJDIR)/tests/support/trigger_proposals_stub.o $(OBJDIR)/db1/db1_trigger.o \
 	                                $(OBJDIR)/db1/pipelines.o $(OBJDIR)/db1/token_audit.o \
-	                                $(OBJDIR)/modules/delegates/delegate_backend.o $(OBJDIR)/modules/delegates/delegate_backend_local.o \
-	                                $(OBJDIR)/modules/delegates/delegate_backend_ssh.o $(OBJDIR)/modules/delegates/delegate_backend_docker.o \
+	                                $(OBJDIR)/modules/delegates/delegate_backend.o 	                                $(OBJDIR)/modules/delegates/delegate_backend_docker.o \
 	                                $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
 	                                $(OBJDIR)/server/anthropic_profile.o	                                $(OBJDIR)/server/openrouter_profile.o $(OBJDIR)/server/ollama_profile.o \
 	                                $(OBJDIR)/server/llama_native_profile.o $(OBJDIR)/server/mistral_profile.o \
@@ -3980,12 +3977,6 @@ $(TESTPREFIX)/unit-test-workspace-client-base: $(OBJDIR)/tests/test_workspace_cl
                       $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-# Gated live integration test (NOT in unit-tests / verify): drives the broker
-# against a real authenticated git remote. Build + run via `make forge-cred-integration`.
-$(TESTPREFIX)/forge-cred-live: $(OBJDIR)/tests/test_forge_credentials_live.o \
-                      $(OBJDIR)/modules/git/forge_credentials.o
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
-
 $(TESTPREFIX)/unit-test-workspace-provider-detached: \
                       $(OBJDIR)/tests/test_workspace_provider_detached.o \
                       $(OBJDIR)/modules/workspace/workspace_provider_detached.o \
@@ -5922,19 +5913,6 @@ $(TESTPREFIX)/unit-test-cli-codex: $(OBJDIR)/tests/test_cli_codex.o \
 
 $(TESTPREFIX)/unit-test-delegate-backend: $(OBJDIR)/tests/test_delegate_backend.o \
                      $(OBJDIR)/modules/delegates/delegate_backend.o \
-                     $(PLATFORM_BASIC_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-delegate-backend-local: $(OBJDIR)/tests/test_delegate_backend_local.o \
-                      $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
-                     $(OBJDIR)/modules/delegates/delegate_backend.o \
-                     $(OBJDIR)/modules/delegates/delegate_backend_local.o \
-                     $(PLATFORM_BASIC_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-delegate-backend-ssh: $(OBJDIR)/tests/test_delegate_backend_ssh.o \
-                     $(OBJDIR)/modules/delegates/delegate_backend.o \
-                     $(OBJDIR)/modules/delegates/delegate_backend_ssh.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
