@@ -19,7 +19,7 @@
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "c391e01cf751ee84c599d297d4e1a4f31eb212a26c2db80fb2913a255cb9ce02"
+          "sha256": "ab88ce20ebbac5f89b8e58410958751429d41bc506b33f6907f237e12cca62c3"
         }
       ]
     },
@@ -1099,7 +1099,7 @@
         },
         {
           "path": "src/headers/server.h",
-          "sha256": "444491cacc15dbb153c9137918dab4216dfca029ebb1559a5efc80d108bf47ac"
+          "sha256": "a1fb249dc78445a73e431b6540935d6ff4bc6aa077e9eb35fddc43f63f5e425a"
         },
         {
           "path": "src/headers/server_cli_oauth.h",
@@ -1538,6 +1538,10 @@
           "sha256": "3e35decd59ed6a9178628ecff0b8b61a83c75256b1b8ccdc5ba0866edcb6026f"
         },
         {
+          "path": "src/modules/protocols/include/aimee/protocols/mcp/mcp_group_tool.h",
+          "sha256": "8e548fc21808e4143b7843653d6fff3e68d569f56c461dbbfbefcbf82ae5c249"
+        },
+        {
           "path": "src/modules/protocols/include/aimee/protocols/mcp/mcp_tools.h",
           "sha256": "b915c88c9a37c2b82cef7880b00387c8afac71534d3b532651d5663b9829e869"
         },
@@ -1616,7 +1620,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "58a2e27e8034f2454185673eed1743591c54da8dd08af8466c6a2168dd8c3cd2",
+      "sha256": "bf9d165ffab2a046a2c0265e13f7949753fba67a8901650a340ec2d0d90b1d0c",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
