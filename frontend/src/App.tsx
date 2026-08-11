@@ -8,7 +8,7 @@ import Logs from './pages/Logs';
 import EditWorkflows from './pages/EditWorkflows';
 import WorkflowActions from './pages/WorkflowActions';
 import Providers from './pages/Providers';
-import Agents from './pages/Agents';
+import Models from './pages/Models';
 import Personas from './pages/Personas';
 import Roles from './pages/Roles';
 import Roundtable from './pages/Roundtable';
@@ -262,8 +262,11 @@ export default function App() {
                 <Route path="/edit-workflows" element={<EditWorkflows />} />
                 <Route path="/workflow-actions" element={<WorkflowActions />} />
                 <Route path="/providers" element={<Providers />} />
-                <Route path="/agents" element={<Agents />} />
-                <Route path="/delegates" element={<Navigate to="/agents" replace />} />
+                <Route path="/models" element={<Models />} />
+                {/* Pre-rename routes: the roster tab was "Agents" (and "delegates"
+                    before that). Keep both redirecting so bookmarks survive. */}
+                <Route path="/agents" element={<Navigate to="/models" replace />} />
+                <Route path="/delegates" element={<Navigate to="/models" replace />} />
                 <Route path="/personas" element={<Personas />} />
                 <Route path="/roles" element={<Roles />} />
                 <Route path="/roundtable" element={<Roundtable />} />

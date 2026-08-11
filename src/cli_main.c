@@ -798,7 +798,7 @@ static int cli_delegate_probe(void)
    cJSON *req = cJSON_CreateObject();
    if (!req)
       return -1;
-   cJSON_AddStringToObject(req, "method", "agent.list");
+   cJSON_AddStringToObject(req, "method", "model.list");
    /* Transport selection is exclusive: a configured remote must receive the
     * probe instead of probing the co-located UDS before the real command is
     * forwarded remotely.  Otherwise every ordinary thin-client invocation

@@ -32,7 +32,7 @@ static void test_append_and_chain(void)
    assert(audit_worm_init_at(path) == 0);
    assert(audit_worm_append("primary", "u1", "tool.read", "v1-abc", "allow", "{\"k\":1}") == 0);
    assert(audit_worm_append("delegate", "mimo", "tool.write", "v1-def", "block", "{\"k\":2}") == 0);
-   assert(audit_worm_append("primary", "u1", "agent.set", "mimo", "allow", "{}") == 0);
+   assert(audit_worm_append("primary", "u1", "model.set", "mimo", "allow", "{}") == 0);
    assert(audit_worm_count() == 3);
    char err[128];
    assert(audit_worm_verify_chain(err, sizeof err) == 0);

@@ -1,6 +1,6 @@
 /* Providers — the operator-facing view of "where models come from".
  *
- * The Agents tab lists RUNTIME TARGETS: one row per (endpoint, model) pair. That
+ * The Models tab lists RUNTIME TARGETS: one row per (endpoint, model) pair. That
  * is what routing schedules, but it is not how anyone thinks about their setup.
  * An operator has a handful of providers and picks models from each, so this
  * page groups the same records by provider and nests its models underneath.
@@ -24,8 +24,8 @@ import {
   Button,
 } from "@rakuensoftware/smoothgui";
 
-/* One runtime target, as GET /api/agents reports it (server_agent_to_json). */
-interface AgentCfg {
+/* One runtime target, as GET /api/models reports it (server_agent_to_json). */
+interface ModelCfg {
   name: string;
   endpoint: string;
   model: string;
@@ -66,7 +66,7 @@ interface DiscoveredModel {
 interface ProviderGroup {
   provider: string;
   endpoint: string;
-  models: AgentCfg[];
+  models: ModelCfg[];
 }
 
 async function getJSON<T>(url: string): Promise<T> {
@@ -98,7 +98,7 @@ const inp: React.CSSProperties = {
  * than provider alone: the same vendor can legitimately be configured twice --
  * a direct account and a gateway that resells it -- and collapsing those would
  * put one provider's models under the other's credentials. */
-export function groupByProvider(agents: AgentCfg[]): ProviderGroup[] {
+export function groupByProvider(agents: ModelCfg[]): ProviderGroup[] {
   const byKey = new Map<string, ProviderGroup>();
   for (const a of agents) {
     const key = `${a.provider} ${a.endpoint}`;
@@ -166,7 +166,7 @@ function ModelEditor({
   onSaved,
   onStatus,
 }: {
-  agent: AgentCfg;
+  agent: ModelCfg;
   onClose: () => void;
   onSaved: () => void;
   onStatus: (msg: string, ok: boolean) => void;
@@ -207,7 +207,7 @@ function ModelEditor({
     args.push("--price-out", priceOut.trim());
     args.push("--price-cached", priceCached.trim());
     try {
-      const res = await postArgs<{ error?: string }>("/api/agents/set", args);
+      const res = await postArgs<{ error?: string }>("/api/models/set", args);
       if (res.error) setErr(res.error);
       else {
         onStatus(`${agent.model} saved`, true);
@@ -336,7 +336,7 @@ function AddModel({
      * model, so a GUI-created target and a config-created one are the same shape. */
     const name = `${group.provider}:${id}`;
     try {
-      const res = await postArgs<{ error?: string }>("/api/agents/add", [
+      const res = await postArgs<{ error?: string }>("/api/models/add", [
         name, group.endpoint, id, "--provider", group.provider,
       ]);
       if (res.error) setErr(res.error);
@@ -409,16 +409,16 @@ function AddModel({
 }
 
 export default function Providers() {
-  const [agents, setAgents] = useState<AgentCfg[]>([]);
+  const [agents, setAgents] = useState<ModelCfg[]>([]);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
-  const [editing, setEditing] = useState<AgentCfg | null>(null);
+  const [editing, setEditing] = useState<ModelCfg | null>(null);
   const [adding, setAdding] = useState<ProviderGroup | null>(null);
 
   const refresh = useCallback(() => {
     setLoading(true);
-    getJSON<{ agents: AgentCfg[] }>("/api/agents")
-      .then((d) => setAgents(d.agents || []))
+    getJSON<{ models?: ModelCfg[]; agents?: ModelCfg[] }>("/api/models")
+      .then((d) => setAgents(d.models || d.agents || []))
       .catch(() => setAgents([]))
       .finally(() => setLoading(false));
   }, []);
@@ -441,7 +441,7 @@ export default function Providers() {
       </div>
 
       {!loading && !groups.length && (
-        <EmptyState message="No providers configured yet — add one from the Agents tab." />
+        <EmptyState message="No providers configured yet — add one from the Models tab." />
       )}
 
       {groups.map((g) => (

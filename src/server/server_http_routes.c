@@ -252,7 +252,7 @@ static int management_apply(void *ctx, const server_mgmt_action_t *a)
    uint32_t required = server_capability_for_method(a->action);
    if (!required)
       return 1;
-   return server_agent_management_set_enabled(a->agent, !strcmp(a->action, "agent.enable")) == 0
+   return server_agent_management_set_enabled(a->agent, !strcmp(a->action, "model.enable")) == 0
               ? 0
               : 1;
 }
@@ -1940,25 +1940,25 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/jobs/status", NULL, RM_EXACT, "jobs.status", 0, rh_dispatch_op},
     {"POST", "/v1/jobs/logs", NULL, RM_EXACT, "jobs.logs", 0, rh_dispatch_op},
     {"POST", "/v1/jobs/cancel", NULL, RM_EXACT, "jobs.cancel", 0, rh_dispatch_op},
-    {"GET", "/v1/agent/list", NULL, RM_EXACT, "agent.list", 0, rh_dispatch_op},
-    {"GET", "/v1/agent/local", NULL, RM_EXACT, "agent.local", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/add", NULL, RM_EXACT, "agent.add", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/remove", NULL, RM_EXACT, "agent.remove", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/enable", NULL, RM_EXACT, "agent.enable", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/roles", NULL, RM_EXACT, "agent.roles", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/personas", NULL, RM_EXACT, "agent.personas", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/set", NULL, RM_EXACT, "agent.set", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/disable", NULL, RM_EXACT, "agent.disable", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/probe", NULL, RM_EXACT, "agent.probe", 0, rh_dispatch_op},
-    {"GET", "/v1/agent/stats", NULL, RM_EXACT, "agent.stats", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/draft", NULL, RM_EXACT, "agent.draft", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/setup", NULL, RM_EXACT, "agent.setup", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/setup_poll", NULL, RM_EXACT, "agent.setup_poll", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/cli_oauth_start", NULL, RM_EXACT, "agent.cli_oauth_start", 0,
+    {"GET", "/v1/model/list", NULL, RM_EXACT, "model.list", 0, rh_dispatch_op},
+    {"GET", "/v1/model/local", NULL, RM_EXACT, "model.local", 0, rh_dispatch_op},
+    {"POST", "/v1/model/add", NULL, RM_EXACT, "model.add", 0, rh_dispatch_op},
+    {"POST", "/v1/model/remove", NULL, RM_EXACT, "model.remove", 0, rh_dispatch_op},
+    {"POST", "/v1/model/enable", NULL, RM_EXACT, "model.enable", 0, rh_dispatch_op},
+    {"POST", "/v1/model/roles", NULL, RM_EXACT, "model.roles", 0, rh_dispatch_op},
+    {"POST", "/v1/model/personas", NULL, RM_EXACT, "model.personas", 0, rh_dispatch_op},
+    {"POST", "/v1/model/set", NULL, RM_EXACT, "model.set", 0, rh_dispatch_op},
+    {"POST", "/v1/model/disable", NULL, RM_EXACT, "model.disable", 0, rh_dispatch_op},
+    {"POST", "/v1/model/probe", NULL, RM_EXACT, "model.probe", 0, rh_dispatch_op},
+    {"GET", "/v1/model/stats", NULL, RM_EXACT, "model.stats", 0, rh_dispatch_op},
+    {"POST", "/v1/model/draft", NULL, RM_EXACT, "model.draft", 0, rh_dispatch_op},
+    {"POST", "/v1/model/setup", NULL, RM_EXACT, "model.setup", 0, rh_dispatch_op},
+    {"POST", "/v1/model/setup_poll", NULL, RM_EXACT, "model.setup_poll", 0, rh_dispatch_op},
+    {"POST", "/v1/model/cli_oauth_start", NULL, RM_EXACT, "model.cli_oauth_start", 0,
      rh_dispatch_op},
-    {"POST", "/v1/agent/cli_oauth_code", NULL, RM_EXACT, "agent.cli_oauth_code", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/cli_oauth_poll", NULL, RM_EXACT, "agent.cli_oauth_poll", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/episodes", NULL, RM_EXACT, "agent.episodes", 0, rh_dispatch_op},
+    {"POST", "/v1/model/cli_oauth_code", NULL, RM_EXACT, "model.cli_oauth_code", 0, rh_dispatch_op},
+    {"POST", "/v1/model/cli_oauth_poll", NULL, RM_EXACT, "model.cli_oauth_poll", 0, rh_dispatch_op},
+    {"POST", "/v1/model/episodes", NULL, RM_EXACT, "model.episodes", 0, rh_dispatch_op},
     {"GET", "/v1/episode/list", NULL, RM_EXACT, "episode.list", 0, rh_dispatch_op},
 
     /* provider.* / model.* / api.* (op-parity wave 3). */
@@ -1969,9 +1969,9 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/provider/set", NULL, RM_EXACT, "provider.set", 0, rh_dispatch_op},
     {"POST", "/v1/provider/quota", NULL, RM_EXACT, "provider.quota", 0, rh_dispatch_op},
     {"POST", "/v1/provider/test", NULL, RM_EXACT, "provider.test", 0, rh_dispatch_op},
-    {"GET", "/v1/model/list", NULL, RM_EXACT, "model.list", 0, rh_dispatch_op},
-    {"GET", "/v1/model/show", NULL, RM_EXACT, "model.show", 0, rh_dispatch_op},
-    {"POST", "/v1/model/refresh", NULL, RM_EXACT, "model.refresh", 0, rh_dispatch_op},
+    {"GET", "/v1/catalog/list", NULL, RM_EXACT, "catalog.list", 0, rh_dispatch_op},
+    {"GET", "/v1/catalog/show", NULL, RM_EXACT, "catalog.show", 0, rh_dispatch_op},
+    {"POST", "/v1/catalog/refresh", NULL, RM_EXACT, "catalog.refresh", 0, rh_dispatch_op},
     {"GET", "/v1/api/status", NULL, RM_EXACT, "api.status", 0, rh_dispatch_op},
     {"POST", "/v1/api/enable", NULL, RM_EXACT, "api.enable", 0, rh_dispatch_op},
     {"POST", "/v1/api/rotate_bearer", NULL, RM_EXACT, "api.rotate_bearer", 0, rh_dispatch_op},

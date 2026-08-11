@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@rakuensoftware/smoothgui';
 
-/* Provider chooser — wizard page 1 AND the Agents tab's "add delegate" first
+/* Provider chooser — wizard page 1 AND the Models tab's "add model" first
  * window. Four supported providers, two shapes:
  *
  *   API key      → agent.add (Anthropic API, OpenAI-compatible API)
@@ -12,12 +12,12 @@ import { Button } from '@rakuensoftware/smoothgui';
  *   'primary'  (wizard default) — the agent becomes the GLOBAL default (the one
  *              resolve_primary drives): agent.add --default, and the OAuth flow
  *              promotes the vendor agent via agent.set --default.
- *   'delegate' (Agents tab) — a named roster entry, NOT the default: the API
+ *   'delegate' (Models tab) — a named roster entry, NOT the default: the API
  *              form collects a delegate name + roles, and the OAuth flow leaves
  *              the registered vendor agent unpromoted.
  *
- * Every write goes through an existing endpoint — /api/agents/add,
- * /api/agents/set, and the /api/agents/oauth/* proxies — so there is no new
+ * Every write goes through an existing endpoint — /api/models/add,
+ * /api/models/set, and the /api/models/oauth/* proxies — so there is no new
  * config surface. In primary mode, on success we also stamp the legacy
  * `provider` config breadcrumb so the wizard summary + header chip (which read
  * config, not the agent roster) reflect that a primary now exists.
@@ -127,7 +127,7 @@ export interface PrimaryChooserProps {
    * it into config as the legacy breadcrumb). */
   onConfigured: (provider: string) => void | Promise<void>;
   /** 'primary' (default): the wizard's add-and-make-default. 'delegate': the
-   * Agents tab's add — a named, non-default roster entry. */
+   * Models tab's add — a named, non-default roster entry. */
   mode?: 'primary' | 'delegate';
 }
 
@@ -208,7 +208,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
         args.push('--default');
       }
       args.push('--primary-only', primaryOnly ? 'on' : 'off');
-      await postJSON('/api/agents/add', { args });
+      await postJSON('/api/models/add', { args });
       await onConfigured(apiSpec.provider);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not add the agent.');
@@ -220,7 +220,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
   const pollOnce = useCallback(async (vendor: string, session: string): Promise<'pending' | 'authenticated' | 'failed'> => {
     try {
       const r = await postJSON<{ state?: string; agent?: string; error?: string }>(
-        '/api/agents/oauth/poll', { vendor, session });
+        '/api/models/oauth/poll', { vendor, session });
       if (r.state === 'authenticated') {
         // Apply the operator's "Primary Agent Only" choice to the freshly
         // OAuth-registered agent (the server registers a claude subscription
@@ -229,7 +229,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
         const agent = r.agent || vendor;
         const setArgs = [agent, '--primary-only', primaryOnly ? 'on' : 'off'];
         if (!delegate) setArgs.push('--default');
-        await postJSON('/api/agents/set', { args: setArgs });
+        await postJSON('/api/models/set', { args: setArgs });
         return 'authenticated';
       }
       if (r.state === 'failed') { setError(r.error || 'Login failed or timed out.'); return 'failed'; }
@@ -258,7 +258,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
     setError('');
     try {
       const r = await postJSON<{ url: string; code?: string; session: string; needs_code_back?: boolean }>(
-        '/api/agents/oauth/start', { vendor: subSpec.vendor });
+        '/api/models/oauth/start', { vendor: subSpec.vendor });
       const st: OauthState = {
         session: r.session, url: r.url, code: r.code || '', needsCodeBack: !!r.needs_code_back,
       };
@@ -279,7 +279,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
     setBusy(true);
     setError('');
     try {
-      await postJSON('/api/agents/oauth/code', {
+      await postJSON('/api/models/oauth/code', {
         vendor: subSpec.vendor, session: oauth.session, code: codeBack.trim(),
       });
       setBusy(false);
@@ -297,7 +297,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
         <p style={{ fontSize: 13, color: '#556', margin: '0 0 2px' }}>
           {delegate
             ? 'Pick the provider for this delegate.'
-            : 'Pick the primary model aimee drives. You can change it later on the Agents tab.'}
+            : 'Pick the primary model aimee drives. You can change it later on the Models tab.'}
         </p>
         {API_SPECS.map((s) => (
           <button key={s.kind} onClick={() => chooseApi(s)} style={cardStyle}>

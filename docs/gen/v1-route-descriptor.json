@@ -4,168 +4,6 @@
   "route_count": 351,
   "routes": [
     {
-      "verb": "POST",
-      "path": "/v1/agent/add",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.add",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "POST",
-      "path": "/v1/agent/cli_oauth_code",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.cli_oauth_code",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "POST",
-      "path": "/v1/agent/cli_oauth_poll",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.cli_oauth_poll",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "POST",
-      "path": "/v1/agent/cli_oauth_start",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.cli_oauth_start",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "POST",
-      "path": "/v1/agent/disable",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.disable",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "POST",
-      "path": "/v1/agent/draft",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.draft",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "POST",
-      "path": "/v1/agent/enable",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.enable",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "POST",
-      "path": "/v1/agent/episodes",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.episodes",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "GET",
-      "path": "/v1/agent/list",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.list",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "GET",
-      "path": "/v1/agent/local",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.local",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "POST",
-      "path": "/v1/agent/personas",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.personas",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "POST",
-      "path": "/v1/agent/probe",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.probe",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "POST",
-      "path": "/v1/agent/remove",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.remove",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "POST",
-      "path": "/v1/agent/roles",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.roles",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "POST",
-      "path": "/v1/agent/set",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.set",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "POST",
-      "path": "/v1/agent/setup",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.setup",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "POST",
-      "path": "/v1/agent/setup_poll",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.setup_poll",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
-      "verb": "GET",
-      "path": "/v1/agent/stats",
-      "suffix": null,
-      "match": "exact",
-      "op": "agent.stats",
-      "caps": "0",
-      "handler": "rh_dispatch_op"
-    },
-    {
       "verb": "GET",
       "path": "/v1/agents",
       "suffix": null,
@@ -362,6 +200,33 @@
       "op": null,
       "caps": "0",
       "handler": "rh_capabilities"
+    },
+    {
+      "verb": "GET",
+      "path": "/v1/catalog/list",
+      "suffix": null,
+      "match": "exact",
+      "op": "catalog.list",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/catalog/refresh",
+      "suffix": null,
+      "match": "exact",
+      "op": "catalog.refresh",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "GET",
+      "path": "/v1/catalog/show",
+      "suffix": null,
+      "match": "exact",
+      "op": "catalog.show",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
     },
     {
       "verb": "POST",
@@ -1822,6 +1687,78 @@
       "handler": "rh_count_tokens"
     },
     {
+      "verb": "POST",
+      "path": "/v1/model/add",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.add",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/model/cli_oauth_code",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.cli_oauth_code",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/model/cli_oauth_poll",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.cli_oauth_poll",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/model/cli_oauth_start",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.cli_oauth_start",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/model/disable",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.disable",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/model/draft",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.draft",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/model/enable",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.enable",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/model/episodes",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.episodes",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
       "verb": "GET",
       "path": "/v1/model/list",
       "suffix": null,
@@ -1831,20 +1768,83 @@
       "handler": "rh_dispatch_op"
     },
     {
-      "verb": "POST",
-      "path": "/v1/model/refresh",
+      "verb": "GET",
+      "path": "/v1/model/local",
       "suffix": null,
       "match": "exact",
-      "op": "model.refresh",
+      "op": "model.local",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/model/personas",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.personas",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/model/probe",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.probe",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/model/remove",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.remove",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/model/roles",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.roles",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/model/set",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.set",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/model/setup",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.setup",
+      "caps": "0",
+      "handler": "rh_dispatch_op"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/model/setup_poll",
+      "suffix": null,
+      "match": "exact",
+      "op": "model.setup_poll",
       "caps": "0",
       "handler": "rh_dispatch_op"
     },
     {
       "verb": "GET",
-      "path": "/v1/model/show",
+      "path": "/v1/model/stats",
       "suffix": null,
       "match": "exact",
-      "op": "model.show",
+      "op": "model.stats",
       "caps": "0",
       "handler": "rh_dispatch_op"
     },

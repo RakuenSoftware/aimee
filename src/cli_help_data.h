@@ -108,8 +108,8 @@
      "  show <job_id>    Alias for status\n"
      "  logs <job_id>    Print the recorded delegate result/log body\n"
      "  cancel <job_id>  Cooperatively cancel a queued or running delegate job\n"},
-    {"model", "Model capability metadata", CLIENT_TIER_ADVANCED, 0,
-     "  list             List known models (--capability <name>, --open-weights)\n"
+    {"catalog", "Model capability metadata", CLIENT_TIER_ADVANCED, 0,
+     "  list             List catalogued models (--capability <name>, --open-weights)\n"
      "  show <model>     Show context, cost, flags, cutoff, deprecation\n"
      "  refresh          Refresh model metadata cache\n"},
     {"job", "Coordinated parallel job management", CLIENT_TIER_ADVANCED, 0,
@@ -123,16 +123,20 @@
      "  exec             Run a command through a backend\n"
      "                   --backend X --task-id Y [--image I] [--host H]\n"
      "                   [--no-hibernate] \"<cmd>\"\n"},
-    {"agent", "Sub-agent management", CLIENT_TIER_ADVANCED, 0,
-     "  list             List configured delegates\n"
-     "  add              Add or update a delegate provider\n"
-     "  setup            Run an agent provider's attended OAuth setup\n"
-     "  local            Register/update a local OpenAI-compatible delegate\n"
+    {"model", "Model roster management", CLIENT_TIER_ADVANCED, 0,
+     "  list             List configured models\n"
+     "  add              Add or update a model\n"
+     "  setup            Run a provider's attended OAuth setup\n"
+     "  local            Register/update a local OpenAI-compatible model\n"
      "                   (--provider openai|llama-eval for request shaping)\n"
-     "  remove           Remove a configured delegate\n"
-     "  enable           Enable a configured delegate\n"
-     "  disable          Disable a configured delegate\n"
-     "  probe            Probe delegate endpoint, slots, and execution\n"},
+     "  remove           Remove a configured model\n"
+     "  enable           Enable a configured model\n"
+     "  disable          Disable a configured model\n"
+     "  probe            Probe a model's endpoint, slots, and execution\n"},
+    {"agent", "Deprecated alias for `model`", CLIENT_TIER_ADVANCED, 0,
+     "  Every subcommand of `aimee model`, kept working under the old name.\n"
+     "  A roster entry is one (endpoint, model) target, so it is now a MODEL;\n"
+     "  `aimee catalog` is the separate per-model capability metadata.\n"},
     {"codex", "Codex OAuth recovery", CLIENT_TIER_ADVANCED, 0,
      "  reauth           Re-authenticate Codex after refresh is rejected\n"},
     {"persona", "Persona management", CLIENT_TIER_CORE, 0,

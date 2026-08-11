@@ -50,7 +50,15 @@ int server_mgmt_action_parse(const char *body, size_t body_len, server_mgmt_acti
    }
    int ok = fields == 2 && cJSON_IsString(action) && cJSON_IsString(agent) && action->valuestring &&
             agent->valuestring &&
-            (!strcmp(action->valuestring, "agent.enable") ||
+            /* INGRESS contract: an external control plane composes these action
+             * strings, so both spellings are accepted rather than renamed. The
+             * roster ops are `model.*` now, but a caller still emitting the
+             * pre-rename `agent.*` must keep working -- it is not redeployed in
+             * lockstep with this server. The value is echoed verbatim into the
+             * canonical form that gets digested, so neither is rewritten. */
+            (!strcmp(action->valuestring, "model.enable") ||
+             !strcmp(action->valuestring, "model.disable") ||
+             !strcmp(action->valuestring, "agent.enable") ||
              !strcmp(action->valuestring, "agent.disable"));
    size_t agent_len = ok ? strnlen(agent->valuestring, sizeof(out->agent)) : 0;
    if (!agent_len || agent_len >= sizeof(out->agent))

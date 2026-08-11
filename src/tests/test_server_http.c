@@ -1506,8 +1506,8 @@ int main(void)
        * only remote_writes>=data. Fail-closed at the default. */
       const char *exec_paths[] = {"/v1/delegate/launch",   "/v1/delegate/backend_exec",
                                   "/v1/roundtable/review", "/v1/cron/add",
-                                  "/v1/agent/add",         "/v1/worktree/gc",
-                                  "/v1/model/refresh",     "/v1/api/disable"};
+                                  "/v1/model/add",         "/v1/worktree/gc",
+                                  "/v1/catalog/refresh",   "/v1/api/disable"};
       for (size_t i = 0; i < sizeof(exec_paths) / sizeof(exec_paths[0]); i++)
       {
          assert(server_http_route_allowed(1, "plain", "POST", exec_paths[i],
@@ -2115,7 +2115,7 @@ int main(void)
           {"POST", "/v1/cron/add", "{\"name\":\"nightly\"}", "cron.add"},
           {"POST", "/v1/provider/set", "{\"name\":\"openai\"}", "provider.set"},
           {"POST", "/v1/wm/context", "{\"k\":\"v\"}", "wm.context"},
-          {"POST", "/v1/agent/add", "{\"name\":\"a\"}", "agent.add"},
+          {"POST", "/v1/model/add", "{\"name\":\"a\"}", "model.add"},
           {"POST", "/v1/mcp/audit", "{}", "mcp.audit"},
           {"GET", "/v1/cron", NULL, "cron.list"},
           {"GET", "/v1/provider/list", NULL, "provider.list"},

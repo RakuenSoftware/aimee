@@ -516,12 +516,12 @@ const AGENT_COLUMNS: Column<Agent>[] = [
   },
 ];
 
-function AgentsPanel({ data }: { data: Agent[] }) {
+function ModelsPanel({ data }: { data: Agent[] }) {
   return (
-    <Panel title="Agents" count={data.length}>
+    <Panel title="Models" count={data.length}>
       {data.length === 0 ? (
         <div style={{ padding: '12px', color: '#aaa', fontSize: '12px' }}>
-          No agents configured
+          No models configured
         </div>
       ) : (
         <DataTable columns={AGENT_COLUMNS} rows={data} rowKey={(_a, i) => i} />
@@ -840,7 +840,7 @@ interface PanelDef {
 
 const PANELS: PanelDef[] = [
   { id: 'readiness',   title: 'Readiness',        defaultOn: true,  render: d => <OnboardPanel data={d.onboard} /> },
-  { id: 'agents',      title: 'Agents',           defaultOn: true,  render: d => <AgentsPanel data={d.agents} /> },
+  { id: 'models',      title: 'Models',           defaultOn: true,  render: d => <ModelsPanel data={d.agents} /> },
   { id: 'sessions',    title: 'Active Sessions',  defaultOn: true,  render: d => <SessionsPanel data={d.sessions} /> },
   { id: 'delegations', title: 'Delegations',      defaultOn: true,  render: d => <DelegationsPanel data={d.delegations} /> },
   { id: 'metrics',     title: 'Metrics',          defaultOn: true,  render: d => <MetricsPanel data={d.metrics} /> },
@@ -867,11 +867,16 @@ function defaultLayout(): string[] {
   return PANELS.filter(p => p.defaultOn).map(p => p.id);
 }
 
-function loadLayout(): string[] {
+/* Panel ids that have been renamed. A saved layout is filtered against PANELS,
+ * so without this map an id from before a rename is simply dropped and the user
+ * silently loses that panel from a layout they chose. */
+const RENAMED_PANEL_IDS: Record<string, string> = { agents: 'models' };
+
+export function loadLayout(): string[] {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
     if (!raw) return defaultLayout();
-    const ids = JSON.parse(raw) as string[];
+    const ids = (JSON.parse(raw) as string[]).map(id => RENAMED_PANEL_IDS[id] ?? id);
     const valid = ids.filter(id => PANELS.some(p => p.id === id));
     return valid.length ? valid : defaultLayout();
   } catch {

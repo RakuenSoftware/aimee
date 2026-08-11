@@ -16,7 +16,7 @@ import (
 func TestCliOauthHandlerProxies(t *testing.T) {
 	var gotBody map[string]any
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/agent/cli_oauth_start", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/model/cli_oauth_start", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		fmt.Fprint(w, `{"status":"ok","vendor":"claude","url":"https://auth.example/x","session":"s1","needs_code_back":true}`)
 	})
@@ -24,7 +24,7 @@ func TestCliOauthHandlerProxies(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/oauth/start", strings.NewReader(`{"vendor":"claude"}`))
-	s.cliOauthHandler("agent.cli_oauth_start", 5*time.Second)(rr, req)
+	s.cliOauthHandler("model.cli_oauth_start", 5*time.Second)(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("code=%d body=%q", rr.Code, rr.Body.String())
@@ -32,7 +32,7 @@ func TestCliOauthHandlerProxies(t *testing.T) {
 	if gotBody["vendor"] != "claude" {
 		t.Fatalf("forwarded vendor=%v want claude", gotBody["vendor"])
 	}
-	if gotBody["method"] != "agent.cli_oauth_start" {
+	if gotBody["method"] != "model.cli_oauth_start" {
 		t.Fatalf("forwarded method=%v", gotBody["method"])
 	}
 	var out map[string]any
@@ -52,7 +52,7 @@ func TestCliOauthHandlerProxies(t *testing.T) {
 func TestCliOauthHandlerForwardsSessionAndCode(t *testing.T) {
 	var gotBody map[string]any
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/agent/cli_oauth_code", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/model/cli_oauth_code", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
@@ -61,7 +61,7 @@ func TestCliOauthHandlerForwardsSessionAndCode(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/oauth/code",
 		strings.NewReader(`{"vendor":"claude","session":"s1","code":"ABC-123"}`))
-	s.cliOauthHandler("agent.cli_oauth_code", 5*time.Second)(rr, req)
+	s.cliOauthHandler("model.cli_oauth_code", 5*time.Second)(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("code=%d body=%q", rr.Code, rr.Body.String())
@@ -76,12 +76,12 @@ func TestCliOauthHandlerForwardsSessionAndCode(t *testing.T) {
 func TestCliOauthHandlerRejectsMissingVendor(t *testing.T) {
 	called := false
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/agent/cli_oauth_start", func(http.ResponseWriter, *http.Request) { called = true })
+	mux.HandleFunc("/v1/model/cli_oauth_start", func(http.ResponseWriter, *http.Request) { called = true })
 	s := &server{cfg: startFakeV1(t, mux)}
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/agents/oauth/start", strings.NewReader(`{}`))
-	s.cliOauthHandler("agent.cli_oauth_start", 5*time.Second)(rr, req)
+	s.cliOauthHandler("model.cli_oauth_start", 5*time.Second)(rr, req)
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("code=%d want 400", rr.Code)

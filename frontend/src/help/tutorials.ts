@@ -71,14 +71,14 @@ export const TAB_TUTORIALS: Record<string, Tutorial> = {
       'Every figure is badged with where it came from: “declared” is a value you set, “resolved” came from the provider, “unknown” means nobody has supplied one.',
       'Leave a field empty to state nothing about it. A price of 0 is different: it says the seat costs nothing per token.',
     ],
-    seeAlso: '/agents',
+    seeAlso: '/models',
   },
-  '/agents': {
-    title: 'Agents',
+  '/models': {
+    title: 'Models',
     body: [
-      'Your delegates and their run history and stats.',
-      'Edit a delegate’s persona and the roles it may use.',
-      'Roles are the routing key matched between personas and agents.',
+      'Every model aimee can route to, with its run history and stats.',
+      'Edit a model’s persona bindings and the roles it may serve.',
+      'Roles are the routing key matched between personas and models.',
     ],
     seeAlso: '/personas',
   },
@@ -87,9 +87,9 @@ export const TAB_TUTORIALS: Record<string, Tutorial> = {
     body: [
       'The shared ROLE vocabulary plus the PERSONA definitions.',
       'Edit who aimee can be (identity + allowed roles) and what each role means.',
-      'Agents binds these personas and roles to actual work.',
+      'Models binds these personas and roles to actual work.',
     ],
-    seeAlso: '/agents',
+    seeAlso: '/models',
   },
   '/roles': {
     title: 'Roles',
@@ -108,7 +108,7 @@ export const TAB_TUTORIALS: Record<string, Tutorial> = {
       'loop knobs (rounds, convergence, deadline, turns) plus authoring-pipeline caps.',
       'Save several named presets and pick one as the active default.',
     ],
-    seeAlso: '/agents',
+    seeAlso: '/models',
   },
   '/projects': {
     title: 'Projects',

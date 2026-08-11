@@ -181,8 +181,8 @@ export default function Roundtable() {
 
   useEffect(() => {
     refresh();
-    getJSON<{ agents?: { name: string }[] }>("/api/agents")
-      .then((d) => setModels((d.agents || []).map((a) => a.name).filter(Boolean).sort()))
+    getJSON<{ models?: { name: string }[]; agents?: { name: string }[] }>("/api/models")
+      .then((d) => setModels((d.models || d.agents || []).map((a) => a.name).filter(Boolean).sort()))
       .catch(() => setModels([]));
     getJSON<{ personas?: { name: string }[] }>("/api/chat/personas")
       .then((d) => setPersonas((d.personas || []).map((p) => p.name).filter(Boolean).sort()))

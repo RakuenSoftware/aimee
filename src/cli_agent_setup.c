@@ -246,7 +246,7 @@ static int oauth_state_is_pending(const char *state)
 static int setup_oauth_cli_cmd(const char *vendor, int json_output)
 {
    const char *sock = NULL;
-   if (setup_ensure_server("agent.cli_oauth_start", &sock) != 0)
+   if (setup_ensure_server("model.cli_oauth_start", &sock) != 0)
       return 1;
 
    fprintf(stderr, "\n=== %s server-hosted OAuth setup ===\n", vendor);
@@ -255,7 +255,7 @@ static int setup_oauth_cli_cmd(const char *vendor, int json_output)
                    "minutes — please wait)\n");
 
    cJSON *started =
-       setup_oauth_rpc("agent.cli_oauth_start", vendor, NULL, NULL, OAUTH_START_TIMEOUT_MS);
+       setup_oauth_rpc("model.cli_oauth_start", vendor, NULL, NULL, OAUTH_START_TIMEOUT_MS);
    if (!started)
    {
       /* A NULL here is a transport failure or a timeout — not necessarily an
@@ -316,7 +316,7 @@ static int setup_oauth_cli_cmd(const char *vendor, int json_output)
          fprintf(stderr, "aimee agent setup: an authorization code is required\n");
          goto done;
       }
-      cJSON *r = setup_oauth_rpc("agent.cli_oauth_code", vendor, session, code, 60000);
+      cJSON *r = setup_oauth_rpc("model.cli_oauth_code", vendor, session, code, 60000);
       secure_zero(code, sizeof(code));
       if (!r)
          goto done;
@@ -331,7 +331,7 @@ static int setup_oauth_cli_cmd(const char *vendor, int json_output)
       fprintf(stderr, ".");
       fflush(stderr);
       sleep(OAUTH_POLL_INTERVAL_S);
-      cJSON *pr = setup_oauth_rpc("agent.cli_oauth_poll", vendor, session, NULL, 60000);
+      cJSON *pr = setup_oauth_rpc("model.cli_oauth_poll", vendor, session, NULL, 60000);
       if (!pr)
       {
          /* Transient failure or unreachable server: bound the retries so a server
