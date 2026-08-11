@@ -255,7 +255,7 @@
         },
         {
           "path": "src/headers/aimee_session_guidance.h",
-          "sha256": "3e7b558d6b91e2abff0f773a0e8e628cf7cd3b5534ecbd8100b35abcd6c8091b"
+          "sha256": "54fa94e4f656d731b7be171cab1ef9c27b75fe3caf650d390460c3cf28fab623"
         },
         {
           "path": "src/headers/aimee_sha256.h",
@@ -1612,7 +1612,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "d2a8e7f1fcefbd8ed2d9a449ad50357d666a7368f60279d2f9edf8d2803cf76a",
+      "sha256": "2d6ed9fcd224f83a72ae69ba1b0389aa052321cbb3bc2c757e744b1e429f448c",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
