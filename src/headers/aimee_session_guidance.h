@@ -57,17 +57,21 @@
  * memory_recall -- the name that IS shown -- not the memory_get named here. It was
  * routing around the advice.
  *
- * get_context_block is the omission that matters and is NOT fixed by editing this
- * string: it is the only tool returning CODE rather than a file:line pointer, so
- * without it a "read this file and change it" task needs a shell read regardless.
- * Promoting it into the shown surface changes what aimee presents by default and
- * has to be decided as such. */
+ * READING CODE was the gap this line failed to close, and it turned out to be a
+ * naming problem rather than a missing capability. `index command=span` resolves
+ * to code_span_get, which returns the span CONTENT plus a source_version hash --
+ * actual code, not a file:line pointer -- and `index` is on the shown surface, so
+ * it costs ONE call. The guidance instead named get_context_block, which is not
+ * callable by that name at all (it is a member of the `recall` family, and
+ * `recall` is not shown either), so the one substitution that matters for "read
+ * this file and change it" was the one an agent could not act on. */
 #define AIMEE_GUIDANCE_EXPLORE_WITH_LINE                                                           \
    "explore-with: for CODE questions call these INSTEAD of a shell command -- "                    \
    "grep/rg for a definition -> " AIMEE_CODE_TOOL_FIND_SYMBOL                                      \
    "; grep for a pattern or a repeated shape -> " AIMEE_CODE_TOOL_AST_GREP_SEARCH                  \
    "; find/ls, or any search that is not a symbol name -> " AIMEE_CODE_TOOL_INDEX                  \
-   " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID "; what else depends on this -> "                   \
+   " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID "; cat/sed a file or a line range -> "               \
+   AIMEE_CODE_TOOL_INDEX " command=span; what else depends on this -> "                            \
    AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS "; what was decided before -> memory_recall. "             \
    "Shell stays right for building, running tests, and editing.\n"
 
