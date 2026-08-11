@@ -710,4 +710,64 @@ static inline int aimee_delegates_imgspec_response_decode(const uint8_t *in, siz
    return 0;
 }
 
+/* --- Isolation verdict (stage 14): what a container's network report means ---
+ *
+ * The caller runs the probe; the module reads it and judges. Reading and
+ * judging are one rule because the whole difficulty is that "the probe failed"
+ * and "the sandbox is open" look identical from the caller's side. */
+
+#define AIMEE_DELEGATES_EVENT_ISOLATION          6670u
+#define AIMEE_DELEGATES_STAGE_ISOLATION          14u
+#define AIMEE_DELEGATES_ISOLATION_REQUEST_MAGIC  0x51534944u /* "DISQ" */
+#define AIMEE_DELEGATES_ISOLATION_RESPONSE_MAGIC 0x53534944u /* "DISS" */
+#define AIMEE_DELEGATES_ISOLATION_HEADER_LEN     16u
+#define AIMEE_DELEGATES_ISOLATION_PROBE_FAILED   1u
+#define AIMEE_DELEGATES_ISOLATION_REQUIRE        2u
+#define AIMEE_DELEGATES_ISOLATION_REPORT_MAX     (1u << 16)
+
+static inline size_t aimee_delegates_isolation_request_encode(const char *report, int probe_failed,
+                                                              int require_isolation, uint8_t *out,
+                                                              size_t cap)
+{
+   size_t len = report ? strlen(report) : 0;
+   if (!out || cap < AIMEE_DELEGATES_ISOLATION_HEADER_LEN + len ||
+       len > AIMEE_DELEGATES_ISOLATION_REPORT_MAX)
+      return 0;
+   memset(out, 0, AIMEE_DELEGATES_ISOLATION_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_ISOLATION_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   out[5] = (uint8_t)((probe_failed ? AIMEE_DELEGATES_ISOLATION_PROBE_FAILED : 0u) |
+                      (require_isolation ? AIMEE_DELEGATES_ISOLATION_REQUIRE : 0u));
+   aimee_delegates_put_u32(out + 8, (uint32_t)len);
+   if (len)
+      memcpy(out + AIMEE_DELEGATES_ISOLATION_HEADER_LEN, report, len);
+   return AIMEE_DELEGATES_ISOLATION_HEADER_LEN + len;
+}
+
+/* `reason` receives the operator-facing wording, NUL-terminated. It travels
+ * with the verdict rather than being written here: a caller that phrased its
+ * own would describe a judgement it did not make. */
+static inline int aimee_delegates_isolation_response_decode(const uint8_t *in, size_t len,
+                                                            int *refuse, int *warn, int *is_error,
+                                                            char *reason, size_t reason_cap)
+{
+   if (!in || len < 16 || !refuse || !warn || !is_error ||
+       aimee_delegates_get_u32(in) != AIMEE_DELEGATES_ISOLATION_RESPONSE_MAGIC)
+      return -1;
+   *refuse = aimee_delegates_get_u32(in + 4) ? 1 : 0;
+   *warn = aimee_delegates_get_u32(in + 8) ? 1 : 0;
+   /* Severity, not inferred from the wording: a breach that runs anyway is an
+    * error, a flaky probe is not. */
+   *is_error = aimee_delegates_get_u32(in + 12) ? 1 : 0;
+   if (reason && reason_cap)
+   {
+      size_t n = len - 16;
+      if (n >= reason_cap)
+         n = reason_cap - 1;
+      memcpy(reason, in + 16, n);
+      reason[n] = '\0';
+   }
+   return 0;
+}
+
 #endif

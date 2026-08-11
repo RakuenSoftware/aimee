@@ -33,6 +33,13 @@ type IsolationVerdict struct {
 	Refuse bool
 	// Warn means the result is worth reporting but not fatal here.
 	Warn bool
+	// Error means the condition is an ERROR even when it does not refuse.
+	//
+	// A breach that runs anyway is not a caution: the sandbox is not a sandbox,
+	// and the only reason it proceeds is that the operator has not opted in to
+	// refusing. Reporting that at the same level as "the probe was flaky" is how
+	// it gets scrolled past.
+	Error bool
 	// Reason is operator-facing and states what was observed and why it
 	// matters, never just "failed".
 	Reason string
@@ -40,11 +47,14 @@ type IsolationVerdict struct {
 
 // JudgeIsolation decides whether a delegate may run.
 //
-// A confirmed breach always refuses: the container can reach the network
-// regardless of what was asked for, so the egress allowlist is not in force and
-// the delegate could exfiltrate or move laterally.
+// A confirmed breach is always an ERROR worth surfacing -- the container can
+// reach the network regardless of what was asked for, so the egress allowlist
+// is not in force -- but it only REFUSES when isolation is required. Refusing
+// unconditionally would turn a runtime that quietly ignores the flag into a
+// total outage on boxes that have run that way all along; the operator opts in
+// to that with the setting.
 //
-// An UNKNOWN result refuses too, but only when isolation is required. That is
+// An UNKNOWN result is judged the same way, and for a sharper reason. That is
 // the point of the setting: an operator who requires isolation will not run a
 // delegate that cannot be PROVEN isolated, because "the probe failed" and "the
 // sandbox is open" are indistinguishable from here. Without the requirement, an
@@ -57,15 +67,15 @@ func JudgeIsolation(probe IsolationProbe, requireIsolation bool) IsolationVerdic
 			"the runtime did not honour isolation, so the delegate can reach the network " +
 			"directly and bypass the egress proxy and its allowlist"
 		if requireIsolation {
-			return IsolationVerdict{Refuse: true, Reason: reason + " -- refusing to run"}
+			return IsolationVerdict{Refuse: true, Error: true, Reason: reason + " -- refusing to run"}
 		}
 		// Still an error worth surfacing: the sandbox is not a sandbox.
-		return IsolationVerdict{Warn: true,
+		return IsolationVerdict{Warn: true, Error: true,
 			Reason: reason + " -- set delegate_sandbox_require_isolation to refuse"}
 
 	case IsolationUnknown:
 		if requireIsolation {
-			return IsolationVerdict{Refuse: true,
+			return IsolationVerdict{Refuse: true, Error: true,
 				Reason: "could not verify network isolation and isolation is required -- " +
 					"refusing to run a delegate that cannot be proven isolated"}
 		}
@@ -81,8 +91,12 @@ func JudgeIsolation(probe IsolationProbe, requireIsolation bool) IsolationVerdic
 // the "none" network AND carries no address: a named network means attachment,
 // and an address means reachability, so either alone is a breach.
 //
-// Unparseable or empty input is UNKNOWN, never isolated. Reading silence as
-// safety is the mistake this whole check exists to prevent.
+// UNPARSEABLE input is UNKNOWN, never isolated: a line that does not match the
+// contract is not evidence of safety. An EMPTY report is different and IS
+// isolated -- docker prints nothing when the network map is empty, so silence
+// here is the answer rather than the absence of one. A probe that could not run
+// at all arrives as probeFailed, which is what covers the silence that means
+// nothing was measured.
 func ParseIsolationProbe(report string, probeFailed bool) IsolationProbe {
 	if probeFailed {
 		return IsolationUnknown

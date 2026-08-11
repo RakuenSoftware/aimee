@@ -196,6 +196,11 @@
           "id": 13,
           "name": "delegate-image-spec",
           "event_kind": 6669
+        },
+        {
+          "id": 14,
+          "name": "delegate-isolation-verdict",
+          "event_kind": 6670
         }
       ]
     },
