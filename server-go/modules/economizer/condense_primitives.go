@@ -19,19 +19,35 @@ import (
 // reaches the lever instead of being truncated at the old 32 KB read cap.
 const TCCeiling = 2 * 1024 * 1024
 
-// splitLines splits on '\n' the way the C next_line walk does: a trailing
-// newline does NOT produce a final empty line, and a string with no newline is
-// one line.
-func splitLines(s string) []string {
+// The C file uses TWO different line models, and conflating them is a real bug.
+//
+// tc_strip_noise walks `while (*p || first)` and STOPS at end-of-string, so a
+// trailing newline yields no final empty line. tc_dedup_lines,
+// tc_truncate_with_signal and tc_signal_filter use a `for(;;)` + has_nl walk that
+// DOES count the empty segment after a trailing newline as a line.
+//
+// That difference is load-bearing rather than academic: real tool output almost
+// always ends with a newline, so under the wrong model `tail=1` keeps an empty
+// final line instead of the last real one, and every elided count shifts by one.
+// Verified against the C, which returns "1\n... 3 lines elided ...\n" for
+// tc_truncate_with_signal("1\n2\n3\n4\n", 1, 1, NULL).
+
+// splitLinesStripModel is tc_strip_noise's model: no trailing empty line.
+func splitLinesStripModel(s string) []string {
 	if s == "" {
 		return []string{""}
 	}
 	lines := strings.Split(s, "\n")
-	// The C loop stops at the line with no '\n', so "a\n" is ONE line, not two.
 	if n := len(lines); n > 1 && lines[n-1] == "" {
 		lines = lines[:n-1]
 	}
 	return lines
+}
+
+// splitLines is the model the dedup / truncate / signal-filter family uses: a
+// trailing newline DOES produce a final empty line.
+func splitLines(s string) []string {
+	return strings.Split(s, "\n")
 }
 
 // cleanLine drops ANSI CSI escapes and resolves carriage-return redraws.
@@ -72,7 +88,7 @@ func cleanLine(line string) string {
 func TCStripNoise(in string) string {
 	var out []string
 	prevBlank := false
-	for _, line := range splitLines(in) {
+	for _, line := range splitLinesStripModel(in) {
 		cleaned := cleanLine(line)
 		isBlank := cleaned == ""
 		if isBlank && prevBlank {
