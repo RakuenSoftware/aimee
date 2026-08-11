@@ -90,6 +90,7 @@
     "server-go/modules/delegates/worktreeplan.go",
     "server-go/modules/delegates/worktreeplan_stage.go",
     "server-go/modules/delegates/launchargs_stage.go",
+    "server-go/modules/delegates/containername.go",
     "server-go/modules/delegates/proxyguard.go"
   ],
   "go_tests": [
@@ -115,6 +116,7 @@
     "server-go/modules/delegates/worktreeplan_test.go",
     "server-go/modules/delegates/worktreeplan_stage_test.go",
     "server-go/modules/delegates/launchargs_stage_test.go",
+    "server-go/modules/delegates/containername_test.go",
     "server-go/modules/delegates/proxyguard_test.go"
   ],
   "tests": [

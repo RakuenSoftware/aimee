@@ -1015,7 +1015,7 @@
         },
         {
           "path": "src/headers/prompts.h",
-          "sha256": "5deda4033a60bd48d0cde5380a0f057c302e66baf49920ee108f66d99d354960"
+          "sha256": "02be31c44afc5aef3a81c37a708dd4fe913f72225f29851aec526b25d6117048"
         },
         {
           "path": "src/headers/provider_catalog.h",
@@ -1608,7 +1608,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "993c60bb35d338015a5966e4c54c8a01679d85249e05e2ff9e46b8b99a356d94",
+      "sha256": "e5af0ebf37128d0b67df0854643424ae10d950f9036b096a73c3304ee2543579",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

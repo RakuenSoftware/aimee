@@ -1582,6 +1582,16 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
    ctx_appendf(buf, cap, &pos, "%s", agent_exec_instructions(task_type));
    ctx_appendf(buf, cap, &pos, "%s", prompt_principles_text(config_current_mode()));
 
+   /* Turn registers (fold §6): ask for the tags the record path already knows how to
+    * read. Gated on the same flag that turns on the fold's skeleton annotation, because
+    * both are the same feature — the grammar is either in use end to end or it is not.
+    * Default-off, so no agent's behaviour changes until someone enables it to measure. */
+   {
+      const char *registers = prompt_turn_registers_text(config_fold_register_enabled());
+      if (registers)
+         ctx_appendf(buf, cap, &pos, "%s", registers);
+   }
+
    char cwd_buf[MAX_PATH_LEN];
    const char *cwd = agent_context_cwd(cwd_buf, sizeof(cwd_buf));
    char memory_project[MAX_PATH_LEN] = "";
