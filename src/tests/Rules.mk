@@ -3977,12 +3977,6 @@ $(TESTPREFIX)/unit-test-workspace-client-base: $(OBJDIR)/tests/test_workspace_cl
                       $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-# Gated live integration test (NOT in unit-tests / verify): drives the broker
-# against a real authenticated git remote. Build + run via `make forge-cred-integration`.
-$(TESTPREFIX)/forge-cred-live: $(OBJDIR)/tests/test_forge_credentials_live.o \
-                      $(OBJDIR)/modules/git/forge_credentials.o
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
-
 $(TESTPREFIX)/unit-test-workspace-provider-detached: \
                       $(OBJDIR)/tests/test_workspace_provider_detached.o \
                       $(OBJDIR)/modules/workspace/workspace_provider_detached.o \

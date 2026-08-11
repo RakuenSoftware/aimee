@@ -1467,13 +1467,6 @@ int main(void)
       assert(server_http_route_allowed(1, "scope:project:a:secret", "POST", "/v1/runner/poll", 0) ==
              0);
 
-      /* Forge-token install: tool:execute, TCP-reachable (a client hands the hub
-       * its short-lived token over /v1); a scoped read-only bearer is denied. */
-      assert(server_http_route_caps("POST", "/v1/workspaces/%2Fp/forge-token") == CAP_TOOL_EXECUTE);
-      assert(server_http_route_is_local_only("POST", "/v1/workspaces/%2Fp/forge-token") == 0);
-      assert(server_http_route_allowed(1, "scope:project:a:s", "POST",
-                                       "/v1/workspaces/%2Fp/forge-token", 0) == 0);
-
       /* Connection effective caps by transport + bearer. */
       assert(server_http_conn_caps(0, NULL, 0) == CAPS_ALL);                /* UDS */
       assert(server_http_conn_caps(0, "scope:project:a:s", 0) == CAPS_ALL); /* UDS exempt */
@@ -2178,7 +2171,6 @@ int main(void)
       {
          const char *m, *p, *body;
       } git_routes[] = {
-          {"POST", "/v1/workspaces/ws1/forge-token", "{}"},
           {"POST", "/v1/workspace/clone", "{}"},
           {"POST", "/v1/workspace/git", "{}"},
           {"GET", "/v1/workspace/projects", NULL},
