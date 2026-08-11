@@ -68,9 +68,17 @@ func TranslateMountPath(containerPath, mountTable string) string {
 // into the daemon's namespace. The container name fingerprints these same
 // strings, so both go through here — a name computed from one rendering while
 // another is created is the bug the fingerprint exists to prevent.
+// The CONTROL SOCKET is exempt from translation. Its source arrives already in
+// the daemon's namespace, because the caller resolves it by inspecting its own
+// container -- strictly better information than a mount table, and available
+// for that one path only. Translating an already-host path a second time would
+// re-map it against the table and point the delegate's only outward channel at
+// a directory that does not exist, which docker then silently CREATES. The
+// delegate comes up with an empty directory where its socket should be, and
+// every tool call it makes fails against it.
 func renderBind(m SandboxMount, mountTable string) string {
 	source := m.Source
-	if mountTable != "" {
+	if mountTable != "" && m.Kind != SandboxControlSocket {
 		source = TranslateMountPath(source, mountTable)
 	}
 	bind := source + ":" + m.Target
