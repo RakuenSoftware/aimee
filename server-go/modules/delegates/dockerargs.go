@@ -64,6 +64,22 @@ func TranslateMountPath(containerPath, mountTable string) string {
 	return bestSource + containerPath[bestLen:]
 }
 
+// renderBind is one mount in docker's "-v" form, with its source translated
+// into the daemon's namespace. The container name fingerprints these same
+// strings, so both go through here — a name computed from one rendering while
+// another is created is the bug the fingerprint exists to prevent.
+func renderBind(m SandboxMount, mountTable string) string {
+	source := m.Source
+	if mountTable != "" {
+		source = TranslateMountPath(source, mountTable)
+	}
+	bind := source + ":" + m.Target
+	if m.ReadOnly {
+		bind += ":ro"
+	}
+	return bind
+}
+
 // DockerCreateRequest is everything needed to phrase the create command.
 type DockerCreateRequest struct {
 	Spec          SandboxSpec
@@ -99,16 +115,12 @@ func DockerCreateArgs(req DockerCreateRequest) ([]string, error) {
 	// The isolation primitive. Never conditional, never configurable.
 	args = append(args, "--network", req.Spec.NetworkMode())
 
+	if req.Spec.User != "" {
+		args = append(args, "--user", req.Spec.User)
+	}
+
 	for _, m := range req.Spec.Mounts {
-		source := m.Source
-		if req.MountTable != "" {
-			source = TranslateMountPath(source, req.MountTable)
-		}
-		bind := source + ":" + m.Target
-		if m.ReadOnly {
-			bind += ":ro"
-		}
-		args = append(args, "-v", bind)
+		args = append(args, "-v", renderBind(m, req.MountTable))
 	}
 
 	for _, e := range req.Spec.Env {

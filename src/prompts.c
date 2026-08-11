@@ -715,6 +715,28 @@ const char *prompt_code_principles_text(void)
    return prompt_principles_text(AIMEE_MODE_ENGINEER);
 }
 
+/* The wording deliberately biases AGAINST tagging. A compaction boundary carries a
+ * tagged turn forward as a settled fact while discarding the reasoning that produced it,
+ * so a mis-tagged [verdict] is worse than no tag at all: it asserts a guess and outlives
+ * its evidence. Untagged means work-in-progress, which is both the safe default and the
+ * common case, and the text says so rather than leaving the model to infer it. */
+const char *prompt_turn_registers_text(int enabled)
+{
+   if (!enabled)
+      return NULL;
+   return "## Turn registers\n"
+          "Prefix a turn with ONE of these tags only when it genuinely applies; otherwise "
+          "write no tag:\n"
+          "  [verdict]  a settled conclusion you believe is final\n"
+          "  [hazard]   a risk or blocker the next reader must not miss\n"
+          "  [blocked]  you cannot proceed without an answer\n"
+          "An untagged turn is treated as work in progress, which is the safe default and "
+          "usually correct. Do NOT tag speculation, a partial finding, or a plan as "
+          "[verdict]: when this conversation is later compacted, tagged turns are carried "
+          "forward as settled facts while the reasoning behind them is discarded, so a "
+          "wrong tag outlives its evidence.\n";
+}
+
 char *prompt_prepend_code_principles(const char *base_prompt)
 {
    return prompt_prepend_principles(AIMEE_MODE_ENGINEER, base_prompt);
