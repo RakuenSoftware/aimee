@@ -928,6 +928,11 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_index_bootstrap.c
     ${AIMEE_SRC_DIR}/cli_launch.c
     ${AIMEE_SRC_DIR}/cli_mcp_serve.c
+    # handle_tools_list calls mcp_tool_prose_lean/mcp_compact_tool_prose to build
+    # the lean catalog. Same rule as memory_redirect.c above: the client does not
+    # link aimee-core, so the definer must build in directly (make links it via
+    # CLIENT_SUPPORT_OBJS). Without it the CLI link fails undefined on Windows.
+    ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_tool_profile.c
     ${AIMEE_SRC_DIR}/cli_profile.c
     ${AIMEE_SRC_DIR}/client_integrations.c
     ${AIMEE_SRC_DIR}/cmd_profile.c
