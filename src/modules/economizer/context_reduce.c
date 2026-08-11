@@ -95,6 +95,61 @@ void context_reduce_result_free(reduce_result_t *out)
       cJSON_Delete(out->messages);
    out->messages = NULL;
    out->mutated = 0;
+   free(out->recall_hint);
+   out->recall_hint = NULL;
+   out->recall_surfaced = 0;
+}
+
+/* §4 page table. Record what LEFT the prompt, then tell the caller when the newest turn
+ * re-touches one of those coordinates.
+ *
+ * `evicted_count` is the number of leading ORIGINAL messages the reduction removed or
+ * skeletonized. Harvesting from the original (not the reduced view) is the point: the
+ * page table must know what is no longer visible, including coordinates the closet could
+ * not fit inside its byte budget — precisely the ones the agent will later reach for and
+ * not find.
+ *
+ * Detection runs against the LAST message only: that is the turn the agent just produced,
+ * and re-scanning retained history would re-fire hints for text that never went away. */
+static void recall_track(const cJSON *original, int evicted_count, const reduce_config_t *cfg,
+                         reduce_state_t *st, reduce_result_t *out)
+{
+   if (!cfg->recall_enabled || !st || !cJSON_IsArray((cJSON *)original))
+      return;
+
+   int n = cJSON_GetArraySize((cJSON *)original);
+   if (evicted_count > n)
+      evicted_count = n;
+   for (int i = 0; i < evicted_count; i++)
+   {
+      cJSON *m = cJSON_GetArrayItem((cJSON *)original, i);
+      char *txt = m ? cJSON_PrintUnformatted(m) : NULL;
+      if (!txt)
+         continue;
+      fold_recall_index_add_from_text(&st->recall, txt, strlen(txt));
+      free(txt);
+   }
+
+   if (st->recall.count == 0 || n == 0)
+      return;
+
+   cJSON *last = cJSON_GetArrayItem((cJSON *)original, n - 1);
+   char *last_txt = last ? cJSON_PrintUnformatted(last) : NULL;
+   if (!last_txt)
+      return;
+
+   dstr_t hints;
+   dstr_init(&hints);
+   size_t surfaced =
+       fold_recall_detect(&st->recall, last_txt, st->turn, cfg->recall_ttl_turns, &hints);
+   free(last_txt);
+
+   if (surfaced > 0 && dstr_cstr(&hints))
+   {
+      out->recall_hint = strdup(dstr_cstr(&hints));
+      out->recall_surfaced = (int)surfaced;
+   }
+   dstr_free(&hints);
 }
 
 /* chars/4 token estimate of the first `count` items of an array — the fold-eligible
@@ -299,6 +354,11 @@ int context_reduce(cJSON *messages, const char *system_prompt, const char *model
                cJSON_Delete(compressed_owned);
                compressed_owned = NULL;
             }
+            /* The fold is the only lever that removes whole messages, so it is the
+             * only one whose eviction the page table must record. Compression shrinks
+             * bodies in place — the carrying message stays visible, so nothing has
+             * left the prompt to page back in. */
+            recall_track(messages, fr.folded_msgs, cfg, st, out);
          }
          fold_result_free(&fr); /* fr.messages is NULL when transferred; no-op otherwise */
       }

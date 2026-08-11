@@ -4318,6 +4318,7 @@ $(TESTPREFIX)/unit-test-fold-register: $(OBJDIR)/tests/test_fold_register.o $(OB
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-fold-recall: $(OBJDIR)/tests/test_fold_recall.o $(OBJDIR)/modules/economizer/fold_recall.o \
+                                  $(OBJDIR)/modules/economizer/coord_closet.o \
                                   $(OBJDIR)/dstr.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

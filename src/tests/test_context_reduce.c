@@ -214,6 +214,89 @@ static void test_history_fold_reduces(void)
    PASS("history_fold reduces: new folded array, original untouched");
 }
 
+/* §4 page table, end to end through the orchestrator: a coordinate that is FOLDED AWAY
+ * and then referenced again by the newest turn produces a recall hint, so the agent
+ * learns the content is pageable rather than gone. This is the property that makes
+ * eviction reversible; without it the fold is destructive. */
+static void test_recall_hint_on_retouch(void)
+{
+   cJSON *m = make_messages(20); /* 40 messages; the prefix folds away */
+
+   /* Put an address deep in the prefix (evicted), then re-touch it in the newest turn
+    * (retained). Anything in the retained tail was never evicted, so a hint proves the
+    * key came from the folded region rather than from text still in view. */
+   cJSON *early = cJSON_GetArrayItem(m, 1);
+   cJSON_ReplaceItemInObject(early, "content",
+                             cJSON_CreateString("inspect src/modules/git/retry.c closely, it is "
+                                                "the file that matters for this task"));
+   cJSON *last = cJSON_GetArrayItem(m, cJSON_GetArraySize(m) - 1);
+   cJSON_ReplaceItemInObject(last, "content",
+                             cJSON_CreateString("what did we conclude about "
+                                                "src/modules/git/retry.c ?"));
+
+   reduce_config_t cfg = {0};
+   cfg.delegate_seam = 1;
+   cfg.history_fold = 1;
+   cfg.fold.closet.enabled = 1;
+   cfg.recall_enabled = 1;
+
+   reduce_state_t st = {0};
+   st.turn = 7;
+   reduce_result_t out;
+   assert(context_reduce(m, "system prompt here", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, &st,
+                         &out) == 0);
+   assert(out.mutated == 1);
+   assert(out.folded_msgs > 0);
+
+   assert(out.recall_surfaced >= 1);
+   assert(out.recall_hint != NULL);
+   assert(strstr(out.recall_hint, "src/modules/git/retry.c") != NULL);
+   /* The hint names the resolvers, so the agent knows how to act on it. */
+   assert(strstr(out.recall_hint, "code_span_get") != NULL);
+
+   /* The page table persists in the caller-owned state, not in the result. */
+   assert(st.recall.count > 0);
+
+   context_reduce_result_free(&out);
+   assert(out.recall_hint == NULL); /* freed with the result */
+   fold_recall_index_free(&st.recall);
+   cJSON_Delete(m);
+   PASS("recall hint fires when the newest turn re-touches a folded coordinate");
+}
+
+/* Default-off stays off: with the lever disabled nothing is tracked and no hint is
+ * produced, so enabling it is an explicit choice and the reducer is unchanged without. */
+static void test_recall_disabled_is_inert(void)
+{
+   cJSON *m = make_messages(20);
+   cJSON *early = cJSON_GetArrayItem(m, 1);
+   cJSON_ReplaceItemInObject(early, "content",
+                             cJSON_CreateString("inspect src/modules/git/retry.c closely here"));
+   cJSON *last = cJSON_GetArrayItem(m, cJSON_GetArraySize(m) - 1);
+   cJSON_ReplaceItemInObject(last, "content",
+                             cJSON_CreateString("what about src/modules/git/retry.c ?"));
+
+   reduce_config_t cfg = {0};
+   cfg.delegate_seam = 1;
+   cfg.history_fold = 1;
+   cfg.fold.closet.enabled = 1;
+   cfg.recall_enabled = 0; /* the lever under test */
+
+   reduce_state_t st = {0};
+   reduce_result_t out;
+   assert(context_reduce(m, "system prompt here", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, &st,
+                         &out) == 0);
+   assert(out.mutated == 1);
+   assert(out.recall_hint == NULL);
+   assert(out.recall_surfaced == 0);
+   assert(st.recall.count == 0);
+
+   context_reduce_result_free(&out);
+   fold_recall_index_free(&st.recall);
+   cJSON_Delete(m);
+   PASS("recall disabled: nothing tracked, no hint");
+}
+
 /* Net-gain pre-check: foldable below min_gain_tokens -> skip, no mutation. */
 static void test_history_fold_skip_no_gain(void)
 {
@@ -421,6 +504,8 @@ int main(void)
    test_provenance_already_reduced();
    test_unpriced_model_no_cost();
    test_history_fold_reduces();
+   test_recall_hint_on_retouch();
+   test_recall_disabled_is_inert();
    test_history_fold_skip_no_gain();
    test_compress_engages_where_fold_cannot();
    test_compress_measure_only_no_mutation();
