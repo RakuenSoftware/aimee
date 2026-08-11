@@ -504,10 +504,13 @@ typedef struct config
     * only when its snippet exceeds this many chars (folding a tiny snippet saves
     * nothing). Default 80. */
    int ingress_compress_min_chars;
-   /* ingress-compression P3 (§2 placement invariant), default off. When on, the
-    * volatile <aimee-context> envelope is appended AFTER the stable instructions
-    * prefix (instead of prepended) on the OpenAI/Codex Responses path, so the
-    * provider's automatic prefix cache is not invalidated each turn. */
+   /* ingress-compression P3 (§2 placement invariant), DEFAULT ON (see
+    * config_set_defaults). When on, the volatile <aimee-context> envelope is
+    * appended AFTER the stable instructions prefix (instead of prepended) on the
+    * OpenAI/Codex Responses path, so the provider's automatic prefix cache is not
+    * invalidated each turn. This said "default off" until 2026-08-11; the default
+    * was flipped on 2026-06-28 and both this comment and the one in
+    * ingress_preinject.c were left behind. */
    int ingress_cache_placement_enabled;
    /* Session-isolation guard (opt-in): when on, the PreToolUse attention-guard
     * fails closed on a mutating tool whose target is NOT inside an aimee-managed
