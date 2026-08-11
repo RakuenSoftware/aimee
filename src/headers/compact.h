@@ -36,8 +36,7 @@ typedef struct
    int per_tool_count;
 } compact_config_t;
 
-/* compact_body: THE single tool-result body-shrink algorithm. Both reduction
- * seams call it — the eager per-result path (agent_compress_tool_result) and the
+/* compact_body: THE single tool-result body-shrink algorithm, called by the
  * economizer's lazy whole-history lever (context_compress_view). It is a pure
  * transformer over the caller's output buffer:
  *
@@ -45,11 +44,17 @@ typedef struct
  *   - Never retains a pointer into `raw` or `cfg` past return.
  *   - Never writes past `out_cap` (always NUL-terminates when out_cap > 0).
  *   - Never applies a hard cap and never touches the Coordinate Closet — those
- *     are per-seam policy the callers own (the eager seam caps to
- *     agent_tool_output_cap and nominates from the FULL raw; the lazy seam runs a
- *     net-shrink guard and nominates from the full body). Nomination is gated on
- *     each seam's own shrink-happened decision, which is why it lives in the
- *     callers, not here.
+ *     are per-seam policy the caller owns (the lazy seam runs a net-shrink guard
+ *     and nominates from the full body). Nomination is gated on the seam's own
+ *     shrink-happened decision, which is why it lives in the caller, not here.
+ *
+ * This header used to describe a SECOND caller, the eager per-result seam
+ * agent_compress_tool_result(). That function had no callers and no tests — a CI
+ * gate once enforced its unreachability, listing it under `legacy_calls` beside
+ * context_reduce and build_fold_view, until that gate was removed in 9d478dcaa6.
+ * It has been deleted rather than left to imply a live path. Its consequence is
+ * worth knowing: eager identifier conservation into history is NOT happening, so
+ * the Coordinate Closet only runs on the lazy seam.
  *   - Output length is <= raw_len EXCEPT the JSON-summary path, which is bounded
  *     by COMPACT_JSON_SUMMARY_MAX; size `out_cap >= raw_len + COMPACT_JSON_SUMMARY_MAX`
  *     to guarantee no truncation of any strategy.

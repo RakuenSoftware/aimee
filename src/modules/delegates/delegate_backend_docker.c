@@ -1366,10 +1366,34 @@ static int docker_exec(delegate_backend_t *self, void *state, const char *comman
    close(out_pipe[0]);
    close(err_pipe[0]);
 
+   /* Terminate where the OUTPUT ends, not at the end of the buffer.
+    *
+    * The caller's buffer is malloc'd and uninitialized, and callers read it with
+    * strlen() -- docker_read_file does exactly that before slicing. Terminating
+    * only the final byte leaves whatever the allocator last had in that arena
+    * sitting between the real output and that NUL, so strlen() walks straight
+    * into it and the delegate is handed its file with heap garbage appended.
+    *
+    * It read correctly for as long as these allocations happened to be fresh
+    * pages, which are zero. Any allocation and free of comparable size beforehand
+    * is enough to expose it, and the result is silent: a file the delegate reads
+    * comes back longer than it is, with plausible-looking bytes on the end.
+    *
+    * The final byte stays terminated as a backstop for a truncated capture. */
    if (result_out->stdout_buf && result_out->stdout_cap > 0)
+   {
+      result_out
+          ->stdout_buf[out_off < result_out->stdout_cap ? out_off : result_out->stdout_cap - 1] =
+          '\0';
       result_out->stdout_buf[result_out->stdout_cap - 1] = '\0';
+   }
    if (result_out->stderr_buf && result_out->stderr_cap > 0)
+   {
+      result_out
+          ->stderr_buf[err_off < result_out->stderr_cap ? err_off : result_out->stderr_cap - 1] =
+          '\0';
       result_out->stderr_buf[result_out->stderr_cap - 1] = '\0';
+   }
 
    int status = 0;
    waitpid(pid, &status, 0);

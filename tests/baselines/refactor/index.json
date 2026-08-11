@@ -19,7 +19,7 @@
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "ab88ce20ebbac5f89b8e58410958751429d41bc506b33f6907f237e12cca62c3"
+          "sha256": "8e5dea99b361a5540dd0ab4ce55fddedda27763ba627894e73745a18ca505a5a"
         }
       ]
     },
@@ -175,7 +175,7 @@
         },
         {
           "path": "src/headers/agent_exec.h",
-          "sha256": "49a49dce41a9bf7f4454a527d7c9cd0207667321aec92e41c88a59720edd6bff"
+          "sha256": "5925aec5bbb58153cd87a7d6c1e2e5ed4174e2863dc4c48592a40d894b57d27c"
         },
         {
           "path": "src/headers/agent_pipeline.h",
@@ -255,7 +255,7 @@
         },
         {
           "path": "src/headers/aimee_session_guidance.h",
-          "sha256": "12cf31353a8acb10306641bbfaac395cd22e0d7817ad7755f767ddb26d342389"
+          "sha256": "3e7b558d6b91e2abff0f773a0e8e628cf7cd3b5534ecbd8100b35abcd6c8091b"
         },
         {
           "path": "src/headers/aimee_sha256.h",
@@ -446,16 +446,12 @@
           "sha256": "ac3f289137fd3eaa68ccfadfdb41f72c0d20472ecf364304df5dd8b208117660"
         },
         {
-          "path": "src/headers/command_registry.h",
-          "sha256": "294d34107dd35d9a8e6946a4ff4773d70eea22769e2b0a768fe4eabde8bfc5bd"
-        },
-        {
           "path": "src/headers/commands.h",
           "sha256": "0a5194d6120587e249bdbc161d43a429cb245a57c1adce30a8f9c410dbe1d3c2"
         },
         {
           "path": "src/headers/compact.h",
-          "sha256": "00c8c65cb66aca512b145dc8ed9c1afae85896e24e1ec2933e9787a1c8dbca67"
+          "sha256": "ec5b56d75d1ea8adc1ae39b898636028f7970ed7a9e947cd7a23ca294554fc5c"
         },
         {
           "path": "src/headers/compact_prune.h",
@@ -1099,7 +1095,7 @@
         },
         {
           "path": "src/headers/server.h",
-          "sha256": "a1fb249dc78445a73e431b6540935d6ff4bc6aa077e9eb35fddc43f63f5e425a"
+          "sha256": "7fc9eb39956e99ec1790e4c2b3b4bbede40d4dd949e15752ef0cc7998a2bcc45"
         },
         {
           "path": "src/headers/server_cli_oauth.h",
@@ -1538,10 +1534,6 @@
           "sha256": "3e35decd59ed6a9178628ecff0b8b61a83c75256b1b8ccdc5ba0866edcb6026f"
         },
         {
-          "path": "src/modules/protocols/include/aimee/protocols/mcp/mcp_group_tool.h",
-          "sha256": "8e548fc21808e4143b7843653d6fff3e68d569f56c461dbbfbefcbf82ae5c249"
-        },
-        {
           "path": "src/modules/protocols/include/aimee/protocols/mcp/mcp_tools.h",
           "sha256": "b915c88c9a37c2b82cef7880b00387c8afac71534d3b532651d5663b9829e869"
         },
@@ -1620,7 +1612,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "bf9d165ffab2a046a2c0265e13f7949753fba67a8901650a340ec2d0d90b1d0c",
+      "sha256": "8204bfe2b2af8bedebee873d7cc9b6995219847a32f3af975e3c4e9b94d7192d",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
