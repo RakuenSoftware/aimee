@@ -310,7 +310,13 @@ static void test_format_envelope(void)
    assert(e != NULL);
    assert(strstr(e, "<aimee-context confidence=\"high\">") == e); /* opens at start */
    assert(strstr(e, "src/a.c::f") != NULL);
-   assert(strstr(e, "explore-with: find_symbol") != NULL);
+   /* The per-turn envelope carries RETRIEVAL ONLY. The standing guidance moved to
+    * a session-start injection on the IR (ir_stage_memory): it used to ride in
+    * here, which meant aimee only told an agent to use aimee's tools once aimee
+    * had already retrieved something -- so on an unindexed repo the agent was told
+    * nothing. Guidance is not per-turn and not conditional on recall. */
+   assert(strstr(e, "explore-with: ") == NULL);
+   assert(strstr(e, "fix-scope: ") == NULL);
    assert(strstr(e, "</aimee-context>") != NULL);
    free(e);
 
@@ -612,7 +618,8 @@ static void test_budgeted_build_uses_memory_previews(void)
    assert(strstr(env, "memory:101") != NULL);
    assert(strstr(env, "Use the deploy matrix.") != NULL);
    assert(strstr(env, "context-budget:") != NULL);
-   assert(strstr(env, "memory_get") != NULL);
+   /* "memory_get" used to appear only as part of the explore-with line, which is
+    * no longer in the per-turn envelope -- see the golden below. */
    assert(strstr(env, "Fallback preview from content.") != NULL);
 
    /* P0 byte-equivalence anchor: the Envelope IR refactor must reproduce the
@@ -631,16 +638,12 @@ static void test_budgeted_build_uses_memory_previews(void)
        "  - memory:102 fallback [L2/policy score=0.440 headline_missing=true]\n"
        "    > Fallback preview from content.\n"
        "context-budget: used_bytes=342 budget_bytes=1200 omitted_count=0 headline_missing_count=1\n"
-       "explore-with: find_symbol, lsp_references, ast_grep_search, index command=hybrid, "
-       "get_context_block, "
-       "memory_get\n"
-       /* The standing scope policy rides in the same envelope as explore-with:
-        * naming the tools did not get ast_grep_search reached for on a task whose
-        * other instances were not callers. */
-       "fix-scope: a defect that is a PATTERN (unsafe join, missing check, raw "
-       "concatenation) usually repeats where nothing calls it -- callers and "
-       "blast-radius will correctly report nothing; match the shape with "
-       "ast_grep_search before reporting done\n"
+       /* explore-with / fix-scope USED TO BE HERE. They moved to a session-start
+        * injection on the IR (ir_stage_memory), because riding the per-turn
+        * retrieval envelope meant aimee only told an agent to use aimee's tools
+        * once it had already retrieved something -- on an unindexed repo the agent
+        * got no guidance at all and reached for shell. They are also no longer
+        * repeated every turn, which is what these bytes were charging for. */
        "</aimee-context>";
    assert(strcmp(env, GOLDEN) == 0);
    free(env);
