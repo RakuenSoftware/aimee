@@ -175,7 +175,7 @@
         },
         {
           "path": "src/headers/agent_exec.h",
-          "sha256": "49a49dce41a9bf7f4454a527d7c9cd0207667321aec92e41c88a59720edd6bff"
+          "sha256": "5925aec5bbb58153cd87a7d6c1e2e5ed4174e2863dc4c48592a40d894b57d27c"
         },
         {
           "path": "src/headers/agent_pipeline.h",
@@ -451,7 +451,7 @@
         },
         {
           "path": "src/headers/compact.h",
-          "sha256": "00c8c65cb66aca512b145dc8ed9c1afae85896e24e1ec2933e9787a1c8dbca67"
+          "sha256": "ec5b56d75d1ea8adc1ae39b898636028f7970ed7a9e947cd7a23ca294554fc5c"
         },
         {
           "path": "src/headers/compact_prune.h",
@@ -1612,7 +1612,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "d2a8e7f1fcefbd8ed2d9a449ad50357d666a7368f60279d2f9edf8d2803cf76a",
+      "sha256": "8204bfe2b2af8bedebee873d7cc9b6995219847a32f3af975e3c4e9b94d7192d",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
