@@ -1182,8 +1182,17 @@ char *ingress_preinject_apply(const char *instructions, const char *envelope)
     * envelope AFTER the stable instructions prefix (append) instead of before
     * (prepend), so the provider's automatic prefix cache survives the per-turn
     * envelope. The choice lives here — not in the caller — so the gateway stage
-    * stays config-free and every consumer links unchanged. Default off => prepend
-    * (byte-identical to before). */
+    * stays config-free and every consumer links unchanged.
+    *
+    * DEFAULT IS ON (config.c: cfg->ingress_cache_placement_enabled = 1), i.e.
+    * APPEND. This comment used to say "Default off => prepend"; that was written
+    * before the 2026-06-28 operator decision to ship the ingress levers on by
+    * default (docs/proposals/done/ingress-compression-and-cache-alignment.md) and
+    * was never updated. Read as a statement of current behaviour it inverts the
+    * truth, and it cost a later investigation an hour spent chasing a
+    * prefix-invalidation theory that the running code had already ruled out.
+    * The default lives in config.c, not here — check it there before trusting any
+    * prose about which branch is taken. */
    if (config_ingress_cache_placement_enabled())
       return ingress_preinject_append(instructions, envelope);
 
