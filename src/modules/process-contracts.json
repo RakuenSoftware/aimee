@@ -191,6 +191,11 @@
           "id": 12,
           "name": "delegate-launch-args",
           "event_kind": 6668
+        },
+        {
+          "id": 13,
+          "name": "delegate-image-spec",
+          "event_kind": 6669
         }
       ]
     },

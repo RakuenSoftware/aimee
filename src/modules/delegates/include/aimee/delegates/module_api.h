@@ -647,4 +647,67 @@ static inline int aimee_delegates_launch_response_decode(const uint8_t *in, size
    return (int)argc;
 }
 
+/* --- Image spec (stage 13): the Dockerfile a sandbox is built from, and the
+ * tag that names it ---
+ *
+ * Both together, because they are one decision: the tag is a hash OF the text.
+ * Computing them apart is how an image gets built under a name describing
+ * different content, which defeats the reuse the content tag exists for. */
+
+#define AIMEE_DELEGATES_EVENT_IMGSPEC          6669u
+#define AIMEE_DELEGATES_STAGE_IMGSPEC          13u
+#define AIMEE_DELEGATES_IMGSPEC_REQUEST_MAGIC  0x51494d44u /* "DMIQ" */
+#define AIMEE_DELEGATES_IMGSPEC_RESPONSE_MAGIC 0x53494d44u /* "DMIS" */
+#define AIMEE_DELEGATES_IMGSPEC_HEADER_LEN     16u
+#define AIMEE_DELEGATES_IMGSPEC_MAX_PACKAGES   512u
+
+/* Returns the encoded length, or 0 when it does not fit. */
+static inline size_t aimee_delegates_imgspec_request_encode(const char *base,
+                                                            const char *const *pkgs, int npkgs,
+                                                            const char *verbatim, uint8_t *out,
+                                                            size_t cap)
+{
+   if (!out || cap < AIMEE_DELEGATES_IMGSPEC_HEADER_LEN || npkgs < 0 ||
+       (unsigned)npkgs > AIMEE_DELEGATES_IMGSPEC_MAX_PACKAGES)
+      return 0;
+   memset(out, 0, AIMEE_DELEGATES_IMGSPEC_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_IMGSPEC_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   aimee_delegates_put_u32(out + 8, (uint32_t)npkgs);
+
+   size_t at = aimee_delegates_launch_field(out, cap, AIMEE_DELEGATES_IMGSPEC_HEADER_LEN, base);
+   if (at == 0)
+      return 0;
+   for (int i = 0; i < npkgs; i++)
+   {
+      at = aimee_delegates_launch_field(out, cap, at, pkgs ? pkgs[i] : NULL);
+      if (at == 0)
+         return 0;
+   }
+   /* An operator-committed Dockerfile, carried whole. Mutually exclusive with
+    * base+packages: the module refuses a request that supplies both. */
+   return aimee_delegates_launch_field(out, cap, at, verbatim);
+}
+
+/* Both outputs are NUL-terminated. Returns 0, or -1 (including when either
+ * would be truncated -- a truncated Dockerfile builds a DIFFERENT image than
+ * the tag names, and a truncated tag collides two images onto one name). */
+static inline int aimee_delegates_imgspec_response_decode(const uint8_t *in, size_t len, char *tag,
+                                                          size_t tag_cap, char *dockerfile,
+                                                          size_t df_cap)
+{
+   if (!in || len < 12 || !tag || !tag_cap || !dockerfile || !df_cap ||
+       aimee_delegates_get_u32(in) != AIMEE_DELEGATES_IMGSPEC_RESPONSE_MAGIC)
+      return -1;
+   size_t tag_len = aimee_delegates_get_u32(in + 4);
+   size_t df_len = aimee_delegates_get_u32(in + 8);
+   if (12 + tag_len + df_len != len || tag_len >= tag_cap || df_len >= df_cap)
+      return -1;
+   memcpy(tag, in + 12, tag_len);
+   tag[tag_len] = '\0';
+   memcpy(dockerfile, in + 12 + tag_len, df_len);
+   dockerfile[df_len] = '\0';
+   return 0;
+}
+
 #endif

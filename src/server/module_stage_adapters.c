@@ -832,6 +832,45 @@ static int delegate_launch_args(const aimee_delegates_launch_spec_t *spec, char 
                                                  argv_cap, arg_len_out);
 }
 
+/* The Dockerfile a sandbox image is built from, and the tag naming its content.
+ * A wire, like the launch adapter: it validates nothing and renders nothing. */
+static int delegate_image_spec(const char *base, const char *const *pkgs, int npkgs,
+                               const char *verbatim, char *tag, size_t tag_cap, char *dockerfile,
+                               size_t df_cap)
+{
+   /* An operator-committed Dockerfile can be large, so both buffers are heap. */
+   size_t request_cap = 1u << 20;
+   size_t response_cap = (1u << 20) + 4096;
+   uint8_t *request = malloc(request_cap);
+   uint8_t *response = malloc(response_cap);
+   if (!request || !response)
+   {
+      free(request);
+      free(response);
+      return -1;
+   }
+   size_t request_len =
+       aimee_delegates_imgspec_request_encode(base, pkgs, npkgs, verbatim, request, request_cap);
+   if (request_len == 0)
+   {
+      free(request);
+      free(response);
+      return -1;
+   }
+
+   uint32_t response_len = 0;
+   int rc = call_module(AIMEE_DELEGATES_EVENT_IMGSPEC, AIMEE_DELEGATES_STAGE_IMGSPEC, request,
+                        (uint32_t)request_len, response, (uint32_t)response_cap, &response_len);
+   free(request);
+   if (rc == 0)
+      rc = aimee_delegates_imgspec_response_decode(response, response_len, tag, tag_cap, dockerfile,
+                                                   df_cap);
+   else
+      rc = -1;
+   free(response);
+   return rc;
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -1049,6 +1088,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_patch_provider(delegate_patch_coord);
    delegate_register_role_policy_provider(delegate_role_policy);
    delegate_register_launch_args_provider(delegate_launch_args);
+   delegate_register_image_spec_provider(delegate_image_spec);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path

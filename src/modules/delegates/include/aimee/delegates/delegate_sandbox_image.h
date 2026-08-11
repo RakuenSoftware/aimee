@@ -26,12 +26,9 @@ int delegate_sandbox_resolve_image(const char *cwd, char *out, size_t cap);
  * Each package name must match [A-Za-z0-9][A-Za-z0-9._+:-]* (no shell metacharacters
  * reach the build RUN). Returns 0 on success, -1 on an invalid package, empty base,
  * or truncation. */
-int delegate_sandbox_dockerfile_from_packages(const char *base, const char *const *pkgs, int npkgs,
-                                              char *out, size_t cap);
 
 /* Deterministic content-addressed image tag `aimee-sbx:<12-hex>` for `content`
  * (the Dockerfile text). Same content -> same tag, so a built image is reused. */
-void delegate_sandbox_content_tag(const char *content, char *tag, size_t cap);
 
 /* --- cache management (aimee-sbx:* images accumulate; these enumerate + prune) --- */
 
