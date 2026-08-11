@@ -14,6 +14,12 @@ typedef enum
 /* Initialize logging. Call once at startup. */
 void log_init(log_level_t level);
 
+/* Tell the logger that stderr is a FILE at `path`, so it can roll that file down
+ * its generations once it grows past the size cap. Call it only where stderr has
+ * actually been redirected to a file — passing a path while stderr is a terminal
+ * would rotate nothing and reopen the terminal onto a file. NULL/"" disables. */
+void log_set_rotating_sink(const char *path);
+
 /* Set the global log level at runtime. */
 void log_set_level(log_level_t level);
 

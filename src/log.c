@@ -19,6 +19,18 @@ static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define AUDIT_MAX_SIZE  (10 * 1024 * 1024) /* 10MB */
 #define AUDIT_MAX_FILES 5
 
+/* The server redirects stderr into <config dir>/server.log and never rotated
+ * it. Observed on the test appliance: 612 MiB and 7.4 million lines in under
+ * four days, on a disk at 83%, with no bound of any kind — a busy period simply
+ * grows the file until something else breaks. Same generations policy as the
+ * audit log next door, larger because this is chattier by nature. */
+#define SERVER_LOG_MAX_SIZE  (64 * 1024 * 1024) /* 64MB */
+#define SERVER_LOG_MAX_FILES 5
+/* Checking st_size on every line would stat() per log call. Sampling bounds the
+ * overshoot to (interval x line length) — a few hundred KB past the threshold,
+ * which does not matter — for one stat per interval. */
+#define SERVER_LOG_CHECK_EVERY 512
+
 static const char *level_names[] = {"ERROR", "WARN", "INFO", "DEBUG"};
 
 void log_init(log_level_t level)
@@ -70,6 +82,57 @@ static void format_timestamp(char *buf, size_t len)
    strftime(buf, len, "%Y-%m-%dT%H:%M:%SZ", &tm_buf);
 }
 
+/* Roll <path> down its generations and reopen stderr onto a fresh file.
+ * Caller MUST hold log_mutex.
+ *
+ * ORDER MATTERS: rename first, then freopen. Renaming a file that is still open
+ * leaves the descriptor pointing at the SAME inode, so without the reopen the
+ * server would keep writing into server.log.1 and the "current" file would stay
+ * empty forever — rotation that silently loses the live log. */
+static void server_log_rotate_locked(const char *path)
+{
+   struct stat st;
+   if (stat(path, &st) != 0 || st.st_size < SERVER_LOG_MAX_SIZE)
+      return;
+
+   char old_path[4096], new_path[4096];
+   for (int i = SERVER_LOG_MAX_FILES - 1; i >= 0; i--)
+   {
+      if (i == 0)
+         snprintf(old_path, sizeof(old_path), "%s", path);
+      else
+         snprintf(old_path, sizeof(old_path), "%s.%d", path, i - 1);
+      snprintf(new_path, sizeof(new_path), "%s.%d", path, i);
+      /* remove(), not platform_unlink(): this runs from every aimee_log call, so
+       * the dependency would reach every binary that links log.o — several test
+       * targets link it without the platform layer and failed to link. remove()
+       * is ISO C and behaves on both platforms. */
+      if (i == SERVER_LOG_MAX_FILES - 1)
+         remove(new_path);
+      rename(old_path, new_path);
+   }
+
+   /* If this fails stderr keeps pointing at the rotated inode: messages still
+    * land in server.log.0 rather than vanishing, which is the safer failure. */
+   FILE *reopened = freopen(path, "a", stderr);
+   if (reopened)
+      setvbuf(stderr, NULL, _IOLBF, 0);
+}
+
+/* Set by the server once it has redirected stderr into server.log. Empty for
+ * the CLI, whose stderr is the user's terminal and must never be rotated. */
+static char g_server_log_path[4096];
+
+void log_set_rotating_sink(const char *path)
+{
+   pthread_mutex_lock(&log_mutex);
+   if (path && path[0])
+      snprintf(g_server_log_path, sizeof(g_server_log_path), "%s", path);
+   else
+      g_server_log_path[0] = '\0';
+   pthread_mutex_unlock(&log_mutex);
+}
+
 void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
 {
    if (level > global_level)
@@ -79,6 +142,16 @@ void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
    format_timestamp(ts, sizeof(ts));
 
    pthread_mutex_lock(&log_mutex);
+
+   if (g_server_log_path[0])
+   {
+      static unsigned since_check;
+      if (++since_check >= SERVER_LOG_CHECK_EVERY)
+      {
+         since_check = 0;
+         server_log_rotate_locked(g_server_log_path);
+      }
+   }
 
    fprintf(stderr, "%s %-5s %s: ", ts, level_names[level], module ? module : "aimee");
 
