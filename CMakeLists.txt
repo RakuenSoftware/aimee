@@ -776,8 +776,6 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/compact_prune.c
     ${AIMEE_SRC_DIR}/server/context_engine.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend.c
-    ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend_local.c
-    ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend_ssh.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend_docker.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_driver.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_openai.c

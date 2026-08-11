@@ -71,18 +71,6 @@
       "ctest": false,
       "make": true,
       "module": "delegates",
-      "test": "src/tests/test_delegate_backend_local.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "delegates",
-      "test": "src/tests/test_delegate_backend_ssh.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "delegates",
       "test": "src/tests/test_delegate_context_shed.c"
     },
     {
