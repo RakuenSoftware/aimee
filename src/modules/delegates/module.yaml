@@ -88,6 +88,7 @@
     "server-go/modules/delegates/dockerargs.go",
     "server-go/modules/delegates/container.go",
     "server-go/modules/delegates/worktreeplan.go",
+    "server-go/modules/delegates/worktreeplan_stage.go",
     "server-go/modules/delegates/proxyguard.go"
   ],
   "go_tests": [
@@ -111,6 +112,7 @@
     "server-go/modules/delegates/dockerargs_test.go",
     "server-go/modules/delegates/container_test.go",
     "server-go/modules/delegates/worktreeplan_test.go",
+    "server-go/modules/delegates/worktreeplan_stage_test.go",
     "server-go/modules/delegates/proxyguard_test.go"
   ],
   "tests": [
