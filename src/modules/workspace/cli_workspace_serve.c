@@ -252,27 +252,24 @@ int cmd_workspace_serve(const char *workspace_id)
  *
  * When mcp-serve / chat target a remote aimee-server, the agent runs on the
  * server but its file/exec tools must act on THIS client's tree. These helpers
- * register the client's cwd as a `detached` workspace and serve it on a
- * background thread, so the server (which binds that workspace per turn by cwd)
- * marshals tool ops back here over runner.poll/respond. No-op for a co-located
- * server. One channel per process. */
-static volatile sig_atomic_t g_rc_stop = 0;
-#ifdef _WIN32
-static HANDLE g_rc_thread = NULL;
-#else
-static pthread_t g_rc_thread;
-#endif
+ * register the client's cwd as a `mirror` workspace and ship its diff, so the
+ * server reconstructs the tree on ITS OWN filesystem and delegates work there.
+ * No-op for a co-located server. One channel per process.
+ *
+ * NO SERVE LOOP. This used to register `detached` and drive one on a background
+ * thread, and the loop outlived that decision: a mirror is reconstructed
+ * server-side and the runner rendezvous a serve loop waits on is created ONLY
+ * for a detached provider (workspace_turn.c), so for a mirror it is never
+ * created at all. The thread polled /v1/runner/poll forever against a tree
+ * nobody serves — every answer "no runner", re-polled at once — which is what
+ * produced ~196k of 200k server log lines and a failed module stage per poll.
+ * `aimee workspace serve` still drives a real loop; that is an operator
+ * deliberately serving a tree, and it registers `detached`. */
 static int g_rc_active = 0;
 static int g_rc_unregister_on_stop = 0;
 static char g_rc_workspace_id[CLI_TUI_PATH_MAX];
 static char g_rc_endpoint[CLI_TUI_PATH_MAX + 32];
 static char *g_rc_bearer = NULL;
-struct rc_args
-{
-   char *id;
-   char *endpoint;
-   char *bearer;
-};
 
 static void rc_unregister_workspace_at(const char *endpoint, const char *bearer,
                                        const char *workspace_id)
@@ -301,29 +298,6 @@ static void rc_unregister_workspace(void)
    free(g_rc_bearer);
    g_rc_bearer = NULL;
 }
-/* Shared body for both thread ABIs: drive the serve loop, then free the args. */
-static void rc_serve_run(struct rc_args *a)
-{
-   cli_workspace_serve_loop(a->id, NULL, a->endpoint, a->bearer, &g_rc_stop);
-   free(a->id);
-   free(a->endpoint);
-   free(a->bearer);
-   free(a);
-}
-#ifdef _WIN32
-static unsigned __stdcall rc_thread_main(void *arg)
-{
-   rc_serve_run((struct rc_args *)arg);
-   return 0;
-}
-#else
-static void *rc_thread_main(void *arg)
-{
-   rc_serve_run((struct rc_args *)arg);
-   return NULL;
-}
-#endif
-
 /* The VCS coordinates the mirror tier seeds from: the fetch URL of `origin` and
  * the current HEAD commit. BOTH are required — the server reconstructs the tree
  * by fetching THIS head from THIS remote — so a directory that is not a repo,
@@ -558,27 +532,9 @@ int cli_workspace_reverse_channel_start(void)
     * usually moved on since the registration that created it. */
    rc_ship_client_diff(endpoint, bearer, cwd, ws_head, ws_branch, ws_upstream);
 
-   struct rc_args *a = calloc(1, sizeof(*a));
-   if (!a)
-   {
-      if (should_unregister)
-         rc_unregister_workspace_at(endpoint, bearer, cwd);
-      free(endpoint);
-      free(bearer);
-      return 0;
-   }
-   a->id = strdup(cwd);
-   if (!a->id)
-   {
-      if (should_unregister)
-         rc_unregister_workspace_at(endpoint, bearer, cwd);
-      free(a);
-      free(endpoint);
-      free(bearer);
-      return 0;
-   }
-   a->endpoint = endpoint; /* ownership passes to the thread */
-   a->bearer = bearer;
+   /* Record what a later stop() needs to tear the registration down. The channel
+    * is "active" from here: the registration and the shipped diff ARE the
+    * channel for a mirror workspace. There is no thread to start. */
    snprintf(g_rc_workspace_id, sizeof(g_rc_workspace_id), "%s", cwd);
    snprintf(g_rc_endpoint, sizeof(g_rc_endpoint), "%s", endpoint);
    g_rc_unregister_on_stop = should_unregister;
@@ -588,8 +544,6 @@ int cli_workspace_reverse_channel_start(void)
    {
       if (should_unregister)
          rc_unregister_workspace_at(endpoint, bearer, cwd);
-      free(a->id);
-      free(a);
       free(endpoint);
       free(bearer);
       g_rc_workspace_id[0] = '\0';
@@ -597,27 +551,10 @@ int cli_workspace_reverse_channel_start(void)
       g_rc_unregister_on_stop = 0;
       return 0;
    }
-   g_rc_stop = 0;
-#ifdef _WIN32
-   g_rc_thread = (HANDLE)_beginthreadex(NULL, 0, rc_thread_main, a, 0, NULL);
-   if (g_rc_thread)
-   {
-      g_rc_active = 1;
-      return 1;
-   }
-#else
-   if (pthread_create(&g_rc_thread, NULL, rc_thread_main, a) == 0)
-   {
-      g_rc_active = 1;
-      return 1;
-   }
-#endif
-   free(a->id);
-   free(a->endpoint);
-   free(a->bearer);
-   free(a);
-   rc_unregister_workspace();
-   return 0;
+   g_rc_active = 1;
+   free(endpoint);
+   free(bearer);
+   return 1;
 }
 
 int cli_workspace_reverse_channel_sync(void)
@@ -639,18 +576,8 @@ void cli_workspace_reverse_channel_stop(void)
 {
    if (!g_rc_active)
       return;
-   g_rc_stop = 1;
-   /* The poll may be mid-flight (~30s); the process is exiting, so detach
-    * rather than block on join. */
-#ifdef _WIN32
-   if (g_rc_thread)
-   {
-      CloseHandle(g_rc_thread);
-      g_rc_thread = NULL;
-   }
-#else
-   pthread_detach(g_rc_thread);
-#endif
+   /* Nothing to join: the mirror channel is a registration plus a shipped diff,
+    * not a running thread. Tearing down the registration is the whole stop. */
    g_rc_active = 0;
    rc_unregister_workspace();
 }
