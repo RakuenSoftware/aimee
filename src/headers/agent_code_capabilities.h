@@ -13,7 +13,7 @@
 
 #define AIMEE_CODE_INDEX_COMMAND_HYBRID      "hybrid"
 #define AIMEE_CODE_INDEX_COMMAND_INVESTIGATE "investigate"
-#define AIMEE_CODE_INDEX_COMMAND_PREVIEW "preview"
+#define AIMEE_CODE_INDEX_COMMAND_PREVIEW     "preview"
 
 #define AIMEE_CODE_SCOPE_CURRENT "current"
 #define AIMEE_CODE_SCOPE_ALL     "all"

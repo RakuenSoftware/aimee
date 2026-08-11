@@ -188,7 +188,21 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       }
    }
 
-   /* tools: flat function tools {type:function, name, description, parameters} */
+   /* tools: flat function tools {type:function, name, description, parameters}
+    *
+    * ONLY named function tools. A Codex client also sends provider-native tool
+    * TYPES -- custom, local_shell, web_search, image_generation -- which carry no
+    * top-level `name`. Admitting them produced an IR tool with a NULL name, which
+    * reached the provider as `tools[N].name: ""` and made it reject the WHOLE
+    * request: 400 empty_string, every tool in the catalog lost, the turn dead. With
+    * a real Codex client that was tools[16] of 17, so the gateway path failed on
+    * every request that carried a catalog.
+    *
+    * openai_parse_responses_to_chat -- the legacy translator this path runs ahead of
+    * -- has always filtered exactly this, and says so ("Codex's
+    * namespace/web_search/image_generation tool *types* are dropped"). The two
+    * disagreeing is what made the failure depend on which translator handled the
+    * request. */
    const cJSON *tools = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "tools");
    if (tools && cJSON_IsArray(tools))
    {
@@ -197,6 +211,15 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       {
          aimee_tool_t *tool = grow1((void **)&out->tools, &out->n_tools, sizeof(aimee_tool_t));
          if (!tool)
+            goto oom;
+         /* Carry the entry verbatim. Only `function` is modelled; a Codex client
+          * also sends namespace / custom / local_shell / web_search / image_generation,
+          * and the backend re-emits those from this sidecar untouched rather than
+          * flattening them into a function. Captured from a real client: of 17 tools,
+          * six were `namespace` groups (mcp__aimee and five others, each holding its
+          * nested function list) and one was `web_search` with no name at all. */
+         tool->raw = cJSON_Duplicate(t, 1);
+         if (!tool->raw)
             goto oom;
          tool->name = dupstr(ostr(t, "name"));
          tool->description = dupstr(ostr(t, "description"));

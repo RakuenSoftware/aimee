@@ -279,7 +279,10 @@ struct fam_def
    const char *name;
    const char *cmd_key;
    const char *description;
-   struct fam_member members[14];
+   /* NULL-terminated, so this must hold every member plus the sentinel. `index` is
+    * the widest family and sets the floor: 15 commands + sentinel after symbol and
+    * ast_grep joined it. */
+   struct fam_member members[16];
 };
 static const struct fam_def MCP_FAMILIES[] = {
 #if AIMEE_WITH_ROUNDTABLE
