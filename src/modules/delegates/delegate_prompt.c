@@ -193,6 +193,21 @@ static int has_create_intent(const char *prompt)
    return 0;
 }
 
+/* RETAINED FOR THE CLI ONLY, and duplicated in the module on purpose.
+ *
+ * The server no longer calls this: it asks the module (stage 15), which
+ * composes this rule with the role's default into one answer. The CLI still
+ * calls it because the CLI cannot reach the bus -- it registers no stage
+ * adapters -- and a fail-closed seam there would not fail closed usefully, it
+ * would just always say "read-only".
+ *
+ * That is not hypothetical. delegate_role_is_write() is already a seam with no
+ * provider in the CLI, so it returns 0 unconditionally there and the branch at
+ * cmd_agent_delegate.c that tests it is dead. Adding a second one would add a
+ * second silent misbehaviour rather than remove a duplicate.
+ *
+ * This copy goes when the CLI can reach the module. Until then it must track
+ * PromptAllowsWrites in server-go/modules/delegates/promptwrites.go. */
 int delegate_prompt_allows_writes(const char *prompt)
 {
    if (!prompt || !prompt[0])

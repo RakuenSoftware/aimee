@@ -201,6 +201,11 @@
           "id": 14,
           "name": "delegate-isolation-verdict",
           "event_kind": 6670
+        },
+        {
+          "id": 15,
+          "name": "delegate-may-write",
+          "event_kind": 6671
         }
       ]
     },
