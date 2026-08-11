@@ -242,6 +242,37 @@ extern "C"
     * may hand out non-owning references into the original array). */
    void context_reduce_result_free(reduce_result_t *out);
 
+/* Persisted-state cap. db1_checkpoint_t.snapshot is a fixed char[8192] read buffer, so
+ * anything longer comes back TRUNCATED — and truncated JSON does not parse, which would
+ * turn "my page table got big" into "my state silently vanished". Serialization is
+ * therefore bounded well inside that, and reports what it dropped. */
+#define REDUCE_STATE_SERIAL_MAX 6144
+
+   /* Serialize per-conversation reducer state to JSON (caller frees), or NULL on error.
+    *
+    * Persists the freeze boundary (with its prefix digest) and the §4 page table. Does
+    * NOT persist `reduced`: that is per-REQUEST provenance meaning "a seam already
+    * reduced this request", and restoring it would make the next request skip reduction
+    * entirely.
+    *
+    * Bounded by REDUCE_STATE_SERIAL_MAX. When the page table does not fit, the
+    * LEAST-RECENTLY-SURFACED keys are dropped first (they are the least likely to be
+    * re-touched) and the count is recorded in the JSON, so a shrunken table is visible
+    * rather than mysterious. */
+   char *reduce_state_serialize(const reduce_state_t *st);
+
+   /* Restore state produced by reduce_state_serialize. Returns 0 on success, -1 on bad
+    * args or unparseable JSON.
+    *
+    * ALL-OR-NOTHING: on failure `*st` is left zeroed rather than half-populated, because
+    * a partially restored freeze boundary (split without its digest) would be trusted by
+    * the fold and could serve a stale prefix. `reduced` is always 0 after restore.
+    *
+    * The caller is responsible for keying storage by conversation. Restoring one
+    * conversation's state into another would leak context across sessions — see the
+    * reduce_state_t comment. */
+   int reduce_state_restore(reduce_state_t *st, const char *json);
+
 #ifdef __cplusplus
 }
 #endif

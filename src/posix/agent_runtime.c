@@ -73,6 +73,16 @@ void db1_agent_job_heartbeat(int job_id);
 void db1_agent_job_heartbeat_ext(int job_id, const char *current_tool, int api_call_count);
 int db1_agent_job_is_cancelled(int job_id);
 int db1_delegation_spawn_stop_reason(const char *delegation_id, char *out, size_t out_sz);
+int db1_economizer_state_save(const char *session_id, const char *json);
+int db1_economizer_state_load(const char *session_id, char *out, size_t out_sz);
+
+/* The agent loop declares a local `char session_id[128]` for the ephemeral-SSH id,
+ * which shadows the global session_id() accessor inside that function. Reach the
+ * conversation id through this alias rather than renaming a buffer the SSH paths use. */
+static const char *econ_conversation_id(void)
+{
+   return session_id();
+}
 const char *delegation_active_id(void);
 
 static int agent_delegation_stopped(char *buf, size_t bufsz)
@@ -628,6 +638,24 @@ native_provider_http:
     * prefix across turns. SAFE never enters context_reduce. */
    reduce_state_t agent_reduce_state;
    memset(&agent_reduce_state, 0, sizeof(agent_reduce_state));
+   /* S2c: continue this conversation's reducer state instead of restarting it. A run
+    * is one agent invocation, but a conversation spans several, so without this every
+    * user turn re-derives the fold boundary and starts with an EMPTY page table — a
+    * coordinate evicted in the previous run would be unrecoverable.
+    *
+    * Strictly keyed by session id, and skipped entirely when there is no session:
+    * restoring another conversation's state here would leak its context. A restored
+    * freeze boundary is safe because it carries its prefix digest, which the fold
+    * re-checks and re-epochs on mismatch. */
+   {
+      const char *econ_sid = econ_conversation_id();
+      if (econ_sid && econ_sid[0])
+      {
+         char saved[REDUCE_STATE_SERIAL_MAX + 1];
+         if (db1_economizer_state_load(econ_sid, saved, sizeof(saved)) == 0)
+            (void)reduce_state_restore(&agent_reduce_state, saved);
+      }
+   }
 
    while (turn < max_t)
    {
@@ -1929,6 +1957,20 @@ native_provider_http:
    cJSON_Delete(tools);
    cJSON_Delete(messages);
    free(assembled_sys);
+   /* Hand this conversation's reducer state to the next run before releasing it. Best
+    * effort: a failed save costs a cold start next turn, never correctness. */
+   {
+      const char *econ_sid = econ_conversation_id();
+      if (econ_sid && econ_sid[0])
+      {
+         char *econ_json = reduce_state_serialize(&agent_reduce_state);
+         if (econ_json)
+         {
+            (void)db1_economizer_state_save(econ_sid, econ_json);
+            free(econ_json);
+         }
+      }
+   }
    /* The §4 page table grows across the whole run and owns its keys. */
    fold_recall_index_free(&agent_reduce_state.recall);
 

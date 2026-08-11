@@ -100,6 +100,162 @@ void context_reduce_result_free(reduce_result_t *out)
    out->recall_surfaced = 0;
 }
 
+/* ------------------------------------------------------- state persistence (S2c) */
+
+/* Order recall keys most-recently-surfaced first, so a size cap drops the coldest.
+ * last_turn -1 means "never surfaced" — those sort last, since a key the agent has
+ * never reached for is the weakest candidate to carry into the next run. */
+static int recall_rank_cmp(const void *a, const void *b)
+{
+   int la = ((const int *)a)[1], lb = ((const int *)b)[1];
+   if (la != lb)
+      return lb - la;                                /* higher last_turn first; -1 sinks */
+   return ((const int *)a)[0] - ((const int *)b)[0]; /* stable by original index */
+}
+
+char *reduce_state_serialize(const reduce_state_t *st)
+{
+   if (!st)
+      return NULL;
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+      return NULL;
+
+   cJSON_AddNumberToObject(root, "turn", st->turn);
+   cJSON *fz = cJSON_AddObjectToObject(root, "freeze");
+   if (!fz)
+   {
+      cJSON_Delete(root);
+      return NULL;
+   }
+   cJSON_AddNumberToObject(fz, "active", st->freeze.active);
+   cJSON_AddNumberToObject(fz, "frozen_split", st->freeze.frozen_split);
+   cJSON_AddNumberToObject(fz, "tail_cap_msgs", st->freeze.tail_cap_msgs);
+   cJSON_AddNumberToObject(fz, "epochs", st->freeze.epochs);
+   /* The digest is 64-bit; a JSON number is a double and would lose the low bits, so
+    * it travels as a hex string. Losing digest fidelity would silently defeat the
+    * fold's staleness check — the one guard that stops a restored boundary serving an
+    * obsolete prefix. */
+   char dig[32];
+   snprintf(dig, sizeof(dig), "%llx", (unsigned long long)st->freeze.prefix_digest);
+   cJSON_AddStringToObject(fz, "prefix_digest", dig);
+
+   /* Rank keys by recency so the cap below drops the coldest first. */
+   size_t n = st->recall.count;
+   int *rank = n ? malloc(n * 2 * sizeof(int)) : NULL;
+   if (n && !rank)
+   {
+      cJSON_Delete(root);
+      return NULL;
+   }
+   for (size_t i = 0; i < n; i++)
+   {
+      rank[i * 2] = (int)i;
+      rank[i * 2 + 1] = st->recall.last_turn[i];
+   }
+   if (n)
+      qsort(rank, n, 2 * sizeof(int), recall_rank_cmp);
+
+   cJSON *keys = cJSON_AddArrayToObject(root, "recall");
+   size_t kept = 0, dropped = 0;
+   for (size_t i = 0; i < n; i++)
+   {
+      size_t idx = (size_t)rank[i * 2];
+      const char *k = st->recall.keys[idx];
+      if (!k || !k[0])
+         continue;
+      /* Budget check against the serialized size so far, not a guessed row width. */
+      char *probe = cJSON_PrintUnformatted(root);
+      size_t used = probe ? strlen(probe) : REDUCE_STATE_SERIAL_MAX;
+      free(probe);
+      if (used + strlen(k) + 48 > REDUCE_STATE_SERIAL_MAX)
+      {
+         dropped = n - i;
+         break;
+      }
+      cJSON *e = cJSON_CreateObject();
+      if (!e)
+         break;
+      cJSON_AddStringToObject(e, "k", k);
+      cJSON_AddNumberToObject(e, "t", st->recall.last_turn[idx]);
+      cJSON_AddItemToArray(keys, e);
+      kept++;
+   }
+   free(rank);
+   cJSON_AddNumberToObject(root, "recall_kept", (double)kept);
+   cJSON_AddNumberToObject(root, "recall_dropped", (double)dropped);
+
+   char *out = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (out && strlen(out) > REDUCE_STATE_SERIAL_MAX)
+   {
+      /* Belt and braces: never hand back something the store would truncate. */
+      free(out);
+      return NULL;
+   }
+   return out;
+}
+
+int reduce_state_restore(reduce_state_t *st, const char *json)
+{
+   if (!st || !json || !json[0])
+      return -1;
+   cJSON *root = cJSON_Parse(json);
+   if (!root)
+      return -1;
+
+   /* Build into a local, then commit in one go: a half-applied freeze (a split without
+    * its digest) is worse than no state at all. */
+   reduce_state_t tmp;
+   memset(&tmp, 0, sizeof(tmp));
+   fold_recall_index_init(&tmp.recall);
+
+   cJSON *t = cJSON_GetObjectItemCaseSensitive(root, "turn");
+   if (cJSON_IsNumber(t))
+      tmp.turn = t->valueint;
+
+   cJSON *fz = cJSON_GetObjectItemCaseSensitive(root, "freeze");
+   if (cJSON_IsObject(fz))
+   {
+      cJSON *v;
+      if ((v = cJSON_GetObjectItemCaseSensitive(fz, "active")) && cJSON_IsNumber(v))
+         tmp.freeze.active = v->valueint;
+      if ((v = cJSON_GetObjectItemCaseSensitive(fz, "frozen_split")) && cJSON_IsNumber(v))
+         tmp.freeze.frozen_split = v->valueint;
+      if ((v = cJSON_GetObjectItemCaseSensitive(fz, "tail_cap_msgs")) && cJSON_IsNumber(v))
+         tmp.freeze.tail_cap_msgs = v->valueint;
+      if ((v = cJSON_GetObjectItemCaseSensitive(fz, "epochs")) && cJSON_IsNumber(v))
+         tmp.freeze.epochs = v->valueint;
+      v = cJSON_GetObjectItemCaseSensitive(fz, "prefix_digest");
+      if (cJSON_IsString(v) && v->valuestring)
+         tmp.freeze.prefix_digest = strtoull(v->valuestring, NULL, 16);
+   }
+
+   cJSON *keys = cJSON_GetObjectItemCaseSensitive(root, "recall");
+   if (cJSON_IsArray(keys))
+   {
+      cJSON *e = NULL;
+      cJSON_ArrayForEach(e, keys)
+      {
+         cJSON *k = cJSON_GetObjectItemCaseSensitive(e, "k");
+         if (!cJSON_IsString(k) || !k->valuestring)
+            continue;
+         fold_recall_index_add(&tmp.recall, k->valuestring);
+         cJSON *lt = cJSON_GetObjectItemCaseSensitive(e, "t");
+         if (cJSON_IsNumber(lt) && tmp.recall.count > 0)
+            tmp.recall.last_turn[tmp.recall.count - 1] = lt->valueint;
+      }
+   }
+   cJSON_Delete(root);
+
+   /* Commit. `reduced` stays 0: it is per-request provenance, and restoring it would
+    * make the next request believe it had already been reduced. */
+   fold_recall_index_free(&st->recall);
+   *st = tmp;
+   st->reduced = 0;
+   return 0;
+}
+
 /* §4 page table. Record what LEFT the prompt, then tell the caller when the newest turn
  * re-touches one of those coordinates.
  *
