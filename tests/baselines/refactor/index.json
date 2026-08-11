@@ -27,7 +27,7 @@
       "files": [
         {
           "path": "docs/gen/configuration.md",
-          "sha256": "3e54073262534d31b04a2cb0951c04f28aaae1949e9df1afe7a769f511fa8155"
+          "sha256": "1e96970eb4dc19b14255cc23bd11f958dd526cb5c03e98c08dc22bcaf1b23795"
         }
       ]
     },
@@ -159,7 +159,7 @@
         },
         {
           "path": "src/headers/agent_code_capabilities.h",
-          "sha256": "e5cdfe5693b96905c7140cb6b6985bbe886295f20f94a985b026565c07be93c4"
+          "sha256": "880939bac3e5c334a545d453630d35d720b8119de52860cc12dbb3f65fb54fdf"
         },
         {
           "path": "src/headers/agent_config.h",
@@ -1539,7 +1539,7 @@
         },
         {
           "path": "src/modules/protocols/include/aimee/protocols/mcp/mcp_tools.h",
-          "sha256": "1e7b46e80c0f30add6d761fba62537fac30cd63f1f70678c339f39a477c792ab"
+          "sha256": "b915c88c9a37c2b82cef7880b00387c8afac71534d3b532651d5663b9829e869"
         },
         {
           "path": "src/modules/providers/include/aimee/providers/module_api.h",
@@ -1616,7 +1616,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "05ab7aef92d01b31270f91ce5c71a6742080b146091d25544d46996bcff80d42",
+      "sha256": "79a52b9b8d693a53929ae0dfa5d7ec168c0f642c5436289db81f739b5eb5c401",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
