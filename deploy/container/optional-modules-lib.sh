@@ -32,9 +32,15 @@
 # workflows is optional and server-placed but is NOT listed: it is hosted by
 # /usr/local/bin/aimee-wfe rather than the module-runtime multicall binary, and
 # is governed by AIMEE_WFE_ENGINE. Gating it here would silently do nothing.
+#
+# economizer IS listed, and without it the module is unreachable in a container.
+# It is optional and default-off, so the exporter writes it no row in
+# server.modules; the image installs aimee-module-economizer and nothing ever
+# starts it. Every economizer caller fails open, so the symptom is not an error
+# anywhere — just a deployment that quietly never reduces a prompt.
 optional_modules_for_placement() {
     case "$1" in
-        server) echo "governance roundtable benchmarks sandbox runtime-web" ;;
+        server) echo "governance roundtable benchmarks sandbox runtime-web economizer" ;;
         kb)     echo "kb-synthesis control-web benchmarks" ;;
         *)      echo "" ;;
     esac
