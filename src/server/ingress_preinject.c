@@ -23,33 +23,10 @@
 #include <sys/stat.h>
 #include <time.h>
 
-/* The standing exploration policy carried in every envelope. Kept short — it is
- * advice the model weighs, not a contract we can enforce over the wire. */
-static const char *const INGRESS_EXPLORE_WITH = AIMEE_CODE_TOOL_FIND_SYMBOL
-    ", lsp_references, " AIMEE_CODE_TOOL_AST_GREP_SEARCH ", " AIMEE_CODE_TOOL_INDEX
-    " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ", get_context_block, memory_get";
-
-/* The standing SCOPE policy, carried in the same envelope for the same reason.
- *
- * explore-with names the tools; it does not say when one of them matters, and a
- * list alone does not get reached for. Measured on t08_traversal at n=3, every
- * arm 0/3: the ticket names one function, the hidden test asserts on two SIBLING
- * functions in another module carrying the identical unsafe join, and the fixture
- * comments that they are the same pattern. aimee called index investigate and
- * preview_blast_radius and got a CORRECT "dependents: []" -- siblings are not
- * callers, so no dependency tool can reach them. ast_grep_search was in
- * explore-with the whole time and was called in zero cells.
- *
- * This lives here rather than in the Codex SKILL.md because a server-mode
- * deployment ships no skill file, and rather than in the MCP initialize
- * instructions because those are a fixed per-session tax that cannot adapt. The
- * envelope reaches the CLI and MCP alike, per turn, and is already the channel
- * carrying explore-with. Kept to one line for the same reason that one is. */
-static const char *const INGRESS_FIX_SCOPE =
-    "a defect that is a PATTERN (unsafe join, missing check, raw concatenation) "
-    "usually repeats where nothing calls it -- callers and blast-radius will "
-    "correctly report nothing; match the shape with " AIMEE_CODE_TOOL_AST_GREP_SEARCH
-    " before reporting done";
+/* The standing guidance is NOT defined here any more -- see
+ * headers/aimee_session_guidance.h. It was written out here AND in
+ * cli_session_start.c, and the two copies drifted: the CLI one lacked memory_get
+ * and the whole fix-scope line. One policy, one definition, every transport. */
 
 #define INGRESS_AUDIT_CONTEXT_FILE            "audit_context.txt"
 #define INGRESS_AUDIT_CONTEXT_MAX_AGE_SECONDS (6 * 60 * 60)
@@ -305,12 +282,6 @@ char *ingress_preinject_format_envelope(const char *context_block, const char *c
    dstr_append_str(&d, context_block);
    if (context_block[strlen(context_block) - 1] != '\n')
       dstr_append_str(&d, "\n");
-   dstr_append_str(&d, "explore-with: ");
-   dstr_append_str(&d, INGRESS_EXPLORE_WITH);
-   dstr_append_str(&d, "\n");
-   dstr_append_str(&d, "fix-scope: ");
-   dstr_append_str(&d, INGRESS_FIX_SCOPE);
-   dstr_append_str(&d, "\n");
    dstr_append_str(&d, "</aimee-context>");
    char *out = dstr_steal(&d);
    return out;

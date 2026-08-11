@@ -69,8 +69,12 @@ func workNameSafe(name string) bool {
 // policy and fails hard when it cannot: guessing one is what let a session
 // inherit another session's branch, and a delegate is in no better position to
 // guess than a session was.
-func PlanWorktree(role, delegateID string) (WorktreePlan, error) {
-	if !RoleIsWrite(role) {
+//
+// writesAllowed is the caller's composed answer, not the role's default. A
+// write role whose prompt does not ask for writes needs no worktree of its own,
+// and cutting one for it would leave a branch nobody ever commits to.
+func PlanWorktree(writesAllowed bool, delegateID string) (WorktreePlan, error) {
+	if !writesAllowed {
 		// Nothing to create: the parent's worktree, mounted read-only.
 		return WorktreePlan{ReadOnlyMount: true}, nil
 	}
@@ -92,10 +96,10 @@ func PlanWorktree(role, delegateID string) (WorktreePlan, error) {
 // Keeping this next to PlanWorktree is deliberate: the plan's ReadOnlyMount and
 // the spec's mount modes are the same decision, and computing them in one place
 // stops a future edit from making a read-only delegate a writable mount.
-func SandboxRequestFor(plan WorktreePlan, role, repoRoot, worktree, gitDir string,
+func SandboxRequestFor(plan WorktreePlan, repoRoot, worktree, gitDir string,
 	isGitCheckout bool, socketHost, socketTarget, egressProxy string) SandboxRequest {
 	req := SandboxRequest{
-		Role:               role,
+		WritesAllowed:      plan.Isolated,
 		RepoRoot:           repoRoot,
 		Worktree:           worktree,
 		IsGitCheckout:      isGitCheckout,

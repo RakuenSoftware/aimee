@@ -74,7 +74,15 @@ type SandboxEnv struct {
 // is supplied rather than discovered: this module does not stat the workspace,
 // because the workspace owns its files.
 type SandboxRequest struct {
-	Role string
+	// WritesAllowed is whether THIS delegate may write its worktree.
+	//
+	// Not derived from the role here, deliberately. The role's default is one
+	// input (stage 10), but the caller narrows it further -- a write role whose
+	// prompt does not ask for writes does not get a writable tree. Re-deriving
+	// from the role would make this module disagree with the decision the caller
+	// actually made, and the disagreement would show up as a delegate writing
+	// into a tree the caller had already ruled read-only.
+	WritesAllowed bool
 
 	// RepoRoot is the parent checkout. Mounted read-only for a write delegate
 	// so the tree is readable but only the worktree is writable.
@@ -162,7 +170,7 @@ func BuildSandboxSpec(req SandboxRequest) (SandboxSpec, error) {
 		return spec, fmt.Errorf("%w: %s", ErrNotGitCheckout, worktree)
 	}
 
-	write := RoleIsWrite(req.Role)
+	write := req.WritesAllowed
 	spec.ReadOnly = !write
 
 	if write {
@@ -170,8 +178,17 @@ func BuildSandboxSpec(req SandboxRequest) (SandboxSpec, error) {
 		if !ok {
 			return spec, fmt.Errorf("repo root must be an absolute path, got %q", req.RepoRoot)
 		}
-		// The tree is readable; only the worktree below is writable.
-		spec.Mounts = append(spec.Mounts, SandboxMount{Source: repo, Target: repo, ReadOnly: true})
+		// A PLAIN checkout carries its own .git, so the repo root IS the
+		// worktree. It needs one writable mount, not a read-only mount of the
+		// same path with a writable one layered over it: two binds on one target
+		// is not a layering, and the delegate would get whichever docker
+		// resolved last -- a coin flip between a writable tree and a read-only
+		// one, discovered only when a write failed.
+		if repo != worktree {
+			// The tree is readable; only the worktree below is writable.
+			spec.Mounts = append(spec.Mounts,
+				SandboxMount{Source: repo, Target: repo, ReadOnly: true})
+		}
 		spec.Mounts = append(spec.Mounts,
 			SandboxMount{Source: worktree, Target: worktree, ReadOnly: false})
 		if gitDir, ok := cleanAbs(req.GitDir); ok {

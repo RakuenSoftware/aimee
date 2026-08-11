@@ -8,7 +8,7 @@ import (
 
 func writeReq() SandboxRequest {
 	return SandboxRequest{
-		Role:               "code",
+		WritesAllowed:      true,
 		RepoRoot:           "/srv/repo",
 		Worktree:           "/srv/repo/.aimee/worktrees/w1/main",
 		GitDir:             "/srv/repo/.git/worktrees/w1",
@@ -21,7 +21,7 @@ func writeReq() SandboxRequest {
 
 func readReq() SandboxRequest {
 	return SandboxRequest{
-		Role:               "review",
+		WritesAllowed:      false,
 		RepoRoot:           "/srv/repo",
 		Worktree:           "/srv/repo",
 		IsGitCheckout:      true,
@@ -221,5 +221,63 @@ func TestValidateRejectsHandBuiltViolations(t *testing.T) {
 		t.Error("the docker socket was accepted")
 	} else if !strings.Contains(err.Error(), "runtime socket") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// A PLAIN checkout carries its own .git, so the repo root IS the worktree. It
+// gets ONE writable mount.
+//
+// Two binds on one target is not a layering: the delegate would get whichever
+// docker resolved last, so a write role could silently land on the read-only
+// copy and only find out when a write failed. The backend has always mounted a
+// plain checkout exactly once.
+func TestPlainCheckoutGetsOneWritableMount(t *testing.T) {
+	spec, err := BuildSandboxSpec(SandboxRequest{
+		WritesAllowed: true, RepoRoot: "/repo", Worktree: "/repo", IsGitCheckout: true,
+	})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+
+	byTarget := map[string]int{}
+	for _, m := range spec.Mounts {
+		if m.Kind == SandboxWorkspace {
+			byTarget[m.Target]++
+		}
+	}
+	if byTarget["/repo"] != 1 {
+		t.Fatalf("/repo mounted %d times, want exactly 1", byTarget["/repo"])
+	}
+	for _, m := range spec.Mounts {
+		if m.Kind == SandboxWorkspace && m.Target == "/repo" && m.ReadOnly {
+			t.Error("a write delegate's plain checkout was mounted read-only")
+		}
+	}
+}
+
+// A LINKED worktree still gets the layering: the repo read-only underneath, the
+// worktree writable over it, so a write outside the worktree fails.
+func TestLinkedWorktreeKeepsTheReadOnlyRepoBeneath(t *testing.T) {
+	spec, err := BuildSandboxSpec(SandboxRequest{
+		WritesAllowed: true, RepoRoot: "/repo", Worktree: "/repo/.aimee/worktrees/d1",
+		GitDir: "/repo/.git/worktrees/d1", IsGitCheckout: true,
+	})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	var repoRO, worktreeRW bool
+	for _, m := range spec.Mounts {
+		if m.Target == "/repo" && m.ReadOnly {
+			repoRO = true
+		}
+		if m.Target == "/repo/.aimee/worktrees/d1" && !m.ReadOnly {
+			worktreeRW = true
+		}
+	}
+	if !repoRO {
+		t.Error("the repo is not mounted read-only beneath the worktree")
+	}
+	if !worktreeRW {
+		t.Error("the worktree is not writable")
 	}
 }

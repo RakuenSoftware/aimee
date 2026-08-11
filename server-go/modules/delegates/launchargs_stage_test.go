@@ -13,7 +13,10 @@ func encodeLaunchArgs(req launchArgsRequest) []byte {
 	binary.LittleEndian.PutUint32(out[0:4], launchArgsRequestMagic)
 	out[4] = wireVersion
 	if req.IsGitCheckout {
-		out[5] = 1
+		out[5] |= 1
+	}
+	if req.WritesAllowed {
+		out[5] |= 2
 	}
 	binary.LittleEndian.PutUint32(out[8:12], uint32(len(req.Command)))
 
@@ -23,14 +26,13 @@ func encodeLaunchArgs(req launchArgsRequest) []byte {
 		out = append(out, n[:]...)
 		out = append(out, s...)
 	}
-	put(req.Role)
 	put(req.RepoRoot)
 	put(req.Worktree)
 	put(req.GitDir)
 	put(req.ParentSocketHost)
 	put(req.ParentSocketTarget)
 	put(req.EgressProxy)
-	put(req.ContainerName)
+	put(req.TaskID)
 	put(req.Image)
 	put(req.WorkDir)
 	put(req.MountTable)
@@ -40,7 +42,7 @@ func encodeLaunchArgs(req launchArgsRequest) []byte {
 	return out
 }
 
-func decodeLaunchArgs(t *testing.T, response []byte) []string {
+func decodeLaunchArgs(t *testing.T, response []byte) (string, []string) {
 	t.Helper()
 	if len(response) < 8 {
 		t.Fatalf("response is %d bytes", len(response))
@@ -48,9 +50,12 @@ func decodeLaunchArgs(t *testing.T, response []byte) []string {
 	if binary.LittleEndian.Uint32(response[0:4]) != launchArgsResponseMagic {
 		t.Fatal("wrong response magic")
 	}
-	count := int(binary.LittleEndian.Uint32(response[4:8]))
+	nameLen := int(binary.LittleEndian.Uint32(response[4:8]))
+	name := string(response[8 : 8+nameLen])
+	at := 8 + nameLen
+	count := int(binary.LittleEndian.Uint32(response[at : at+4]))
+	at += 4
 	args := make([]string, 0, count)
-	at := 8
 	for i := 0; i < count; i++ {
 		n := int(binary.LittleEndian.Uint32(response[at : at+4]))
 		at += 4
@@ -60,28 +65,35 @@ func decodeLaunchArgs(t *testing.T, response []byte) []string {
 	if at != len(response) {
 		t.Fatalf("decoded %d of %d bytes", at, len(response))
 	}
-	return args
+	return name, args
 }
 
 func callLaunchArgs(t *testing.T, req launchArgsRequest) ([]string, bus.ModuleStatus) {
 	t.Helper()
+	_, args, status := callLaunchArgsNamed(t, req)
+	return args, status
+}
+
+func callLaunchArgsNamed(t *testing.T, req launchArgsRequest) (string, []string, bus.ModuleStatus) {
+	t.Helper()
 	response, status := Handle(bus.ModuleInvocation{StageID: StageLaunchArgs}, encodeLaunchArgs(req))
 	if status != bus.ModuleStatusOK {
-		return nil, status
+		return "", nil, status
 	}
-	return decodeLaunchArgs(t, response), status
+	name, args := decodeLaunchArgs(t, response)
+	return name, args, status
 }
 
 func writeRequest() launchArgsRequest {
 	return launchArgsRequest{
-		Role:               "code",
+		WritesAllowed:      true,
 		RepoRoot:           "/repo",
 		Worktree:           "/repo/.aimee/worktrees/d1",
 		GitDir:             "/repo/.git/worktrees/d1",
 		IsGitCheckout:      true,
 		ParentSocketHost:   "/run/aimee/aimee.sock",
 		ParentSocketTarget: "/run/aimee.sock",
-		ContainerName:      "aimee-d1",
+		TaskID:             "d1",
 		Image:              "ubuntu:22.04",
 		WorkDir:            "/repo/.aimee/worktrees/d1",
 	}
@@ -99,10 +111,12 @@ func argIndex(args []string, want string) int {
 // The isolation primitive. If this is ever absent the delegate has a network,
 // so it is asserted on the rendered argv rather than on the spec.
 func TestLaunchArgsAlwaysHasNoNetwork(t *testing.T) {
-	for _, role := range []string{"code", "refactor", "review", "search", "validate"} {
+	for _, writes := range []bool{true, false} {
 		req := writeRequest()
-		req.Role = role
-		if !RoleIsWrite(role) {
+		req.WritesAllowed = writes
+		role := "a writing delegate"
+		if !writes {
+			role = "a read-only delegate"
 			req.GitDir = ""
 			req.RepoRoot = ""
 		}
@@ -144,7 +158,7 @@ func TestLaunchArgsWriteRoleMountLayering(t *testing.T) {
 // enforcement -- not a request the delegate is asked to honour.
 func TestLaunchArgsReadOnlyRoleGetsReadOnlyMount(t *testing.T) {
 	req := writeRequest()
-	req.Role = "review"
+	req.WritesAllowed = false
 	req.RepoRoot = ""
 	req.GitDir = "/repo/.git/worktrees/d1" // supplied, and must be ignored
 	req.Worktree = "/repo"
@@ -171,7 +185,7 @@ func TestLaunchArgsRefusesUnsafeRequests(t *testing.T) {
 		"not a git checkout":   func(r *launchArgsRequest) { r.IsGitCheckout = false },
 		"relative worktree":    func(r *launchArgsRequest) { r.Worktree = "relative/path" },
 		"empty worktree":       func(r *launchArgsRequest) { r.Worktree = "" },
-		"no container name":    func(r *launchArgsRequest) { r.ContainerName = "" },
+		"no task id":           func(r *launchArgsRequest) { r.TaskID = "" },
 		"bad image reference":  func(r *launchArgsRequest) { r.Image = "ubuntu:22.04; rm -rf /" },
 		"relative socket host": func(r *launchArgsRequest) { r.ParentSocketHost = "sock" },
 	}
