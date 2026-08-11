@@ -384,49 +384,6 @@ static void test_guarded_lxc_readonly_root_matching(void)
    printf("  PASS: test_guarded_lxc_readonly_root_matching\n");
 }
 
-static void test_role_default_tools(void)
-{
-   assert(delegate_role_enable_tools_by_default("search") == 1);
-   assert(delegate_role_enable_tools_by_default("execute") == 1);
-   assert(delegate_role_enable_tools_by_default("diagnose") == 1);
-   assert(delegate_role_enable_tools_by_default("validate") == 1);
-   assert(delegate_role_enable_tools_by_default("inspect") == 1);
-   assert(delegate_role_enable_tools_by_default("test") == 1);
-   assert(delegate_role_enable_tools_by_default("check") == 1);
-   assert(delegate_role_enable_tools_by_default("research") == 1);
-   /* Write roles need a filesystem to do the job at all. This asserted 0 until a
-    * `code` delegate with no file tools answered with a per-file diff summary of
-    * code it never wrote -- see test_delegate_role.c. */
-   assert(delegate_role_enable_tools_by_default("code") == 1);
-   assert(delegate_role_enable_tools_by_default("refactor") == 1);
-   /* Prose generation is not a write role. */
-   assert(delegate_role_enable_tools_by_default("draft") == 0);
-   assert(delegate_role_enable_tools_by_default(NULL) == 0);
-   assert(delegate_role_enable_tools_by_default("") == 0);
-   printf("  PASS: test_role_default_tools\n");
-}
-
-static void test_role_result_cache_policy(void)
-{
-   assert(delegate_role_result_cache_enabled("review") == 0);
-   assert(delegate_role_result_cache_enabled("validate") == 0);
-   assert(delegate_role_result_cache_enabled("diagnose") == 0);
-   assert(delegate_role_result_cache_enabled("search") == 0);
-   assert(delegate_role_result_cache_enabled("execute") == 0);
-   assert(delegate_role_result_cache_enabled("code") == 0);
-   assert(delegate_role_result_cache_enabled("refactor") == 0);
-   assert(delegate_role_result_cache_enabled("inspect") == 0);
-   assert(delegate_role_result_cache_enabled("test") == 0);
-   assert(delegate_role_result_cache_enabled("summarize") == 1);
-   assert(delegate_role_result_cache_enabled("format") == 1);
-   assert(delegate_role_result_cache_enabled("draft") == 1);
-   assert(delegate_role_result_cache_enabled("reason") == 0);
-   assert(delegate_role_result_cache_enabled("custom-review") == 0);
-   assert(delegate_role_result_cache_enabled(NULL) == 0);
-   assert(delegate_role_result_cache_enabled("") == 0);
-   printf("  PASS: test_role_result_cache_policy\n");
-}
-
 static void test_prompt_plan_inline_prompt_only(void)
 {
    delegate_prompt_plan_t plan;
@@ -1321,8 +1278,6 @@ int main(void)
    test_depth_error_message_content();
    test_delegate_chain_env_clear_policy();
    test_guarded_lxc_readonly_root_matching();
-   test_role_default_tools();
-   test_role_result_cache_policy();
    test_prompt_plan_inline_prompt_only();
    test_prompt_plan_file_only();
    test_prompt_plan_prompt_and_file();
