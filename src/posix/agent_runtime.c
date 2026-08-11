@@ -840,8 +840,23 @@ native_provider_http:
             memset(&mreq, 0, sizeof mreq);
             /* The fold is reachable on its own, not only via the AGGRESSIVE
              * preset: fold.enabled had zero live callers before, so the only way
-             * to turn it on was a tier that also enables wire mutation. */
-            mreq.history_fold = (preset.history_fold || config_fold_enabled()) && !chatgpt;
+             * to turn it on was a tier that also enables wire mutation.
+             *
+             * THE CHATGPT ROUTE FOLDS TOO. It was excluded in #913 as "unverified"
+             * rather than as known-broken, and the exclusion then outlived the
+             * doubt that motivated it: chatgpt is what a codex-provider deployment
+             * actually uses, so excluding it meant the fold never ran there at all.
+             * Measured on CT 403 with the module attached and mode=aggressive, the
+             * same request cost an IDENTICAL 38826 prompt tokens with the
+             * economizer attached and detached — the lever was structurally
+             * unreachable on the only route the box uses.
+             *
+             * The original doubt was about SHAPE: folded turns are {role, content}
+             * with a string content, and agent_build_request_responses forwards
+             * `input` without converting to typed items. The Responses API accepts
+             * that string shorthand, which is why this is safe, and it is verified
+             * live against the real backend rather than argued from the spec. */
+            mreq.history_fold = preset.history_fold || config_fold_enabled();
             mreq.compress = preset.compress;
             mreq.freeze_guard_enabled = 1;
             mreq.freeze_guard_horizon = preset.freeze_guard_horizon;
