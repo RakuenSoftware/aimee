@@ -115,6 +115,17 @@ char *prompt_build(prompt_tier_t tier, const char *cwd, const char *custom_file)
 char *prompt_build_mode(aimee_mode_t mode, prompt_tier_t tier, const char *cwd,
                         const char *custom_file);
 
+/* Compose the manager-workflow block from explicit flags. Returns NULL when the
+ * block is withheld, otherwise a heap-allocated string the caller frees.
+ *
+ * Takes flags rather than reading config so the composition is testable without
+ * a config file on disk: what the levers COMPOSE TO is policy, and policy should
+ * not need I/O to exercise. prompt_build_mode supplies the config values.
+ *
+ * delegates_enabled withholds the whole block, not just the delegation
+ * paragraph -- see the definition for why. */
+char *prompt_manager_block(int block_enabled, int delegates_enabled, int review_enabled);
+
 /* Append lower-priority disposition guidance derived from config.
  * Returns a heap-allocated prompt string; caller must free().
  * If no dispositions are configured, returns a duplicate of base_prompt. */

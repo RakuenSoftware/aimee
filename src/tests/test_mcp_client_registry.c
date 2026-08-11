@@ -787,21 +787,21 @@ static void test_tool_profile_filter(void)
    cJSON *t = mcp_build_tools_list();
    int full = cJSON_GetArraySize(t);
    assert(full > expect);
-   assert(mcp_filter_tools_for_profile(t, "full") == 0 && cJSON_GetArraySize(t) == full);
-   assert(mcp_filter_tools_for_profile(t, "nonsense") == 0 && cJSON_GetArraySize(t) == full);
+   assert(mcp_filter_tools_for_profile(t, "full", 1) == 0 && cJSON_GetArraySize(t) == full);
+   assert(mcp_filter_tools_for_profile(t, "nonsense", 1) == 0 && cJSON_GetArraySize(t) == full);
    cJSON_Delete(t);
 
    /* P2 default: env unset + NULL profile resolves to "core" and filters. */
    assert(strcmp(mcp_tool_profile_effective(NULL), "core") == 0);
    t = mcp_build_tools_list();
-   assert(mcp_filter_tools_for_profile(t, NULL) == full - expect);
+   assert(mcp_filter_tools_for_profile(t, NULL, 1) == full - expect);
    assert(cJSON_GetArraySize(t) == expect);
    cJSON_Delete(t);
 
    /* "core" keeps exactly the Tier-0 set — and every named core tool exists in
     * the built list (kept count == expected count proves none was dropped). */
    t = mcp_build_tools_list();
-   int removed = mcp_filter_tools_for_profile(t, "core");
+   int removed = mcp_filter_tools_for_profile(t, "core", 1);
    assert(removed == full - expect);
    assert(cJSON_GetArraySize(t) == expect);
    cJSON *tool = NULL;
@@ -814,7 +814,7 @@ static void test_tool_profile_filter(void)
 
    /* "lean" is an alias for "core". */
    t = mcp_build_tools_list();
-   assert(mcp_filter_tools_for_profile(t, "lean") == full - expect);
+   assert(mcp_filter_tools_for_profile(t, "lean", 1) == full - expect);
    cJSON_Delete(t);
 }
 
@@ -953,17 +953,44 @@ static void test_solo_profile_is_gone(void)
    assert(tools_get(tools, "delegate") != NULL);
    assert(tools_get(tools, "roundtable_review") != NULL);
    /* Unknown profile -> fail open: nothing is removed. */
-   assert(mcp_filter_tools_for_profile(tools, "solo") == 0);
+   assert(mcp_filter_tools_for_profile(tools, "solo", 1) == 0);
    assert(tools_get(tools, "delegate") != NULL);
    assert(tools_get(tools, "roundtable_review") != NULL);
    cJSON_Delete(tools);
 
    /* "core" ships delegation, as it always did. */
    cJSON *core_tools = mcp_build_tools_list_flat();
-   mcp_filter_tools_for_profile(core_tools, "core");
+   mcp_filter_tools_for_profile(core_tools, "core", 1);
    assert(tools_get(core_tools, "delegate") != NULL);
    assert(tools_get(core_tools, "delegate_status") != NULL);
    cJSON_Delete(core_tools);
+}
+
+/* Delegation off removes the delegate tools from EVERY profile, including the
+ * ones that otherwise remove nothing.
+ *
+ * "full" and unknown profiles are the cases worth asserting: they fail open and
+ * return early, so a delegation filter written after that early-return would
+ * silently do nothing on exactly the surface that presents the most tools.
+ *
+ * roundtable_review must SURVIVE. Withholding it would be hiding a working tool
+ * to flatter a measurement, which is what the "no solo profile" decision above
+ * exists to prevent; the review levers change what the prompt demands, not what
+ * the server can do. */
+static void test_delegates_disabled_withholds_delegate_tools(void)
+{
+   const char *profiles[] = {"full", "nonsense", "core", "lean", NULL};
+   for (int i = 0; profiles[i]; i++)
+   {
+      cJSON *tools = mcp_build_tools_list_flat();
+      assert(tools_get(tools, "delegate") != NULL); /* present before */
+      int removed = mcp_filter_tools_for_profile(tools, profiles[i], 0);
+      assert(removed >= 2);
+      assert(tools_get(tools, "delegate") == NULL);
+      assert(tools_get(tools, "delegate_status") == NULL);
+      assert(tools_get(tools, "roundtable_review") != NULL);
+      cJSON_Delete(tools);
+   }
 }
 
 static void test_agent_code_intelligence_contracts(void)
@@ -1155,6 +1182,7 @@ int main(void)
    test_call_tool_demux();
    test_get_help_topics_exist();
    test_solo_profile_is_gone();
+   test_delegates_disabled_withholds_delegate_tools();
    test_agent_code_intelligence_contracts();
    test_flat_list_keeps_family_members();
    test_boot_and_lazy_tools();

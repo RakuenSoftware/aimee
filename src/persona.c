@@ -514,8 +514,38 @@ char *persona_identity_prose(const persona_t *p, const char *cwd)
     * persona uses its file `## Persona` body. */
    if (p->builtin)
    {
-      const char *prose = prompt_persona_text(aimee_mode_from_string(p->name));
-      return (prose && prose[0]) ? persona_apply_cwd(prose, cwd) : NULL;
+      aimee_mode_t mode = aimee_mode_from_string(p->name);
+      const char *prose = prompt_persona_text(mode);
+      if (!prose || !prose[0])
+         return NULL;
+      char *out = persona_apply_cwd(prose, cwd);
+      /* The manager block lives outside the persona literal (one definition,
+       * appended at build time) so it has to be appended HERE too -- this is a
+       * second composition path, not a caller of prompt_build_mode. Missing it
+       * silently dropped the manager framing from every session that builds its
+       * identity through a persona rather than a tier.
+       *
+       * Same levers, same reason: a surface that cannot delegate should not be
+       * told to. The block carries no %s, so it is appended after cwd
+       * substitution rather than through it. */
+      if (out && mode == AIMEE_MODE_ENGINEER)
+      {
+         char *block =
+             prompt_manager_block(config_prompt_manager_block_enabled(), config_delegates_enabled(),
+                                  config_prompt_manager_review_enabled());
+         if (block)
+         {
+            size_t need = strlen(out) + strlen(block) + 1;
+            char *joined = realloc(out, need);
+            if (joined)
+            {
+               strcat(joined, block);
+               out = joined;
+            }
+            free(block);
+         }
+      }
+      return out;
    }
    if (p->persona_text && p->persona_text[0])
       return persona_apply_cwd(p->persona_text, cwd);

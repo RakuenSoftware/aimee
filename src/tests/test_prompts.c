@@ -577,6 +577,64 @@ int main(void)
       }
    }
 
+   /* --- Manager block: every lever actually withholds text ---
+    *
+    * Asserted through the pure composer so no config file is needed. Each lever
+    * is checked to REMOVE text rather than merely to be settable: a flag that
+    * parses but changes no output is the failure mode worth testing, and it is
+    * invisible to a test that only inspects the default prompt. */
+   {
+      const char *HEADER = "## Your role: manage the work";
+      const char *DELEGATION = "ALWAYS delegate multi-file changes";
+      const char *REVIEW = "roundtable review";
+
+      char *b = prompt_manager_block(1, 1, 1);
+      assert(b);
+      assert(strstr(b, HEADER) && strstr(b, DELEGATION) && strstr(b, REVIEW));
+      free(b);
+
+      /* Review off: manager framing and delegation stay, the round trip goes. */
+      b = prompt_manager_block(1, 1, 0);
+      assert(b);
+      assert(strstr(b, HEADER) && strstr(b, DELEGATION));
+      assert(strstr(b, REVIEW) == NULL);
+      free(b);
+
+      /* Block off, and delegates off, each withhold the whole thing. */
+      assert(prompt_manager_block(0, 1, 1) == NULL);
+      assert(prompt_manager_block(0, 0, 0) == NULL);
+      assert(prompt_manager_block(1, 0, 1) == NULL);
+   }
+
+   /* --- The block appears exactly ONCE, on both tiers ---
+    *
+    * It used to be pasted verbatim into both the STANDARD and EXTENDED literals.
+    * Asserting a single occurrence is what stops a future edit from reintroducing
+    * the second copy, which is how the two drifted apart before. Runs at whatever
+    * the ambient config says, so it asserts only the count -- not presence, which
+    * the levers legitimately control. */
+   {
+      const char *HEADER = "## Your role: manage the work";
+      prompt_tier_t tiers[] = {PROMPT_STANDARD, PROMPT_EXTENDED};
+      for (int i = 0; i < 2; i++)
+      {
+         char *p = prompt_build_mode(AIMEE_MODE_ENGINEER, tiers[i], "/tmp/x", NULL);
+         assert(p);
+         const char *first = strstr(p, HEADER);
+         if (first)
+            assert(strstr(first + 1, HEADER) == NULL);
+         assert(strstr(p, "autonomous software engineer") != NULL);
+         free(p);
+      }
+
+      /* MINIMAL never carries it: a tier chosen for brevity must not gain the
+       * longest block in the prompt. */
+      char *p = prompt_build_mode(AIMEE_MODE_ENGINEER, PROMPT_MINIMAL, "/tmp/x", NULL);
+      assert(p);
+      assert(strstr(p, HEADER) == NULL);
+      free(p);
+   }
+
    printf("OK\n");
    return 0;
 }

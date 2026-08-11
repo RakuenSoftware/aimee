@@ -509,6 +509,21 @@ typedef struct config
     * prefix (instead of prepended) on the OpenAI/Codex Responses path, so the
     * provider's automatic prefix cache is not invalidated each turn. */
    int ingress_cache_placement_enabled;
+   /* Delegation available at all. Default 1. When 0, the delegate tools are
+    * withheld from the tool surface AND the manager persona block is omitted --
+    * that block exists to direct work to delegates, so it is noise without them.
+    * Advertising delegation on a surface that cannot perform it costs tokens on
+    * every request and was measured doing exactly nothing: zero delegate calls
+    * across a whole benchmark corpus whose prompt said "ALWAYS delegate". */
+   int delegates_enabled;
+   /* Emit the manager persona block. Default 1. Independent off switch for
+    * callers that keep delegation but want the shorter prompt. */
+   int prompt_manager_block_enabled;
+   /* Emit the roundtable-review mandate inside the manager block. Default 1.
+    * Separable because it is obeyed and each review is a full round trip: on
+    * small bounded tasks that is pure overhead, which is why benchmarks turn it
+    * off while production keeps it. */
+   int prompt_manager_review_enabled;
    /* Session-isolation guard (opt-in): when on, the PreToolUse attention-guard
     * fails closed on a mutating tool whose target is NOT inside an aimee-managed
     * worktree (.aimee/worktrees/...), forcing every mutating session into an

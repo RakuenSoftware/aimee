@@ -28,6 +28,60 @@ static const char *PROMPT_MINIMAL_TEXT =
     "When using tools, verify each result before proceeding.\n"
     "Working directory: %s\n";
 
+/* --- Manager workflow block ------------------------------------------------
+ *
+ * ONE definition, appended at build time, because this text used to be pasted
+ * verbatim into both PROMPT_STANDARD_TEXT and PROMPT_EXTENDED_TEXT -- two copies
+ * that had to be edited in lockstep forever.
+ *
+ * Split into a header, a DELEGATION mandate, and a REVIEW mandate so each can be
+ * withheld on a surface that cannot honour it. That is not hypothetical: on the
+ * MCP surface the delegate tool is advertised but delegation does not work, and
+ * across a whole benchmark corpus `delegate` was called ZERO times while this
+ * text instructed the agent to "ALWAYS delegate". Shipping an instruction that
+ * cannot be followed costs tokens on every single request and teaches the model
+ * to discount the rest of the prompt.
+ *
+ * The review mandate is separable for cost reasons: it is honoured (52
+ * roundtable_review calls in the same corpus) and each one is a full round trip.
+ * On a one-file change that process is overhead, so a caller running small
+ * bounded tasks -- benchmarks especially -- can turn it off without also losing
+ * the manager framing. */
+static const char *MANAGER_BLOCK_HEADER = "\n"
+                                          "## Your role: manage the work, don't do it yourself\n";
+
+static const char *MANAGER_BLOCK_DELEGATION =
+    "You are the MANAGER. Communicate with the user, split the request into bounded\n"
+    "packets, and hand each to a delegate.\n"
+    "ALWAYS delegate multi-file changes, infrastructure, deployments, and parallel work:\n"
+    "  aimee delegate <role> --persona <name> \"prompt\" [--tools] [--background]\n"
+    "A persona is REQUIRED (e.g. engineer, qa, security, reviewer, architect).\n"
+    "Always use aimee delegates over the Agent tool (the Agent tool is disabled in aimee).\n";
+
+static const char *MANAGER_BLOCK_REVIEW =
+    "After a delegate returns: REVIEW its diff against the packet's acceptance\n"
+    "criteria, then LEAD a roundtable review (aimee roundtable review ...) before\n"
+    "reporting the work as complete. Do not claim done on unreviewed delegate output.\n";
+
+char *prompt_manager_block(int block_enabled, int delegates_enabled, int review_enabled)
+{
+   /* The block is premised on delegation: "manage the work, don't do it
+    * yourself" is incoherent with nobody to hand it to, so delegates_enabled
+    * withholds ALL of it rather than just the delegation paragraph. The review
+    * mandate gates separately within that, because a caller can want the manager
+    * framing and still not want a roundtable round trip on a one-file change. */
+   if (!block_enabled || !delegates_enabled)
+      return NULL;
+
+   dstr_t out;
+   dstr_init(&out);
+   dstr_append_str(&out, MANAGER_BLOCK_HEADER);
+   dstr_append_str(&out, MANAGER_BLOCK_DELEGATION);
+   if (review_enabled)
+      dstr_append_str(&out, MANAGER_BLOCK_REVIEW);
+   return dstr_steal(&out);
+}
+
 static const char *PROMPT_STANDARD_TEXT =
     "You are an expert autonomous software engineer working in %s.\n"
     "\n"
@@ -45,18 +99,7 @@ static const char *PROMPT_STANDARD_TEXT =
     "- When memory context contains '## Memory Answerability', treat it as an\n"
     "  insufficient-memory signal. When it contains '## Retrieval Confidence: LOW',\n"
     "  acknowledge the uncertainty and avoid speculating beyond the context.\n"
-    "\n"
-    "## Your role: manage the work, don't do it yourself\n"
-    "You are the MANAGER. Communicate with the user, split the request into bounded\n"
-    "packets, hand each to a delegate, then REVIEW what comes back and LEAD a\n"
-    "roundtable review before you treat the work as done.\n"
-    "ALWAYS delegate multi-file changes, infrastructure, deployments, and parallel work:\n"
-    "  aimee delegate <role> --persona <name> \"prompt\" [--tools] [--background]\n"
-    "A persona is REQUIRED (e.g. engineer, qa, security, reviewer, architect).\n"
-    "Always use aimee delegates over the Agent tool (the Agent tool is disabled in aimee).\n"
-    "After a delegate returns: review its diff against the packet's acceptance\n"
-    "criteria, then run a roundtable review (aimee roundtable review ...) before\n"
-    "reporting the work as complete. Do not claim done on unreviewed delegate output.\n";
+    "";
 
 static const char *PROMPT_EXTENDED_TEXT =
     "You are an expert autonomous software engineer working in %s.\n"
@@ -92,18 +135,7 @@ static const char *PROMPT_EXTENDED_TEXT =
     "- EXECUTE: Make the changes, one file at a time\n"
     "- VERIFY: Confirm each change works before moving on\n"
     "- ITERATE: If verification fails, diagnose and retry\n"
-    "\n"
-    "## Your role: manage the work, don't do it yourself\n"
-    "You are the MANAGER. Communicate with the user, split the request into bounded\n"
-    "packets, hand each to a delegate, then REVIEW what comes back and LEAD a\n"
-    "roundtable review before you treat the work as done.\n"
-    "ALWAYS delegate multi-file changes, infrastructure, deployments, and parallel work:\n"
-    "  aimee delegate <role> --persona <name> \"prompt\" [--tools] [--background]\n"
-    "A persona is REQUIRED (e.g. engineer, qa, security, reviewer, architect).\n"
-    "Always use aimee delegates over the Agent tool (the Agent tool is disabled in aimee).\n"
-    "After a delegate returns: review its diff against the packet's acceptance\n"
-    "criteria, then run a roundtable review (aimee roundtable review ...) before\n"
-    "reporting the work as complete. Do not claim done on unreviewed delegate output.\n";
+    "";
 
 /* Novel-mode personas. Structurally parallel to the engineer tiers above so
  * the workflow scaffolding is familiar, but the role, workflow, and rules are
@@ -834,6 +866,23 @@ char *prompt_build_mode(aimee_mode_t mode, prompt_tier_t tier, const char *cwd,
       default:
          dstr_appendf(&out, standard_text, cwd ? cwd : ".");
          break;
+      }
+   }
+
+   /* Manager workflow: engineer mode only (the novel/songwriter personas carry
+    * their own scaffolding), never on MINIMAL -- a tier chosen for brevity should
+    * not gain the longest block in the prompt -- and never when a custom file has
+    * replaced the persona wholesale. Reading the levers is the ONLY config work
+    * here; what they compose to is decided by the pure function above. */
+   if (mode == AIMEE_MODE_ENGINEER && tier != PROMPT_MINIMAL && !(custom_file && custom_file[0]))
+   {
+      char *block =
+          prompt_manager_block(config_prompt_manager_block_enabled(), config_delegates_enabled(),
+                               config_prompt_manager_review_enabled());
+      if (block)
+      {
+         dstr_append_str(&out, block);
+         free(block);
       }
    }
 

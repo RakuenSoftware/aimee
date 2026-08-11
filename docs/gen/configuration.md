@@ -123,7 +123,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 
 > **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `aimee_synthesis_model`
 
-### Advanced tuning keys (78)
+### Advanced tuning keys (81)
 
 Expert scalars with sensible defaults; settable in the config file but off the everyday surface.
 
@@ -139,6 +139,7 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `code_span_max_lines` | int | Max line span the code_span_get recovery resolver returns per call (default 400). |
 | `code_surprising_precision_floor` | float | §4 self-suppress: when the LLM-judge-sampled precision of surprising-link candidates falls below this floor, an unjudged /v1/code/graph/surprising request returns no candidates (default 0 = disabled). |
 | `cost_reward_lambda_pct` | int | Cost-penalty weight (percent) in the reward. |
+| `delegates_enabled` | bool | n/a |
 | `guardrails_semantic_block_threshold` | float | Semantic score threshold to block. |
 | `guardrails_semantic_prompt_threshold` | float | Semantic score threshold for prompt-level flags. |
 | `guardrails_semantic_warn_threshold` | float | Semantic score threshold to warn. |
@@ -205,6 +206,8 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `memory_semantic_floor_scale` | float | Multiplier on the semantic-recall cosine floors (0 = auto-scale by the active embedder dimension; >0 pins it). |
 | `memory_semantic_weight` | float | Semantic (vector) weight in hybrid recall. |
 | `memory_window_radius` | int | Neighbour radius for memory-window expansion. |
+| `prompt_manager_block_enabled` | bool | n/a |
+| `prompt_manager_review_enabled` | bool | n/a |
 | `session_worktree_base` | string | What a new primary session's branch+worktree is cut from. Order: configured -> remote default -> main -> master. Values: remote_default (default), local_default, current (opt-in only, never a fallback), or an explicit ref. Env: AIMEE_SESSION_WORKTREE_BASE. |
 | `tool_output_max_bytes` | int | Per-result cap (bytes) on the model-visible tool output (read_file/bash/grep/glob/git_* results). 0 = built-in default (32768); any positive value is clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the prompt + history; the context-economizer (aggressive tier) compresses older results to keep history bounded. |
 

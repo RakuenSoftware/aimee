@@ -242,6 +242,30 @@ int config_ingress_cache_placement_enabled(void)
    return v;
 }
 
+/* These three default to 1, so they read into an initializer of 1: a failed
+ * config_field_read must fall back to the shipped default, not silently disable
+ * delegation and the manager persona. */
+int config_delegates_enabled(void)
+{
+   int v = 1;
+   config_field_read(offsetof(config_t, delegates_enabled), sizeof(v), &v);
+   return v;
+}
+
+int config_prompt_manager_block_enabled(void)
+{
+   int v = 1;
+   config_field_read(offsetof(config_t, prompt_manager_block_enabled), sizeof(v), &v);
+   return v;
+}
+
+int config_prompt_manager_review_enabled(void)
+{
+   int v = 1;
+   config_field_read(offsetof(config_t, prompt_manager_review_enabled), sizeof(v), &v);
+   return v;
+}
+
 int config_require_session_worktree(void)
 {
    int v = 0;
