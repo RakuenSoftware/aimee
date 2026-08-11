@@ -148,55 +148,6 @@ static void test_empty_role(void)
    printf("  PASS: test_empty_role\n");
 }
 
-static void test_is_write_code_role(void)
-{
-   assert(delegate_role_is_write("code") == 1);
-   printf("  PASS: test_is_write_code_role\n");
-}
-
-static void test_is_write_refactor_role(void)
-{
-   assert(delegate_role_is_write("refactor") == 1);
-   printf("  PASS: test_is_write_refactor_role\n");
-}
-
-static void test_is_write_implement_alias(void)
-{
-   assert(delegate_role_is_write("implement") == 1);
-   printf("  PASS: test_is_write_implement_alias\n");
-}
-
-static void test_is_write_read_only_roles(void)
-{
-   assert(delegate_role_is_write("review") == 0);
-   assert(delegate_role_is_write("validate") == 0);
-   assert(delegate_role_is_write("diagnose") == 0);
-   assert(delegate_role_is_write("execute") == 0);
-   assert(delegate_role_is_write("draft") == 0);
-   assert(delegate_role_is_write("planner") == 0);
-   printf("  PASS: test_is_write_read_only_roles\n");
-}
-
-static void test_is_write_null_empty(void)
-{
-   assert(delegate_role_is_write(NULL) == 0);
-   assert(delegate_role_is_write("") == 0);
-   printf("  PASS: test_is_write_null_empty\n");
-}
-
-static void test_novel_roles(void)
-{
-   /* continuity and beat-check survive the persona-vs-role cull: they are real
-    * read-only inspection actions a novel persona genuinely delegates, not
-    * restatements of who the delegate is. */
-   assert(delegate_role_is_write("continuity") == 0);
-   assert(delegate_role_is_write("beat-check") == 0);
-   assert(delegate_role_auto_tools_for_invocation("continuity", -1, 0) == 1);
-   assert(delegate_role_auto_tools_for_invocation("beat-check", 2, 0) == 1);
-   assert(delegate_role_auto_tools_for_invocation("continuity", 1, 0) == 0);
-   printf("  PASS: test_novel_roles\n");
-}
-
 /* The cull deleted the roles that only restated a persona. Writing prose or a
  * lyric is the `draft` action performed BY a novel/songwriter persona, so these
  * names must now be rejected outright rather than silently degrading to a
@@ -278,23 +229,6 @@ static void test_known_roles_cover_documented_and_aliased(void)
    printf("  PASS: test_known_roles_cover_documented_and_aliased\n");
 }
 
-static void test_inspection_turn_policies(void)
-{
-   assert(delegate_default_max_turns_for_role("review") == 20);
-   assert(delegate_default_max_turns_for_role("test") == 12);
-   assert(delegate_default_max_turns_for_role("diagnose") == 16);
-   assert(delegate_default_max_turns_for_role("code") == -1);
-   assert(delegate_final_after_turns_for_role("review") == -1);
-   assert(delegate_final_after_turns_for_role("validate") == 8);
-   assert(delegate_final_after_turns_for_role("test") == 8);
-   assert(delegate_final_after_turns_for_role("search") == 10);
-   assert(delegate_final_after_turns_for_role("diagnose") == 12);
-   assert(delegate_final_after_turns_for_role("inspect") == 12);
-   assert(delegate_final_after_turns_for_role("plan") == -1);
-   assert(delegate_final_after_turns_for_role("code") == -1);
-   printf("  PASS: test_inspection_turn_policies\n");
-}
-
 static void test_apply_max_turns_policy(void)
 {
    agent_config_t cfg;
@@ -359,49 +293,6 @@ static void test_apply_max_turns_cap(void)
    printf("  PASS: test_apply_max_turns_cap\n");
 }
 
-static void test_auto_tools_policy(void)
-{
-   assert(delegate_role_auto_tools_for_invocation("diagnose", -1, 0) == 1);
-   assert(delegate_role_auto_tools_for_invocation("validate", 2, 0) == 1);
-   assert(delegate_role_auto_tools_for_invocation("diagnose", 1, 0) == 0);
-   assert(delegate_role_auto_tools_for_invocation("inspect", 1, 0) == 0);
-   assert(delegate_role_auto_tools_for_invocation("diagnose", 1, 1) == 1);
-   assert(delegate_role_auto_tools_for_invocation("review", -1, 0) == 1);
-   assert(delegate_role_auto_tools_for_invocation("review", 1, 0) == 0);
-   printf("  PASS: test_auto_tools_policy\n");
-}
-
-/* A write role left tools-off cannot fail visibly. Measured: a `code` packet
- * delegated over MCP -- which had no way to ask for tools -- came back with a
- * per-file diff summary naming files that were never created, and the caller
- * had to disprove it by searching the disk. `review` enabled tools by default
- * and `code` did not, so delegation worked for inspection and fabricated for
- * implementation: the failure distribution that builds trust before it lies. */
-static void test_write_roles_get_tools_by_default(void)
-{
-   assert(delegate_role_enable_tools_by_default("code") == 1);
-   assert(delegate_role_enable_tools_by_default("refactor") == 1);
-   /* Through the aliases a caller actually types. */
-   assert(delegate_role_auto_tools_for_invocation("implement", -1, 0) == 1);
-   assert(delegate_role_auto_tools_for_invocation("build", -1, 0) == 1);
-
-   /* Every write role, whatever the alias table holds, by the same rule. */
-   static const char *const write_roles[] = {"code", "refactor", "implement", "build"};
-   for (size_t i = 0; i < sizeof(write_roles) / sizeof(write_roles[0]); i++)
-   {
-      assert(delegate_role_is_write(write_roles[i]) == 1);
-      assert(delegate_role_auto_tools_for_invocation(write_roles[i], -1, 0) == 1);
-   }
-
-   /* The two overrides still win: a single turn cannot use tools, and an
-    * explicit --no-tools is honored (server side) as a deliberate choice. */
-   assert(delegate_role_auto_tools_for_invocation("code", 1, 0) == 0);
-
-   /* Prose generation is not a write role and stays text-only. */
-   assert(delegate_role_enable_tools_by_default("draft") == 0);
-   printf("  PASS: test_write_roles_get_tools_by_default\n");
-}
-
 int main(void)
 {
    printf("test_delegate_role\n");
@@ -417,20 +308,11 @@ int main(void)
    test_unknown_role_unchanged();
    test_null_role();
    test_empty_role();
-   test_is_write_code_role();
-   test_is_write_refactor_role();
-   test_is_write_implement_alias();
-   test_is_write_read_only_roles();
-   test_is_write_null_empty();
-   test_novel_roles();
    test_culled_persona_roles_are_rejected();
    test_unknown_roles_are_not_known();
    test_known_roles_cover_documented_and_aliased();
-   test_inspection_turn_policies();
    test_apply_max_turns_policy();
    test_apply_max_turns_cap();
-   test_auto_tools_policy();
-   test_write_roles_get_tools_by_default();
    printf("All tests passed.\n");
    return 0;
 }

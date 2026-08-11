@@ -752,6 +752,44 @@ static void delegate_patch_coord(const db1_coord_task_t *tasks, int task_count,
    free(response);
 }
 
+/* What a role implies about how it is run. One call answers whichever question
+ * the caller asked; the module resolves the alias itself, so every answer is
+ * computed from the same canonical spelling. */
+static int delegate_role_policy(int op, const char *role, int a, int b, int *out)
+{
+   uint8_t request[AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN];
+   uint8_t response[AIMEE_DELEGATES_ROLEPOL_RESPONSE_LEN];
+   uint32_t response_len = 0;
+
+   if (!out || aimee_delegates_rolepol_request_encode(role, a, b, request, sizeof(request)) != 0 ||
+       call_module(AIMEE_DELEGATES_EVENT_ROLEPOL, AIMEE_DELEGATES_STAGE_ROLEPOL, request,
+                   sizeof(request), response, sizeof(response), &response_len) != 0 ||
+       response_len != AIMEE_DELEGATES_ROLEPOL_RESPONSE_LEN ||
+       aimee_delegates_get_u32(response) != AIMEE_DELEGATES_ROLEPOL_RESPONSE_MAGIC)
+      return -1;
+
+   switch (op)
+   {
+   case DELEGATE_ROLE_OP_IS_WRITE:
+      *out = (int)aimee_delegates_get_u32(response + 4);
+      return 0;
+   case DELEGATE_ROLE_OP_TOOLS:
+      *out = (int)aimee_delegates_get_u32(response + 8);
+      return 0;
+   case DELEGATE_ROLE_OP_CACHE:
+      *out = (int)aimee_delegates_get_u32(response + 12);
+      return 0;
+   case DELEGATE_ROLE_OP_AUTO_TOOLS:
+      *out = (int)aimee_delegates_get_u32(response + 16);
+      return 0;
+   case DELEGATE_ROLE_OP_FINAL_TURNS:
+      *out = (int)aimee_delegates_get_u32(response + 20);
+      return 0;
+   default:
+      return -1;
+   }
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -967,6 +1005,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_verify_provider(delegate_verify);
    delegate_register_economics_provider(delegate_economics);
    delegate_register_patch_provider(delegate_patch_coord);
+   delegate_register_role_policy_provider(delegate_role_policy);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path
