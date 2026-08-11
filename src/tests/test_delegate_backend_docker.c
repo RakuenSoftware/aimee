@@ -14,6 +14,32 @@
 #include <aimee/delegates/delegate_backend_docker.h>
 #include <aimee/delegates/delegate_launch_args.h>
 
+/* The isolation verdict, faked.
+ *
+ * These cases are about the backend's create/start/resume behaviour, not about
+ * what a network report means -- that is judged against the module. The fake
+ * records what it was asked and answers "isolated" so the flow proceeds; a case
+ * that needs a refusal sets g_fake_isolation_refuse. */
+static int g_fake_isolation_refuse;
+static int g_fake_isolation_calls;
+static char g_fake_isolation_report[4096];
+static int g_fake_isolation_probe_failed;
+
+static int fake_isolation(const char *report, int probe_failed, int require_isolation, int *refuse,
+                          int *warn, int *is_error, char *reason, size_t reason_cap)
+{
+   (void)require_isolation;
+   g_fake_isolation_calls++;
+   snprintf(g_fake_isolation_report, sizeof(g_fake_isolation_report), "%s", report ? report : "");
+   g_fake_isolation_probe_failed = probe_failed;
+   *refuse = g_fake_isolation_refuse;
+   *warn = 0;
+   *is_error = g_fake_isolation_refuse;
+   if (reason && reason_cap)
+      snprintf(reason, reason_cap, "%s", g_fake_isolation_refuse ? "fake breach" : "");
+   return 0;
+}
+
 /* ── the module's answer, faked ─────────────────────────────────────────────
  *
  * The backend no longer decides the container's shape. What it still does, and
@@ -124,6 +150,7 @@ static void test_file_ops_reject_null_state(void)
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    char *out = (char *)0x1;
    assert(b->read_file(b, NULL, "x", 0, 0, &out) == -1);
@@ -173,6 +200,7 @@ static void test_docker_write_then_read_roundtrip(void)
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    void *state = NULL;
    setup_docker_fileio_state(b, "task-fileio-1", &state);
@@ -249,6 +277,7 @@ static void test_docker_absolute_in_workspace_path_accepted(void)
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    void *state = NULL;
    setup_docker_fileio_state(b, "task-abs-1", &state);
@@ -289,6 +318,7 @@ static void test_docker_path_validation_rejects_escapes(void)
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    void *state = NULL;
    setup_docker_fileio_state(b, "task-fileio-2", &state);
@@ -309,6 +339,7 @@ static void test_docker_list_dir_returns_entries(void)
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    void *state = NULL;
    setup_docker_fileio_state(b, "task-list-1", &state);
@@ -491,11 +522,66 @@ static int fake_create_count(void)
    return count;
 }
 
+/* The backend's job with an isolation verdict is to honour it: destroy the
+ * container and refuse the delegation. What the report MEANT is judged in the
+ * module and tested there. */
+static void test_acquire_refuses_when_isolation_is_refused(void)
+{
+   delegate_backend_reset_for_test();
+   delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
+   delegate_backend_t *b = delegate_backend_docker_get();
+   const char *fixture = write_fake_docker_fixture();
+   setenv("AIMEE_DOCKER_BIN", fixture, 1);
+
+   g_fake_isolation_refuse = 1;
+   g_fake_isolation_calls = 0;
+   delegate_backend_config_t cfg = {0};
+   void *state = NULL;
+   assert(b->acquire(b, "task-iso-refuse", &cfg, &state) == DELEGATE_ACQUIRE_REFUSED_ISOLATION);
+   assert(state == NULL);
+   assert(g_fake_isolation_calls == 1);
+   /* The container must not be left running for something else to reuse. */
+   assert(!fake_container_exists("aimee-delegate-task-iso-refuse"));
+
+   g_fake_isolation_refuse = 0;
+   teardown_fake_docker();
+   unsetenv("AIMEE_DOCKER_BIN");
+   printf("  PASS: test_acquire_refuses_when_isolation_is_refused\n");
+}
+
+/* No verdict is not a pass. A sandbox nobody could assess is not an assessed
+ * sandbox, so an unanswered judgement refuses exactly as a failed probe would
+ * under require_isolation -- otherwise removing the provider would silently
+ * turn every container into an unchecked one. */
+static void test_acquire_refuses_when_isolation_cannot_be_judged(void)
+{
+   delegate_backend_reset_for_test();
+   delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(NULL); /* nothing to judge with */
+   delegate_backend_t *b = delegate_backend_docker_get();
+   const char *fixture = write_fake_docker_fixture();
+   setenv("AIMEE_DOCKER_BIN", fixture, 1);
+
+   delegate_backend_config_t cfg = {0};
+   void *state = NULL;
+   assert(b->acquire(b, "task-iso-unjudged", &cfg, &state) == DELEGATE_ACQUIRE_REFUSED_ISOLATION);
+   assert(state == NULL);
+
+   delegate_register_isolation_provider(fake_isolation);
+   teardown_fake_docker();
+   unsetenv("AIMEE_DOCKER_BIN");
+   printf("  PASS: test_acquire_refuses_when_isolation_cannot_be_judged\n");
+}
+
 static void test_acquire_creates_and_starts_container(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
@@ -577,6 +663,7 @@ static void test_release_hibernate_keeps_container(void)
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
@@ -612,6 +699,7 @@ static void test_docker_exec_runs_through_fake(void)
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
@@ -637,6 +725,7 @@ static void test_docker_exec_propagates_nonzero_exit(void)
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
@@ -661,6 +750,7 @@ static void test_docker_exec_timeout_kills_inner_command(void)
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
@@ -694,6 +784,7 @@ static void test_docker_exec_set_cwd_prefixes_subsequent_calls(void)
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
@@ -728,6 +819,7 @@ static void test_acquire_rejects_invalid_args(void)
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    /* Empty task_id rejected. */
    void *state = (void *)0x1;
@@ -790,6 +882,7 @@ static void test_docker_mounts_caller_workspace(void)
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
@@ -856,6 +949,7 @@ static void test_docker_refuses_a_missing_workspace(void)
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
@@ -894,6 +988,7 @@ static void test_docker_workspace_validation_refusals(void)
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
    delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
@@ -1113,6 +1208,8 @@ int main(void)
    test_build_exec_command_handles_special_chars();
    test_build_exec_command_rejects_invalid();
    test_acquire_creates_and_starts_container();
+   test_acquire_refuses_when_isolation_is_refused();
+   test_acquire_refuses_when_isolation_cannot_be_judged();
    test_release_hibernate_keeps_container();
    test_docker_exec_runs_through_fake();
    test_docker_exec_propagates_nonzero_exit();

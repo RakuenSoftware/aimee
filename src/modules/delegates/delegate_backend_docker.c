@@ -465,7 +465,16 @@ int delegate_backend_docker_reap_aged(int max_age_secs)
  *                     counts, so a subnet-only/link-local route cannot slip past)
  *  -1  = undetermined (the inspect probe could not run)
  * The caller decides what an undetermined result means (fail-closed under enforce). */
-static int docker_sandbox_network_state(const char *container)
+/* Run the network probe and hand back its RAW report.
+ *
+ * What the report means is not decided here: reading it and judging it are one
+ * rule, and it lives in the module. This half is the part that must stay --
+ * inspecting a container is I/O.
+ *
+ * Returns 0 with *out set to a malloc'd report (caller frees), or -1 when the
+ * probe could not run at all. Those are different answers: a failed probe is
+ * UNKNOWN, and unknown is not isolated. */
+static int docker_sandbox_network_report(const char *container, char **out)
 {
    const char *argv[] = {
        resolve_docker_bin(),
@@ -474,37 +483,15 @@ static int docker_sandbox_network_state(const char *container)
        "{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{$v.IPAddress}};{{end}}",
        container,
        NULL};
-   char *out = NULL;
-   if (safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &out, 65536, DOCKER_PROBE_TIMEOUT_MS) !=
-       0)
+   char *report = NULL;
+   if (safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &report, 65536,
+                                         DOCKER_PROBE_TIMEOUT_MS) != 0)
    {
-      free(out);
+      free(report);
       return -1;
    }
-   int has_net = 0;
-   if (out)
-   {
-      char *save = NULL;
-      for (char *tok = strtok_r(out, ";\n", &save); tok; tok = strtok_r(NULL, ";\n", &save))
-      {
-         char *eq = strchr(tok, '=');
-         if (!eq)
-            continue;
-         *eq = '\0';
-         const char *name = tok, *ip = eq + 1;
-         while (*name == ' ' || *name == '\t')
-            name++;
-         while (*ip == ' ' || *ip == '\t')
-            ip++;
-         if (ip[0] || (name[0] && strcmp(name, "none") != 0))
-         {
-            has_net = 1;
-            break;
-         }
-      }
-   }
-   free(out);
-   return has_net;
+   *out = report;
+   return 0;
 }
 
 /* Read a linked worktree's `.git` pointer file: "gitdir: <absolute path>".
@@ -1021,39 +1008,42 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
     * it, giving the sandbox real egress and silently defeating the package-access proxy
     * and its allowlist. Probe now that the container is up (covers create AND resume). */
    {
-      int net = docker_sandbox_network_state(st->container_name);
-      int enforce = cfg && cfg->require_isolation;
-      /* Under enforce, an UNDETERMINED result (-1) is also a refusal: we will not run a
-       * delegate we cannot prove is isolated. Under warn-only, only a confirmed breach
-       * (1) is worth an error; an undetermined probe is a quiet warning. */
-      if (net == 1 || (enforce && net != 0))
+      char *report = NULL;
+      int probe_failed = docker_sandbox_network_report(st->container_name, &report) != 0;
+      int refuse = 0, warn = 0, is_error = 0;
+      char reason[512] = "";
+      int judged = delegate_isolation_judge(report ? report : "", probe_failed,
+                                            cfg && cfg->require_isolation, &refuse, &warn,
+                                            &is_error, reason, sizeof(reason));
+      free(report);
+
+      /* No verdict is not a pass. The judgement's own reasoning applies to the
+       * judgement itself: a sandbox nobody could assess is not an assessed
+       * sandbox, so an unanswered call refuses exactly as a failed probe under
+       * require_isolation would. */
+      if (judged != 0)
       {
-         if (net == 1)
-            aimee_log(LOG_ERROR, "delegate-sandbox",
-                      "container %s has network egress despite --network none: the runtime did "
-                      "not honour network isolation, so the delegate can reach the network "
-                      "directly and BYPASS the package-access proxy/allowlist%s",
-                      st->container_name,
-                      enforce ? " — refusing to run (delegate_sandbox_require_isolation)"
-                              : " — set delegate_sandbox_require_isolation=true to refuse");
-         else /* undetermined + enforce */
-            aimee_log(LOG_ERROR, "delegate-sandbox",
-                      "container %s: could not verify network isolation and "
-                      "delegate_sandbox_require_isolation is set — refusing to run",
-                      st->container_name);
-         if (enforce)
-         {
-            const char *rm_argv[] = {"docker", "rm", "-f", st->container_name, NULL};
-            (void)run_docker(rm_argv);
-            free(st);
-            return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
-         }
-      }
-      else if (net == -1) /* undetermined, warn-only: note it without failing */
-      {
-         aimee_log(LOG_WARN, "delegate-sandbox",
-                   "container %s: could not verify network isolation (probe failed)",
+         aimee_log(LOG_ERROR, "delegate-sandbox",
+                   "container %s: isolation could not be judged; refusing to run",
                    st->container_name);
+         refuse = 1;
+         is_error = 1;
+      }
+
+      /* Severity comes from the verdict: a breach that runs anyway is an ERROR
+       * even though it does not refuse, while an unverifiable probe on a box
+       * that does not require isolation is only a warning. */
+      if (refuse || warn || is_error)
+         aimee_log((refuse || is_error) ? LOG_ERROR : LOG_WARN, "delegate-sandbox",
+                   "container %s: %s", st->container_name,
+                   reason[0] ? reason : "isolation unverified");
+
+      if (refuse)
+      {
+         const char *rm_argv[] = {"docker", "rm", "-f", st->container_name, NULL};
+         (void)run_docker(rm_argv);
+         free(st);
+         return DELEGATE_ACQUIRE_REFUSED_ISOLATION;
       }
    }
 

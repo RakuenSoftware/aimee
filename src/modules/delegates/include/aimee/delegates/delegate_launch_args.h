@@ -51,4 +51,21 @@ int delegate_image_spec_resolve(const char *base, const char *const *pkgs, int n
                                 const char *verbatim, char *tag, size_t tag_cap, char *dockerfile,
                                 size_t df_cap);
 
+/* What a container's network report means, and what to do about it.
+ *
+ * FAILS CLOSED: with no provider there is no verdict, and a delegate whose
+ * isolation nothing judged is refused. That is the same reasoning the judgement
+ * itself uses -- an unproven sandbox is not a sandbox. */
+typedef int (*delegate_isolation_fn)(const char *report, int probe_failed, int require_isolation,
+                                     int *refuse, int *warn, int *is_error, char *reason,
+                                     size_t reason_cap);
+
+void delegate_register_isolation_provider(delegate_isolation_fn provider);
+
+/* Returns 0 with the verdict filled, or -1 (logged) -- which callers must treat
+ * as a refusal. */
+int delegate_isolation_judge(const char *report, int probe_failed, int require_isolation,
+                             int *refuse, int *warn, int *is_error, char *reason,
+                             size_t reason_cap);
+
 #endif
