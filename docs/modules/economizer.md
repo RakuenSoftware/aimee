@@ -73,7 +73,7 @@ reports whether an `aimee-module-economizer` process is attached to the bus.
 
 When it is not attached, `econ_module_reduce` returns non-zero immediately and the caller
 dispatches its original prompt. That is the designed steady state for any deployment that
-has not enabled the module — a missing economizer costs tokens, never correctness.
+has not enabled the module. A missing economizer costs tokens, never correctness.
 
 ## Configuration and activation
 
@@ -117,7 +117,7 @@ It is therefore an in-process bus peer with no network egress of its own.
 
 Ref validation is strict because a spill ref reaches the filesystem: anything that is not
 a well-formed content-derived ref is refused rather than normalized. The proof registry is
-the second control — `proof.go` can produce evidence that a transform pays for itself, but
+the second control. `proof.go` can produce evidence that a transform pays for itself, but
 applying one requires a signed registry entry, and production ships with an empty
 registry, so no proof-authorized transform can run.
 
@@ -126,7 +126,7 @@ registry, so no proof-authorized transform can run.
 - **Delegate turn.** `agent_runtime` reduces before dispatch; a returned array replaces
   the prompt for that call only, and the ledger row records what was removed.
 - **Gateway proxy turn.** `gateway_mutate_wire` snapshots the pristine body, reduces,
-  and dispatches only if `gw_should_apply` returns `GW_BYPASS_NONE` — which requires a
+  and dispatches only if `gw_should_apply` returns `GW_BYPASS_NONE`, which requires a
   genuine net shrink AND a structurally clean result (no orphaned `tool_use`/`tool_result`
   pair, checked on a copy).
 - **Measure-only turn.** The same path with mutation suppressed, so a deployment can see
@@ -139,9 +139,9 @@ the port against the C originals byte for byte. On the C side `unit-test-gateway
 `unit-test-gateway-mutate-wire` and `unit-test-economizer-activation` cover the seam
 decision, the wire dance and the JSON canonicaliser.
 
-Failure behavior is uniform and fail-open. Bus unavailable, malformed reply, allocation
-failure, a reply whose `messages` will not parse — every one returns non-zero and leaves
-the caller's array untouched. On the gateway path a payload-class `4xx` restores the
+Failure behavior is uniform and fail-open. Every failure mode returns non-zero and leaves
+the caller's array untouched: bus unavailable, malformed reply, allocation failure, or a
+reply whose `messages` will not parse. On the gateway path a payload-class `4xx` restores the
 pristine array and resends once; a `5xx` trips the per-session breaker WITHOUT resending,
 because provider state is uncertain after a server error.
 
@@ -154,7 +154,7 @@ pass from "no gain available" from "already reduced".
 
 The gateway seam additionally emits `gateway_hard_bypass{reason}` whenever it declines to
 dispatch a reduced payload. A rising bypass count with a healthy reduce count means the
-reducer is producing results the seam will not ship — look at the reason label before
+reducer is producing results the seam will not ship. Look at the reason label before
 looking at the reducer.
 
 ## Compatibility
@@ -164,7 +164,7 @@ ordinal is. Request and response are JSON objects read field-by-field: an unknow
 ignored, and an absent optional field takes its zero value, so a newer module and an older
 caller interoperate in both directions.
 
-The one field that is NOT optional in spirit is `messages` — its ABSENCE is meaningful
+The one field that is NOT optional in spirit is `messages`: its ABSENCE is meaningful
 ("nothing changed"), so a future version must never omit it to mean anything else.
 
 ## Extension and removal
