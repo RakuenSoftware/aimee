@@ -36,6 +36,7 @@ func encodeLaunchArgs(req launchArgsRequest) []byte {
 	put(req.Image)
 	put(req.WorkDir)
 	put(req.MountTable)
+	put(req.RunAsUser)
 	for _, a := range req.Command {
 		put(a)
 	}

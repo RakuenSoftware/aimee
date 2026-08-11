@@ -105,6 +105,13 @@ type SandboxRequest struct {
 	// EgressProxy, when set, becomes http_proxy so a no-network delegate can
 	// still install software through the narrow update whitelist.
 	EgressProxy string
+
+	// RunAsUser is "<uid>:<gid>" and must be set whenever a host tree is
+	// mounted. Containers run as root by default, so every file the delegate
+	// created in the caller's checkout would land root-owned: the user could not
+	// edit or delete their own files afterwards, and git would refuse the tree
+	// outright with "detected dubious ownership".
+	RunAsUser string
 }
 
 // SandboxSpec is the container specification. NetworkMode is not a field the
@@ -113,6 +120,8 @@ type SandboxSpec struct {
 	Mounts   []SandboxMount
 	Env      []SandboxEnv
 	ReadOnly bool // the role does not write, so nothing is mounted writable
+	// User is "<uid>:<gid>", empty to keep the image's own user.
+	User string
 }
 
 // NetworkMode is always "none". It is a method rather than a field so no caller
@@ -132,10 +141,24 @@ func isDockerSocket(p string) bool {
 	return false
 }
 
+// sandboxEnvAllowed names variables the container genuinely needs that would
+// otherwise trip the marker scan below.
+//
+// GIT_CONFIG_KEY_0 contains "KEY" and is not a secret: it carries the literal
+// string "safe.directory". Naming the exceptions explicitly keeps the scan as
+// broad as it should be -- narrowing the markers to let this through would let
+// a real key through with it.
+var sandboxEnvAllowed = map[string]bool{
+	"GIT_CONFIG_KEY_0": true,
+}
+
 // looksLikeCredential reports whether an environment name suggests a secret.
 // Deliberately broad: a false positive costs a delegate one variable it should
 // not have needed, a false negative puts a credential inside the sandbox.
 func looksLikeCredential(name string) bool {
+	if sandboxEnvAllowed[name] {
+		return false
+	}
 	upper := strings.ToUpper(name)
 	for _, marker := range credentialEnvMarkers {
 		if strings.Contains(upper, marker) {
@@ -220,11 +243,41 @@ func BuildSandboxSpec(req SandboxRequest) (SandboxSpec, error) {
 			SandboxMount{Source: host, Target: target, Kind: SandboxControlSocket})
 	}
 
+	if req.ParentSocketTarget != "" {
+		// Without this the in-container CLI does not know where its only
+		// outward channel is, and every tool call it makes goes nowhere.
+		spec.Env = append(spec.Env,
+			SandboxEnv{Name: "AIMEE_API_ENDPOINT", Value: "unix:" + req.ParentSocketTarget})
+	}
+
 	if req.EgressProxy != "" {
+		// Both spellings: package managers disagree about which one they read,
+		// and one honoured while the other is not is a fetch that silently
+		// bypasses the proxy. no_proxy keeps loopback direct so the forwarder
+		// does not try to proxy to itself.
 		spec.Env = append(spec.Env,
 			SandboxEnv{Name: "http_proxy", Value: req.EgressProxy},
-			SandboxEnv{Name: "https_proxy", Value: req.EgressProxy})
+			SandboxEnv{Name: "https_proxy", Value: req.EgressProxy},
+			SandboxEnv{Name: "HTTP_PROXY", Value: req.EgressProxy},
+			SandboxEnv{Name: "HTTPS_PROXY", Value: req.EgressProxy},
+			SandboxEnv{Name: "no_proxy", Value: "localhost,127.0.0.1"},
+			SandboxEnv{Name: "NO_PROXY", Value: "localhost,127.0.0.1"})
 	}
+
+	// Trust every tree inside the container for git. Even running as the tree's
+	// owner, a linked worktree resolves its .git to a SEPARATELY mounted gitdir
+	// whose ownership git checks independently, so a plain `git status` still
+	// trips "detected dubious ownership" and refuses -- which breaks the
+	// delegate's git-based inspection of its own worktree. The container is a
+	// single-purpose sandbox holding only the mounted trees, so trusting all of
+	// them is safe. These are inherited by every exec, so plain `git` works
+	// without the caller adding -c safe.directory.
+	spec.Env = append(spec.Env,
+		SandboxEnv{Name: "GIT_CONFIG_COUNT", Value: "1"},
+		SandboxEnv{Name: "GIT_CONFIG_KEY_0", Value: "safe.directory"},
+		SandboxEnv{Name: "GIT_CONFIG_VALUE_0", Value: "*"})
+
+	spec.User = req.RunAsUser
 
 	if err := ValidateSandboxSpec(spec); err != nil {
 		return SandboxSpec{}, err

@@ -115,6 +115,10 @@ func DockerCreateArgs(req DockerCreateRequest) ([]string, error) {
 	// The isolation primitive. Never conditional, never configurable.
 	args = append(args, "--network", req.Spec.NetworkMode())
 
+	if req.Spec.User != "" {
+		args = append(args, "--user", req.Spec.User)
+	}
+
 	for _, m := range req.Spec.Mounts {
 		args = append(args, "-v", renderBind(m, req.MountTable))
 	}
