@@ -78,6 +78,17 @@ char *prompt_prepend_principles(aimee_mode_t mode, const char *base_prompt);
  * prompt_principles_text). */
 const char *prompt_code_principles_text(void);
 
+/* Turn-register instructions, or NULL when `enabled` is 0.
+ *
+ * The register GRAMMAR has always been parsed — fold_register_parse classifies a turn and
+ * session_compact's record path reads it to decide what belongs under Key Decisions — but
+ * nothing ever ASKED an agent to emit one, so real transcripts contain none and that
+ * extraction is empty in practice. This is the missing half: the request.
+ *
+ * A pure function of its argument so the gate and the wording are testable; the caller
+ * supplies config_fold_register_enabled(). */
+const char *prompt_turn_registers_text(int enabled);
+
 /* Engineer-mode form of prompt_prepend_principles. Caller must free(). */
 char *prompt_prepend_code_principles(const char *base_prompt);
 
