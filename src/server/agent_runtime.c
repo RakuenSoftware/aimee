@@ -899,6 +899,39 @@ static void parse_response_openai(cJSON *root, agent_result_t *out)
    agent_free_parsed_response(&parsed);
 }
 
+/* Read a Responses-API `usage` object: the two flat counters AND the cached-input
+ * detail.
+ *
+ * The chat-completions wire reaches `agent_result_t` through the canonical IR
+ * parser, which already carries cached tokens across. The Responses wire does
+ * not -- it is hand-parsed here, in three places that each read exactly
+ * input_tokens and output_tokens. `cached_tokens` lives one level down, in the
+ * `input_tokens_details` sibling, so reading only the flat pair loses it with no
+ * error: cache_read_tokens simply stays 0, which is indistinguishable from a
+ * real cache miss.
+ *
+ * Factored out rather than patched in triplicate because three copies is how the
+ * field came to be missing from all three in the first place. */
+static void read_responses_usage(cJSON *usage, agent_result_t *out)
+{
+   if (!usage)
+      return;
+   cJSON *it = cJSON_GetObjectItem(usage, "input_tokens");
+   cJSON *ot = cJSON_GetObjectItem(usage, "output_tokens");
+   if (it && cJSON_IsNumber(it))
+      out->prompt_tokens = it->valueint;
+   if (ot && cJSON_IsNumber(ot))
+      out->completion_tokens = ot->valueint;
+
+   cJSON *details = cJSON_GetObjectItem(usage, "input_tokens_details");
+   if (details && cJSON_IsObject(details))
+   {
+      cJSON *cached = cJSON_GetObjectItem(details, "cached_tokens");
+      if (cached && cJSON_IsNumber(cached))
+         out->cache_read_tokens = cached->valueint;
+   }
+}
+
 static void parse_response_object(cJSON *root, agent_result_t *out)
 {
    /* Responses API: output[].content[].text where type == "output_text" */
@@ -938,17 +971,7 @@ static void parse_response_object(cJSON *root, agent_result_t *out)
       }
    }
 
-   /* Responses API usage: input_tokens, output_tokens */
-   cJSON *usage = cJSON_GetObjectItem(root, "usage");
-   if (usage)
-   {
-      cJSON *it = cJSON_GetObjectItem(usage, "input_tokens");
-      cJSON *ot = cJSON_GetObjectItem(usage, "output_tokens");
-      if (it && cJSON_IsNumber(it))
-         out->prompt_tokens = it->valueint;
-      if (ot && cJSON_IsNumber(ot))
-         out->completion_tokens = ot->valueint;
-   }
+   read_responses_usage(cJSON_GetObjectItem(root, "usage"), out);
 }
 
 /* Parse SSE stream body for the Responses API.
@@ -1019,16 +1042,7 @@ static void parse_response_responses(const char *body, agent_result_t *out)
                cJSON *resp = cJSON_GetObjectItem(ev, "response");
                if (resp)
                {
-                  cJSON *usage = cJSON_GetObjectItem(resp, "usage");
-                  if (usage)
-                  {
-                     cJSON *it = cJSON_GetObjectItem(usage, "input_tokens");
-                     cJSON *ot = cJSON_GetObjectItem(usage, "output_tokens");
-                     if (it && cJSON_IsNumber(it))
-                        out->prompt_tokens = it->valueint;
-                     if (ot && cJSON_IsNumber(ot))
-                        out->completion_tokens = ot->valueint;
-                  }
+                  read_responses_usage(cJSON_GetObjectItem(resp, "usage"), out);
                }
                cJSON_Delete(ev);
             }
@@ -1107,6 +1121,14 @@ static void parse_response_anthropic(cJSON *root, agent_result_t *out)
          out->prompt_tokens = it->valueint;
       if (ot && cJSON_IsNumber(ot))
          out->completion_tokens = ot->valueint;
+      /* Anthropic spells cached input as two FLAT siblings, not a details
+       * object, so this cannot share the Responses reader above. */
+      cJSON *cr = cJSON_GetObjectItem(usage, "cache_read_input_tokens");
+      if (cr && cJSON_IsNumber(cr))
+         out->cache_read_tokens = cr->valueint;
+      cJSON *cw = cJSON_GetObjectItem(usage, "cache_creation_input_tokens");
+      if (cw && cJSON_IsNumber(cw))
+         out->cache_write_tokens = cw->valueint;
    }
 
    /* Prefer the provider-reported model over the served alias set at entry. */

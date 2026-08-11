@@ -754,7 +754,7 @@ static int responses_handler(const char *body, char *resp, int cap)
    free(combined);
 
    int len = openai_format_response(id, model, result.response, created, result.prompt_tokens,
-                                    result.completion_tokens, resp, cap);
+                                    result.completion_tokens, result.cache_read_tokens, resp, cap);
    free(result.response);
    if (len < 0)
    {
@@ -1319,7 +1319,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
       if (openai_format_responses_created(id, model, created, frame, sizeof(frame)) > 0)
          emit(ctx, "response.created", frame);
       if (openai_format_responses_completed(id, model, "invalid responses request", created, 0, 0,
-                                            frame, sizeof(frame)) > 0)
+                                            0, frame, sizeof(frame)) > 0)
          emit(ctx, "response.completed", frame);
       free(instructions);
       cJSON_Delete(messages);
@@ -1334,8 +1334,8 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    {
       if (openai_format_responses_created(id, model, created, frame, sizeof(frame)) > 0)
          emit(ctx, "response.created", frame);
-      if (openai_format_responses_completed(id, model, "no agent configured", created, 0, 0, frame,
-                                            sizeof(frame)) > 0)
+      if (openai_format_responses_completed(id, model, "no agent configured", created, 0, 0, 0,
+                                            frame, sizeof(frame)) > 0)
          emit(ctx, "response.completed", frame);
       free(instructions);
       cJSON_Delete(messages);
@@ -1509,7 +1509,8 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
                emit(ctx, "response.incomplete", cf);
          }
          else if (openai_format_responses_completed(id, model, txt, created, parsed.prompt_tokens,
-                                                    parsed.completion_tokens, cf, (int)ccap) > 0)
+                                                    parsed.completion_tokens,
+                                                    parsed.cache_read_tokens, cf, (int)ccap) > 0)
             emit(ctx, "response.completed", cf);
          free(cf);
       }
@@ -1552,8 +1553,9 @@ typedef struct
  * the pointer (buf) on success or "{}" if it does not fit. */
 static const char *run_status_json(const run_job_t *j, const char *status, char *buf, int cap)
 {
-   return openai_format_run(j->run_id, j->model, "", j->created, 0, 0, status, buf, cap) > 0 ? buf
-                                                                                             : "{}";
+   return openai_format_run(j->run_id, j->model, "", j->created, 0, 0, 0, status, buf, cap) > 0
+              ? buf
+              : "{}";
 }
 
 /* Tool-event hook for /v1/runs: append a `tool_call.started` /
@@ -1695,7 +1697,8 @@ static void *run_job_worker(void *arg)
       cJSON_Delete(mc);
    }
    if (openai_format_run(j->run_id, j->model, result.response, j->created, result.prompt_tokens,
-                         result.completion_tokens, "completed", buf, RUN_JSON_CAP) > 0)
+                         result.completion_tokens, result.cache_read_tokens, "completed", buf,
+                         RUN_JSON_CAP) > 0)
    {
       openai_runs_store_append_event(j->run_id, "response.completed", buf);
       openai_runs_store_finalize(j->run_id, OPENAI_RUN_COMPLETED, buf);
@@ -1752,7 +1755,7 @@ static int runs_handler(const char *body, char *resp, int cap)
    snprintf(id, sizeof(id), "run_%ld_%lu", created, atomic_fetch_add(&g_run_seq, 1) + 1);
 
    /* Queued snapshot returned to the caller and stored for GET /v1/runs/{id}. */
-   int len = openai_format_run(id, model, "", created, 0, 0, "queued", resp, cap);
+   int len = openai_format_run(id, model, "", created, 0, 0, 0, "queued", resp, cap);
    if (len < 0)
    {
       free(prompt);
