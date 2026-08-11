@@ -29,6 +29,7 @@
  */
 #include "command_registry.h"
 #include "server_mcp_internal.h" /* tool_memory_get / tool_search_memory / ... */
+#include "server.h"              /* memory_store_command: the RPC handler, split */
 #include "cJSON.h"
 #include "log.h"
 
@@ -47,6 +48,7 @@ MEMORY_CMD_ADAPTER(cmd_memory_get, tool_memory_get)
 MEMORY_CMD_ADAPTER(cmd_memory_search, tool_search_memory)
 MEMORY_CMD_ADAPTER(cmd_memory_briefing, tool_memory_briefing)
 MEMORY_CMD_ADAPTER(cmd_memory_mutate, tool_memory_mutate)
+MEMORY_CMD_ADAPTER(cmd_memory_store, memory_store_command)
 
 int memory_commands_register(void)
 {
@@ -75,6 +77,26 @@ int memory_commands_register(void)
         .surfaces = AIMEE_SURFACE_ALL,
         .mcp_visibility = AIMEE_MCP_DISCOVERABLE,
         .fn = cmd_memory_briefing,
+        .module = "memory"},
+       {.group = "memory",
+        .verb = "store",
+        .summary = "Store a memory.",
+        /* CLI and RPC ONLY, and that is a decision rather than an oversight.
+         * Writing to memory is not something an external agent should reach for
+         * mid-turn: aimee decides what is worth keeping through the curator, and a
+         * tool letting any client write what it likes turns the store into a
+         * scratchpad. Flagged explicitly because absence from a list is exactly how
+         * the previous four tables came to disagree with nobody deciding anything.
+         *
+         * This is also the first command registered from the RPC side: its only
+         * implementation was handle_memory_store, which WRITES to a connection and
+         * returns int, so there was no result for a table to hand to any other
+         * surface. memory_store_command is that handler split in two -- the logic
+         * returns a result, the handler writes it -- which is the shape every
+         * surface needs and the change the other ~230 RPC handlers need too. */
+        .surfaces = AIMEE_SURFACE_CLI | AIMEE_SURFACE_RPC,
+        .mcp_visibility = AIMEE_MCP_DISCOVERABLE, /* unused while MCP is not a surface here */
+        .fn = cmd_memory_store,
         .module = "memory"},
        {.group = "memory",
         .verb = "mutate",

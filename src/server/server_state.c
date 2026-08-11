@@ -173,33 +173,42 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* THE command, in the shape the core command table can route.
+ *
+ * Every surface needs the same thing from a command -- a result -- but the RPC
+ * handlers were written to WRITE ONE to a connection and return int, so there was
+ * nothing for a table to hand back to MCP or ACP. That shape is why capability
+ * surface ended up declared four separate times: a command reachable over RPC had
+ * no result-returning form to register, so each surface grew its own list.
+ *
+ * Splitting it costs nothing at the wire: server_send_error and jo_err build the
+ * identical {status:"error", message} envelope, so the bytes on the RPC path are
+ * unchanged. handle_memory_store below is now only the connection write. */
+cJSON *memory_store_command(const cJSON *req)
+{
+   const char *key, *content;
+   if (jo_need_str((cJSON *)req, "key", &key) < 0 ||
+       jo_need_str((cJSON *)req, "content", &content) < 0)
+      return jo_err("missing key or content");
+
+   const char *tier = jo_str((cJSON *)req, "tier", TIER_L0);
+   const char *kind = jo_str((cJSON *)req, "kind", KIND_FACT);
+   double confidence = jo_num((cJSON *)req, "confidence", 1.0);
+   const char *sid = jo_str((cJSON *)req, "session_id", "");
+
+   memory_t out;
+   if (kb_client_memory_insert(tier, kind, key, content, confidence, sid, &out) != 0)
+      return jo_err("failed to store memory");
+
+   cJSON *resp = jo_ok();
+   jo_add_i64(resp, "id", out.id);
+   return resp;
+}
+
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-
-   const char *key, *content;
-   if (jo_need_str(req, "key", &key) < 0 || jo_need_str(req, "content", &content) < 0)
-      return server_send_error(conn, "missing key or content", NULL);
-
-   const char *tier = jo_str(req, "tier", TIER_L0);
-   const char *kind = jo_str(req, "kind", KIND_FACT);
-   double confidence = jo_num(req, "confidence", 1.0);
-   const char *sid = jo_str(req, "session_id", "");
-
-   memory_t out;
-   int rc = kb_client_memory_insert(tier, kind, key, content, confidence, sid, &out);
-
-   cJSON *resp;
-   if (rc == 0)
-   {
-      resp = jo_ok();
-      jo_add_i64(resp, "id", out.id);
-   }
-   else
-   {
-      resp = jo_err("failed to store memory");
-   }
-   return send_and_free(conn, resp);
+   return send_and_free(conn, memory_store_command(req));
 }
 
 int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
