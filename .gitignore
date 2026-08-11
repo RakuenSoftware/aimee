@@ -228,3 +228,4 @@ scratchpad/
 # Transient deploy/sync bundles for the test container.
 .synctmp/
 src/.testlogs/
+benchmarks/compaction-quality/.cache-ab/
