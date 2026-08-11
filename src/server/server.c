@@ -29,8 +29,6 @@
 #include <aimee/delegates/delegate_backend_docker.h>
 #include "modules/workspace/workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
 #include "modules/workspace/workspace_turn.h" /* the ONE workspace bound, shared with the delegate turn */
-#include <aimee/delegates/delegate_backend_local.h>
-#include <aimee/delegates/delegate_backend_ssh.h>
 #include "server_delegate_monitor.h"
 #include "server_coord_dispatcher.h"
 #include "server_skill.h"
@@ -2312,10 +2310,6 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * to register is non-fatal: the legacy local-exec path keeps
     * working, callers that explicitly opt into the new dispatcher
     * just won't find a backend. */
-   if (delegate_backend_register_local() != 0)
-      LOG_WARN("server", "delegate_backend_register_local failed (already registered?)");
-   if (delegate_backend_register_ssh() != 0)
-      LOG_WARN("server", "delegate_backend_register_ssh failed (already registered?)");
    if (delegate_backend_register_docker() != 0)
       LOG_WARN("server", "delegate_backend_register_docker failed (already registered?)");
    /* Log what's actually in the registry so operators can confirm

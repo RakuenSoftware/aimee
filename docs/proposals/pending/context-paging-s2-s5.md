@@ -253,3 +253,82 @@ planned as such.
   baseline.
 - Anything that cannot be exercised in-tree is reported validation-pending, never
   silently marked done.
+
+---
+
+# Amendments (2026-08-11), after implementing S2c–S2d and S5a
+
+Three things this proposal got wrong, each found by checking the tree rather than by
+re-reading the plan. Recorded here rather than silently fixed, because the reasoning
+they replace is the reasoning a reviewer would otherwise inherit.
+
+## 1. S2a / S2b were mis-sequenced: production is the gap, not persistence
+
+Verified: `task_rail_start` and `episode_seal_set_conclusion` / `_add_file` have **zero
+live callers**. Nothing creates a rail. Nothing seals an episode.
+
+"Bind them to storage" would therefore persist data that is never produced — precisely
+the *installed and ready is not the same as used* failure this document warns about
+elsewhere. Both slices need a **producer** first:
+
+- `task_rail` needs the agent to declare a plan, which is a prompt/behaviour change.
+- `episode_seal` has a natural producer already available: at a fold boundary, the
+  evicted region yields a file inventory (closet PATH coordinates) and a conclusion
+  (register-tagged verdict turns). Both ingredients now exist from S1 and S2d.
+
+Sequence for these two is **producer → measure → persist**, not persist-first.
+
+## 2. S3 cannot live at the `context_engine` seam
+
+The proposal says S3 plugs into `context_engine.c` *and* that reusing the fold freeze is
+mandatory, or continuous eviction rewrites the prefix every turn and destroys prompt-cache
+hits. Those two requirements are incompatible at that seam:
+
+```c
+int (*compress)(struct context_engine *self, void *messages, const char *focus_topic);
+```
+
+There is **no per-conversation state parameter**, so an engine implemented there cannot
+carry `fold_freeze_t` and cannot keep a stable boundary. Building S3 as specified would
+produce exactly the cache regression the same document forbids.
+
+S3 belongs in the **reducer path**, which already owns `reduce_state_t` — freeze,
+prefix digest, and (since S2c) a page table that survives the run. Either that, or the
+`context_engine` ABI grows a state parameter first; the reducer path is the smaller
+change and the one with the state already in it.
+
+## 3. Continuous paging mostly EXISTS — it is the fold, and it is switched off
+
+The framing of "build continuous paging" was wrong. The mechanism is already written:
+
+| | trigger | shape | freeze-aware | conserves identifiers |
+|---|---|---|---|---|
+| `session_compact` | 80% pressure | one destructive boundary | no | only via S1's record path |
+| `context_fold_view` | every turn | rolling skeleton | **yes** | **yes** (Coordinate Closet) |
+
+The fold is incremental, freeze-aware, closet-conserving, and now reversible via the S2d
+page table. It is `fold_enabled = 0` — **default-off** (`config.c:731`). Meanwhile the
+cliff compactor is default-on.
+
+So S3 is not new machinery. It is:
+
+1. Enable the fold so eviction is continuous.
+2. Let the 80% compactor become the rare fallback rather than the normal path.
+3. Only then consider water marks, which are a refinement of a mechanism that is already
+   running rather than a thing to build from scratch.
+
+### What gates that flip
+
+Flipping `fold_enabled` is a large behaviour change and must not be done on argument
+alone — the same discipline that reversed the `compact.from_record` verdict twice.
+
+- **Prompt-cache impact is the main risk and is unmeasured.** The freeze exists to keep
+  the folded prefix byte-identical; whether it actually holds across real turns needs
+  measuring against realized `cache_read` / `cache_write` token counts, not reasoning.
+- **Quality** should be compared on the existing harness
+  (`benchmarks/compaction-quality`), which currently scores `session_compact` summaries
+  only. Comparing a fold view against a summary needs a harness extension, because they
+  are different artefacts.
+
+Recommended next slice: **measure the fold against the compactor** on retention,
+precision, and cache behaviour — then flip, rather than flip and hope.

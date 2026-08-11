@@ -23,8 +23,6 @@
 static int api_bearer_primary(char *out, size_t out_n);
 static int api_bearer_extra_count(void);
 #include <aimee/delegates/delegate_backend_docker.h>
-#include <aimee/delegates/delegate_backend_local.h>
-#include <aimee/delegates/delegate_backend_ssh.h>
 #include "server_delegate_monitor.h"
 #include "server_coord_dispatcher.h"
 #include "server_skill.h"

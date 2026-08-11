@@ -1398,14 +1398,6 @@
           "sha256": "4c8d7e8cb8d4e5bf75dfb8863d712de5423298b0dd97a9423c9f21b9c711855e"
         },
         {
-          "path": "src/modules/delegates/include/aimee/delegates/delegate_backend_local.h",
-          "sha256": "31496d42d7dd53e3d69f67ccc70c2e46d089cd877ac0fac48e6f4330f33b310a"
-        },
-        {
-          "path": "src/modules/delegates/include/aimee/delegates/delegate_backend_ssh.h",
-          "sha256": "a8b1f5044c7146ace9cb93bba35b09e95c634389ed9fb01a818441ea0f153847"
-        },
-        {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_credential_retry.h",
           "sha256": "6bf49d5d261eddc43ce6b24a40fbfc74a8bc13d2eabc0c767ec7735b3032bb7f"
         },
@@ -1616,14 +1608,14 @@
       ]
     },
     "public-symbols": {
-      "sha256": "05ab7aef92d01b31270f91ce5c71a6742080b146091d25544d46996bcff80d42",
+      "sha256": "f84157c85e6d2eff55effc71962902826b00c12272fc458aaf606596817b374f",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
       "files": [
         {
           "path": "docs/gen/v1-route-descriptor.json",
-          "sha256": "230efbe36196ad315cccdfc9a31cc9cb6eba96aacdd247d68db825e884237d7b"
+          "sha256": "fe9e27e1c928bb8345a387abd7a90e473bded26c9e2c6479a823064a38cbbc62"
         }
       ]
     }

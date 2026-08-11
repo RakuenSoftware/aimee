@@ -20,7 +20,6 @@
 #include "modules/workspace/workspace_provider.h"
 #include "modules/workspace/workspace_handle.h"
 #include "modules/workspace/workspace_runner_registry.h"
-#include "modules/git/forge_credentials.h"
 #include "db1.h"
 #include "kb_client.h"
 #include "log.h" /* aimee_log — name the real KB failure in the server log */
@@ -1677,11 +1676,6 @@ int handle_workspace_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * A remove that a caller cannot immediately act on is worse than a slow one:
     * scripted setup (and the wizard) issue these back to back. */
    (void)config_reload_if_changed();
-
-   /* Closing a workspace revokes any brokered forge token for it (zeroed in
-    * memory) — the "revoked on session close" half of the forge-credential
-    * contract (workspace-resource-plane §4). No-op when none was installed. */
-   forge_cred_revoke(target);
 
    cJSON *resp = jo_ok();
    jo_add_str(resp, "removed", target);
