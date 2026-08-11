@@ -211,25 +211,19 @@ int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, memory_store_command(req));
 }
 
-int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+cJSON *memory_list_command(const cJSON *req)
 {
-   (void)ctx;
-
-   const char *tier = jo_str(req, "tier", NULL);
-   const char *kind = jo_str(req, "kind", NULL);
-   int limit = jo_int(req, "limit", 20);
-   int active_context_missing = server_memory_scope_begin(req);
+   const char *tier = jo_str((cJSON *)req, "tier", NULL);
+   const char *kind = jo_str((cJSON *)req, "kind", NULL);
+   int limit = jo_int((cJSON *)req, "limit", 20);
+   int active_context_missing = server_memory_scope_begin((cJSON *)req);
    memory_t results[64];
    int count = kb_client_memory_list(tier, kind, limit, results, 64);
+   kb_client_memory_scope_context_clear(); /* cleared on BOTH paths, as before */
    if (count < 0)
-   {
-      kb_client_memory_scope_context_clear();
-      return server_send_error(conn,
-                               "knowledge service unavailable; the memory store is unreachable "
-                               "(server-side maintenance is required)",
-                               NULL);
-   }
-   kb_client_memory_scope_context_clear();
+      return jo_err("knowledge service unavailable; the memory store is unreachable "
+                    "(server-side maintenance is required)");
+
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < count; i++)
       cJSON_AddItemToArray(arr, memory_to_json(&results[i]));
@@ -237,7 +231,13 @@ int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "memories", arr);
    jo_add_bool(resp, "active_context_missing", active_context_missing);
-   return send_and_free(conn, resp);
+   return resp;
+}
+
+int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_list_command(req));
 }
 
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -361,13 +361,12 @@ int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
-int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+cJSON *memory_get_command(cJSON *req)
 {
-   (void)ctx;
 
    cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "id");
    if (!cJSON_IsNumber(jid))
-      return server_send_error(conn, "missing id", NULL);
+      return jo_err("missing id");
 
    /* `memory get --as-of <ts>` asks the EVENT-time question, and this handler is
     * the only thing between the flag and aimee-kb, which owns the interval. It
@@ -424,7 +423,13 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       if (!resp)
          resp = jo_err("knowledge service unavailable");
    }
-   return send_and_free(conn, resp);
+   return resp;
+}
+
+int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_get_command(req));
 }
 
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

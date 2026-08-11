@@ -339,6 +339,8 @@ int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
  * RPC surface's connection write. This is the shape every surface needs, and the
  * lack of it is why capability surface was declared four separate times. */
 cJSON *memory_store_command(const cJSON *req);
+cJSON *memory_list_command(const cJSON *req);
+cJSON *memory_get_command(cJSON *req);
 int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
