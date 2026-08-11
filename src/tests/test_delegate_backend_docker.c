@@ -123,6 +123,57 @@ static void test_docker_write_then_read_roundtrip(void)
    printf("  PASS: test_docker_write_then_read_roundtrip\n");
 }
 
+/* A file read must return the file, and nothing after it.
+ *
+ * docker_exec writes the captured output into a caller-allocated buffer and
+ * docker_read_file measures it with strlen(). If the terminator goes at the END
+ * OF THE BUFFER rather than the end of the output, everything between is
+ * whatever the allocator last left there -- so strlen() walks past the file into
+ * heap garbage and the delegate is handed its own file with plausible-looking
+ * bytes appended.
+ *
+ * That read correctly for as long as the buffers were fresh zeroed pages, which
+ * is why it survived: the bug needs a dirty arena to show. This dirties one on
+ * purpose, the way any real allocation before the read would. */
+static void test_read_file_returns_only_the_file(void)
+{
+   delegate_backend_reset_for_test();
+   delegate_backend_register_docker();
+   delegate_backend_t *b = delegate_backend_docker_get();
+   void *state = NULL;
+   setup_docker_fileio_state(b, "task-dirty-1", &state);
+
+   /* Dirty the arena with a recognisable pattern and release it, so the read
+    * buffer below is very likely to be handed the same memory. */
+   for (int i = 0; i < 4; i++)
+   {
+      size_t n = 1u << 18;
+      char *scratch = malloc(n);
+      assert(scratch != NULL);
+      memset(scratch, 'X', n - 1);
+      scratch[n - 1] = '\0';
+      free(scratch);
+   }
+
+   assert(b->write_file(b, state, "exact.txt", "nine char") == 0);
+   char *content = NULL;
+   assert(b->read_file(b, state, "exact.txt", 0, 0, &content) == 0);
+   assert(content != NULL);
+   assert(strlen(content) == 9);
+   assert(strcmp(content, "nine char") == 0);
+   free(content);
+
+   /* An EMPTY file must come back empty, not as whatever was in the buffer. */
+   assert(b->write_file(b, state, "empty.txt", "") == 0);
+   content = NULL;
+   assert(b->read_file(b, state, "empty.txt", 0, 0, &content) == 0);
+   assert(content != NULL && content[0] == '\0');
+   free(content);
+
+   teardown_docker_fileio_state(b, state);
+   printf("  PASS: test_read_file_returns_only_the_file\n");
+}
+
 /* The native file tools (tool_read_file/tool_write_file) resolve to an ABSOLUTE
  * in-workspace path via the thread cwd before calling the provider. The worktree is
  * bind-mounted path-identically, so that path is valid in-container and MUST be accepted
@@ -1054,6 +1105,7 @@ int main(void)
    test_docker_exec_set_cwd_prefixes_subsequent_calls();
    test_acquire_rejects_invalid_args();
    test_docker_write_then_read_roundtrip();
+   test_read_file_returns_only_the_file();
    test_docker_absolute_in_workspace_path_accepted();
    test_docker_path_validation_rejects_escapes();
    test_docker_list_dir_returns_entries();
