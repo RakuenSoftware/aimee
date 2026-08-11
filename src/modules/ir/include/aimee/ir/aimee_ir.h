@@ -70,6 +70,13 @@ typedef struct
     * result = opaque content; is_error set on an error result. */
    char *tool_id;
    char *tool_name;
+   /* TOOL_USE: the tool's owning namespace group, NULL when it has none. A Codex
+    * client offers its MCP tools inside a `namespace` group and routes on
+    * (namespace, name) together, so the pair must stay together through a
+    * resubmitted history. Modeled rather than left to `raw` for the same reason as
+    * thinking_signature: `raw` is same-protocol replay, and this has to survive the
+    * chat hop in the middle of responses -> IR -> chat -> IR -> responses. Owned. */
+   char *tool_namespace;
    struct cJSON *tool_input;  /* owned */
    struct cJSON *tool_result; /* owned */
    int tool_is_error;

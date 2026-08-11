@@ -11,7 +11,23 @@ struct cJSON;
 typedef struct
 {
    char id[64];
-   char name[32];
+   /* Was [32], which silently TRUNCATED. A namespaced MCP tool name routinely
+    * exceeds it: "mcp__aimee__preview_blast_radius" is exactly 32 characters, so
+    * it could not fit even with its terminator. */
+   char name[128];
+   /* The tool's owning namespace, empty when it has none.
+    *
+    * A Codex client sends its MCP tools inside a `namespace` group, and the
+    * provider answers with the nested name BARE plus this field beside it:
+    *
+    *   {"type":"function_call","name":"git","namespace":"mcp__aimee",...}
+    *
+    * The client routes on the pair, so dropping this half makes the call
+    * unroutable -- it answers "unsupported call: git". Modeled rather than left
+    * to the raw sidecar for the same reason as aimee_block_t.thinking_signature:
+    * the sidecar is same-protocol replay, and this has to survive the chat hop in
+    * the middle of responses -> IR -> chat -> IR -> responses. */
+   char tool_namespace[64];
    char *arguments; /* malloc'd */
 } parsed_tool_call_t;
 

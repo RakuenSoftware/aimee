@@ -834,7 +834,17 @@ native_provider_http:
             reduce_config_t rcfg;
             memset(&rcfg, 0, sizeof rcfg);
             rcfg.delegate_seam = 1;
-            rcfg.history_fold = preset.history_fold && !chatgpt;
+            /* The fold is reachable on its own, not only as part of the AGGRESSIVE
+             * preset. `fold.enabled` already existed in config — parsed, saved, with an
+             * accessor — and had ZERO live callers, so the only way to turn the fold on
+             * was economizer.mode=aggressive, which ALSO switches on compress,
+             * command_filter and gateway_seam mutation of live client requests.
+             *
+             * That bundling makes the fold untestable in isolation: measuring its
+             * prompt-cache behaviour would have meant simultaneously shipping wire
+             * mutation, which is gated on an experiment (S0) that has never been run.
+             * Additive and default-off, so aggressive still folds exactly as before. */
+            rcfg.history_fold = (preset.history_fold || config_fold_enabled()) && !chatgpt;
             rcfg.compress = preset.compress;
             rcfg.freeze_guard_enabled = 1;
             rcfg.freeze_guard_horizon = preset.freeze_guard_horizon;

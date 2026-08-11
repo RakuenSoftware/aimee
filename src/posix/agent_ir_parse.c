@@ -229,6 +229,9 @@ static void ir_bridge_common(const aimee_response_t *ir, parsed_response_t *out)
          snprintf(c->id, sizeof(c->id), "%s", b->tool_id);
       if (b->tool_name)
          snprintf(c->name, sizeof(c->name), "%s", b->tool_name);
+      /* Carried with the name: a namespaced call is only routable as the pair. */
+      if (b->tool_namespace)
+         snprintf(c->tool_namespace, sizeof(c->tool_namespace), "%s", b->tool_namespace);
       char *args = b->tool_input ? cJSON_PrintUnformatted(b->tool_input) : NULL;
       c->arguments = args ? args : strdup("{}");
    }

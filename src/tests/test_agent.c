@@ -74,6 +74,7 @@ void test_responses_object_folds_in_streamed_function_call(void);
 void test_responses_object_keeps_existing_function_call(void);
 void test_responses_object_keeps_existing_text(void);
 void test_ir_parse_responses_tool_call(void);
+void test_ir_parse_responses_namespaced_tool_call(void);
 void test_ir_parse_responses_text_only(void);
 void test_responses_parser_uses_output_text_done(void);
 void test_responses_parser_separates_message_items(void);
@@ -3619,6 +3620,7 @@ int main(void)
    test_responses_object_keeps_existing_function_call();
    test_responses_object_keeps_existing_text();
    test_ir_parse_responses_tool_call();
+   test_ir_parse_responses_namespaced_tool_call();
    test_ir_parse_responses_text_only();
    test_responses_parser_uses_output_text_done();
    test_responses_parser_separates_message_items();

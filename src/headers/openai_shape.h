@@ -158,19 +158,24 @@ extern "C"
     * helpers emit the matching SSE data payloads (bytes written or -1). */
    struct cJSON *openai_responses_message_item(const char *item_id, const char *text,
                                                const char *status);
+   /* `tool_namespace` is the call's owning namespace group, or NULL/"" when it has
+    * none; it is emitted only when set. A Codex client offers its MCP tools inside
+    * a `namespace` group and routes the answer on (namespace, name) together, so a
+    * call that arrived with one must carry it back. */
    struct cJSON *openai_responses_function_call_item(const char *item_id, const char *call_id,
-                                                     const char *name, const char *arguments,
-                                                     const char *status);
+                                                     const char *name, const char *tool_namespace,
+                                                     const char *arguments, const char *status);
    int openai_format_responses_msg_item_added(const char *item_id, int output_index, char *resp,
                                               int cap);
    int openai_format_responses_msg_item_done(const char *item_id, const char *text,
                                              int output_index, char *resp, int cap);
    int openai_format_responses_fc_item_added(const char *item_id, const char *call_id,
-                                             const char *name, int output_index, char *resp,
-                                             int cap);
+                                             const char *name, const char *tool_namespace,
+                                             int output_index, char *resp, int cap);
    int openai_format_responses_fc_item_done(const char *item_id, const char *call_id,
-                                            const char *name, const char *arguments,
-                                            int output_index, char *resp, int cap);
+                                            const char *name, const char *tool_namespace,
+                                            const char *arguments, int output_index, char *resp,
+                                            int cap);
    int openai_format_responses_fc_args_delta(const char *item_id, int output_index,
                                              const char *delta, char *resp, int cap);
    int openai_format_responses_fc_args_done(const char *item_id, int output_index,

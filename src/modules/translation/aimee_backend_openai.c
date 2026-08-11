@@ -122,6 +122,15 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
          cJSON *call = cJSON_CreateObject();
          cJSON_AddStringToObject(call, "id", b->tool_id ? b->tool_id : "");
          cJSON_AddStringToObject(call, "type", "function");
+         /* Chat has no namespace concept, but a Responses request crosses this shape
+          * on its way to the provider (responses -> IR -> chat -> IR -> responses),
+          * so dropping the group here loses it for good -- the same trap that made
+          * the tools fix at the Responses ends insufficient on its own. Carried
+          * beside `function` rather than inside it, so a strict `function` schema is
+          * untouched, and only when the client actually grouped the tool: a request
+          * that never used namespace grouping is byte-identical to before. */
+         if (b->tool_namespace && b->tool_namespace[0])
+            cJSON_AddStringToObject(call, "namespace", b->tool_namespace);
          cJSON *fn = cJSON_AddObjectToObject(call, "function");
          cJSON_AddStringToObject(fn, "name", b->tool_name ? b->tool_name : "");
          char *args = b->tool_input ? cJSON_PrintUnformatted(b->tool_input) : NULL;
@@ -389,6 +398,7 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
             b->type = AIMEE_BLK_TOOL_USE;
             b->raw = cJSON_Duplicate(c, 1);
             b->tool_id = dupstr(ostr(c, "id"));
+            b->tool_namespace = dupstr(ostr(c, "namespace"));
             const cJSON *fn = cJSON_GetObjectItemCaseSensitive((cJSON *)c, "function");
             b->tool_name = dupstr(fn ? ostr(fn, "name") : NULL);
             const char *args = fn ? ostr(fn, "arguments") : NULL;
