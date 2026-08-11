@@ -378,6 +378,111 @@ static void test_recall_inject_off_leaves_transcript(void)
    PASS("injection off: hint reported, transcript untouched");
 }
 
+/* THE PROGRAMME'S HEADLINE CRITERION, end to end: a coordinate evicted in an EARLIER RUN
+ * can be surfaced as pageable in a later one.
+ *
+ * Every piece of this is unit-tested in isolation — the page table (S2d), serialization
+ * (S2c), detection — but the CHAIN has never been exercised, and a chain of three
+ * individually-correct parts is exactly where an integration bug hides.
+ *
+ * The design makes the result unambiguous: run 2's transcript mentions the coordinate
+ * ONLY in its newest turn, which is in the retained tail and never evicted. So run 2's
+ * own fold cannot have harvested it, and a hint can only come from the state restored
+ * from run 1. Without that discipline the test would pass on a completely broken
+ * restore. */
+static void test_recall_survives_across_runs(void)
+{
+   const char *coord = "src/modules/git/retry.c";
+
+   /* ---- run 1: the coordinate is deep in the prefix, and gets folded away ---- */
+   cJSON *run1 = make_messages(20);
+   cJSON *early = cJSON_GetArrayItem(run1, 1);
+   cJSON_ReplaceItemInObject(
+       early, "content",
+       cJSON_CreateString("the retry backoff lives in src/modules/git/retry.c and needs care"));
+
+   reduce_config_t cfg = {0};
+   cfg.delegate_seam = 1;
+   cfg.history_fold = 1;
+   cfg.fold.closet.enabled = 1;
+   cfg.recall_enabled = 1;
+
+   reduce_state_t st1 = {0};
+   st1.turn = 3;
+   reduce_result_t r1;
+   assert(context_reduce(run1, "sys", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, &st1, &r1) == 0);
+   assert(r1.mutated == 1 && r1.folded_msgs > 0);
+   assert(st1.recall.count > 0); /* the page table saw the eviction */
+
+   /* ---- the run ends: state is persisted ---- */
+   char *saved = reduce_state_serialize(&st1);
+   assert(saved != NULL);
+   assert(strstr(saved, coord) != NULL);
+   context_reduce_result_free(&r1);
+   fold_recall_index_free(&st1.recall);
+   cJSON_Delete(run1);
+
+   /* ---- run 2: a fresh process, restoring that state ---- */
+   reduce_state_t st2 = {0};
+   assert(reduce_state_restore(&st2, saved) == 0);
+   free(saved);
+   assert(st2.recall.count > 0);
+   st2.turn = 9; /* far enough ahead that the anti-thrash TTL cannot suppress the hint */
+
+   /* This transcript never mentions the coordinate except in its newest turn, which is
+    * retained verbatim and therefore never evicted — so nothing here can put the key in
+    * the table. */
+   cJSON *run2 = make_messages(20);
+   cJSON *last = cJSON_GetArrayItem(run2, cJSON_GetArraySize(run2) - 1);
+   cJSON_ReplaceItemInObject(last, "content",
+                             cJSON_CreateString("remind me what we concluded about "
+                                                "src/modules/git/retry.c before"));
+
+   reduce_result_t r2;
+   assert(context_reduce(run2, "sys", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, &st2, &r2) == 0);
+
+   /* The payoff: an eviction from the PREVIOUS run is still pageable in this one. */
+   assert(r2.recall_surfaced >= 1);
+   assert(r2.recall_hint != NULL);
+   assert(strstr(r2.recall_hint, coord) != NULL);
+   assert(strstr(r2.recall_hint, "code_span_get") != NULL);
+
+   context_reduce_result_free(&r2);
+   fold_recall_index_free(&st2.recall);
+   cJSON_Delete(run2);
+   PASS("a coordinate evicted in an earlier RUN is still pageable in the next");
+}
+
+/* The negative half: with no restored state, the same run 2 produces NO hint. Without
+ * this the test above could pass on a bug that hinted for any mentioned path. */
+static void test_recall_absent_without_restored_state(void)
+{
+   reduce_config_t cfg = {0};
+   cfg.delegate_seam = 1;
+   cfg.history_fold = 1;
+   cfg.fold.closet.enabled = 1;
+   cfg.recall_enabled = 1;
+
+   reduce_state_t fresh = {0}; /* nothing restored */
+   fresh.turn = 9;
+
+   cJSON *run2 = make_messages(20);
+   cJSON *last = cJSON_GetArrayItem(run2, cJSON_GetArraySize(run2) - 1);
+   cJSON_ReplaceItemInObject(last, "content",
+                             cJSON_CreateString("remind me what we concluded about "
+                                                "src/modules/git/retry.c before"));
+
+   reduce_result_t r;
+   assert(context_reduce(run2, "sys", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, &fresh, &r) == 0);
+   assert(r.recall_hint == NULL);
+   assert(r.recall_surfaced == 0);
+
+   context_reduce_result_free(&r);
+   fold_recall_index_free(&fresh.recall);
+   cJSON_Delete(run2);
+   PASS("no restored state: the same turn produces no hint");
+}
+
 /* ------------------------------------------------ state persistence (S2c) */
 
 /* Round-trip: the freeze boundary and the page table survive, so a later run continues
@@ -713,6 +818,8 @@ int main(void)
    test_recall_disabled_is_inert();
    test_recall_inject_appends_notice();
    test_recall_inject_off_leaves_transcript();
+   test_recall_survives_across_runs();
+   test_recall_absent_without_restored_state();
    test_state_serialize_round_trip();
    test_state_never_restores_reduced();
    test_state_restore_all_or_nothing();
