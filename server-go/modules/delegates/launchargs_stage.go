@@ -47,11 +47,11 @@ type launchArgsRequest struct {
 	ParentSocketTarget string
 	EgressProxy        string
 
-	ContainerName string
-	Image         string
-	WorkDir       string
-	MountTable    string
-	Command       []string
+	TaskID     string
+	Image      string
+	WorkDir    string
+	MountTable string
+	Command    []string
 }
 
 // decodeLaunchArgsRequest reads the request, or reports that it is malformed.
@@ -89,7 +89,7 @@ func decodeLaunchArgsRequest(request []byte) (launchArgsRequest, bool) {
 	req.ParentSocketHost = readString(launchArgsStringMax)
 	req.ParentSocketTarget = readString(launchArgsStringMax)
 	req.EgressProxy = readString(launchArgsStringMax)
-	req.ContainerName = readString(launchArgsStringMax)
+	req.TaskID = readString(launchArgsStringMax)
 	req.Image = readString(launchArgsStringMax)
 	req.WorkDir = readString(launchArgsStringMax)
 	req.MountTable = readString(launchArgsMountTableMax)
@@ -131,9 +131,16 @@ func handleLaunchArgs(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 
+	// The name is computed HERE, from the spec that is about to be rendered, so
+	// it cannot describe a different set of mounts than the ones created.
+	name, err := ContainerName(req.TaskID, spec, req.MountTable)
+	if err != nil {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+
 	args, err := DockerCreateArgs(DockerCreateRequest{
 		Spec:          spec,
-		ContainerName: req.ContainerName,
+		ContainerName: name,
 		Image:         req.Image,
 		WorkDir:       req.WorkDir,
 		MountTable:    req.MountTable,
@@ -143,13 +150,20 @@ func handleLaunchArgs(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 
-	total := 8
+	total := 12 + len(name)
 	for _, a := range args {
 		total += 4 + len(a)
 	}
+	// The container name travels back with the argv. The caller needs it to
+	// start, exec into and remove the container, and re-deriving it there would
+	// be a second copy of a rule whose entire job is not to have one.
 	response := make([]byte, 8, total)
 	binary.LittleEndian.PutUint32(response[0:4], launchArgsResponseMagic)
-	binary.LittleEndian.PutUint32(response[4:8], uint32(len(args)))
+	binary.LittleEndian.PutUint32(response[4:8], uint32(len(name)))
+	response = append(response, name...)
+	var count [4]byte
+	binary.LittleEndian.PutUint32(count[:], uint32(len(args)))
+	response = append(response, count[:]...)
 	for _, a := range args {
 		var n [4]byte
 		binary.LittleEndian.PutUint32(n[:], uint32(len(a)))
