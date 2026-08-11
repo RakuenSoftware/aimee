@@ -145,6 +145,12 @@ uint32_t server_http_enrollment_caps(uint32_t caps, int is_tcp, int mtls_authent
 void server_http_gzip_set(int enabled);
 int server_http_gzip_peek(void);
 
+/* One access-log line per served request (server_http_response.c). Demotes the
+ * shapes that are noise BY DESIGN — see the definition — so the log stays
+ * readable; everything else logs at INFO as before. */
+void server_http_log_access(const char *method, const char *path, int status,
+                            const char *request_id);
+
 /* PC2: CI webhook route handler (defined in server_ci_route.c). */
 int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap);
 
