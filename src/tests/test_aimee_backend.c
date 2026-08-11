@@ -223,6 +223,42 @@ int main(void)
    aimee_response_free(&oresp);
    cJSON_Delete(orj);
 
+   /* CACHED PROMPT TOKENS on the openai wire. They arrive in a SIBLING object,
+    * usage.prompt_tokens_details.cached_tokens, not as a flat counter -- so a
+    * parser reading only prompt_tokens/completion_tokens loses them silently and
+    * reports cache_read=0 forever. Measured before the fix: 158 calls and 3.1M
+    * prompt tokens across a whole day, cache_read_tokens=0, which reads as
+    * "prompt caching is not working" when it may have been working throughout.
+    * The Anthropic arm read its equivalent all along, which is why only
+    * Anthropic-egress ever showed cache numbers. */
+   const char *OCACHE =
+       "{\"id\":\"cmpl_2\",\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"message\":"
+       "{\"role\":\"assistant\",\"content\":\"hi\"},\"finish_reason\":\"stop\"}],"
+       "\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":5,"
+       "\"prompt_tokens_details\":{\"cached_tokens\":64}}}";
+   cJSON *ocj = cJSON_Parse(OCACHE);
+   aimee_response_t ocresp;
+   assert(openai_backend_parse(ocj, &ocresp, err, sizeof err) == 0);
+   assert(ocresp.usage_in == 100 && ocresp.usage_out == 5);
+   assert(ocresp.usage_cache_read == 64);
+   aimee_response_free(&ocresp);
+   cJSON_Delete(ocj);
+
+   /* Same on the responses wire, under a different name for the same shape:
+    * usage.input_tokens_details.cached_tokens. */
+   const char *RCACHE =
+       "{\"id\":\"resp_2\",\"model\":\"gpt-5\",\"output\":[{\"type\":\"message\","
+       "\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}],"
+       "\"usage\":{\"input_tokens\":200,\"output_tokens\":6,"
+       "\"input_tokens_details\":{\"cached_tokens\":128}}}";
+   cJSON *rcj = cJSON_Parse(RCACHE);
+   aimee_response_t rcresp;
+   assert(responses_backend_parse(rcj, &rcresp, err, sizeof err) == 0);
+   assert(rcresp.usage_in == 200 && rcresp.usage_out == 6);
+   assert(rcresp.usage_cache_read == 128);
+   aimee_response_free(&rcresp);
+   cJSON_Delete(rcj);
+
    /* Reasoning models on the openai wire embed chain-of-thought inline. The IR STORES
     * it as a THINKING block (not discarded) and keeps the answer as TEXT; the content
     * accessor excludes THINKING so callers see only the answer. */
