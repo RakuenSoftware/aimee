@@ -54,6 +54,10 @@ const (
 	SandboxWorkspace SandboxMountKind = iota
 	// SandboxControlSocket is the single outward channel to the parent.
 	SandboxControlSocket
+	// SandboxScratch is a working directory aimee created for a delegate that
+	// has no repository. It is not caller-supplied, which is the whole reason it
+	// is a separate kind -- see ScratchDir.
+	SandboxScratch
 )
 
 // SandboxMount is one bind mount in the container specification.
@@ -105,6 +109,18 @@ type SandboxRequest struct {
 	// EgressProxy, when set, becomes http_proxy so a no-network delegate can
 	// still install software through the narrow update whitelist.
 	EgressProxy string
+
+	// ScratchDir is a directory AIMEE created for a delegate that has no
+	// repository at all, mounted at ScratchTarget.
+	//
+	// It is exempt from the git-checkout rule, and that exemption is safe only
+	// because of what the rule is for: refusing to bind an ARBITRARY HOST
+	// directory into a delegate. A path aimee just made under its own cache is
+	// categorically not that. To keep the exemption from becoming a way to
+	// smuggle one in, a scratch request may not also name a repository -- the
+	// two are mutually exclusive and the builder refuses a request with both.
+	ScratchDir    string
+	ScratchTarget string
 
 	// RunAsUser is "<uid>:<gid>" and must be set whenever a host tree is
 	// mounted. Containers run as root by default, so every file the delegate
@@ -175,6 +191,47 @@ func cleanAbs(p string) (string, bool) {
 	return path.Clean(p), true
 }
 
+// buildScratchSpec is the container for a delegate with no repository.
+//
+// One writable mount and nothing else: there is no repo to layer beneath it and
+// no git metadata to expose. Everything the sandbox guarantees still holds --
+// the network, the runtime socket and the credential rules are applied by the
+// shared tail below, not skipped here.
+func buildScratchSpec(req SandboxRequest) (SandboxSpec, error) {
+	var spec SandboxSpec
+
+	// The exemption is for aimee's OWN directory. A request that also names a
+	// repository is not that, and is refused rather than resolved in favour of
+	// one of them.
+	if req.Worktree != "" || req.RepoRoot != "" || req.GitDir != "" {
+		return spec, fmt.Errorf(
+			"a scratch container cannot also mount a repository (worktree=%q repo=%q gitdir=%q)",
+			req.Worktree, req.RepoRoot, req.GitDir)
+	}
+
+	source, ok := cleanAbs(req.ScratchDir)
+	if !ok {
+		return spec, fmt.Errorf("scratch dir must be an absolute path, got %q", req.ScratchDir)
+	}
+	target, ok := cleanAbs(req.ScratchTarget)
+	if !ok {
+		return spec, fmt.Errorf("scratch target must be an absolute path, got %q", req.ScratchTarget)
+	}
+
+	// Writable regardless of the role: the delegate has nowhere else to work,
+	// and nothing else can see this directory.
+	spec.Mounts = append(spec.Mounts,
+		SandboxMount{Source: source, Target: target, Kind: SandboxScratch})
+
+	if err := attachSandboxChannel(&spec, req); err != nil {
+		return SandboxSpec{}, err
+	}
+	if err := ValidateSandboxSpec(spec); err != nil {
+		return SandboxSpec{}, err
+	}
+	return spec, nil
+}
+
 // BuildSandboxSpec decides the container's shape for one delegate run.
 //
 // A write role gets three mounts: the repo read-only so the whole tree is
@@ -184,6 +241,10 @@ func cleanAbs(p string) (string, bool) {
 // supervisor's live branch and the mode is the enforcement, not the request.
 func BuildSandboxSpec(req SandboxRequest) (SandboxSpec, error) {
 	var spec SandboxSpec
+
+	if req.ScratchDir != "" {
+		return buildScratchSpec(req)
+	}
 
 	worktree, ok := cleanAbs(req.Worktree)
 	if !ok {
@@ -228,15 +289,33 @@ func BuildSandboxSpec(req SandboxRequest) (SandboxSpec, error) {
 			SandboxMount{Source: worktree, Target: worktree, ReadOnly: true})
 	}
 
+	if err := attachSandboxChannel(&spec, req); err != nil {
+		return SandboxSpec{}, err
+	}
+	if err := ValidateSandboxSpec(spec); err != nil {
+		return SandboxSpec{}, err
+	}
+	return spec, nil
+}
+
+// attachSandboxChannel adds everything that is true of EVERY delegate container
+// regardless of what it mounts: the one outward channel, the environment that
+// makes it usable, and the user it runs as.
+//
+// Shared by the repository and scratch shapes on purpose. These are the parts
+// whose absence is silent -- a container with no AIMEE_API_ENDPOINT starts and
+// looks healthy -- so a second copy that fell one variable behind would be
+// found by a delegate failing mysteriously, not by a test.
+func attachSandboxChannel(spec *SandboxSpec, req SandboxRequest) error {
 	if req.ParentSocketHost != "" {
 		host, ok := cleanAbs(req.ParentSocketHost)
 		if !ok {
-			return spec, fmt.Errorf("parent socket must be an absolute path, got %q",
+			return fmt.Errorf("parent socket must be an absolute path, got %q",
 				req.ParentSocketHost)
 		}
 		target, ok := cleanAbs(req.ParentSocketTarget)
 		if !ok {
-			return spec, fmt.Errorf("parent socket target must be an absolute path, got %q",
+			return fmt.Errorf("parent socket target must be an absolute path, got %q",
 				req.ParentSocketTarget)
 		}
 		spec.Mounts = append(spec.Mounts,
@@ -278,11 +357,7 @@ func BuildSandboxSpec(req SandboxRequest) (SandboxSpec, error) {
 		SandboxEnv{Name: "GIT_CONFIG_VALUE_0", Value: "*"})
 
 	spec.User = req.RunAsUser
-
-	if err := ValidateSandboxSpec(spec); err != nil {
-		return SandboxSpec{}, err
-	}
-	return spec, nil
+	return nil
 }
 
 // ValidateSandboxSpec re-checks a specification against every invariant.
