@@ -1450,6 +1450,14 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
                              for the future P2b audit pass; today the only
                              visible effect is the parsed.calls[] mutation. */
 
+      /* Name every call handed back to the client. A Codex client sends its MCP
+       * servers as `namespace` groups and can only route a call whose name is
+       * namespace-qualified; a bare nested name comes back as
+       * "unsupported call: <name>" and the turn is wasted. Logging the names is the
+       * only way to tell "the provider emitted it bare" from "we stripped it". */
+      for (int ci = 0; ci < parsed.call_count; ci++)
+         LOG_INFO("openai.responses", "returning tool call name=%s",
+                  parsed.calls[ci].name[0] ? parsed.calls[ci].name : "(empty)");
       openai_responses_emit_policed(&parsed, id, model, created, emit, ctx);
    }
    else
