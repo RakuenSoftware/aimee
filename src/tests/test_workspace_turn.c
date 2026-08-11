@@ -232,29 +232,11 @@ int main(void)
       delegate_backend_reset_for_test();
       assert(delegate_backend_register(&g_fake_docker) == 0);
 
-      /* Dial OFF (the default): no container, no acquire, and the active provider
-       * is untouched — the turn runs in-process exactly as it does today. */
+      /* Acquires a container and binds a CONTAINER provider — not shared. If this
+       * ever resolved to `shared` the delegate would be on the host while the
+       * operator believed it was sandboxed. There is no dial to turn this off:
+       * a delegate runs in its own container or not at all. */
       {
-         config_t c;
-         memset(&c, 0, sizeof(c));
-         config_load(&c);
-         c.delegate_sandbox = 0;
-         assert(config_save(&c) == 0);
-         g_acquires = g_releases = 0;
-         assert(workspace_turn_bind_container("deleg-1", NULL, NULL, 0) == 0);
-         assert(g_acquires == 0); /* must not even try to take a container */
-         assert(workspace_provider_active() == shared);
-      }
-
-      /* Dial ON: acquires a container and binds a CONTAINER provider — not shared.
-       * If this ever resolved to `shared` the delegate would be on the host while
-       * the operator believed it was sandboxed. */
-      {
-         config_t c;
-         memset(&c, 0, sizeof(c));
-         config_load(&c);
-         c.delegate_sandbox = 1;
-         assert(config_save(&c) == 0);
          g_acquires = g_releases = 0;
          assert(workspace_turn_container_bound() == 0); /* nothing bound yet */
          assert(workspace_turn_bind_container("deleg-2", NULL, NULL, 0) == 1);
@@ -358,13 +340,12 @@ int main(void)
          c.workspace_count = 1;
          snprintf(c.workspaces[0], MAX_PATH_LEN, "/");
          c.workspace_providers[0][0] = '\0';
-         c.delegate_sandbox = 1;
          assert(config_save(&c) == 0);
 
          g_acquires = 0;
          mkdir("/tmp/aimee-root-authorized", 0700);
          assert(workspace_turn_bind_container("deleg-9", NULL, "/tmp/aimee-root-authorized", 1) ==
-                0);
+                -1);
          assert(g_acquires == 0);
          rmdir("/tmp/aimee-root-authorized");
 
@@ -376,7 +357,6 @@ int main(void)
          snprintf(c.workspace_providers[0], sizeof(c.workspace_providers[0]), "detached");
          snprintf(c.workspaces[1], MAX_PATH_LEN, "/tmp/ws-shared");
          c.workspace_providers[1][0] = '\0';
-         c.delegate_sandbox = 1;
          assert(config_save(&c) == 0);
       }
 
@@ -389,19 +369,19 @@ int main(void)
          g_acquires = 0;
          mkdir("/tmp/aimee-unregistered-tree", 0700);
          assert(workspace_turn_bind_container("deleg-8", NULL, "/tmp/aimee-unregistered-tree", 0) ==
-                0);
+                -1);
          assert(g_acquires == 0); /* refused BEFORE taking a container */
          assert(workspace_provider_active() == shared);
          rmdir("/tmp/aimee-unregistered-tree");
       }
 
       /* Acquire failure must NOT bind: falling through with a half-bound provider
-       * would send every op to the host. It returns 0, so the caller runs
-       * in-process (and the seam logs at ERROR). */
+       * would send every op to the host. It refuses (-1) — there is no in-process
+       * path left to fall back to, so the delegation aborts. */
       {
          g_acquires = g_releases = 0;
          g_acquire_fails = 1;
-         assert(workspace_turn_bind_container("deleg-3", NULL, NULL, 0) == 0);
+         assert(workspace_turn_bind_container("deleg-3", NULL, NULL, 0) == -1);
          assert(g_acquires == 1);
          assert(g_releases == 0); /* nothing to release: it never took one */
          assert(workspace_provider_active() == shared);
@@ -416,12 +396,12 @@ int main(void)
          assert(g_acquires == 0);
       }
 
-      /* No docker backend registered at all: the dial is on but there is nothing
-       * to bind to. Must refuse rather than silently run on the host. */
+      /* No docker backend registered at all: there is nothing to bind to. Must
+       * refuse rather than silently run on the host. */
       {
          delegate_backend_reset_for_test();
          g_acquires = 0;
-         assert(workspace_turn_bind_container("deleg-4", NULL, NULL, 0) == 0);
+         assert(workspace_turn_bind_container("deleg-4", NULL, NULL, 0) == -1);
          assert(workspace_provider_active() == shared);
       }
       delegate_backend_reset_for_test();

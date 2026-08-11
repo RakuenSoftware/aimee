@@ -33,21 +33,16 @@ const char *workspace_turn_git_target(const char *tool, const char *path, const 
  * scratch dir. NULL keeps that historical empty dir. `workspace_read_only` mounts
  * it :ro — required whenever the tree is not the delegate's own, because a
  * delegate's changes must not leave its container: a shared tree must be
- * unwritable at the MOUNT, not merely guarded above it. Returns 1 if bound (pair it
- * with workspace_turn_unbind_active, which also RELEASES the container), 0 for the
- * benign in-process fallback, or -1 for a HARD refusal (do not run the delegate at
- * all — see below).
+ * unwritable at the MOUNT, not merely guarded above it.
  *
- * Returns 0 — leaving the turn in-process, exactly as today — when the
- * `delegate_sandbox` config dial is off (the default), or when the docker backend
- * is unavailable, or the container cannot be acquired. Those last two are LOGGED at
- * ERROR: falling back silently would run the delegate on the host while the
+ * Returns 1 if bound (pair it with workspace_turn_unbind_active, which also
+ * RELEASES the container), 0 only when `task_id` is empty and there is therefore
+ * no delegate to bind, or -1 for a refusal: the caller MUST abort the delegation.
  *
- * Returns -1 — the caller MUST abort the delegation, not fall back to in-process —
- * when `delegate_sandbox_require_isolation` is set and the runtime did not provide a
- * network-isolated sandbox (e.g. it ignored --network none). Running in-process on
- * the host would be even less isolated, so a hard refusal must never degrade.
- * operator believes it is sandboxed.
+ * There is no in-process fallback and no dial that selects one. A delegate runs in
+ * its own container or not at all, so an unavailable backend, an unacquirable
+ * container, an unauthorized workspace, and a runtime that would not honour
+ * --network none all return -1. Every one is logged at ERROR where it is detected.
  *
  * Unlike workspace_turn_bind_active this is not cwd-driven: a container provider
  * needs a live container handle, so the caller that owns the delegate decides. */

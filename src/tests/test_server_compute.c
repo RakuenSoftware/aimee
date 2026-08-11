@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include "aimee.h"
@@ -16,6 +17,99 @@
 #include <aimee/audit/obs_bus.h>
 #include "platform_path.h"
 #include "platform_test_util.h"
+#include <aimee/delegates/delegate_backend.h>
+
+/* A delegate runs in its own container or not at all, so a delegation with no
+ * container runtime now REFUSES rather than falling back to running in-process
+ * on the host. These cases are about compute-budget and dispatch behaviour, not
+ * about sandboxing, so they need a box that HAS a runtime. Register a fake one
+ * under the name the seam looks up. */
+static int g_fake_container_state = 1;
+
+static int fake_docker_acquire(delegate_backend_t *self, const char *task_id,
+                               const delegate_backend_config_t *cfg, void **out)
+{
+   (void)self;
+   (void)task_id;
+   (void)cfg;
+   *out = &g_fake_container_state;
+   return 0;
+}
+
+static void fake_docker_release(delegate_backend_t *self, void *state, int hibernate)
+{
+   (void)self;
+   (void)state;
+   (void)hibernate;
+}
+
+static int fake_docker_exec(delegate_backend_t *self, void *state, const char *command,
+                            int timeout_ms, delegate_exec_result_t *r)
+{
+   (void)self;
+   (void)state;
+   (void)command;
+   (void)timeout_ms;
+   if (r)
+      r->exit_code = 0;
+   return 0;
+}
+
+static delegate_backend_t g_fake_docker = {.name = "docker",
+                                           .description = "fake docker for tests",
+                                           .acquire = fake_docker_acquire,
+                                           .release = fake_docker_release,
+                                           .exec = fake_docker_exec,
+                                           .read_file = NULL,
+                                           .write_file = NULL,
+                                           .list_dir = NULL,
+                                           .get_cwd = NULL,
+                                           .set_cwd = NULL};
+
+/* The harness sets TMPDIR, and a tree outside the REGISTERED workspace roots is
+ * now refused outright rather than quietly run in-process. So these fixtures live
+ * under the registered temp root instead of a hard-coded /tmp. */
+static const char *test_parent_repo(void)
+{
+   static char buf[600];
+   if (!buf[0])
+      snprintf(buf, sizeof(buf), "%s/aimee-parent-repo", platform_tmpdir());
+   return buf;
+}
+
+static const char *test_delegate_wt(void)
+{
+   static char buf[600];
+   if (!buf[0])
+      snprintf(buf, sizeof(buf), "%s/aimee-delegate-wt", platform_tmpdir());
+   return buf;
+}
+
+/* Registered workspace roots are now a PREREQUISITE for delegation, not just for
+ * sandboxing: an unregistered tree is refused outright rather than quietly run
+ * in-process. These cases use /tmp paths as their workspace, so register /tmp. */
+static void register_test_workspace_root(void)
+{
+   static char tmpdir[512];
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-compute-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(tmpdir) != NULL);
+   platform_setenv("HOME", tmpdir);
+   platform_unsetenv("AIMEE_HOME");
+   platform_setenv("AIMEE_NO_CACHE", "1");
+
+   char cfgdir[640];
+   snprintf(cfgdir, sizeof(cfgdir), "mkdir -p %s/.config/aimee", tmpdir);
+   assert(system(cfgdir) == 0);
+
+   char cfgpath[700];
+   snprintf(cfgpath, sizeof(cfgpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+   FILE *cf = fopen(cfgpath, "w");
+   assert(cf != NULL);
+   fprintf(cf, "workspaces:\n  - path: %s\n", platform_tmpdir());
+   fclose(cf);
+   config_reload();
+   assert(config_workspace_count() == 1);
+}
 
 /* The learned toolchain moved to the sandbox module, so resolving a sandbox
  * image now asks the bus for it. No bus runs in a unit test: report the module
@@ -2472,6 +2566,9 @@ static void test_direct_delegate_max_turns_override(void)
 }
 static void test_delegate_launch_repairs_paths_from_request_cwd(void)
 {
+   /* An earlier case may have pointed HOME at its own tmpdir: re-register the
+    * workspace roots, without which this delegation is refused outright. */
+   register_test_workspace_root();
    reset_last_response();
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
    server_conn_t *conn = calloc(1, sizeof(*conn));
@@ -2514,6 +2611,9 @@ static void test_delegate_launch_repairs_paths_from_request_cwd(void)
  * their task prompt while reading from the parent workspace by default. */
 static void assert_role_gets_evidence_bundle_with_cwd(const char *role, const char *cwd)
 {
+   /* An earlier case may have pointed HOME at its own tmpdir: re-register the
+    * workspace roots, without which this delegation is refused outright. */
+   register_test_workspace_root();
    reset_last_response();
    int fds[2];
    assert(pipe(fds) == 0);
@@ -2523,11 +2623,11 @@ static void assert_role_gets_evidence_bundle_with_cwd(const char *role, const ch
    conn->fd = fds[1];
    g_agent_response = "Validation complete — no findings";
    g_git_repo_root_rc = 0;
-   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", "/tmp/aimee-parent-repo");
+   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", test_parent_repo());
    g_worktree_create_rc = 0;
    g_worktree_sibling_path_rc = 0;
    snprintf(g_worktree_sibling_path_value, sizeof(g_worktree_sibling_path_value), "%s",
-            "/tmp/aimee-delegate-wt");
+            test_delegate_wt());
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "role", role);
    cJSON_AddStringToObject(req, "persona", "engineer");
@@ -2565,11 +2665,16 @@ static void assert_role_gets_evidence_bundle_with_cwd(const char *role, const ch
 
 static void assert_role_gets_evidence_bundle(const char *role)
 {
-   assert_role_gets_evidence_bundle_with_cwd(role, "/tmp");
+   /* The registered temp root, not a literal /tmp: the harness sets TMPDIR, and an
+    * unregistered tree is refused rather than quietly run in-process. */
+   assert_role_gets_evidence_bundle_with_cwd(role, platform_tmpdir());
 }
 
 static void test_read_only_delegate_uses_parent_workspace(void)
 {
+   /* An earlier case may have pointed HOME at its own tmpdir: re-register the
+    * workspace roots, without which this delegation is refused outright. */
+   register_test_workspace_root();
    reset_last_response();
    int fds[2];
    assert(pipe(fds) == 0);
@@ -2579,18 +2684,21 @@ static void test_read_only_delegate_uses_parent_workspace(void)
    conn->fd = fds[1];
    g_agent_response = "Read-only validation complete";
    g_git_repo_root_rc = 0;
-   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", "/tmp/aimee-parent-repo");
+   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", test_parent_repo());
    g_worktree_create_rc = 0;
    g_worktree_sibling_path_rc = 0;
    snprintf(g_worktree_sibling_path_value, sizeof(g_worktree_sibling_path_value), "%s",
-            "/tmp/aimee-delegate-wt");
+            test_delegate_wt());
+   /* The workspace must EXIST: it is canonicalized before it can be authorized,
+    * and an unresolvable tree is now a refusal rather than a quiet host run. */
+   (void)mkdir(test_parent_repo(), 0700);
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "role", "validate");
    cJSON_AddStringToObject(req, "persona", "engineer");
    cJSON_AddStringToObject(req, "prompt",
                            "Read-only. Validate the changes in the current diff for correctness.");
-   cJSON_AddStringToObject(req, "cwd", "/tmp/aimee-parent-repo");
+   cJSON_AddStringToObject(req, "cwd", test_parent_repo());
    assert(handle_delegate(ctx, conn, req) == 0);
    assert(g_submitted_fn == delegate_worker);
    g_submitted_fn(g_submitted_arg);
@@ -2620,6 +2728,9 @@ static void test_read_only_delegate_uses_parent_workspace(void)
 
 static void test_provided_review_target_suppresses_worktree_evidence(void)
 {
+   /* An earlier case may have pointed HOME at its own tmpdir: re-register the
+    * workspace roots, without which this delegation is refused outright. */
+   register_test_workspace_root();
    reset_last_response();
    int fds[2];
    assert(pipe(fds) == 0);
@@ -2629,14 +2740,14 @@ static void test_provided_review_target_suppresses_worktree_evidence(void)
    conn->fd = fds[1];
    g_agent_response = "Plan review complete";
    g_git_repo_root_rc = 0;
-   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", "/tmp/aimee-parent-repo");
+   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", test_parent_repo());
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "role", "review");
    cJSON_AddStringToObject(req, "persona", "reviewer");
    cJSON_AddStringToObject(req, "prompt",
                            "BEGIN_ARTIFACT_DATA (plan)\nPLAN_TARGET_MARKER\nEND_ARTIFACT_DATA");
-   cJSON_AddStringToObject(req, "cwd", "/tmp/aimee-parent-repo");
+   cJSON_AddStringToObject(req, "cwd", test_parent_repo());
    cJSON_AddBoolToObject(req, "provided_target", 1);
    assert(handle_delegate(ctx, conn, req) == 0);
    assert(g_submitted_fn == delegate_worker);
@@ -2664,6 +2775,9 @@ static void test_provided_review_target_suppresses_worktree_evidence(void)
 
 static void test_read_only_branch_delegate_rejected(void)
 {
+   /* An earlier case may have pointed HOME at its own tmpdir: re-register the
+    * workspace roots, without which this delegation is refused outright. */
+   register_test_workspace_root();
    reset_last_response();
    int fds[2];
    assert(pipe(fds) == 0);
@@ -2673,18 +2787,18 @@ static void test_read_only_branch_delegate_rejected(void)
    conn->fd = fds[1];
    g_agent_response = "should not run";
    g_git_repo_root_rc = 0;
-   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", "/tmp/aimee-parent-repo");
+   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", test_parent_repo());
    g_worktree_create_rc = 0;
    g_worktree_sibling_path_rc = 0;
    snprintf(g_worktree_sibling_path_value, sizeof(g_worktree_sibling_path_value), "%s",
-            "/tmp/aimee-delegate-wt");
+            test_delegate_wt());
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "role", "validate");
    cJSON_AddStringToObject(req, "persona", "engineer");
    cJSON_AddStringToObject(req, "prompt",
                            "Read-only. Validate the changes in the current diff for correctness.");
-   cJSON_AddStringToObject(req, "cwd", "/tmp/aimee-parent-repo");
+   cJSON_AddStringToObject(req, "cwd", test_parent_repo());
    cJSON_AddStringToObject(req, "branch", "feature/read-only-review");
    assert(handle_delegate(ctx, conn, req) == 0);
    assert(g_submitted_fn == delegate_worker);
@@ -3065,6 +3179,9 @@ static void assert_delegate_roots_agree(const char *what)
  * file tools write there. Its shell must run there too, not in the parent. */
 static void test_delegate_shell_and_file_roots_agree(void)
 {
+   /* An earlier case may have pointed HOME at its own tmpdir: re-register the
+    * workspace roots, without which this delegation is refused outright. */
+   register_test_workspace_root();
    reset_last_response();
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-rootparity-XXXXXX", platform_tmpdir());
@@ -3556,6 +3673,8 @@ static int compute_test_handoff_provider(const char *text, const char *owned_fil
 
 int main(void)
 {
+   register_test_workspace_root();
+   assert(delegate_backend_register(&g_fake_docker) == 0);
    delegate_register_handoff_provider(compute_test_handoff_provider);
    test_codex_oauth_vault_server_principal_fallback();
    /* DB1 owns delegation_spawns + delegation_messages. */

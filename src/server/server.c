@@ -2035,20 +2035,12 @@ static int server_shell_git_blocked(const char *command, const char *cwd)
  * prevent. An operator must not have to read the code to learn that. */
 static void delegate_sandbox_log_posture(void)
 {
-   int dial_on = config_present() && config_delegate_sandbox();
-   if (!dial_on)
-   {
-      aimee_log(LOG_INFO, "delegate-sandbox",
-                "OFF: delegate_sandbox=false — a delegate's shell and file ops run IN-PROCESS "
-                "inside aimee-server, with the server's filesystem and environment");
-      return;
-   }
    delegate_backend_t *b = delegate_backend_lookup("docker");
    if (!b || !b->acquire)
    {
       aimee_log(LOG_ERROR, "delegate-sandbox",
-                "INERT: delegate_sandbox is ON but the docker backend is not registered — every "
-                "delegate will run on the HOST while appearing sandboxed");
+                "UNAVAILABLE: the docker backend is not registered — no delegate can be given a "
+                "container, so every delegation will REFUSE to run");
       return;
    }
 
@@ -2068,9 +2060,8 @@ static void delegate_sandbox_log_posture(void)
    if (rc != 0)
    {
       aimee_log(LOG_ERROR, "delegate-sandbox",
-                "INERT: delegate_sandbox is ON and the docker backend is registered, but `%s "
-                "version` failed (rc=%d) — no daemon reachable, so every delegate will run on "
-                "the HOST while appearing sandboxed",
+                "UNAVAILABLE: the docker backend is registered, but `%s version` failed (rc=%d) — "
+                "no daemon reachable, so every delegation will REFUSE to run",
                 bin, rc);
       free(ver);
       return;

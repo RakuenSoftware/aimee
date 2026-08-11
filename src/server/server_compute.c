@@ -1661,18 +1661,17 @@ void delegate_worker(void *arg)
       container_ws = cwd; /* shared: readable, never writable */
       container_ws_ro = 1;
    }
-   /* A WRITE-capable delegate with no tree of its own is deliberately left
-    * unsandboxed rather than handed a read-only mount. Isolation is the constraint,
-    * so its writes must not reach a shared tree — but a writer fighting a :ro mount
-    * fails in a way that reads as a broken repo, not as a policy. Better to run it
-    * where it works, under the write guard, and say so. Its own worktree is what
-    * makes it sandboxable; without one there is nothing safe to give it. */
+   /* A WRITE-capable delegate with no tree of its own has nothing safe to mount: a
+    * shared tree must stay read-only, and a writer cannot use a read-only tree. It
+    * used to be run unsandboxed on the host under the write guard, which was a
+    * second execution model standing beside the container one. There is only the
+    * container now, so this refuses: container_ws stays NULL and the bind below
+    * turns that into a hard failure rather than a host run. */
    else if (cwd[0] == '/' && delegate_allows_writes)
    {
-      aimee_log(LOG_WARN, "delegate-sandbox",
-                "delegate %s: write-capable but has no worktree of its own (shared=%d); NOT "
-                "sandboxing it — a shared tree must stay read-only, and a writer cannot use a "
-                "read-only tree. Running in-process under the write guard",
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "delegate %s: write-capable but has no worktree of its own (shared=%d) — refusing "
+                "to run. A write delegate needs its own worktree to be given a container",
                 deleg_id, delegate_shared_worktree);
    }
    /* Resolve the per-project/-workspace/-global sandbox image (pre-baked `image:`
@@ -1684,18 +1683,29 @@ void delegate_worker(void *arg)
         delegate_sandbox_resolve_image(container_ws, sbx_image, sizeof(sbx_image)) == 0)
            ? sbx_image
            : NULL;
-   /* container_ws == NULL is the write-capable-but-no-own-worktree case resolved
-    * above: the intent there is to run IN-PROCESS under the write guard, NOT to hand
-    * the delegate a scratch sandbox. Binding with a NULL workspace mints an EMPTY
-    * scratch tree and mounts THAT, so the delegate edits files the engine never sees
-    * ("write role reported success but produced no diff"). A WFE implement slice is
-    * NOT this case: its cwd already IS a dedicated per-slice worktree it owns, so
-    * delegate_resolve_worktree marks it dedicated and container_ws points at that
-    * tree read-write (above). Only bind a container when there is a real tree to
-    * mount; otherwise run in-process in cwd so writes land where the engine diffs. */
+   /* container_ws == NULL has two causes, and they end differently.
+    *
+    * For a WRITE delegate it is the no-worktree-of-its-own case resolved above, and
+    * it REFUSES. It must never become a bind with a NULL workspace: that mints an
+    * EMPTY scratch tree and mounts THAT, so the delegate edits files the engine
+    * never sees ("write role reported success but produced no diff"). A WFE
+    * implement slice is NOT this case: its cwd already IS a dedicated per-slice
+    * worktree it owns, so delegate_resolve_worktree marks it dedicated and
+    * container_ws points at that tree read-write (above).
+    *
+    * For a READ-ONLY delegate it means there is no repository in play at all. That
+    * still gets a container — the backend's scratch dir — because the mount is a
+    * parameter of the single container path, not a second path. An empty tree is
+    * harmless to a delegate that was never going to write one.
+    *
+    * A DETACHED workspace is still exempt. It is served by the connected client
+    * over the reverse channel, not by this host, so there is no local tree to put
+    * in a container. That is a separate execution model from the in-process host
+    * path this change removed, and collapsing it is not this change's business. */
    int container_bound =
-       (detached_bound || !container_ws || !container_ws[0])
-           ? 0
+       detached_bound ? 0
+       : (!container_ws || !container_ws[0]) && delegate_allows_writes
+           ? -1
            : workspace_turn_bind_container(deleg_id, sbx_image_arg, container_ws, container_ws_ro);
 
    if (cost_limit_failed)
@@ -1704,13 +1714,14 @@ void delegate_worker(void *arg)
    }
    else if (container_bound < 0)
    {
-      /* HARD isolation refusal (delegate_sandbox_require_isolation): the runtime would
-       * not provide a network-isolated sandbox. Refuse the delegation rather than fall
-       * back to the in-process host path, which has NO isolation at all. */
+      /* The delegate could not be given a container: no worktree of its own to
+       * mount, no docker backend, or a runtime that would not isolate it. There is
+       * no un-sandboxed path to fall back to, so the delegation fails. The specific
+       * cause was logged where it was detected. */
       memset(&result, 0, sizeof(result));
       snprintf(result.error, sizeof(result.error),
-               "delegate sandbox isolation required but unavailable: the container runtime did "
-               "not honour --network none; refusing to run the delegate un-isolated");
+               "delegate could not be given a sandboxed container; refusing to run it "
+               "un-sandboxed (see the delegate-sandbox log for the cause)");
       rc = -1;
    }
    else
