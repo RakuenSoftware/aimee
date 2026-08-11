@@ -1076,8 +1076,78 @@ static void test_flat_list_keeps_family_members(void)
    printf("  PASS: flat_list_keeps_family_members\n");
 }
 
+/* Trimming prose must cost tokens and nothing else.
+ *
+ * tools/list is re-sent as context on every turn, and 59% of its 20 KB is guidance
+ * prose rather than the shape a client needs to build a call. Shortening it is only
+ * safe if every tool survives and every schema stays exactly as callable, so that is
+ * what this asserts -- not the byte count, which will drift, but the invariants. */
+static void test_prose_trim_keeps_tools_callable(void)
+{
+   cJSON *full = mcp_build_tools_list();
+   cJSON *lean = mcp_build_tools_list();
+   int n = cJSON_GetArraySize(full);
+   assert(n > 0);
+
+   char *before = cJSON_PrintUnformatted(lean);
+   assert(mcp_compact_tool_prose(lean) == n);
+   char *after = cJSON_PrintUnformatted(lean);
+
+   /* It actually saves something, and no tool was dropped. */
+   assert(strlen(after) < strlen(before));
+   assert(cJSON_GetArraySize(lean) == n);
+
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *f = cJSON_GetArrayItem(full, i);
+      cJSON *l = cJSON_GetArrayItem(lean, i);
+      const char *fname = cJSON_GetObjectItemCaseSensitive(f, "name")->valuestring;
+      const char *lname = cJSON_GetObjectItemCaseSensitive(l, "name")->valuestring;
+      assert(strcmp(fname, lname) == 0); /* same tools, same order */
+
+      /* A description may shrink but must never vanish: a nameless tool is worse
+       * than a terse one. */
+      cJSON *ld = cJSON_GetObjectItemCaseSensitive(l, "description");
+      if (cJSON_GetObjectItemCaseSensitive(f, "description"))
+         assert(cJSON_IsString(ld) && ld->valuestring[0]);
+
+      /* The callable shape is untouched: same properties, same types, same required. */
+      cJSON *fs = cJSON_GetObjectItemCaseSensitive(f, "inputSchema");
+      cJSON *ls = cJSON_GetObjectItemCaseSensitive(l, "inputSchema");
+      if (!fs)
+         continue;
+      cJSON *fp = cJSON_GetObjectItemCaseSensitive(fs, "properties");
+      cJSON *lp = cJSON_GetObjectItemCaseSensitive(ls, "properties");
+      assert(cJSON_GetArraySize(fp) == cJSON_GetArraySize(lp));
+      cJSON *prop = NULL;
+      cJSON_ArrayForEach(prop, fp)
+      {
+         cJSON *mirror = cJSON_GetObjectItemCaseSensitive(lp, prop->string);
+         assert(mirror != NULL);
+         cJSON *ft = cJSON_GetObjectItemCaseSensitive(prop, "type");
+         cJSON *lt = cJSON_GetObjectItemCaseSensitive(mirror, "type");
+         if (cJSON_IsString(ft))
+            assert(cJSON_IsString(lt) && strcmp(ft->valuestring, lt->valuestring) == 0);
+         cJSON *fe = cJSON_GetObjectItemCaseSensitive(prop, "enum");
+         cJSON *le = cJSON_GetObjectItemCaseSensitive(mirror, "enum");
+         if (fe)
+            assert(le && cJSON_GetArraySize(fe) == cJSON_GetArraySize(le));
+      }
+      cJSON *fr = cJSON_GetObjectItemCaseSensitive(fs, "required");
+      cJSON *lr = cJSON_GetObjectItemCaseSensitive(ls, "required");
+      if (fr)
+         assert(lr && cJSON_GetArraySize(fr) == cJSON_GetArraySize(lr));
+   }
+
+   free(before);
+   free(after);
+   cJSON_Delete(full);
+   cJSON_Delete(lean);
+}
+
 int main(void)
 {
+   test_prose_trim_keeps_tools_callable();
    printf("test_mcp_client_registry\n");
    test_tools_list_surface();
    test_tool_profile_filter();

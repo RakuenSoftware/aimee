@@ -174,9 +174,31 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
       cJSON *tools = cJSON_AddArrayToObject(out, "tools");
       for (int i = 0; i < ir->n_tools; i++)
       {
+         /* Re-emit anything the IR does not model as a plain named function exactly
+          * as it arrived. A Codex client's `namespace` groups carry their nested tool
+          * list under `tools`, and flattening one into a single function named
+          * mcp__aimee lost all nineteen aimee tools and made the model call a name
+          * Codex then rejected ("unsupported call: mcp__aimee"). `web_search` and
+          * friends carry no name at all, and synthesising `"name": ""` for them made
+          * the provider reject the entire request.
+          *
+          * Only a sidecar whose own type is `function` is safe to re-render from the
+          * modelled fields; everything else goes back verbatim. */
+         const cJSON *raw = ir->tools[i].raw;
+         const cJSON *rtype = raw ? cJSON_GetObjectItemCaseSensitive((cJSON *)raw, "type") : NULL;
+         int raw_is_function = cJSON_IsString(rtype) && strcmp(rtype->valuestring, "function") == 0;
+         if (raw && (!raw_is_function || !ir->tools[i].name || !ir->tools[i].name[0]))
+         {
+            cJSON *verbatim = cJSON_Duplicate((cJSON *)raw, 1);
+            if (verbatim)
+               cJSON_AddItemToArray(tools, verbatim);
+            continue;
+         }
+         if (!ir->tools[i].name || !ir->tools[i].name[0])
+            continue; /* unnamed and unmodelled: never emit name:"" */
          cJSON *t = cJSON_CreateObject();
          cJSON_AddStringToObject(t, "type", "function");
-         cJSON_AddStringToObject(t, "name", ir->tools[i].name ? ir->tools[i].name : "");
+         cJSON_AddStringToObject(t, "name", ir->tools[i].name);
          if (ir->tools[i].description)
             cJSON_AddStringToObject(t, "description", ir->tools[i].description);
          cJSON_AddItemToObject(t, "parameters",

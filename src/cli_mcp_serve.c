@@ -13,6 +13,7 @@
 #include "platform_random.h"
 #include "util.h"
 #include "cJSON.h"
+#include <aimee/protocols/mcp/mcp_tools.h> /* mcp_compact_tool_prose */
 #include <ctype.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -577,6 +578,14 @@ static void handle_tools_list(cJSON *id)
       mcp_error(id, -32603, errmsg);
       return;
    }
+
+   /* Trim guidance prose on the way out, when asked. The server applies the same
+    * function at its own choke point, but this is the one that decides what THIS
+    * consumer's context carries, and a thin client can face a server it does not
+    * control. Hides no tool and alters no callable shape; see mcp_compact_tool_prose.
+    * Off unless AIMEE_MCP_TOOL_PROSE=lean, so the default payload is unchanged. */
+   if (mcp_tool_prose_lean())
+      (void)mcp_compact_tool_prose(tools);
 
    cJSON *result = cJSON_CreateObject();
    cJSON_AddItemToObject(result, "tools", cJSON_DetachItemFromObjectCaseSensitive(resp, "tools"));

@@ -1278,7 +1278,10 @@ $(TESTPREFIX)/unit-test-context-discover: $(OBJDIR)/tests/test_context_discover.
                        $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+# mcp_tool_profile.o: cli_mcp_serve trims tools/list prose on the way out, so this
+# test links the same object the shipped client does.
 $(TESTPREFIX)/unit-test-cli-mcp-serve: $(OBJDIR)/tests/test_cli_mcp_serve.o $(OBJDIR)/cJSON.o \
+                     $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o \
                      $(OBJDIR)/posix/platform_random.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 

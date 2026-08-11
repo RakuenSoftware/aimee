@@ -634,6 +634,13 @@ static void test_budgeted_build_uses_memory_previews(void)
        "explore-with: find_symbol, lsp_references, ast_grep_search, index command=hybrid, "
        "get_context_block, "
        "memory_get\n"
+       /* The standing scope policy rides in the same envelope as explore-with:
+        * naming the tools did not get ast_grep_search reached for on a task whose
+        * other instances were not callers. */
+       "fix-scope: a defect that is a PATTERN (unsafe join, missing check, raw "
+       "concatenation) usually repeats where nothing calls it -- callers and "
+       "blast-radius will correctly report nothing; match the shape with "
+       "ast_grep_search before reporting done\n"
        "</aimee-context>";
    assert(strcmp(env, GOLDEN) == 0);
    free(env);
