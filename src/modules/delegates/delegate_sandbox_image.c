@@ -14,6 +14,7 @@
  * tags the result by content hash, and reuses it on later turns; the delegate then
  * RUNS that image `--network none`. The per-workspace/global forms are `image:` only. */
 
+#include <aimee/delegates/delegate_launch_args.h>
 #include <aimee/delegates/delegate_sandbox_image.h>
 
 #include "aimee.h" /* MAX_PATH_LEN */
@@ -45,6 +46,10 @@ typedef struct
    char from[128];                /* build: base image */
    char dockerfile[MAX_PATH_LEN]; /* build: path to a Dockerfile (repo-relative or abs) */
    char *packages_df;             /* build: generated Dockerfile text (from+packages); owned */
+   /* ...and the tag naming it. Both come from ONE answer: a tag derived
+    * separately from the text it is supposed to name is how an image gets
+    * built under a name that describes something else. */
+   char packages_tag[SBX_TAG_MAX];
 } sandbox_spec_t;
 
 static void sandbox_spec_free(sandbox_spec_t *s)
@@ -63,71 +68,6 @@ static const char *resolve_docker_bin(void)
 }
 
 /* --- pure helpers (also unit-tested) --- */
-
-static int package_name_valid(const char *pkg)
-{
-   if (!pkg || !pkg[0])
-      return 0;
-   if (!(isalnum((unsigned char)pkg[0])))
-      return 0;
-   for (const char *c = pkg; *c; c++)
-   {
-      if (!(isalnum((unsigned char)*c) || *c == '.' || *c == '_' || *c == '+' || *c == ':' ||
-            *c == '-'))
-         return 0;
-   }
-   return 1;
-}
-
-int delegate_sandbox_dockerfile_from_packages(const char *base, const char *const *pkgs, int npkgs,
-                                              char *out, size_t cap)
-{
-   if (!out || cap == 0)
-      return -1;
-   out[0] = '\0';
-   if (!base || !base[0])
-      return -1;
-   /* Base image ref may contain '/' and ':' (registry/repo:tag) — allow those too. */
-   for (const char *c = base; *c; c++)
-   {
-      if (!(isalnum((unsigned char)*c) || *c == '.' || *c == '_' || *c == '+' || *c == ':' ||
-            *c == '-' || *c == '/'))
-         return -1;
-   }
-
-   char pkglist[4096];
-   size_t pos = 0;
-   for (int i = 0; i < npkgs; i++)
-   {
-      if (!package_name_valid(pkgs[i]))
-         return -1;
-      int n = snprintf(pkglist + pos, sizeof(pkglist) - pos, "%s%s", pos ? " " : "", pkgs[i]);
-      if (n < 0 || (size_t)n >= sizeof(pkglist) - pos)
-         return -1;
-      pos += (size_t)n;
-   }
-
-   int n;
-   if (npkgs > 0)
-      n = snprintf(out, cap,
-                   "FROM %s\n"
-                   "RUN apt-get update && apt-get install -y --no-install-recommends %s && "
-                   "rm -rf /var/lib/apt/lists/*\n",
-                   base, pkglist);
-   else
-      n = snprintf(out, cap, "FROM %s\n", base);
-   return (n > 0 && (size_t)n < cap) ? 0 : -1;
-}
-
-void delegate_sandbox_content_tag(const char *content, char *tag, size_t cap)
-{
-   char hex[HMEM_HASH_HEX_LEN];
-   hmem_sha256_hex(content ? content : "", content ? strlen(content) : 0, hex);
-   hex[12] = '\0';
-   snprintf(tag, cap, "aimee-sbx:%s", hex);
-}
-
-/* --- docker ops (impure) --- */
 
 static int docker_image_exists(const char *tag)
 {
@@ -171,10 +111,10 @@ static pthread_mutex_t g_build_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Ensure the build spec's image exists (build once, cached), writing its tag to
  * out[cap]. Returns 0 on success, -1 on failure. */
-static int ensure_built(const char *dockerfile_text, char *out, size_t cap)
+static int ensure_built(const char *tag, const char *dockerfile_text, char *out, size_t cap)
 {
-   char tag[SBX_TAG_MAX];
-   delegate_sandbox_content_tag(dockerfile_text, tag, sizeof(tag));
+   if (!tag || !tag[0] || !dockerfile_text)
+      return -1;
 
    pthread_mutex_lock(&g_build_lock);
    int ok = docker_image_exists(tag) || docker_build(tag, dockerfile_text) == 0;
@@ -540,11 +480,12 @@ static int project_yaml_sandbox_spec(const char *cwd, char *repo_root, size_t ro
                   argv[argc++] = p->valuestring;
             }
          }
-         char df[DOCKERFILE_MAX];
-         if (delegate_sandbox_dockerfile_from_packages(from->valuestring, argv, argc, df,
-                                                       sizeof(df)) == 0)
+         char df[DOCKERFILE_MAX], tag[SBX_TAG_MAX];
+         if (delegate_image_spec_resolve(from->valuestring, argv, argc, NULL, tag, sizeof(tag), df,
+                                         sizeof(df)) == 0)
          {
             out->packages_df = safe_strdup(df);
+            snprintf(out->packages_tag, sizeof(out->packages_tag), "%s", tag);
             snprintf(out->from, sizeof(out->from), "%s", from->valuestring);
             found = out->packages_df ? 0 : -1;
          }
@@ -619,13 +560,12 @@ static int apply_learned_overlay(const char *cwd, const char *base, char *out, s
    const char *argv[SBX_LEARN_MAX];
    for (int i = 0; i < n; i++)
       argv[i] = pk[i];
-   char df[DOCKERFILE_MAX];
-   if (delegate_sandbox_dockerfile_from_packages(base, argv, n, df, sizeof(df)) != 0)
+   char df[DOCKERFILE_MAX], tag[SBX_TAG_MAX], built[SBX_TAG_MAX];
+   if (delegate_image_spec_resolve(base, argv, n, NULL, tag, sizeof(tag), df, sizeof(df)) != 0)
       return -1;
-   char tag[SBX_TAG_MAX];
-   if (ensure_built(df, tag, sizeof(tag)) != 0)
+   if (ensure_built(tag, df, built, sizeof(built)) != 0)
       return -1; /* build failed -> caller uses base */
-   snprintf(out, cap, "%s", tag);
+   snprintf(out, cap, "%s", built);
    return 0;
 }
 
@@ -659,8 +599,9 @@ int delegate_sandbox_resolve_image(const char *cwd, char *out, size_t cap)
          }
          else if (spec.packages_df)
          {
+            /* The tag came back with the text it names; it is not re-derived. */
             char tag[SBX_TAG_MAX];
-            if (ensure_built(spec.packages_df, tag, sizeof(tag)) == 0)
+            if (ensure_built(spec.packages_tag, spec.packages_df, tag, sizeof(tag)) == 0)
             {
                snprintf(base, sizeof(base), "%s", tag);
                have_base = 1; /* from+packages: learned may augment on top */
@@ -669,9 +610,15 @@ int delegate_sandbox_resolve_image(const char *cwd, char *out, size_t cap)
          else if (spec.dockerfile[0])
          {
             overlay_ok = 0; /* explicit Dockerfile: respect it, even if it fails to build */
+            /* A Dockerfile the operator committed: carried whole to be NAMED,
+             * because the tag's shape must exist in one place or the same
+             * content resolves to two names and nothing is ever reused. */
             char *df = read_dockerfile(repo_root, spec.dockerfile);
-            char tag[SBX_TAG_MAX];
-            if (df && ensure_built(df, tag, sizeof(tag)) == 0)
+            char tag[SBX_TAG_MAX], named[DOCKERFILE_MAX];
+            if (df &&
+                delegate_image_spec_resolve(NULL, NULL, 0, df, tag, sizeof(tag), named,
+                                            sizeof(named)) == 0 &&
+                ensure_built(tag, named, tag, sizeof(tag)) == 0)
             {
                snprintf(base, sizeof(base), "%s", tag);
                have_base = 1;

@@ -33,4 +33,22 @@ int delegate_launch_args_resolve(const aimee_delegates_launch_spec_t *spec, char
                                  size_t name_cap, const char **argv_out, size_t argv_cap,
                                  uint8_t *buf, size_t buf_cap);
 
+/* The Dockerfile a sandbox image is built from, and the tag naming its content.
+ *
+ * Same seam, same reason: the package and base names are interpolated into a
+ * file that `docker build` then executes WITH a network, so the rule that
+ * validates them and the rule that renders them must be the same rule.
+ *
+ * FAILS CLOSED: with no provider there is no Dockerfile, and nothing is built. */
+typedef int (*delegate_image_spec_fn)(const char *base, const char *const *pkgs, int npkgs,
+                                      const char *verbatim, char *tag, size_t tag_cap,
+                                      char *dockerfile, size_t df_cap);
+
+void delegate_register_image_spec_provider(delegate_image_spec_fn provider);
+
+/* Returns 0 and fills both, or -1 (logged). */
+int delegate_image_spec_resolve(const char *base, const char *const *pkgs, int npkgs,
+                                const char *verbatim, char *tag, size_t tag_cap, char *dockerfile,
+                                size_t df_cap);
+
 #endif

@@ -49,3 +49,28 @@ int delegate_launch_args_resolve(const aimee_delegates_launch_spec_t *spec, char
    argv_out[argc] = NULL;
    return argc;
 }
+
+static delegate_image_spec_fn g_image_spec;
+
+void delegate_register_image_spec_provider(delegate_image_spec_fn provider)
+{
+   g_image_spec = provider;
+}
+
+int delegate_image_spec_resolve(const char *base, const char *const *pkgs, int npkgs,
+                                const char *verbatim, char *tag, size_t tag_cap, char *dockerfile,
+                                size_t df_cap)
+{
+   if (!tag || !tag_cap || !dockerfile || !df_cap)
+      return -1;
+   tag[0] = '\0';
+   dockerfile[0] = '\0';
+   if (!g_image_spec)
+   {
+      LOG_ERROR("delegate-sandbox-image",
+                "no image-spec provider registered; refusing to build a sandbox image whose "
+                "contents nothing validated");
+      return -1;
+   }
+   return g_image_spec(base, pkgs, npkgs, verbatim, tag, tag_cap, dockerfile, df_cap);
+}
