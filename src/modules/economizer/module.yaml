@@ -8,10 +8,18 @@
   ],
   "enabled_by_default": false,
   "runtime_toggle": {
-    "supported": true
+    "supported": false
   },
   "ownership_complete": true,
-  "sources": [],
+  "sources": [
+    "src/modules/economizer/coord_closet.c",
+    "src/modules/economizer/economizer_json.c",
+    "src/modules/economizer/economizer_module_client.c",
+    "src/modules/economizer/fold_register.c",
+    "src/modules/economizer/gateway_mutate.c",
+    "src/modules/economizer/gateway_mutate_wire.c",
+    "src/modules/economizer/tool_condense.c"
+  ],
   "go_sources": [
     "server-go/modules/economizer/budget.go",
     "server-go/modules/economizer/cjson.go",
@@ -65,7 +73,16 @@
     "server-go/modules/economizer/state_test.go"
   ],
   "public_headers": [],
-  "private_headers": [],
+  "private_headers": [
+    "src/modules/economizer/coord_closet.h",
+    "src/modules/economizer/economizer.h",
+    "src/modules/economizer/economizer_json.h",
+    "src/modules/economizer/economizer_module_client.h",
+    "src/modules/economizer/fold_register.h",
+    "src/modules/economizer/gateway_mutate.h",
+    "src/modules/economizer/gateway_mutate_wire.h",
+    "src/modules/economizer/tool_condense.h"
+  ],
   "tests": [],
   "docs": [
     "docs/modules/economizer.md"
