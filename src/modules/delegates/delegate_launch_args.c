@@ -74,3 +74,30 @@ int delegate_image_spec_resolve(const char *base, const char *const *pkgs, int n
    }
    return g_image_spec(base, pkgs, npkgs, verbatim, tag, tag_cap, dockerfile, df_cap);
 }
+
+static delegate_isolation_fn g_isolation;
+
+void delegate_register_isolation_provider(delegate_isolation_fn provider)
+{
+   g_isolation = provider;
+}
+
+int delegate_isolation_judge(const char *report, int probe_failed, int require_isolation,
+                             int *refuse, int *warn, int *is_error, char *reason, size_t reason_cap)
+{
+   if (!refuse || !warn || !is_error)
+      return -1;
+   *refuse = 0;
+   *warn = 0;
+   *is_error = 0;
+   if (reason && reason_cap)
+      reason[0] = '\0';
+   if (!g_isolation)
+   {
+      LOG_ERROR("delegate-sandbox",
+                "no isolation provider registered; the sandbox cannot be judged isolated");
+      return -1;
+   }
+   return g_isolation(report, probe_failed, require_isolation, refuse, warn, is_error, reason,
+                      reason_cap);
+}

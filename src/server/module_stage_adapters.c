@@ -871,6 +871,26 @@ static int delegate_image_spec(const char *base, const char *const *pkgs, int np
    return rc;
 }
 
+/* The isolation verdict for a container the runtime just started. A wire. */
+static int delegate_isolation(const char *report, int probe_failed, int require_isolation,
+                              int *refuse, int *warn, int *is_error, char *reason,
+                              size_t reason_cap)
+{
+   uint8_t request[AIMEE_DELEGATES_ISOLATION_REPORT_MAX + 64];
+   size_t request_len = aimee_delegates_isolation_request_encode(
+       report, probe_failed, require_isolation, request, sizeof(request));
+   if (request_len == 0)
+      return -1;
+
+   uint8_t response[2048];
+   uint32_t response_len = 0;
+   if (call_module(AIMEE_DELEGATES_EVENT_ISOLATION, AIMEE_DELEGATES_STAGE_ISOLATION, request,
+                   (uint32_t)request_len, response, sizeof(response), &response_len) != 0)
+      return -1;
+   return aimee_delegates_isolation_response_decode(response, response_len, refuse, warn, is_error,
+                                                    reason, reason_cap);
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -1089,6 +1109,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_role_policy_provider(delegate_role_policy);
    delegate_register_launch_args_provider(delegate_launch_args);
    delegate_register_image_spec_provider(delegate_image_spec);
+   delegate_register_isolation_provider(delegate_isolation);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path
