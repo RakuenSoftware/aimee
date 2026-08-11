@@ -19,7 +19,7 @@
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "4afacbd65680ebcae084ebf86773f6b1af9a753cb1ec5eb5a1e7e226490475dd"
+          "sha256": "8e5dea99b361a5540dd0ab4ce55fddedda27763ba627894e73745a18ca505a5a"
         }
       ]
     },
@@ -875,7 +875,7 @@
         },
         {
           "path": "src/headers/log.h",
-          "sha256": "bfa3a228bccbe18c3411b85edb0f18483fea4fe05d170e5104a6ba5c5efd4cf8"
+          "sha256": "d95c790b2eb557ad85d7d792b1b000717a95c2ca420a0b7d538af40a9b0ddfb7"
         },
         {
           "path": "src/headers/management_read.h",
@@ -1616,7 +1616,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "68748ab07e630453d7236d9a2392bacfebe18419afe48c6967e4ced13c57ea57",
+      "sha256": "05ab7aef92d01b31270f91ce5c71a6742080b146091d25544d46996bcff80d42",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

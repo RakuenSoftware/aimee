@@ -169,6 +169,9 @@ static int run_server(const char *socket_path, log_level_t log_level)
          setvbuf(log_fp, NULL, _IOLBF, 0);
          platform_server_redirect_stderr(log_fp);
          fclose(log_fp);
+         /* stderr is now this file, so it is ours to bound. Only registered
+          * here: the CLI's stderr is the user's terminal. */
+         log_set_rotating_sink(log_path);
       }
    }
 
