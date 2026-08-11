@@ -24,7 +24,7 @@
 #include "economizer.h"
 #include "economizer_module_client.h"
 #include "token_tracker.h"
-#include "economizer_wire_snapshot.h"
+#include "wire_fence.h"
 #include "log.h"
 #include "middleware.h"
 #include "model_registry.h"
@@ -975,14 +975,14 @@ native_provider_http:
                                         api_call_count);
       }
       int economizer_active = config_present() && econ_mode_current() != ECON_MODE_OFF;
-      econ_wire_route_t wire_route = anthropic                   ? ECON_WIRE_ANTHROPIC_MESSAGES
-                                     : chatgpt                   ? ECON_WIRE_OPENAI_RESPONSES
-                                     : strstr(url, "/responses") ? ECON_WIRE_OPENAI_RESPONSES
-                                                                 : ECON_WIRE_OPENAI_CHAT;
-      econ_wire_snapshot_t *wire_snapshot = NULL;
-      econ_wire_bytes_t wire_body;
-      if (econ_wire_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
-                           &wire_body) != 0)
+      wire_fence_route_t wire_route = anthropic                   ? WIRE_FENCE_ANTHROPIC_MESSAGES
+                                      : chatgpt                   ? WIRE_FENCE_OPENAI_RESPONSES
+                                      : strstr(url, "/responses") ? WIRE_FENCE_OPENAI_RESPONSES
+                                                                  : WIRE_FENCE_OPENAI_CHAT;
+      wire_fence_t *wire_snapshot = NULL;
+      wire_fence_bytes_t wire_body;
+      if (wire_fence_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
+                            &wire_body) != 0)
       {
          snprintf(out->error, sizeof(out->error), "economizer wire fence unavailable");
          free(body);
@@ -998,7 +998,7 @@ native_provider_http:
             db1_agent_job_heartbeat_ext(dj, "", api_call_count);
       }
       free(body);
-      econ_wire_snapshot_destroy(wire_snapshot);
+      wire_fence_destroy(wire_snapshot);
 
       /* Model fallback on first turn: if 400, retry with fallback_model */
       if (http_status == 400 && turn == 0 && fb_agent.fallback_model[0])
@@ -1032,10 +1032,10 @@ native_provider_http:
                if (dj > 0)
                   db1_agent_job_heartbeat_ext(dj, "model", api_call_count);
             }
-            econ_wire_snapshot_t *fb_snapshot = NULL;
-            econ_wire_bytes_t fb_wire_body;
-            if (econ_wire_select(economizer_active, wire_route, fb_body, strlen(fb_body),
-                                 &fb_snapshot, &fb_wire_body) != 0)
+            wire_fence_t *fb_snapshot = NULL;
+            wire_fence_bytes_t fb_wire_body;
+            if (wire_fence_select(economizer_active, wire_route, fb_body, strlen(fb_body),
+                                  &fb_snapshot, &fb_wire_body) != 0)
             {
                snprintf(out->error, sizeof(out->error),
                         "economizer wire fence unavailable for fallback");
@@ -1052,7 +1052,7 @@ native_provider_http:
                   db1_agent_job_heartbeat_ext(dj, "", api_call_count);
             }
             free(fb_body);
-            econ_wire_snapshot_destroy(fb_snapshot);
+            wire_fence_destroy(fb_snapshot);
          }
       }
 

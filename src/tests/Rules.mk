@@ -323,7 +323,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-coord-closet \
                $(TESTPREFIX)/unit-test-economizer-proof \
                $(TESTPREFIX)/unit-test-economizer-activation \
-               $(TESTPREFIX)/unit-test-economizer-wire-snapshot \
+               $(TESTPREFIX)/unit-test-wire-fence \
                $(TESTPREFIX)/unit-test-economizer-live-surface \
                $(TESTPREFIX)/unit-test-economizer-openai \
                $(TESTPREFIX)/unit-test-economizer-anthropic \
@@ -4201,6 +4201,10 @@ $(TESTPREFIX)/unit-test-rounds-to-resume: $(OBJDIR)/tests/test_rounds_to_resume.
                                           $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                           $(OBJDIR)/server/agent_tools.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-wire-fence: $(OBJDIR)/tests/test_wire_fence.o \
+                               $(OBJDIR)/wire_fence.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-token-tracker: $(OBJDIR)/tests/test_token_tracker.o \
