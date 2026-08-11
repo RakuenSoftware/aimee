@@ -194,14 +194,34 @@ us whether any of this actually helps an agent get its work done.
 
 ## Cross-cutting: register tagging is the real unlock
 
-`fold_register_enabled` defaults off. That single flag is why the record derivation is a
-lateral move rather than a win, and why S1 ships dark. Turning it on requires agents to
-actually emit `[verdict]` / `[hazard]` / `[wip]` registers, which is a **prompt/behaviour
-change, not a code change** — and therefore needs its own measurement, because an agent
-that tags unreliably is worse than one that never tags (a mis-tagged `[verdict]` promotes
-a guess into the summary as a settled fact).
+> **Corrected 2026-08-11 — the paragraph this replaces named the wrong lever.** It said
+> `fold_register_enabled` defaults off and that this is why the record derivation is a
+> lateral move. Both halves were wrong, and the wrong version shipped in #2532 and was
+> repeated in #2537 and #2541, so it is corrected here rather than quietly edited.
 
-Sequence: enable tagging → measure tagging *accuracy* → re-run the retention probe →
+Two facts from the tree:
+
+1. **The record path does not read that flag.** `session_compact`'s record derivation
+   calls `fold_register_parse` unconditionally — `fold_register_enabled` appears **zero**
+   times in `src/server/session_compact.c`. The flag gates the *fold's* skeleton
+   annotation (`context_fold.c:79`), which is a different consumer.
+2. **Nothing asks agents to emit registers.** There is no `prompts/` directory; the system
+   prompt is `PROMPT_STANDARD_TEXT` in `src/prompts.c`, and it never mentions
+   `[verdict]` / `[hazard]` / `[wip]`. The only occurrences of those tags in the whole
+   repository are unit tests and this document.
+
+So flipping `fold_register_enabled` would change nothing for the compactor. Real
+transcripts carry no registers because **agents are never asked for them**, which on its
+own explains the measured result: record 15/20 vs legacy 11/20 overall, and dead even at
+10/14 on fixtures matching real transcripts.
+
+The actual unlock is a **prompt change** in `src/prompts.c`. That is a behaviour change
+for every agent, and an agent that tags *unreliably* is worse than one that never tags —
+a mis-tagged `[verdict]` promotes a guess into the summary as a settled fact, which is the
+failure mode the precision axis was built to catch.
+
+Sequence: add the instruction (gated, so it can be enabled for one server rather than
+everywhere) → measure tagging **accuracy** → re-run `benchmarks/compaction-quality` →
 only then revisit the `compact.from_record` default.
 
 ## Risks
