@@ -551,7 +551,8 @@ static void test_osv_offline_cache_miss_allows(void)
    "list_curiosity_items {limit,state} req:\n"                                                     \
    "lsp {col,command,file,line,workspace} req:command\n"                                           \
    "memory "                                                                                       \
-   "{command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,project,"     \
+   "{as_of,command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,"       \
+   "project,"                                                                                      \
    "query,reason,scope,tier,verb,workspace} req:command\n"                                         \
    "memory_recall {cwd,limit_tokens,project,scope,session_start,task_hint,workspace} req:\n"       \
    "note {command,content,limit,query,tag,tags,title} req:command\n"                               \

@@ -16,6 +16,7 @@
     "src/modules/protocols/mcp/mcp_client.c",
     "src/modules/protocols/mcp/mcp_client_registry.c",
     "src/modules/protocols/mcp/mcp_skill_tools.c",
+    "src/modules/protocols/mcp/mcp_group_tool.c",
     "src/modules/protocols/mcp/mcp_tool_profile.c",
     "src/modules/protocols/mcp/mcp_tools.c",
     "src/modules/protocols/mcp/mcp_tools_extended.c",

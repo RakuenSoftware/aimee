@@ -15,7 +15,7 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		principal uint32
 		events    []uint32
 	}{
-		{"memory", 7, []uint32{5889, 5890, 5891, 5892, 5893}},
+		{"memory", 7, []uint32{5889, 5890, 5891, 5892, 5893, 5894}},
 		{"learning", 8, []uint32{6145}},
 		{"routing", 9, []uint32{6401}},
 		{"delegates", 10, []uint32{6657, 6658, 6659, 6660, 6661, 6662, 6663, 6664, 6665, 6666, 6667, 6668}},

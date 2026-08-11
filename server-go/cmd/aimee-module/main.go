@@ -86,6 +86,7 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 			{EventKind: memory.EventEmbed, StageID: memory.StageEmbed},
 			{EventKind: memory.EventRetrieve, StageID: memory.StageRetrieve},
 			{EventKind: memory.EventRerank, StageID: memory.StageRerank},
+			{EventKind: memory.EventDeclareCommands, StageID: memory.StageDeclareCommands},
 		}
 		config.Handler = memory.Handle
 	case "learning":
