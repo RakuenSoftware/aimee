@@ -102,6 +102,13 @@ char *delegate_handoff_repair_prompt(const char *previous_response, const char *
  * JSON array, changed files outside that list are reported as supervisor-review
  * items.  If |require_verification| is true, status=done without a passed test is
  * downgraded to partial in |out->status|. */
+/* Fills *out and returns 0 when the module answered, non-zero when it could
+ * not or the handoff was malformed. */
+typedef int (*delegate_handoff_provider_fn)(const char *text, const char *owned_files_json,
+                                            int require_verification,
+                                            delegate_handoff_validation_t *out);
+void delegate_register_handoff_provider(delegate_handoff_provider_fn provider);
+
 int delegate_handoff_validate_text(const char *text, const char *owned_files_json,
                                    int require_verification, delegate_handoff_validation_t *out);
 

@@ -710,9 +710,19 @@ static void config_set_defaults(config_t *cfg)
     * parse below carries an env override), so the default lives here, not in
     * config_flat_defaults[]. */
    cfg->delegate_sandbox = 1;
+   /* Default-ON: co-located shell execution is namespace-isolated to the workspace.
+    * This is the mode the delegate shell guard in tool_bash() reads (it refuses a
+    * delegated shell when the mode is OFF), so leaving it at the SANDBOX_MODE_OFF
+    * zero value made that guard refuse EVERY co-located delegate shell on an
+    * unconfigured install — isolation-by-default and delegate-shells-work-by-default
+    * cannot both hold while `delegate_sandbox` defaults on and this defaults off.
+    * Non-flat (sandbox is a SCHEMA_OBJECT section), so the default lives here.
+    * Opt out with `sandbox: {"mode": "off"}` — config_save persists that opt-out. */
+   cfg->sandbox.mode = SANDBOX_MODE_WORKSPACE_ONLY;
    snprintf(cfg->delegate_sandbox_package_access, sizeof(cfg->delegate_sandbox_package_access),
             "proxy");
-   cfg->compact_enabled = 1; /* default on; set before no-config early returns */
+   cfg->compact_enabled = 1;     /* default on; set before no-config early returns */
+   cfg->compact_from_record = 0; /* default-off until the quality baseline exists */
    cfg->coord_closet_enabled =
        1; /* fold §2: default-ON — conserves identifiers elided by the
            * default-on compress/fold so lossy reduction stays recoverable */
@@ -725,7 +735,11 @@ static void config_set_defaults(config_t *cfg)
    cfg->fold_register_enabled = 0; /* fold §6: default-off */
    cfg->fold_freeze_enabled = 0;   /* fold §3: default-off */
    cfg->fold_freeze_tail_cap_msgs = 0;
-   cfg->fold_recall_enabled = 0; /* fold §4: default-off */
+   /* fold §4: default-ON. The page table is what makes eviction REVERSIBLE — without
+    * it a folded coordinate is simply gone, and the agent re-derives it. It only ever
+    * ADDS a bounded hint when the newest turn re-touches something already evicted, so
+    * the downside is a few lines of text and the upside is not losing the thread. */
+   cfg->fold_recall_enabled = 1;
    cfg->fold_recall_ttl_turns = 0;
    /* SAFE is useful without provider-specific pricing guesses: it only compacts
     * strict JSON returned by a local tool before that result's first dispatch. */

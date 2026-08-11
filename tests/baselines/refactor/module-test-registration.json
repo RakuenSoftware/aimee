@@ -149,12 +149,6 @@
       "ctest": false,
       "make": true,
       "module": "delegates",
-      "test": "src/tests/test_delegate_xml_fallback.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "delegates",
       "test": "src/tests/test_gw_orch_delegates.c"
     },
     {

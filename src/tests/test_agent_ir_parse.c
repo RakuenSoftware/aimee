@@ -16,14 +16,7 @@
 
 /* Local copy of agent_free_parsed_response (agent_bridge.c) so the test stays
  * self-contained rather than linking the whole legacy bridge. Same semantics. */
-/* Stub the tool registry: the dialect rescue consults it only on bare-JSON/bracket
- * paths, which these explicit <tool_call> cases do not hit -- same pattern as
- * test_delegate_xml_fallback.c. */
-struct cJSON *agent_tool_get_schema_cached(const char *tool_name)
-{
-   (void)tool_name;
-   return NULL;
-}
+#include "support/rescue_fixture_provider.h"
 
 void agent_free_parsed_response(parsed_response_t *p)
 {
@@ -40,6 +33,7 @@ void agent_free_parsed_response(parsed_response_t *p)
 int main(void)
 {
    printf("agent-ir-parse:\n");
+   delegate_register_rescue_provider(rescue_fixture_provider);
 
    /* 1. Anthropic: text AND a tool_use in one turn. Both survive; assistant_message
     * is the raw content array (what the anthropic multi-turn append re-wraps). */

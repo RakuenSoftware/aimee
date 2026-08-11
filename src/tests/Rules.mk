@@ -307,7 +307,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-client-cache \
                $(TESTPREFIX)/unit-test-openai-runs-store \
                $(TESTPREFIX)/unit-test-cli-http-transport \
-               $(TESTPREFIX)/unit-test-delegate-xml-fallback \
                $(TESTPREFIX)/unit-test-http-retry \
                $(TESTPREFIX)/unit-test-cmd-doctor \
                $(TESTPREFIX)/unit-test-diff \
@@ -480,7 +479,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-cmd-session \
                $(TESTPREFIX)/unit-test-model-registry \
                $(TESTPREFIX)/unit-test-models-dev $(TESTPREFIX)/unit-test-agent-tier-lint \
-               $(TESTPREFIX)/unit-test-delegate-verify \
                $(TESTPREFIX)/unit-test-p3b-spend \
                $(TESTPREFIX)/unit-test-model-provider \
                $(TESTPREFIX)/unit-test-delegate-driver \
@@ -3888,28 +3886,11 @@ $(TESTPREFIX)/unit-test-cli-http-transport: $(OBJDIR)/tests/test_cli_http_transp
                                             $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-# Differential reference for the tool-call rescue parser. Emits the C parser's
-# output for tests/support/xml_fallback_corpus.h; the Go port in
-# server-go/modules/delegates is asserted against it, so a divergence names the
-# shape that diverged instead of surfacing in production.
-#
-#   make xml-fallback-golden      # refresh after an intentional parser change
-$(OBJDIR)/tests/gen_xml_fallback_golden.o: C_FLAGS += -Itests
-$(TESTPREFIX)/gen-xml-fallback-golden: $(OBJDIR)/tests/gen_xml_fallback_golden.o \
-                                       $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
-                                       $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-.PHONY: xml-fallback-golden
-xml-fallback-golden: $(TESTPREFIX)/gen-xml-fallback-golden
-	@mkdir -p ../server-go/modules/delegates/testdata
-	@$< > ../server-go/modules/delegates/testdata/xml_fallback_golden.json
-	@echo "xml-fallback-golden: refreshed"
-
-$(TESTPREFIX)/unit-test-delegate-xml-fallback: $(OBJDIR)/tests/test_delegate_xml_fallback.o \
-                                               $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
-                                               $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+# The tool-call rescue parser and its golden corpus moved with the rule to
+# server-go/modules/delegates (rescue*.go, testdata/xml_fallback_golden.json).
+# The generator that used to refresh that corpus from the C parser is gone with
+# it: C no longer implements the dialects, so regenerating would have quietly
+# emptied the very corpus the port is pinned against.
 
 $(TESTPREFIX)/unit-test-agent-policy-intercept: $(OBJDIR)/tests/test_agent_policy_intercept.o \
                                                 $(OBJDIR)/server/agent_policy_intercept.o
@@ -4340,6 +4321,7 @@ $(TESTPREFIX)/unit-test-fold-register: $(OBJDIR)/tests/test_fold_register.o $(OB
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-fold-recall: $(OBJDIR)/tests/test_fold_recall.o $(OBJDIR)/modules/economizer/fold_recall.o \
+                                  $(OBJDIR)/modules/economizer/coord_closet.o \
                                   $(OBJDIR)/dstr.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -5677,10 +5659,6 @@ $(TESTPREFIX)/unit-test-agent-tier-lint: $(OBJDIR)/tests/test_agent_tier_lint.o 
                                 $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-delegate-verify: $(OBJDIR)/tests/test_delegate_verify.o \
-                                $(OBJDIR)/modules/delegates/delegate_verify.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
-
 $(TESTPREFIX)/unit-test-models-dev: $(OBJDIR)/tests/test_models_dev.o \
                                 $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                                 $(OBJDIR)/models_dev_cache.o $(OBJDIR)/aimee_home.o \
@@ -6936,3 +6914,29 @@ TEST_KB_RUNTIME_TARGETS = \
   $(TESTPREFIX)/unit-test-witness-tamper-pg
 $(filter-out $(TEST_KB_RUNTIME_TARGETS),$(TEST_TARGETS)): \
   $(OBJDIR)/modules/vault/runtime_secret.o
+
+# ---------------------------------------------------------------- benchmark probes
+# Compaction retention probe: measures how much load-bearing detail survives a
+# compaction boundary under each summary derivation. Deliberately NOT in
+# TEST_TARGETS -- it is a measurement, not a gate, and a derivation scoring badly
+# is a result to read rather than a build failure. Run it explicitly:
+#   make -C src compaction-retention-probe
+#   src/build/obj/tests/compaction-retention-probe benchmarks/compaction-quality/corpus.json
+$(OBJDIR)/tests/retention_probe.o: ../benchmarks/compaction-quality/retention_probe.c
+	@mkdir -p $(dir $@)
+	$(CC) -c $(TEST_C_FLAGS) -o $@ $<
+
+$(TESTPREFIX)/compaction-retention-probe: $(OBJDIR)/tests/retention_probe.o \
+                                          $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
+                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                                          $(OBJDIR)/server/agent_request_shaping.o \
+                                          $(OBJDIR)/modules/delegates/delegate_driver.o \
+                                          $(OBJDIR)/modules/delegates/delegate_openai.o \
+                                          $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
+                                          $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
+                                          $(OBJDIR)/server/agent_tools.o \
+                                          $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+.PHONY: compaction-retention-probe
+compaction-retention-probe: $(TESTPREFIX)/compaction-retention-probe

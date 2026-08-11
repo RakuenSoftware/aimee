@@ -1529,14 +1529,13 @@ cJSON *tool_job_status(cJSON *args)
        "| Invalid handoffs | %d |\n| Manual integration events | %d |\n"
        "| Reviewer blocking findings | %d |\n| Supervisor work remaining | %d decisions |\n"
        "| Verdict | %s |\n| Recommendation | %s |\n",
-       delegate_economics_cost_model_label(), econ.delegate_count, econ.tier_counts[0],
-       econ.tier_counts[1], econ.tier_counts[2], econ.tier_counts[3], econ.unknown_tier_count,
+       econ.cost_model_label, econ.delegate_count, econ.tier_counts[0], econ.tier_counts[1],
+       econ.tier_counts[2], econ.tier_counts[3], econ.unknown_tier_count,
        econ.delegate_tokens_estimated, econ.tokenized_delegate_results == 0 ? " (unavailable)" : "",
        econ.supervisor_prompt_tokens_estimated, econ.delegates_with_focused_tests,
        econ.delegate_count, econ.valid_handoffs, econ.handoff_count, econ.invalid_handoffs,
        econ.manual_integration_events, econ.reviewer_findings_blocking,
-       econ.supervisor_actions_required, delegate_economics_verdict_text(econ.verdict),
-       econ.recommendation);
+       econ.supervisor_actions_required, econ.verdict_label, econ.recommendation);
    char patch_brief[1024];
    pos = mcp_appendf(buf, pos, (int)sizeof(buf), "\n### Patch coordinator\n\n```text\n%s\n```\n",
                      delegate_patch_coordinator_brief(&patches, patch_brief, sizeof(patch_brief)));

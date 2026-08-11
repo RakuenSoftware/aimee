@@ -210,3 +210,28 @@ int server_http_gzip_peek(void)
 {
    return tl_gzip;
 }
+
+/* One access-log line per served request.
+ *
+ * A LONG POLL THAT SUCCEEDS IS NOT NEWS. /v1/runner/poll is re-issued the
+ * instant it answers — that is the design — so logging every 200 writes one
+ * line per poll per serving client, forever. Measured on the test appliance:
+ * 196,310 of the last 200,000 lines were this one line; 98% of a 612 MiB
+ * unrotated server.log accumulated in under four days. It buries everything
+ * worth reading, and did: a credential warning sat unnoticed in that file for
+ * hours because the signal-to-noise made it unreadable.
+ *
+ * DEMOTED, NOT DELETED, and only for the 2xx shape. A poll that FAILS still
+ * logs at INFO, which is the case anyone debugging actually wants — dropping
+ * those would trade a noise problem for a blindness one. Same treatment, and
+ * the same reasoning, as the unauthenticated health probe in server_http.c. */
+void server_http_log_access(const char *method, const char *path, int status,
+                            const char *request_id)
+{
+   int quiet_poll = status >= 200 && status < 300 && method && path &&
+                    strcmp(method, "POST") == 0 && strcmp(path, "/v1/runner/poll") == 0;
+   if (quiet_poll)
+      LOG_DEBUG("server.http", "%s %s -> %d req_id=%s", method, path, status, request_id);
+   else
+      LOG_INFO("server.http", "%s %s -> %d req_id=%s", method, path, status, request_id);
+}

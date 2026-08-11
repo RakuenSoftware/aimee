@@ -1040,12 +1040,14 @@ int config_save(const config_t *cfg)
 
    /* Tool result compaction (only save non-default values) */
    if (!cfg->compact_enabled || cfg->compact_threshold || cfg->compact_head_bytes ||
-       cfg->compact_tail_bytes || cfg->compact_per_tool_count || !cfg->coord_closet_enabled ||
-       cfg->coord_closet_budget_bytes || cfg->coord_closet_max_ratio_pct ||
-       cfg->coord_closet_denylist[0])
+       cfg->compact_tail_bytes || cfg->compact_per_tool_count || cfg->compact_from_record ||
+       !cfg->coord_closet_enabled || cfg->coord_closet_budget_bytes ||
+       cfg->coord_closet_max_ratio_pct || cfg->coord_closet_denylist[0])
    {
       cJSON *cmpct = cJSON_AddObjectToObject(root, "compact");
       cJSON_AddBoolToObject(cmpct, "enabled", cfg->compact_enabled);
+      if (cfg->compact_from_record) /* default-off: persist only the opt-in */
+         cJSON_AddBoolToObject(cmpct, "from_record", cfg->compact_from_record);
       if (cfg->compact_threshold)
          cJSON_AddNumberToObject(cmpct, "threshold", cfg->compact_threshold);
       if (cfg->compact_head_bytes)
@@ -1108,6 +1110,8 @@ int config_save(const config_t *cfg)
          cJSON_AddBoolToObject(recall, "enabled", cfg->fold_recall_enabled);
          if (cfg->fold_recall_ttl_turns)
             cJSON_AddNumberToObject(recall, "ttl_turns", cfg->fold_recall_ttl_turns);
+         if (cfg->fold_recall_inject) /* default-off: persist only the opt-in */
+            cJSON_AddBoolToObject(recall, "inject", cfg->fold_recall_inject);
       }
    }
 
@@ -1166,8 +1170,13 @@ int config_save(const config_t *cfg)
          cJSON_AddNumberToObject(sess, "max_worktrees", cfg->max_worktrees);
    }
 
-   /* Sandbox config (only save if non-default) */
-   if (cfg->sandbox.mode != SANDBOX_MODE_OFF || cfg->sandbox.network_isolated ||
+   /* Sandbox config (only save if non-default). The default is now
+    * SANDBOX_MODE_WORKSPACE_ONLY, so the value that MUST survive a save is the
+    * explicit opt-out (`mode: "off"`) — mirroring delegate_sandbox above, which
+    * persists only its opt-out. Testing against SANDBOX_MODE_OFF here (the old
+    * predicate) would drop an operator's "off" on the next save and silently
+    * re-enable the sandbox from the default. */
+   if (cfg->sandbox.mode != SANDBOX_MODE_WORKSPACE_ONLY || cfg->sandbox.network_isolated ||
        cfg->sandbox.allow_path_count > 0)
    {
       cJSON *sbox = cJSON_AddObjectToObject(root, "sandbox");

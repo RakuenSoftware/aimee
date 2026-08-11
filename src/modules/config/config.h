@@ -1146,6 +1146,15 @@ typedef struct config
    char compact_per_tool[CONFIG_COMPACT_MAX_PER_TOOL][128]; /* "tool_name=threshold" */
    int compact_per_tool_count;
 
+   /* Session-compaction summary derivation. 0 (default) = the legacy prose scan
+    * (guess paths by shape, match "error"/"decided" keywords). 1 = derive from the
+    * economizer's deterministic extractors instead: Coordinate Closet coordinates
+    * conserved VERBATIM, and fold_register's settled/hazard classification of the
+    * agent's own turns. Default-off because compaction quality is still unmeasured
+    * (docs/proposals/pending/compaction-quality-baseline.md); the legacy path stays
+    * selectable until that baseline can say which is better. */
+   int compact_from_record;
+
    /* Coordinate Closet (fold §2): conserve verbatim identifiers from compacted
     * tool results. Nested under the "compact" config section. Default-off.
     * coord_closet_enabled: 0 = off (default), 1 = on.
@@ -1179,6 +1188,11 @@ typedef struct config
     * fold_recall_ttl_turns: don't re-surface the same key within this many turns. */
    int fold_recall_enabled;
    int fold_recall_ttl_turns;
+   /* fold_recall_inject: put the hint in front of the model instead of only reporting
+    * it. Separate from _enabled and default-off, because tracking what was evicted is
+    * inert while injecting CHANGES WHAT THE MODEL DOES, and whether that helps or
+    * derails a turn is a behavioural question for live traffic to answer. */
+   int fold_recall_inject;
 
    /* The single economizer mode. OFF is the pristine baseline. PROOF_GATED
     * verifies the signed empty registry and freezes the completed provider body;

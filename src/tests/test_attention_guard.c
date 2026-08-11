@@ -340,6 +340,50 @@ static void test_session_isolation_decision(void)
    assert(attn_unregistered_lineage_blocked(0, 0) == 1);
    assert(attn_unregistered_lineage_blocked(0, 1) == 1);
 
+   /* ---- git probe directory (attn_git_dir_for) ----
+    * THE REGRESSION: the probe directory was derived by stripping ONE component off the
+    * target. For a new file in a not-yet-created directory that yields another missing
+    * path, so `git -C` fails and BOTH lineage probes come back empty. The caller reads
+    * default_resolved == 0 and fails closed (asserted just above) — so creating a file in
+    * a new subdirectory was refused with a branch-lineage error that had nothing to do
+    * with the branch, for every session without a registry row. */
+   {
+      char tmpl[] = "/tmp/aimee_attn_gitdir_XXXXXX";
+      const char *root = mkdtemp(tmpl);
+      assert(root != NULL);
+
+      char got[2048];
+
+      /* An existing directory is returned as-is. */
+      attn_git_dir_for(root, got, sizeof(got));
+      assert(strcmp(got, root) == 0);
+
+      /* An existing FILE resolves to its (existing) parent. */
+      char existing_file[2200];
+      snprintf(existing_file, sizeof(existing_file), "%s/present.txt", root);
+      FILE *f = fopen(existing_file, "w");
+      assert(f != NULL);
+      fclose(f);
+      attn_git_dir_for(existing_file, got, sizeof(got));
+      assert(strcmp(got, root) == 0);
+
+      /* A new file in a MISSING directory must still resolve to a real directory —
+       * one level of absence... */
+      char one_deep[2200];
+      snprintf(one_deep, sizeof(one_deep), "%s/newdir/corpus.json", root);
+      attn_git_dir_for(one_deep, got, sizeof(got));
+      assert(strcmp(got, root) == 0);
+
+      /* ...and several. A single strip returned "<root>/a/b/c", which does not exist. */
+      char deep[2400];
+      snprintf(deep, sizeof(deep), "%s/a/b/c/corpus.json", root);
+      attn_git_dir_for(deep, got, sizeof(got));
+      assert(strcmp(got, root) == 0);
+
+      unlink(existing_file);
+      rmdir(root);
+   }
+
    /* ---- Bash reaching outside the worktree (attn_bash_escapes_worktree) ----
     * The observed bypass: cwd was a valid managed worktree, so the isolation check
     * passed, while the command cd'd to the shared checkout and wrote there. */

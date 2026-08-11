@@ -105,6 +105,24 @@ void sandbox_set_audit_hook(sandbox_audit_hook_fn fn);
 void sandbox_set_available_override_for_test(int (*fn)(const char **reason));
 
 /*
+ * sandbox_effective_mode:
+ *   The sandbox mode callers should GATE on (as distinct from the mode sandbox_exec
+ *   builds with). Returns the test override when one is set, else cfg->mode; returns
+ *   SANDBOX_MODE_OFF for a NULL cfg.
+ *
+ *   This exists because the delegate shell guard's fail-closed branch is only
+ *   reachable when the mode is OFF, and now that the mode defaults to WORKSPACE_ONLY
+ *   a test cannot reach it by configuration: the config path is resolved before a
+ *   test can move HOME, so an in-process opt-out never reaches config_sandbox().
+ *   Without this seam that containment branch would go unexercised.
+ *
+ * sandbox_set_mode_override_for_test:
+ *   Force the value sandbox_effective_mode() reports. Pass -1 to clear. Test-only.
+ */
+int sandbox_effective_mode(const sandbox_config_t *cfg);
+void sandbox_set_mode_override_for_test(int mode);
+
+/*
  * sandbox_exec:
  *   Execute |cmd| via /bin/sh -c inside the sandbox described by |cfg|.
  *   The child's stdout/stderr are written to |out_fd|/|err_fd|.

@@ -146,6 +146,36 @@
           "id": 4,
           "name": "delegate-named-paths",
           "event_kind": 6660
+        },
+        {
+          "id": 5,
+          "name": "delegate-handoff-validation",
+          "event_kind": 6661
+        },
+        {
+          "id": 6,
+          "name": "delegate-tool-call-rescue",
+          "event_kind": 6662
+        },
+        {
+          "id": 7,
+          "name": "delegate-verify-outcome",
+          "event_kind": 6663
+        },
+        {
+          "id": 8,
+          "name": "delegate-economics-report",
+          "event_kind": 6664
+        },
+        {
+          "id": 9,
+          "name": "delegate-patch-coordination",
+          "event_kind": 6665
+        },
+        {
+          "id": 10,
+          "name": "delegate-role-policy",
+          "event_kind": 6666
         }
       ]
     },

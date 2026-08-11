@@ -65,14 +65,28 @@ type ForgeRequest struct {
 
 // PullSummary is the subset of a pull request every caller here needs.
 type PullSummary struct {
-	Number int    `json:"number"`
-	State  string `json:"state"`
-	Title  string `json:"title"`
-	Head   string `json:"head,omitempty"`
-	Base   string `json:"base,omitempty"`
-	Draft  bool   `json:"draft,omitempty"`
-	Merged bool   `json:"merged,omitempty"`
-	URL    string `json:"url,omitempty"`
+	Number  int    `json:"number"`
+	State   string `json:"state"`
+	Title   string `json:"title"`
+	Head    string `json:"head,omitempty"`
+	Base    string `json:"base,omitempty"`
+	HeadSHA string `json:"head_sha,omitempty"`
+	Draft   bool   `json:"draft,omitempty"`
+	Merged  bool   `json:"merged,omitempty"`
+	URL     string `json:"url,omitempty"`
+	// MergedAt is absent when the PR was never merged (the forge sends null).
+	MergedAt string `json:"merged_at,omitempty"`
+	// MergeState is the forge's mergeable_state, UPPER-CASED here. REST spells it
+	// lowercase while gh reported the same values upper-cased as mergeStateStatus,
+	// and callers render that spelling; normalising in one place beats every
+	// caller doing it and one of them forgetting.
+	MergeState string `json:"merge_state,omitempty"`
+	// Mergeable is THREE-valued and must stay that way. The forge answers null
+	// while it is still computing the merge, which is NOT the same as "cannot
+	// merge": treating null as false tells a caller a mergeable PR is conflicted,
+	// and it gives up on a merge that would have succeeded a second later. A nil
+	// pointer here (the field omitted on the wire) means "not known yet".
+	Mergeable *bool `json:"mergeable,omitempty"`
 }
 
 // ForgeResponse reports the HTTP status alongside the parsed answer so a caller
@@ -177,8 +191,13 @@ func summarize(raw []byte) *PullSummary {
 		Draft  bool   `json:"draft"`
 		Merged bool   `json:"merged"`
 		URL    string `json:"html_url"`
-		Head   struct {
+		// Pointer, so "still computing" (null) stays distinct from false.
+		Mergeable  *bool  `json:"mergeable"`
+		MergedAt   string `json:"merged_at"`
+		MergeState string `json:"mergeable_state"`
+		Head       struct {
 			Ref string `json:"ref"`
+			SHA string `json:"sha"`
 		} `json:"head"`
 		Base struct {
 			Ref string `json:"ref"`
@@ -189,8 +208,10 @@ func summarize(raw []byte) *PullSummary {
 	}
 	return &PullSummary{
 		Number: decoded.Number, State: decoded.State, Title: decoded.Title,
-		Head: decoded.Head.Ref, Base: decoded.Base.Ref,
+		Head: decoded.Head.Ref, Base: decoded.Base.Ref, HeadSHA: decoded.Head.SHA,
 		Draft: decoded.Draft, Merged: decoded.Merged, URL: decoded.URL,
+		MergedAt: decoded.MergedAt, MergeState: strings.ToUpper(decoded.MergeState),
+		Mergeable: decoded.Mergeable,
 	}
 }
 
@@ -245,9 +266,25 @@ func PerformForge(request ForgeRequest) ForgeResponse {
 
 	case OpPRFindOpen, OpPRListOpen:
 		query := url.Values{"state": {"open"}}
-		if request.Op == OpPRFindOpen && request.Head != "" {
-			// GitHub wants owner-qualified head for this filter.
-			query.Set("head", request.Owner+":"+request.Head)
+		if request.Op == OpPRFindOpen {
+			if request.Head != "" {
+				// GitHub wants owner-qualified head for this filter.
+				query.Set("head", request.Owner+":"+request.Head)
+			}
+			// The BASE matters as much as the head. "Is there already an open PR
+			// for this branch?" is only answered correctly per target branch: the
+			// same head can have an open PR into one base and none into another,
+			// and filtering by head alone answers yes for the wrong one.
+			if request.Base != "" {
+				query.Set("base", request.Base)
+			}
+		}
+		if request.Op == OpPRListOpen {
+			// Most recently updated first. Without this the forge returns
+			// creation order, so a "latest open PRs" listing silently shows the
+			// OLDEST ones once there are more than one page's worth.
+			query.Set("sort", "updated")
+			query.Set("direction", "desc")
 		}
 		if request.Limit > 0 {
 			query.Set("per_page", fmt.Sprint(request.Limit))

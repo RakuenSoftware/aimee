@@ -214,6 +214,294 @@ static void test_history_fold_reduces(void)
    PASS("history_fold reduces: new folded array, original untouched");
 }
 
+/* §4 page table, end to end through the orchestrator: a coordinate that is FOLDED AWAY
+ * and then referenced again by the newest turn produces a recall hint, so the agent
+ * learns the content is pageable rather than gone. This is the property that makes
+ * eviction reversible; without it the fold is destructive. */
+static void test_recall_hint_on_retouch(void)
+{
+   cJSON *m = make_messages(20); /* 40 messages; the prefix folds away */
+
+   /* Put an address deep in the prefix (evicted), then re-touch it in the newest turn
+    * (retained). Anything in the retained tail was never evicted, so a hint proves the
+    * key came from the folded region rather than from text still in view. */
+   cJSON *early = cJSON_GetArrayItem(m, 1);
+   cJSON_ReplaceItemInObject(early, "content",
+                             cJSON_CreateString("inspect src/modules/git/retry.c closely, it is "
+                                                "the file that matters for this task"));
+   cJSON *last = cJSON_GetArrayItem(m, cJSON_GetArraySize(m) - 1);
+   cJSON_ReplaceItemInObject(last, "content",
+                             cJSON_CreateString("what did we conclude about "
+                                                "src/modules/git/retry.c ?"));
+
+   reduce_config_t cfg = {0};
+   cfg.delegate_seam = 1;
+   cfg.history_fold = 1;
+   cfg.fold.closet.enabled = 1;
+   cfg.recall_enabled = 1;
+
+   reduce_state_t st = {0};
+   st.turn = 7;
+   reduce_result_t out;
+   assert(context_reduce(m, "system prompt here", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, &st,
+                         &out) == 0);
+   assert(out.mutated == 1);
+   assert(out.folded_msgs > 0);
+
+   assert(out.recall_surfaced >= 1);
+   assert(out.recall_hint != NULL);
+   assert(strstr(out.recall_hint, "src/modules/git/retry.c") != NULL);
+   /* The hint names the resolvers, so the agent knows how to act on it. */
+   assert(strstr(out.recall_hint, "code_span_get") != NULL);
+
+   /* The page table persists in the caller-owned state, not in the result. */
+   assert(st.recall.count > 0);
+
+   context_reduce_result_free(&out);
+   assert(out.recall_hint == NULL); /* freed with the result */
+   fold_recall_index_free(&st.recall);
+   cJSON_Delete(m);
+   PASS("recall hint fires when the newest turn re-touches a folded coordinate");
+}
+
+/* Default-off stays off: with the lever disabled nothing is tracked and no hint is
+ * produced, so enabling it is an explicit choice and the reducer is unchanged without. */
+static void test_recall_disabled_is_inert(void)
+{
+   cJSON *m = make_messages(20);
+   cJSON *early = cJSON_GetArrayItem(m, 1);
+   cJSON_ReplaceItemInObject(early, "content",
+                             cJSON_CreateString("inspect src/modules/git/retry.c closely here"));
+   cJSON *last = cJSON_GetArrayItem(m, cJSON_GetArraySize(m) - 1);
+   cJSON_ReplaceItemInObject(last, "content",
+                             cJSON_CreateString("what about src/modules/git/retry.c ?"));
+
+   reduce_config_t cfg = {0};
+   cfg.delegate_seam = 1;
+   cfg.history_fold = 1;
+   cfg.fold.closet.enabled = 1;
+   cfg.recall_enabled = 0; /* the lever under test */
+
+   reduce_state_t st = {0};
+   reduce_result_t out;
+   assert(context_reduce(m, "system prompt here", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, &st,
+                         &out) == 0);
+   assert(out.mutated == 1);
+   assert(out.recall_hint == NULL);
+   assert(out.recall_surfaced == 0);
+   assert(st.recall.count == 0);
+
+   context_reduce_result_free(&out);
+   fold_recall_index_free(&st.recall);
+   cJSON_Delete(m);
+   PASS("recall disabled: nothing tracked, no hint");
+}
+
+/* Injection puts the hint in front of the model. Default-off and separate from tracking,
+ * because reporting is inert while injecting changes what the model does. */
+static void test_recall_inject_appends_notice(void)
+{
+   cJSON *m = make_messages(20);
+   cJSON *early = cJSON_GetArrayItem(m, 1);
+   cJSON_ReplaceItemInObject(early, "content",
+                             cJSON_CreateString("inspect src/modules/git/retry.c closely here"));
+   cJSON *last = cJSON_GetArrayItem(m, cJSON_GetArraySize(m) - 1);
+   cJSON_ReplaceItemInObject(last, "content",
+                             cJSON_CreateString("what about src/modules/git/retry.c ?"));
+
+   reduce_config_t cfg = {0};
+   cfg.delegate_seam = 1;
+   cfg.history_fold = 1;
+   cfg.fold.closet.enabled = 1;
+   cfg.recall_enabled = 1;
+   cfg.recall_inject = 1;
+
+   reduce_state_t st = {0};
+   reduce_result_t out;
+   assert(context_reduce(m, "sys", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, &st, &out) == 0);
+   assert(out.mutated == 1 && out.recall_surfaced >= 1);
+
+   int n = cJSON_GetArraySize(out.messages);
+   cJSON *tail = cJSON_GetArrayItem(out.messages, n - 1);
+   const char *txt = cJSON_GetStringValue(cJSON_GetObjectItem(tail, "content"));
+   assert(txt != NULL);
+   assert(strstr(txt, "src/modules/git/retry.c") != NULL);
+   /* Labelled as a notice: an unlabelled line appended after the user's turn reads as
+    * something the USER said, which is a way for evicted text to put words in their
+    * mouth. */
+   assert(strstr(txt, "not from the user") != NULL);
+
+   /* Appended at the very END — never spliced between an assistant tool_use and its
+    * matching tool_result, which would make the request structurally invalid. */
+   assert(tail != cJSON_GetArrayItem(out.messages, 0));
+
+   context_reduce_result_free(&out);
+   fold_recall_index_free(&st.recall);
+   cJSON_Delete(m);
+   PASS("recall injection appends a labelled notice at the tail");
+}
+
+/* Tracking without injection must leave the transcript exactly as the fold produced it:
+ * the reporting contract is what callers with their own placement rely on. */
+static void test_recall_inject_off_leaves_transcript(void)
+{
+   cJSON *m = make_messages(20);
+   cJSON *early = cJSON_GetArrayItem(m, 1);
+   cJSON_ReplaceItemInObject(early, "content",
+                             cJSON_CreateString("inspect src/modules/git/retry.c closely here"));
+   cJSON *last = cJSON_GetArrayItem(m, cJSON_GetArraySize(m) - 1);
+   cJSON_ReplaceItemInObject(last, "content",
+                             cJSON_CreateString("what about src/modules/git/retry.c ?"));
+
+   reduce_config_t cfg = {0};
+   cfg.delegate_seam = 1;
+   cfg.history_fold = 1;
+   cfg.fold.closet.enabled = 1;
+   cfg.recall_enabled = 1;
+   cfg.recall_inject = 0; /* the lever under test */
+
+   reduce_state_t st = {0};
+   reduce_result_t out;
+   assert(context_reduce(m, "sys", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, &st, &out) == 0);
+   assert(out.recall_surfaced >= 1); /* still tracked and reported */
+   assert(out.recall_hint != NULL);
+
+   int n = cJSON_GetArraySize(out.messages);
+   cJSON *tail = cJSON_GetArrayItem(out.messages, n - 1);
+   const char *txt = cJSON_GetStringValue(cJSON_GetObjectItem(tail, "content"));
+   assert(txt != NULL);
+   assert(strstr(txt, "not from the user") == NULL); /* nothing appended */
+
+   context_reduce_result_free(&out);
+   fold_recall_index_free(&st.recall);
+   cJSON_Delete(m);
+   PASS("injection off: hint reported, transcript untouched");
+}
+
+/* ------------------------------------------------ state persistence (S2c) */
+
+/* Round-trip: the freeze boundary and the page table survive, so a later run continues
+ * the conversation instead of restarting the economizer from scratch. */
+static void test_state_serialize_round_trip(void)
+{
+   reduce_state_t st = {0};
+   st.turn = 12;
+   st.freeze.active = 1;
+   st.freeze.frozen_split = 9;
+   st.freeze.tail_cap_msgs = 24;
+   st.freeze.epochs = 3;
+   st.freeze.prefix_digest = 0xfeedfacecafeb00dULL;
+   fold_recall_index_add(&st.recall, "src/modules/git/retry.c");
+   fold_recall_index_add(&st.recall, "memory:8817");
+   st.recall.last_turn[0] = 5;
+   st.recall.last_turn[1] = -1;
+
+   char *json = reduce_state_serialize(&st);
+   assert(json != NULL);
+   assert(strlen(json) <= REDUCE_STATE_SERIAL_MAX);
+
+   reduce_state_t back = {0};
+   assert(reduce_state_restore(&back, json) == 0);
+   assert(back.turn == 12);
+   assert(back.freeze.active == 1);
+   assert(back.freeze.frozen_split == 9);
+   assert(back.freeze.tail_cap_msgs == 24);
+   assert(back.freeze.epochs == 3);
+   /* The digest must survive EXACTLY: it is the guard that stops a restored boundary
+    * being reused over a prefix that has since changed. A JSON number would have lost
+    * the low bits here. */
+   assert(back.freeze.prefix_digest == 0xfeedfacecafeb00dULL);
+   assert(back.recall.count == 2);
+
+   free(json);
+   fold_recall_index_free(&st.recall);
+   fold_recall_index_free(&back.recall);
+   PASS("state round-trips, including the full 64-bit prefix digest");
+}
+
+/* `reduced` is per-REQUEST provenance. Restoring it would make the next request think a
+ * seam had already reduced it, and skip reduction for the rest of the conversation. */
+static void test_state_never_restores_reduced(void)
+{
+   reduce_state_t st = {0};
+   st.reduced = 1;
+   st.turn = 4;
+   char *json = reduce_state_serialize(&st);
+   assert(json != NULL);
+   assert(strstr(json, "reduced") == NULL); /* not even written */
+
+   reduce_state_t back = {0};
+   back.reduced = 1; /* pre-dirtied: restore must clear it */
+   assert(reduce_state_restore(&back, json) == 0);
+   assert(back.reduced == 0);
+
+   free(json);
+   fold_recall_index_free(&back.recall);
+   PASS("reduced is never persisted or restored");
+}
+
+/* Unparseable input must leave NO state, not half of one: a split without its digest
+ * would be trusted by the fold and could serve a stale prefix. */
+static void test_state_restore_all_or_nothing(void)
+{
+   reduce_state_t st = {0};
+   st.freeze.active = 1;
+   st.freeze.frozen_split = 7;
+   fold_recall_index_add(&st.recall, "src/a.c");
+
+   assert(reduce_state_restore(&st, "{\"freeze\":{\"frozen_spl") == -1); /* truncated */
+   assert(reduce_state_restore(&st, "") == -1);
+   assert(reduce_state_restore(&st, NULL) == -1);
+   /* Prior state is untouched by a failed restore. */
+   assert(st.freeze.frozen_split == 7);
+   assert(st.recall.count == 1);
+
+   fold_recall_index_free(&st.recall);
+   PASS("failed restore leaves prior state intact");
+}
+
+/* The store reads into a fixed char[8192], so oversize must be bounded HERE and the loss
+ * reported — truncated JSON would not parse, turning a large page table into no state. */
+static void test_state_serialize_bounded_and_reports_drops(void)
+{
+   reduce_state_t st = {0};
+   for (int i = 0; i < 400; i++)
+   {
+      char key[64];
+      snprintf(key, sizeof(key), "src/generated/module_%03d/file_%03d.c", i, i);
+      fold_recall_index_add(&st.recall, key);
+      st.recall.last_turn[i] = i; /* newer keys have higher last_turn */
+   }
+
+   char *json = reduce_state_serialize(&st);
+   assert(json != NULL);
+   assert(strlen(json) <= REDUCE_STATE_SERIAL_MAX);
+   assert(strstr(json, "recall_dropped") != NULL);
+
+   reduce_state_t back = {0};
+   assert(reduce_state_restore(&back, json) == 0);
+   assert(back.recall.count > 0);
+   assert(back.recall.count < 400); /* genuinely capped */
+
+   /* The COLDEST keys are the ones dropped: key 399 was surfaced most recently and
+    * must survive, key 000 must not. */
+   int has_newest = 0, has_oldest = 0;
+   for (size_t i = 0; i < back.recall.count; i++)
+   {
+      if (strstr(back.recall.keys[i], "file_399"))
+         has_newest = 1;
+      if (strstr(back.recall.keys[i], "file_000"))
+         has_oldest = 1;
+   }
+   assert(has_newest);
+   assert(!has_oldest);
+
+   free(json);
+   fold_recall_index_free(&st.recall);
+   fold_recall_index_free(&back.recall);
+   PASS("serialization is bounded, drops the coldest keys, and says so");
+}
+
 /* Net-gain pre-check: foldable below min_gain_tokens -> skip, no mutation. */
 static void test_history_fold_skip_no_gain(void)
 {
@@ -421,6 +709,14 @@ int main(void)
    test_provenance_already_reduced();
    test_unpriced_model_no_cost();
    test_history_fold_reduces();
+   test_recall_hint_on_retouch();
+   test_recall_disabled_is_inert();
+   test_recall_inject_appends_notice();
+   test_recall_inject_off_leaves_transcript();
+   test_state_serialize_round_trip();
+   test_state_never_restores_reduced();
+   test_state_restore_all_or_nothing();
+   test_state_serialize_bounded_and_reports_drops();
    test_history_fold_skip_no_gain();
    test_compress_engages_where_fold_cannot();
    test_compress_measure_only_no_mutation();

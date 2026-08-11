@@ -84,6 +84,10 @@ void agent_tools_filter_for_role(struct cJSON *tools, const char *role);
  * wins; subsequent callers reuse the same pointer. */
 struct cJSON *agent_tool_get_schema_cached(const char *tool_name);
 
+/* Write up to `max` built-in tool names into `out`, returning how many.
+ * The names are borrowed from the process-lifetime schema cache. */
+int agent_tool_known_names(const char **out, int max);
+
 /* Walk an OpenAI-format tools array (each element {type:"function",
  * function:{name, description, parameters}}) and rewrite each tool's
  * `function.parameters` schema in place via tool_schema_sanitize for

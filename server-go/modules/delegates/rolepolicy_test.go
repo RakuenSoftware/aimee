@@ -1,0 +1,178 @@
+package delegates
+
+import (
+	"encoding/binary"
+	"testing"
+
+	"github.com/JBailes/aimee/server-go/bus"
+)
+
+// Ported from test_delegate_role.c.
+func TestRoleIsWrite(t *testing.T) {
+	for _, role := range []string{"code", "refactor", "implement", "build"} {
+		if !RoleIsWrite(role) {
+			t.Errorf("%q should be a write role", role)
+		}
+	}
+	for _, role := range []string{"review", "validate", "summarize", "", "unknown"} {
+		if RoleIsWrite(role) {
+			t.Errorf("%q should not be a write role", role)
+		}
+	}
+}
+
+// A write role with tools off cannot fail visibly -- it returns a diff summary
+// of code it never wrote -- so tools-on is the only honest default.
+func TestRoleEnablesToolsByDefault(t *testing.T) {
+	on := []string{"code", "refactor", "review", "search", "execute", "diagnose",
+		"validate", "continuity", "beat-check"}
+	for _, role := range on {
+		if !RoleEnablesToolsByDefault(role) {
+			t.Errorf("%q should enable tools by default", role)
+		}
+	}
+	off := []string{"summarize", "format", "draft", "explain", "reason", "plan", ""}
+	for _, role := range off {
+		if RoleEnablesToolsByDefault(role) {
+			t.Errorf("%q should not enable tools by default", role)
+		}
+	}
+	// Aliases resolve before the policy is applied.
+	for _, alias := range []string{"implement", "reviewer", "inspect", "recall",
+		"verifier", "research", "test", "check", "enforce", "build"} {
+		if !RoleEnablesToolsByDefault(alias) {
+			t.Errorf("alias %q did not resolve to a tools-on role", alias)
+		}
+	}
+}
+
+// Caching is opt-in and only for pure text transforms: the same prompt against
+// a changed working tree must never be answered from cache.
+func TestRoleResultCacheEnabled(t *testing.T) {
+	for _, role := range []string{"summarize", "format", "draft", "synthesize"} {
+		if !RoleResultCacheEnabled(role) {
+			t.Errorf("%q should be cacheable", role)
+		}
+	}
+	for _, role := range []string{"code", "review", "search", "diagnose", "execute", "", "custom"} {
+		if RoleResultCacheEnabled(role) {
+			t.Errorf("%q must not be cacheable", role)
+		}
+	}
+}
+
+func TestRoleAutoToolsForInvocation(t *testing.T) {
+	// An explicit request always wins, even for a one-turn probe.
+	if !RoleAutoToolsForInvocation("summarize", 1, true) {
+		t.Error("explicit tools were ignored")
+	}
+	// One turn is a final-answer smoke probe, so no implicit tools.
+	if RoleAutoToolsForInvocation("code", 1, false) {
+		t.Error("a one-turn run got implicit tools")
+	}
+	if !RoleAutoToolsForInvocation("code", 8, false) {
+		t.Error("a multi-turn write role did not get its default tools")
+	}
+	if RoleAutoToolsForInvocation("summarize", 8, false) {
+		t.Error("a text-transform role got implicit tools")
+	}
+}
+
+func TestRoleFinalAfterTurns(t *testing.T) {
+	for role, want := range map[string]int{
+		"validate": 8, "search": 10, "diagnose": 12,
+		"code": -1, "review": -1, "": -1,
+		// Aliases resolve first.
+		"verifier": 8, "recall": 10, "inspect": 12,
+	} {
+		if got := RoleFinalAfterTurns(role); got != want {
+			t.Errorf("%q = %d, want %d", role, got, want)
+		}
+	}
+}
+
+// continuity and beat-check survived the persona-vs-role cull: they are real
+// read-only inspection actions a novel persona genuinely delegates, not
+// restatements of who the delegate is. They inspect the world bible by default,
+// but a one-turn probe still gets no tools.
+func TestRoleNovelInspectionRoles(t *testing.T) {
+	for _, role := range []string{"continuity", "beat-check"} {
+		if RoleIsWrite(role) {
+			t.Errorf("%q must not be a write role", role)
+		}
+	}
+	if !RoleAutoToolsForInvocation("continuity", -1, false) {
+		t.Error("continuity did not get its default tools")
+	}
+	if !RoleAutoToolsForInvocation("beat-check", 2, false) {
+		t.Error("beat-check did not get its default tools")
+	}
+	if RoleAutoToolsForInvocation("continuity", 1, false) {
+		t.Error("a one-turn continuity probe got implicit tools")
+	}
+}
+
+func rolePolicyRequestBytes(role string, maxTurns int, explicitTools bool) []byte {
+	request := make([]byte, rolePolicyRequestLen)
+	binary.LittleEndian.PutUint32(request[0:4], rolePolicyRequestMagic)
+	request[4] = wireVersion
+	if explicitTools {
+		request[5] = 1
+	}
+	binary.LittleEndian.PutUint32(request[8:12], uint32(int32(maxTurns)))
+	binary.LittleEndian.PutUint32(request[12:16], uint32(len(role)))
+	copy(request[16:], role)
+	return request
+}
+
+func TestRolePolicyStageRoundTrip(t *testing.T) {
+	response, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+		rolePolicyRequestBytes("implement", 8, false))
+	if status != bus.ModuleStatusOK || len(response) != rolePolicyResponseLen ||
+		binary.LittleEndian.Uint32(response[0:4]) != rolePolicyResponseMagic {
+		t.Fatalf("status %d, %d bytes", status, len(response))
+	}
+	// "implement" is an alias for the write role "code".
+	if binary.LittleEndian.Uint32(response[4:8]) != 1 {
+		t.Error("alias did not resolve to a write role")
+	}
+	if binary.LittleEndian.Uint32(response[8:12]) != 1 {
+		t.Error("write role did not enable tools by default")
+	}
+	if binary.LittleEndian.Uint32(response[12:16]) != 0 {
+		t.Error("a write role was reported cacheable")
+	}
+	if int32(binary.LittleEndian.Uint32(response[20:24])) != -1 {
+		t.Error("code should have no early-final turn")
+	}
+
+	// diagnose has one, and a one-turn probe still gets no implicit tools.
+	response, _ = Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+		rolePolicyRequestBytes("diagnose", 1, false))
+	if int32(binary.LittleEndian.Uint32(response[20:24])) != 12 {
+		t.Error("diagnose lost its early-final turn")
+	}
+	if binary.LittleEndian.Uint32(response[16:20]) != 0 {
+		t.Error("a one-turn probe got implicit tools")
+	}
+}
+
+func TestRolePolicyStageRejectsInvalidEnvelope(t *testing.T) {
+	good := rolePolicyRequestBytes("code", 4, false)
+
+	if _, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+		good[:rolePolicyRequestLen-1]); status != bus.ModuleStatusInvalidRequest {
+		t.Errorf("truncated status = %d", status)
+	}
+
+	lying := rolePolicyRequestBytes("code", 4, false)
+	binary.LittleEndian.PutUint32(lying[12:16], uint32(roleMax+1))
+	if _, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy}, lying); status != bus.ModuleStatusInvalidRequest {
+		t.Errorf("over-long role status = %d", status)
+	}
+
+	if _, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy, DeadlineNS: 1},
+		good); status != bus.ModuleStatusCancelled {
+		t.Errorf("expired status = %d", status)
+	}
+}

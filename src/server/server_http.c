@@ -2081,7 +2081,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
    g_rpc_conn_caps = CAPS_READ_ONLY;
    server_http_identity_clear();
    send_response(fd, status, resp, request_id);
-   LOG_INFO("server.http", "%s %s -> %d req_id=%s", method, path, status, request_id);
+   server_http_log_access(method, path, status, request_id);
    free(resp);
    free(body);
 }

@@ -616,6 +616,12 @@ int git_pr_find_open_via_api_slug(const char *principal, const char *slug, const
 {
    if (out && out_cap)
       out[0] = '\0';
+   /* Clear err like every sibling does. This one returns 0 for "no open PR",
+    * which is a SUCCESS, and a caller reusing the buffer would otherwise read a
+    * stale message from an earlier call and report a failure that never
+    * happened. */
+   if (err && errlen)
+      err[0] = '\0';
    if (number_out)
       *number_out = 0;
    if (!head || !head[0] || !base || !base[0] || strlen(head) > 200 || strlen(base) > 200 ||
@@ -627,23 +633,39 @@ int git_pr_find_open_via_api_slug(const char *principal, const char *slug, const
    gh_ctx_t cx;
    if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
-   char path[700];
-   snprintf(path, sizeof(path), "pulls?state=open&head=%s:%s&base=%s&per_page=1", cx.owner, head,
-            base);
-   char *response = NULL;
-   int status = gh_get(&cx, path, &response);
-   gh_ctx_done(&cx);
-   if (status < 200 || status >= 300 || !response)
+   cJSON *extra = cJSON_CreateObject();
+   if (!extra)
    {
-      gh_err(response, status, "find PR", err, errlen);
-      free(response);
+      gh_ctx_done(&cx);
+      snprintf(err, errlen, "internal error");
       return -1;
    }
+   /* Head AND base: the same head can have an open PR into one base and none
+    * into another, so filtering by head alone answers the question for the
+    * wrong target branch. */
+   cJSON_AddStringToObject(extra, "head", head);
+   cJSON_AddStringToObject(extra, "base", base);
+   cJSON_AddNumberToObject(extra, "limit", 1);
+   cJSON *reply = forge_stage(&cx, "pr_find_open", extra);
+   gh_ctx_done(&cx);
+   if (!reply)
+   {
+      snprintf(err, errlen, "find PR: the git module could not be reached");
+      return -1;
+   }
+   const cJSON *message = cJSON_GetObjectItemCaseSensitive(reply, "error");
+   if (cJSON_IsString(message) && message->valuestring)
+   {
+      snprintf(err, errlen, "%s", message->valuestring);
+      cJSON_Delete(reply);
+      return -1;
+   }
+   /* NO MATCH IS NOT AN ERROR: 0 means "no open PR", which is the answer the
+    * caller acts on by opening one. Reporting -1 here would make it give up. */
    int found = 0;
-   cJSON *array = cJSON_Parse(response);
-   const cJSON *first = cJSON_IsArray(array) ? cJSON_GetArrayItem(array, 0) : NULL;
-   const cJSON *url = first ? cJSON_GetObjectItem(first, "html_url") : NULL;
-   const cJSON *number = first ? cJSON_GetObjectItem(first, "number") : NULL;
+   const cJSON *pull = cJSON_GetObjectItemCaseSensitive(reply, "pull");
+   const cJSON *url = pull ? cJSON_GetObjectItemCaseSensitive(pull, "url") : NULL;
+   const cJSON *number = pull ? cJSON_GetObjectItemCaseSensitive(pull, "number") : NULL;
    if (cJSON_IsString(url) && url->valuestring && url->valuestring[0])
    {
       snprintf(out, out_cap, "%s", url->valuestring);
@@ -651,8 +673,7 @@ int git_pr_find_open_via_api_slug(const char *principal, const char *slug, const
          *number_out = number->valueint;
       found = 1;
    }
-   cJSON_Delete(array);
-   free(response);
+   cJSON_Delete(reply);
    return found;
 }
 
@@ -1124,22 +1145,43 @@ int git_pr_list_open_via_api_slug(const char *principal, const char *slug, int l
    gh_ctx_t cx;
    if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
-   char path[96];
-   snprintf(path, sizeof(path), "pulls?state=open&sort=updated&direction=desc&per_page=%d", limit);
-   char *resp = NULL;
-   int st = gh_get(&cx, path, &resp);
-   gh_ctx_done(&cx);
-   if (st < 200 || st >= 300 || !resp)
+   cJSON *extra = cJSON_CreateObject();
+   if (!extra)
    {
-      gh_err(resp, st, "pr list", err, errlen);
-      free(resp);
+      gh_ctx_done(&cx);
+      snprintf(err, errlen, "internal error");
       return -1;
    }
-   cJSON *arr = cJSON_Parse(resp);
-   free(resp);
+   cJSON_AddNumberToObject(extra, "limit", limit);
+   cJSON *reply = forge_stage(&cx, "pr_list_open", extra);
+   gh_ctx_done(&cx);
+   if (!reply)
+   {
+      snprintf(err, errlen, "pr list: the git module could not be reached");
+      return -1;
+   }
+   const cJSON *message = cJSON_GetObjectItemCaseSensitive(reply, "error");
+   if (cJSON_IsString(message) && message->valuestring)
+   {
+      snprintf(err, errlen, "%s", message->valuestring);
+      cJSON_Delete(reply);
+      return -1;
+   }
+   const cJSON *statusj = cJSON_GetObjectItemCaseSensitive(reply, "status");
+   int status = cJSON_IsNumber(statusj) ? statusj->valueint : 0;
+   cJSON *arr = cJSON_DetachItemFromObjectCaseSensitive(reply, "pulls");
+   cJSON_Delete(reply);
    if (!cJSON_IsArray(arr))
    {
+      /* NO OPEN PRs IS A RESULT, NOT A FAILURE. The stage omits an empty list
+       * entirely, so an absent key on a 2xx is zero rows -- reporting an error
+       * here would turn "nothing to list" into "the listing is broken". */
       cJSON_Delete(arr);
+      if (status >= 200 && status < 300)
+      {
+         *count = 0;
+         return 0;
+      }
       snprintf(err, errlen, "github API: unparseable pr list");
       return -1;
    }
@@ -1152,8 +1194,7 @@ int git_pr_list_open_via_api_slug(const char *principal, const char *slug, int l
       const cJSON *num = cJSON_GetObjectItem(item, "number");
       const cJSON *state = cJSON_GetObjectItem(item, "state");
       const cJSON *title = cJSON_GetObjectItem(item, "title");
-      const cJSON *headj = cJSON_GetObjectItem(item, "head");
-      const cJSON *headref = headj ? cJSON_GetObjectItem(headj, "ref") : NULL;
+      const cJSON *headref = cJSON_GetObjectItem(item, "head");
       const cJSON *mat = cJSON_GetObjectItem(item, "merged_at");
       if (!cJSON_IsNumber(num) || num->valueint <= 0)
          continue; /* a row without a number is not addressable; skip it */
@@ -1205,33 +1246,44 @@ int git_pr_info_via_api_slug(const char *principal, const char *slug, int number
    gh_ctx_t cx;
    if (gh_ctx_resolve_slug(principal, slug, &cx, err, errlen) != 0)
       return -1;
-   char path[64];
-   snprintf(path, sizeof(path), "pulls/%d", number);
-   char *resp = NULL;
-   int st = gh_get(&cx, path, &resp);
-   gh_ctx_done(&cx);
-   if (st < 200 || st >= 300 || !resp)
+   cJSON *extra = cJSON_CreateObject();
+   if (!extra)
    {
-      gh_err(resp, st, "pr info", err, errlen);
-      free(resp);
+      gh_ctx_done(&cx);
+      snprintf(err, errlen, "internal error");
       return -1;
    }
-   cJSON *j = cJSON_Parse(resp);
-   free(resp);
+   cJSON_AddNumberToObject(extra, "number", number);
+   cJSON *reply = forge_stage(&cx, "pr_info", extra);
+   gh_ctx_done(&cx);
+   if (!reply)
+   {
+      snprintf(err, errlen, "pr info: the git module could not be reached");
+      return -1;
+   }
+   const cJSON *message = cJSON_GetObjectItemCaseSensitive(reply, "error");
+   cJSON *j = cJSON_DetachItemFromObjectCaseSensitive(reply, "pull");
    if (!j)
    {
-      snprintf(err, errlen, "github API: unparseable pr info");
+      if (cJSON_IsString(message) && message->valuestring)
+         snprintf(err, errlen, "%s", message->valuestring);
+      else
+         snprintf(err, errlen, "github API: unparseable pr info");
+      cJSON_Delete(reply);
       return -1;
    }
+   cJSON_Delete(reply);
+
    const cJSON *state = cJSON_GetObjectItem(j, "state");
    const cJSON *merged = cJSON_GetObjectItem(j, "merged");
+   /* ABSENT means the forge is still computing the merge, which is not the same
+    * as "cannot merge": out->mergeable stays -1 in that case, and only an
+    * explicit boolean moves it to 1/0. */
    const cJSON *mergeable = cJSON_GetObjectItem(j, "mergeable");
-   const cJSON *headj = cJSON_GetObjectItem(j, "head");
-   const cJSON *sha = headj ? cJSON_GetObjectItem(headj, "sha") : NULL;
-   const cJSON *headref = headj ? cJSON_GetObjectItem(headj, "ref") : NULL;
-   const cJSON *basej = cJSON_GetObjectItem(j, "base");
-   const cJSON *baseref = basej ? cJSON_GetObjectItem(basej, "ref") : NULL;
-   const char *sha_s = cJSON_IsString(sha) ? sha->valuestring : NULL;
+   const cJSON *shaj = cJSON_GetObjectItem(j, "head_sha");
+   const cJSON *headref = cJSON_GetObjectItem(j, "head");
+   const cJSON *baseref = cJSON_GetObjectItem(j, "base");
+   const char *sha_s = cJSON_IsString(shaj) ? shaj->valuestring : NULL;
    const char *head_s = cJSON_IsString(headref) ? headref->valuestring : NULL;
    const char *base_s = cJSON_IsString(baseref) ? baseref->valuestring : NULL;
    if (!cJSON_IsString(state) || !state->valuestring || !sha_s || !sha_s[0] || !head_s ||
@@ -1249,23 +1301,20 @@ int git_pr_info_via_api_slug(const char *principal, const char *slug, int number
     * missing or over-long value is left empty rather than failing the whole call
     * the way a missing ref does above. */
    const cJSON *title = cJSON_GetObjectItem(j, "title");
-   const cJSON *hurl = cJSON_GetObjectItem(j, "html_url");
+   const cJSON *hurl = cJSON_GetObjectItem(j, "url");
    const cJSON *mat = cJSON_GetObjectItem(j, "merged_at");
    if (cJSON_IsString(title) && title->valuestring)
       snprintf(out->title, sizeof(out->title), "%s", title->valuestring);
    if (cJSON_IsString(hurl) && hurl->valuestring)
       snprintf(out->html_url, sizeof(out->html_url), "%s", hurl->valuestring);
-   if (cJSON_IsString(mat) && mat->valuestring) /* null when never merged */
+   if (cJSON_IsString(mat) && mat->valuestring) /* absent when never merged */
       snprintf(out->merged_at, sizeof(out->merged_at), "%s", mat->valuestring);
-   const cJSON *mstate = cJSON_GetObjectItem(j, "mergeable_state");
+   /* Already upper-cased by the module: REST spells mergeable_state lowercase
+    * while callers render the gh mergeStateStatus spelling, and normalising it
+    * in one place beats every caller remembering to. */
+   const cJSON *mstate = cJSON_GetObjectItem(j, "merge_state");
    if (cJSON_IsString(mstate) && mstate->valuestring)
-   {
-      /* REST spells it lowercase; gh reported the same values upper-cased as
-       * mergeStateStatus, and callers render that spelling. */
       snprintf(out->merge_state, sizeof(out->merge_state), "%s", mstate->valuestring);
-      for (char *p = out->merge_state; *p; p++)
-         *p = (char)toupper((unsigned char)*p);
-   }
 
    if (cJSON_IsBool(mergeable))
       out->mergeable = cJSON_IsTrue(mergeable) ? 1 : 0; /* null stays -1 (computing) */

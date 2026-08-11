@@ -209,4 +209,311 @@ static inline int aimee_delegates_paths_response_decode(const uint8_t *in, size_
    return (int)count;
 }
 
+/* Handoff validation: whether a delegate's structured report can be believed.
+ * The rule lives only in the Go module; there is no C mirror. */
+#define AIMEE_DELEGATES_EVENT_HANDOFF          6661u
+#define AIMEE_DELEGATES_STAGE_HANDOFF          5u
+#define AIMEE_DELEGATES_HANDOFF_REQUEST_MAGIC  0x444e4844u /* "DHND" */
+#define AIMEE_DELEGATES_HANDOFF_RESPONSE_MAGIC 0x564e4844u /* "DHNV" */
+#define AIMEE_DELEGATES_HANDOFF_HEADER_LEN     16u
+#define AIMEE_DELEGATES_HANDOFF_STATUS_LEN     32u
+#define AIMEE_DELEGATES_HANDOFF_ERROR_LEN      256u
+#define AIMEE_DELEGATES_HANDOFF_RESPONSE_LEN                                                       \
+   (4u + 8u * 4u + AIMEE_DELEGATES_HANDOFF_STATUS_LEN * 2u + AIMEE_DELEGATES_HANDOFF_ERROR_LEN)
+#define AIMEE_DELEGATES_HANDOFF_TEXT_MAX (1u << 20)
+
+static inline size_t aimee_delegates_handoff_request_encode(const char *text, size_t text_len,
+                                                            const char *owned, size_t owned_len,
+                                                            int require_verification, uint8_t *out,
+                                                            size_t cap)
+{
+   if (!out || text_len > AIMEE_DELEGATES_HANDOFF_TEXT_MAX ||
+       owned_len > AIMEE_DELEGATES_HANDOFF_TEXT_MAX ||
+       cap < AIMEE_DELEGATES_HANDOFF_HEADER_LEN + text_len + owned_len)
+      return 0;
+   memset(out, 0, AIMEE_DELEGATES_HANDOFF_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_HANDOFF_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   out[5] = require_verification ? 1u : 0u;
+   aimee_delegates_put_u32(out + 8, (uint32_t)text_len);
+   aimee_delegates_put_u32(out + 12, (uint32_t)owned_len);
+   if (text_len)
+      memcpy(out + AIMEE_DELEGATES_HANDOFF_HEADER_LEN, text, text_len);
+   if (owned_len)
+      memcpy(out + AIMEE_DELEGATES_HANDOFF_HEADER_LEN + text_len, owned, owned_len);
+   return AIMEE_DELEGATES_HANDOFF_HEADER_LEN + text_len + owned_len;
+}
+
+/* Copy one fixed-width, NUL-padded field out of the response. */
+static inline void aimee_delegates_handoff_field(const uint8_t *in, size_t at, size_t width,
+                                                 char *out, size_t cap)
+{
+   size_t n = 0;
+   while (n < width && in[at + n] != 0)
+      ++n;
+   if (n >= cap)
+      n = cap ? cap - 1 : 0;
+   if (cap)
+   {
+      memcpy(out, in + at, n);
+      out[n] = '\0';
+   }
+}
+
+/* --- Tool-call rescue (stage 6) --- */
+
+#define AIMEE_DELEGATES_EVENT_RESCUE          6662u
+#define AIMEE_DELEGATES_STAGE_RESCUE          6u
+#define AIMEE_DELEGATES_RESCUE_REQUEST_MAGIC  0x51535244u /* "DRSQ" */
+#define AIMEE_DELEGATES_RESCUE_RESPONSE_MAGIC 0x52535244u /* "DRSR" */
+#define AIMEE_DELEGATES_RESCUE_REQ_HEADER_LEN 16u
+#define AIMEE_DELEGATES_RESCUE_RESP_HEADER_LEN 16u
+#define AIMEE_DELEGATES_RESCUE_TEXT_MAX       (1u << 20)
+#define AIMEE_DELEGATES_RESCUE_KNOWN_MAX      4096u
+#define AIMEE_DELEGATES_RESCUE_MODE_PARSE     0u
+#define AIMEE_DELEGATES_RESCUE_MODE_DETECT    1u
+
+/* Encode a rescue request: the response text, then the caller's tool
+ * inventory as u16-length-prefixed names. The inventory travels with the
+ * request because whether a rescued name is real is the caller's knowledge,
+ * not something the module may go and ask another module for. */
+static inline size_t aimee_delegates_rescue_request_encode(const char *text, size_t text_len,
+                                                           const char *const *names, size_t name_count,
+                                                           int allow_json, unsigned mode,
+                                                           uint8_t *out, size_t cap)
+{
+   size_t at, i;
+   if (!out || text_len > AIMEE_DELEGATES_RESCUE_TEXT_MAX ||
+       name_count > AIMEE_DELEGATES_RESCUE_KNOWN_MAX ||
+       cap < AIMEE_DELEGATES_RESCUE_REQ_HEADER_LEN + text_len)
+      return 0;
+
+   memset(out, 0, AIMEE_DELEGATES_RESCUE_REQ_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_RESCUE_REQUEST_MAGIC);
+   out[4] = 1; /* wire version */
+   out[5] = allow_json ? 1 : 0;
+   out[6] = (uint8_t)mode;
+   aimee_delegates_put_u32(out + 8, (uint32_t)text_len);
+   aimee_delegates_put_u32(out + 12, (uint32_t)name_count);
+   if (text_len)
+      memcpy(out + AIMEE_DELEGATES_RESCUE_REQ_HEADER_LEN, text, text_len);
+
+   at = AIMEE_DELEGATES_RESCUE_REQ_HEADER_LEN + text_len;
+   for (i = 0; i < name_count; i++)
+   {
+      size_t n = names[i] ? strlen(names[i]) : 0;
+      if (n > 0xffffu || at + 2 + n > cap)
+         return 0;
+      out[at] = (uint8_t)(n & 0xffu);
+      out[at + 1] = (uint8_t)((n >> 8) & 0xffu);
+      at += 2;
+      memcpy(out + at, names[i], n);
+      at += n;
+   }
+   return at;
+}
+
+/* --- Verification outcome and escalation policy (stage 7) --- */
+
+#define AIMEE_DELEGATES_EVENT_VERIFY          6663u
+#define AIMEE_DELEGATES_STAGE_VERIFY          7u
+#define AIMEE_DELEGATES_VERIFY_REQUEST_MAGIC  0x51524556u /* "VERQ" */
+#define AIMEE_DELEGATES_VERIFY_RESPONSE_MAGIC 0x53524556u /* "VERS" */
+#define AIMEE_DELEGATES_VERIFY_REQUEST_LEN    20u
+#define AIMEE_DELEGATES_VERIFY_RESPONSE_LEN   12u
+
+static inline int aimee_delegates_verify_request_encode(unsigned op, int a, int b,
+                                                        int max_signal_status, uint8_t *out,
+                                                        size_t cap)
+{
+   if (!out || cap < AIMEE_DELEGATES_VERIFY_REQUEST_LEN)
+      return -1;
+   memset(out, 0, AIMEE_DELEGATES_VERIFY_REQUEST_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_VERIFY_REQUEST_MAGIC);
+   out[4] = 1; /* wire version */
+   out[5] = (uint8_t)op;
+   aimee_delegates_put_u32(out + 8, (uint32_t)a);
+   aimee_delegates_put_u32(out + 12, (uint32_t)b);
+   aimee_delegates_put_u32(out + 16, (uint32_t)max_signal_status);
+   return 0;
+}
+
+/* --- Delegate-run economics (stage 8) --- */
+
+#define AIMEE_DELEGATES_EVENT_ECONOMICS          6664u
+#define AIMEE_DELEGATES_STAGE_ECONOMICS          8u
+#define AIMEE_DELEGATES_ECON_REQUEST_MAGIC       0x51434544u /* "DECQ" */
+#define AIMEE_DELEGATES_ECON_RESPONSE_MAGIC      0x53434544u /* "DECS" */
+#define AIMEE_DELEGATES_ECON_REQ_HEADER_LEN      16u
+#define AIMEE_DELEGATES_ECON_VERDICT_LEN         32u
+#define AIMEE_DELEGATES_ECON_ADVICE_LEN          256u
+#define AIMEE_DELEGATES_ECON_LABEL_LEN           64u
+#define AIMEE_DELEGATES_ECON_FIELD_COUNT         19u
+#define AIMEE_DELEGATES_ECON_RESPONSE_LEN                                                          \
+   (4u + AIMEE_DELEGATES_ECON_FIELD_COUNT * 4u + AIMEE_DELEGATES_ECON_VERDICT_LEN +                \
+    AIMEE_DELEGATES_ECON_ADVICE_LEN + 2u * AIMEE_DELEGATES_ECON_LABEL_LEN)
+#define AIMEE_DELEGATES_ECON_MAX_TASKS  4096u
+#define AIMEE_DELEGATES_ECON_MAX_AGENTS 4096u
+
+/* Start a request; tasks and agents are appended with the helpers below. */
+static inline size_t aimee_delegates_econ_request_begin(uint32_t task_count, uint32_t agent_count,
+                                                        uint8_t *out, size_t cap)
+{
+   if (!out || cap < AIMEE_DELEGATES_ECON_REQ_HEADER_LEN ||
+       task_count > AIMEE_DELEGATES_ECON_MAX_TASKS ||
+       agent_count > AIMEE_DELEGATES_ECON_MAX_AGENTS)
+      return 0;
+   memset(out, 0, AIMEE_DELEGATES_ECON_REQ_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_ECON_REQUEST_MAGIC);
+   out[4] = 1; /* wire version */
+   aimee_delegates_put_u32(out + 8, task_count);
+   aimee_delegates_put_u32(out + 12, agent_count);
+   return AIMEE_DELEGATES_ECON_REQ_HEADER_LEN;
+}
+
+static inline size_t aimee_delegates_econ_put_task(const char *status, const char *claimed_by,
+                                                   const char *files, const char *result,
+                                                   uint8_t *out, size_t at, size_t cap)
+{
+   size_t status_len = status ? strlen(status) : 0;
+   size_t claimed_len = claimed_by ? strlen(claimed_by) : 0;
+   size_t files_len = files ? strlen(files) : 0;
+   size_t result_len = result ? strlen(result) : 0;
+   if (!out || at == 0 || status_len > 0xffffu || claimed_len > 0xffffu ||
+       at + 12 + status_len + claimed_len + files_len + result_len > cap)
+      return 0;
+
+   out[at] = (uint8_t)(status_len & 0xffu);
+   out[at + 1] = (uint8_t)((status_len >> 8) & 0xffu);
+   out[at + 2] = (uint8_t)(claimed_len & 0xffu);
+   out[at + 3] = (uint8_t)((claimed_len >> 8) & 0xffu);
+   aimee_delegates_put_u32(out + at + 4, (uint32_t)files_len);
+   aimee_delegates_put_u32(out + at + 8, (uint32_t)result_len);
+   at += 12;
+   if (status_len)
+      memcpy(out + at, status, status_len);
+   at += status_len;
+   if (claimed_len)
+      memcpy(out + at, claimed_by, claimed_len);
+   at += claimed_len;
+   if (files_len)
+      memcpy(out + at, files, files_len);
+   at += files_len;
+   if (result_len)
+      memcpy(out + at, result, result_len);
+   return at + result_len;
+}
+
+static inline size_t aimee_delegates_econ_put_agent(const char *name, int tier, uint8_t *out,
+                                                    size_t at, size_t cap)
+{
+   size_t name_len = name ? strlen(name) : 0;
+   if (!out || at == 0 || name_len > 0xffffu || at + 2 + name_len + 4 > cap)
+      return 0;
+   out[at] = (uint8_t)(name_len & 0xffu);
+   out[at + 1] = (uint8_t)((name_len >> 8) & 0xffu);
+   at += 2;
+   if (name_len)
+      memcpy(out + at, name, name_len);
+   at += name_len;
+   aimee_delegates_put_u32(out + at, (uint32_t)tier);
+   return at + 4;
+}
+
+/* --- Patch coordination (stage 9) --- */
+
+#define AIMEE_DELEGATES_EVENT_PATCH          6665u
+#define AIMEE_DELEGATES_STAGE_PATCH          9u
+#define AIMEE_DELEGATES_PATCH_REQUEST_MAGIC  0x51435044u /* "DPCQ" */
+#define AIMEE_DELEGATES_PATCH_RESPONSE_MAGIC 0x53435044u /* "DPCS" */
+#define AIMEE_DELEGATES_PATCH_REQ_HEADER_LEN 16u
+#define AIMEE_DELEGATES_PATCH_STATE_LEN      32u
+#define AIMEE_DELEGATES_PATCH_NOTE_LEN       256u
+#define AIMEE_DELEGATES_PATCH_NEXTCMD_LEN    64u
+#define AIMEE_DELEGATES_PATCH_RUN_FIELDS     18u
+#define AIMEE_DELEGATES_PATCH_RESP_HEADER_LEN                                                      \
+   (4u + AIMEE_DELEGATES_PATCH_RUN_FIELDS * 4u + AIMEE_DELEGATES_PATCH_STATE_LEN +                 \
+    AIMEE_DELEGATES_PATCH_NEXTCMD_LEN)
+#define AIMEE_DELEGATES_PATCH_TASK_FIELDS 9u
+#define AIMEE_DELEGATES_PATCH_TASK_REC_LEN                                                         \
+   (AIMEE_DELEGATES_PATCH_TASK_FIELDS * 4u + AIMEE_DELEGATES_PATCH_STATE_LEN * 3u +                \
+    AIMEE_DELEGATES_PATCH_NOTE_LEN)
+#define AIMEE_DELEGATES_PATCH_MAX_TASKS 64u
+
+static inline size_t aimee_delegates_patch_request_begin(uint32_t task_count, uint8_t *out,
+                                                         size_t cap)
+{
+   if (!out || cap < AIMEE_DELEGATES_PATCH_REQ_HEADER_LEN ||
+       task_count > AIMEE_DELEGATES_PATCH_MAX_TASKS)
+      return 0;
+   memset(out, 0, AIMEE_DELEGATES_PATCH_REQ_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_PATCH_REQUEST_MAGIC);
+   out[4] = 1; /* wire version */
+   aimee_delegates_put_u32(out + 8, task_count);
+   return AIMEE_DELEGATES_PATCH_REQ_HEADER_LEN;
+}
+
+static inline size_t aimee_delegates_patch_put_task(int id, int step_id, const char *status,
+                                                    const char *error, const char *files,
+                                                    const char *result, uint8_t *out, size_t at,
+                                                    size_t cap)
+{
+   size_t status_len = status ? strlen(status) : 0;
+   size_t error_len = error ? strlen(error) : 0;
+   size_t files_len = files ? strlen(files) : 0;
+   size_t result_len = result ? strlen(result) : 0;
+   if (!out || at == 0 || status_len > 0xffffu || error_len > 0xffffu ||
+       at + 20 + status_len + error_len + files_len + result_len > cap)
+      return 0;
+
+   aimee_delegates_put_u32(out + at, (uint32_t)id);
+   aimee_delegates_put_u32(out + at + 4, (uint32_t)step_id);
+   out[at + 8] = (uint8_t)(status_len & 0xffu);
+   out[at + 9] = (uint8_t)((status_len >> 8) & 0xffu);
+   out[at + 10] = (uint8_t)(error_len & 0xffu);
+   out[at + 11] = (uint8_t)((error_len >> 8) & 0xffu);
+   aimee_delegates_put_u32(out + at + 12, (uint32_t)files_len);
+   aimee_delegates_put_u32(out + at + 16, (uint32_t)result_len);
+   at += 20;
+   if (status_len)
+      memcpy(out + at, status, status_len);
+   at += status_len;
+   if (error_len)
+      memcpy(out + at, error, error_len);
+   at += error_len;
+   if (files_len)
+      memcpy(out + at, files, files_len);
+   at += files_len;
+   if (result_len)
+      memcpy(out + at, result, result_len);
+   return at + result_len;
+}
+
+/* --- Role policy (stage 10) --- */
+
+#define AIMEE_DELEGATES_EVENT_ROLEPOL          6666u
+#define AIMEE_DELEGATES_STAGE_ROLEPOL          10u
+#define AIMEE_DELEGATES_ROLEPOL_REQUEST_MAGIC  0x514c5244u /* "DRLQ" */
+#define AIMEE_DELEGATES_ROLEPOL_RESPONSE_MAGIC 0x534c5244u /* "DRLS" */
+#define AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN    (16u + AIMEE_DELEGATES_ROLE_MAX + 1u)
+#define AIMEE_DELEGATES_ROLEPOL_RESPONSE_LEN   24u
+
+static inline int aimee_delegates_rolepol_request_encode(const char *role, int max_turns,
+                                                         int explicit_tools, uint8_t *out,
+                                                         size_t cap)
+{
+   size_t len = role ? strlen(role) : 0;
+   if (!out || cap < AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN || len > AIMEE_DELEGATES_ROLE_MAX)
+      return -1;
+   memset(out, 0, AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_ROLEPOL_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   out[5] = explicit_tools ? 1u : 0u;
+   aimee_delegates_put_u32(out + 8, (uint32_t)max_turns);
+   aimee_delegates_put_u32(out + 12, (uint32_t)len);
+   if (len)
+      memcpy(out + 16, role, len);
+   return 0;
+}
+
 #endif

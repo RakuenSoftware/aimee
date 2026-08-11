@@ -16,8 +16,10 @@
  *
  * Container detection:
  *   Checks /.dockerenv, /run/.containerenv, and /proc/1/cgroup for container
- *   markers.  When detected, sandbox_available() returns 0 because nested user
- *   namespaces are often blocked by the outer container's seccomp policy.
+ *   markers.  Detection is DIAGNOSTIC, not a verdict: nested user namespaces work
+ *   inside many containers, so availability is decided by actually attempting
+ *   unshare(CLONE_NEWUSER).  Container-ness only shapes the reason string when that
+ *   real probe fails, so the message points at the container rather than the kernel.
  */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -60,6 +62,20 @@ static int (*g_sbx_avail_override)(const char **) = NULL;
 void sandbox_set_available_override_for_test(int (*fn)(const char **reason))
 {
    g_sbx_avail_override = fn;
+}
+
+/* Test-only effective-mode override; <0 means "no override" (production). */
+static int g_sbx_mode_override = -1;
+void sandbox_set_mode_override_for_test(int mode)
+{
+   g_sbx_mode_override = mode;
+}
+
+int sandbox_effective_mode(const sandbox_config_t *cfg)
+{
+   if (g_sbx_mode_override >= 0)
+      return g_sbx_mode_override;
+   return cfg ? (int)cfg->mode : SANDBOX_MODE_OFF;
 }
 
 /* Characters allowed in a bare program path we are willing to surface verbatim.
@@ -207,12 +223,19 @@ int sandbox_available(const char **reason)
       *reason = "Linux namespaces not available on this platform";
    return 0;
 #else
-   if (sandbox_detect_container())
-   {
-      if (reason)
-         *reason = "running inside a container — nested namespaces may be blocked";
-      return 0;
-   }
+   /* Being in a container is NOT a verdict. Nested user namespaces work inside many
+    * containers, and this function already ends with an authoritative test: fork a
+    * child and actually call unshare(CLONE_NEWUSER). Returning early on detection made
+    * that test dead code in precisely the deployments that need it — aimee-server ships
+    * as a container, so every co-located delegate shell was refused ("sandbox fallback
+    * could not start") on a capability that was never measured, only inferred from
+    * /.dockerenv.
+    *
+    * Container-ness is kept as DIAGNOSIS: when the real probe below fails, saying so in
+    * container terms points at the right fix (grant the container the capability) rather
+    * than at the kernel. Fail-closed is unchanged — an environment that genuinely cannot
+    * create a user namespace still reports unavailable. */
+   const int in_container = sandbox_detect_container();
 
    /* Probe whether unprivileged user namespaces are permitted.
     * The kernel sysctl /proc/sys/kernel/unprivileged_userns_clone (Debian/Ubuntu)
@@ -227,8 +250,10 @@ int sandbox_available(const char **reason)
          if (rc == 1 && val == 0)
          {
             if (reason)
-               *reason = "unprivileged user namespaces disabled "
-                         "(kernel.unprivileged_userns_clone=0)";
+               *reason = in_container ? "unprivileged user namespaces disabled in this container "
+                                        "(kernel.unprivileged_userns_clone=0)"
+                                      : "unprivileged user namespaces disabled "
+                                        "(kernel.unprivileged_userns_clone=0)";
             return 0;
          }
       }
@@ -255,8 +280,11 @@ int sandbox_available(const char **reason)
    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
    {
       if (reason)
-         *reason = "unshare(CLONE_NEWUSER) failed — kernel may not support "
-                   "unprivileged user namespaces";
+         *reason = in_container ? "unshare(CLONE_NEWUSER) failed inside this container — grant it "
+                                  "unprivileged user namespaces (or run delegates in their own "
+                                  "container) to enable isolated execution"
+                                : "unshare(CLONE_NEWUSER) failed — kernel may not support "
+                                  "unprivileged user namespaces";
       return 0;
    }
 
@@ -787,11 +815,27 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
 
    if (pipe(g_sync_pipe) != 0)
       return -1;
+   /* Child -> parent readiness. setup_userns_maps() writes /proc/<pid>/uid_map, which
+    * is only permitted once the child is actually IN its new user namespace. g_sync_pipe
+    * only signals parent -> child ("maps written"), so without this second pipe the
+    * parent raced the child's unshare() and — winning that race — wrote uid_map while
+    * the child was still in the initial userns. That fails EPERM, so sandbox_exec
+    * returned -1 and every sandboxed command reported a bare "fork failed". The bug was
+    * invisible while sandbox.mode defaulted to OFF, because this path never ran. */
+   int ready_pipe[2] = {-1, -1};
+   if (pipe(ready_pipe) != 0)
+   {
+      close(g_sync_pipe[0]);
+      close(g_sync_pipe[1]);
+      return -1;
+   }
    int setup_pipe[2] = {-1, -1};
    if (require_isolation && pipe(setup_pipe) != 0)
    {
       close(g_sync_pipe[0]);
       close(g_sync_pipe[1]);
+      close(ready_pipe[0]);
+      close(ready_pipe[1]);
       return -1;
    }
 
@@ -811,6 +855,8 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
    {
       close(g_sync_pipe[0]);
       close(g_sync_pipe[1]);
+      close(ready_pipe[0]);
+      close(ready_pipe[1]);
       if (setup_pipe[0] >= 0)
          close(setup_pipe[0]);
       if (setup_pipe[1] >= 0)
@@ -823,12 +869,19 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
       /* Child — wait for uid/gid map to be written before doing anything */
       close(g_sync_pipe[1]);
       g_sync_pipe[1] = -1;
+      close(ready_pipe[0]);
       if (setup_pipe[0] >= 0)
          close(setup_pipe[0]);
 
       /* Enter user namespace */
       if (unshare(clone_flags & ~SIGCHLD) != 0)
       {
+         /* Report the FAILURE to the parent so it skips the map write (there is no
+          * new userns to map) and releases us, instead of blocking on a readiness
+          * byte that never comes. */
+         char unshared = '0';
+         (void)write(ready_pipe[1], &unshared, 1);
+         close(ready_pipe[1]);
          sync_child_wait();
          if (require_isolation)
          {
@@ -843,6 +896,14 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
             chdir(workspace);
          execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
          _exit(127);
+      }
+
+      /* We are now IN the new user namespace — tell the parent it is safe to write
+       * our uid/gid maps, then wait for it to finish. */
+      {
+         char unshared = '1';
+         (void)write(ready_pipe[1], &unshared, 1);
+         close(ready_pipe[1]);
       }
 
       sync_child_wait();
@@ -879,10 +940,25 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
    /* Parent: write uid/gid maps then signal child */
    close(g_sync_pipe[0]);
    g_sync_pipe[0] = -1;
+   close(ready_pipe[1]);
    if (setup_pipe[1] >= 0)
       close(setup_pipe[1]);
 
-   if (setup_userns_maps(pid) != 0)
+   /* Block until the child reports whether it entered the new user namespace.
+    * Writing uid_map before unshare() has taken effect fails EPERM — that race is
+    * what made every sandboxed command report "fork failed". A short read (child
+    * died) is treated as "did not unshare". */
+   char child_unshared = '0';
+   {
+      ssize_t rn = read(ready_pipe[0], &child_unshared, 1);
+      close(ready_pipe[0]);
+      if (rn != 1)
+         child_unshared = '0';
+   }
+
+   /* No new userns means there are no maps to write; skipping the write lets the
+    * child's own non-namespaced fallback proceed instead of failing the exec. */
+   if (child_unshared == '1' && setup_userns_maps(pid) != 0)
    {
       /* Maps failed — signal child anyway so it doesn't hang, then reap */
       sync_parent_signal();

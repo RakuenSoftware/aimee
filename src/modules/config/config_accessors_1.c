@@ -179,6 +179,13 @@ int config_compact_threshold(void)
    return v;
 }
 
+int config_compact_from_record(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, compact_from_record), sizeof(v), &v);
+   return v;
+}
+
 int config_compact_head_bytes(void)
 {
    int v = 0;
@@ -274,6 +281,13 @@ int config_fold_recall_enabled(void)
 {
    int v = 0;
    config_field_read(offsetof(config_t, fold_recall_enabled), sizeof(v), &v);
+   return v;
+}
+
+int config_fold_recall_inject(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, fold_recall_inject), sizeof(v), &v);
    return v;
 }
 
