@@ -1183,9 +1183,10 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
 
    int tok = agent_request_max_tokens(agent, max_tokens);
 
-   /* AGGRESSIVE may apply the existing lossy reducer to OpenAI-family request
-    * history. SAFE never enters this path. Anthropic-backed routes remain
-    * untouched to preserve their cache prefix. */
+   /* AGGRESSIVE may apply the existing lossy reducer to request history. SAFE
+    * never enters this path. Anthropic-backed routes are no longer excluded: the
+    * gateway's per-session freeze keeps a folded prefix byte-identical, which is
+    * what their cache prefix actually requires. */
    gw_mutate_ctx_t gwmc;
    gw_mutate_ctx_init(&gwmc);
    cJSON *mbox = NULL;
