@@ -1099,7 +1099,7 @@
         },
         {
           "path": "src/headers/server.h",
-          "sha256": "7fc9eb39956e99ec1790e4c2b3b4bbede40d4dd949e15752ef0cc7998a2bcc45"
+          "sha256": "444491cacc15dbb153c9137918dab4216dfca029ebb1559a5efc80d108bf47ac"
         },
         {
           "path": "src/headers/server_cli_oauth.h",
@@ -1616,7 +1616,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "cb8d83a1847dbfee2f51a19d33fc6b692055d825c4d5b71379e9a075d1ea2f74",
+      "sha256": "58a2e27e8034f2454185673eed1743591c54da8dd08af8466c6a2168dd8c3cd2",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
