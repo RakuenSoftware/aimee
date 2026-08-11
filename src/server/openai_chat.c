@@ -28,6 +28,7 @@
 #include "openai_responses_store.h"             /* previous_response_id continuation store */
 #include "openai_runs_store.h"                  /* GET /v1/runs/{id} record store */
 #include "aimee.h" /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
+#include "log.h"   /* LOG_WARN: name the provider's error instead of discarding it */
 #include "aimee_errors.h"
 #include "config.h" /* config_t, config_load */
 #include "agent_config.h"
@@ -1192,6 +1193,18 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
 
    if (http_status != 200 || !response_body)
    {
+      /* Say WHAT the provider said. This path reports a single generic
+       * "upstream model request failed" to the client, which is all a Codex user
+       * ever sees -- and the buffered /v1/responses handler on the SAME agent and
+       * the SAME url succeeds, so "the provider is down" is not the explanation
+       * and the difference is in this request. Discarding the body here meant the
+       * only way to find out was to read the source and guess.
+       *
+       * Truncated because a provider error can carry an HTML error page. */
+      LOG_WARN("openai.responses",
+               "streaming upstream failed: status=%d provider=%s model=%s url=%s body=%.400s",
+               http_status, agent->provider ? agent->provider : "?",
+               agent->model ? agent->model : "?", url, response_body ? response_body : "(none)");
       free(response_body);
       return -1;
    }
