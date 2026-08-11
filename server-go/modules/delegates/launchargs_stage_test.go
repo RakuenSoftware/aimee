@@ -30,7 +30,7 @@ func encodeLaunchArgs(req launchArgsRequest) []byte {
 	put(req.ParentSocketHost)
 	put(req.ParentSocketTarget)
 	put(req.EgressProxy)
-	put(req.ContainerName)
+	put(req.TaskID)
 	put(req.Image)
 	put(req.WorkDir)
 	put(req.MountTable)
@@ -40,7 +40,7 @@ func encodeLaunchArgs(req launchArgsRequest) []byte {
 	return out
 }
 
-func decodeLaunchArgs(t *testing.T, response []byte) []string {
+func decodeLaunchArgs(t *testing.T, response []byte) (string, []string) {
 	t.Helper()
 	if len(response) < 8 {
 		t.Fatalf("response is %d bytes", len(response))
@@ -48,9 +48,12 @@ func decodeLaunchArgs(t *testing.T, response []byte) []string {
 	if binary.LittleEndian.Uint32(response[0:4]) != launchArgsResponseMagic {
 		t.Fatal("wrong response magic")
 	}
-	count := int(binary.LittleEndian.Uint32(response[4:8]))
+	nameLen := int(binary.LittleEndian.Uint32(response[4:8]))
+	name := string(response[8 : 8+nameLen])
+	at := 8 + nameLen
+	count := int(binary.LittleEndian.Uint32(response[at : at+4]))
+	at += 4
 	args := make([]string, 0, count)
-	at := 8
 	for i := 0; i < count; i++ {
 		n := int(binary.LittleEndian.Uint32(response[at : at+4]))
 		at += 4
@@ -60,16 +63,23 @@ func decodeLaunchArgs(t *testing.T, response []byte) []string {
 	if at != len(response) {
 		t.Fatalf("decoded %d of %d bytes", at, len(response))
 	}
-	return args
+	return name, args
 }
 
 func callLaunchArgs(t *testing.T, req launchArgsRequest) ([]string, bus.ModuleStatus) {
 	t.Helper()
+	_, args, status := callLaunchArgsNamed(t, req)
+	return args, status
+}
+
+func callLaunchArgsNamed(t *testing.T, req launchArgsRequest) (string, []string, bus.ModuleStatus) {
+	t.Helper()
 	response, status := Handle(bus.ModuleInvocation{StageID: StageLaunchArgs}, encodeLaunchArgs(req))
 	if status != bus.ModuleStatusOK {
-		return nil, status
+		return "", nil, status
 	}
-	return decodeLaunchArgs(t, response), status
+	name, args := decodeLaunchArgs(t, response)
+	return name, args, status
 }
 
 func writeRequest() launchArgsRequest {
@@ -81,7 +91,7 @@ func writeRequest() launchArgsRequest {
 		IsGitCheckout:      true,
 		ParentSocketHost:   "/run/aimee/aimee.sock",
 		ParentSocketTarget: "/run/aimee.sock",
-		ContainerName:      "aimee-d1",
+		TaskID:             "d1",
 		Image:              "ubuntu:22.04",
 		WorkDir:            "/repo/.aimee/worktrees/d1",
 	}
@@ -171,7 +181,7 @@ func TestLaunchArgsRefusesUnsafeRequests(t *testing.T) {
 		"not a git checkout":   func(r *launchArgsRequest) { r.IsGitCheckout = false },
 		"relative worktree":    func(r *launchArgsRequest) { r.Worktree = "relative/path" },
 		"empty worktree":       func(r *launchArgsRequest) { r.Worktree = "" },
-		"no container name":    func(r *launchArgsRequest) { r.ContainerName = "" },
+		"no task id":           func(r *launchArgsRequest) { r.TaskID = "" },
 		"bad image reference":  func(r *launchArgsRequest) { r.Image = "ubuntu:22.04; rm -rf /" },
 		"relative socket host": func(r *launchArgsRequest) { r.ParentSocketHost = "sock" },
 	}
