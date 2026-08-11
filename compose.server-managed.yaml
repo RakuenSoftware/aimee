@@ -61,6 +61,15 @@ services:
       # Vault by scripts/aimee-compose-vault-bootstrap.sh before `up`; never add
       # them to this long-lived service's persistent container environment.
       AIMEE_RUNTIME_WEB_ENABLED: ${AIMEE_RUNTIME_WEB_ENABLED:-1}
+      # Optional modules the operator can start (optional-modules-lib.sh). The
+      # entrypoint reads these from the PROCESS environment, so a var that is not
+      # forwarded here cannot be set at all — the documented knob reaches the
+      # binary from nowhere and setting it appears to do nothing.
+      #
+      # Empty default means "keep the image default", which for both of these is
+      # off, so adding them changes no existing deployment.
+      AIMEE_MODULE_ECONOMIZER: ${AIMEE_MODULE_ECONOMIZER:-}
+      AIMEE_MODULE_ROUNDTABLE: ${AIMEE_MODULE_ROUNDTABLE:-}
       # Reach the managed kb by name on the shared network once it is up.
       AIMEE_KB_API_URL: http://aimee-kb:8741
       # Per-user remote-write identity. These stay empty on a read-only install,
