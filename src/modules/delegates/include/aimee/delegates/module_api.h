@@ -516,4 +516,198 @@ static inline int aimee_delegates_rolepol_request_encode(const char *role, int m
    return 0;
 }
 
+/* --- Launch args (stage 12): the command that creates a delegate container ---
+ *
+ * The module decides the container's shape and its name together and returns
+ * the argv. Nothing here re-derives either: past the argv every guarantee is
+ * just a flag, and a missing flag is a delegate with a network. */
+
+#define AIMEE_DELEGATES_EVENT_LAUNCH          6668u
+#define AIMEE_DELEGATES_STAGE_LAUNCH          12u
+#define AIMEE_DELEGATES_LAUNCH_REQUEST_MAGIC  0x514c4144u /* "DALQ" */
+#define AIMEE_DELEGATES_LAUNCH_RESPONSE_MAGIC 0x534c4144u /* "DALS" */
+#define AIMEE_DELEGATES_LAUNCH_HEADER_LEN     16u
+#define AIMEE_DELEGATES_LAUNCH_FLAG_GIT       1u /* the worktree is a git checkout */
+#define AIMEE_DELEGATES_LAUNCH_FLAG_WRITES    2u /* this delegate may write it */
+
+/* The caller's facts. Every path is the HOST's; the module translates bind
+ * sources into the daemon namespace itself, given `mount_table`. */
+typedef struct
+{
+   int writes_allowed;  /* the CALLER's composed answer, not the role default */
+   int is_git_checkout; /* the caller stat'd it; the module does not touch disk */
+   const char *repo_root;
+   const char *worktree;
+   const char *gitdir;
+   const char *parent_socket_host;   /* the one outward channel, host side */
+   const char *parent_socket_target; /* ...and where it appears inside */
+   const char *egress_proxy;
+   const char *task_id;
+   const char *image;
+   const char *workdir;
+   const char *mount_table; /* "<dest>\t<source>" per line, or NULL */
+   const char *run_as_user; /* "<uid>:<gid>", or NULL to keep the image's */
+   /* A delegate with NO repository: a directory aimee made for it. Mutually
+    * exclusive with the repository fields above -- the module refuses both. */
+   const char *scratch_dir;
+   const char *scratch_target;
+   const char *const *command; /* NULL-terminated, or NULL for the image's */
+} aimee_delegates_launch_spec_t;
+
+static inline size_t aimee_delegates_launch_field(uint8_t *out, size_t cap, size_t at,
+                                                  const char *value)
+{
+   size_t len = value ? strlen(value) : 0;
+   if (at + 4 + len > cap)
+      return 0;
+   aimee_delegates_put_u32(out + at, (uint32_t)len);
+   if (len)
+      memcpy(out + at + 4, value, len);
+   return at + 4 + len;
+}
+
+/* Returns the encoded length, or 0 when it does not fit. The field ORDER is the
+ * wire contract and must match the module's decoder exactly. */
+static inline size_t aimee_delegates_launch_request_encode(
+    const aimee_delegates_launch_spec_t *spec, uint8_t *out, size_t cap)
+{
+   if (!spec || !out || cap < AIMEE_DELEGATES_LAUNCH_HEADER_LEN)
+      return 0;
+   uint32_t argc = 0;
+   if (spec->command)
+      while (spec->command[argc])
+         argc++;
+
+   memset(out, 0, AIMEE_DELEGATES_LAUNCH_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_LAUNCH_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   out[5] = (uint8_t)((spec->is_git_checkout ? AIMEE_DELEGATES_LAUNCH_FLAG_GIT : 0u) |
+                      (spec->writes_allowed ? AIMEE_DELEGATES_LAUNCH_FLAG_WRITES : 0u));
+   aimee_delegates_put_u32(out + 8, argc);
+
+   size_t at = AIMEE_DELEGATES_LAUNCH_HEADER_LEN;
+   const char *fields[] = {spec->repo_root,           spec->worktree,
+                           spec->gitdir,              spec->parent_socket_host,
+                           spec->parent_socket_target, spec->egress_proxy,
+                           spec->task_id,             spec->image,
+                           spec->workdir,             spec->mount_table,
+                           spec->run_as_user,         spec->scratch_dir,
+                           spec->scratch_target};
+   for (unsigned i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
+   {
+      at = aimee_delegates_launch_field(out, cap, at, fields[i]);
+      if (at == 0)
+         return 0;
+   }
+   for (uint32_t i = 0; i < argc; i++)
+   {
+      at = aimee_delegates_launch_field(out, cap, at, spec->command[i]);
+      if (at == 0)
+         return 0;
+   }
+   return at;
+}
+
+/* Decode the container name and argv. `argv_out` receives pointers INTO `in`,
+ * so it stays valid only while the response buffer does — no allocation, and
+ * nothing to free. Returns the argument count, or -1. */
+static inline int aimee_delegates_launch_response_decode(const uint8_t *in, size_t len,
+                                                         char *name_out, size_t name_cap,
+                                                         const char **argv_out, size_t argv_cap,
+                                                         size_t *arg_len_out)
+{
+   if (!in || len < 8 || !name_out || name_cap == 0 || !argv_out || !arg_len_out ||
+       aimee_delegates_get_u32(in) != AIMEE_DELEGATES_LAUNCH_RESPONSE_MAGIC)
+      return -1;
+   size_t name_len = aimee_delegates_get_u32(in + 4);
+   if (8 + name_len + 4 > len || name_len >= name_cap)
+      return -1;
+   memcpy(name_out, in + 8, name_len);
+   name_out[name_len] = '\0';
+
+   size_t at = 8 + name_len;
+   size_t argc = aimee_delegates_get_u32(in + at);
+   at += 4;
+   if (argc > argv_cap)
+      return -1;
+   for (size_t i = 0; i < argc; i++)
+   {
+      if (at + 4 > len)
+         return -1;
+      size_t n = aimee_delegates_get_u32(in + at);
+      at += 4;
+      if (at + n > len)
+         return -1;
+      argv_out[i] = (const char *)(in + at);
+      arg_len_out[i] = n;
+      at += n;
+   }
+   if (at != len)
+      return -1;
+   return (int)argc;
+}
+
+/* --- Image spec (stage 13): the Dockerfile a sandbox is built from, and the
+ * tag that names it ---
+ *
+ * Both together, because they are one decision: the tag is a hash OF the text.
+ * Computing them apart is how an image gets built under a name describing
+ * different content, which defeats the reuse the content tag exists for. */
+
+#define AIMEE_DELEGATES_EVENT_IMGSPEC          6669u
+#define AIMEE_DELEGATES_STAGE_IMGSPEC          13u
+#define AIMEE_DELEGATES_IMGSPEC_REQUEST_MAGIC  0x51494d44u /* "DMIQ" */
+#define AIMEE_DELEGATES_IMGSPEC_RESPONSE_MAGIC 0x53494d44u /* "DMIS" */
+#define AIMEE_DELEGATES_IMGSPEC_HEADER_LEN     16u
+#define AIMEE_DELEGATES_IMGSPEC_MAX_PACKAGES   512u
+
+/* Returns the encoded length, or 0 when it does not fit. */
+static inline size_t aimee_delegates_imgspec_request_encode(const char *base,
+                                                            const char *const *pkgs, int npkgs,
+                                                            const char *verbatim, uint8_t *out,
+                                                            size_t cap)
+{
+   if (!out || cap < AIMEE_DELEGATES_IMGSPEC_HEADER_LEN || npkgs < 0 ||
+       (unsigned)npkgs > AIMEE_DELEGATES_IMGSPEC_MAX_PACKAGES)
+      return 0;
+   memset(out, 0, AIMEE_DELEGATES_IMGSPEC_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_IMGSPEC_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   aimee_delegates_put_u32(out + 8, (uint32_t)npkgs);
+
+   size_t at = aimee_delegates_launch_field(out, cap, AIMEE_DELEGATES_IMGSPEC_HEADER_LEN, base);
+   if (at == 0)
+      return 0;
+   for (int i = 0; i < npkgs; i++)
+   {
+      at = aimee_delegates_launch_field(out, cap, at, pkgs ? pkgs[i] : NULL);
+      if (at == 0)
+         return 0;
+   }
+   /* An operator-committed Dockerfile, carried whole. Mutually exclusive with
+    * base+packages: the module refuses a request that supplies both. */
+   return aimee_delegates_launch_field(out, cap, at, verbatim);
+}
+
+/* Both outputs are NUL-terminated. Returns 0, or -1 (including when either
+ * would be truncated -- a truncated Dockerfile builds a DIFFERENT image than
+ * the tag names, and a truncated tag collides two images onto one name). */
+static inline int aimee_delegates_imgspec_response_decode(const uint8_t *in, size_t len, char *tag,
+                                                          size_t tag_cap, char *dockerfile,
+                                                          size_t df_cap)
+{
+   if (!in || len < 12 || !tag || !tag_cap || !dockerfile || !df_cap ||
+       aimee_delegates_get_u32(in) != AIMEE_DELEGATES_IMGSPEC_RESPONSE_MAGIC)
+      return -1;
+   size_t tag_len = aimee_delegates_get_u32(in + 4);
+   size_t df_len = aimee_delegates_get_u32(in + 8);
+   if (12 + tag_len + df_len != len || tag_len >= tag_cap || df_len >= df_cap)
+      return -1;
+   memcpy(tag, in + 12, tag_len);
+   tag[tag_len] = '\0';
+   memcpy(dockerfile, in + 12 + tag_len, df_len);
+   dockerfile[df_len] = '\0';
+   return 0;
+}
+
 #endif

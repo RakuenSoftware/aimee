@@ -198,7 +198,6 @@ FLAT_ROOT_REACH = {
     ("src/modules/delegates/delegate_sandbox_image.c", "guardrails/guardrails.h"),
     ("src/modules/delegates/delegate_sandbox_image.c", "sandbox/sandbox_learned.h"),
     ("src/modules/delegates/include/aimee/delegates/panel_provider.h", "roundtable/roundtable_types.h"),
-    ("src/modules/execution-policy/execution_policy.c", "economizer/coord_closet.h"),
     ("src/modules/execution-policy/execution_policy.c", "kb_client/kb_client.h"),
     ("src/modules/git/git_ssh_agent.c", "webuser/webuser_runtime.h"),
     ("src/modules/git/git_verify_ops.c", "guardrails/guardrails.h"),

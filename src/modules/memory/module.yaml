@@ -46,6 +46,7 @@
     "src/modules/memory/module_adapter.c"
   ],
   "go_sources": [
+    "server-go/modules/memory/commands.go",
     "server-go/modules/memory/embed.go",
     "server-go/modules/memory/extract.go",
     "server-go/modules/memory/memory.go",
@@ -54,6 +55,7 @@
     "server-go/modules/memory/pii.go"
   ],
   "go_tests": [
+    "server-go/modules/memory/commands_test.go",
     "server-go/modules/memory/embed_test.go",
     "server-go/modules/memory/extract_conformance_test.go",
     "server-go/modules/memory/gate_conformance_test.go",

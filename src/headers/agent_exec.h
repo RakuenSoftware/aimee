@@ -243,10 +243,6 @@ void agent_write_metrics(void);
 void agent_introspect_env(void);
 void agent_write_manifest(const char *run_id, const agent_result_t *result, const char *role);
 char *agent_load_project_contract(const char *project_root);
-/* Compact a raw tool result string using application config.
- * tool_name may be NULL to skip per-tool overrides. Returns a heap-allocated
- * string bounded by AGENT_TOOL_OUTPUT_MAX; caller must free(). */
-char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *tool_name);
 
 /* Pure clamp half of agent_tool_output_cap(): map a configured
  * tool_output_max_bytes value to an effective per-result cap. 0/negative ->
@@ -373,7 +369,7 @@ int agent_http_get(const char *url, const char *extra_headers, char **response_b
  * Authorization header. Only the caller knows which of its headers are
  * host-bound, so the caller issues the second request itself. */
 int agent_http_get_location(const char *url, const char *extra_headers, char *location,
-                           size_t location_cap, char **response_buf, int timeout_ms);
+                            size_t location_cap, char **response_buf, int timeout_ms);
 /* SSRF-safe GET: connect to the caller-validated numeric `pinned_ip` (no DNS
  * re-resolution) with Host/SNI still taken from the URL host. */
 int agent_http_get_pinned(const char *url, const char *pinned_ip, const char *extra_headers,

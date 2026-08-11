@@ -40,8 +40,15 @@ void server_error_kind_register_http_status_provider(server_error_http_status_pr
  * Use the SERVER_ERR_* constants from server.h. If the event-bus provider is
  * unavailable or returns invalid data, the envelope omits `http_status` and the
  * web boundary treats it as a generic transport failure. */
-int server_send_error_kind(server_conn_t *conn, const char *kind, const char *message,
-                           const char *request_id)
+/* The typed error as a VALUE, so a command can return one instead of writing it.
+ *
+ * Split out for the command-table port: the RPC handlers write errors to a
+ * connection, but every other surface needs a result. jo_err is NOT a substitute
+ * -- it carries only {status, message}, so a mechanical split through it would
+ * silently drop `kind` and the derived `http_status`, turning a typed
+ * NOT_FOUND/INVALID_ARGUMENT into an untyped failure that clients cannot branch
+ * on. Building both forms from one function is what keeps the two identical. */
+cJSON *server_error_kind_json(const char *kind, const char *message, const char *request_id)
 {
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "error");
@@ -54,5 +61,11 @@ int server_send_error_kind(server_conn_t *conn, const char *kind, const char *me
       cJSON_AddNumberToObject(resp, "http_status", (double)http_status);
    if (request_id)
       cJSON_AddStringToObject(resp, "request_id", request_id);
-   return server_send_ok(conn, resp);
+   return resp;
+}
+
+int server_send_error_kind(server_conn_t *conn, const char *kind, const char *message,
+                           const char *request_id)
+{
+   return server_send_ok(conn, server_error_kind_json(kind, message, request_id));
 }

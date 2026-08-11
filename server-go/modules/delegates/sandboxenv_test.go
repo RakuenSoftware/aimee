@@ -169,3 +169,51 @@ func TestDockerArgsOmitsUserWhenUnset(t *testing.T) {
 		}
 	}
 }
+
+// The control socket's source is resolved by the caller inspecting its OWN
+// container, which is better information than the mount table and available for
+// that path alone. Translating it again would re-map an already-host path and
+// point the delegate's only outward channel at a directory docker would then
+// silently create -- an empty dir where the socket should be.
+func TestControlSocketIsNotTranslatedTwice(t *testing.T) {
+	spec, err := BuildSandboxSpec(SandboxRequest{
+		WritesAllowed:      true,
+		RepoRoot:           "/repo",
+		Worktree:           "/repo",
+		IsGitCheckout:      true,
+		ParentSocketHost:   "/host/run/aimee-http.sock",
+		ParentSocketTarget: "/run/aimee.sock",
+	})
+	if err != nil {
+		t.Fatalf("BuildSandboxSpec: %v", err)
+	}
+
+	// A table that WOULD rewrite the socket source if it were applied to it.
+	args, err := DockerCreateArgs(DockerCreateRequest{
+		Spec: spec, ContainerName: "c1", Image: "ubuntu:22.04",
+		MountTable: "/host\t/elsewhere\n/repo\t/host/checkout",
+	})
+	if err != nil {
+		t.Fatalf("DockerCreateArgs: %v", err)
+	}
+
+	var sawSocket, sawWorkspace bool
+	for _, a := range args {
+		if a == "/host/run/aimee-http.sock:/run/aimee.sock" {
+			sawSocket = true
+		}
+		if a == "/elsewhere/run/aimee-http.sock:/run/aimee.sock" {
+			t.Error("the control socket source was translated a second time")
+		}
+		if a == "/host/checkout:/repo" {
+			sawWorkspace = true
+		}
+	}
+	if !sawSocket {
+		t.Errorf("the socket bind is missing or altered: %v", args)
+	}
+	// ...and the workspace IS still translated, so the exemption stays narrow.
+	if !sawWorkspace {
+		t.Errorf("the workspace source was not translated: %v", args)
+	}
+}

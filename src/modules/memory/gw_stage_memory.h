@@ -37,6 +37,18 @@ extern "C"
     * raw sidecar directly), so Arm A's parity-skip is structurally satisfied here. */
    int ir_stage_memory(aimee_request_t *ir, void *ud);
 
+   /* True when the model has not spoken yet in this conversation -- the opening
+    * turn, and again after a compaction (a carried-over summary holds no assistant
+    * turn). The one definition of "session start" shared by the stages below. */
+   int ir_session_start(const aimee_request_t *ir);
+
+   /* Withhold Codex's shell tools for the opening turn only, so the first look at
+    * a tree goes through aimee's symbol-scoped tools instead of grep. Returns >0
+    * when it removed something. apply_patch/update_plan are untouched, and from
+    * the second turn the shell is back unconditionally. Naming the tools in the
+    * guidance was measured NOT to be enough on its own. */
+   int ir_stage_first_turn_shell_block(aimee_request_t *ir, void *ud);
+
    /* Adapter for the legacy OpenAI text handlers (/v1/chat/completions,
     * /v1/completions, and the buffered/streaming chat paths) that pass the
     * envelope to agent_execute() as the system prompt. Routes `query` through

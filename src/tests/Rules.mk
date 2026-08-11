@@ -655,6 +655,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-http-servers-health \
                $(TESTPREFIX)/unit-test-kb-management-action \
                $(TESTPREFIX)/unit-test-aws-eventstream
+TEST_TARGETS += $(TESTPREFIX)/unit-test-command-registry
 TEST_TARGETS += $(TESTPREFIX)/unit-test-config-accessors
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-status-custody \
                 $(TESTPREFIX)/unit-test-management-status-key-ctx \
@@ -1474,7 +1475,8 @@ $(TESTPREFIX)/unit-test-sandbox-pkg-proxy: $(OBJDIR)/tests/test_sandbox_pkg_prox
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-sandbox-image: $(OBJDIR)/tests/test_delegate_sandbox_image.o \
-                      $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o \
+                      $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/delegates/delegate_launch_args.o \
+                      $(OBJDIR)/modules/delegates/delegate_launch_args.o \
                       $(OBJDIR)/modules/guardrails/guardrails_tdd.o \
                       $(OBJDIR)/harness_memory_common.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1759,7 +1761,7 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server/provider_settable.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
 	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o \
 	$(OBJDIR)/db1/wfe_binding.o $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_enforce.o \
-                      $(OBJDIR)/harness_memory_common.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o \
+                      $(OBJDIR)/harness_memory_common.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/delegates/delegate_launch_args.o \
                       $(OBJDIR)/modules/memory/memory_redirect.o $(OBJDIR)/harness_memory_scope.o $(OBJDIR)/harness_memory_audit.o \
                       $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
 	                                $(OBJDIR)/server/server_config.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_accessors_0.o $(OBJDIR)/modules/config/config_accessors_1.o $(OBJDIR)/modules/config/config_accessors_2.o $(OBJDIR)/modules/config/config_accessors_3.o $(OBJDIR)/modules/config/config_accessors_4.o $(OBJDIR)/modules/config/config_accessors_5.o $(OBJDIR)/modules/config/config_accessors_6.o $(OBJDIR)/modules/config/config_accessors_7.o \
@@ -1854,7 +1856,7 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
                                $(OBJDIR)/aimee_home.o \
                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                $(OBJDIR)/platform_random.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o $(OBJDIR)/server/presence.o $(OBJDIR)/server/turn_registry.o $(OBJDIR)/tests/support/agent_cancel_stub.o $(OBJDIR)/delivery_target.o \
-                               $(OBJDIR)/modules/workspace/workspace_turn.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o $(OBJDIR)/harness_memory_common.o $(OBJDIR)/modules/workspace/workspace_provider_container.o $(OBJDIR)/modules/delegates/delegate_backend.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/workspace/workspace_provider_detached.o \
+                               $(OBJDIR)/modules/workspace/workspace_turn.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o $(OBJDIR)/harness_memory_common.o $(OBJDIR)/modules/workspace/workspace_provider_container.o $(OBJDIR)/modules/delegates/delegate_backend.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/workspace/workspace_provider_detached.o $(OBJDIR)/modules/delegates/delegate_launch_args.o \
                                $(OBJDIR)/modules/workspace/workspace_runner_registry.o $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
                                $(OBJDIR)/modules/workspace/workspace_mirror.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o \
 	                               $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/json_fluent.o \
@@ -5452,6 +5454,17 @@ $(TESTPREFIX)/unit-test-openai-chat-policed: $(OBJDIR)/tests/test_openai_chat_po
                            $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
+$(TESTPREFIX)/unit-test-command-registry: $(OBJDIR)/tests/test_command_registry.o \
+                           $(OBJDIR)/command_registry.o $(OBJDIR)/log.o $(OBJDIR)/dstr.o \
+                           $(OBJDIR)/modules/protocols/mcp/mcp_group_tool.o \
+                           $(OBJDIR)/modules/protocols/mcp/mcp_tools.o \
+                           $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o \
+                           $(OBJDIR)/modules/protocols/mcp/mcp_skill_tools.o \
+                           $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o \
+                           $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o \
+                           $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
 $(TESTPREFIX)/unit-test-openai-responses-store: $(OBJDIR)/tests/test_openai_responses_store.o \
                            $(OBJDIR)/server/openai_responses_store.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
@@ -5742,6 +5755,7 @@ $(TESTPREFIX)/unit-test-delegate-backend: $(OBJDIR)/tests/test_delegate_backend.
 $(TESTPREFIX)/unit-test-delegate-backend-docker: $(OBJDIR)/tests/test_delegate_backend_docker.o \
                      $(OBJDIR)/modules/delegates/delegate_backend.o \
                      $(OBJDIR)/modules/delegates/delegate_backend_docker.o $(OBJDIR)/log.o \
+                     $(OBJDIR)/modules/delegates/delegate_launch_args.o \
                      $(OBJDIR)/aimee_home.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

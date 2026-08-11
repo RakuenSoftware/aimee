@@ -301,6 +301,18 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
          out->usage_in = (long)in->valuedouble;
       if (ou && cJSON_IsNumber(ou))
          out->usage_out = (long)ou->valuedouble;
+      /* CACHED PROMPT TOKENS. Responses reports them in a sibling object,
+       * usage.input_tokens_details.cached_tokens -- the same shape as Chat's
+       * prompt_tokens_details, under a different name. Reading only the two flat
+       * counters loses them, which is why the Anthropic arm was the only one ever
+       * reporting cache numbers. See the note in aimee_backend_openai.c. */
+      const cJSON *itd = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "input_tokens_details");
+      if (itd && cJSON_IsObject(itd))
+      {
+         const cJSON *cr = cJSON_GetObjectItemCaseSensitive((cJSON *)itd, "cached_tokens");
+         if (cr && cJSON_IsNumber(cr))
+            out->usage_cache_read = (long)cr->valuedouble;
+      }
    }
    return 0;
 

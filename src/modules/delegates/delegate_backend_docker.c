@@ -40,6 +40,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
+#include <aimee/delegates/delegate_launch_args.h>
 #include "log.h"
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -49,32 +50,6 @@
 
 /* RFC 4648 base64 — same as the SSH backend uses. Kept local so this
  * source file stays standalone (no shared b64 header yet). */
-int delegate_backend_docker_container_name(const char *task_id, char *out, size_t outsz)
-{
-   if (!task_id || !task_id[0] || !out || outsz == 0)
-      return -1;
-   const char *prefix = "aimee-delegate-";
-   size_t plen = strlen(prefix);
-   if (plen + strlen(task_id) + 1 > outsz)
-      return -1;
-   memcpy(out, prefix, plen);
-   /* Sanitise: docker container names allow [a-zA-Z0-9_.-]+. Anything
-    * else gets replaced with '_'. The leading char must be alnum;
-    * "aimee-delegate-" satisfies that already. */
-   size_t i = 0;
-   for (const char *p = task_id; *p; p++)
-   {
-      char c = *p;
-      if (isalnum((unsigned char)c) || c == '_' || c == '.' || c == '-')
-         out[plen + i] = c;
-      else
-         out[plen + i] = '_';
-      i++;
-   }
-   out[plen + i] = '\0';
-   return 0;
-}
-
 static int docker_build_exec_command(const char *container_name, const char *wrapped_script,
                                      int timeout_ms, char **out_cmd)
 {
@@ -159,6 +134,12 @@ typedef struct
    char mounts[3][MAX_PATH_LEN * 2 + 8];
    int mount_count;
 } docker_state_t;
+
+/* The in-container forwarder the package proxy bridges through. */
+#define DELEGATE_PKG_PROXY_URL "http://127.0.0.1:3129"
+/* The module's response buffer. The argv points into it, and the last entry is
+ * NUL-terminated one byte past the response, so it carries slack. */
+#define DELEGATE_LAUNCH_BUF (1u << 18)
 
 #define DOCKER_DEFAULT_IMAGE    "ubuntu:22.04"
 #define DOCKER_WORKDIR_DEFAULT  "/workspace"
@@ -568,78 +549,27 @@ static int docker_read_gitlink(const char *gitfile, char *out, size_t outsz)
  * the path is used unchanged, so ordinary same-host deploys are untouched. Only
  * the source is translated — the destination (the path the delegate sees inside
  * the sandbox) is deliberately left as-is. */
-static void docker_translate_host_source(const char *src, char *out, size_t cap)
-{
-   snprintf(out, cap, "%s", src ? src : "");
-   const char *map = getenv("AIMEE_SANDBOX_HOST_MOUNTS");
-   if (!map || !map[0] || !src || !src[0])
-      return;
-   size_t best_clen = 0;
-   char best[512] = "";
-   const char *p = map;
-   while (*p)
-   {
-      const char *comma = strchr(p, ',');
-      size_t plen = comma ? (size_t)(comma - p) : strlen(p);
-      const char *eq = memchr(p, '=', plen);
-      if (eq)
-      {
-         size_t clen = (size_t)(eq - p); /* container-prefix length */
-         const char *hpath = eq + 1;     /* host-prefix (to end of pair) */
-         size_t hlen = (size_t)(plen - clen - 1);
-         /* src must equal the prefix or continue with '/', so /var/lib/aimee never
-          * matches /var/lib/aimee-workspaces. */
-         if (clen > 0 && clen > best_clen && strncmp(src, p, clen) == 0 &&
-             (src[clen] == '/' || src[clen] == '\0') && hlen < sizeof(best))
-         {
-            memcpy(best, hpath, hlen);
-            best[hlen] = '\0';
-            best_clen = clen;
-         }
-      }
-      p = comma ? comma + 1 : p + plen;
-   }
-   if (best_clen > 0)
-      snprintf(out, cap, "%s%s", best, src + best_clen);
-}
-
-static int docker_add_mount(docker_state_t *st, const char *src, const char *dst, int ro)
-{
-   if (st->mount_count >= (int)(sizeof(st->mounts) / sizeof(st->mounts[0])))
-      return -1;
-   char host_src[1024];
-   docker_translate_host_source(src, host_src, sizeof host_src);
-   if ((size_t)snprintf(st->mounts[st->mount_count], sizeof(st->mounts[0]), "%s:%s%s", host_src,
-                        dst, ro ? ":ro" : "") >= sizeof(st->mounts[0]))
-      return -1;
-   st->mount_count++;
-   return 0;
-}
-
-/* Decide what to mount for a caller-provided tree `real` (already canonical).
+/* Discover what a caller-provided tree `real` (already canonical) actually IS.
+ *
+ * This reads the host filesystem, which is why it stays here: the module decides
+ * the container's shape, but it never touches disk and could not answer any of
+ * these questions. What it gets back is the answer, as content.
  *
  * A LINKED WORKTREE's .git is a FILE holding `gitdir: <absolute host path>` into
- * the main repo, so mounting the worktree alone leaves that path absent inside the
- * container and every git command fails — after the delegate has started work,
- * looking like a corrupt repo rather than a bad mount. Mounting the repo at its OWN
- * absolute path makes the pointer resolve verbatim, with no rewriting.
+ * the main repo. Mounting the worktree alone leaves that path absent inside the
+ * container and every git command fails -- after the delegate has started work,
+ * looking like a corrupt repo rather than a bad mount.
  *
- * Isolation decides the modes, and they are measured, not assumed (validated on
- * docker 26.1.5):
- *   <repo>:ro     the whole tree is readable; a write outside the worktree fails
- *                 with "Read-only file system"
- *   <worktree>    this delegate's files, writable — a nested mount correctly
- *                 overlays the read-only repo
- *   <gitdir>      this delegate's git metadata, writable — `git status` refreshes
- *                 its index here, so a read-only .git does not break it
- * `git commit` inside then fails (blobs cannot be written to the :ro object store),
- * which is intended: git_commit runs server-side and require_aimee_git forbids the
- * shell route anyway.
- *
- * A PLAIN checkout needs none of that: one mount at its own absolute path.
- * Returns 0 on success. */
-static int docker_build_mounts(docker_state_t *st, const char *real, int read_only)
+ * Fills `repo` with the repository root and `gitdir` with the worktree's git
+ * metadata directory. For a PLAIN checkout `repo` is `real` itself and `gitdir`
+ * is empty: the tree carries its own .git and there is nothing separate to find.
+ * Returns 0, or -1 having logged why. */
+static int docker_discover_repo(const char *real, char *repo, size_t repo_cap, char *gitdir,
+                                size_t gitdir_cap)
 {
+   repo[0] = '\0';
+   gitdir[0] = '\0';
+
    char gitmark[MAX_PATH_LEN];
    if ((size_t)snprintf(gitmark, sizeof(gitmark), "%s/.git", real) >= sizeof(gitmark))
    {
@@ -665,15 +595,14 @@ static int docker_build_mounts(docker_state_t *st, const char *real, int read_on
 
    if (S_ISDIR(gst.st_mode))
    {
-      /* Plain checkout: the tree carries its own .git. Mount it at its own absolute
-       * path so paths inside the container match the host's. */
-      snprintf(st->workdir, sizeof(st->workdir), "%s", real);
-      return docker_add_mount(st, real, real, read_only);
+      /* Plain checkout: the tree carries its own .git and IS its own repo root. */
+      if ((size_t)snprintf(repo, repo_cap, "%s", real) >= repo_cap)
+         return -1;
+      return 0;
    }
 
    /* Linked worktree. */
-   char gitdir[MAX_PATH_LEN];
-   if (docker_read_gitlink(gitmark, gitdir, sizeof(gitdir)) != 0)
+   if (docker_read_gitlink(gitmark, gitdir, gitdir_cap) != 0)
    {
       aimee_log(LOG_ERROR, "delegate-backend-docker",
                 "workspace '%s': .git is a file but carries no absolute `gitdir:` pointer; "
@@ -698,26 +627,23 @@ static int docker_build_mounts(docker_state_t *st, const char *real, int read_on
                 real, gitdir);
       return -1;
    }
-   char repo[MAX_PATH_LEN];
    size_t rlen = (size_t)(marker - gitdir);
-   if (rlen == 0 || rlen >= sizeof(repo))
+   if (rlen == 0 || rlen >= repo_cap)
       return -1;
    memcpy(repo, gitdir, rlen);
    repo[rlen] = '\0';
 
    /* Is the worktree physically nested under its repo root? A normal delegate
     * sibling worktree (under <repo>/.aimee/worktrees/) is; a WFE per-slice
-    * worktree is NOT — it lives outside the repo, under $AIMEE_HOME/wfe-worktrees.
-    * Nesting is not actually required by the mounts below: docker binds each of
-    * the three paths at its own absolute host path, so when they are disjoint they
-    * are simply separate mounts rather than an overlay. What nesting DID provide,
-    * for free, was evidence that the worktree belongs to the repo. For the disjoint
-    * case we cannot lean on physical containment, so prove the two-way git link
-    * explicitly before mounting an out-of-repo tree: the repo's per-worktree admin
-    * dir carries a `gitdir` file that must point back at <real>/.git. Together with
-    * the forward gitlink read above (real/.git -> gitdir under <repo>/.git/worktrees)
-    * this defeats a spoofed .git aimed at an unrelated repo. (`real` is already
-    * realpath-canonicalized and workspace-authorized by the caller.) */
+    * worktree is NOT -- it lives outside the repo, under $AIMEE_HOME/wfe-worktrees.
+    * Nesting is not required by the mounts, which bind each path at its own
+    * absolute location. What nesting DID provide, for free, was evidence that the
+    * worktree belongs to the repo. For the disjoint case we cannot lean on
+    * physical containment, so prove the two-way git link explicitly before
+    * mounting an out-of-repo tree: the repo's per-worktree admin dir carries a
+    * `gitdir` file that must point back at <real>/.git. Together with the forward
+    * gitlink read above this defeats a spoofed .git aimed at an unrelated repo.
+    * (`real` is already realpath-canonicalized and workspace-authorized.) */
    size_t plen = strlen(repo);
    int nested = (strncmp(real, repo, plen) == 0 && (real[plen] == '/' || real[plen] == '\0'));
    if (!nested)
@@ -747,40 +673,56 @@ static int docker_build_mounts(docker_state_t *st, const char *real, int read_on
          return -1;
       }
    }
-
-   snprintf(st->workdir, sizeof(st->workdir), "%s", real);
-   /* Order matters when nested: the repo first (read-only base + object store),
-    * then the writable worktree and its gitdir over it. When disjoint the order is
-    * immaterial, but the same three mounts apply. git commit inside still writes to
-    * the :ro object store and fails — intended: commits run server-side. */
-   if (docker_add_mount(st, repo, repo, 1) != 0 ||
-       docker_add_mount(st, real, real, read_only) != 0 ||
-       docker_add_mount(st, gitdir, gitdir, read_only) != 0)
-      return -1;
-   aimee_log(LOG_INFO, "delegate-backend-docker",
-             "%s worktree '%s': mounting repo '%s' read-only with the worktree and its gitdir %s",
-             nested ? "linked" : "disjoint linked (verified backlink)", real, repo,
-             read_only ? "read-only" : "writable");
+   aimee_log(LOG_INFO, "delegate-backend-docker", "%s worktree '%s': repo '%s', gitdir '%s'",
+             nested ? "linked" : "disjoint linked (verified backlink)", real, repo, gitdir);
    return 0;
 }
 
-/* 32-bit FNV-1a over the mount specs. The container is resumed by NAME
- * (`docker start` first, create only on failure), so a task id reused with a
- * DIFFERENT workspace would silently resume a container carrying the OLD mounts —
- * the delegate would then work in the previous tree and nothing would say so. I hit
- * exactly this while testing: containers created against one image were resumed and
- * the new image ignored. Folding the mounts into the name makes a changed mount a
- * different container by construction. */
-static unsigned docker_mounts_fingerprint(const docker_state_t *st)
+/* Render AIMEE_SANDBOX_HOST_MOUNTS into the ONE table format the module reads:
+ * "<destination>\t<source>" per line, as `docker inspect` reports mounts.
+ *
+ * The env var is written "container=host,container2=host2", which is a different
+ * encoding of the same mapping. Passing it through unconverted would match
+ * nothing, translate nothing, and leave every bind source as an in-container
+ * path -- which docker does not reject, it CREATES. The delegate would come up
+ * with empty directories where its workspace should be.
+ *
+ * The env stays the source of truth for workspace sources exactly as before;
+ * only the encoding changes. */
+static void docker_mount_table(char *out, size_t cap)
 {
-   unsigned h = 2166136261u;
-   for (int i = 0; i < st->mount_count; i++)
-      for (const char *p = st->mounts[i]; *p; p++)
+   out[0] = '\0';
+   const char *map = getenv("AIMEE_SANDBOX_HOST_MOUNTS");
+   if (!map || !map[0])
+      return;
+
+   size_t at = 0;
+   const char *p = map;
+   while (*p && at + 1 < cap)
+   {
+      const char *comma = strchr(p, ',');
+      size_t plen = comma ? (size_t)(comma - p) : strlen(p);
+      const char *eq = memchr(p, '=', plen);
+      if (eq)
       {
-         h ^= (unsigned char)*p;
-         h *= 16777619u;
+         size_t clen = (size_t)(eq - p);
+         size_t hlen = plen - clen - 1;
+         if (clen > 0 && hlen > 0)
+         {
+            int n = snprintf(out + at, cap - at, "%.*s\t%.*s\n", (int)clen, p, (int)hlen, eq + 1);
+            if (n < 0 || (size_t)n >= cap - at)
+            {
+               /* A truncated table would translate some mounts and not others,
+                * which is worse than translating none: the delegate would get a
+                * working repo and an empty worktree. */
+               out[0] = '\0';
+               return;
+            }
+            at += (size_t)n;
+         }
       }
-   return h;
+      p = comma ? comma + 1 : p + plen;
+   }
 }
 
 /* package_access=proxy: copy the static aimee-forwarder into the (running) delegate
@@ -869,12 +811,14 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    docker_state_t *st = calloc(1, sizeof(*st));
    if (!st)
       return -1;
-   if (delegate_backend_docker_container_name(task_id, st->container_name,
-                                              sizeof(st->container_name)) != 0)
-   {
-      free(st);
-      return -1;
-   }
+   /* The container's NAME comes back with its argv: the name folds in the mounts
+    * so a task id reused against a different tree cannot resume the old
+    * container, and the mounts are the module's decision. Computing it here from
+    * a different set of mounts is the bug that rule exists to prevent. */
+   aimee_delegates_launch_spec_t launch;
+   memset(&launch, 0, sizeof(launch));
+   char repo[MAX_PATH_LEN] = "", gitdir[MAX_PATH_LEN] = "", real[MAX_PATH_LEN] = "";
+   char userflag[64] = "";
    const char *image = (cfg && cfg->image && cfg->image[0]) ? cfg->image : DOCKER_DEFAULT_IMAGE;
    snprintf(st->image, sizeof(st->image), "%s", image);
    if (cfg && cfg->workspace && cfg->workspace[0])
@@ -885,7 +829,6 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
        * Canonicalize FIRST: stat() follows symlinks and so does the docker daemon,
        * so validating the path as given and mounting the same string would let a
        * symlinked component point the mount somewhere the checks never saw. */
-      char real[MAX_PATH_LEN];
       if (!realpath(cfg->workspace, real))
       {
          aimee_log(LOG_ERROR, "delegate-backend-docker",
@@ -915,13 +858,25 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
          free(st);
          return -1;
       }
-      st->mount_read_only = (cfg->workspace_read_only != 0);
-      if (docker_build_mounts(st, real, st->mount_read_only) != 0)
+      if (docker_discover_repo(real, repo, sizeof(repo), gitdir, sizeof(gitdir)) != 0)
       {
          free(st);
          return -1;
       }
-      st->mount_host_tree = 1;
+      /* Mounted at its own absolute path, so paths inside the container match
+       * the host's and a tool that reports a path reports a real one. */
+      snprintf(st->workdir, sizeof(st->workdir), "%s", real);
+      launch.repo_root = repo;
+      launch.worktree = real;
+      launch.gitdir = gitdir[0] ? gitdir : NULL;
+      launch.is_git_checkout = 1;
+      launch.writes_allowed = (cfg->workspace_read_only == 0);
+      /* Run as the server's uid:gid: the container would otherwise write into
+       * the caller's checkout as root, and the user could not then edit or
+       * delete their own files. Only for a caller tree -- nobody else owns our
+       * scratch dir. */
+      snprintf(userflag, sizeof(userflag), "%u:%u", (unsigned)getuid(), (unsigned)getgid());
+      launch.run_as_user = userflag;
    }
    else if (compute_workspace_host(task_id, st->workspace_host, sizeof(st->workspace_host)) != 0 ||
             docker_mkdir_p(st->workspace_host) != 0)
@@ -933,30 +888,10 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    {
       /* Our own scratch dir: keep the historical /workspace contract. */
       snprintf(st->workdir, sizeof(st->workdir), "%s", resolve_docker_workdir());
-      if (docker_add_mount(st, st->workspace_host, st->workdir, 0) != 0)
-      {
-         free(st);
-         return -1;
-      }
+      launch.scratch_dir = st->workspace_host;
+      launch.scratch_target = st->workdir;
    }
    snprintf(st->cwd, sizeof(st->cwd), "%s", st->workdir);
-
-   /* Fold the mounts into the container's identity. `docker start` resumes by name,
-    * so without this a task id reused with a different workspace resumes a container
-    * carrying the OLD mounts, and the delegate works in the previous tree with
-    * nothing to say so. Only for caller-provided trees: the scratch dir is derived
-    * from the task id already, and hibernate/resume there is the point. */
-   if (st->mount_host_tree)
-   {
-      char suffix[16];
-      snprintf(suffix, sizeof(suffix), "-%08x", docker_mounts_fingerprint(st));
-      size_t have = strlen(st->container_name);
-      if (have + strlen(suffix) < sizeof(st->container_name))
-         memcpy(st->container_name + have, suffix, strlen(suffix) + 1);
-      else /* truncating would collide two different mount sets onto one name */
-         snprintf(st->container_name + sizeof(st->container_name) - sizeof(suffix), sizeof(suffix),
-                  "%s", suffix);
-   }
 
    /* Runtime package-access policy: "proxy" (default) arms the in-container forwarder
     * + http_proxy so a --network none delegate can install via aimee's egress. The
@@ -997,6 +932,52 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    if (have_sock)
       snprintf(sock_bind, sizeof(sock_bind), "%s:%s", host_sock, DELEGATE_SOCK_PATH);
 
+   /* Ask the module for this container: its name and the command that creates
+    * it, decided together from one set of mounts.
+    *
+    * host_sock is already in the daemon's namespace -- it was resolved by
+    * inspecting THIS container, which is better information than the mount
+    * table and exists for that path alone. The module leaves the control socket
+    * untranslated for exactly that reason. */
+   char mount_table[8192];
+   docker_mount_table(mount_table, sizeof(mount_table));
+
+   static const char *const sleep_forever[] = {"sleep", "infinity", NULL};
+   launch.task_id = task_id;
+   launch.image = st->image;
+   launch.workdir = st->workdir;
+   launch.mount_table = mount_table[0] ? mount_table : NULL;
+   launch.command = sleep_forever;
+   if (have_sock)
+   {
+      launch.parent_socket_host = host_sock;
+      launch.parent_socket_target = DELEGATE_SOCK_PATH;
+      /* Only with the socket present: the forwarder bridges to it, so pointing
+       * package managers at a proxy with no channel behind it would hang them. */
+      if (pkg_proxy)
+         launch.egress_proxy = DELEGATE_PKG_PROXY_URL;
+   }
+
+   /* One slot per argument plus the NULL. The buffer is the module's response
+    * and the argv points into it, so both live until the container is created. */
+   const char *create_argv[128];
+   uint8_t *argv_buf = malloc(DELEGATE_LAUNCH_BUF);
+   if (!argv_buf)
+   {
+      free(st);
+      return -1;
+   }
+   create_argv[0] = "docker";
+   int argc = delegate_launch_args_resolve(
+       &launch, st->container_name, sizeof(st->container_name), create_argv + 1,
+       sizeof(create_argv) / sizeof(create_argv[0]) - 1, argv_buf, DELEGATE_LAUNCH_BUF);
+   if (argc < 0)
+   {
+      free(argv_buf);
+      free(st);
+      return -1;
+   }
+
    /* Try `docker start` first — if a container with this name already
     * exists (operator opted hibernate=1 last release), starting it
     * resumes the same workspace. If start fails, create + start. */
@@ -1019,102 +1000,21 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    }
    if (!started)
    {
-      /* Run as the server's uid:gid when the mount is the caller's real tree.
-       * Containers run as root by default, so every file the delegate creates in
-       * the user's checkout would land root-owned — the user could not then edit
-       * or delete their own files, and git would report "dubious ownership" and
-       * refuse to operate on the tree at all. Our own scratch dir keeps the
-       * historical behaviour: nobody else owns it. */
-      char userflag[64] = "";
-      if (st->mount_host_tree)
-         snprintf(userflag, sizeof(userflag), "%u:%u", (unsigned)getuid(), (unsigned)getgid());
-
-      /* Sized from the mount array itself: a hand-counted bound silently overflows
-       * the day a fourth mount is added. Fixed slots cover docker/create/--name/
-       * --network/--user/-w/image/sleep + the aimee-socket -v and -e. */
-      const char *create_argv[40 + 2 * (sizeof(st->mounts) / sizeof(st->mounts[0]))];
-      int n = 0;
-      create_argv[n++] = "docker";
-      create_argv[n++] = "create";
-      create_argv[n++] = "--name";
-      create_argv[n++] = st->container_name;
-      /* No IP network: the container's only reachable peer is aimee-server, over the
-       * bound UDS below. Removes lateral movement and data-exfil in one flag.
-       * INVARIANT: never bind the docker socket (/var/run/docker.sock) — that would
-       * hand the delegate root-equivalent control of the host daemon. */
-      create_argv[n++] = "--network";
-      create_argv[n++] = "none";
-      if (have_sock)
-      {
-         /* The one permitted channel out: aimee-server's UDS, with the in-container
-          * `aimee` CLI pointed at it. Auth is filesystem-permission on the socket. */
-         create_argv[n++] = "-v";
-         create_argv[n++] = sock_bind;
-         create_argv[n++] = "-e";
-         create_argv[n++] = "AIMEE_API_ENDPOINT=unix:" DELEGATE_SOCK_PATH;
-         /* package-access=proxy: point package managers at the in-container forwarder
-          * (started after boot), which bridges to the bound UDS. docker exec inherits
-          * these, so every delegate tool run sees them. Only with the UDS present. */
-         if (pkg_proxy)
-         {
-            create_argv[n++] = "-e";
-            create_argv[n++] = "http_proxy=http://127.0.0.1:3129";
-            create_argv[n++] = "-e";
-            create_argv[n++] = "https_proxy=http://127.0.0.1:3129";
-            create_argv[n++] = "-e";
-            create_argv[n++] = "HTTP_PROXY=http://127.0.0.1:3129";
-            create_argv[n++] = "-e";
-            create_argv[n++] = "HTTPS_PROXY=http://127.0.0.1:3129";
-            create_argv[n++] = "-e";
-            create_argv[n++] = "no_proxy=localhost,127.0.0.1";
-            create_argv[n++] = "-e";
-            create_argv[n++] = "NO_PROXY=localhost,127.0.0.1";
-         }
-      }
-      /* Trust every tree inside the container for git. Even running as the tree's
-       * owner (userflag above), a disjoint linked worktree resolves its .git to a
-       * SEPARATELY-mounted gitdir whose ownership git checks independently, so a plain
-       * `git status` from the delegate still trips "detected dubious ownership" and
-       * refuses — breaking the model's git-based inspection of its own worktree. The
-       * container is a single-purpose sandbox with only the mounted trees, so trusting
-       * all of them is safe. GIT_CONFIG_* is inherited by every `docker exec`, so it
-       * applies to plain `git` invocations without the caller adding -c safe.directory. */
-      create_argv[n++] = "-e";
-      create_argv[n++] = "GIT_CONFIG_COUNT=1";
-      create_argv[n++] = "-e";
-      create_argv[n++] = "GIT_CONFIG_KEY_0=safe.directory";
-      create_argv[n++] = "-e";
-      create_argv[n++] = "GIT_CONFIG_VALUE_0=*";
-      if (userflag[0])
-      {
-         create_argv[n++] = "--user";
-         create_argv[n++] = userflag;
-      }
-      for (int m = 0; m < st->mount_count; m++)
-      {
-         create_argv[n++] = "-v";
-         create_argv[n++] = st->mounts[m];
-      }
-      create_argv[n++] = "-w";
-      create_argv[n++] = st->workdir;
-      create_argv[n++] = st->image;
-      create_argv[n++] = "sleep";
-      create_argv[n++] = "infinity";
-      /* Guard the hand-sized slot count against a future knob overflowing it. */
-      assert(n < (int)(sizeof(create_argv) / sizeof(create_argv[0])));
-      create_argv[n] = NULL;
       if (run_docker(create_argv) != 0)
       {
+         free(argv_buf);
          free(st);
          return -1;
       }
       const char *start2_argv[] = {"docker", "start", st->container_name, NULL};
       if (run_docker(start2_argv) != 0)
       {
+         free(argv_buf);
          free(st);
          return -1;
       }
    }
+   free(argv_buf);
 
    /* Verify the runtime honoured --network none. Some container runtimes (e.g.
     * SmoothNAS/tierd, which attaches a primary veth that cannot be disconnected) ignore
@@ -1366,10 +1266,34 @@ static int docker_exec(delegate_backend_t *self, void *state, const char *comman
    close(out_pipe[0]);
    close(err_pipe[0]);
 
+   /* Terminate where the OUTPUT ends, not at the end of the buffer.
+    *
+    * The caller's buffer is malloc'd and uninitialized, and callers read it with
+    * strlen() -- docker_read_file does exactly that before slicing. Terminating
+    * only the final byte leaves whatever the allocator last had in that arena
+    * sitting between the real output and that NUL, so strlen() walks straight
+    * into it and the delegate is handed its file with heap garbage appended.
+    *
+    * It read correctly for as long as these allocations happened to be fresh
+    * pages, which are zero. Any allocation and free of comparable size beforehand
+    * is enough to expose it, and the result is silent: a file the delegate reads
+    * comes back longer than it is, with plausible-looking bytes on the end.
+    *
+    * The final byte stays terminated as a backstop for a truncated capture. */
    if (result_out->stdout_buf && result_out->stdout_cap > 0)
+   {
+      result_out
+          ->stdout_buf[out_off < result_out->stdout_cap ? out_off : result_out->stdout_cap - 1] =
+          '\0';
       result_out->stdout_buf[result_out->stdout_cap - 1] = '\0';
+   }
    if (result_out->stderr_buf && result_out->stderr_cap > 0)
+   {
+      result_out
+          ->stderr_buf[err_off < result_out->stderr_cap ? err_off : result_out->stderr_cap - 1] =
+          '\0';
       result_out->stderr_buf[result_out->stderr_cap - 1] = '\0';
+   }
 
    int status = 0;
    waitpid(pid, &status, 0);

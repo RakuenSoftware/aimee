@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import base64
+import contextlib
+import os
+import signal
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import importlib.util
@@ -567,17 +570,36 @@ class ModuleDocContractTests(unittest.TestCase):
             reader.budget.git_deadline = time.monotonic() + 0.1
             self.assert_rule("git-timeout", lambda: reader._git_bounded(
                 1024, "-c",
-                f"alias.orphan=!sh -c 'sleep 5 & echo $! > {child_pid_path}'",
+                f"alias.orphan=!sh -c 'sleep 600 & echo $! > {child_pid_path}'",
                 "orphan",
             ))
             child_pid = int(child_pid_path.read_text(encoding="ascii").strip())
-            for _ in range(100):
+            # The orphan MUST outlive the observation window, or this assertion is
+            # vacuous: with `sleep 5` the child exited on its own at five seconds,
+            # so any wait longer than that passed whether or not the process-group
+            # kill did anything. That is why the wait was ~1s -- and a 1s budget is
+            # not enough for the reap to be observable on a loaded runner, which
+            # failed CI here with the kill working correctly ("Git descendant
+            # survived process-group timeout", 2026-08-11).
+            #
+            # sleep 600 makes the two failure modes distinguishable: if the kill
+            # works the child is gone in milliseconds, and if it does not the child
+            # is still there when the deadline expires, so waiting longer costs
+            # nothing on success and cannot manufacture one.
+            deadline = time.monotonic() + 30.0
+            while time.monotonic() < deadline:
                 if process_is_gone_or_zombie(child_pid):
                     break
                 time.sleep(0.01)
+            reaped = process_is_gone_or_zombie(child_pid)
+            if not reaped:
+                # Never leave a ten-minute sleep behind for the next test or the
+                # runner to inherit -- the failure is the assertion below, not a
+                # leaked process.
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.kill(child_pid, signal.SIGKILL)
             self.assertTrue(
-                process_is_gone_or_zombie(child_pid),
-                "Git descendant survived process-group timeout",
+                reaped, "Git descendant survived process-group timeout"
             )
             reader.budget.git_deadline = time.monotonic() - 1
             with mock.patch.object(contract.subprocess, "Popen") as popen:
