@@ -55,7 +55,10 @@ type launchArgsRequest struct {
 	// RunAsUser is "<uid>:<gid>". The caller supplies it because the uid that
 	// owns the tree is a fact about the host, not about the delegate.
 	RunAsUser string
-	Command   []string
+	// ScratchDir/ScratchTarget describe a delegate with no repository at all.
+	ScratchDir    string
+	ScratchTarget string
+	Command       []string
 }
 
 // decodeLaunchArgsRequest reads the request, or reports that it is malformed.
@@ -98,6 +101,8 @@ func decodeLaunchArgsRequest(request []byte) (launchArgsRequest, bool) {
 	req.WorkDir = readString(launchArgsStringMax)
 	req.MountTable = readString(launchArgsMountTableMax)
 	req.RunAsUser = readString(launchArgsStringMax)
+	req.ScratchDir = readString(launchArgsStringMax)
+	req.ScratchTarget = readString(launchArgsStringMax)
 
 	req.Command = make([]string, 0, commandCount)
 	for i := 0; i < commandCount; i++ {
@@ -134,6 +139,8 @@ func handleLaunchArgs(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 	sandboxReq := SandboxRequestFor(plan, req.RepoRoot, req.Worktree, req.GitDir,
 		req.IsGitCheckout, req.ParentSocketHost, req.ParentSocketTarget, req.EgressProxy)
 	sandboxReq.RunAsUser = req.RunAsUser
+	sandboxReq.ScratchDir = req.ScratchDir
+	sandboxReq.ScratchTarget = req.ScratchTarget
 
 	spec, err := BuildSandboxSpec(sandboxReq)
 	if err != nil {
