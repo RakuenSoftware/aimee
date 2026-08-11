@@ -54,7 +54,7 @@ table, which costs one turn of cache warmth instead of failing the request.
 
 Every lever is default-off and resolved by the caller, so the module reads no ambient
 config. That includes the freeze cost guardrail, which takes the three provider **rates**
-rather than a model name — the pricing table stays with whoever owns it.
+rather than a model name, so the pricing table stays with whoever owns it.
 
 ## Safety properties worth knowing
 

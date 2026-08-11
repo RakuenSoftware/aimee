@@ -495,7 +495,7 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-economizer.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "5e1194783c4cf1d9046fbb5dfc9a57f5baf8af96",
+      "commit": "4c42c46446bb9b8d5222992edf420820a6f0f54b",
       "execution": "process",
       "runtime": "go",
       "principal_class": 1,
@@ -506,7 +506,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "9f46847a5c31ff7057448d4e741aaf7568250499b86e00054aefb11e5d839214"
+      "source_sha256": "a01484f61d76ad83da1a478133193937539dee856256bb23952e6339e0368726"
     }
   ]
 }

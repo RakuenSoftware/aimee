@@ -22,6 +22,8 @@
 #include "gw_stage_governance.h"
 #include "http_retry.h"
 #include "economizer.h"
+#include "economizer_module_client.h"
+#include "token_tracker.h"
 #include "economizer_wire_snapshot.h"
 #include "log.h"
 #include "middleware.h"
@@ -634,27 +636,24 @@ native_provider_http:
    mw_pipeline_cfgs_t mw_cfgs;
    mw_pipeline_build(&mw_pipeline, &mw_cfgs, &agent->middleware, mw_max_turns, agent->model);
 
-   /* Persistent only within this agent loop; AGGRESSIVE may freeze a reduced
-    * prefix across turns. SAFE never enters context_reduce. */
-   reduce_state_t agent_reduce_state;
-   memset(&agent_reduce_state, 0, sizeof(agent_reduce_state));
-   /* S2c: continue this conversation's reducer state instead of restarting it. A run
-    * is one agent invocation, but a conversation spans several, so without this every
-    * user turn re-derives the fold boundary and starts with an EMPTY page table — a
-    * coordinate evicted in the previous run would be unrecoverable.
+   /* The reducer's state is now the MODULE's shape, so this side carries it as an
+    * opaque blob: loaded once, handed to each reduce, and saved back whenever the
+    * module returns a new one.
     *
-    * Strictly keyed by session id, and skipped entirely when there is no session:
-    * restoring another conversation's state here would leak its context. A restored
-    * freeze boundary is safe because it carries its prefix digest, which the fold
-    * re-checks and re-epochs on mismatch. */
+    * A run is one agent invocation, but a conversation spans several, so without
+    * this every user turn would re-derive the fold boundary and start with an
+    * EMPTY page table — a coordinate evicted in the previous run would be
+    * unrecoverable.
+    *
+    * Strictly keyed by session id and skipped entirely when there is none:
+    * restoring another conversation's state here would leak its context. */
+   char agent_reduce_state_blob[ECON_MODULE_STATE_MAX + 1];
+   agent_reduce_state_blob[0] = '\0';
    {
       const char *econ_sid = econ_conversation_id();
       if (econ_sid && econ_sid[0])
-      {
-         char saved[REDUCE_STATE_SERIAL_MAX + 1];
-         if (db1_economizer_state_load(econ_sid, saved, sizeof(saved)) == 0)
-            (void)reduce_state_restore(&agent_reduce_state, saved);
-      }
+         (void)db1_economizer_state_load(econ_sid, agent_reduce_state_blob,
+                                         sizeof(agent_reduce_state_blob));
    }
 
    while (turn < max_t)
@@ -819,62 +818,82 @@ native_provider_http:
       /* AGGRESSIVE opts into the existing lossy context reducers on OpenAI-family
        * routes. SAFE never touches previously sent history, and native Anthropic
        * history is never reduced because its exact prefix controls cache reuse. */
-      reduce_result_t agent_reduce_result;
-      memset(&agent_reduce_result, 0, sizeof(agent_reduce_result));
+      /* Context reduction now lives in the Go economizer module and is reached
+       * over the event bus (stage economizer-reduce, kind 11009). This side
+       * resolves config and persists state; every decision is the module's.
+       *
+       * FAIL-OPEN: an unreachable module leaves `reduced` NULL and the turn runs
+       * on its original context. Losing the economizer costs tokens; failing the
+       * turn costs the user's work. */
+      cJSON *reduced_messages = NULL;
+      econ_module_result_t econ_res;
+      memset(&econ_res, 0, sizeof econ_res);
       int reduce_active = 0;
       {
          econ_preset_t preset;
          econ_preset_current(&preset);
-         /* The closet denylist is a borrowed pointer stored in rcfg and read
-          * after the reduce runs, so it is copied out of the accessor buffer. */
          char closet_denylist[CONFIG_COPY_MAX];
          config_coord_closet_denylist_copy(closet_denylist, sizeof(closet_denylist));
          if (!anthropic && (preset.history_fold || preset.compress))
          {
-            reduce_config_t rcfg;
-            memset(&rcfg, 0, sizeof rcfg);
-            rcfg.delegate_seam = 1;
-            /* The fold is reachable on its own, not only as part of the AGGRESSIVE
-             * preset. `fold.enabled` already existed in config — parsed, saved, with an
-             * accessor — and had ZERO live callers, so the only way to turn the fold on
-             * was economizer.mode=aggressive, which ALSO switches on compress,
-             * command_filter and gateway_seam mutation of live client requests.
-             *
-             * That bundling makes the fold untestable in isolation: measuring its
-             * prompt-cache behaviour would have meant simultaneously shipping wire
-             * mutation, which is gated on an experiment (S0) that has never been run.
-             * Additive and default-off, so aggressive still folds exactly as before. */
-            rcfg.history_fold = (preset.history_fold || config_fold_enabled()) && !chatgpt;
-            rcfg.compress = preset.compress;
-            rcfg.freeze_guard_enabled = 1;
-            rcfg.freeze_guard_horizon = preset.freeze_guard_horizon;
-            rcfg.fold.retained_msgs = config_fold_retained_msgs();
-            rcfg.fold.min_fold_msgs = config_fold_min_fold_msgs();
-            rcfg.fold.reasoning_excerpt_bytes = config_fold_excerpt_bytes();
-            rcfg.fold.compact_head_bytes = config_compact_head_bytes();
-            rcfg.fold.compact_tail_bytes = config_compact_tail_bytes();
-            rcfg.fold.register_enabled = config_fold_register_enabled();
-            rcfg.fold.closet.enabled = config_coord_closet_enabled();
-            rcfg.fold.closet.budget_bytes = config_coord_closet_budget_bytes();
-            rcfg.fold.closet.max_ratio_pct = config_coord_closet_max_ratio_pct();
-            rcfg.fold.closet.denylist = closet_denylist[0] ? closet_denylist : NULL;
-            rcfg.recall_enabled = config_fold_recall_enabled();
-            rcfg.recall_ttl_turns = config_fold_recall_ttl_turns();
-            rcfg.recall_inject = config_fold_recall_inject();
-            agent_reduce_state.reduced = 0;
-            agent_reduce_state.turn = turn;
-            if (context_reduce(messages, sys, fb_agent.model, NULL, REDUCE_SEAM_DELEGATE, &rcfg,
-                               &agent_reduce_state, &agent_reduce_result) == 0 &&
-                agent_reduce_result.mutated && agent_reduce_result.messages)
-               reduce_active = 1;
-            else if (!reduce_active)
+            econ_module_request_t mreq;
+            memset(&mreq, 0, sizeof mreq);
+            /* The fold is reachable on its own, not only via the AGGRESSIVE
+             * preset: fold.enabled had zero live callers before, so the only way
+             * to turn it on was a tier that also enables wire mutation. */
+            mreq.history_fold = (preset.history_fold || config_fold_enabled()) && !chatgpt;
+            mreq.compress = preset.compress;
+            mreq.freeze_guard_enabled = 1;
+            mreq.freeze_guard_horizon = preset.freeze_guard_horizon;
+            mreq.retained_msgs = config_fold_retained_msgs();
+            mreq.min_fold_msgs = config_fold_min_fold_msgs();
+            mreq.excerpt_bytes = config_fold_excerpt_bytes();
+            mreq.compact_head_bytes = config_compact_head_bytes();
+            mreq.compact_tail_bytes = config_compact_tail_bytes();
+            mreq.register_enabled = config_fold_register_enabled();
+            mreq.closet_enabled = config_coord_closet_enabled();
+            mreq.closet_budget_bytes = config_coord_closet_budget_bytes();
+            mreq.closet_max_ratio_pct = config_coord_closet_max_ratio_pct();
+            mreq.closet_denylist = closet_denylist[0] ? closet_denylist : NULL;
+            mreq.recall_enabled = config_fold_recall_enabled();
+            mreq.recall_ttl_turns = config_fold_recall_ttl_turns();
+            mreq.recall_inject = config_fold_recall_inject();
+            mreq.turn = turn;
+            mreq.state = agent_reduce_state_blob;
+
+            /* The freeze guardrail prices each cache tier; the module does the
+             * arithmetic, this side supplies the rates. */
             {
-               context_reduce_result_free(&agent_reduce_result);
-               memset(&agent_reduce_result, 0, sizeof agent_reduce_result);
+               token_usage_t w = {0}, in = {0}, rd = {0};
+               w.cache_write_tokens = 1000;
+               in.input_tokens = 1000;
+               rd.cache_read_tokens = 1000;
+               int priced = 0;
+               double wc = token_estimate_cost_ex(fb_agent.model, &w, &priced);
+               if (priced)
+               {
+                  mreq.priced = 1;
+                  mreq.write_cost = wc;
+                  mreq.input_cost = token_estimate_cost_ex(fb_agent.model, &in, NULL);
+                  mreq.read_cost = token_estimate_cost_ex(fb_agent.model, &rd, NULL);
+               }
+            }
+
+            if (econ_module_reduce(messages, sys, ECON_MODULE_SEAM_DELEGATE, &mreq,
+                                   &reduced_messages, &econ_res) == 0 &&
+                econ_res.mutated && reduced_messages)
+               reduce_active = 1;
+            /* Persist the state the module handed back, so the freeze boundary
+             * and page table survive into the next turn. */
+            if (econ_res.state && econ_res.state[0])
+            {
+               snprintf(agent_reduce_state_blob, sizeof agent_reduce_state_blob, "%s",
+                        econ_res.state);
+               db1_economizer_state_save(econ_conversation_id(), agent_reduce_state_blob);
             }
          }
       }
-      cJSON *eff_messages = reduce_active ? agent_reduce_result.messages : messages;
+      cJSON *eff_messages = reduce_active ? reduced_messages : messages;
 
       /* Build request (use fb_agent which may have fallback model after turn 0) */
       cJSON *req;
@@ -900,13 +919,15 @@ native_provider_http:
       {
          snprintf(out->error, sizeof(out->error), "gateway request pipeline failed");
          cJSON_Delete(req);
-         context_reduce_result_free(&agent_reduce_result);
+         cJSON_Delete(reduced_messages);
+         econ_module_result_free(&econ_res);
          break;
       }
 
       char *body = cJSON_PrintUnformatted(req);
       cJSON_Delete(req);
-      context_reduce_result_free(&agent_reduce_result);
+      cJSON_Delete(reduced_messages);
+      econ_module_result_free(&econ_res);
       if (!body)
       {
          snprintf(out->error, sizeof(out->error), "failed to build request");
@@ -1968,23 +1989,6 @@ native_provider_http:
    cJSON_Delete(tools);
    cJSON_Delete(messages);
    free(assembled_sys);
-   /* Hand this conversation's reducer state to the next run before releasing it. Best
-    * effort: a failed save costs a cold start next turn, never correctness. */
-   {
-      const char *econ_sid = econ_conversation_id();
-      if (econ_sid && econ_sid[0])
-      {
-         char *econ_json = reduce_state_serialize(&agent_reduce_state);
-         if (econ_json)
-         {
-            (void)db1_economizer_state_save(econ_sid, econ_json);
-            free(econ_json);
-         }
-      }
-   }
-   /* The §4 page table grows across the whole run and owns its keys. */
-   fold_recall_index_free(&agent_reduce_state.recall);
-
    /* Cleanup ephemeral SSH */
    if (has_ephemeral_ssh)
       agent_ssh_cleanup(network, ephemeral_key, session_id);
