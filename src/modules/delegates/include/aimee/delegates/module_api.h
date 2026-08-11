@@ -489,4 +489,31 @@ static inline size_t aimee_delegates_patch_put_task(int id, int step_id, const c
    return at + result_len;
 }
 
+/* --- Role policy (stage 10) --- */
+
+#define AIMEE_DELEGATES_EVENT_ROLEPOL          6666u
+#define AIMEE_DELEGATES_STAGE_ROLEPOL          10u
+#define AIMEE_DELEGATES_ROLEPOL_REQUEST_MAGIC  0x514c5244u /* "DRLQ" */
+#define AIMEE_DELEGATES_ROLEPOL_RESPONSE_MAGIC 0x534c5244u /* "DRLS" */
+#define AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN    (16u + AIMEE_DELEGATES_ROLE_MAX + 1u)
+#define AIMEE_DELEGATES_ROLEPOL_RESPONSE_LEN   24u
+
+static inline int aimee_delegates_rolepol_request_encode(const char *role, int max_turns,
+                                                         int explicit_tools, uint8_t *out,
+                                                         size_t cap)
+{
+   size_t len = role ? strlen(role) : 0;
+   if (!out || cap < AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN || len > AIMEE_DELEGATES_ROLE_MAX)
+      return -1;
+   memset(out, 0, AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_ROLEPOL_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   out[5] = explicit_tools ? 1u : 0u;
+   aimee_delegates_put_u32(out + 8, (uint32_t)max_turns);
+   aimee_delegates_put_u32(out + 12, (uint32_t)len);
+   if (len)
+      memcpy(out + 16, role, len);
+   return 0;
+}
+
 #endif
