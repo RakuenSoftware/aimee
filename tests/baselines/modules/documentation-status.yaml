@@ -26,7 +26,8 @@
     "control-web",
     "governance",
     "runtime-web",
-    "sandbox"
+    "sandbox",
+    "economizer"
   ],
   "debt": []
 }

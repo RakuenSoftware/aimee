@@ -21,12 +21,13 @@ Two properties shape the whole module:
   printer rather than using `encoding/json`, which reorders object keys and HTML-escapes.
 
 It does not decide *whether* to call a provider, does not talk to providers, and does not
-predict cache residency. The proof planner produces cost EVIDENCE only; authorization
-requires a signed registry entry, and the production registry is empty by design.
+predict cache residency. The proof planner in `proof.go` produces cost EVIDENCE only;
+authorization requires a signed registry entry, and the production registry is empty by
+design.
 
 ## Public contracts
 
-One stage. `coord_closet`, `fold_recall`, `context_fold` and the condensation primitives
+One stage. `coord_closet`, `fold_recall`, the fold itself and the condensation primitives
 are internal to a reduction rather than separately callable, so exposing them would be
 surface with no caller.
 
@@ -42,33 +43,139 @@ cJSON-compatible printer, so the bytes the caller forwards are the bytes the fol
 measured. A `messages` field absent from the response means nothing was mutated and the
 caller must forward its **original** array untouched.
 
-## State
+## Dependencies and consumers
 
-The module is **stateless**. Per-conversation reducer state (the freeze boundary, its
-prefix digest, and the page table) travels in and out with the request, because the
-caller already persists it. A state blob that cannot be read is discarded rather than
-treated as fatal: the reduction still runs, starting from a cold freeze and an empty page
-table, which costs one turn of cache warmth instead of failing the request.
+The descriptor declares three dependencies and nothing else, because the module reads no
+ambient state: its dependency set is the runtime it registers with plus the types it
+exchanges.
 
-## Configuration
+- `config`: the shape of the resolved preset the caller sends in the request.
+- `ir`: the message representation the prompt is assembled in.
+- `module-runtime`: bus registration, stage dispatch and the process lifecycle.
 
-Every lever is default-off and resolved by the caller, so the module reads no ambient
-config. That includes the freeze cost guardrail, which takes the three provider **rates**
-rather than a model name, so the pricing table stays with whoever owns it.
+Everything in C reaches it through one file, `src/modules/economizer/economizer_module_client.c`,
+which owns the whole call: build the request, hand it to `aimee_module_json_call`, parse
+the reply. Two seams consume it.
 
-## Safety properties worth knowing
+| Consumer | Seam | Entry point |
+|---|---|---|
+| `src/posix/agent_runtime.c` | delegate (aimee's own agent loop) | `econ_module_reduce` |
+| `src/modules/economizer/gateway_mutate_wire.c` | gateway (inbound `/v1` proxy) | `econ_module_reduce` |
 
-- The **fold freeze** pins a boundary so the prefix stays byte-identical, and guards it
-  with a digest: a mid-run mutation of the folded region forces an epoch rather than a
-  false reuse that would claim a warm cache it does not have.
-- **Tool-output condensation is lossless-on-demand.** A condensed body ships only if the
-  full output was durably spilled (temp file, fsync, atomic rename) and the recovery
-  pointer fits. Spill refs are content-derived so they are not enumerable, and ref
-  validation is strict because the ref reaches the filesystem.
-- A family filter **passes output through verbatim** when a command failed with no
-  recognisable failure signal. Condensed output that hid why a command failed is worse
-  than long output.
-- The **gateway path** snapshots before it reduces and never dispatches a payload it
-  cannot restore. A 4xx restores the pristine array and resends once; a 5xx trips the
-  per-session breaker without resending, because provider state is uncertain after a
-  server error.
+The client NEVER mutates its input array. `*reduced == NULL` means "use the original",
+which is also what every failure path yields.
+
+## Providers and readiness
+
+The module serves one bus stage and calls no provider itself, so it has no upstream to be
+ready for. Readiness is binary and observed at the call site: `obs_bus_module_available`
+reports whether an `aimee-module-economizer` process is attached to the bus.
+
+When it is not attached, `econ_module_reduce` returns non-zero immediately and the caller
+dispatches its original prompt. That is the designed steady state for any deployment that
+has not enabled the module — a missing economizer costs tokens, never correctness.
+
+## Configuration and activation
+
+Every lever is default-off and resolved by the caller from `econ_preset`, so the module
+reads no ambient config. The request carries the resolved values; the module applies them.
+
+That includes the freeze cost guardrail, which takes the three provider **rates** rather
+than a model name, so the pricing table stays with whoever owns it.
+
+- `runtime_toggle.supported`: `false`. Activation is the presence of the module process,
+  not a runtime flag, because flipping one mid-conversation would strand reducer state
+  that the caller is still persisting across turns.
+
+## Surfaces
+
+There is no HTTP surface, no MCP tool and no CLI verb. The single entry point is the bus
+stage above, and the only in-process surface is the C client header
+`economizer_module_client.h`.
+
+Two C files remain beside the client, and both are seam mechanics rather than reduction
+policy: `gateway_mutate.c` decides whether a reported reduction is safe to dispatch, and
+`gateway_mutate_wire.c` drives the snapshot/restore/retry dance around the provider call.
+The reduction itself is entirely Go.
+
+## Data and migrations
+
+No schema, no tables, no migrations. Reducer state is not the module's to keep: the
+freeze boundary, its `prefix_digest` and the page table travel in and out with each
+request because the caller already persists them.
+
+The one durable artifact is the **condensation spill store** on local disk, written with
+temp file, `fsync`, atomic rename. Spill refs are content-derived rather than sequential,
+so the store is not enumerable by guessing. A state blob that cannot be read is discarded
+rather than treated as fatal: the reduction still runs, starting from a cold freeze and an
+empty page table, which costs one turn of cache warmth instead of failing the request.
+
+## Security and privacy
+
+Prompt content is the most sensitive thing aimee handles, and this module sees all of it.
+It is therefore an in-process bus peer with no network egress of its own.
+
+Ref validation is strict because a spill ref reaches the filesystem: anything that is not
+a well-formed content-derived ref is refused rather than normalized. The proof registry is
+the second control — `proof.go` can produce evidence that a transform pays for itself, but
+applying one requires a signed registry entry, and production ships with an empty
+registry, so no proof-authorized transform can run.
+
+## Supported journeys
+
+- **Delegate turn.** `agent_runtime` reduces before dispatch; a returned array replaces
+  the prompt for that call only, and the ledger row records what was removed.
+- **Gateway proxy turn.** `gateway_mutate_wire` snapshots the pristine body, reduces,
+  and dispatches only if `gw_should_apply` returns `GW_BYPASS_NONE` — which requires a
+  genuine net shrink AND a structurally clean result (no orphaned `tool_use`/`tool_result`
+  pair, checked on a copy).
+- **Measure-only turn.** The same path with mutation suppressed, so a deployment can see
+  what reduction WOULD save before enabling it.
+
+## Tests and failure behavior
+
+The Go package carries the reduction tests, including the differential ones that pinned
+the port against the C originals byte for byte. On the C side `unit-test-gateway-mutate`,
+`unit-test-gateway-mutate-wire` and `unit-test-economizer-activation` cover the seam
+decision, the wire dance and the JSON canonicaliser.
+
+Failure behavior is uniform and fail-open. Bus unavailable, malformed reply, allocation
+failure, a reply whose `messages` will not parse — every one returns non-zero and leaves
+the caller's array untouched. On the gateway path a payload-class `4xx` restores the
+pristine array and resends once; a `5xx` trips the per-session breaker WITHOUT resending,
+because provider state is uncertain after a server error.
+
+## Operational diagnostics
+
+Each reduction emits a ledger row with `baseline_tokens`, `reduced_tokens`,
+`removed_tokens` and a reason, so savings are measured rather than assumed. A reduction
+that is skipped is as informative as one that runs: `reason` distinguishes a measure-only
+pass from "no gain available" from "already reduced".
+
+The gateway seam additionally emits `gateway_hard_bypass{reason}` whenever it declines to
+dispatch a reduced payload. A rising bypass count with a healthy reduce count means the
+reducer is producing results the seam will not ship — look at the reason label before
+looking at the reducer.
+
+## Compatibility
+
+The bus kind `11009` is derived from the module's ordinal, so it is stable as long as the
+ordinal is. Request and response are JSON objects read field-by-field: an unknown field is
+ignored, and an absent optional field takes its zero value, so a newer module and an older
+caller interoperate in both directions.
+
+The one field that is NOT optional in spirit is `messages` — its ABSENCE is meaningful
+("nothing changed"), so a future version must never omit it to mean anything else.
+
+## Extension and removal
+
+A new lever belongs in the Go package behind the existing stage, not behind a new one. The
+request already carries per-lever config, so adding a default-off field extends the
+contract without a version bump; adding a stage would mean a second round trip for work
+that shares the same fold.
+
+Removal is equally undramatic: stop running the module process. Every caller already
+treats its absence as "no reduction available" and dispatches the original prompt, which
+is the same path exercised whenever the bus is momentarily unavailable. The C files that
+would then be dead are `economizer_module_client.c`, `gateway_mutate.c` and
+`gateway_mutate_wire.c`.

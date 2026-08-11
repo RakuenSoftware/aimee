@@ -279,66 +279,18 @@ __attribute__((weak)) int gw_response_governance_enabled(void)
    return 1;
 }
 
-/* Context-economizer gateway-seam symbols. messages_run_request_pipeline calls these inside a
- * block gated by the economizer gateway seam (off under the tests' stubbed safe-tier config, so
- * NEVER entered at runtime). LTO used to dead-code-eliminate the block, but that decision is
- * fragile (any new read of the loaded cfg in that function can retain it, and it differs across gcc
- * versions), so resolve the symbols with inert weak stubs. Real context_reduce.o / agent_exec.o win
- * when a test links them. Loose signatures: never called here, matched only by name + ABI (arg
- * count, pointer/enum-as-int). */
-__attribute__((weak)) int context_reduce(cJSON *messages, const char *system_prompt,
-                                         const char *model, const char *session_id,
-                                         reduce_seam_t seam, const reduce_config_t *cfg,
-                                         reduce_state_t *st, reduce_result_t *out)
-{
-   (void)messages;
-   (void)system_prompt;
-   (void)model;
-   (void)session_id;
-   (void)seam;
-   (void)cfg;
-   (void)st;
-   (void)out;
-   return 1; /* non-zero: "did nothing" (the caller bypasses on != 0) */
-}
-__attribute__((weak)) void context_reduce_result_free(reduce_result_t *out)
-{
-   (void)out;
-}
-/* anthropic_http.c / openai_chat.c resolve the economizer gateway-seam gate through
- * econ_preset(); this inert weak stub returns an all-zero preset (gateway_seam off), so
- * the shadow-measure block is never entered. The real config.o wins when linked. */
+/* The economizer gateway-seam stubs that used to live here are gone with the C
+ * reducer. context_reduce / context_reduce_result_free / agent_record_reduce_ledger
+ * no longer exist anywhere, and gw_economizer_measure has no caller in the ingress,
+ * so nothing here needs resolving. econ_preset stays: anthropic_http.c / openai_chat.c
+ * still gate on it. */
+/* Inert weak preset: returns an all-zero preset (gateway_seam off) so the shadow
+ * block is never entered. The real config.o wins when linked. */
 __attribute__((weak)) void econ_preset(const config_t *cfg, econ_preset_t *out)
 {
    (void)cfg;
    if (out)
       memset(out, 0, sizeof(*out));
-}
-/* Shadow gateway-measure wrapper: anthropic_http.c / openai_chat.c call this inside the
- * economizer gateway-seam block (off under the tests' stubbed safe-tier config, so NEVER entered at
- * runtime); the inert weak stub only resolves the link. Mirrors the real no-op contract:
- * zero `out` so the caller's context_reduce_result_free is safe, return 1 ("did nothing").
- * Real gateway_mutate_wire.o wins when a test links it. */
-__attribute__((weak)) int gw_economizer_measure(cJSON *messages, const char *system_prompt,
-                                                const char *model, int retained_msgs,
-                                                reduce_result_t *out)
-{
-   (void)messages;
-   (void)system_prompt;
-   (void)model;
-   (void)retained_msgs;
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return 1;
-}
-__attribute__((weak)) void agent_record_reduce_ledger(const struct reduce_result_s *r,
-                                                      const char *model, const char *agent_name,
-                                                      const char *role)
-{
-   (void)r;
-   (void)model;
-   (void)agent_name;
-   (void)role;
 }
 
 /* Config-surface slice: the ingress now resolves module toggles via config_module_enabled
