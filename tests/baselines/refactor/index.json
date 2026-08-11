@@ -446,6 +446,10 @@
           "sha256": "ac3f289137fd3eaa68ccfadfdb41f72c0d20472ecf364304df5dd8b208117660"
         },
         {
+          "path": "src/headers/command_registry.h",
+          "sha256": "294d34107dd35d9a8e6946a4ff4773d70eea22769e2b0a768fe4eabde8bfc5bd"
+        },
+        {
           "path": "src/headers/commands.h",
           "sha256": "0a5194d6120587e249bdbc161d43a429cb245a57c1adce30a8f9c410dbe1d3c2"
         },
@@ -1612,7 +1616,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "2d6ed9fcd224f83a72ae69ba1b0389aa052321cbb3bc2c757e744b1e429f448c",
+      "sha256": "fc7577748b6a76d17b9896334e3049971f60f9c7b37231a24bc2c2dae61a3f4c",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
