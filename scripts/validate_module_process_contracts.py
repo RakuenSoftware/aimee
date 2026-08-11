@@ -23,7 +23,7 @@ PROCESS_REQUIRED = {
 GO_PROCESSES = {
     "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
     "skills", "response-composition", "governance", "workflows", "roundtable", "kb-synthesis",
-    "runtime-web", "control-web", "benchmarks", "sandbox",
+    "runtime-web", "control-web", "benchmarks", "sandbox", "economizer",
 }
 # Executables that host a process other than the module runtime's multicall binary.
 HOSTED_BY = {"wfe": "/usr/local/bin/aimee-wfe"}
