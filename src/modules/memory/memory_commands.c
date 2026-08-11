@@ -50,6 +50,7 @@ MEMORY_CMD_ADAPTER(cmd_memory_briefing, tool_memory_briefing)
 MEMORY_CMD_ADAPTER(cmd_memory_mutate, tool_memory_mutate)
 MEMORY_CMD_ADAPTER(cmd_memory_store, memory_store_command)
 MEMORY_CMD_ADAPTER(cmd_memory_list, memory_list_command)
+MEMORY_CMD_ADAPTER(cmd_memory_delete, memory_delete_command)
 
 int memory_commands_register(void)
 {
@@ -88,6 +89,16 @@ int memory_commands_register(void)
         .surfaces = AIMEE_SURFACE_CLI | AIMEE_SURFACE_RPC,
         .mcp_visibility = AIMEE_MCP_DISCOVERABLE,
         .fn = cmd_memory_list,
+        .module = "memory"},
+       {.group = "memory",
+        .verb = "delete",
+        .summary = "Delete a memory by id.",
+        /* CLI and RPC only. Deleting is destructive and irreversible from the
+         * agent's side; an agent that decides a memory is wrong should supersede
+         * it, which keeps the history the curator reasons over. */
+        .surfaces = AIMEE_SURFACE_CLI | AIMEE_SURFACE_RPC,
+        .mcp_visibility = AIMEE_MCP_DISCOVERABLE,
+        .fn = cmd_memory_delete,
         .module = "memory"},
        {.group = "memory",
         .verb = "store",

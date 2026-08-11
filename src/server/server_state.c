@@ -342,23 +342,27 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  *
  * Gated on CAP_MEMORY_WRITE, so it follows the same write-tier grant rules as
  * memory.store rather than inventing its own. */
-int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+cJSON *memory_delete_command(cJSON *req)
 {
-   (void)ctx;
-
    int64_t id = 0;
    if (memory_request_positive_id(req, "id", &id) != 0)
-      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.delete requires a positive integer id", NULL);
 
    if (kb_client_memory_delete(id) != 0)
-      return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND,
+      return server_error_kind_json(SERVER_ERR_NOT_FOUND,
                                     "no such memory, or the knowledge service refused", NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "id", (double)id);
    cJSON_AddBoolToObject(resp, "deleted", 1);
-   return server_send_ok(conn, resp);
+   return resp;
+}
+
+int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return server_send_ok(conn, memory_delete_command(req));
 }
 
 cJSON *memory_get_command(cJSON *req)

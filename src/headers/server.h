@@ -286,6 +286,12 @@ int server_send_error(server_conn_t *conn, const char *message, const char *requ
 #define SERVER_ERR_PERMISSION_DENIED "permission_denied" /* caller not allowed */
 #define SERVER_ERR_UNAVAILABLE       "unavailable"       /* a dependency is down */
 
+/* The typed error as a VALUE, for commands that RETURN a result rather than write
+ * one. jo_err is not a substitute: it omits `kind` and the derived `http_status`,
+ * so splitting an RPC handler through it downgrades a typed error to an untyped
+ * one. Same function builds both forms, so they cannot drift. */
+cJSON *server_error_kind_json(const char *kind, const char *message, const char *request_id);
+
 int server_send_error_kind(server_conn_t *conn, const char *kind, const char *message,
                            const char *request_id);
 
@@ -341,6 +347,7 @@ int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 cJSON *memory_store_command(const cJSON *req);
 cJSON *memory_list_command(const cJSON *req);
 cJSON *memory_get_command(cJSON *req);
+cJSON *memory_delete_command(cJSON *req);
 int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
