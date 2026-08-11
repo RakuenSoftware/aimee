@@ -284,6 +284,13 @@ int config_fold_recall_enabled(void)
    return v;
 }
 
+int config_fold_recall_inject(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, fold_recall_inject), sizeof(v), &v);
+   return v;
+}
+
 int config_fold_recall_ttl_turns(void)
 {
    int v = 0;

@@ -308,6 +308,38 @@ static void recall_track(const cJSON *original, int evicted_count, const reduce_
    dstr_free(&hints);
 }
 
+/* Put the hint in front of the model, at the END of the transcript.
+ *
+ * Not the folded prefix and not the system prompt: both are deliberately stable so the
+ * provider prompt cache stays warm (§3 freeze), and a per-turn line in either would bust
+ * the very cache the rest of the economizer exists to protect. The tail already changes
+ * every turn, so appending there costs nothing extra.
+ *
+ * Framed explicitly as a system notice. An unlabelled line appended after the user's turn
+ * reads as something the USER said, which is both wrong and a way for evicted text to put
+ * words in their mouth.
+ *
+ * Appends rather than splicing, so it cannot land between an assistant tool_use and its
+ * matching tool_result — the one structural mistake that would make the request invalid. */
+static void recall_inject(cJSON *reduced, const reduce_result_t *out)
+{
+   if (!cJSON_IsArray(reduced) || !out->recall_hint || !out->recall_hint[0])
+      return;
+   cJSON *note = cJSON_CreateObject();
+   if (!note)
+      return;
+   dstr_t body;
+   dstr_init(&body);
+   dstr_append_str(&body, "[context notice — not from the user] Earlier turns were folded "
+                          "out of this transcript. You referenced something that went with "
+                          "them; it is PAGEABLE, not lost:\n");
+   dstr_append_str(&body, out->recall_hint);
+   cJSON_AddStringToObject(note, "role", "user");
+   cJSON_AddStringToObject(note, "content", dstr_cstr(&body));
+   dstr_free(&body);
+   cJSON_AddItemToArray(reduced, note);
+}
+
 /* chars/4 token estimate of the first `count` items of an array — the fold-eligible
  * prefix region. Provider-agnostic (counts serialized bytes), matching
  * session_compact_estimate_tokens' chars_to_tokens convention. */
@@ -515,6 +547,8 @@ int context_reduce(cJSON *messages, const char *system_prompt, const char *model
              * bodies in place — the carrying message stays visible, so nothing has
              * left the prompt to page back in. */
             recall_track(messages, fr.folded_msgs, cfg, st, out);
+            if (cfg->recall_inject)
+               recall_inject(out->messages, out);
          }
          fold_result_free(&fr); /* fr.messages is NULL when transferred; no-op otherwise */
       }

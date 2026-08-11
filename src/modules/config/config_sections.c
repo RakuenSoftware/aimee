@@ -717,6 +717,9 @@ void config_parse_fold_section(config_t *cfg, cJSON *root)
       item = cJSON_GetObjectItemCaseSensitive(recall, "ttl_turns");
       if (cJSON_IsNumber(item) && item->valuedouble > 0)
          cfg->fold_recall_ttl_turns = (int)item->valuedouble;
+      item = cJSON_GetObjectItemCaseSensitive(recall, "inject");
+      if (cJSON_IsBool(item))
+         cfg->fold_recall_inject = cJSON_IsTrue(item) ? 1 : 0;
    }
 }
 

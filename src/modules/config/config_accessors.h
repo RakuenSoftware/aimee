@@ -200,6 +200,7 @@ int config_fold_freeze_enabled(void);
 int config_fold_freeze_tail_cap_msgs(void);
 int config_fold_recall_enabled(void);
 int config_fold_recall_ttl_turns(void);
+int config_fold_recall_inject(void);
 int config_economizer_mode(void);
 int config_module_memory(void);
 int config_module_governance(void);
