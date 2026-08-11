@@ -742,6 +742,139 @@ static void test_compress_measure_only_no_mutation(void)
  * even at the conservative default horizon of 1. The disable branch fires only under
  * adverse pricing (write premium > horizon x per-reuse saving) that no model aimee
  * currently prices satisfies. */
+/* Append one realistic turn: a user ask, an assistant tool_call, a bulky tool result,
+ * and an assistant reply. Gives BOTH levers something to do — compress needs fat tool
+ * bodies, fold needs clean user-turn boundaries. */
+static void append_turn(cJSON *m, int k)
+{
+   char id[32];
+   snprintf(id, sizeof(id), "call_%03d", k);
+
+   cJSON *u = cJSON_CreateObject();
+   cJSON_AddStringToObject(u, "role", "user");
+   cJSON_AddStringToObject(u, "content", "keep going on the migration and report what changed");
+   cJSON_AddItemToArray(m, u);
+
+   cJSON *a = cJSON_CreateObject();
+   cJSON_AddStringToObject(a, "role", "assistant");
+   cJSON *tcs = cJSON_AddArrayToObject(a, "tool_calls");
+   cJSON *tc = cJSON_CreateObject();
+   cJSON_AddStringToObject(tc, "id", id);
+   cJSON_AddStringToObject(tc, "type", "function");
+   cJSON *fn = cJSON_AddObjectToObject(tc, "function");
+   cJSON_AddStringToObject(fn, "name", "read_file");
+   cJSON_AddStringToObject(fn, "arguments", "{}");
+   cJSON_AddItemToArray(tcs, tc);
+   cJSON_AddItemToArray(m, a);
+
+   cJSON *t = cJSON_CreateObject();
+   cJSON_AddStringToObject(t, "role", "tool");
+   cJSON_AddStringToObject(t, "tool_call_id", id);
+   char body[900];
+   size_t pos = 0;
+   while (pos + 48 < sizeof(body) - 96)
+      pos += (size_t)snprintf(body + pos, sizeof(body) - pos, "filler output bytes here and on; ");
+   snprintf(body + pos, sizeof(body) - pos, "tail at /work/src/stage_%d.c done", k);
+   cJSON_AddStringToObject(t, "content", body);
+   cJSON_AddItemToArray(m, t);
+
+   cJSON *a2 = cJSON_CreateObject();
+   cJSON_AddStringToObject(a2, "role", "assistant");
+   cJSON_AddStringToObject(a2, "content",
+                           "read the stage file and applied the change; moving to the next one "
+                           "now that the previous edit is confirmed good");
+   cJSON_AddItemToArray(m, a2);
+}
+
+/* THE CACHE CLAIM, tested end-to-end through the composed reducer.
+ *
+ * The freeze exists so the reduced PREFIX stays byte-identical turn-to-turn and the
+ * provider prompt cache keeps hitting. test_context_fold.c proves that for the fold
+ * lever in isolation — but production stacks compress AHEAD of fold and the fold
+ * digests the COMPRESSED view, so a compressor whose output for the prefix region
+ * drifts as the retained band slides would silently epoch the freeze and bust the
+ * cache with every lever still reporting success. Nothing asserted that.
+ *
+ * The invariant, stated honestly: while the epoch counter holds, the emitted prefix
+ * must be byte-identical; a changed prefix is legal ONLY on an epoch advance. That is
+ * the property the cache actually depends on. Bytes are compared, not token counts —
+ * a cache hit is a bytewise prefix match, so anything weaker would pass on a prefix
+ * that "looks the same" and still misses.
+ *
+ * recall_inject is deliberately ON: the header claims tail placement is cache-safe.
+ * If the hint ever landed in the prefix instead, this test fails. */
+static void test_prefix_stable_across_turns(void)
+{
+   cJSON *m = cJSON_CreateArray();
+   for (int k = 0; k < 8; k++)
+      append_turn(m, k);
+
+   reduce_config_t cfg = {0};
+   cfg.delegate_seam = 1;
+   cfg.history_fold = 1;
+   cfg.compress = 1;
+   cfg.freeze = 1;
+   cfg.fold.closet.enabled = 1;
+   cfg.fold.compact_head_bytes = 40;
+   cfg.recall_enabled = 1;
+   cfg.recall_inject = 1;
+
+   reduce_state_t st = {0};
+   st.freeze.tail_cap_msgs = 16;
+
+   char *prev_prefix = NULL;
+   int prev_epochs = -1;
+   int reuses = 0; /* turns that held the prefix steady */
+   int epochs = 0; /* legitimate boundary advances */
+
+   /* claude-3-5-sonnet: priced with a cache-read discount, so the freeze guardrail
+    * finds the pin cost-favorable and the freeze is actually live for this run. */
+   for (int turn = 0; turn < 14; turn++)
+   {
+      st.turn = turn;
+      reduce_result_t out;
+      assert(context_reduce(m, "sys", "claude-3-5-sonnet", "s-freeze", REDUCE_SEAM_DELEGATE, &cfg,
+                            &st, &out) == 0);
+      st.reduced = 0; /* next turn is a fresh request, not a second seam on this one */
+
+      if (out.mutated && out.messages)
+      {
+         char *prefix = cJSON_PrintUnformatted(cJSON_GetArrayItem(out.messages, 0));
+         assert(prefix != NULL);
+         if (prev_prefix)
+         {
+            if (out.epochs == prev_epochs)
+            {
+               /* No epoch advance -> the cache MUST still be warm. */
+               assert(strcmp(prev_prefix, prefix) == 0);
+               reuses++;
+            }
+            else
+            {
+               assert(out.epochs > prev_epochs); /* epochs only ever advance */
+               epochs++;
+            }
+         }
+         free(prev_prefix);
+         prev_prefix = prefix;
+         prev_epochs = out.epochs;
+      }
+      context_reduce_result_free(&out);
+      append_turn(m, 100 + turn);
+   }
+
+   /* Guard the guard: a run where the fold never engaged, or never held a boundary
+    * across a turn, would satisfy every assertion above vacuously. */
+   assert(reuses > 0);
+
+   free(prev_prefix);
+   fold_recall_index_free(&st.recall);
+   cJSON_Delete(m);
+   printf("  prefix stable across turns: %d cache-warm reuses, %d epoch advance(s)\n", reuses,
+          epochs);
+   PASS("composed reduce keeps the emitted prefix byte-identical while frozen");
+}
+
 static void test_freeze_guard(void)
 {
    /* zero prefix -> no churn possible -> always favorable */
@@ -827,6 +960,7 @@ int main(void)
    test_history_fold_skip_no_gain();
    test_compress_engages_where_fold_cannot();
    test_compress_measure_only_no_mutation();
+   test_prefix_stable_across_turns();
    printf("All context_reduce tests passed.\n");
    return 0;
 }

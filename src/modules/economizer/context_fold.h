@@ -114,10 +114,16 @@ extern "C"
     * (JSON structural summary for JSON bodies, else head+tail truncation — the same
     * algorithm the eager seam uses). The exact identifiers in the full body are first
     * nominated into a
-    * Coordinate Closet, which (when cfg->closet.enabled) is prepended as a synthetic
-    * user+assistant note pair (matching context_fold_view's closet emission) so
-    * conserved identifiers ride along. EVERYTHING else — role/type, ids, message
-    * ordering, all non-tool-result content — is byte-for-byte preserved.
+    * Coordinate Closet, which (when cfg->closet.enabled) is APPENDED as a synthetic
+    * user note at the very END of the transcript so conserved identifiers ride along.
+    * EVERYTHING else — role/type, ids, message ordering, all non-tool-result content
+    * — is byte-for-byte preserved.
+    *
+    * That note summarizes a region that GROWS as messages age out of the retained
+    * band, so its text changes every turn. It is appended at the tail (which varies
+    * each turn anyway) rather than the head, because at the head it fell inside the
+    * fold's frozen prefix and defeated the §3 freeze outright whenever compress and
+    * history_fold were composed. See the block comment at the emission site.
     *
     * The input `messages` array is NEVER mutated: out->messages is a fresh
     * deep-copied array the caller owns (fold_result_free). On success with at least
@@ -126,7 +132,10 @@ extern "C"
     * threshold (or on OOM / disabled / too-short), out->folded = 0 and
     * out->messages = NULL (the caller uses the original). Returns 0 on success
     * (incl. no-op), -1 on bad args. Deterministic: identical (messages, cfg) ->
-    * byte-identical out->messages serialization (for freeze/cache warmth). Output
+    * byte-identical out->messages serialization. Note that determinism alone does
+    * NOT give cache warmth across turns — successive turns feed DIFFERENT (growing)
+    * input, so what the prompt cache actually needs is a stable emitted PREFIX,
+    * which is why the note above is appended rather than prepended. Output
     * is provider-native (only bodies shortened + a plain-text note pair), so it is
     * valid input for ALL provider builders, including chatgpt/Responses. */
    int context_compress_view(const cJSON *messages, const fold_config_t *cfg, fold_result_t *out);
