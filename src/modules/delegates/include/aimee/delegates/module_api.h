@@ -770,4 +770,57 @@ static inline int aimee_delegates_isolation_response_decode(const uint8_t *in, s
    return 0;
 }
 
+/* --- May write (stage 15): the role AND the brief, composed ---------------
+ *
+ * One answer, because it is the one fact stages 11 and 12 must agree on. The
+ * halves come back too, so a refusal is debuggable: "the delegate could not
+ * edit anything" is otherwise a mystery. */
+
+#define AIMEE_DELEGATES_EVENT_MAYWRITE          6671u
+#define AIMEE_DELEGATES_STAGE_MAYWRITE          15u
+#define AIMEE_DELEGATES_MAYWRITE_REQUEST_MAGIC  0x51575744u /* "DWWQ" */
+#define AIMEE_DELEGATES_MAYWRITE_RESPONSE_MAGIC 0x53575744u /* "DWWS" */
+#define AIMEE_DELEGATES_MAYWRITE_HEADER_LEN     16u
+#define AIMEE_DELEGATES_MAYWRITE_RESPONSE_LEN   16u
+#define AIMEE_DELEGATES_MAYWRITE_PROMPT_MAX     (1u << 20)
+
+/* Returns the encoded length, or 0 when it does not fit. */
+static inline size_t aimee_delegates_maywrite_request_encode(const char *role, const char *prompt,
+                                                             uint8_t *out, size_t cap)
+{
+   size_t role_len = role ? strlen(role) : 0;
+   size_t prompt_len = prompt ? strlen(prompt) : 0;
+   size_t total = AIMEE_DELEGATES_MAYWRITE_HEADER_LEN + role_len + prompt_len;
+   if (!out || cap < total || role_len > AIMEE_DELEGATES_ROLE_MAX ||
+       prompt_len > AIMEE_DELEGATES_MAYWRITE_PROMPT_MAX)
+      return 0;
+   memset(out, 0, AIMEE_DELEGATES_MAYWRITE_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_MAYWRITE_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   aimee_delegates_put_u32(out + 8, (uint32_t)role_len);
+   aimee_delegates_put_u32(out + 12, (uint32_t)prompt_len);
+   if (role_len)
+      memcpy(out + AIMEE_DELEGATES_MAYWRITE_HEADER_LEN, role, role_len);
+   if (prompt_len)
+      memcpy(out + AIMEE_DELEGATES_MAYWRITE_HEADER_LEN + role_len, prompt, prompt_len);
+   return total;
+}
+
+/* `by_role` and `by_prompt` are optional and are for reporting only -- the
+ * decision is `may_write`. */
+static inline int aimee_delegates_maywrite_response_decode(const uint8_t *in, size_t len,
+                                                           int *may_write, int *by_role,
+                                                           int *by_prompt)
+{
+   if (!in || len != AIMEE_DELEGATES_MAYWRITE_RESPONSE_LEN || !may_write ||
+       aimee_delegates_get_u32(in) != AIMEE_DELEGATES_MAYWRITE_RESPONSE_MAGIC)
+      return -1;
+   *may_write = aimee_delegates_get_u32(in + 4) ? 1 : 0;
+   if (by_role)
+      *by_role = aimee_delegates_get_u32(in + 8) ? 1 : 0;
+   if (by_prompt)
+      *by_prompt = aimee_delegates_get_u32(in + 12) ? 1 : 0;
+   return 0;
+}
+
 #endif

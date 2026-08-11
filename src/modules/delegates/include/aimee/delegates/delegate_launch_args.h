@@ -68,4 +68,18 @@ int delegate_isolation_judge(const char *report, int probe_failed, int require_i
                              int *refuse, int *warn, int *is_error, char *reason,
                              size_t reason_cap);
 
+/* May this delegate write? The role and the brief, composed by the module.
+ *
+ * FAILS CLOSED: with no provider the answer is NO. A delegate that cannot be
+ * shown to be permitted does not get a writable tree -- the mount is the
+ * enforcement, so guessing yes is the one direction with no recovery. */
+typedef int (*delegate_may_write_fn)(const char *role, const char *prompt, int *may_write,
+                                     int *by_role, int *by_prompt);
+
+void delegate_register_may_write_provider(delegate_may_write_fn provider);
+
+/* Returns 1 when the delegate may write, 0 otherwise (including on any
+ * failure, which is logged). */
+int delegate_may_write(const char *role, const char *prompt);
+
 #endif

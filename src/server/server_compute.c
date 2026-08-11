@@ -34,6 +34,7 @@
 #include "kb_client.h"
 #include "kb_bandit.h"
 #include "db1/interaction_events.h"
+#include <aimee/delegates/delegate_launch_args.h>
 #include <aimee/delegates/delegate_role.h>
 #include "delegate_ensemble.h"
 #include "evidence_replay.h"
@@ -1230,8 +1231,11 @@ void delegate_worker(void *arg)
       if (resolved_prompt)
          prompt = resolved_prompt;
    }
-   int role_allows_writes = delegate_role_is_write(role);
-   int delegate_allows_writes = role_allows_writes && delegate_prompt_allows_writes(prompt);
+   /* ONE answer, composed by the module from the role AND the brief. This is the
+    * boolean the worktree plan and the container spec both consume, and it is
+    * the one fact they must agree on -- composing it in two places is how a
+    * delegate ends up planned read-only and mounted writable, or the reverse. */
+   int delegate_allows_writes = delegate_may_write(role, prompt);
    if (branch && !delegate_allows_writes)
    {
       delegation_compute_error(cctx, "read-only delegates must use the parent worktree; branch "
