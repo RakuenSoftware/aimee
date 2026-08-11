@@ -735,7 +735,11 @@ static void config_set_defaults(config_t *cfg)
    cfg->fold_register_enabled = 0; /* fold §6: default-off */
    cfg->fold_freeze_enabled = 0;   /* fold §3: default-off */
    cfg->fold_freeze_tail_cap_msgs = 0;
-   cfg->fold_recall_enabled = 0; /* fold §4: default-off */
+   /* fold §4: default-ON. The page table is what makes eviction REVERSIBLE — without
+    * it a folded coordinate is simply gone, and the agent re-derives it. It only ever
+    * ADDS a bounded hint when the newest turn re-touches something already evicted, so
+    * the downside is a few lines of text and the upside is not losing the thread. */
+   cfg->fold_recall_enabled = 1;
    cfg->fold_recall_ttl_turns = 0;
    /* SAFE is useful without provider-specific pricing guesses: it only compacts
     * strict JSON returned by a local tool before that result's first dispatch. */

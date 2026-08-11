@@ -1,6 +1,7 @@
 /* fold_recall.c: page folded content back in on re-touch (fold §4, P4).
  * See fold_recall.h. Pure: dstr + libc only. */
 #include "fold_recall.h"
+#include "coord_closet.h" /* nomination: the page table reuses the closet's matchers */
 
 #include <stdlib.h>
 #include <string.h>
@@ -92,6 +93,31 @@ void fold_recall_index_add(fold_recall_index_t *ix, const char *key)
    ix->keys[ix->count] = copy;
    ix->last_turn[ix->count] = -1;
    ix->count++;
+}
+
+size_t fold_recall_index_add_from_text(fold_recall_index_t *ix, const char *text, size_t len)
+{
+   if (!ix || !text || len == 0)
+      return 0;
+
+   coord_set_t set;
+   coord_set_init(&set);
+   /* Provenance is irrelevant here: the page table stores addresses, not conserved
+    * values, and never renders them into the prompt as trusted content. */
+   coord_closet_nominate(text, len, NULL, &set);
+
+   size_t before = ix->count;
+   for (size_t i = 0; i < set.count; i++)
+   {
+      if (!set.items[i].value)
+         continue;
+      /* Addresses only — see the header. */
+      if (set.items[i].kind != COORD_KIND_PATH && set.items[i].kind != COORD_KIND_HANDLE)
+         continue;
+      fold_recall_index_add(ix, set.items[i].value);
+   }
+   coord_set_free(&set);
+   return ix->count - before;
 }
 
 size_t fold_recall_detect(fold_recall_index_t *ix, const char *turn_text, int turn, int ttl_turns,
