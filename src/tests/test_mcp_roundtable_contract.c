@@ -93,6 +93,23 @@ int main(void)
     * drift, and an approval it could not have earned is worse than no review. */
    assert(required_has(schema, "original_request"));
 
+   /* memory_get must let an agent ask the EVENT-time question.
+    *
+    * `aimee memory get --as-of <ts>` has answered "was this in force then" since
+    * the flag shipped. The TOOL form did not: the schema declared only id/handle
+    * and tool_memory_get called the plain kb_client_memory_get, so as_of was
+    * unaskable and ignored if passed. The failure mode is the dangerous one --
+    * nothing errored, and a memory superseded last week came back looking exactly
+    * like a current one. A confident wrong answer, invisible because the row
+    * itself was correct. */
+   cJSON *mg = schema_for("memory_get");
+   assert(mg != NULL);
+   cJSON *props = cJSON_GetObjectItemCaseSensitive(mg, "properties");
+   assert(props != NULL);
+   assert(cJSON_GetObjectItemCaseSensitive(props, "as_of") != NULL);
+   assert(cJSON_GetObjectItemCaseSensitive(props, "id") != NULL);     /* additive */
+   assert(cJSON_GetObjectItemCaseSensitive(props, "handle") != NULL); /* additive */
+
    printf("ok\n");
    return 0;
 }
