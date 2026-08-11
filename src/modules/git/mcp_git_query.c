@@ -5,6 +5,7 @@
 #include "config.h"
 #include "guardrails.h"
 #include "git_verify.h"
+#include "log.h"
 #include "mcp_git.h"
 #include "platform_process.h"
 #include "util.h"
@@ -155,9 +156,11 @@ char *mcp_git_run(const char *cmd, int *exit_code)
    /* Credential injection: for a server-run command whose cwd is inside a registered
     * workspace, run under an execve environment that authenticates git — never on the
     * command line or disk. The token is resolved through the one shared vault-first
-    * policy: a client-handed per-workspace broker token (§4) wins, else the per-host
-    * vault token for the checkout's `origin`, else the server's own forge identity
-    * (§6); no token → fall through to ambient creds (co-located dev's own gh/SSH).
+    * policy: the per-host vault token for the workspace's remote (or the checkout's
+    * `origin`), else the principal's vaulted forge token, else the server's own forge
+    * identity (§6); no token → fall through to ambient creds (co-located dev's own
+    * gh/SSH). No workspace broker token: aimee git proxies through aimee's own
+    * vaulted credential, and a brokered one would outrank it.
     *
     * This carries AIMEE_GIT_TOKEN_FD and the GIT_ASKPASS shim, NOT GH_TOKEN. The
     * builder is called in FD mode (out_token_fd non-NULL), which puts the secret on a
@@ -173,6 +176,17 @@ char *mcp_git_run(const char *cmd, int *exit_code)
     * sent at least one reader hunting for a broken OAuth that was never broken. */
    if (run_on_server)
    {
+      /* The other half of the same silence: with no workspace owning the cwd the
+       * block below never runs, so git execs bare and no credential is even
+       * attempted. That is the condition this file's header describes as having
+       * caused exactly this bug once, and it is indistinguishable from a bad
+       * token unless it says so. It is also what a broken credential-resolve
+       * stage looks like from here — that stage going unadvertised silently
+       * disabled injection for every git child. */
+      if (have_ws != 0)
+         LOG_WARN("git",
+                  "no registered workspace owns cwd \"%s\": git will run with no forge credential",
+                  cwd ? cwd : "");
       if (have_ws == 0)
       {
          /* Resolve the git credential through the ONE policy
@@ -206,6 +220,18 @@ char *mcp_git_run(const char *cmd, int *exit_code)
          const char *ws_remote = workspace_remote_for_root(wsid);
          char **envp =
              git_cred_inject_build_env_for_repo(NULL, ws_remote, cwd, NULL, environ, &token_fd);
+         /* SAY SO WHEN NOTHING WAS STAGED. Falling through to ambient credentials
+          * is deliberate for a co-located dev with their own gh/SSH, but a server
+          * has none, so the only symptom is git prompting: "could not read
+          * Username", which reads as a dead token and sends the reader to the
+          * vault. Naming the workspace and the remote resolution keyed on
+          * separates "no remote recorded for this workspace" from "the remote is
+          * right and the vault has no entry for its host". */
+         if (token_fd < 0)
+            LOG_WARN("git",
+                     "no forge credential staged for workspace \"%s\" (remote=%s): git will run "
+                     "unauthenticated and a push will fail asking for a username",
+                     wsid, (ws_remote && ws_remote[0]) ? ws_remote : "<none recorded>");
          if (envp)
          {
             /* FD mode: the token rides an inherited memfd, never the environ. */
