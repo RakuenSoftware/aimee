@@ -898,6 +898,18 @@ native_provider_http:
                                    &reduced_messages, &econ_res) == 0 &&
                 econ_res.mutated && reduced_messages)
                reduce_active = 1;
+            /* Same line the gateway seam emits, for the same reason: the delegate
+             * seam recorded NOTHING about what a reduction saved.
+             * agent_record_reduce_ledger was deleted as having no callers and
+             * nothing replaced it, so the only way to tell whether the fold had run
+             * was to diff token counts between two deploys. reused=1 means the
+             * freeze held and the prefix was byte-identical to last turn. */
+            aimee_log(LOG_INFO, "economizer.delegate",
+                      "seam=delegate mutated=%d reason=%s baseline=%d reduced=%d removed=%d "
+                      "folded=%d retained=%d reused=%d",
+                      econ_res.mutated, econ_res.reason[0] ? econ_res.reason : "none",
+                      econ_res.baseline_tokens, econ_res.reduced_tokens, econ_res.removed_tokens,
+                      econ_res.folded_msgs, econ_res.retained_msgs, econ_res.reused_boundary);
             /* Persist the state the module handed back, so the freeze boundary
              * and page table survive into the next turn. */
             if (econ_res.state && econ_res.state[0])
