@@ -13,7 +13,10 @@ func encodeLaunchArgs(req launchArgsRequest) []byte {
 	binary.LittleEndian.PutUint32(out[0:4], launchArgsRequestMagic)
 	out[4] = wireVersion
 	if req.IsGitCheckout {
-		out[5] = 1
+		out[5] |= 1
+	}
+	if req.WritesAllowed {
+		out[5] |= 2
 	}
 	binary.LittleEndian.PutUint32(out[8:12], uint32(len(req.Command)))
 
@@ -23,7 +26,6 @@ func encodeLaunchArgs(req launchArgsRequest) []byte {
 		out = append(out, n[:]...)
 		out = append(out, s...)
 	}
-	put(req.Role)
 	put(req.RepoRoot)
 	put(req.Worktree)
 	put(req.GitDir)
@@ -84,7 +86,7 @@ func callLaunchArgsNamed(t *testing.T, req launchArgsRequest) (string, []string,
 
 func writeRequest() launchArgsRequest {
 	return launchArgsRequest{
-		Role:               "code",
+		WritesAllowed:      true,
 		RepoRoot:           "/repo",
 		Worktree:           "/repo/.aimee/worktrees/d1",
 		GitDir:             "/repo/.git/worktrees/d1",
@@ -109,10 +111,12 @@ func argIndex(args []string, want string) int {
 // The isolation primitive. If this is ever absent the delegate has a network,
 // so it is asserted on the rendered argv rather than on the spec.
 func TestLaunchArgsAlwaysHasNoNetwork(t *testing.T) {
-	for _, role := range []string{"code", "refactor", "review", "search", "validate"} {
+	for _, writes := range []bool{true, false} {
 		req := writeRequest()
-		req.Role = role
-		if !RoleIsWrite(role) {
+		req.WritesAllowed = writes
+		role := "a writing delegate"
+		if !writes {
+			role = "a read-only delegate"
 			req.GitDir = ""
 			req.RepoRoot = ""
 		}
@@ -154,7 +158,7 @@ func TestLaunchArgsWriteRoleMountLayering(t *testing.T) {
 // enforcement -- not a request the delegate is asked to honour.
 func TestLaunchArgsReadOnlyRoleGetsReadOnlyMount(t *testing.T) {
 	req := writeRequest()
-	req.Role = "review"
+	req.WritesAllowed = false
 	req.RepoRoot = ""
 	req.GitDir = "/repo/.git/worktrees/d1" // supplied, and must be ignored
 	req.Worktree = "/repo"
