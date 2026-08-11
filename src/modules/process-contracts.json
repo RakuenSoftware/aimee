@@ -181,6 +181,11 @@
           "id": 11,
           "name": "delegate-worktree-plan",
           "event_kind": 6667
+        },
+        {
+          "id": 12,
+          "name": "delegate-launch-args",
+          "event_kind": 6668
         }
       ]
     },
