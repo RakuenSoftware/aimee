@@ -820,6 +820,8 @@ native_provider_http:
             rcfg.fold.closet.budget_bytes = config_coord_closet_budget_bytes();
             rcfg.fold.closet.max_ratio_pct = config_coord_closet_max_ratio_pct();
             rcfg.fold.closet.denylist = closet_denylist[0] ? closet_denylist : NULL;
+            rcfg.recall_enabled = config_fold_recall_enabled();
+            rcfg.recall_ttl_turns = config_fold_recall_ttl_turns();
             agent_reduce_state.reduced = 0;
             agent_reduce_state.turn = turn;
             if (context_reduce(messages, sys, fb_agent.model, NULL, REDUCE_SEAM_DELEGATE, &rcfg,
@@ -1927,6 +1929,8 @@ native_provider_http:
    cJSON_Delete(tools);
    cJSON_Delete(messages);
    free(assembled_sys);
+   /* The §4 page table grows across the whole run and owns its keys. */
+   fold_recall_index_free(&agent_reduce_state.recall);
 
    /* Cleanup ephemeral SSH */
    if (has_ephemeral_ssh)

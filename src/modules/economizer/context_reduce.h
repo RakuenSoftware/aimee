@@ -44,6 +44,7 @@
 #define DEC_CONTEXT_REDUCE_H 1
 
 #include "context_fold.h" /* fold_config_t, fold_freeze_t (reused, not duplicated) */
+#include "fold_recall.h"  /* §4 page table carried in reduce_state_t */
 #include <cJSON.h>
 
 #ifdef __cplusplus
@@ -90,6 +91,12 @@ extern "C"
       int freeze_guard_enabled;
       int freeze_guard_horizon; /* expected reuse turns for break-even (0 -> 1) */
 
+      /* §4 page table. Requires `st`: the index has to outlive a single call, so with
+       * no per-conversation state there is nowhere to record what was evicted and the
+       * lever stays inert. */
+      int recall_enabled;
+      int recall_ttl_turns; /* anti-thrash residency; 0 -> FOLD_RECALL_DEFAULT_TTL_TURNS */
+
       fold_config_t fold; /* history-fold sub-config (reused verbatim) */
    } reduce_config_t;
 
@@ -107,6 +114,13 @@ extern "C"
       int reduced;          /* provenance: set once a seam has reduced this request
                              * set -> a second seam re-measures but does NOT re-reduce */
       int turn;             /* current turn index (freeze residency + ledger) */
+
+      /* §4 page table: coordinates that have LEFT the prompt in this conversation, so
+       * a later turn re-touching one can be told it is pageable rather than gone. This
+       * is what makes eviction reversible; it must persist across turns, which is why
+       * it lives here and not inside a single fold call. Owned by the caller: release
+       * with fold_recall_index_free() when the conversation ends. */
+      fold_recall_index_t recall;
    } reduce_state_t;
 
    /* Why a request did/didn't reduce — recorded in the ledger for auditability. */
@@ -167,6 +181,15 @@ extern "C"
       int reused_boundary; /* 1 = freeze reused (cache-warm) */
       int epochs;
       int freeze_guarded; /* 1 = the cost guardrail disabled freeze this turn */
+
+      /* §4: bounded recall hints for folded coordinates the NEWEST turn re-touched,
+       * or NULL when none fired. Freed by context_reduce_result_free.
+       *
+       * Reported rather than injected: where a hint belongs in the transcript is a
+       * provider-shaped decision (role alternation, content-block vs string), and the
+       * reducer does not own that. The caller surfaces it. */
+      char *recall_hint;
+      int recall_surfaced; /* number of coordinates surfaced this turn */
    } reduce_result_t;
 
    /* Run the economizer for one request at one seam.

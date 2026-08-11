@@ -36,6 +36,21 @@ extern "C"
    void fold_recall_index_init(fold_recall_index_t *ix);
    void fold_recall_index_free(fold_recall_index_t *ix);
 
+   /* Harvest recall keys out of `text` and add them (deduplicated) to the index.
+    *
+    * Only coordinates that NAME SOMETHING A RESOLVER CAN FETCH become recall keys:
+    * paths (code_span_get) and handle:/memory: ids (memory_get). A sha, a uuid, a
+    * digit-bearing key=value or an issue ref is a fact worth conserving verbatim in
+    * the closet, but it is not an ADDRESS — there is nothing to page back in, so a
+    * recall hint for one would be noise the agent cannot act on.
+    *
+    * Called on the region being evicted, so the page table records what LEFT the
+    * prompt — deliberately including coordinates the closet could not fit inside its
+    * byte budget, which are exactly the ones most in need of a later hint.
+    *
+    * Returns the number of NEW keys added. */
+   size_t fold_recall_index_add_from_text(fold_recall_index_t *ix, const char *text, size_t len);
+
    /* Add a recall key (path / handle:id / memory:id) if not already present.
     * Copies the string. Empty/NULL keys are ignored. */
    void fold_recall_index_add(fold_recall_index_t *ix, const char *key);

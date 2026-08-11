@@ -104,9 +104,69 @@ static void test_whole_token_match(void)
    PASS("whole_token_match");
 }
 
+/* Harvesting turns evicted text into a page table. Only ADDRESSES become keys: a sha or
+ * an issue ref is a fact the closet conserves verbatim, but there is nothing to page back
+ * in, so a recall hint for one would be noise the agent cannot act on. */
+static void test_harvest_addresses_only(void)
+{
+   fold_recall_index_t ix;
+   fold_recall_index_init(&ix);
+
+   const char *evicted = "Edited src/modules/git/retry.c and /var/lib/aimee/state, see "
+                         "memory:8817 and handle:abc12. Commit "
+                         "4a7f19c2b8e30d15f6a2c9b40e7d3814aa9c5162 closes #778, "
+                         "retries=5.";
+   size_t added = fold_recall_index_add_from_text(&ix, evicted, strlen(evicted));
+   assert(added == ix.count);
+   assert(ix.count > 0);
+
+   dstr_t hints;
+   dstr_init(&hints);
+   /* Re-touch every candidate at once; whatever is in the table surfaces. */
+   const char *turn = "look again at src/modules/git/retry.c /var/lib/aimee/state memory:8817 "
+                      "handle:abc12 4a7f19c2b8e30d15f6a2c9b40e7d3814aa9c5162 #778 retries=5";
+   fold_recall_detect(&ix, turn, 1, 4, &hints);
+   const char *h = dstr_cstr(&hints);
+   assert(h);
+
+   /* Addresses: pageable via code_span_get / memory_get. */
+   assert(has(h, "src/modules/git/retry.c"));
+   assert(has(h, "/var/lib/aimee/state"));
+   assert(has(h, "memory:8817"));
+   assert(has(h, "handle:abc12"));
+
+   /* Not addresses: conserved elsewhere, never a recall hint. */
+   assert(!has(h, "4a7f19c2b8e30d15f6a2c9b40e7d3814aa9c5162"));
+   assert(!has(h, "#778"));
+   assert(!has(h, "retries=5"));
+
+   dstr_free(&hints);
+   fold_recall_index_free(&ix);
+   PASS("harvest_addresses_only");
+}
+
+/* Harvesting is idempotent: folding turn after turn must not grow the table with
+ * duplicates of coordinates already evicted. */
+static void test_harvest_dedups_across_calls(void)
+{
+   fold_recall_index_t ix;
+   fold_recall_index_init(&ix);
+   const char *t = "src/a/b.c and memory:7";
+   size_t first = fold_recall_index_add_from_text(&ix, t, strlen(t));
+   size_t before = ix.count;
+   size_t second = fold_recall_index_add_from_text(&ix, t, strlen(t));
+   assert(first > 0);
+   assert(second == 0);
+   assert(ix.count == before);
+   fold_recall_index_free(&ix);
+   PASS("harvest_dedups_across_calls");
+}
+
 int main(void)
 {
    printf("fold_recall tests:\n");
+   test_harvest_addresses_only();
+   test_harvest_dedups_across_calls();
    test_add_dedup();
    test_detect_and_ttl();
    test_empty_and_null();
