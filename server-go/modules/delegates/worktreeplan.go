@@ -31,6 +31,11 @@ type WorktreePlan struct {
 	ReadOnlyMount bool
 }
 
+// workNameMax bounds a work name. The wire field that carries one is sized from
+// this, so a name this module accepts can never be truncated on the way out
+// into a different branch than the one it decided on.
+const workNameMax = 64
+
 // workNameSafe reports whether a work name can appear in a branch name and a
 // directory name.
 //
@@ -38,7 +43,7 @@ type WorktreePlan struct {
 // the set is narrow on purpose: a slash would nest a branch namespace, a space
 // or a quote would split an argument, and a leading dash would read as a flag.
 func workNameSafe(name string) bool {
-	if name == "" || len(name) > 64 {
+	if name == "" || len(name) > workNameMax {
 		return false
 	}
 	if !isAlnum(name[0]) {
