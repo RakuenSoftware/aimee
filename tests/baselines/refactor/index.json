@@ -951,7 +951,7 @@
         },
         {
           "path": "src/headers/openai_shape.h",
-          "sha256": "d9a2b83e8c1161dac7e1dc0fb8a6b8db35b999659e94c12510c0e0b17ac1002e"
+          "sha256": "57f06881cc7d56e9eca995931a36d6f92e456e9b4724dd20599186be3fdf1ef8"
         },
         {
           "path": "src/headers/osv_check.h",
@@ -1624,7 +1624,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "e82da193c32395767fdf74139d34e456471806d46050dd862a81498f850b1705",
+      "sha256": "4e3dae815268a84217abc7f96b0784440a758fe669beaba4c945b21b1df6a2db",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
