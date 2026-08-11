@@ -274,7 +274,7 @@ int main(void)
 
    /* --- responses: format response object --- */
    {
-      int len = openai_format_response("resp_42", "aimee", "the answer", 1700000000, 7, 3, resp,
+      int len = openai_format_response("resp_42", "aimee", "the answer", 1700000000, 7, 3, 0, resp,
                                        sizeof(resp));
       assert(len > 0);
       assert(strstr(resp, "\"object\":\"response\""));
@@ -354,7 +354,7 @@ int main(void)
       assert(strstr(resp, "\"item_id\":\"resp_9-msg\""));
       assert(strstr(resp, "\"delta\":\"lorem\""));
 
-      len = openai_format_responses_completed("resp_9", "aimee", "the answer", 1700000000, 7, 3,
+      len = openai_format_responses_completed("resp_9", "aimee", "the answer", 1700000000, 7, 3, 0,
                                               resp, sizeof(resp));
       assert(len > 0);
       assert(strstr(resp, "\"type\":\"response.completed\""));
@@ -447,13 +447,43 @@ int main(void)
       cJSON_AddItemToArray((cJSON *)out, openai_responses_function_call_item(
                                              "resp_9-fc-0", "call_42", "exec_command", NULL,
                                              "{\"cmd\":\"ls\"}", "completed"));
-      int len = openai_format_responses_completed_items("resp_9", "aimee", 1700000000, out, 5, 2,
+      int len = openai_format_responses_completed_items("resp_9", "aimee", 1700000000, out, 5, 2, 4,
                                                         resp, sizeof(resp));
       assert(len > 0);
       assert(strstr(resp, "\"type\":\"response.completed\""));
       assert(strstr(resp, "\"type\":\"function_call\""));
       assert(strstr(resp, "\"call_id\":\"call_42\""));
       assert(strstr(resp, "\"total_tokens\":7"));
+      /* The tool-call turn is the one the Codex gateway emits most, and it is
+       * where the cached count went missing on the wire. */
+      assert(strstr(resp, "\"input_tokens_details\":{\"cached_tokens\":4}"));
+   }
+
+   /* --- Cached input tokens survive to the client on every usage-bearing shape.
+    *
+    * A client bills what these blocks say. When the cached count is dropped, the
+    * conversation is priced at the full uncached rate -- about 10x on the cached
+    * portion -- and the symptom is indistinguishable from prompt caching being
+    * broken. Asserted on each emitter separately because each builds its own
+    * usage object, which is exactly how one path kept the field and the others
+    * never had it. Zero is asserted as PRESENT, not absent: a client must be able
+    * to tell a real cache miss from a gateway that does not report caching. --- */
+   {
+      int len = openai_format_responses_completed("resp_c", "aimee", "hi", 1700000000, 100, 5, 80,
+                                                  resp, sizeof(resp));
+      assert(len > 0);
+      assert(strstr(resp, "\"input_tokens\":100"));
+      assert(strstr(resp, "\"input_tokens_details\":{\"cached_tokens\":80}"));
+
+      len = openai_format_response("resp_d", "aimee", "hi", 1700000000, 100, 5, 0, resp,
+                                   sizeof(resp));
+      assert(len > 0);
+      assert(strstr(resp, "\"input_tokens_details\":{\"cached_tokens\":0}"));
+
+      len = openai_format_run("run_e", "aimee", "hi", 1700000000, 100, 5, 64, "completed", resp,
+                              sizeof(resp));
+      assert(len > 0);
+      assert(strstr(resp, "\"input_tokens_details\":{\"cached_tokens\":64}"));
    }
 
    /* --- Codex parity: terminal error events --- */
