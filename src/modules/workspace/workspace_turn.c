@@ -476,35 +476,28 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
 {
    if (!task_id || !task_id[0])
       return 0;
-   if (!config_delegate_sandbox())
-      return 0; /* default off: the delegate keeps running in-process, as today */
-
-   /* When set, sandboxing is MANDATORY: any path below that would otherwise fall back
-    * to un-isolated in-process host execution instead returns -1 (hard refuse), so the
-    * delegate does not run rather than run un-sandboxed. Only meaningful once we are
-    * past the dial check (sandboxing was actually requested). */
-   int require_iso = config_delegate_sandbox_require_isolation();
-   int fallback = require_iso ? -1 : 0;
+   /* A delegate IS a sandboxed container. There is no second execution model to
+    * fall back to, so every failure below refuses (-1) rather than returning 0.
+    *
+    * The 0 return used to mean "run this delegate in-process, inside aimee-server,
+    * with the server's filesystem and environment". That was an un-isolated host
+    * path living beside the container one, and every way the sandbox could fail to
+    * apply grew a branch back to it. Refusing is the whole point: a delegate that
+    * cannot be sandboxed does not run. */
 
    char ws_real[MAX_PATH_LEN] = "";
    if (workspace && workspace[0] &&
        !workspace_turn_workspace_authorized(workspace, ws_real, sizeof(ws_real)))
-      return fallback; /* refused + logged; in-process (or hard-refuse under require_iso) */
+      return -1; /* refused + logged by the authorization check */
 
    delegate_backend_t *b = delegate_backend_lookup("docker");
    if (!b || !b->acquire)
    {
-      /* Say so rather than fall through silently. Falling through means the
-       * delegate runs on the host while the operator believes it is sandboxed —
-       * the one outcome this feature exists to prevent, and the shape of every
-       * "enabled but inert" bug we have shipped. */
       LOG_ERROR("delegate-sandbox",
-                "delegate_sandbox is ON but the docker backend is unavailable; delegate '%s' would "
-                "run on the HOST — refusing to bind%s",
-                task_id,
-                require_iso ? " and refusing to run (delegate_sandbox_require_isolation)"
-                            : ", the turn stays in-process and unsandboxed");
-      return fallback;
+                "delegate '%s': the docker backend is unavailable — refusing to run. A delegate "
+                "runs in a container or not at all",
+                task_id);
+      return -1;
    }
 
    delegate_backend_config_t bcfg = {
@@ -519,28 +512,23 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
    int arc = b->acquire(b, task_id, &bcfg, &state);
    if (arc == DELEGATE_ACQUIRE_REFUSED_ISOLATION)
    {
-      /* HARD refuse: the sandbox could not be proven isolated and require_isolation is
-       * set. Signal the caller to abort the delegation — it must NOT fall back to the
-       * in-process host path (which is even less isolated than the container). */
       LOG_ERROR("delegate-sandbox",
-                "delegate '%s': refusing to run — sandbox network isolation required "
-                "(delegate_sandbox_require_isolation) but the runtime did not provide it",
+                "delegate '%s': refusing to run — the runtime did not provide network isolation",
                 task_id);
       return -1;
    }
    if (arc != 0 || !state)
    {
-      LOG_ERROR("delegate-sandbox", "delegate '%s': could not acquire a container (image=%s); %s",
-                task_id, bcfg.image ? bcfg.image : "<default>",
-                require_iso ? "refusing to run (delegate_sandbox_require_isolation)"
-                            : "the turn stays in-process and unsandboxed");
-      return fallback;
+      LOG_ERROR("delegate-sandbox",
+                "delegate '%s': could not acquire a container (image=%s) — refusing to run",
+                task_id, bcfg.image ? bcfg.image : "<default>");
+      return -1;
    }
 
    if (ws_container_provider_init(&t_turn_container, b, state) != 0)
    {
       b->release(b, state, 0);
-      return fallback;
+      return -1;
    }
    workspace_provider_set_active(&t_turn_container.base);
    t_turn_container_backend = b;

@@ -552,12 +552,11 @@ int main(void)
                "--background-index");
       cfg.lsp_servers[0].extension_count = 1;
       snprintf(cfg.lsp_servers[0].extensions[0], sizeof(cfg.lsp_servers[0].extensions[0]), "c");
-      /* require_aimee_git + delegate_sandbox (both default ON): enforcement dials, so a
-       * value that does not survive save+reload is a guard silently in the wrong state
-       * after every restart. Set each to its OPT-OUT — the direction config_save has to
-       * persist explicitly, and the direction that is unsafe to lose. */
+      /* require_aimee_git (default ON): an enforcement dial, so a value that does not
+       * survive save+reload is a guard silently in the wrong state after every
+       * restart. Set it to its OPT-OUT — the direction config_save has to persist
+       * explicitly, and the direction that is unsafe to lose. */
       cfg.require_aimee_git = 0;
-      cfg.delegate_sandbox = 0;
       cfg.subagent_ban_enabled = 0; /* default-ON dial: opt-out must survive save+reload */
       config_save(&cfg);
 
@@ -598,7 +597,6 @@ int main(void)
        * turn it off. Save-without-parse and parse-without-save are the same bug from
        * opposite ends; a round-trip is the only thing that catches either. */
       assert(cfg2.require_aimee_git == 0);
-      assert(cfg2.delegate_sandbox == 0);
       /* Same save-without-parse / parse-without-save class as require_aimee_git:
        * subagent_ban_enabled is written only as the opt-out and must parse back. */
       assert(cfg2.subagent_ban_enabled == 0);
