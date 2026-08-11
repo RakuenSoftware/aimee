@@ -850,6 +850,7 @@ native_provider_http:
             rcfg.fold.closet.denylist = closet_denylist[0] ? closet_denylist : NULL;
             rcfg.recall_enabled = config_fold_recall_enabled();
             rcfg.recall_ttl_turns = config_fold_recall_ttl_turns();
+            rcfg.recall_inject = config_fold_recall_inject();
             agent_reduce_state.reduced = 0;
             agent_reduce_state.turn = turn;
             if (context_reduce(messages, sys, fb_agent.model, NULL, REDUCE_SEAM_DELEGATE, &rcfg,
