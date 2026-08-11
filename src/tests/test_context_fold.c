@@ -554,10 +554,24 @@ static void test_compress_openai_tool_loop(void)
    cJSON *last_in = cJSON_GetArrayItem(msgs, orig_count - 1);
    assert(strlen(cJSON_GetStringValue(cJSON_GetObjectItem(last_in, "content"))) > 200);
 
-   /* output: a synthetic closet note pair was prepended, then every original
-    * message survives in order — no message dropped, every tool_call_id kept. */
+   /* output: every original message survives in order — no message dropped, every
+    * tool_call_id kept — followed by ONE synthetic closet note APPENDED at the tail.
+    * Tail, not head: the note summarizes a growing region, so at the head it sat in
+    * the fold's frozen prefix and broke freeze reuse (see context_fold.c). */
    int out_count = cJSON_GetArraySize(r.messages);
-   assert(out_count == orig_count + 2);
+   assert(out_count == orig_count + 1);
+   {
+      cJSON *tail = cJSON_GetArrayItem(r.messages, out_count - 1);
+      const char *trole = cJSON_GetStringValue(cJSON_GetObjectItem(tail, "role"));
+      const char *tbody = cJSON_GetStringValue(cJSON_GetObjectItem(tail, "content"));
+      assert(trole && strcmp(trole, "user") == 0);
+      assert(tbody && contains(tbody, "Coordinate Closet"));
+      /* and the ORIGINAL first message is still first — nothing prepended */
+      cJSON *head = cJSON_GetArrayItem(r.messages, 0);
+      const char *hrole = cJSON_GetStringValue(cJSON_GetObjectItem(head, "role"));
+      assert(hrole && strcmp(hrole, "user") == 0);
+      assert(cJSON_GetObjectItem(head, "content"));
+   }
    int in_tool = 0, out_tool = 0;
    cJSON *it;
    cJSON_ArrayForEach(it, msgs)
@@ -605,15 +619,55 @@ static void test_compress_openai_tool_loop(void)
     * Coordinate Closet note (it is NOT in the shrunk body's head excerpt). */
    char *flat = cJSON_PrintUnformatted(r.messages);
    assert(contains(flat, "/work/src/module_2.c"));
-   /* and the conserving note rode along */
-   const char *note0 =
-       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(r.messages, 0), "content"));
-   assert(contains(note0, "Coordinate Closet"));
+   /* and the conserving note rode along (asserted at the tail, above) */
    free(flat);
 
    fold_result_free(&r);
    cJSON_Delete(msgs);
    PASS("compress_openai_tool_loop");
+}
+
+/* The closet note is appended at the TAIL, so it must not leave two consecutive
+ * user turns (Anthropic role-alternation) and must never leave the transcript
+ * ending on an assistant turn (which reads as a prefill). Both end-states are
+ * exercised: a transcript ending in a tool result, and one ending in a user turn. */
+static void test_compress_note_preserves_alternation(void)
+{
+   for (int ends_with_user = 0; ends_with_user <= 1; ends_with_user++)
+   {
+      cJSON *msgs = cJSON_CreateArray();
+      add_user_text(msgs, "start");
+      char body[4096], id[32], path[64];
+      for (int k = 0; k < 12; k++)
+      {
+         snprintf(id, sizeof(id), "call_%02d", k);
+         add_openai_assistant_tool_call(msgs, id, "read_file", "{}");
+         snprintf(path, sizeof(path), "/work/src/alt_%d.c", k);
+         make_big_body(body, sizeof(body), path);
+         add_openai_tool_result(msgs, id, body);
+      }
+      if (ends_with_user)
+         add_user_text(msgs, "now summarize what you found");
+
+      fold_config_t cfg = {.enabled = 1, .retained_msgs = 8, .closet = {.enabled = 1}};
+      fold_result_t r;
+      assert(context_compress_view(msgs, &cfg, &r) == 0);
+      assert(r.folded == 1 && r.messages != NULL);
+
+      int n = cJSON_GetArraySize(r.messages);
+      const char *last =
+          cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(r.messages, n - 1), "role"));
+      const char *prev =
+          cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(r.messages, n - 2), "role"));
+      assert(last && strcmp(last, "user") == 0); /* note is last: never a prefill */
+      assert(prev && strcmp(prev, "user") != 0); /* and no consecutive user turns */
+      if (ends_with_user)
+         assert(strcmp(prev, "assistant") == 0); /* the bridge ack was inserted */
+
+      fold_result_free(&r);
+      cJSON_Delete(msgs);
+   }
+   PASS("compress_note_preserves_alternation");
 }
 
 /* (b) Anthropic tool_result content-block shape compresses in place. */
@@ -734,6 +788,7 @@ int main(void)
    test_openai_shape_fold();
    test_responses_shape_fold();
    test_compress_openai_tool_loop();
+   test_compress_note_preserves_alternation();
    test_compress_anthropic_shape();
    test_compress_deterministic();
    test_compress_below_threshold_noop();
