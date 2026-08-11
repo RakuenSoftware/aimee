@@ -208,6 +208,37 @@ int main(void)
    cJSON_Delete(oj3);
    cJSON_Delete(rj3);
 
+   /* A Codex client sends provider-native tool TYPES alongside its function tools:
+    * custom, local_shell, web_search, image_generation. None carries a top-level
+    * `name`. Admitting them produced an IR tool with a NULL name, which reached the
+    * provider as tools[N].name = "" and made it reject the ENTIRE request
+    * (400 empty_string) -- every tool in the catalog lost, and the turn with it.
+    *
+    * Assert the shape, not a count that will drift: every parsed tool has a usable
+    * name, and the named function tool survives. */
+   {
+      static const char *MIXED =
+          "{\"model\":\"m\",\"input\":[{\"type\":\"message\",\"role\":\"user\","
+          "\"content\":[{\"type\":\"input_text\",\"text\":\"hi\"}]}],"
+          "\"tools\":["
+          "{\"type\":\"function\",\"name\":\"Read\",\"description\":\"Read a file\","
+          "\"parameters\":{\"type\":\"object\"}},"
+          "{\"type\":\"local_shell\"},"
+          "{\"type\":\"web_search\"},"
+          "{\"type\":\"custom\",\"description\":\"no name here\"}"
+          "]}";
+      cJSON *mj = cJSON_Parse(MIXED);
+      assert(mj);
+      aimee_request_t mi;
+      assert(responses_frontend_parse(mj, &mi, err, sizeof err) == 0);
+      assert(mi.n_tools == 1);
+      for (int i = 0; i < mi.n_tools; i++)
+         assert(mi.tools[i].name && mi.tools[i].name[0]);
+      assert(strcmp(mi.tools[0].name, "Read") == 0);
+      aimee_request_free(&mi);
+      cJSON_Delete(mj);
+   }
+
    printf("ok\n");
    return 0;
 }
