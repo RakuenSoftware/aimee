@@ -91,7 +91,8 @@
     "server-go/modules/delegates/sandboximage.go",
     "server-go/modules/delegates/dockerargs.go",
     "server-go/modules/delegates/container.go",
-    "server-go/modules/delegates/worktreeplan.go"
+    "server-go/modules/delegates/worktreeplan.go",
+    "server-go/modules/delegates/proxyguard.go"
   ],
   "go_tests": [
     "server-go/modules/delegates/delegates_test.go",
@@ -113,7 +114,8 @@
     "server-go/modules/delegates/sandboximage_test.go",
     "server-go/modules/delegates/dockerargs_test.go",
     "server-go/modules/delegates/container_test.go",
-    "server-go/modules/delegates/worktreeplan_test.go"
+    "server-go/modules/delegates/worktreeplan_test.go",
+    "server-go/modules/delegates/proxyguard_test.go"
   ],
   "tests": [
     "src/tests/test_aimee_ir_rescue.c",
