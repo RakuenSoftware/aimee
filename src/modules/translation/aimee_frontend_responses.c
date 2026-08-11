@@ -209,13 +209,19 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       const cJSON *t = NULL;
       cJSON_ArrayForEach(t, tools)
       {
-         const char *tname = ostr(t, "name");
-         if (!tname || !tname[0])
-            continue;
          aimee_tool_t *tool = grow1((void **)&out->tools, &out->n_tools, sizeof(aimee_tool_t));
          if (!tool)
             goto oom;
-         tool->name = dupstr(tname);
+         /* Carry the entry verbatim. Only `function` is modelled; a Codex client
+          * also sends namespace / custom / local_shell / web_search / image_generation,
+          * and the backend re-emits those from this sidecar untouched rather than
+          * flattening them into a function. Captured from a real client: of 17 tools,
+          * six were `namespace` groups (mcp__aimee and five others, each holding its
+          * nested function list) and one was `web_search` with no name at all. */
+         tool->raw = cJSON_Duplicate(t, 1);
+         if (!tool->raw)
+            goto oom;
+         tool->name = dupstr(ostr(t, "name"));
          tool->description = dupstr(ostr(t, "description"));
          const cJSON *params = cJSON_GetObjectItemCaseSensitive((cJSON *)t, "parameters");
          tool->schema = params ? cJSON_Duplicate(params, 1) : NULL;
