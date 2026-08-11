@@ -28,6 +28,7 @@
 #include "openai_responses_store.h"             /* previous_response_id continuation store */
 #include "openai_runs_store.h"                  /* GET /v1/runs/{id} record store */
 #include "aimee.h" /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
+#include "log.h"   /* LOG_WARN: name the provider's error instead of discarding it */
 #include "aimee_errors.h"
 #include "config.h" /* config_t, config_load */
 #include "agent_config.h"
@@ -1055,6 +1056,43 @@ static char *openai_build_body(const agent_t *agent, const delegate_driver_t *dr
    return body;
 }
 
+/* Drop tools the provider will reject, and say which.
+ *
+ * A single tool with an empty name invalidates the WHOLE request: the ChatGPT
+ * Responses backend answers 400 `Invalid 'tools[16].name': empty string`, so the
+ * turn dies and every other tool in the catalog dies with it. Measured with a real
+ * Codex client, which sends 17 tools; the legacy responses->chat translator filters
+ * non-function and nameless tools, and the IR path that runs ahead of it does not,
+ * so which translator handled the request decided whether the turn worked.
+ *
+ * Dropping one unusable entry is strictly better than failing the turn: a tool the
+ * provider will not accept cannot be called either way. Logged per tool so a
+ * silently-missing capability is diagnosable rather than mysterious. */
+static int strip_unusable_tools(cJSON *tools)
+{
+   if (!cJSON_IsArray(tools))
+      return 0;
+   int dropped = 0;
+   for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
+   {
+      cJSON *t = cJSON_GetArrayItem(tools, i);
+      const cJSON *name = cJSON_GetObjectItemCaseSensitive(t, "name");
+      if (!cJSON_IsString(name) || !name->valuestring[0])
+      {
+         const cJSON *fn = cJSON_GetObjectItemCaseSensitive(t, "function");
+         name = fn ? cJSON_GetObjectItemCaseSensitive(fn, "name") : NULL;
+      }
+      if (cJSON_IsString(name) && name->valuestring[0])
+         continue;
+      const cJSON *type = cJSON_GetObjectItemCaseSensitive(t, "type");
+      LOG_WARN("openai.responses", "dropping tool[%d] with no usable name (type=%s)", i,
+               cJSON_IsString(type) ? type->valuestring : "?");
+      cJSON_DeleteItemFromArray(tools, i);
+      dropped++;
+   }
+   return dropped;
+}
+
 static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *tools,
                                   const char *system_prompt, int max_tokens, double temperature,
                                   parsed_response_t *out)
@@ -1064,19 +1102,37 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    memset(out, 0, sizeof(*out));
    if (!agent || !messages)
       return -1;
+   strip_unusable_tools(tools);
 
+   /* Every bare `return -1` below reported the same generic failure to the client.
+    * Each now says which precondition failed: the difference between "no driver for
+    * this provider" and "this agent has no usable token" is the whole diagnosis, and
+    * the client message ("upstream model request failed") actively misdirects,
+    * because on three of these paths nothing upstream was ever contacted. */
    delegate_drivers_init();
    const delegate_driver_t *driver = delegate_driver_get(agent->provider);
    if (!driver || !driver->build_request || !driver->parse_response)
+   {
+      LOG_WARN("openai.responses", "no usable driver for provider=%s (agent=%s)",
+               agent->provider ? agent->provider : "?", agent->name ? agent->name : "?");
       return -1;
+   }
 
    char url[MAX_ENDPOINT_LEN + 64];
    if (delegate_build_url(driver, agent, url, sizeof(url)) != 0)
+   {
+      LOG_WARN("openai.responses", "build_url failed: driver=%s endpoint=%s", driver->name,
+               agent->endpoint ? agent->endpoint : "?");
       return -1;
+   }
 
    char auth_header[MAX_API_KEY_LEN + 32];
    if (agent_resolve_auth(agent, auth_header, sizeof(auth_header)) != 0)
+   {
+      LOG_WARN("openai.responses", "auth unresolved: agent=%s auth_type=%s",
+               agent->name ? agent->name : "?", agent->auth_type ? agent->auth_type : "?");
       return -1;
+   }
    char extra_headers[512];
    agent_build_extra_headers(agent, extra_headers, sizeof(extra_headers));
 
@@ -1115,6 +1171,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    {
       /* Misconfigured stage catalog: fail closed (like the anthropic ingress) rather
        * than run a partial/empty pipeline that skips tool policing + routing. */
+      LOG_WARN("openai.responses", "stage catalog build failed; refusing a partial pipeline");
       cJSON_Delete(gw_raw);
       return -1;
    }
@@ -1153,6 +1210,8 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
        openai_build_body(agent, driver, econ_messages, eff_tools, eff_system, tok, temperature);
    if (!body)
    {
+      LOG_WARN("openai.responses", "openai_build_body returned nothing: driver=%s model=%s",
+               driver->name, agent->model ? agent->model : "?");
       cJSON_Delete(mbox);
       gw_mutate_ctx_free(&gwmc);
       cJSON_Delete(gw_raw);
@@ -1192,6 +1251,18 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
 
    if (http_status != 200 || !response_body)
    {
+      /* Say WHAT the provider said. This path reports a single generic
+       * "upstream model request failed" to the client, which is all a Codex user
+       * ever sees -- and the buffered /v1/responses handler on the SAME agent and
+       * the SAME url succeeds, so "the provider is down" is not the explanation
+       * and the difference is in this request. Discarding the body here meant the
+       * only way to find out was to read the source and guess.
+       *
+       * Truncated because a provider error can carry an HTML error page. */
+      LOG_WARN("openai.responses",
+               "streaming upstream failed: status=%d provider=%s model=%s url=%s body=%.400s",
+               http_status, agent->provider ? agent->provider : "?",
+               agent->model ? agent->model : "?", url, response_body ? response_body : "(none)");
       free(response_body);
       return -1;
    }
@@ -1379,6 +1450,14 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
                              for the future P2b audit pass; today the only
                              visible effect is the parsed.calls[] mutation. */
 
+      /* Name every call handed back to the client. A Codex client sends its MCP
+       * servers as `namespace` groups and can only route a call whose name is
+       * namespace-qualified; a bare nested name comes back as
+       * "unsupported call: <name>" and the turn is wasted. Logging the names is the
+       * only way to tell "the provider emitted it bare" from "we stripped it". */
+      for (int ci = 0; ci < parsed.call_count; ci++)
+         LOG_INFO("openai.responses", "returning tool call name=%s",
+                  parsed.calls[ci].name[0] ? parsed.calls[ci].name : "(empty)");
       openai_responses_emit_policed(&parsed, id, model, created, emit, ctx);
    }
    else

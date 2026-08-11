@@ -183,10 +183,17 @@ char *mcp_git_run(const char *cmd, int *exit_code)
        * token unless it says so. It is also what a broken credential-resolve
        * stage looks like from here — that stage going unadvertised silently
        * disabled injection for every git child. */
-      if (have_ws != 0)
+      /* Only when a cwd IS set. run_cmd_get_cwd() returns NULL outside a bound
+       * turn, and those are aimee's own housekeeping git calls — a branch name,
+       * a rev-parse — which need no credential and have no workspace to own
+       * them. Warning on them fired several times per push with an empty path
+       * and said nothing; that was noise this instrumentation introduced. The
+       * real anomaly, and all this now reports, is a cwd that exists and that
+       * no registered workspace claims. */
+      if (have_ws != 0 && cwd && cwd[0])
          LOG_WARN("git",
                   "no registered workspace owns cwd \"%s\": git will run with no forge credential",
-                  cwd ? cwd : "");
+                  cwd);
       if (have_ws == 0)
       {
          /* Resolve the git credential through the ONE policy

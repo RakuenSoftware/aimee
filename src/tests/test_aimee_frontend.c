@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include <aimee/translation/aimee_frontend.h>
+#include <aimee/translation/aimee_backend.h> /* responses_backend_build: what reaches the provider */
 #include <aimee/ir/aimee_ir.h>
 #include "cJSON.h"
 
@@ -207,6 +208,77 @@ int main(void)
    cJSON_Delete(aj3);
    cJSON_Delete(oj3);
    cJSON_Delete(rj3);
+
+   /* A Codex client sends provider-native tool TYPES alongside its function tools:
+    * custom, local_shell, web_search, image_generation. None carries a top-level
+    * `name`. Admitting them produced an IR tool with a NULL name, which reached the
+    * provider as tools[N].name = "" and made it reject the ENTIRE request
+    * (400 empty_string) -- every tool in the catalog lost, and the turn with it.
+    *
+    * Assert the shape, not a count that will drift: every parsed tool has a usable
+    * name, and the named function tool survives. */
+   {
+      static const char *MIXED =
+          "{\"model\":\"m\",\"input\":[{\"type\":\"message\",\"role\":\"user\","
+          "\"content\":[{\"type\":\"input_text\",\"text\":\"hi\"}]}],"
+          "\"tools\":["
+          "{\"type\":\"function\",\"name\":\"Read\",\"description\":\"Read a file\","
+          "\"parameters\":{\"type\":\"object\"}},"
+          "{\"type\":\"local_shell\"},"
+          "{\"type\":\"web_search\"},"
+          "{\"type\":\"custom\",\"description\":\"no name here\"},"
+          /* The shape a real Codex client sends for an MCP server: a named group
+           * whose nested `tools` hold the callable functions. Flattening this lost
+           * every tool inside it. */
+          "{\"type\":\"namespace\",\"name\":\"mcp__aimee\",\"tools\":["
+          "{\"type\":\"function\",\"name\":\"index\",\"parameters\":{\"type\":\"object\"}},"
+          "{\"type\":\"function\",\"name\":\"find_symbol\",\"parameters\":{\"type\":\"object\"}}"
+          "]}"
+          "]}";
+      cJSON *mj = cJSON_Parse(MIXED);
+      assert(mj);
+      aimee_request_t mi;
+      assert(responses_frontend_parse(mj, &mi, err, sizeof err) == 0);
+
+      /* Every entry is CARRIED (the sidecar keeps the ones the IR does not model),
+       * so nothing a client sent is silently lost. */
+      assert(mi.n_tools == 5);
+      for (int i = 0; i < mi.n_tools; i++)
+         assert(mi.tools[i].raw != NULL);
+
+      /* What actually matters is what reaches the provider. Render and check:
+       * the namespace group survives WITH its nested tools, the nameless native
+       * types survive as themselves, and no entry is ever emitted with name "" --
+       * which is what made the provider reject the whole request. */
+      cJSON *rendered = responses_backend_build(&mi);
+      assert(rendered);
+      cJSON *rt = cJSON_GetObjectItemCaseSensitive(rendered, "tools");
+      assert(cJSON_IsArray(rt) && cJSON_GetArraySize(rt) == 5);
+      int saw_ns = 0, saw_named_fn = 0, saw_search = 0;
+      cJSON *e = NULL;
+      cJSON_ArrayForEach(e, rt)
+      {
+         cJSON *ty = cJSON_GetObjectItemCaseSensitive(e, "type");
+         cJSON *nm = cJSON_GetObjectItemCaseSensitive(e, "name");
+         if (nm)
+            assert(cJSON_IsString(nm) && nm->valuestring[0]); /* never name:"" */
+         if (cJSON_IsString(ty) && strcmp(ty->valuestring, "namespace") == 0)
+         {
+            cJSON *nested = cJSON_GetObjectItemCaseSensitive(e, "tools");
+            assert(cJSON_IsArray(nested) && cJSON_GetArraySize(nested) == 2);
+            saw_ns = 1;
+         }
+         if (cJSON_IsString(ty) && strcmp(ty->valuestring, "web_search") == 0)
+            saw_search = 1;
+         if (cJSON_IsString(ty) && strcmp(ty->valuestring, "function") == 0 && nm &&
+             strcmp(nm->valuestring, "Read") == 0)
+            saw_named_fn = 1;
+      }
+      assert(saw_ns && saw_named_fn && saw_search);
+      cJSON_Delete(rendered);
+      aimee_request_free(&mi);
+      cJSON_Delete(mj);
+   }
 
    printf("ok\n");
    return 0;

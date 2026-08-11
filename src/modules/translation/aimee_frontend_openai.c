@@ -251,6 +251,14 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
          aimee_tool_t *tool = grow1((void **)&out->tools, &out->n_tools, sizeof(aimee_tool_t));
          if (!tool)
             goto oom;
+         /* Keep the entry verbatim so a shape this wire cannot express survives the
+          * round trip. A Responses request reaches the provider as
+          * responses -> IR -> chat -> IR -> responses, so without this the sidecar
+          * the Responses frontend set is lost on the way back in and a Codex
+          * `namespace` group is reduced to a nameless function. */
+         tool->raw = cJSON_Duplicate((cJSON *)t, 1);
+         if (!tool->raw)
+            goto oom;
          tool->name = dupstr(ostr(src, "name"));
          tool->description = dupstr(ostr(src, "description"));
          const cJSON *params = cJSON_GetObjectItemCaseSensitive((cJSON *)src, "parameters");

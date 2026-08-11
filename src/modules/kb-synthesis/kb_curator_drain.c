@@ -235,10 +235,21 @@ static void curator_index_set_status(const char *label)
  * kb_curator_queue_docs_for_project does) and returns 1=did work / 0=idle. */
 static int en_embedder(void)
 {
-   /* config_embedder_command_current resolves request > config > env > builtin;
-    * this stage only cares whether an embedder is CONFIGURED, so read the raw
-    * field rather than the resolved value, which is never empty. */
-   return config_embedder_command_field()[0] != '\0';
+   /* Ask the RESOLVER, not the stored field. config_embedder_command is explicit
+    * that EMBEDDER_URL outranks config precisely because it is how the running
+    * embedder announces itself, so "the bundled model and an operator's external
+    * endpoint arrive by the same route and obey one rule". The raw field is not on
+    * that route: a bundled deployment stores embedder_model and exports
+    * EMBEDDER_URL, never embedder_command, so this gate read empty and the doc/code
+    * embed stages never ran on the wizard's own recommended setup -- while query
+    * embedding kept working, because it goes through the resolver. A healthy KB
+    * that retrieves nothing, forever.
+    *
+    * Reading the raw field was correct when the resolver fell back to "builtin" and
+    * so could never answer "nothing configured". That fallback is gone: the resolver
+    * returns "" when no embedder is selected, which is exactly the signal this gate
+    * wants. */
+   return config_embedder_command_current(NULL)[0] != '\0';
 }
 static int en_evidence_embed(void)
 {
@@ -248,7 +259,7 @@ static int en_evidence_embed(void)
 static int stage_embed_code(const kb_curator_extract_opts_t *opts)
 {
    (void)opts;
-   if (!config_embedder_command_field()[0])
+   if (!config_embedder_command_current(NULL)[0])
       return 0;
    project_info_t projects[CURATOR_PROJECT_SWEEP_MAX];
    int np = index_list_projects(projects, CURATOR_PROJECT_SWEEP_MAX);
@@ -286,7 +297,11 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
     * sufficient.  Rotating one bounded project per pass prevents an early large
     * corpus from starving every later project in lexical name order. */
    static size_t next_project = 0;
-   if (!config_embedder_command_field()[0])
+   /* Copied, not held: the resolver hands back a thread-local buffer that the next
+    * call on this thread overwrites, and there are two calls below. */
+   char embedder[512];
+   snprintf(embedder, sizeof(embedder), "%s", config_embedder_command_current(NULL));
+   if (!embedder[0])
       return 0;
    project_info_t projects[CURATOR_PROJECT_SWEEP_MAX];
    int np = index_list_projects(projects, CURATOR_PROJECT_SWEEP_MAX);
@@ -295,12 +310,10 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
    size_t selected = next_project % (size_t)np;
    next_project = (selected + 1) % (size_t)np;
    int total = 0;
-   int e = kb_doc_refresh(projects[selected].name, config_embedder_command_field(),
-                          CURATOR_DOC_SWEEP_BATCH);
+   int e = kb_doc_refresh(projects[selected].name, embedder, CURATOR_DOC_SWEEP_BATCH);
    if (e > 0)
       total += e;
-   int b = kb_doc_embed_backfill(projects[selected].name, config_embedder_command_field(),
-                                 CURATOR_DOC_SWEEP_BATCH);
+   int b = kb_doc_embed_backfill(projects[selected].name, embedder, CURATOR_DOC_SWEEP_BATCH);
    if (b > 0)
       total += b;
    if (total > 0)
