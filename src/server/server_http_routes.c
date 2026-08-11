@@ -11,7 +11,6 @@
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
 #include "modules/workspace/workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
-#include "modules/git/forge_credentials.h" /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
 #include "persona.h"
 #include "role_templates.h"
@@ -1627,40 +1626,6 @@ static int rh_workspace_remove(const route_req_t *rq, char *resp, int cap)
    return ws_dispatch_args("workspace.remove", path, NULL, 0, resp, cap);
 }
 
-static int rh_workspace_forge_token(const route_req_t *rq, char *resp, int cap)
-{
-   if (!git_surface_enabled())
-      return err_json(resp, cap, 503, "the git surface is disabled on this server");
-   char path[MAX_PATH_LEN];
-   ws_pct_decode(rq->id, path, sizeof(path));
-   if (!path[0])
-      return err_json(resp, cap, 400, "missing workspace id");
-   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
-   if (!body || !cJSON_IsObject(body))
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "invalid JSON body");
-   }
-   const cJSON *jtok = cJSON_GetObjectItemCaseSensitive(body, "token");
-   const cJSON *jscope = cJSON_GetObjectItemCaseSensitive(body, "scope");
-   const cJSON *jttl = cJSON_GetObjectItemCaseSensitive(body, "ttl_seconds");
-   const char *token = (cJSON_IsString(jtok) && jtok->valuestring) ? jtok->valuestring : NULL;
-   const char *scope =
-       (cJSON_IsString(jscope) && jscope->valuestring) ? jscope->valuestring : "project";
-   long ttl = cJSON_IsNumber(jttl) ? (long)jttl->valuedouble : 3600;
-   if (!token || !token[0])
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "missing token");
-   }
-   int rc = forge_cred_install(path, token, scope, ttl, (long)time(NULL));
-   cJSON_Delete(body);
-   if (rc != 0)
-      return err_json(resp, cap, 400, "invalid token / scope / ttl, or registry full");
-   snprintf(resp, (size_t)cap, "{\"ok\":true}");
-   return 200;
-}
-
 /* POST /v1/chat/live {session_id, since_rev} — the browser's polling source of
  * truth for an in-flight turn. The server mirrors the tmux pane scrape into the
  * db1 webchat_live row as the answer streams; the browser tails it on a fixed
@@ -2349,8 +2314,6 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/deploy/apply", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_deploy_apply},
     {"GET", "/v1/deploy/status", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_deploy_status},
     {"GET", "/v1/server/forensics", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_server_forensics},
-    {"POST", "/v1/workspaces/", "/forge-token", RM_PREFIX, NULL, CAP_TOOL_EXECUTE,
-     rh_workspace_forge_token},
     {"GET", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.get", 0, rh_workspace_get},
     {"DELETE", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.remove", 0, rh_workspace_remove},
 
