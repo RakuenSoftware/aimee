@@ -1,7 +1,6 @@
 package economizer
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -115,101 +114,18 @@ func startsWithJSON(s string) bool {
 	return i < len(s) && (s[i] == '{' || s[i] == '[')
 }
 
-// jsonNode is a decoded JSON value retaining object key order, which cJSON
-// preserves and encoding/json's map does not. Key order changes the summary
-// bytes, so it has to be kept.
-type jsonNode struct {
-	kind    byte // 'o' object, 'a' array, 's' string, 'n' number, 'b' bool, 'z' null
-	keys    []string
-	vals    []*jsonNode
-	str     string
-	num     float64
-	boolean bool
-}
-
-func decodeJSON(raw string) *jsonNode {
-	dec := json.NewDecoder(strings.NewReader(raw))
-	dec.UseNumber()
-	tok, err := dec.Token()
-	if err != nil {
-		return nil
-	}
-	node, err := decodeValue(dec, tok)
-	if err != nil {
-		return nil
-	}
-	return node
-}
-
-func decodeValue(dec *json.Decoder, tok json.Token) (*jsonNode, error) {
-	switch t := tok.(type) {
-	case json.Delim:
-		if t == '{' {
-			n := &jsonNode{kind: 'o'}
-			for {
-				kt, err := dec.Token()
-				if err != nil {
-					return nil, err
-				}
-				if d, ok := kt.(json.Delim); ok && d == '}' {
-					return n, nil
-				}
-				key, _ := kt.(string)
-				vt, err := dec.Token()
-				if err != nil {
-					return nil, err
-				}
-				child, err := decodeValue(dec, vt)
-				if err != nil {
-					return nil, err
-				}
-				n.keys = append(n.keys, key)
-				n.vals = append(n.vals, child)
-			}
-		}
-		if t == '[' {
-			n := &jsonNode{kind: 'a'}
-			for {
-				vt, err := dec.Token()
-				if err != nil {
-					return nil, err
-				}
-				if d, ok := vt.(json.Delim); ok && d == ']' {
-					return n, nil
-				}
-				child, err := decodeValue(dec, vt)
-				if err != nil {
-					return nil, err
-				}
-				n.vals = append(n.vals, child)
-			}
-		}
-		return nil, fmt.Errorf("unexpected delim %v", t)
-	case string:
-		return &jsonNode{kind: 's', str: t}, nil
-	case json.Number:
-		f, _ := t.Float64()
-		return &jsonNode{kind: 'n', num: f}, nil
-	case bool:
-		return &jsonNode{kind: 'b', boolean: t}, nil
-	case nil:
-		return &jsonNode{kind: 'z'}, nil
-	}
-	return nil, fmt.Errorf("unexpected token")
-}
-
 // describeJSON renders the structural summary, depth-limited so a deeply nested
 // document cannot produce an enormous summary.
-func describeJSON(node *jsonNode, b *boundBuf, depth int) {
+func describeJSON(node *JSONValue, b *boundBuf, depth int) {
 	if node == nil || b.pos >= b.cap {
 		return
 	}
-	switch node.kind {
-	case 'o':
-		count := len(node.keys)
+	switch node.Kind {
+	case JSONObject:
+		count := len(node.Keys)
 		b.appendf("{")
 		first := true
-		for i, key := range node.keys {
+		for i, key := range node.Keys {
 			if b.pos >= b.cap {
 				break
 			}
@@ -219,17 +135,17 @@ func describeJSON(node *jsonNode, b *boundBuf, depth int) {
 			first = false
 			b.appendf("\"%s\": ", key)
 			if depth < 2 {
-				describeJSON(node.vals[i], b, depth+1)
+				describeJSON(node.Vals[i], b, depth+1)
 			} else {
-				b.appendf("%s", typeGlyph(node.vals[i]))
+				b.appendf("%s", typeGlyph(node.Vals[i]))
 			}
 		}
 		b.appendf("}")
 		if count > 5 {
 			b.appendf(" /* %d keys */", count)
 		}
-	case 'a':
-		count := len(node.vals)
+	case JSONArray:
+		count := len(node.Items)
 		if count == 0 {
 			b.appendf("[]")
 			return
@@ -237,45 +153,43 @@ func describeJSON(node *jsonNode, b *boundBuf, depth int) {
 		b.appendf("[/* %d items */", count)
 		if depth < 2 {
 			b.appendf(" ")
-			describeJSON(node.vals[0], b, depth+1)
+			describeJSON(node.Items[0], b, depth+1)
 			if count > 1 {
 				b.appendf(", ...")
 			}
 		}
 		b.appendf("]")
-	case 's':
-		if len(node.str) <= 64 {
-			b.appendf("\"%s\"", node.str)
+	case JSONString:
+		if len(node.Str) <= 64 {
+			b.appendf("\"%s\"", node.Str)
 		} else {
-			b.appendf("\"%s...\"", node.str[:60]) // C's %.60s is a BYTE precision
+			b.appendf("\"%s...\"", node.Str[:60]) // C's %.60s is a BYTE precision
 		}
-	case 'n':
-		b.appendf("%s", cFormatG(node.num))
-	case 'b':
-		if node.boolean {
-			b.appendf("true")
-		} else {
-			b.appendf("false")
-		}
+	case JSONNumber:
+		b.appendf("%s", cFormatG(node.Num))
+	case JSONTrue:
+		b.appendf("true")
+	case JSONFalse:
+		b.appendf("false")
 	default:
 		b.appendf("null")
 	}
 }
 
-func typeGlyph(n *jsonNode) string {
+func typeGlyph(n *JSONValue) string {
 	if n == nil {
 		return "null"
 	}
-	switch n.kind {
-	case 's':
+	switch n.Kind {
+	case JSONString:
 		return "<string>"
-	case 'n':
+	case JSONNumber:
 		return "<number>"
-	case 'o':
+	case JSONObject:
 		return "{...}"
-	case 'a':
+	case JSONArray:
 		return "[...]"
-	case 'b':
+	case JSONTrue, JSONFalse:
 		return "<bool>"
 	}
 	return "null"
@@ -284,7 +198,7 @@ func typeGlyph(n *jsonNode) string {
 // compactJSONSummary returns the structural summary, or ok=false when the body
 // is not valid JSON (the caller then falls back to head+tail).
 func compactJSONSummary(raw string) (string, bool) {
-	node := decodeJSON(raw)
+	node := ParseJSON(raw)
 	if node == nil {
 		return "", false
 	}
