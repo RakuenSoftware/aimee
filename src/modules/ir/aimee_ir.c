@@ -20,6 +20,7 @@ void aimee_block_free_contents(aimee_block_t *b)
    free_str(b->thinking_signature);
    free_str(b->tool_id);
    free_str(b->tool_name);
+   free_str(b->tool_namespace);
    cJSON_Delete(b->tool_input);
    cJSON_Delete(b->tool_result);
    free_str(b->media_type);
@@ -182,8 +183,10 @@ static int block_eq(const aimee_block_t *a, const aimee_block_t *b)
    case AIMEE_BLK_THINKING:
       return str_eq(a->text, b->text) && str_eq(a->thinking_signature, b->thinking_signature);
    case AIMEE_BLK_TOOL_USE:
+      /* The namespace is part of the call's identity: two calls to the same bare
+       * name in different groups are different calls. */
       return str_eq(a->tool_id, b->tool_id) && str_eq(a->tool_name, b->tool_name) &&
-             json_eq(a->tool_input, b->tool_input);
+             str_eq(a->tool_namespace, b->tool_namespace) && json_eq(a->tool_input, b->tool_input);
    case AIMEE_BLK_TOOL_RESULT:
       return str_eq(a->tool_id, b->tool_id) && a->tool_is_error == b->tool_is_error &&
              json_eq(a->tool_result, b->tool_result);

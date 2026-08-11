@@ -144,6 +144,10 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
             cJSON_AddStringToObject(fc, "type", "function_call");
             cJSON_AddStringToObject(fc, "call_id", b->tool_id ? b->tool_id : "");
             cJSON_AddStringToObject(fc, "name", b->tool_name ? b->tool_name : "");
+            /* Only when set: a plain tool has no group, and an empty `namespace`
+             * would claim one that does not exist. */
+            if (b->tool_namespace && b->tool_namespace[0])
+               cJSON_AddStringToObject(fc, "namespace", b->tool_namespace);
             char *args = b->tool_input ? cJSON_PrintUnformatted(b->tool_input) : NULL;
             cJSON_AddStringToObject(fc, "arguments", args ? args : "{}");
             free(args);
@@ -247,6 +251,7 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
             b->raw = cJSON_Duplicate(item, 1);
             b->tool_id = dupstr(ostr(item, "call_id"));
             b->tool_name = dupstr(ostr(item, "name"));
+            b->tool_namespace = dupstr(ostr(item, "namespace"));
             const char *args = ostr(item, "arguments");
             b->tool_input = args ? cJSON_Parse(args) : NULL;
             saw_tool = 1;

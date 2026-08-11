@@ -187,7 +187,7 @@
         },
         {
           "path": "src/headers/agent_protocol.h",
-          "sha256": "37fca15b304f310618078c6732a67740545c17e55d5f4032d15e08850c2070ea"
+          "sha256": "b16e225be9dd915d9b11d13981db066ea8b4224c53b93c07cf61a33ba6722603"
         },
         {
           "path": "src/headers/agent_request_build.h",
@@ -943,7 +943,7 @@
         },
         {
           "path": "src/headers/openai_shape.h",
-          "sha256": "cee4a00e0f52b0bd414c0ba27712226cea1cdb1185a026423da7a065fd166036"
+          "sha256": "d9a2b83e8c1161dac7e1dc0fb8a6b8db35b999659e94c12510c0e0b17ac1002e"
         },
         {
           "path": "src/headers/osv_check.h",
@@ -1487,7 +1487,7 @@
         },
         {
           "path": "src/modules/ir/include/aimee/ir/aimee_ir.h",
-          "sha256": "af9499c7c1f2773b27d527372970af4b103c9fb7d8874022e1f8d23cc1d91ab7"
+          "sha256": "3db215982571830d8177dbacd179e1e9906a1169bc8171f1d94b2d2b7a231d0a"
         },
         {
           "path": "src/modules/ir/include/aimee/ir/aimee_ir_metrics.h",
@@ -1608,7 +1608,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "c7c082bcb06eb9792f364d225014d2564f9c7948576059668abf3232f943737e",
+      "sha256": "993c60bb35d338015a5966e4c54c8a01679d85249e05e2ff9e46b8b99a356d94",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

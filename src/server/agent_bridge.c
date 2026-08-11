@@ -369,10 +369,16 @@ static void parse_responses_output_item(cJSON *item, parsed_response_t *out)
          cJSON *cid = cJSON_GetObjectItem(item, "call_id");
          cJSON *nm = cJSON_GetObjectItem(item, "name");
          cJSON *args = cJSON_GetObjectItem(item, "arguments");
+         /* A tool the client offered inside a `namespace` group comes back with a
+          * BARE nested name and its namespace beside it. Keep the pair together --
+          * the client routes on both. */
+         cJSON *ns = cJSON_GetObjectItem(item, "namespace");
          if (cid && cJSON_IsString(cid))
             snprintf(call->id, sizeof(call->id), "%s", cid->valuestring);
          if (nm && cJSON_IsString(nm))
             snprintf(call->name, sizeof(call->name), "%s", nm->valuestring);
+         if (ns && cJSON_IsString(ns))
+            snprintf(call->tool_namespace, sizeof(call->tool_namespace), "%s", ns->valuestring);
          if (args && cJSON_IsString(args))
             call->arguments = strdup(args->valuestring);
          else
