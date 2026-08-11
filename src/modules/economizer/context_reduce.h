@@ -97,6 +97,19 @@ extern "C"
       int recall_enabled;
       int recall_ttl_turns; /* anti-thrash residency; 0 -> FOLD_RECALL_DEFAULT_TTL_TURNS */
 
+      /* Append the recall hint to the reduced transcript instead of only reporting it.
+       * Default-off, and separate from recall_enabled on purpose: tracking what was
+       * evicted is inert, whereas putting a line in front of the model CHANGES WHAT IT
+       * DOES, and whether that helps or derails a turn is a behavioural question that
+       * needs evaluating on live traffic, not asserting here.
+       *
+       * Placement is the END of the transcript, which is the cache-cheapest option: the
+       * tail already varies every turn, whereas the folded prefix is deliberately
+       * byte-identical for prompt-cache warmth (§3 freeze) and the system prompt sits
+       * at the front of everything cached. A per-turn hint in either of those would bust
+       * a cache the rest of the economizer exists to keep warm. */
+      int recall_inject;
+
       fold_config_t fold; /* history-fold sub-config (reused verbatim) */
    } reduce_config_t;
 

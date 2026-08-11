@@ -297,6 +297,87 @@ static void test_recall_disabled_is_inert(void)
    PASS("recall disabled: nothing tracked, no hint");
 }
 
+/* Injection puts the hint in front of the model. Default-off and separate from tracking,
+ * because reporting is inert while injecting changes what the model does. */
+static void test_recall_inject_appends_notice(void)
+{
+   cJSON *m = make_messages(20);
+   cJSON *early = cJSON_GetArrayItem(m, 1);
+   cJSON_ReplaceItemInObject(early, "content",
+                             cJSON_CreateString("inspect src/modules/git/retry.c closely here"));
+   cJSON *last = cJSON_GetArrayItem(m, cJSON_GetArraySize(m) - 1);
+   cJSON_ReplaceItemInObject(last, "content",
+                             cJSON_CreateString("what about src/modules/git/retry.c ?"));
+
+   reduce_config_t cfg = {0};
+   cfg.delegate_seam = 1;
+   cfg.history_fold = 1;
+   cfg.fold.closet.enabled = 1;
+   cfg.recall_enabled = 1;
+   cfg.recall_inject = 1;
+
+   reduce_state_t st = {0};
+   reduce_result_t out;
+   assert(context_reduce(m, "sys", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, &st, &out) == 0);
+   assert(out.mutated == 1 && out.recall_surfaced >= 1);
+
+   int n = cJSON_GetArraySize(out.messages);
+   cJSON *tail = cJSON_GetArrayItem(out.messages, n - 1);
+   const char *txt = cJSON_GetStringValue(cJSON_GetObjectItem(tail, "content"));
+   assert(txt != NULL);
+   assert(strstr(txt, "src/modules/git/retry.c") != NULL);
+   /* Labelled as a notice: an unlabelled line appended after the user's turn reads as
+    * something the USER said, which is a way for evicted text to put words in their
+    * mouth. */
+   assert(strstr(txt, "not from the user") != NULL);
+
+   /* Appended at the very END — never spliced between an assistant tool_use and its
+    * matching tool_result, which would make the request structurally invalid. */
+   assert(tail != cJSON_GetArrayItem(out.messages, 0));
+
+   context_reduce_result_free(&out);
+   fold_recall_index_free(&st.recall);
+   cJSON_Delete(m);
+   PASS("recall injection appends a labelled notice at the tail");
+}
+
+/* Tracking without injection must leave the transcript exactly as the fold produced it:
+ * the reporting contract is what callers with their own placement rely on. */
+static void test_recall_inject_off_leaves_transcript(void)
+{
+   cJSON *m = make_messages(20);
+   cJSON *early = cJSON_GetArrayItem(m, 1);
+   cJSON_ReplaceItemInObject(early, "content",
+                             cJSON_CreateString("inspect src/modules/git/retry.c closely here"));
+   cJSON *last = cJSON_GetArrayItem(m, cJSON_GetArraySize(m) - 1);
+   cJSON_ReplaceItemInObject(last, "content",
+                             cJSON_CreateString("what about src/modules/git/retry.c ?"));
+
+   reduce_config_t cfg = {0};
+   cfg.delegate_seam = 1;
+   cfg.history_fold = 1;
+   cfg.fold.closet.enabled = 1;
+   cfg.recall_enabled = 1;
+   cfg.recall_inject = 0; /* the lever under test */
+
+   reduce_state_t st = {0};
+   reduce_result_t out;
+   assert(context_reduce(m, "sys", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, &st, &out) == 0);
+   assert(out.recall_surfaced >= 1); /* still tracked and reported */
+   assert(out.recall_hint != NULL);
+
+   int n = cJSON_GetArraySize(out.messages);
+   cJSON *tail = cJSON_GetArrayItem(out.messages, n - 1);
+   const char *txt = cJSON_GetStringValue(cJSON_GetObjectItem(tail, "content"));
+   assert(txt != NULL);
+   assert(strstr(txt, "not from the user") == NULL); /* nothing appended */
+
+   context_reduce_result_free(&out);
+   fold_recall_index_free(&st.recall);
+   cJSON_Delete(m);
+   PASS("injection off: hint reported, transcript untouched");
+}
+
 /* ------------------------------------------------ state persistence (S2c) */
 
 /* Round-trip: the freeze boundary and the page table survive, so a later run continues
@@ -630,6 +711,8 @@ int main(void)
    test_history_fold_reduces();
    test_recall_hint_on_retouch();
    test_recall_disabled_is_inert();
+   test_recall_inject_appends_notice();
+   test_recall_inject_off_leaves_transcript();
    test_state_serialize_round_trip();
    test_state_never_restores_reduced();
    test_state_restore_all_or_nothing();
