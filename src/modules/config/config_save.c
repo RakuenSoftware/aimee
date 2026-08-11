@@ -1110,6 +1110,8 @@ int config_save(const config_t *cfg)
          cJSON_AddBoolToObject(recall, "enabled", cfg->fold_recall_enabled);
          if (cfg->fold_recall_ttl_turns)
             cJSON_AddNumberToObject(recall, "ttl_turns", cfg->fold_recall_ttl_turns);
+         if (cfg->fold_recall_inject) /* default-off: persist only the opt-in */
+            cJSON_AddBoolToObject(recall, "inject", cfg->fold_recall_inject);
       }
    }
 

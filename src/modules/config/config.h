@@ -1188,6 +1188,11 @@ typedef struct config
     * fold_recall_ttl_turns: don't re-surface the same key within this many turns. */
    int fold_recall_enabled;
    int fold_recall_ttl_turns;
+   /* fold_recall_inject: put the hint in front of the model instead of only reporting
+    * it. Separate from _enabled and default-off, because tracking what was evicted is
+    * inert while injecting CHANGES WHAT THE MODEL DOES, and whether that helps or
+    * derails a turn is a behavioural question for live traffic to answer. */
+   int fold_recall_inject;
 
    /* The single economizer mode. OFF is the pristine baseline. PROOF_GATED
     * verifies the signed empty registry and freezes the completed provider body;
