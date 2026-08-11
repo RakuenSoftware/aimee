@@ -1088,21 +1088,6 @@ int config_set_require_aimee_git(int value)
    return rc;
 }
 
-int config_set_delegate_sandbox(int value)
-{
-   config_t *cfg = calloc(1, sizeof(*cfg));
-   if (!cfg)
-      return -1;
-   int rc = config_load(cfg);
-   if (rc == 0)
-   {
-      cfg->delegate_sandbox = value;
-      rc = config_save(cfg);
-   }
-   free(cfg);
-   return rc;
-}
-
 int config_set_delegate_sandbox_require_isolation(int value)
 {
    config_t *cfg = calloc(1, sizeof(*cfg));

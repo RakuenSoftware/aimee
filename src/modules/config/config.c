@@ -705,17 +705,12 @@ static void config_set_defaults(config_t *cfg)
 
    /* Defaults */
    snprintf(cfg->db1_path, sizeof(cfg->db1_path), "%s", config_default_db1_path());
-   /* Default-ON: a delegate's shell and file ops run inside its own container rather
-    * than in-process with aimee-server's filesystem and environment. Non-flat (the
-    * parse below carries an env override), so the default lives here, not in
-    * config_flat_defaults[]. */
-   cfg->delegate_sandbox = 1;
    /* Default-ON: co-located shell execution is namespace-isolated to the workspace.
     * This is the mode the delegate shell guard in tool_bash() reads (it refuses a
     * delegated shell when the mode is OFF), so leaving it at the SANDBOX_MODE_OFF
     * zero value made that guard refuse EVERY co-located delegate shell on an
     * unconfigured install — isolation-by-default and delegate-shells-work-by-default
-    * cannot both hold while `delegate_sandbox` defaults on and this defaults off.
+    * cannot both hold while delegates are always containerized and this defaults off.
     * Non-flat (sandbox is a SCHEMA_OBJECT section), so the default lives here.
     * Opt out with `sandbox: {"mode": "off"}` — config_save persists that opt-out. */
    cfg->sandbox.mode = SANDBOX_MODE_WORKSPACE_ONLY;
@@ -1347,17 +1342,20 @@ int config_load_file(config_t *cfg)
 
    /* Default-on; parse the explicit opt-out so `subagent_ban_enabled: false` loads. */
 
-   /* Delegate sandbox: default 1 (on) from config_set_defaults, so an unconfigured
-    * install isolates delegates; only an explicit `delegate_sandbox: false` opts out.
-    * A deploy that cannot easily write aimee.yaml (e.g. a container image whose config
-    * is baked) can flip it with AIMEE_DELEGATE_SANDBOX=0/1 — the env wins. */
+   /* `delegate_sandbox` no longer selects anything: a delegate runs in a container
+    * or not at all. Say so rather than ignore it silently — an operator who set it
+    * to false chose an execution model that no longer exists, and their delegates
+    * will now refuse to run instead of quietly running on the host. The key stays
+    * in config_schema[] so it does not also draw "unknown key". */
    item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox");
-   if (cJSON_IsBool(item))
-      cfg->delegate_sandbox = cJSON_IsTrue(item);
+   if (cJSON_IsBool(item) && !cJSON_IsTrue(item))
+      fprintf(stderr, "aimee: config warning: `delegate_sandbox: false` is no longer honoured — a "
+                      "delegate runs in its own container or not at all. Remove the key.\n");
    {
       const char *e = getenv("AIMEE_DELEGATE_SANDBOX");
-      if (e && (e[0] == '1' || e[0] == '0'))
-         cfg->delegate_sandbox = (e[0] == '1');
+      if (e && e[0] == '0')
+         fprintf(stderr, "aimee: config warning: AIMEE_DELEGATE_SANDBOX=0 is no longer honoured — "
+                         "a delegate runs in its own container or not at all.\n");
    }
    item = cJSON_GetObjectItemCaseSensitive(root, "delegate_sandbox_image");
    if (cJSON_IsString(item) && item->valuestring[0])
