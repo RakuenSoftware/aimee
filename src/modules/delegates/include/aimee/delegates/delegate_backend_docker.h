@@ -38,7 +38,6 @@ extern "C"
     *
     * Returns 0 + writes the name into `out`, or -1 on NULL/empty
     * task_id or undersized buffer. */
-   int delegate_backend_docker_container_name(const char *task_id, char *out, size_t outsz);
 
    /* Remove delegate containers left running by an earlier server process.
     * Server startup calls this before its worker pools exist, so every matching

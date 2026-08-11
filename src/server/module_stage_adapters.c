@@ -25,6 +25,8 @@
 #include <aimee/benchmarks/module_api.h>
 #include <aimee/core/event_bus/module_protocol.h>
 #include <aimee/delegates/delegate_role.h>
+#include <aimee/delegates/delegate_launch_args.h>
+#include <aimee/delegates/delegate_launch_args.h>
 #include <aimee/delegates/module_api.h>
 #include <aimee/git/module_api.h>
 #include <aimee/governance/module_api.h>
@@ -790,6 +792,46 @@ static int delegate_role_policy(int op, const char *role, int a, int b, int *out
    }
 }
 
+/* The create argv for a delegate container, decided by the module.
+ *
+ * The request is built here and the answer is used verbatim: this adapter makes
+ * no decision about mounts, environment, the container's name or its flags. It
+ * is a wire, and deliberately nothing more -- a "small fix" applied here would
+ * be a rule with none of the module's checks behind it.
+ *
+ * The mount table is the largest field (the runtime's report of this process's
+ * own mounts), so the request buffer is sized for it rather than hand-counted. */
+static int delegate_launch_args(const aimee_delegates_launch_spec_t *spec, char *name_out,
+                                size_t name_cap, const char **argv_out, size_t argv_cap,
+                                size_t *arg_len_out, uint8_t *buf, size_t buf_cap)
+{
+   if (!spec || !buf || buf_cap < 2)
+      return -1;
+
+   size_t request_cap = 1u << 20;
+   uint8_t *request = malloc(request_cap);
+   if (!request)
+      return -1;
+   size_t request_len = aimee_delegates_launch_request_encode(spec, request, request_cap);
+   if (request_len == 0)
+   {
+      free(request);
+      return -1;
+   }
+
+   /* One byte of slack: the caller NUL-terminates the last argv entry in place,
+    * which writes one past the response. */
+   uint32_t response_len = 0;
+   int rc = call_module(AIMEE_DELEGATES_EVENT_LAUNCH, AIMEE_DELEGATES_STAGE_LAUNCH, request,
+                        (uint32_t)request_len, buf, (uint32_t)(buf_cap - 1), &response_len);
+   free(request);
+   if (rc != 0)
+      return -1;
+
+   return aimee_delegates_launch_response_decode(buf, response_len, name_out, name_cap, argv_out,
+                                                 argv_cap, arg_len_out);
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -1006,6 +1048,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_economics_provider(delegate_economics);
    delegate_register_patch_provider(delegate_patch_coord);
    delegate_register_role_policy_provider(delegate_role_policy);
+   delegate_register_launch_args_provider(delegate_launch_args);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path
