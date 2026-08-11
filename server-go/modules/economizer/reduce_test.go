@@ -168,10 +168,10 @@ func TestReduceSeamGating(t *testing.T) {
 	m := makeMessages(20)
 	cfg := &ReduceConfig{DelegateSeam: true, HistoryFold: true}
 	out := Reduce(m, "sys", SeamGateway, cfg, nil)
-	if out.Reason != ReasonNone || out.Mutated || out.BaselineTokens != 0 {
+	if out.Reason != ReduceReasonNone || out.Mutated || out.BaselineTokens != 0 {
 		t.Errorf("disabled seam must be a true no-op: %+v", out)
 	}
-	if out2 := Reduce(m, "sys", SeamDelegate, nil, nil); out2.Reason != ReasonNone {
+	if out2 := Reduce(m, "sys", SeamDelegate, nil, nil); out2.Reason != ReduceReasonNone {
 		t.Error("nil config must be a no-op")
 	}
 }
@@ -182,7 +182,7 @@ func TestReduceMeasureOnly(t *testing.T) {
 	before := PrintJSONUnformatted(m)
 	cfg := &ReduceConfig{DelegateSeam: true, MeasureOnly: true, HistoryFold: true}
 	out := Reduce(m, "system prompt here", SeamDelegate, cfg, nil)
-	if out.Reason != ReasonMeasured || out.Mutated || out.Messages != nil {
+	if out.Reason != ReduceReasonMeasured || out.Mutated || out.Messages != nil {
 		t.Errorf("measure-only must not mutate: %+v", out)
 	}
 	if out.BaselineTokens <= 0 || out.ReducedTokens != out.BaselineTokens || out.RemovedTokens != 0 {
@@ -202,7 +202,7 @@ func TestReduceProvenanceAlready(t *testing.T) {
 	cfg := &ReduceConfig{DelegateSeam: true, HistoryFold: true}
 	st := &ReduceState{Reduced: true}
 	out := Reduce(m, "sys", SeamDelegate, cfg, st)
-	if out.Reason != ReasonAlready || out.Mutated {
+	if out.Reason != ReduceReasonAlready || out.Mutated {
 		t.Errorf("second seam must not re-reduce: %+v", out)
 	}
 	if out.BaselineTokens <= 0 {
@@ -218,7 +218,7 @@ func TestReduceSkipNoGain(t *testing.T) {
 	m := makeMessages(20)
 	cfg := &ReduceConfig{DelegateSeam: true, HistoryFold: true, MinGainTokens: 1000000}
 	out := Reduce(m, "sys", SeamDelegate, cfg, nil)
-	if out.Reason != ReasonSkipNoGain || out.Mutated || out.Messages != nil {
+	if out.Reason != ReduceReasonSkipNoGain || out.Mutated || out.Messages != nil {
 		t.Errorf("below min_gain must skip cleanly: %+v", out)
 	}
 }
@@ -229,7 +229,7 @@ func TestReduceHistoryFoldReduces(t *testing.T) {
 	cfg := &ReduceConfig{DelegateSeam: true, HistoryFold: true,
 		Fold: FoldConfig{Closet: ClosetConfig{Enabled: true}}}
 	out := Reduce(m, "sys", SeamDelegate, cfg, &ReduceState{})
-	if out.Reason != ReasonReduced || !out.Mutated || out.Messages == nil {
+	if out.Reason != ReduceReasonReduced || !out.Mutated || out.Messages == nil {
 		t.Fatalf("fold should have reduced: %+v", out)
 	}
 	if out.ReducedTokens >= out.BaselineTokens || out.RemovedTokens == 0 {
@@ -313,7 +313,7 @@ func TestReduceCompressEngagesWhereFoldCannot(t *testing.T) {
 	m := compressFixture()
 	origCount := m.Len()
 	out := Reduce(m, "sys", SeamDelegate, compressOnly, &ReduceState{})
-	if out.Reason != ReasonReduced || !out.Mutated || out.Messages == nil {
+	if out.Reason != ReduceReasonReduced || !out.Mutated || out.Messages == nil {
 		t.Fatalf("compress should have engaged: %+v", out)
 	}
 	if out.ReducedTokens >= out.BaselineTokens {

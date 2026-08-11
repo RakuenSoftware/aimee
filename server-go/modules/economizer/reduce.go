@@ -28,11 +28,11 @@ const (
 type ReduceReason int
 
 const (
-	ReasonNone       ReduceReason = iota // no lever enabled at this seam
-	ReasonReduced                        // reduction applied
-	ReasonMeasured                       // measure-only: metrics computed, not mutated
-	ReasonSkipNoGain                     // foldable tokens below MinGainTokens
-	ReasonAlready                        // provenance: a prior seam already reduced
+	ReduceReasonNone       ReduceReason = iota // no lever enabled at this seam
+	ReduceReasonReduced                        // reduction applied
+	ReduceReasonMeasured                       // measure-only: metrics computed, not mutated
+	ReduceReasonSkipNoGain                     // foldable tokens below MinGainTokens
+	ReduceReasonAlready                        // provenance: a prior seam already reduced
 )
 
 // PriceRates are the per-token provider rates the freeze guardrail needs.
@@ -247,7 +247,7 @@ func recallInject(reduced *JSONValue, out *ReduceResult) {
 func Reduce(messages *JSONValue, systemPrompt string, seam Seam, cfg *ReduceConfig, st *ReduceState) ReduceResult {
 	var out ReduceResult
 	if messages == nil || !messages.IsArray() {
-		out.Reason = ReasonNone
+		out.Reason = ReduceReasonNone
 		return out
 	}
 
@@ -255,7 +255,7 @@ func Reduce(messages *JSONValue, systemPrompt string, seam Seam, cfg *ReduceConf
 	seamOn := cfg != nil && ((seam == SeamGateway && cfg.GatewaySeam) ||
 		(seam == SeamDelegate && cfg.DelegateSeam))
 	if !seamOn {
-		out.Reason = ReasonNone
+		out.Reason = ReduceReasonNone
 		return out
 	}
 
@@ -274,7 +274,7 @@ func Reduce(messages *JSONValue, systemPrompt string, seam Seam, cfg *ReduceConf
 	// reduced, re-measure the baseline but do NOT re-account the opportunity —
 	// that saving belongs to the seam that performed it.
 	if st != nil && st.Reduced {
-		out.Reason = ReasonAlready
+		out.Reason = ReduceReasonAlready
 		return out
 	}
 
@@ -308,7 +308,7 @@ func Reduce(messages *JSONValue, systemPrompt string, seam Seam, cfg *ReduceConf
 			compressedOwned = cr.Messages
 			work = compressedOwned
 			out.Mutated = true
-			out.Reason = ReasonReduced
+			out.Reason = ReduceReasonReduced
 			out.FoldedMsgs = cr.FoldedMsgs // bodies compressed; fold may overwrite
 			out.ClosetEvict = cr.ClosetEvict
 			if st != nil {
@@ -322,7 +322,7 @@ func Reduce(messages *JSONValue, systemPrompt string, seam Seam, cfg *ReduceConf
 		// operator's round-trip recovery threshold.
 		if cfg.MinGainTokens > 0 && out.FoldableTokens < cfg.MinGainTokens {
 			if compressedOwned == nil {
-				out.Reason = ReasonSkipNoGain
+				out.Reason = ReduceReasonSkipNoGain
 				out.Mutated = false
 				out.Messages = nil
 				return out
@@ -348,7 +348,7 @@ func Reduce(messages *JSONValue, systemPrompt string, seam Seam, cfg *ReduceConf
 			if fr := FoldView(work, &fc, freezeArg); fr.Folded && fr.Messages != nil {
 				out.Messages = fr.Messages
 				out.Mutated = true
-				out.Reason = ReasonReduced
+				out.Reason = ReduceReasonReduced
 				out.FoldedMsgs = fr.FoldedMsgs
 				out.RetainedMsgs = fr.RetainedMsgs
 				out.ReusedBoundary = fr.ReusedBoundary
@@ -402,8 +402,8 @@ func Reduce(messages *JSONValue, systemPrompt string, seam Seam, cfg *ReduceConf
 	}
 
 	// Only the measure path falls through with the reason still unset.
-	if out.Reason == ReasonNone {
-		out.Reason = ReasonMeasured
+	if out.Reason == ReduceReasonNone {
+		out.Reason = ReduceReasonMeasured
 		out.Mutated = false
 		out.Messages = nil
 	}
