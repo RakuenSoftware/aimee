@@ -290,7 +290,12 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
     * signal that actually matters -- it means the freeze held and the folded prefix
     * was byte-identical to last turn, which is the difference between folding that
     * pays for itself and folding that burns a cache read every turn. */
-   if (rrc == 0)
+   if (rrc != 0)
+      aimee_log(LOG_INFO, "economizer.gateway",
+                "seam=gateway UNREACHED call_result=%d (1=capability_absent: nothing is "
+                "serving the reduce stage) -- request dispatched pristine",
+                mres.call_result);
+   else
       aimee_log(LOG_INFO, "economizer.gateway",
                 "seam=gateway mutated=%d reason=%s baseline=%d reduced=%d removed=%d "
                 "folded=%d retained=%d reused=%d",
