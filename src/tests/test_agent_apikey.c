@@ -18,6 +18,7 @@
 #include "config.h"
 #include "platform_path.h"
 #include "runtime_secret.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void test_apikey_ref_not_serialized(void)
 {
@@ -544,7 +545,8 @@ static void test_migration_never_overwrites_a_stated_limit(void)
 
 int main(void)
 {
-   char tmp_template[] = "/tmp/aimee-agent-apikey-XXXXXX";
+   char tmp_template[256];
+   snprintf(tmp_template, sizeof tmp_template, "%s/aimee-agent-apikey-XXXXXX", platform_tmpdir());
    char *tmp_home = mkdtemp(tmp_template);
    assert(tmp_home != NULL);
    setenv("AIMEE_HOME", tmp_home, 1);
