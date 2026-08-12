@@ -165,6 +165,9 @@ static const struct
     {"curator", "contradictions", "curator.contradictions", NULL, NULL, 0},
     {"index", "blast-radius", "index.blast_radius", NULL, NULL, 0},
     {"index", "structure", "index.structure", NULL, NULL, 0},
+    {"index", "span", "index.span", NULL, NULL, 0},
+    {"index", "investigate", "index.investigate", NULL, NULL, 0},
+    {"index", "hybrid", "index.hybrid", NULL, NULL, 0},
     {"index", "callers", "index.find_callers", NULL, NULL, 0},
     {"index", "deps", "index.deps", NULL, NULL, 0},
     {"workspace", "add", "workspace.add", NULL, NULL, 300000},
@@ -615,6 +618,90 @@ static cJSON *marshal_index_file_request(const char *method, int argc, char **ar
 cJSON *marshal_index_blast_radius(int argc, char **argv)
 {
    return marshal_index_file_request("index.blast_radius", argc, argv);
+}
+
+/* `aimee index span <file> [start] [end]`, or the historic <project> <file> form
+ * with the range after it. Positional rather than flagged because this is meant
+ * to be typed inline in a chain of && commands, where three short positionals
+ * beat --line-start/--line-end. */
+cJSON *marshal_index_span(int argc, char **argv)
+{
+   static const char *bools[] = {"json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bools, &opts);
+
+   cJSON *req = marshal_no_args("index.span");
+   int at = 0;
+   /* A leading argument that is not a number and is followed by another
+    * non-number is the project, matching the other index commands. */
+   if (opts.pos_count > 1 && !isdigit((unsigned char)opts.positional[1][0]))
+   {
+      cJSON_AddStringToObject(req, "project", opts.positional[0]);
+      at = 1;
+   }
+   if (opts.pos_count > at)
+      cJSON_AddStringToObject(req, "file_path", opts.positional[at]);
+   if (opts.pos_count > at + 1)
+      cJSON_AddNumberToObject(req, "line_start", atoi(opts.positional[at + 1]));
+   if (opts.pos_count > at + 2)
+      cJSON_AddNumberToObject(req, "line_end", atoi(opts.positional[at + 2]));
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
+   return req;
+}
+
+/* `aimee index investigate "<question>" ["<question>" ...]`.
+ *
+ * EVERY positional is a question, so several become one invocation and one
+ * round trip -- the same reason the MCP tool grew a `queries` array. A single
+ * question still works and is sent as `query`, matching the tool's shape. */
+/* `aimee index hybrid "<phrase>" ["<phrase>" ...]` -- same positional-as-query
+ * shape as investigate, for the same reason: several phrases in one invocation
+ * is one round trip. --scope all widens beyond the active project. */
+cJSON *marshal_index_hybrid(int argc, char **argv)
+{
+   static const char *bools[] = {"json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bools, &opts);
+
+   cJSON *req = marshal_no_args("index.hybrid");
+   if (opts.pos_count == 1)
+      cJSON_AddStringToObject(req, "query", opts.positional[0]);
+   else if (opts.pos_count > 1)
+   {
+      cJSON *arr = cJSON_AddArrayToObject(req, "queries");
+      for (int i = 0; i < opts.pos_count; i++)
+         cJSON_AddItemToArray(arr, cJSON_CreateString(opts.positional[i]));
+   }
+   const char *scope = rpc_get(&opts, "scope");
+   if (scope && scope[0])
+      cJSON_AddStringToObject(req, "scope", scope);
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
+   return req;
+}
+
+cJSON *marshal_index_investigate(int argc, char **argv)
+{
+   static const char *bools[] = {"json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bools, &opts);
+
+   cJSON *req = marshal_no_args("index.investigate");
+   if (opts.pos_count == 1)
+      cJSON_AddStringToObject(req, "query", opts.positional[0]);
+   else if (opts.pos_count > 1)
+   {
+      cJSON *arr = cJSON_AddArrayToObject(req, "queries");
+      for (int i = 0; i < opts.pos_count; i++)
+         cJSON_AddItemToArray(arr, cJSON_CreateString(opts.positional[i]));
+   }
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
+   return req;
 }
 
 cJSON *marshal_index_structure(int argc, char **argv)

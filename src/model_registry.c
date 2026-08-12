@@ -516,23 +516,30 @@ typedef struct
    int deprecated;
 } capability_entry_t;
 
+/* Models the CATALOGUE DOES NOT CARRY, and nothing else.
+ *
+ * This table used to hold rows for models the catalogue also describes, and
+ * those rows were maintained by hand against an assistant knowledge cutoff. They
+ * drifted, as hand-maintained copies of someone else's data do: measured against
+ * data/models_dev_snapshot.json, three of the nine disagreed, and not subtly --
+ * claude-sonnet-4-6 and claude-opus-4-6 both claimed 200000/8192 where the
+ * catalogue says 1000000/128000. A max_output of 8192 against a real ceiling of
+ * 128000 truncates a reply at a sixteenth of what the model can produce.
+ *
+ * Those rows normally lose to the catalogue (it is consulted first), so the
+ * damage only surfaces when the catalogue load comes up empty -- which is
+ * exactly when nobody is watching, and precisely the failure that already
+ * happened once: a stale row outranked the snapshot's own numbers when the
+ * nested-schema reader returned zero entries.
+ *
+ * A row that agrees with the catalogue is dead weight; a row that disagrees can
+ * only ever be wrong. Both kinds are gone. What remains is the one case the
+ * catalogue cannot answer: a model it does not list at all. Deprecation moved to
+ * g_local_deprecations below, because that IS knowledge the catalogue lacks. */
 static const capability_entry_t g_capabilities[] = {
-    {"openai", "gpt-4o", 128000, 16384, 2.50, 10.00,
-     MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_PDF | MODEL_CAP_AUDIO |
-         MODEL_CAP_STREAMING,
-     "text,image,audio", "2025-06", 0, 0},
-    {"openai", "gpt-4-turbo", 128000, 4096, 10.00, 30.00,
-     MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_PDF | MODEL_CAP_STREAMING,
-     "text,image", "2024-04", 0, 1},
     {"anthropic", "claude-3-5-sonnet", 200000, 8192, 3.00, 15.00,
      MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_PDF | MODEL_CAP_STREAMING,
      "text,image", "2025-04", 0, 0},
-    {"anthropic", "claude-sonnet-4-6", 200000, 8192, 3.00, 15.00,
-     MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_PDF | MODEL_CAP_STREAMING,
-     "text,image", "2025-10", 0, 0},
-    {"anthropic", "claude-opus-4-6", 200000, 8192, 15.00, 75.00,
-     MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_PDF | MODEL_CAP_STREAMING,
-     "text,image", "2025-10", 0, 0},
     {"gemini", "gemini-1.5-pro", 1000000, 8192, 1.25, 5.00,
      MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_AUDIO |
          MODEL_CAP_STREAMING,
@@ -543,9 +550,24 @@ static const capability_entry_t g_capabilities[] = {
      "text,image,audio", "2025-08", 0, 0},
     {"groq", "llama-3-70b-instruct", 8192, 4096, 0.59, 0.79,
      MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_STREAMING, "text", "2023-12", 1, 0},
-    {"minimax", "MiniMax-M2.7", 200000, 8192, 0.0, 0.0,
-     MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_STREAMING, "text", "2026-01", 0, 0},
     {NULL, NULL, 0, 0, 0.0, 0.0, 0, NULL, NULL, 0, 0},
+};
+
+/* Models THIS PROJECT has retired, whatever the catalogue says.
+ *
+ * The catalogue reports a model as live while the vendor still lists it, so a
+ * model retired here comes back routable on every refresh unless the decision is
+ * recorded somewhere. It is recorded here — a name, not a copy of the vendor's
+ * numbers, so it cannot drift the way the capability rows did. */
+typedef struct
+{
+   const char *provider;
+   const char *model_id;
+} deprecation_entry_t;
+
+static const deprecation_entry_t g_local_deprecations[] = {
+    {"openai", "gpt-4-turbo"},
+    {NULL, NULL},
 };
 
 #define MODEL_CAP_DYNAMIC_MAX 1024
@@ -860,22 +882,20 @@ static void capability_dynamic_load_once(void)
    /* Carry local deprecation forward. The catalogue treats "still listed
     * upstream" as live (fill_cap_from_nested: absent key means live), so a model
     * this project has already retired -- gpt-4-turbo, say -- comes back marked
-    * live and becomes routable again. Deprecation is the one field where the
-    * static table holds knowledge the catalogue does not, and routing AWAY from
-    * a model is the conservative direction, so OR it in rather than let the
-    * catalogue clear it. Numbers and capabilities still come from the catalogue;
-    * only this flag is merged. Runs before overrides so an operator can still
-    * override the result either way. */
+    * live and becomes routable again. Deprecation is the one thing this project
+    * knows that the catalogue does not, and routing AWAY from a model is the
+    * conservative direction, so OR it in rather than let the catalogue clear it.
+    * Numbers and capabilities still come from the catalogue; only this flag is
+    * merged. Runs before overrides so an operator can still override the result
+    * either way. */
    for (int i = 0; i < count && i < MODEL_CAP_DYNAMIC_MAX; i++)
    {
       if (g_dynamic_caps[i].deprecated)
          continue;
-      for (int j = 0; g_capabilities[j].provider != NULL; j++)
+      for (int j = 0; g_local_deprecations[j].provider != NULL; j++)
       {
-         if (!g_capabilities[j].deprecated)
-            continue;
-         if (strcasecmp(g_capabilities[j].provider, g_dynamic_caps[i].provider) == 0 &&
-             strcasecmp(g_capabilities[j].model_id, g_dynamic_caps[i].model_id) == 0)
+         if (strcasecmp(g_local_deprecations[j].provider, g_dynamic_caps[i].provider) == 0 &&
+             strcasecmp(g_local_deprecations[j].model_id, g_dynamic_caps[i].model_id) == 0)
          {
             g_dynamic_caps[i].deprecated = 1;
             break;

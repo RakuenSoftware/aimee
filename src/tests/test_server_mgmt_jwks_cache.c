@@ -3,6 +3,7 @@
 #include "kb/kb_mgmt_jwks_publication.h"
 #include "kb/kb_mgmt_token_roots_provision.h"
 #include "server/server_mgmt_jwks_cache.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #include <assert.h>
 #include <fcntl.h>
@@ -112,7 +113,12 @@ static void fixture(int64_t from, int64_t until, unsigned char manifest_seed[32]
 
 int main(void)
 {
-   char db_path[] = "/tmp/aimee-management-jwks-cache-XXXXXX";
+   /* Built from TMPDIR, not hardcoded to /tmp. The runner exports TMPDIR and
+    * removes it on exit, so a test that hardcodes /tmp escapes that sandbox and
+    * leaves one entry behind on every run — the drip that has already put ~40k
+    * of them in /tmp on the development box. */
+   char db_path[256];
+   snprintf(db_path, sizeof db_path, "%s/aimee-management-jwks-cache-XXXXXX", platform_tmpdir());
    int fd = mkstemp(db_path);
    assert(fd >= 0);
    close(fd);
@@ -124,7 +130,9 @@ int main(void)
    fixture(90, 200, seed, bundle, &bundle_n, envelope, &envelope_n);
    if (geteuid() == 0)
    {
-      char trust_path[] = "/tmp/aimee-management-jwks-trust-XXXXXX";
+      char trust_path[256];
+      snprintf(trust_path, sizeof trust_path, "%s/aimee-management-jwks-trust-XXXXXX",
+               platform_tmpdir());
       int trust_fd = mkstemp(trust_path);
       assert(trust_fd >= 0);
       assert(write(trust_fd, bundle, bundle_n) == (ssize_t)bundle_n);
