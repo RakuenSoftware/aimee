@@ -511,8 +511,9 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * the pointer cached above (line ~397) could now dangle. */
    model = jo_cstr(req, "model");
 
-   /* Only AGGRESSIVE and only an OpenAI-family upstream. Native Anthropic
-    * requests keep the client's exact cache prefix and cache_control layout. */
+   /* Only AGGRESSIVE. Native Anthropic requests are mutated too now: the gateway
+    * holds a per-session freeze, so a folded prefix stays byte-identical after the
+    * turn it first engages, which is what the client's cache prefix needs. */
    if (gw_mutate_upstream_ok(parity))
    {
       char *mut_sys = anthropic_system_to_text(req);
