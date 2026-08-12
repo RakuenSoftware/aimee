@@ -492,6 +492,49 @@ static void test_provided_target_suppresses_cwd_bundle(void)
    printf("  PASS: test_provided_target_suppresses_cwd_bundle\n");
 }
 
+/* Build an mkdtemp template under TMPDIR rather than hardcoding /tmp: a shared
+ * /tmp accumulates an entry per run, and the sandbox gives each session its own
+ * TMPDIR precisely so those land somewhere disposable. */
+static void review_tmp_template(char *out, size_t cap, const char *name)
+{
+   const char *base = getenv("TMPDIR");
+   if (!base || !base[0])
+      base = "/tmp";
+   size_t len = strlen(base);
+   while (len > 1 && base[len - 1] == '/')
+      len--;
+   snprintf(out, cap, "%.*s/%s-XXXXXX", (int)len, base, name);
+}
+
+/* A review-evidence provider the tests drive directly.
+ *
+ * WHICH roles are guarded, which are snippet-checked, and what counts as
+ * claiming there was nothing to review are the module's rules, pinned against
+ * the module (server-go/modules/delegates/reviewevidence_test.go) -- including
+ * the two fixtures that used to live here. Restating them in this harness would
+ * put the rule in two places again.
+ *
+ * What only this side can test is that the guard HONOURS a verdict: that it
+ * runs the checkout comparison exactly when told to, reports the module's
+ * wording, and leaves an unguarded review alone. So the verdict is set by the
+ * test, not decided here. */
+static unsigned g_review_verdict;
+static const char *g_review_message = "";
+static unsigned g_review_flags_seen;
+
+static int test_review_evidence_provider(const char *role, const char *response, unsigned flags,
+                                         unsigned *verdict, char *message, size_t message_cap)
+{
+   (void)role;
+   (void)response;
+   g_review_flags_seen = flags;
+   if (verdict)
+      *verdict = g_review_verdict;
+   if (message && message_cap)
+      snprintf(message, message_cap, "%s", g_review_message);
+   return 0;
+}
+
 static void test_review_evidence_drift_detects_reversed_snippet(void)
 {
    char root[] = "/tmp/aimee-review-drift-XXXXXX";
@@ -624,9 +667,15 @@ static void test_review_evidence_drift_ignores_inline_review_annotation(void)
    printf("  PASS: test_review_evidence_drift_ignores_inline_review_annotation\n");
 }
 
-static void test_review_evidence_guard_rejects_clean_claim_on_dirty_worktree(void)
+/* The guard reports the module's contradiction verdict, in the module's words.
+ *
+ * This replaces a fixture that pinned the ROLE list and the claim keywords by
+ * driving a real git worktree. Those are rules and they now live in one place;
+ * what could only be tested here is that the verdict reaches the caller. */
+static void test_review_evidence_guard_reports_a_contradiction(void)
 {
-   char root[] = "/tmp/aimee-review-clean-claim-XXXXXX";
+   char root[512];
+   review_tmp_template(root, sizeof(root), "aimee-review-verdict");
    assert(mkdtemp(root) != NULL);
 
    char cmd[1024];
@@ -636,13 +685,133 @@ static void test_review_evidence_guard_rejects_clean_claim_on_dirty_worktree(voi
    agent_result_t result;
    memset(&result, 0, sizeof(result));
    result.success = 1;
-   result.response = strdup("No uncommitted diff exists. The working tree is clean.");
+   result.response = strdup("No uncommitted diff exists.");
    assert(result.response != NULL);
 
+   g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED | AIMEE_DELEGATES_REVIEW_CONTRADICTION;
+   g_review_message = "delegate evidence drift: the wording the module chose";
    int rc = 0;
    delegate_apply_review_evidence_guard("review", root, &rc, &result, 0);
+   assert(rc == -1);
+   assert(strcmp(result.error, "delegate evidence drift: the wording the module chose") == 0);
+   free(result.response);
+
+   /* An unguarded verdict leaves the review alone, whatever it said. */
+   memset(&result, 0, sizeof(result));
+   result.success = 1;
+   result.response = strdup("No uncommitted diff exists.");
+   assert(result.response != NULL);
+   g_review_verdict = 0;
+   g_review_message = "";
+   rc = 0;
+   delegate_apply_review_evidence_guard("code", root, &rc, &result, 0);
    assert(rc == 0);
    assert(result.error[0] == '\0');
+   free(result.response);
+
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);
+   assert(system(cmd) == 0);
+   printf("  PASS: test_review_evidence_guard_reports_a_contradiction\n");
+}
+
+/* The caller runs the checkout comparison exactly when the verdict asks for it.
+ *
+ * The response below cites a snippet that does NOT match the file, so the
+ * difference between the two halves is entirely whether CHECK_SNIPPETS was set.
+ * This replaces a fixture that asserted the same thing via the role "diagnose";
+ * which roles get the check is now the module's to say. */
+static void test_review_evidence_guard_runs_the_snippet_check_only_when_asked(void)
+{
+   char root[512];
+   review_tmp_template(root, sizeof(root), "aimee-review-snippet");
+   assert(mkdtemp(root) != NULL);
+   char srcdir[512];
+   snprintf(srcdir, sizeof(srcdir), "%s/src", root);
+   assert(mkdir(srcdir, 0700) == 0);
+   char path[512];
+   snprintf(path, sizeof(path), "%s/src/kb_client.c", root);
+   FILE *f = fopen(path, "w");
+   assert(f != NULL);
+   fputs("void f(void)\n"
+         "{\n"
+         "   cJSON *req = cJSON_CreateObject();\n"
+         "   if (!req)\n"
+         "      return;\n"
+         "   char *resp = kb_client_v1_post_json(\"/v1/internal/ingest/job/claim\", req, 1000, "
+         "NULL);\n"
+         "   cJSON_Delete(req);\n"
+         "   return;\n"
+         "}\n",
+         f);
+   fclose(f);
+
+   /* The reversed-order snippet from the drift test above: known to drift, so
+    * the only difference between the two halves below is the verdict. */
+   const char *response =
+       "Findings\n"
+       "**Severity: critical | Location: `src/kb_client.c:6`**\n"
+       "```c\n"
+       "cJSON_Delete(req);\n"
+       "char *resp = kb_client_v1_post_json(\"/v1/internal/ingest/job/claim\", req, 1000, NULL);\n"
+       "```\n";
+
+   agent_result_t result;
+   memset(&result, 0, sizeof(result));
+   result.success = 1;
+   result.response = strdup(response);
+   assert(result.response != NULL);
+
+   g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED;
+   g_review_message = "";
+   int rc = 0;
+   delegate_apply_review_evidence_guard("diagnose", root, &rc, &result, 0);
+   assert(rc == 0);
+   assert(result.error[0] == '\0');
+   free(result.response);
+
+   memset(&result, 0, sizeof(result));
+   result.success = 1;
+   result.response = strdup(response);
+   assert(result.response != NULL);
+
+   g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED | AIMEE_DELEGATES_REVIEW_CHECK_SNIPPETS;
+   rc = 0;
+   delegate_apply_review_evidence_guard("review", root, &rc, &result, 0);
+   assert(rc == -1);
+   assert(strstr(result.error, "delegate evidence drift") != NULL);
+   free(result.response);
+
+   unlink(path);
+   rmdir(srcdir);
+   rmdir(root);
+   printf("  PASS: test_review_evidence_guard_runs_the_snippet_check_only_when_asked\n");
+}
+
+/* The worktree-dirty fact is computed here and travels WITH the question. A
+ * module that never learns the worktree is dirty cannot catch the one thing
+ * this guard exists to catch. */
+static void test_review_evidence_guard_sends_the_facts_it_owns(void)
+{
+   char root[512];
+   review_tmp_template(root, sizeof(root), "aimee-review-facts");
+   assert(mkdtemp(root) != NULL);
+   char cmd[1024];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q", root);
+   assert(system(cmd) == 0);
+
+   agent_result_t result;
+   memset(&result, 0, sizeof(result));
+   result.success = 1;
+   result.response = strdup("a report");
+   assert(result.response != NULL);
+
+   g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED;
+   g_review_message = "";
+   g_review_flags_seen = 0xffffffffu;
+   int rc = 0;
+   delegate_apply_review_evidence_guard("review", root, &rc, &result, 0);
+   assert((g_review_flags_seen & AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY) == 0);
+   assert((g_review_flags_seen & AIMEE_DELEGATES_REVIEW_TARGET_PROVIDED) == 0);
    free(result.response);
 
    char path[512];
@@ -654,57 +823,18 @@ static void test_review_evidence_guard_rejects_clean_claim_on_dirty_worktree(voi
 
    memset(&result, 0, sizeof(result));
    result.success = 1;
-   result.response = strdup("No uncommitted diff exists. The working tree is clean.");
+   result.response = strdup("a report");
    assert(result.response != NULL);
-
+   g_review_flags_seen = 0;
    rc = 0;
-   delegate_apply_review_evidence_guard("validate", root, &rc, &result, 0);
-   assert(rc == -1);
-   assert(strstr(result.error, "delegate evidence drift") != NULL);
+   delegate_apply_review_evidence_guard("review", root, &rc, &result, 1);
+   assert((g_review_flags_seen & AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY) != 0);
+   assert((g_review_flags_seen & AIMEE_DELEGATES_REVIEW_TARGET_PROVIDED) != 0);
    free(result.response);
 
    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);
    assert(system(cmd) == 0);
-   printf("  PASS: test_review_evidence_guard_rejects_clean_claim_on_dirty_worktree\n");
-}
-
-static void test_diagnose_evidence_guard_allows_nonreview_snippets(void)
-{
-   char root[] = "/tmp/aimee-diagnose-snippet-XXXXXX";
-   assert(mkdtemp(root) != NULL);
-   char srcdir[512];
-   snprintf(srcdir, sizeof(srcdir), "%s/docs", root);
-   assert(mkdir(srcdir, 0700) == 0);
-   char path[512];
-   snprintf(path, sizeof(path), "%s/docs/proposal.md", root);
-   FILE *f = fopen(path, "w");
-   assert(f != NULL);
-   fputs("one\n"
-         "two\n"
-         "three\n",
-         f);
-   fclose(f);
-
-   agent_result_t result;
-   memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup("Finding\n"
-                            "**Location: `docs/proposal.md:2`**\n"
-                            "```md\n"
-                            "this is an explanatory quote, not an exact current-file snippet\n"
-                            "```\n");
-   assert(result.response != NULL);
-
-   int rc = 0;
-   delegate_apply_review_evidence_guard("diagnose", root, &rc, &result, 0);
-   assert(rc == 0);
-   assert(result.error[0] == '\0');
-   free(result.response);
-
-   unlink(path);
-   rmdir(srcdir);
-   rmdir(root);
-   printf("  PASS: test_diagnose_evidence_guard_allows_nonreview_snippets\n");
+   printf("  PASS: test_review_evidence_guard_sends_the_facts_it_owns\n");
 }
 
 static void test_apply_max_turns_override(void)
@@ -1244,11 +1374,13 @@ int main(void)
    test_prompt_plan_requires_prompt_source();
    test_validation_bundle_appended_for_review_roles();
    test_provided_target_suppresses_cwd_bundle();
+   delegate_register_review_evidence_provider(test_review_evidence_provider);
    test_review_evidence_drift_detects_reversed_snippet();
    test_review_evidence_drift_ignores_historical_diff_snippet();
    test_review_evidence_drift_ignores_inline_review_annotation();
-   test_review_evidence_guard_rejects_clean_claim_on_dirty_worktree();
-   test_diagnose_evidence_guard_allows_nonreview_snippets();
+   test_review_evidence_guard_reports_a_contradiction();
+   test_review_evidence_guard_runs_the_snippet_check_only_when_asked();
+   test_review_evidence_guard_sends_the_facts_it_owns();
    test_apply_max_turns_override();
    test_apply_max_turns_policy_caps_inspection_roles();
    test_apply_max_turns_policy_aliases();
