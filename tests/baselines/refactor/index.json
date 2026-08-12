@@ -107,7 +107,7 @@
         },
         {
           "path": "Dockerfile.server",
-          "sha256": "91b06328210dbe6b23fc54423b9258ebc256939585988d48cb46a3bb6a7da742"
+          "sha256": "a236e9ad97b9e1b07e5b94e6b1e1b3073ea0f1db1204ad26170dc5336968a94f"
         },
         {
           "path": "Dockerfile.status-authority",
