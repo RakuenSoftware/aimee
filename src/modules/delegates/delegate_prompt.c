@@ -1408,16 +1408,6 @@ char *delegate_bound_root_notice(const char *shell_root, const char *file_root,
    return out;
 }
 
-/* Nested delegate creation is denied at runtime; do not add a prompt block that
- * tells delegates to fan out work they cannot actually create. */
-char *delegate_build_tier_context(const char *via_name, int tier_override, const char *role)
-{
-   (void)via_name;
-   (void)tier_override;
-   (void)role;
-   return NULL;
-}
-
 char *delegate_rewrite_prompt_cwd(const char *prompt, const char *cwd, const char *worktree_path,
                                   int *occurrences_out)
 {

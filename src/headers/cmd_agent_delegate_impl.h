@@ -216,7 +216,6 @@ int delegate_worktree_has_changes(const char *wt_path);
  *   via_name      — pin by agent name (mutually exclusive with tier_override)
  *   tier_override — pin by tier number (-1 = use default routing)
  *   role          — the delegation role (used to resolve the agent) */
-char *delegate_build_tier_context(const char *via_name, int tier_override, const char *role);
 
 /* Route override helpers shared by the direct CLI and server-routed delegate
  * paths. Provider routing picks the cheapest enabled agent for the requested
