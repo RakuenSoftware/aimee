@@ -931,6 +931,18 @@ static int delegate_image_gc(const uint8_t *request, size_t request_len, uint8_t
    return 0;
 }
 
+/* Which agents may serve this packet. A wire. */
+static int delegate_route_filter(const uint8_t *request, size_t request_len, uint8_t *response,
+                                 size_t response_cap, size_t *response_len)
+{
+   uint32_t got = 0;
+   if (call_module(AIMEE_DELEGATES_EVENT_ROUTEFILTER, AIMEE_DELEGATES_STAGE_ROUTEFILTER, request,
+                   (uint32_t)request_len, response, (uint32_t)response_cap, &got) != 0)
+      return -1;
+   *response_len = got;
+   return 0;
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -1152,6 +1164,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_isolation_provider(delegate_isolation);
    delegate_register_may_write_provider(delegate_may_write_adapter);
    delegate_register_image_gc_provider(delegate_image_gc);
+   delegate_register_route_filter_provider(delegate_route_filter);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path

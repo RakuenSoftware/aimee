@@ -51,6 +51,7 @@ static int capabilities_via_module(const char *prompt, int tools_enabled, unsign
 #include "modules/tools/agent_tools_internal.h"
 #include "provider_cli_adapter.h"
 #include "cJSON.h"
+#include <aimee/delegates/delegate_launch_args.h>
 
 /* role_template_max_turns() (via delegate_role.o, reached by the max-turns policy)
  * reads the role_templates dir under config_default_dir() and parses `max_turns:`
@@ -886,100 +887,70 @@ static void test_via_override_rejects_role_mismatch(void)
    printf("  PASS: test_via_override_rejects_role_mismatch\n");
 }
 
-static void test_capability_filter_drops_deprecated_on_auto_route(void)
+/* The capability POLICY moved to the module (stage 17): the predicate, the
+ * context-window precedence and the modality relaxation are decided and tested
+ * there, where the fleet-wide relaxation can actually be exercised.
+ *
+ * What stays here is the wrapper's own job, and it is the half most likely to
+ * rot silently: RESOLVING each agent's facts out of the catalog, the registry
+ * and the CLI adapters, and APPLYING the verdict to the fleet. A recording
+ * provider makes both visible. */
+static unsigned g_rf_flags[8];
+static int g_rf_override_ctx[8], g_rf_catalog_ctx[8], g_rf_cli_ctx[8];
+static unsigned g_rf_count, g_rf_required_caps;
+static int g_rf_min_context, g_rf_drop_deprecated;
+static int g_rf_keep[8];
+
+static int recording_route_filter(const uint8_t *request, size_t request_len, uint8_t *response,
+                                  size_t response_cap, size_t *response_len)
 {
-   agent_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 2;
-   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "old");
-   snprintf(cfg.agents[0].model, sizeof(cfg.agents[0].model), "deprecated-model");
-   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "openai");
-   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "diagnose");
-   cfg.agents[0].role_count = 1;
-   cfg.agents[0].enabled = 1;
+   if (request_len < AIMEE_DELEGATES_ROUTEFILTER_HEADER_LEN)
+      return -1;
+   g_rf_drop_deprecated = request[5];
+   g_rf_count = aimee_delegates_get_u32(request + 8);
+   g_rf_required_caps = aimee_delegates_get_u32(request + 12);
+   g_rf_min_context = (int)aimee_delegates_get_u32(request + 16);
+   if (g_rf_count > 8)
+      return -1;
 
-   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "new");
-   snprintf(cfg.agents[1].model, sizeof(cfg.agents[1].model), "vision-model");
-   snprintf(cfg.agents[1].provider, sizeof(cfg.agents[1].provider), "openai");
-   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "diagnose");
-   cfg.agents[1].role_count = 1;
-   cfg.agents[1].enabled = 1;
+   for (unsigned i = 0; i < g_rf_count; i++)
+   {
+      const uint8_t *at = request + AIMEE_DELEGATES_ROUTEFILTER_HEADER_LEN +
+                          (size_t)i * AIMEE_DELEGATES_ROUTEFILTER_AGENT_LEN;
+      g_rf_flags[i] = aimee_delegates_get_u32(at);
+      g_rf_override_ctx[i] = (int)aimee_delegates_get_u32(at + 8);
+      g_rf_catalog_ctx[i] = (int)aimee_delegates_get_u32(at + 12);
+      g_rf_cli_ctx[i] = (int)aimee_delegates_get_u32(at + 16);
+   }
 
-   char errbuf[128];
-   assert(delegate_filter_route_capabilities(&cfg, "diagnose", MODEL_CAP_VISION, 0, 1, errbuf,
-                                             sizeof(errbuf)) == 0);
-   assert(cfg.agents[0].enabled == 0);
-   assert(cfg.agents[1].enabled == 1);
-   printf("  PASS: test_capability_filter_drops_deprecated_on_auto_route\n");
+   size_t need = 16u + (size_t)g_rf_count * 4u;
+   if (response_cap < need)
+      return -1;
+   memset(response, 0, need);
+   aimee_delegates_put_u32(response, AIMEE_DELEGATES_ROUTEFILTER_RESPONSE_MAGIC);
+   unsigned kept = 0;
+   for (unsigned i = 0; i < g_rf_count; i++)
+      if (g_rf_keep[i])
+      {
+         aimee_delegates_put_u32(response + 16 + i * 4, 1u);
+         kept++;
+      }
+   aimee_delegates_put_u32(response + 4, kept);
+   *response_len = need;
+   return 0;
 }
 
-static void test_capability_filter_enforces_min_context(void)
+static void test_route_filter_resolves_facts_and_applies_the_verdict(void)
 {
-   agent_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 2;
-   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "small");
-   snprintf(cfg.agents[0].model, sizeof(cfg.agents[0].model), "vision-tinyctx-model");
-   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "openai");
-   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "diagnose");
-   cfg.agents[0].role_count = 1;
-   cfg.agents[0].enabled = 1;
+   delegate_register_route_filter_provider(recording_route_filter);
 
-   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "large");
-   snprintf(cfg.agents[1].model, sizeof(cfg.agents[1].model), "vision-large-model");
-   snprintf(cfg.agents[1].provider, sizeof(cfg.agents[1].provider), "openai");
-   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "diagnose");
-   cfg.agents[1].role_count = 1;
-   cfg.agents[1].enabled = 1;
-
-   char errbuf[128];
-   assert(delegate_filter_route_capabilities(&cfg, "diagnose", MODEL_CAP_VISION, 10000, 0, errbuf,
-                                             sizeof(errbuf)) == 0);
-   assert(cfg.agents[0].enabled == 0);
-   assert(cfg.agents[1].enabled == 1);
-   printf("  PASS: test_capability_filter_enforces_min_context\n");
-}
-
-static void test_capability_filter_honors_tools_enabled(void)
-{
-   agent_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 2;
-   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "metadata-only");
-   snprintf(cfg.agents[0].model, sizeof(cfg.agents[0].model), "notools-model");
-   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "openai");
-   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "diagnose");
-   cfg.agents[0].role_count = 1;
-   cfg.agents[0].enabled = 1;
-   cfg.agents[0].tools_enabled = 0;
-
-   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "configured-tools");
-   snprintf(cfg.agents[1].model, sizeof(cfg.agents[1].model), "notools-model");
-   snprintf(cfg.agents[1].provider, sizeof(cfg.agents[1].provider), "openai");
-   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "diagnose");
-   cfg.agents[1].role_count = 1;
-   cfg.agents[1].enabled = 1;
-   cfg.agents[1].tools_enabled = 1;
-
-   char errbuf[128];
-   assert(delegate_filter_route_capabilities(&cfg, "diagnose", MODEL_CAP_TOOLS, 0, 0, errbuf,
-                                             sizeof(errbuf)) == 0);
-   assert(cfg.agents[0].enabled == 0);
-   assert(cfg.agents[1].enabled == 1);
-   printf("  PASS: test_capability_filter_honors_tools_enabled\n");
-}
-
-/* A tmux-CLI agent (codex) has no `model` and may have context_window=0 (records
- * registered before the window was persisted). The filter must fall back to the
- * CLI adapter's declared window so it survives a min-context floor — and still
- * drop a CLI agent whose adapter is unknown / declares no window. */
-static void test_capability_filter_cli_agent_uses_adapter_context(void)
-{
    agent_config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.agent_count = 2;
 
-   /* codex: no model, no explicit window — resolves via the codex adapter (272k). */
+   /* A tmux-CLI agent: no model and no explicit window, so its window can only
+    * come from the codex adapter. That resolution is the wrapper's, and the
+    * module cannot do it -- so it must arrive on the wire. */
    snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "codex");
    snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "codex");
    snprintf(cfg.agents[0].cli_kind, sizeof(cfg.agents[0].cli_kind), "codex");
@@ -987,81 +958,70 @@ static void test_capability_filter_cli_agent_uses_adapter_context(void)
    cfg.agents[0].role_count = 1;
    cfg.agents[0].enabled = 1;
    cfg.agents[0].tools_enabled = 1;
-   cfg.agents[0].middleware.context_window = 0;
 
-   /* unknown CLI kind, no model/window — must NOT resolve a window, so dropped. */
-   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "mystery-cli");
+   /* An explicit override, which must be sent as itself rather than resolved. */
+   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "other");
    snprintf(cfg.agents[1].provider, sizeof(cfg.agents[1].provider), "mystery");
    snprintf(cfg.agents[1].cli_kind, sizeof(cfg.agents[1].cli_kind), "no-such-cli");
    snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "review");
    cfg.agents[1].role_count = 1;
    cfg.agents[1].enabled = 1;
-   cfg.agents[1].tools_enabled = 1;
-   cfg.agents[1].middleware.context_window = 0;
+   cfg.agents[1].tools_enabled = 0;
+   cfg.agents[1].middleware.context_window = 400000;
+
+   g_rf_keep[0] = 1; /* the module's answer: keep the first, drop the second */
+   g_rf_keep[1] = 0;
 
    char errbuf[128];
-   assert(delegate_filter_route_capabilities(&cfg, "review", MODEL_CAP_TOOLS, 5131, 0, errbuf,
+   assert(delegate_filter_route_capabilities(&cfg, "review", MODEL_CAP_TOOLS, 5131, 1, errbuf,
                                              sizeof(errbuf)) == 0);
-   assert(cfg.agents[0].enabled == 1); /* codex kept via adapter window */
-   assert(cfg.agents[1].enabled == 0); /* unknown CLI dropped */
-   printf("  PASS: test_capability_filter_cli_agent_uses_adapter_context\n");
+
+   /* The requirement reached the module unchanged. */
+   assert(g_rf_count == 2);
+   assert(g_rf_required_caps == MODEL_CAP_TOOLS);
+   assert(g_rf_min_context == 5131);
+   assert(g_rf_drop_deprecated == 1);
+
+   /* Facts the module cannot look up: role membership, the agent's own tools
+    * setting, and the CLI adapter's window. */
+   assert(g_rf_flags[0] & AIMEE_DELEGATES_RF_ENABLED);
+   assert(g_rf_flags[0] & AIMEE_DELEGATES_RF_HAS_ROLE);
+   assert(g_rf_flags[0] & AIMEE_DELEGATES_RF_TOOLS);
+   assert(g_rf_cli_ctx[0] > 0); /* resolved from the codex adapter */
+   assert(g_rf_override_ctx[0] == 0);
+
+   assert(!(g_rf_flags[1] & AIMEE_DELEGATES_RF_TOOLS)); /* tools off travels */
+   assert(g_rf_override_ctx[1] == 400000);              /* sent, not resolved */
+   assert(g_rf_cli_ctx[1] == 0);                        /* unknown CLI has none */
+
+   /* And the verdict was applied to the fleet. */
+   assert(cfg.agents[0].enabled == 1);
+   assert(cfg.agents[1].enabled == 0);
+   printf("  PASS: test_route_filter_resolves_facts_and_applies_the_verdict\n");
 }
 
-/* An inferred modality cap (vision/pdf/audio) that no model satisfies must NOT
- * hard-fail the fleet: it is relaxed to the hard caps (tools + min_context) so
- * the text models stay routable. Guards the fleet-wide false-fail where a text
- * task merely mentioning an image required vision no model had. */
-static void test_capability_filter_relaxes_unmet_modality(void)
+/* With no provider there is no verdict, and the router must refuse rather than
+ * route on requirements nothing checked. */
+static void test_route_filter_refuses_without_a_provider(void)
 {
+   delegate_register_route_filter_provider(NULL);
+
    agent_config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 2;
-   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "text-a");
-   snprintf(cfg.agents[0].model, sizeof(cfg.agents[0].model), "text-model");
-   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "openai");
-   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "diagnose");
+   cfg.agent_count = 1;
+   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "a");
+   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "review");
    cfg.agents[0].role_count = 1;
    cfg.agents[0].enabled = 1;
    cfg.agents[0].tools_enabled = 1;
 
-   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "text-b");
-   snprintf(cfg.agents[1].model, sizeof(cfg.agents[1].model), "text-model");
-   snprintf(cfg.agents[1].provider, sizeof(cfg.agents[1].provider), "openai");
-   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "diagnose");
-   cfg.agents[1].role_count = 1;
-   cfg.agents[1].enabled = 1;
-   cfg.agents[1].tools_enabled = 1;
-
-   /* Require TOOLS (hard) + VISION (soft); no text-model has vision. The hard
-    * TOOLS must be enforced, the unmet VISION relaxed -> both kept, no error. */
-   char errbuf[128];
-   assert(delegate_filter_route_capabilities(&cfg, "diagnose", MODEL_CAP_TOOLS | MODEL_CAP_VISION,
-                                             0, 0, errbuf, sizeof(errbuf)) == 0);
-   assert(cfg.agents[0].enabled == 1);
-   assert(cfg.agents[1].enabled == 1);
-   printf("  PASS: test_capability_filter_relaxes_unmet_modality\n");
-}
-
-/* A hard capability (tools) that no model satisfies still fails closed — only the
- * inferred modality caps are soft. */
-static void test_capability_filter_hard_cap_still_fails(void)
-{
-   agent_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 1;
-   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "metadata-only");
-   snprintf(cfg.agents[0].model, sizeof(cfg.agents[0].model), "notools-model");
-   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "openai");
-   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "diagnose");
-   cfg.agents[0].role_count = 1;
-   cfg.agents[0].enabled = 1;
-   cfg.agents[0].tools_enabled = 0;
-
-   char errbuf[128];
-   assert(delegate_filter_route_capabilities(&cfg, "diagnose", MODEL_CAP_TOOLS, 0, 0, errbuf,
+   char errbuf[128] = "";
+   assert(delegate_filter_route_capabilities(&cfg, "review", MODEL_CAP_TOOLS, 0, 0, errbuf,
                                              sizeof(errbuf)) == -1);
-   assert(cfg.agents[0].enabled == 0);
-   printf("  PASS: test_capability_filter_hard_cap_still_fails\n");
+   assert(errbuf[0] != '\0');
+
+   delegate_register_route_filter_provider(recording_route_filter);
+   printf("  PASS: test_route_filter_refuses_without_a_provider\n");
 }
 
 static void test_capability_inference_audio_extension_not_keyword(void)
@@ -1298,12 +1258,8 @@ int main(void)
    test_tier_override_keeps_same_tier_pool();
    test_delegate_checkout_records_unavailable_heads();
    test_via_override_rejects_role_mismatch();
-   test_capability_filter_drops_deprecated_on_auto_route();
-   test_capability_filter_enforces_min_context();
-   test_capability_filter_honors_tools_enabled();
-   test_capability_filter_cli_agent_uses_adapter_context();
-   test_capability_filter_relaxes_unmet_modality();
-   test_capability_filter_hard_cap_still_fails();
+   test_route_filter_resolves_facts_and_applies_the_verdict();
+   test_route_filter_refuses_without_a_provider();
    test_capability_inference_audio_extension_not_keyword();
    test_capability_inference_detects_modalities();
    test_delegate_filter_route_scope();

@@ -1935,7 +1935,7 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
                                $(OBJDIR)/db1/execution_plans.o $(OBJDIR)/db1/coord_jobs.o \
 		                               $(OBJDIR)/modules/delegates/delegate_launch.o $(OBJDIR)/modules/delegates/delegate_source_authority.o $(OBJDIR)/modules/delegates/delegate_economics.o $(OBJDIR)/server/server_coord_dispatcher.o \
 		                               $(OBJDIR)/modules/delegates/gw_orch_delegates.o $(OBJDIR)/pipeline/gw_orchestration_seam.o \
-		                               $(OBJDIR)/modules/delegates/delegate_routing.o \
+		                               $(OBJDIR)/modules/delegates/delegate_routing.o $(OBJDIR)/modules/delegates/delegate_launch_args.o \
 		                               $(OBJDIR)/model_registry.o \
 		                               $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
 		                               $(OBJDIR)/server/server_delegate_status.o \
@@ -4027,7 +4027,7 @@ $(TESTPREFIX)/unit-test-cmd-cancel: $(OBJDIR)/tests/test_cmd_cancel.o \
 $(TESTPREFIX)/unit-test-cmd-delegate: $(OBJDIR)/tests/test_cmd_delegate.o \
                              $(OBJDIR)/modules/delegates/delegate_depth.o $(OBJDIR)/modules/delegates/delegate_role.o \
                              $(OBJDIR)/role_templates.o \
-                             $(OBJDIR)/modules/delegates/delegate_prompt.o $(OBJDIR)/modules/delegates/delegate_routing.o \
+                             $(OBJDIR)/modules/delegates/delegate_prompt.o $(OBJDIR)/modules/delegates/delegate_routing.o $(OBJDIR)/modules/delegates/delegate_launch_args.o \
                              $(OBJDIR)/modules/delegates/delegate_checkout.o $(OBJDIR)/cJSON.o \
                              $(OBJDIR)/tests/module_handlers/delegates.o \
                              $(OBJDIR)/util.o $(OBJDIR)/posix/platform_process.o $(OBJDIR)/posix/util.o
