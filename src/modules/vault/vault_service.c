@@ -105,6 +105,15 @@ vault_status_t vault_service_get_server_wrap(const char *principal, const char *
                  VAULT_ERR_CRYPTO); /* decrypt/tamper — fail closed */
 }
 
+int vault_service_has_server_principal(const char *agent, const char *cred)
+{
+   if (!agent || !cred)
+      return 0;
+   /* vault_store_has_entry reads the store index only -- see vault_store.h: "no
+    * decryption". Deliberately no vaudit() here: nothing was accessed. */
+   return vault_store_has_entry(VAULT_SERVER_PRINCIPAL, agent, cred) == 1;
+}
+
 /* Read (agent, cred) from the SERVER principal's vault under the server master KEK
  * — no client, no unlock. VAULT_OK / VAULT_NO_ENTRY (no file or no entry) /
  * VAULT_ERR_* (fail closed). */

@@ -37,6 +37,16 @@ vault_status_t vault_service_get(const char *principal, const char *agent, const
    return VAULT_NO_ENTRY;
 }
 
+/* Presence mirror of the getter below: routability probing asks whether an entry
+ * exists WITHOUT decrypting or auditing, so the stub answers from the same
+ * fixture the getter uses. Keeping them consistent means a test that seeds a
+ * credential sees it as both present and gettable. */
+int vault_service_has_server_principal(const char *agent, const char *cred)
+{
+   return agent && cred && strcmp(agent, "codex") == 0 && strcmp(cred, "oauth") == 0 &&
+          test_vault_server_codex_oauth[0];
+}
+
 vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
                                                   size_t out_len)
 {
