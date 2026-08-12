@@ -82,7 +82,23 @@ jobs:
         run: python3 -I -S scripts/check_panel_contract_boundary.py
       - name: Test panel contract boundary failure modes
         run: python3 -I scripts/tests/test_check_panel_contract_boundary.py -v
+      # The surface baseline is a digest of the PUBLIC surface: 370 public
+      # headers, the routes, the schemas, the CLI help. That is a release
+      # question, so it gates `main` and not the integration branch.
+      #
+      # On `testing` it was answering a question nobody asked. A branch whose
+      # job is to absorb in-flight work touches public headers constantly, so
+      # every PR re-froze the digest -- a mechanical diff nobody reads -- and
+      # any two concurrent PRs then collided on the same regenerated lines.
+      # Nineteen rebases in one migration, none of which surfaced a single real
+      # change to the surface.
+      #
+      # Nothing is lost by moving it. The promoting testing -> main PR runs this
+      # and fails until the baseline is refrozen, and THAT diff is the useful
+      # artifact: one review of everything a release changes on the public
+      # surface, instead of nineteen refreezes read by nobody.
       - name: Enforce refactor surface baselines
+        if: github.base_ref != 'testing' && github.ref != 'refs/heads/testing'
         run: python3 -I -S scripts/refactor_baselines.py
       - name: Enforce refactor cleanup accounting
         run: python3 -I -S scripts/check_cleanup_ledger.py
