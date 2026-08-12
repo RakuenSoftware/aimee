@@ -226,6 +226,11 @@
           "id": 19,
           "name": "delegate-launch-plan",
           "event_kind": 6675
+        },
+        {
+          "id": 20,
+          "name": "delegate-review-evidence",
+          "event_kind": 6676
         }
       ]
     },
