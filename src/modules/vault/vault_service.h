@@ -108,6 +108,22 @@ vault_status_t vault_service_set_server(const char *agent, const char *cred, con
 /* Read (agent, cred) from the server principal's vault under the server master KEK
  * — no client, no unlock. VAULT_OK (plaintext written), VAULT_NO_ENTRY (no file or
  * no such entry), or VAULT_ERR_* (fail closed). `out` is cleansed on non-OK. */
+/* Does the SERVER principal hold (agent, cred)? 1 if present, 0 otherwise.
+ *
+ * PRESENCE, not access: no KEK is derived, nothing is decrypted, no plaintext is
+ * produced, and NO AUDIT ROW IS EMITTED. That last part is the point. Routing asks
+ * "is this agent usable?" on every agent, on every /v1/agent/list -- and answering
+ * it through vault_service_get_server_principal() made a read-only availability
+ * probe look identical, in the audit ledger, to a real credential access. Measured
+ * on CT 403: 50 requests to /v1/agent/list produced exactly 50 vault.get_server
+ * rows, and the ledger had accumulated 3669 of them. Those rows are the key
+ * operators correlate a credential incident by; filling them with probe traffic
+ * costs the ledger its meaning.
+ *
+ * Use this to decide availability. Use vault_service_get_server_principal() when
+ * you actually intend to USE the credential -- that one audits, correctly. */
+int vault_service_has_server_principal(const char *agent, const char *cred);
+
 vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
                                                   size_t out_len);
 

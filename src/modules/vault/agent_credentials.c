@@ -152,10 +152,13 @@ int agent_has_resolvable_credentials(const agent_t *agent)
     * For codex we probe the TOKEN, not the account id: a vaulted account without a
     * token is NOT a usable credential (the token is what authenticates). */
    {
-      char k[MAX_API_KEY_LEN];
+      /* PRESENCE, not access. This used to call agent_vault_get, which decrypts
+       * the credential into a stack buffer (never wiped here) and emits a
+       * vault.get_server audit row -- for a question that only needs to know
+       * whether an entry exists. */
       int is_codex = strcmp(agent->auth_type, "codex-oauth") == 0;
-      if (agent_vault_get(agent->name, is_codex ? VAULT_CODEX_TOKEN_CRED : VAULT_API_KEY_CRED, k,
-                          sizeof(k)))
+      if (vault_service_has_server_principal(agent->name, is_codex ? VAULT_CODEX_TOKEN_CRED
+                                                                   : VAULT_API_KEY_CRED))
          return 1;
    }
    for (int i = 0; i < agent->credential_count; i++)
