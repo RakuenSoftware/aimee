@@ -50,26 +50,72 @@
 
 /* --- ast_grep_search --- */
 
-/* Resolve the sg (ast-grep) binary path.
- * Checks ~/.local/bin/sg first (where install.sh places it), then falls back
- * to "sg" in PATH via execvp. Returns a pointer to a static buffer. */
+/* Is `candidate` really ast-grep? `--version` prints "ast-grep <semver>". */
+static int is_ast_grep(const char *candidate)
+{
+   const char *argv[] = {candidate, "--version", NULL};
+   char *out = NULL;
+   int rc = safe_exec_capture(argv, &out, 4096);
+   int ok = (rc == 0) && out && strstr(out, "ast-grep") != NULL;
+   free(out);
+   return ok;
+}
+
+/* Resolve the ast-grep binary, VERIFYING it is ast-grep before returning it.
+ * NULL when no ast-grep is installed, so the caller can say so.
+ *
+ * `sg` IS ALSO A STANDARD LINUX COMMAND -- util-linux's set-group-ID runner --
+ * and it is present on essentially every distro. The old resolver checked
+ * ~/.local/bin/sg and otherwise fell back to bare "sg", so on any box without
+ * ast-grep installed, execvp found /usr/bin/sg instead. What happened next was
+ * worse than an error:
+ *
+ *   util-linux sg rejects --json and writes to stderr; safe_exec_capture merges
+ *   stderr into the captured output, so `output` is NON-empty; the not-found
+ *   guard is (rc == 127 || (!output && rc != 0)) and neither half fires; the
+ *   error text is then parsed as NDJSON, matches nothing, and the tool answers
+ *   "No matches found."
+ *
+ * A wrong binary reported as a clean empty result. An agent asking "does this
+ * pattern repeat anywhere" was told no, authoritatively, on a machine where the
+ * search never ran. That is the worst possible failure for a search tool, and it
+ * is invisible in a transcript.
+ *
+ * So: prefer the unambiguous name (ast-grep), accept sg only where it verifies,
+ * and verify with --version rather than trusting the filename. Cached after the
+ * first resolution -- the probe costs one subprocess per process lifetime. */
 static const char *ast_grep_binary(void)
 {
    static char path[MAX_PATH_LEN];
-   if (path[0])
-      return path;
+   static int resolved = 0;
+   if (resolved)
+      return path[0] ? path : NULL;
+   resolved = 1;
 
    const char *home = platform_home_dir();
+   char home_ast[MAX_PATH_LEN] = "";
+   char home_sg[MAX_PATH_LEN] = "";
    if (home && home[0])
    {
-      snprintf(path, sizeof(path), "%s/.local/bin/sg", home);
-      if (access(path, X_OK) == 0)
-         return path;
+      snprintf(home_ast, sizeof(home_ast), "%s/.local/bin/ast-grep", home);
+      snprintf(home_sg, sizeof(home_sg), "%s/.local/bin/sg", home);
    }
 
-   /* Fall back to name-only; execvp will search PATH */
-   snprintf(path, sizeof(path), "sg");
-   return path;
+   /* Explicit paths first (an install we placed), then PATH names. "ast-grep"
+    * before "sg" because only the latter collides with util-linux. */
+   const char *candidates[] = {home_ast[0] ? home_ast : NULL, home_sg[0] ? home_sg : NULL,
+                               "ast-grep", "sg", NULL};
+   for (int i = 0; candidates[i]; i++)
+   {
+      if (strchr(candidates[i], '/') && access(candidates[i], X_OK) != 0)
+         continue; /* an explicit path that is not there */
+      if (!is_ast_grep(candidates[i]))
+         continue;
+      snprintf(path, sizeof(path), "%s", candidates[i]);
+      return path;
+   }
+   path[0] = '\0';
+   return NULL;
 }
 
 #define AST_GREP_MAX_OUTPUT (256 * 1024)
@@ -90,6 +136,13 @@ cJSON *tool_ast_grep_search(cJSON *args)
    const char *path = (cJSON_IsString(jpath) && jpath->valuestring[0]) ? jpath->valuestring : ".";
 
    const char *sg = ast_grep_binary();
+   if (!sg)
+      return text_content(
+          "error: ast-grep is not installed (a `sg` on PATH that is util-linux's "
+          "set-group-ID command does not count, and is why this used to answer 'No matches "
+          "found' instead). Install it with: curl -fsSL "
+          "https://github.com/ast-grep/ast-grep/releases/latest/download/"
+          "sg-x86_64-unknown-linux-musl.tar.gz | tar xz -C ~/.local/bin");
    const char *argv[] = {sg, "--json", "--pattern", pattern, "--lang", lang, path, NULL};
 
    char *output = NULL;

@@ -72,6 +72,7 @@ Subcommands:
   span <file> [start] [end]  Read an exact line range (chainable with &&)
   callers          Find callers of a symbol
   investigate "<question>" [...]  Ask the index; several questions, one call
+  hybrid "<phrase>" [...]  Search for a phrase, not a symbol (--scope all)
 ```
 
 ### `aimee init`

@@ -1123,6 +1123,10 @@ void pt_print_index_span(const char *method, cJSON *resp)
 /* One block per question. The result payload is the KB's own evidence object, so
  * it is printed as JSON rather than flattened: an agent chaining this wants the
  * structure, and a human reading it gets the query line as a header. */
+void pt_print_index_hybrid(const char *method, cJSON *resp)
+{
+   pt_print_index_investigate(method, resp);
+}
 void pt_print_index_investigate(const char *method, cJSON *resp)
 {
    (void)method;
