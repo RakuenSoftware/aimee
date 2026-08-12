@@ -65,14 +65,38 @@
  * callable by that name at all (it is a member of the `recall` family, and
  * `recall` is not shown either), so the one substitution that matters for "read
  * this file and change it" was the one an agent could not act on. */
+/* THE SURFACE MATTERS MORE THAN THE TOOL NAME, and this line used to get that
+ * backwards. It said "call these INSTEAD of a shell command" and named MCP tools
+ * only. Every other channel said the same: SKILL.md, and the MCP server
+ * instructions ("call them directly, by name"). So an agent did exactly as asked
+ * and spent one round trip per lookup.
+ *
+ * Measured on the benchmark: 13.3 MCP tool calls per cell, 29 total calls against
+ * plain Codex's 8.7, and ZERO invocations of the aimee CLI across 13 cells --
+ * despite /usr/local/bin/aimee being on PATH the whole time. Round trips are the
+ * 3.3x term in the cost gap; tokens per call are only 1.27x.
+ *
+ * An MCP call cannot be chained: one call, one turn, the whole conversation
+ * re-sent. `aimee ...` is an ordinary command, so N of them chain with && inside
+ * ONE shell call the agent was already making. Same answers, ~1 round trip
+ * instead of N. That is why the CLI leads here and MCP is named as the fallback:
+ * not preference, arithmetic. */
 #define AIMEE_GUIDANCE_EXPLORE_WITH_LINE                                                           \
-   "explore-with: for CODE questions call these INSTEAD of a shell command -- "                    \
-   "grep/rg for a definition -> " AIMEE_CODE_TOOL_FIND_SYMBOL                                      \
-   "; grep for a pattern or a repeated shape -> " AIMEE_CODE_TOOL_AST_GREP_SEARCH                  \
-   "; find/ls, or any search that is not a symbol name -> " AIMEE_CODE_TOOL_INDEX                  \
-   " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID "; cat/sed a file or a line range -> "               \
-   AIMEE_CODE_TOOL_INDEX " command=span; what else depends on this -> "                            \
-   AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS "; what was decided before -> memory_recall. "             \
+   "explore-with: aimee answers CODE questions from its index. When a lookup is "                  \
+   "available as a COMMAND, chain it: several `aimee ...` commands joined with && "                \
+   "cost ONE round trip, where the same lookups as separate tool calls cost one "                  \
+   "turn each. Fold them into a shell call you are already making. "                               \
+   "definition -> aimee index find <symbol>; callers of a symbol -> aimee index "                  \
+   "callers <symbol>; what else depends on this -> aimee index blast-radius "                      \
+   "<file>; a file's shape -> aimee index structure <file>; what was decided "                     \
+   "before -> aimee memory search <terms>. "                                                       \
+   "These have no command form yet, so call the tool: a pattern or repeated shape "                \
+   "-> " AIMEE_CODE_TOOL_AST_GREP_SEARCH "; a search that is not a symbol name -> "                \
+   AIMEE_CODE_TOOL_INDEX " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID "; reading a "                \
+   "file or line range -> " AIMEE_CODE_TOOL_INDEX " command=span. Tool calls cannot "              \
+   "be chained, so batch WITHIN one: each of these takes a PLURAL argument that "                  \
+   "answers several at once (spans, queries, symbols) -- use it rather than "                      \
+   "repeating the call. "                                                                          \
    "Shell stays right for building, running tests, and editing.\n"
 
 /* The scope policy. explore-with names the tools; it does not say WHEN one
