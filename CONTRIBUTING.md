@@ -60,22 +60,40 @@ Keep one purpose per PR. Include:
 
 Do not include generated artifacts without their source change.
 
-### When `testing` moves under you
+### The public-surface baseline gates `main`, not `testing`
 
-`tests/baselines/refactor/index.json` is generated: a digest per file of the
-public surface. Two branches touching the same file rewrite the same digest
-line, so rebasing onto a moved `testing` conflicts there routinely. Neither
-side's bytes are the answer: the answer is whatever the merged tree produces.
+`tests/baselines/refactor/index.json` is a digest of the PUBLIC surface: 370
+public headers, the routes, the schemas, the CLI help. Asking "did the public
+surface change, and did you mean it?" is a release question, so it is enforced
+on pull requests into `main` and not on the integration branch.
 
-    make -C src resolve-generated     # regenerate it, stage it
-    git rebase --continue
+On `testing` it was answering a question nobody asked. A branch whose job is to
+absorb in-flight work touches public headers constantly, so every PR re-froze
+the digest, and any two concurrent PRs then collided on the same regenerated
+lines. It cost nineteen rebases in one migration and surfaced no real change to
+the surface in any of them.
 
-This is a script rather than a git merge driver deliberately. A driver runs
-DURING the merge, before git has necessarily written every merged file, so a
-whole-tree digest computed there can be silently wrong: measured, a driver made
-the rebase complete clean with a baseline that did not match the tree. A loud
-conflict is better than a quiet mismatch, so the conflict stays and only its
-resolution is automated.
+So on `testing`: do not re-freeze it. `make -C src lint` no longer asks you to.
 
-The check itself is unchanged and still runs in CI. If you regenerate a baseline
-you did not mean to change, that is a real finding. Read the diff.
+When promoting `testing` into `main`:
+
+    make -C src refactor-baseline-check              # what changed on the surface?
+    python3 -I -S scripts/refactor_baselines.py freeze
+
+That diff is the point. One review of everything a release changes on the public
+surface beats a mechanical re-freeze per PR that nobody reads.
+
+If you do hit a conflict in a generated baseline anyway, do not merge two
+digests by hand. Take either side and re-derive it:
+
+    git checkout --theirs -- tests/baselines/refactor/index.json
+    python3 -I -S scripts/refactor_baselines.py freeze --accept-dirty
+    git add tests/baselines/refactor/index.json && git rebase --continue
+
+Do NOT reach for a git merge driver here, however tempting. A driver runs DURING
+the merge, before git has necessarily written every merged file, so a whole-tree
+digest computed there is computed against a half-written tree. Measured: with a
+driver configured the rebase completed CLEAN and produced a baseline that did
+not match the tree, where the same rebase without it conflicted loudly. A quiet
+mismatch is worse than a conflict, so regenerate after the merge, when the tree
+is final.
