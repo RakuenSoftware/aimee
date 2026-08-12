@@ -1763,6 +1763,44 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /index/span:
+    post:
+      summary: Read an exact line range from an indexed file
+      description: >
+        The command-line twin of the code_span_get MCP tool. It exists so a range
+        read can be chained with && into one shell call instead of costing a tool
+        turn per read. line_end defaults to line_start, so an omitted range
+        returns a single line rather than a whole file.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file_path]
+              properties:
+                project: { type: string }
+                file_path: { type: string }
+                line_start: { type: integer }
+                line_end: { type: integer }
+                cwd: { type: string }
+      responses:
+        "200":
+          description: Span envelope with the file content for the range
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing file_path, or no active project to scope it to
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "502":
+          description: Knowledge service unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /index/structure:
     post:
       summary: List the definitions in an indexed file
