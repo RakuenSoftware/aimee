@@ -363,6 +363,7 @@ int handle_index_blast_radius(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 int handle_index_structure(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_span(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_investigate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_index_hybrid(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_deps(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_blast_radius_preview(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

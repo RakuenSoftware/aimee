@@ -93,9 +93,10 @@
    "read a file or line range -> aimee index span <file> <start> <end>; where do "                 \
    "I even start -> aimee index investigate \"<question>\" (pass several "                         \
    "questions to answer them in one call). "                                                       \
-   "These two have no command form yet, so call the tool: a pattern or repeated "                  \
-   "shape -> " AIMEE_CODE_TOOL_AST_GREP_SEARCH "; a search that is not a symbol "                  \
-   "name -> " AIMEE_CODE_TOOL_INDEX " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ". "               \
+   "a phrase rather than a symbol -> aimee index hybrid \"<phrase>\" (several "                    \
+   "phrases in one call; --scope all to widen). "                                                  \
+   "Only this one has no command form: a pattern or repeated shape "                               \
+   "-> " AIMEE_CODE_TOOL_AST_GREP_SEARCH ". "                                                      \
    "Tool calls cannot be chained, so batch WITHIN one: each takes a PLURAL "                       \
    "argument that answers several at once (spans, queries, symbols) -- use it "                    \
    "rather than repeating the call. "                                                              \

@@ -1763,6 +1763,48 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /index/hybrid:
+    post:
+      summary: Fused lexical and semantic search over the code index
+      description: >
+        The command-line twin of the index_hybrid MCP tool, for finding a PHRASE
+        rather than a symbol. Accepts `queries` so several phrases cost one round
+        trip. scope=all widens beyond the active project. Note the MCP twin also
+        performs cite-capture against an MCP session id; this route does not,
+        because it has no such session. The retrieval is identical.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                project: { type: string }
+                query: { type: string }
+                queries:
+                  type: array
+                  items: { type: string }
+                symbol: { type: string }
+                scope: { type: string, enum: [current, all] }
+                max_results: { type: integer }
+                cwd: { type: string }
+      responses:
+        "200":
+          description: One result entry per query, in order
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing query/queries, bad scope, or no active project
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "502":
+          description: Knowledge service unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /index/investigate:
     post:
       summary: Ask the code index a plain-words question
