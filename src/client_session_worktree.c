@@ -28,6 +28,126 @@ void client_session_worktree_key(const char *sid, char *out, size_t cap)
 }
 
 #ifndef _WIN32
+/* --- Session-id rendezvous -------------------------------------------------
+ *
+ * Every process of one agent session must agree on the session id, because the
+ * worktree is keyed on it: disagree and the session gets TWO worktrees, and
+ * whichever process holds the wrong one operates on an empty checkout. That is
+ * not hypothetical -- a Claude Code session was landing its edits in the
+ * hook's worktree while `aimee git` and every delegate were bound to the
+ * proxy's, which refused the real one as "outside the session checkout".
+ *
+ * The rendezvous is a file named for a process both sides can name. `aimee mcp
+ * serve` reads session-ppid-<its own ppid>, and its parent IS the host process
+ * (verified: the proxy is a direct child of `claude`). The hook cannot use its
+ * own getppid() for this: its command carries an environment assignment, so the
+ * host must run it through a shell, and the hook is therefore a GRANDchild --
+ * publishing under its immediate parent would name a shell that exits
+ * immediately and that the proxy never asks about.
+ *
+ * So the hook walks up to the host and publishes there as well. Only as far as
+ * the host: publishing under every ancestor would eventually name something
+ * shared (a terminal, a service manager) and hand one session's id to an
+ * unrelated one -- the precise collision the ppid key exists to avoid. */
+#if defined(__linux__)
+/* The parent of `pid`, or 0 when it cannot be read. Parsed from the END of
+ * /proc/<pid>/stat: comm sits in field 2 wrapped in parentheses and may itself
+ * contain spaces or ')', so everything before the LAST ") " is skipped rather
+ * than tokenising from the front. */
+static pid_t csw_parent_of(pid_t pid)
+{
+   char path[64];
+   snprintf(path, sizeof(path), "/proc/%d/stat", (int)pid);
+   FILE *f = fopen(path, "r");
+   if (!f)
+      return 0;
+   char buf[512];
+   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+   fclose(f);
+   buf[n] = '\0';
+   char *tail = strrchr(buf, ')');
+   if (!tail || !tail[1])
+      return 0;
+   int ppid = 0;
+   char state = 0;
+   if (sscanf(tail + 1, " %c %d", &state, &ppid) != 2 || ppid <= 0)
+      return 0;
+   return (pid_t)ppid;
+}
+
+static int csw_comm_is(pid_t pid, const char *name)
+{
+   char path[64];
+   snprintf(path, sizeof(path), "/proc/%d/comm", (int)pid);
+   FILE *f = fopen(path, "r");
+   if (!f)
+      return 0;
+   char buf[64] = "";
+   if (!fgets(buf, sizeof(buf), f))
+   {
+      fclose(f);
+      return 0;
+   }
+   fclose(f);
+   buf[strcspn(buf, "\r\n")] = '\0';
+   return strcmp(buf, name) == 0;
+}
+#endif /* __linux__ */
+
+/* Write `sid` to <aimee_home>/session-ppid-<pid>. Authoritative: the caller
+ * holds the id the HOST assigned, which outranks anything a peer minted for
+ * itself, so this truncates rather than failing on an existing file. */
+static void csw_publish_at(const char *home, pid_t pid, const char *sid)
+{
+   char path[4200];
+   if (snprintf(path, sizeof(path), "%s/session-ppid-%d", home, (int)pid) >= (int)sizeof(path))
+      return;
+   int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+   if (fd < 0)
+      return;
+   size_t len = strlen(sid);
+   ssize_t wrote = write(fd, sid, len);
+   (void)wrote;
+   close(fd);
+}
+
+int client_session_id_publish(const char *sid, const char *home)
+{
+   if (!sid || !sid[0] || !home || !home[0])
+      return -1;
+   /* Reject anything that could escape the filename or the file's one-line
+    * contract; a session id is an opaque token from the host, not a path. */
+   for (const char *p = sid; *p; p++)
+      if (*p == '/' || *p == '\n' || *p == '\r' || (unsigned char)*p < 0x20)
+         return -1;
+
+   int published = 0;
+   pid_t parent = getppid();
+   if (parent > 1)
+   {
+      csw_publish_at(home, parent, sid);
+      published++;
+   }
+#if defined(__linux__)
+   /* Up to the host process, and no further. */
+   pid_t pid = parent;
+   for (int depth = 0; depth < 8 && pid > 1; depth++)
+   {
+      if (csw_comm_is(pid, "claude"))
+      {
+         if (pid != parent)
+         {
+            csw_publish_at(home, pid, sid);
+            published++;
+         }
+         break;
+      }
+      pid = csw_parent_of(pid);
+   }
+#endif
+   return published > 0 ? 0 : -1;
+}
+
 /* Run `git <argv...>` with NO shell (fork/execvp), discarding stderr. Captures
  * the first trimmed stdout line into out[cap] (out may be NULL — status only).
  * Returns the child's exit code (0 = success), or -1 if it could not be spawned
@@ -361,6 +481,13 @@ int client_session_worktree_base(const char *git_root, char *buf, size_t cap)
    (void)git_root;
    if (buf && cap)
       buf[0] = '\0';
+   return -1;
+}
+
+int client_session_id_publish(const char *sid, const char *home)
+{
+   (void)sid;
+   (void)home;
    return -1;
 }
 
