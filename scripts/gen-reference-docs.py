@@ -1436,7 +1436,12 @@ AGENT_FIELD_RE = re.compile(r'cJSON_GetObjectItem(?:CaseSensitive)?\(\s*\w+\s*,\
 
 
 def parse_agent_fields():
-    f = SRC / "server" / "agent_config.c"
+    # DELIBERATELY the config module only. An agent object is also parsed by
+    # src/modules/vault/agent_credentials.c, which reads the credential-bearing
+    # fields -- and the vault is an attack surface, so generated public docs do
+    # not enumerate what it holds or name the file that reads it. Operators who
+    # need those field names have `aimee agent setup`, which prompts for them.
+    f = SRC / "modules" / "config" / "agent_config.c"
     if not f.exists():
         return set()
     return set(AGENT_FIELD_RE.findall(f.read_text(encoding="utf-8")))
@@ -1451,7 +1456,8 @@ def render_config_files(agent_fields):
            "### `agents.json`: agent / model definitions",
            "",
            "`{\"default_agent\": \"<name>\", \"agents\": [ {<agent>}, … ]}`. Each agent "
-           "object's fields (scanned from `src/server/agent_config.c`):",
+           "object's non-credential fields (credential fields are vault-held and "
+           "deliberately not enumerated here):",
            "",
            "| Field | Description |",
            "|-------|-------------|"]

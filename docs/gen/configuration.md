@@ -743,11 +743,10 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 
 ### `agents.json`: agent / model definitions
 
-`{"default_agent": "<name>", "agents": [ {<agent>}, … ]}`. Each agent object's fields (scanned from `src/server/agent_config.c`):
+`{"default_agent": "<name>", "agents": [ {<agent>}, … ]}`. Each agent object's non-credential fields (credential fields are vault-held and deliberately not enumerated here):
 
 | Field | Description |
 |-------|-------------|
-| `access_token` | Static auth token for the endpoint. |
 | `agents` | Top-level: array of agent definitions. |
 | `api_key` | Inline API key (prefer `api_key_env` or the vault). |
 | `api_key_env` | Env var name holding the agent's API key. |
@@ -771,7 +770,6 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `endpoint` | Provider endpoint URL. |
 | `exec_roles` | Roles this agent may execute with tools. |
 | `exec_system_prompt` | System prompt for exec/tool runs. |
-| `exp` | OAuth token expiry as a Unix timestamp. |
 | `extra_headers` | Extra HTTP headers for requests. |
 | `fallback_chain` | Ordered fallback agent chain. |
 | `fallback_model` | Fallback model on failure. |
@@ -799,7 +797,6 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `provider` | Provider name. |
 | `recommended_sampling` | Provider-recommended sampling parameters. |
 | `reconnect_delay` | Delay between reconnects (ms). |
-| `refresh_token` | OAuth refresh token for the endpoint. |
 | `registration` | Name of the provider registration this agent was expanded from. Set automatically; used to prefer same-provider peers during fallback. |
 | `relay_key` | Relay auth key. |
 | `relay_ssh` | SSH relay config. |
@@ -812,7 +809,6 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `target_port` | Target port (relay / tunnel). |
 | `tier_price_exempt` | Reason this agent is exempt from the `cost_tier`-vs-price lint (e.g. a flat-rate seat whose per-token price is not meaningful). |
 | `timeout_ms` | Per-call timeout (ms). |
-| `tokens` | Token budget / accounting block. |
 | `tools_enabled` | Allow tool use for this agent. |
 | `tunnel` | Tunnel config. |
 | `tunnels` | Tunnel definitions. |

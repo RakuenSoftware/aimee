@@ -1159,6 +1159,11 @@ int config_load(config_t *cfg)
    return rc;
 }
 
+int config_cache_disabled(void)
+{
+   return getenv("AIMEE_NO_CACHE") != NULL;
+}
+
 int config_load_file(config_t *cfg)
 {
    config_set_defaults(cfg);
@@ -1170,7 +1175,7 @@ int config_load_file(config_t *cfg)
     * same-timestamp (or clock-skewed) rewrite — observed on the tiered appliance
     * filesystem, where an in-place `aimee workspace add` rewrite kept serving the
     * stale (empty-workspaces) snapshot, which config_save then re-serialised. */
-   if (!getenv("AIMEE_NO_CACHE") && g_config_cached)
+   if (!config_cache_disabled() && g_config_cached)
    {
       struct stat st;
       if (stat(path, &st) == 0)
