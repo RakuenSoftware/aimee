@@ -1,13 +1,38 @@
+/* delegate_launch.c -- turn a delegate plan into a running coordinator job.
+ *
+ * What is decided here and what is not:
+ *
+ *   - The DECISIONS about a plan -- which packets are work, whether a packet
+ *     may launch, what its delegate is briefed with, how a named path that does
+ *     not exist is repaired -- belong to the delegates module (stage 19).
+ *   - The I/O belongs here: does this file exist, which tracked files share its
+ *     basename, and every database write. The module returns rows; this file
+ *     writes them.
+ *
+ * The split is not tidiness. A plan that fails validation must leave NOTHING
+ * behind, so the whole decision is taken before the first row is created, and
+ * a refusal returns before any of it. */
+
 #include <aimee/delegates/delegate_launch.h>
 #include "aimee.h"
 #include "agent_tasks.h"
 #include "db1.h"
+#include <aimee/delegates/delegate_launch_args.h>
 #include <aimee/delegates/delegate_role.h>
+#include <aimee/delegates/module_api.h>
 #include "log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#ifndef MAX_PATH_LEN
+#define MAX_PATH_LEN 4096
+#endif
+
+/* Room for a plan and for what it becomes. A plan larger than this is refused
+ * rather than truncated: half a launch is worse than none. */
+#define LAUNCH_WIRE_CAP (512u * 1024u)
 
 static void launch_set_err(char *errbuf, size_t errbuf_len, const char *msg)
 {
@@ -57,54 +82,45 @@ static int packet_path_exists(const char *cwd, const char *path)
    return access(full, F_OK) == 0;
 }
 
-/* Canonicalize the "role" field in a packet JSON object in-place.
- * Records an INFO log when an alias is resolved. */
-static void packet_canonicalize_role(cJSON *packet)
+static const char *path_basename(const char *path)
 {
-   cJSON *role = cJSON_GetObjectItemCaseSensitive(packet, "role");
-   if (!cJSON_IsString(role) || !role->valuestring || !role->valuestring[0])
-      return;
-   const char *canonical = delegate_role_canonicalize(role->valuestring);
-   if (canonical != role->valuestring)
-   {
-      LOG_INFO("delegate", "packet role alias '%s' -> '%s'", role->valuestring, canonical);
-      cJSON_SetValuestring(role, canonical);
-   }
+   const char *slash = strrchr(path, '/');
+   return slash ? slash + 1 : path;
 }
 
-/* Normalize a single path by looking up its basename in `git ls-files`.
- * Returns 0 if the path exists or was repaired.  Returns -1 if missing and
- * unresolvable (zero or multiple matches); errbuf is populated on -1. */
-static int normalize_one_path(cJSON *item, const char *cwd, char *errbuf, size_t errbuf_len)
+/* --- the repository's tracked files -------------------------------------- */
+
+typedef struct
 {
-   const char *path = item->valuestring;
+   char **items;
+   int count;
+} tracked_files_t;
 
-   /* Fast path: file exists as-is. */
-   if (packet_path_exists(cwd, path))
-      return 0;
+static void tracked_files_free(tracked_files_t *t)
+{
+   for (int i = 0; i < t->count; i++)
+      free(t->items[i]);
+   free(t->items);
+   t->items = NULL;
+   t->count = 0;
+}
 
-   /* Extract the basename of the missing path. */
-   const char *slash = strrchr(path, '/');
-   const char *base = slash ? slash + 1 : path;
-   if (!base[0])
-   {
-      snprintf(errbuf, errbuf_len, "packet owned_files: invalid path '%s'", path);
-      return -1;
-   }
-
-   /* Scan git ls-files for files with the same basename. */
-   char candidates[8][MAX_PATH_LEN];
-   int ncandidates = 0;
+/* Read `git ls-files` ONCE per launch.
+ *
+ * The C this replaces re-ran it for every missing path. The list does not
+ * change between packets, so reading it once is both cheaper and more obviously
+ * consistent: every repair in one launch now sees the same repository. */
+static int tracked_files_load(const char *cwd, tracked_files_t *out)
+{
+   out->items = NULL;
+   out->count = 0;
 
    char ls_cmd[MAX_PATH_LEN + 64];
    if (cwd && cwd[0])
    {
       char quoted[MAX_PATH_LEN * 2];
       if (shell_quote(quoted, sizeof(quoted), cwd) != 0)
-      {
-         snprintf(errbuf, errbuf_len, "packet path repair: cannot quote cwd for '%s'", path);
          return -1;
-      }
       snprintf(ls_cmd, sizeof(ls_cmd), "git -C %s ls-files --full-name", quoted);
    }
    else
@@ -112,364 +128,350 @@ static int normalize_one_path(cJSON *item, const char *cwd, char *errbuf, size_t
 
    FILE *fp = popen(ls_cmd, "r");
    if (!fp)
-   {
-      snprintf(errbuf, errbuf_len, "packet path repair: cannot run git ls-files for '%s'", path);
       return -1;
-   }
 
+   int cap = 0;
    char line[MAX_PATH_LEN];
-   while (ncandidates < 8 && fgets(line, sizeof(line), fp))
+   while (fgets(line, sizeof(line), fp))
    {
       size_t len = strlen(line);
       while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
          line[--len] = '\0';
       if (!len)
          continue;
-
-      const char *lslash = strrchr(line, '/');
-      const char *lbase = lslash ? lslash + 1 : line;
-      if (strcmp(lbase, base) == 0)
-         snprintf(candidates[ncandidates++], MAX_PATH_LEN, "%s", line);
+      if (out->count == cap)
+      {
+         int next = cap ? cap * 2 : 256;
+         char **grown = realloc(out->items, (size_t)next * sizeof(*grown));
+         if (!grown)
+         {
+            pclose(fp);
+            tracked_files_free(out);
+            return -1;
+         }
+         out->items = grown;
+         cap = next;
+      }
+      out->items[out->count] = strdup(line);
+      if (!out->items[out->count])
+      {
+         pclose(fp);
+         tracked_files_free(out);
+         return -1;
+      }
+      out->count++;
    }
    pclose(fp);
-
-   if (ncandidates == 1)
-   {
-      LOG_INFO("delegate", "packet path repair: '%s' -> '%s'", path, candidates[0]);
-      cJSON_SetValuestring(item, candidates[0]);
-      return 0;
-   }
-
-   if (ncandidates == 0)
-   {
-      /* No match found — warn and continue.  The delegate will surface its
-       * own error if it cannot locate the file at runtime.  We do not fail
-       * here because the planner may legitimately reference files that do not
-       * exist yet (new-file creation tasks). */
-      LOG_WARN("delegate",
-               "packet owned_files: '%s' not found in repository (basename '%s' "
-               "has no match in git ls-files)",
-               path, base);
-      return 0;
-   }
-
-   /* Multiple matches — cannot pick safely; fail before dispatch. */
-   char clist[1024] = "";
-   size_t cpos = 0;
-   for (int i = 0; i < ncandidates && cpos < sizeof(clist) - 2; i++)
-   {
-      int n = snprintf(clist + cpos, sizeof(clist) - cpos, "%s%s", i ? ", " : "", candidates[i]);
-      if (n > 0)
-         cpos += (size_t)n < sizeof(clist) - cpos ? (size_t)n : sizeof(clist) - cpos - 1;
-   }
-   snprintf(errbuf, errbuf_len,
-            "packet owned_files: '%s' not found; ambiguous basename '%s' matches: %s — "
-            "repair the path before launching",
-            path, base, clist);
-   return -1;
-}
-
-/* Validate and repair owned_files paths in a packet before launch.
- * Returns 0 if all paths exist or were repaired, -1 on unresolvable missing path. */
-static int packet_normalize_paths(cJSON *packet, const char *cwd, char *errbuf, size_t errbuf_len)
-{
-   cJSON *owned = cJSON_GetObjectItemCaseSensitive(packet, "owned_files");
-   if (!cJSON_IsArray(owned))
-      return 0;
-
-   cJSON *item;
-   cJSON_ArrayForEach(item, owned)
-   {
-      if (!cJSON_IsString(item) || !item->valuestring || !item->valuestring[0])
-         continue;
-      if (normalize_one_path(item, cwd, errbuf, errbuf_len) != 0)
-         return -1;
-   }
    return 0;
 }
 
-static int packet_is_review(cJSON *packet)
+/* --- encoding the plan ---------------------------------------------------- */
+
+static const char *json_str(cJSON *obj, const char *key)
 {
-   cJSON *role = cJSON_GetObjectItemCaseSensitive(packet, "role");
-   return cJSON_IsString(role) && strcmp(role->valuestring, "review") == 0;
+   cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+   return (cJSON_IsString(item) && item->valuestring) ? item->valuestring : "";
 }
 
-static int packet_owned_file_count(cJSON *packet)
+/* Write one owned file: its path, whether it exists, and -- only when it does
+ * not -- the tracked files sharing its basename. Candidates rather than the
+ * whole file list because the whole list does not fit in one event. */
+static void encode_owned_file(aimee_delegates_wire_t *w, const char *path, const char *cwd,
+                              const tracked_files_t *tracked)
 {
-   cJSON *owned = cJSON_GetObjectItemCaseSensitive(packet, "owned_files");
-   if (!cJSON_IsArray(owned))
-      return 0;
+   aimee_delegates_wire_str(w, path);
 
-   int count = 0;
+   int exists = packet_path_exists(cwd, path);
+   aimee_delegates_wire_u32(w, exists ? 1u : 0u);
+
+   if (exists)
+   {
+      aimee_delegates_wire_u32(w, 0);
+      return;
+   }
+
+   const char *base = path_basename(path);
+   uint32_t matches = 0;
+   for (int i = 0; i < tracked->count; i++)
+      if (strcmp(path_basename(tracked->items[i]), base) == 0)
+         matches++;
+
+   aimee_delegates_wire_u32(w, matches);
+   for (int i = 0; i < tracked->count; i++)
+      if (strcmp(path_basename(tracked->items[i]), base) == 0)
+         aimee_delegates_wire_str(w, tracked->items[i]);
+}
+
+static void encode_packet(aimee_delegates_wire_t *w, cJSON *packet, const char *cwd,
+                          const tracked_files_t *tracked)
+{
+   aimee_delegates_wire_str(w, json_str(packet, "id"));
+   aimee_delegates_wire_str(w, json_str(packet, "title"));
+   aimee_delegates_wire_str(w, json_str(packet, "objective"));
+
+   /* Role aliases resolve before the module sees them: "reviewer" and "review"
+    * must not launch as two different things. The canonicalizer is itself a
+    * module seam, so this is one module's answer feeding another's question. */
+   const char *role = json_str(packet, "role");
+   if (role[0])
+      role = delegate_role_canonicalize(role);
+   aimee_delegates_wire_str(w, role);
+   aimee_delegates_wire_str(w, json_str(packet, "handoff_schema"));
+
+   cJSON *owned = cJSON_GetObjectItemCaseSensitive(packet, "owned_files");
+   uint32_t file_count = 0;
    cJSON *item;
-   cJSON_ArrayForEach(item, owned)
-   {
-      if (cJSON_IsString(item) && item->valuestring[0])
-         count++;
-   }
-   return count;
-}
-
-static int packet_handoff_schema_ok(cJSON *packet)
-{
-   cJSON *schema = cJSON_GetObjectItemCaseSensitive(packet, "handoff_schema");
-   return cJSON_IsString(schema) && strcmp(schema->valuestring, "delegate_result_v1") == 0;
-}
-
-static int append_packet_step(cJSON *steps, cJSON *packet, char *errbuf, size_t errbuf_len)
-{
-   if (!cJSON_IsObject(packet))
-   {
-      launch_set_err(errbuf, errbuf_len, "delegate plan contains an invalid packet");
-      return -1;
-   }
-   if (packet_is_review(packet))
-      return 0;
-   if (packet_owned_file_count(packet) == 0)
-   {
-      launch_set_err(errbuf, errbuf_len, "delegate plan packet missing owned_files");
-      return -1;
-   }
-   if (!packet_handoff_schema_ok(packet))
-   {
-      launch_set_err(errbuf, errbuf_len,
-                     "delegate plan packet missing handoff_schema delegate_result_v1");
-      return -1;
-   }
-
-   cJSON *step = cJSON_CreateObject();
-   if (!step)
-   {
-      launch_set_err(errbuf, errbuf_len, "out of memory building delegate launch steps");
-      return -1;
-   }
-
-   cJSON *title = cJSON_GetObjectItemCaseSensitive(packet, "title");
-   cJSON *objective = cJSON_GetObjectItemCaseSensitive(packet, "objective");
-   cJSON *id = cJSON_GetObjectItemCaseSensitive(packet, "id");
-   cJSON_AddStringToObject(step, "action",
-                           cJSON_IsString(title) && title->valuestring[0]
-                               ? title->valuestring
-                               : (cJSON_IsString(id) ? id->valuestring : "delegate packet"));
-   cJSON_AddStringToObject(step, "precondition",
-                           cJSON_IsString(id) && id->valuestring[0] ? id->valuestring
-                                                                    : "delegate packet");
-   cJSON_AddStringToObject(step, "success_predicate",
-                           cJSON_IsString(objective) && objective->valuestring[0]
-                               ? objective->valuestring
-                               : "delegate packet completed");
-   cJSON_AddStringToObject(step, "rollback", "");
-   cJSON_AddItemToArray(steps, step);
-   return 1;
-}
-
-static char *packet_build_prompt(cJSON *packet)
-{
-   cJSON *title = cJSON_GetObjectItemCaseSensitive(packet, "title");
-   cJSON *objective = cJSON_GetObjectItemCaseSensitive(packet, "objective");
-   cJSON *owned = cJSON_GetObjectItemCaseSensitive(packet, "owned_files");
-
-   const char *t =
-       (cJSON_IsString(title) && title->valuestring[0]) ? title->valuestring : "delegate packet";
-   const char *obj =
-       (cJSON_IsString(objective) && objective->valuestring[0]) ? objective->valuestring : t;
-
-   char files_list[1024] = "";
    if (cJSON_IsArray(owned))
-   {
-      size_t pos = 0;
-      cJSON *item;
-      cJSON_ArrayForEach(item, owned)
-      {
-         if (!cJSON_IsString(item) || !item->valuestring[0])
-            continue;
-         int n = snprintf(files_list + pos, sizeof(files_list) - pos - 1, "%s%s", pos ? ", " : "",
-                          item->valuestring);
-         if (n > 0 && (size_t)n < sizeof(files_list) - pos - 1)
-            pos += (size_t)n;
-      }
-   }
+      cJSON_ArrayForEach(item, owned) if (cJSON_IsString(item) && item->valuestring[0])
+          file_count++;
 
-   size_t cap = strlen(t) + strlen(obj) + strlen(files_list) + 256;
-   char *out = malloc(cap);
-   if (!out)
-      return NULL;
-   snprintf(out, cap,
-            "%s\n\n"
-            "Objective: %s\n\n"
-            "Owned files (modify only these): %s\n\n"
-            "When done, respond with a structured handoff JSON (delegate_result_v1 schema).",
-            t, obj, files_list[0] ? files_list : "(none)");
-   return out;
-}
-
-static char *packet_owned_files_json(cJSON *packet)
-{
-   cJSON *owned = cJSON_GetObjectItemCaseSensitive(packet, "owned_files");
-   cJSON *files = cJSON_CreateArray();
-   if (!files)
-      return NULL;
-
+   aimee_delegates_wire_u32(w, file_count);
    if (cJSON_IsArray(owned))
-   {
-      cJSON *item;
       cJSON_ArrayForEach(item, owned)
       {
          if (cJSON_IsString(item) && item->valuestring[0])
-            cJSON_AddItemToArray(files, cJSON_CreateString(item->valuestring));
+            encode_owned_file(w, item->valuestring, cwd, tracked);
       }
-   }
-   char *json = cJSON_PrintUnformatted(files);
-   cJSON_Delete(files);
-   return json;
 }
+
+static int encode_request(cJSON *plan, int max_concurrent, const char *cwd,
+                          const tracked_files_t *tracked, uint8_t *buf, size_t cap, size_t *out_len)
+{
+   aimee_delegates_wire_t w;
+   aimee_delegates_launchplan_request_begin(&w, buf, cap, max_concurrent, json_str(plan, "schema"),
+                                            json_str(plan, "title"));
+
+   cJSON *missing = cJSON_GetObjectItemCaseSensitive(plan, "missing_owned_files");
+   uint32_t missing_count = 0;
+   cJSON *item;
+   if (cJSON_IsArray(missing))
+      cJSON_ArrayForEach(item, missing) if (cJSON_IsString(item)) missing_count++;
+   aimee_delegates_wire_u32(&w, missing_count);
+   if (cJSON_IsArray(missing))
+      cJSON_ArrayForEach(item, missing) if (cJSON_IsString(item))
+          aimee_delegates_wire_str(&w, item->valuestring);
+
+   cJSON *packets = cJSON_GetObjectItemCaseSensitive(plan, "packets");
+   uint32_t packet_count = 0;
+   if (cJSON_IsArray(packets))
+      cJSON_ArrayForEach(item, packets) if (cJSON_IsObject(item)) packet_count++;
+   aimee_delegates_wire_u32(&w, packet_count);
+   if (cJSON_IsArray(packets))
+      cJSON_ArrayForEach(item, packets) if (cJSON_IsObject(item))
+          encode_packet(&w, item, cwd, tracked);
+
+   if (w.overflow)
+      return -1;
+   *out_len = w.len;
+   return 0;
+}
+
+/* --- the launch ----------------------------------------------------------- */
 
 int delegate_launch_coord_job(cJSON *plan, int max_concurrent, const char *cwd,
                               delegate_launch_result_t *out, char *errbuf, size_t errbuf_len)
 {
    if (out)
       memset(out, 0, sizeof(*out));
-   if (max_concurrent <= 0)
-      max_concurrent = DB1_COORD_DEFAULT_PAR;
 
    if (!cJSON_IsObject(plan))
    {
       launch_set_err(errbuf, errbuf_len, "missing delegate plan");
       return -1;
    }
-
-   cJSON *schema = cJSON_GetObjectItemCaseSensitive(plan, "schema");
-   if (!cJSON_IsString(schema) || strcmp(schema->valuestring, "delegate_plan_v1") != 0)
-   {
-      launch_set_err(errbuf, errbuf_len, "invalid delegate plan schema");
-      return -1;
-   }
-
-   cJSON *packets = cJSON_GetObjectItemCaseSensitive(plan, "packets");
-   if (!cJSON_IsArray(packets))
+   /* The packets array must exist before anything else: without it there is no
+    * plan to read, and the module would only be able to say "no packets". */
+   if (!cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(plan, "packets")))
    {
       launch_set_err(errbuf, errbuf_len, "delegate plan missing packets");
       return -1;
    }
 
-   cJSON *missing_owned = cJSON_GetObjectItemCaseSensitive(plan, "missing_owned_files");
-   if (cJSON_IsArray(missing_owned) && cJSON_GetArraySize(missing_owned) > 0)
+   tracked_files_t tracked;
+   if (tracked_files_load(cwd, &tracked) != 0)
    {
-      cJSON *first = cJSON_GetArrayItem(missing_owned, 0);
-      if (errbuf && errbuf_len > 0)
-         snprintf(errbuf, errbuf_len,
-                  "delegate plan has missing owned_files%s%s; review or mark new files before "
-                  "launching",
-                  cJSON_IsString(first) ? ": " : "",
-                  cJSON_IsString(first) ? first->valuestring : "");
+      launch_set_err(errbuf, errbuf_len, "delegate launch: cannot list repository files");
       return -1;
    }
 
+   uint8_t *request = malloc(LAUNCH_WIRE_CAP);
+   uint8_t *response = malloc(LAUNCH_WIRE_CAP);
+   if (!request || !response)
+   {
+      free(request);
+      free(response);
+      tracked_files_free(&tracked);
+      launch_set_err(errbuf, errbuf_len, "out of memory building delegate launch");
+      return -1;
+   }
+
+   size_t request_len = 0;
+   int rc =
+       encode_request(plan, max_concurrent, cwd, &tracked, request, LAUNCH_WIRE_CAP, &request_len);
+   tracked_files_free(&tracked);
+   if (rc != 0)
+   {
+      free(request);
+      free(response);
+      launch_set_err(errbuf, errbuf_len, "delegate plan is too large to launch");
+      return -1;
+   }
+
+   size_t response_len = 0;
+   rc = delegate_launch_plan_call(request, request_len, response, LAUNCH_WIRE_CAP, &response_len);
+   free(request);
+   if (rc != 0)
+   {
+      free(response);
+      launch_set_err(errbuf, errbuf_len, "delegate launch could not be planned");
+      return -1;
+   }
+
+   aimee_delegates_rd_t r;
+   char module_err[512] = "";
+   int effective_par = max_concurrent;
+   if (aimee_delegates_launchplan_response_begin(&r, response, response_len, module_err,
+                                                 sizeof(module_err), &effective_par) != 0)
+   {
+      free(response);
+      launch_set_err(errbuf, errbuf_len, "delegate launch returned an unreadable plan");
+      return -1;
+   }
+   if (module_err[0])
+   {
+      free(response);
+      launch_set_err(errbuf, errbuf_len, module_err);
+      return -1;
+   }
+
+   /* From here the plan is accepted and the writes begin. Anything that fails
+    * below cancels what it already created: a half-built job would sit in the
+    * queue looking runnable. */
    cJSON *steps = cJSON_CreateArray();
    if (!steps)
    {
+      free(response);
       launch_set_err(errbuf, errbuf_len, "out of memory building delegate launch steps");
       return -1;
    }
 
-   /* Canonicalize role aliases and normalize owned_files paths in all packets
-    * before step validation so path repairs are visible to append_packet_step. */
+   uint32_t step_count = aimee_delegates_rd_u32(&r);
+   for (uint32_t i = 0; i < step_count && !r.bad; i++)
    {
-      cJSON *p;
-      cJSON_ArrayForEach(p, packets)
-      {
-         packet_canonicalize_role(p);
-         if (!packet_is_review(p))
-         {
-            if (packet_normalize_paths(p, cwd, errbuf, errbuf_len) != 0)
-            {
-               cJSON_Delete(steps);
-               return -1;
-            }
-         }
-      }
-   }
+      char action[512], precondition[512], success[1024], rollback[256];
+      aimee_delegates_rd_str(&r, action, sizeof(action));
+      aimee_delegates_rd_str(&r, precondition, sizeof(precondition));
+      aimee_delegates_rd_str(&r, success, sizeof(success));
+      aimee_delegates_rd_str(&r, rollback, sizeof(rollback));
 
-   int task_count = 0;
-   cJSON *packet;
-   cJSON_ArrayForEach(packet, packets)
-   {
-      int rc = append_packet_step(steps, packet, errbuf, errbuf_len);
-      if (rc < 0)
+      cJSON *step = cJSON_CreateObject();
+      if (!step)
       {
-         cJSON_Delete(steps);
-         return -1;
+         r.bad = 1;
+         break;
       }
-      task_count += rc;
-      if (task_count > AGENT_MAX_PLAN_STEPS)
-      {
-         cJSON_Delete(steps);
-         launch_set_err(errbuf, errbuf_len, "delegate plan has too many implementation packets");
-         return -1;
-      }
+      cJSON_AddStringToObject(step, "action", action);
+      cJSON_AddStringToObject(step, "precondition", precondition);
+      cJSON_AddStringToObject(step, "success_predicate", success);
+      cJSON_AddStringToObject(step, "rollback", rollback);
+      cJSON_AddItemToArray(steps, step);
    }
-
-   if (task_count <= 0)
+   if (r.bad)
    {
       cJSON_Delete(steps);
-      launch_set_err(errbuf, errbuf_len, "delegate plan has no implementation packets");
+      free(response);
+      launch_set_err(errbuf, errbuf_len, "delegate launch returned an unreadable plan");
       return -1;
    }
 
-   cJSON *title = cJSON_GetObjectItemCaseSensitive(plan, "title");
-   const char *task = cJSON_IsString(title) && title->valuestring[0] ? title->valuestring
-                                                                     : "delegate work packet plan";
-   int plan_id = db1_execution_plan_create("delegate-plan", task, steps);
+   const char *title = json_str(plan, "title");
+   int plan_id = db1_execution_plan_create("delegate-plan",
+                                           title[0] ? title : "delegate work packet plan", steps);
    cJSON_Delete(steps);
    if (plan_id <= 0)
    {
+      free(response);
       launch_set_err(errbuf, errbuf_len, "failed to create execution plan");
       return -1;
    }
 
    plan_t stored;
-   if (db1_execution_plan_get(plan_id, &stored) != 0 || stored.step_count < task_count)
+   if (db1_execution_plan_get(plan_id, &stored) != 0 || stored.step_count < (int)step_count)
    {
       db1_execution_plan_cancel_by_id(plan_id, "delegate launch could not read created steps");
+      free(response);
       launch_set_err(errbuf, errbuf_len, "failed to read created execution plan");
       return -1;
    }
 
-   int job_id = db1_coord_job_create(plan_id, max_concurrent);
+   int job_id = db1_coord_job_create(plan_id, effective_par);
    if (job_id <= 0)
    {
       db1_execution_plan_cancel_by_id(plan_id, "delegate launch could not create coord job");
+      free(response);
       launch_set_err(errbuf, errbuf_len, "failed to create coord job");
       return -1;
    }
 
+   uint32_t task_count = aimee_delegates_rd_u32(&r);
    int added = 0;
-   int step_idx = 0;
-   cJSON_ArrayForEach(packet, packets)
+   for (uint32_t i = 0; i < task_count && !r.bad; i++)
    {
-      if (packet_is_review(packet))
-         continue;
-      if (packet_owned_file_count(packet) == 0)
-         continue;
+      cJSON *files = cJSON_CreateArray();
+      uint32_t file_count = aimee_delegates_rd_u32(&r);
+      for (uint32_t f = 0; f < file_count && !r.bad; f++)
+      {
+         char path[MAX_PATH_LEN];
+         aimee_delegates_rd_str(&r, path, sizeof(path));
+         if (files)
+            cJSON_AddItemToArray(files, cJSON_CreateString(path));
+      }
 
-      char *files_json = packet_owned_files_json(packet);
-      if (!files_json)
-         break;
+      char role[64];
+      aimee_delegates_rd_str(&r, role, sizeof(role));
 
-      cJSON *prole = cJSON_GetObjectItemCaseSensitive(packet, "role");
-      const char *role =
-          (cJSON_IsString(prole) && prole->valuestring[0]) ? prole->valuestring : "execute";
-      char *prompt = packet_build_prompt(packet);
+      uint32_t prompt_len = aimee_delegates_rd_u32(&r);
+      char *prompt = malloc((size_t)prompt_len + 1);
+      if (prompt && !r.bad && r.at + prompt_len <= r.len)
+      {
+         memcpy(prompt, r.buf + r.at, prompt_len);
+         prompt[prompt_len] = '\0';
+         r.at += prompt_len;
+      }
+      else
+         r.bad = 1;
 
-      int step_id = step_idx < stored.step_count ? stored.steps[step_idx].id : 0;
-      if (db1_coord_job_add_task(job_id, step_id, files_json, role, prompt, cwd, "engineer") > 0)
+      char *files_json = files ? cJSON_PrintUnformatted(files) : NULL;
+      cJSON_Delete(files);
+
+      if (!r.bad && files_json && prompt &&
+          db1_coord_job_add_task(job_id, i < (uint32_t)stored.step_count ? stored.steps[i].id : 0,
+                                 files_json, role, prompt, cwd, "engineer") > 0)
          added++;
       free(files_json);
       free(prompt);
-      step_idx++;
    }
 
-   if (added != task_count)
+   /* Repairs and warnings the module made on our behalf, reported here because
+    * this is the process an operator is watching. */
+   uint32_t repair_count = aimee_delegates_rd_u32(&r);
+   for (uint32_t i = 0; i < repair_count && !r.bad; i++)
+   {
+      char from[MAX_PATH_LEN], to[MAX_PATH_LEN];
+      aimee_delegates_rd_str(&r, from, sizeof(from));
+      aimee_delegates_rd_str(&r, to, sizeof(to));
+      LOG_INFO("delegate", "packet path repair: '%s' -> '%s'", from, to);
+   }
+   uint32_t warning_count = aimee_delegates_rd_u32(&r);
+   for (uint32_t i = 0; i < warning_count && !r.bad; i++)
+   {
+      char warning[1024];
+      aimee_delegates_rd_str(&r, warning, sizeof(warning));
+      LOG_WARN("delegate", "%s", warning);
+   }
+   free(response);
+
+   if (r.bad || added != (int)task_count)
    {
       db1_coord_job_cancel(job_id);
       db1_execution_plan_cancel_by_id(plan_id, "delegate launch could not enqueue all packets");
@@ -482,7 +484,7 @@ int delegate_launch_coord_job(cJSON *plan, int max_concurrent, const char *cwd,
       out->plan_id = plan_id;
       out->job_id = job_id;
       out->tasks = added;
-      out->max_concurrent = max_concurrent;
+      out->max_concurrent = effective_par;
    }
    return 0;
 }

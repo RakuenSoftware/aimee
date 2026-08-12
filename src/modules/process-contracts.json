@@ -221,6 +221,11 @@
           "id": 18,
           "name": "delegate-noop-write",
           "event_kind": 6674
+        },
+        {
+          "id": 19,
+          "name": "delegate-launch-plan",
+          "event_kind": 6675
         }
       ]
     },
