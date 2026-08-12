@@ -69,6 +69,7 @@ Subcommands:
   watch <name> <root>  Install git hooks that re-index after branch changes
   blast-radius     Show files affected by changes to a file
   structure        Show file structure
+  span <file> [start] [end]  Read an exact line range (chainable with &&)
   callers          Find callers of a symbol
 ```
 
