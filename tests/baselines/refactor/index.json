@@ -375,7 +375,7 @@
         },
         {
           "path": "src/headers/client_session_worktree.h",
-          "sha256": "762ba612370db270a14cc4ac10f88f709ffbf43bc6b8d9754730cbe51b0dc4e0"
+          "sha256": "78e22b1a9a6ffc2ce266738e554a91032f6ffe7d104cf066b446b55890c555db"
         },
         {
           "path": "src/headers/cmd_agent_delegate_impl.h",
@@ -1628,7 +1628,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "48dd546a79fe56458eb9175e38a6eed1fabce8b06c130db0adba046ad2ac42c2",
+      "sha256": "47b461467f57f15215477ad9b31d0e8c721ff600adafa6fedb0a913eeacc86cc",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

@@ -61,4 +61,20 @@ int client_session_worktree_base(const char *git_root, char *buf, size_t cap);
  * tests and so both call sites derive the same key. */
 void client_session_worktree_key(const char *sid, char *out, size_t cap);
 
+/* Publish the HOST-assigned session id under <home>/session-ppid-<pid> so the
+ * session's other processes resolve the same one, and therefore the same
+ * worktree. Written for the caller's parent AND, on Linux, for the host process
+ * found by walking up to it -- a hook whose command carries an env assignment
+ * runs under a shell and so is a grandchild, while `aimee mcp serve` is a direct
+ * child and reads the key named for the host. The walk stops at the host so no
+ * shared ancestor (terminal, service manager) is ever named.
+ *
+ * Authoritative: truncates an existing file, because the host's id outranks one
+ * a peer minted for itself when it could not find this. Rejects a sid
+ * containing '/', a newline, or a control character.
+ *
+ * Returns 0 when at least one location was published, -1 otherwise (including
+ * on Windows, where session-worktree isolation is not a feature). */
+int client_session_id_publish(const char *sid, const char *home);
+
 #endif /* DEC_CLIENT_SESSION_WORKTREE_H */
