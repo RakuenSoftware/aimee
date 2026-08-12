@@ -496,7 +496,7 @@ static inline size_t aimee_delegates_patch_put_task(int id, int step_id, const c
 #define AIMEE_DELEGATES_ROLEPOL_REQUEST_MAGIC  0x514c5244u /* "DRLQ" */
 #define AIMEE_DELEGATES_ROLEPOL_RESPONSE_MAGIC 0x534c5244u /* "DRLS" */
 #define AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN    (16u + AIMEE_DELEGATES_ROLE_MAX + 1u)
-#define AIMEE_DELEGATES_ROLEPOL_RESPONSE_LEN   28u
+#define AIMEE_DELEGATES_ROLEPOL_RESPONSE_LEN   32u
 
 static inline int aimee_delegates_rolepol_request_encode(const char *role, int max_turns,
                                                          int explicit_tools, uint8_t *out,

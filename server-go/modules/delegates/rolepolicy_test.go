@@ -218,3 +218,60 @@ func TestRolePolicyStageCarriesParentDiffEvidence(t *testing.T) {
 		t.Error("a write role must not be handed the parent diff")
 	}
 }
+
+func TestRoleSeesCurrentCodeOnly(t *testing.T) {
+	for _, role := range []string{"review", "diagnose", "inspect"} {
+		if !RoleSeesCurrentCodeOnly(role) {
+			t.Errorf("%q answers about the code as it is now", role)
+		}
+	}
+	for _, role := range []string{"code", "validate", "execute", "search", "plan", ""} {
+		if RoleSeesCurrentCodeOnly(role) {
+			t.Errorf("%q should keep its index and memory tools", role)
+		}
+	}
+}
+
+// This rule compares the RAW role, unlike every other one in this file.
+//
+// The C it replaces did the same, so "review" is confined and its alias
+// "reviewer" is not -- even though "reviewer" canonicalises to "review"
+// everywhere else. Canonicalising would silently narrow the tool surface of any
+// delegate invoked by an alias, which is a change to a security boundary and was
+// not this migration's to make.
+//
+// The asymmetry is pinned here so that fixing it has to be a decision: this test
+// fails the moment someone canonicalises, and its failure says why.
+func TestRoleSeesCurrentCodeOnlyMatchesTheRawRole(t *testing.T) {
+	if !RoleSeesCurrentCodeOnly("review") {
+		t.Fatal("review is confined")
+	}
+	if RoleSeesCurrentCodeOnly("reviewer") {
+		t.Error("PORTED BEHAVIOUR: the alias is not confined, because the C compared " +
+			"the raw role. If this is now being fixed deliberately, change the rule AND " +
+			"this test together, and say so.")
+	}
+	// "inspect" canonicalises to "diagnose" and both are listed, so the raw
+	// comparison happens to agree there. Stated so the next reader does not
+	// conclude aliases work in general.
+	if !RoleSeesCurrentCodeOnly("inspect") || !RoleSeesCurrentCodeOnly("diagnose") {
+		t.Error("inspect and diagnose are both listed explicitly")
+	}
+}
+
+func TestRolePolicyStageCarriesCurrentCodeOnly(t *testing.T) {
+	response, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+		rolePolicyRequestBytes("review", -1, false))
+	if status != bus.ModuleStatusOK || len(response) != rolePolicyResponseLen {
+		t.Fatalf("status %v len %d", status, len(response))
+	}
+	if binary.LittleEndian.Uint32(response[28:32]) == 0 {
+		t.Error("review is current-code-only and the wire should say so")
+	}
+
+	response, _ = Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+		rolePolicyRequestBytes("code", -1, false))
+	if binary.LittleEndian.Uint32(response[28:32]) != 0 {
+		t.Error("a write role keeps its tools")
+	}
+}

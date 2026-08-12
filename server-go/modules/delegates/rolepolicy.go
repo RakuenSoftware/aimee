@@ -20,7 +20,7 @@ const (
 	rolePolicyRequestMagic  uint32 = 0x514c5244 /* "DRLQ" */
 	rolePolicyResponseMagic uint32 = 0x534c5244 /* "DRLS" */
 	rolePolicyRequestLen           = 16 + roleMax + 1
-	rolePolicyResponseLen          = 28
+	rolePolicyResponseLen          = 32
 )
 
 // canonicalRole folds an alias onto the role it names. Doing it here rather
@@ -76,6 +76,30 @@ func RoleEnablesToolsByDefault(role string) bool {
 func RoleResultCacheEnabled(role string) bool {
 	switch canonicalRole(role) {
 	case "summarize", "format", "draft":
+		return true
+	}
+	return false
+}
+
+// RoleSeesCurrentCodeOnly reports whether a role is confined to reading the
+// CURRENT checkout: indexed search, memory, docs, notes and remote MCP tools are
+// withheld from it.
+//
+// These roles answer questions about the code as it is now. An index can be
+// stale, and memory or notes can be confidently wrong about a file that has
+// since changed -- so a review grounded in them can cite something that is no
+// longer there. Withholding those tools forces the answer to come from the tree.
+//
+// DELIBERATELY NOT CANONICALISED, unlike every other rule in this file. The C
+// this replaces compared the raw role, so "review" is confined and its alias
+// "reviewer" is not. Canonicalising here would silently narrow the tool surface
+// of any delegate invoked by an alias, which is a behaviour change to a security
+// boundary and not this migration's to make. The inconsistency is real and worth
+// fixing; it should be fixed deliberately, with its own test and its own
+// decision. See TestRoleSeesCurrentCodeOnlyMatchesTheRawRole.
+func RoleSeesCurrentCodeOnly(role string) bool {
+	switch role {
+	case "review", "diagnose", "inspect":
 		return true
 	}
 	return false
@@ -159,5 +183,6 @@ func handleRolePolicy(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 	putBool(response[16:20], RoleAutoToolsForInvocation(role, maxTurns, explicitTools))
 	binary.LittleEndian.PutUint32(response[20:24], uint32(int32(RoleFinalAfterTurns(role))))
 	putBool(response[24:28], RoleNeedsParentDiffEvidence(role))
+	putBool(response[28:32], RoleSeesCurrentCodeOnly(role))
 	return response, bus.ModuleStatusOK
 }
