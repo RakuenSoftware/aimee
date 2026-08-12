@@ -15,6 +15,10 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
 
 static char g_tmp_root[512];
 
@@ -355,6 +359,148 @@ static void test_reclaim_keeps_a_dirty_pre_rekey_worktree(void)
    printf("  reclaim: dirty pre-rekey worktree kept, not destroyed: ok\n");
 }
 
+/* Read back what client_session_id_publish wrote for `pid`, or "" if absent. */
+static void read_published(const char *home, pid_t pid, char *out, size_t cap)
+{
+   out[0] = '\0';
+   char path[4200];
+   snprintf(path, sizeof path, "%s/session-ppid-%d", home, (int)pid);
+   FILE *f = fopen(path, "r");
+   if (!f)
+      return;
+   if (fgets(out, (int)cap, f))
+      out[strcspn(out, "\r\n")] = '\0';
+   fclose(f);
+}
+
+/* The publish half of the session-id rendezvous. Without it `aimee mcp serve`
+ * finds nothing, mints its own id, and the session ends up on two worktrees. */
+static void test_publish_reaches_the_parent(void)
+{
+   char home[4200];
+   snprintf(home, sizeof home, "%s/publish-home", g_tmp_root);
+   shell("mkdir -p '%s'", home);
+
+   assert(client_session_id_publish("sess-abc-123", home) == 0);
+
+   char got[128];
+   read_published(home, getppid(), got, sizeof got);
+   assert(strcmp(got, "sess-abc-123") == 0);
+
+   /* Authoritative: the host's id replaces one a peer minted for itself, so a
+    * second publish must overwrite rather than leave the stale value. */
+   assert(client_session_id_publish("sess-xyz-999", home) == 0);
+   read_published(home, getppid(), got, sizeof got);
+   assert(strcmp(got, "sess-xyz-999") == 0);
+
+   printf("  PASS: publish reaches the parent and overwrites\n");
+}
+
+/* A session id is an opaque host token, not a path fragment: anything that
+ * could escape the filename or the file's one-line contract is refused rather
+ * than written somewhere unintended. */
+static void test_publish_rejects_unusable_ids(void)
+{
+   char home[4200];
+   snprintf(home, sizeof home, "%s/publish-home-reject", g_tmp_root);
+   shell("mkdir -p '%s'", home);
+
+   assert(client_session_id_publish("../escape", home) == -1);
+   assert(client_session_id_publish("has\nnewline", home) == -1);
+   assert(client_session_id_publish("", home) == -1);
+   assert(client_session_id_publish(NULL, home) == -1);
+   assert(client_session_id_publish("fine", NULL) == -1);
+
+   printf("  PASS: publish refuses ids it cannot name a file for\n");
+}
+
+#if defined(__linux__)
+/* The walk is the whole point, and it is the part that is easy to get wrong.
+ *
+ * The hook is NOT a direct child of the host: its command carries an env
+ * assignment, so the host runs it through a shell. Publishing only under
+ * getppid() therefore names a shell that exits immediately, and `aimee mcp
+ * serve` -- which reads the key named for its OWN parent, the host -- never
+ * finds it. Rebuild that exact chain here: a process renamed "claude", a
+ * stand-in shell beneath it, and the publisher beneath that. */
+static void test_publish_walks_past_the_shell_to_the_host(void)
+{
+   char home[4200];
+   snprintf(home, sizeof home, "%s/publish-home-walk", g_tmp_root);
+   shell("mkdir -p '%s'", home);
+
+   pid_t host = fork();
+   assert(host >= 0);
+   if (host == 0)
+   {
+      prctl(PR_SET_NAME, "claude", 0, 0, 0);
+      pid_t sh = fork(); /* stands in for the shell the host spawns */
+      if (sh == 0)
+      {
+         /* fork() INHERITS comm, so this must be renamed or it would still read
+          * "claude" and the walk would stop here. The real shell is execve'd,
+          * which resets it — rename to match rather than let the test pass for
+          * a reason production does not have. */
+         prctl(PR_SET_NAME, "sh", 0, 0, 0);
+         pid_t hook = fork();
+         if (hook == 0)
+         {
+            _exit(client_session_id_publish("host-assigned-sid", home) == 0 ? 0 : 1);
+         }
+         int st = 1;
+         waitpid(hook, &st, 0);
+         _exit(WIFEXITED(st) ? WEXITSTATUS(st) : 1);
+      }
+      int st = 1;
+      waitpid(sh, &st, 0);
+      _exit(WIFEXITED(st) ? WEXITSTATUS(st) : 1);
+   }
+   int status = 1;
+   waitpid(host, &status, 0);
+   assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+
+   /* The host's key is what the proxy will ask for. */
+   char got[128];
+   read_published(home, host, got, sizeof got);
+   assert(strcmp(got, "host-assigned-sid") == 0);
+
+   printf("  PASS: publish walks past the shell and names the host\n");
+}
+
+/* And it must stop there. Publishing under every ancestor would eventually name
+ * a terminal or a service manager and hand one session's id to an unrelated
+ * one -- the collision the per-process key exists to prevent. */
+static void test_publish_stops_at_the_host(void)
+{
+   char home[4200];
+   snprintf(home, sizeof home, "%s/publish-home-stop", g_tmp_root);
+   shell("mkdir -p '%s'", home);
+
+   pid_t host = fork();
+   assert(host >= 0);
+   if (host == 0)
+   {
+      prctl(PR_SET_NAME, "claude", 0, 0, 0);
+      pid_t hook = fork();
+      if (hook == 0)
+         _exit(client_session_id_publish("host-assigned-sid", home) == 0 ? 0 : 1);
+      int st = 1;
+      waitpid(hook, &st, 0);
+      _exit(WIFEXITED(st) ? WEXITSTATUS(st) : 1);
+   }
+   int status = 1;
+   waitpid(host, &status, 0);
+   assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+
+   /* This test process is the host's parent — it must NOT have been named. */
+   char got[128];
+   read_published(home, getpid(), got, sizeof got);
+   assert(got[0] == '\0');
+
+   printf("  PASS: publish stops at the host, not above it\n");
+}
+#endif /* __linux__ */
+
 int main(void)
 {
    printf("client session worktree bootstrap\n");
@@ -375,6 +521,12 @@ int main(void)
    test_ensure_requires_a_session_id_and_a_repo();
    test_ensure_reclaims_pre_rekey_worktree();
    test_reclaim_keeps_a_dirty_pre_rekey_worktree();
+   test_publish_reaches_the_parent();
+   test_publish_rejects_unusable_ids();
+#if defined(__linux__)
+   test_publish_walks_past_the_shell_to_the_host();
+   test_publish_stops_at_the_host();
+#endif
 
    shell("rm -rf '%s'", g_tmp_root);
    printf("all client session worktree tests passed\n");

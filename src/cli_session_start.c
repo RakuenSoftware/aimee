@@ -8,7 +8,8 @@
 #include "session_degraded_notice.h"
 #include "cJSON.h"
 #include "cli_attention_guard.h"     /* attn_require_session_worktree */
-#include "client_session_worktree.h" /* client_session_worktree_ensure */
+#include "client_session_worktree.h" /* client_session_worktree_ensure, _id_publish */
+#include "aimee_home.h"              /* aimee_home */
 #include "cmd_self_update.h"         /* aimee_self_update_notice */
 #include "agent_code_capabilities.h"
 #include "aimee_session_guidance.h"
@@ -583,6 +584,20 @@ int handle_session_start(int json_output)
    cJSON *hook_json = stdin_data ? cJSON_Parse(stdin_data) : NULL;
    if (client_hook_payload_session_id(hook_json, hook_sid, sizeof(hook_sid)))
       sid = hook_sid;
+
+   /* Share it with the rest of the session BEFORE any transport choice, because
+    * both branches below return.
+    *
+    * This hook holds the only authoritative copy of the host's session id, and
+    * used to keep it: it built its worktree from the id and then exited. `aimee
+    * mcp serve`, which has no way to learn it, fell through to minting a random
+    * one -- so the same Claude Code session ran on TWO session ids and therefore
+    * two worktrees, with the proxy (and every delegate and `aimee git` call
+    * behind it) bound to the empty one and refusing the worktree that actually
+    * held the work. Publishing here is the half of that rendezvous that was
+    * never written; the reader has always been there. */
+   if (sid && sid[0])
+      (void)client_session_id_publish(sid, aimee_home());
 
    /* Detect server-invoked context: AIMEE_SESSION_ID is set by chat_stream_worker
     * in the environment of the claude subprocess it forks. */
