@@ -272,6 +272,84 @@ int handle_index_span(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* One question, answered from the index with the code attached. */
+static cJSON *investigate_one(const char *query, const char *symbol, const char *project)
+{
+   cJSON *row = cJSON_CreateObject();
+   if (!row)
+      return NULL;
+   jo_add_str(row, "query", query);
+   int st = -1;
+   char *j = kb_client_code_context(query, symbol, project, &st);
+   if (j)
+   {
+      cJSON *parsed = cJSON_Parse(j);
+      if (parsed)
+         cJSON_AddItemToObject(row, "result", parsed);
+      else
+         jo_add_str(row, "result_raw", j);
+      free(j);
+   }
+   else
+      cJSON_AddNumberToObject(row, "error_status", st);
+   return row;
+}
+
+/* Ask the index a plain-words question, as a COMMAND rather than only a tool.
+ *
+ * This is the call an agent makes FIRST on unfamiliar code -- it returns ranked
+ * evidence with the code already attached instead of a list of paths to go read.
+ * It was reachable only over MCP, where one call is one turn, so the opening
+ * move of every task was also the one that could not be combined with anything
+ * else. As a command it chains:
+ *
+ *   aimee index investigate "how are profiles cached" "what invalidates them"
+ *
+ * Several questions in ONE invocation, and that invocation folds into a shell
+ * call the agent was already making. */
+int handle_index_investigate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cJSON *queries = cJSON_GetObjectItemCaseSensitive(req, "queries");
+   int batch = cJSON_IsArray(queries) && cJSON_GetArraySize(queries) > 0;
+   const char *single = jo_str(req, "query", NULL);
+   if (!batch && (!single || !single[0]))
+      return server_send_error(conn, "missing query", NULL);
+
+   const char *symbol = jo_str(req, "symbol", NULL);
+   char project_buf[MAX_PATH_LEN] = "";
+   const char *project = jo_str(req, "project", NULL);
+   if (!project || !project[0])
+   {
+      const char *cwd = jo_str(req, "cwd", NULL);
+      if (!cwd || server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf)) != 0)
+         return server_send_error(conn, "scope_required: no active project", NULL);
+      project = project_buf;
+   }
+
+   cJSON *resp = jo_ok();
+   cJSON *arr = cJSON_AddArrayToObject(resp, "results");
+   if (batch)
+   {
+      cJSON *e;
+      cJSON_ArrayForEach(e, queries)
+      {
+         if (!cJSON_IsString(e) || !e->valuestring[0])
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         cJSON *row = investigate_one(e->valuestring, symbol, project);
+         if (row)
+            cJSON_AddItemToArray(arr, row);
+      }
+   }
+   else
+   {
+      cJSON *row = investigate_one(single, symbol, project);
+      if (row)
+         cJSON_AddItemToArray(arr, row);
+   }
+   return send_and_free(conn, resp);
+}
+
 int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

@@ -166,6 +166,7 @@ static const struct
     {"index", "blast-radius", "index.blast_radius", NULL, NULL, 0},
     {"index", "structure", "index.structure", NULL, NULL, 0},
     {"index", "span", "index.span", NULL, NULL, 0},
+    {"index", "investigate", "index.investigate", NULL, NULL, 0},
     {"index", "callers", "index.find_callers", NULL, NULL, 0},
     {"index", "deps", "index.deps", NULL, NULL, 0},
     {"workspace", "add", "workspace.add", NULL, NULL, 300000},
@@ -643,6 +644,32 @@ cJSON *marshal_index_span(int argc, char **argv)
       cJSON_AddNumberToObject(req, "line_start", atoi(opts.positional[at + 1]));
    if (opts.pos_count > at + 2)
       cJSON_AddNumberToObject(req, "line_end", atoi(opts.positional[at + 2]));
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
+   return req;
+}
+
+/* `aimee index investigate "<question>" ["<question>" ...]`.
+ *
+ * EVERY positional is a question, so several become one invocation and one
+ * round trip -- the same reason the MCP tool grew a `queries` array. A single
+ * question still works and is sent as `query`, matching the tool's shape. */
+cJSON *marshal_index_investigate(int argc, char **argv)
+{
+   static const char *bools[] = {"json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bools, &opts);
+
+   cJSON *req = marshal_no_args("index.investigate");
+   if (opts.pos_count == 1)
+      cJSON_AddStringToObject(req, "query", opts.positional[0]);
+   else if (opts.pos_count > 1)
+   {
+      cJSON *arr = cJSON_AddArrayToObject(req, "queries");
+      for (int i = 0; i < opts.pos_count; i++)
+         cJSON_AddItemToArray(arr, cJSON_CreateString(opts.positional[i]));
+   }
    char cwd[4096];
    if (getcwd(cwd, sizeof(cwd)))
       cJSON_AddStringToObject(req, "cwd", cwd);

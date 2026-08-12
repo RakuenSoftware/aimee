@@ -1763,6 +1763,45 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /index/investigate:
+    post:
+      summary: Ask the code index a plain-words question
+      description: >
+        The command-line twin of the index_investigate MCP tool. Returns ranked
+        evidence with the code attached rather than a list of paths to go read.
+        Accepts `queries` so several questions cost one round trip; `query` is
+        the single-question form.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                project: { type: string }
+                query: { type: string }
+                queries:
+                  type: array
+                  items: { type: string }
+                symbol: { type: string }
+                cwd: { type: string }
+      responses:
+        "200":
+          description: One result entry per question, in order
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing query/queries, or no active project to scope it to
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "502":
+          description: Knowledge service unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /index/span:
     post:
       summary: Read an exact line range from an indexed file

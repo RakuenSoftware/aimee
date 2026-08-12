@@ -33,7 +33,8 @@
      "  blast-radius     Show files affected by changes to a file\n"
      "  structure        Show file structure\n"
      "  span <file> [start] [end]  Read an exact line range (chainable with &&)\n"
-     "  callers          Find callers of a symbol\n"},
+     "  callers          Find callers of a symbol\n"
+     "  investigate \"<question>\" [...]  Ask the index; several questions, one call\n"},
     {"workspace", "Workspace management (add, list, remove)", CLIENT_TIER_ADVANCED, 0,
      "  add <path>       Register a directory as a workspace and index its projects\n"
      "  list             List configured workspaces and their indexed projects\n"

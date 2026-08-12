@@ -90,13 +90,15 @@
    "callers <symbol>; what else depends on this -> aimee index blast-radius "                      \
    "<file>; a file's shape -> aimee index structure <file>; what was decided "                     \
    "before -> aimee memory search <terms>. "                                                       \
-   "These have no command form yet, so call the tool: a pattern or repeated shape "                \
-   "-> " AIMEE_CODE_TOOL_AST_GREP_SEARCH "; a search that is not a symbol name -> "                \
-   AIMEE_CODE_TOOL_INDEX " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID "; reading a "                \
-   "file or line range -> " AIMEE_CODE_TOOL_INDEX " command=span. Tool calls cannot "              \
-   "be chained, so batch WITHIN one: each of these takes a PLURAL argument that "                  \
-   "answers several at once (spans, queries, symbols) -- use it rather than "                      \
-   "repeating the call. "                                                                          \
+   "read a file or line range -> aimee index span <file> <start> <end>; where do "                 \
+   "I even start -> aimee index investigate \"<question>\" (pass several "                         \
+   "questions to answer them in one call). "                                                       \
+   "These two have no command form yet, so call the tool: a pattern or repeated "                  \
+   "shape -> " AIMEE_CODE_TOOL_AST_GREP_SEARCH "; a search that is not a symbol "                  \
+   "name -> " AIMEE_CODE_TOOL_INDEX " command=" AIMEE_CODE_INDEX_COMMAND_HYBRID ". "               \
+   "Tool calls cannot be chained, so batch WITHIN one: each takes a PLURAL "                       \
+   "argument that answers several at once (spans, queries, symbols) -- use it "                    \
+   "rather than repeating the call. "                                                              \
    "Shell stays right for building, running tests, and editing.\n"
 
 /* The scope policy. explore-with names the tools; it does not say WHEN one
@@ -110,8 +112,8 @@
 #define AIMEE_GUIDANCE_FIX_SCOPE_LINE                                                              \
    "fix-scope: a defect that is a PATTERN (unsafe join, missing check, raw "                       \
    "concatenation) usually repeats where nothing calls it -- callers and "                         \
-   "blast-radius will correctly report nothing; match the shape with "                             \
-   AIMEE_CODE_TOOL_AST_GREP_SEARCH " before reporting done\n"
+   "blast-radius will correctly report nothing; match the shape "                                  \
+   "with " AIMEE_CODE_TOOL_AST_GREP_SEARCH " before reporting done\n"
 
 /* The whole standing block, in the order an agent reads it. */
 #define AIMEE_GUIDANCE_BLOCK AIMEE_GUIDANCE_EXPLORE_WITH_LINE AIMEE_GUIDANCE_FIX_SCOPE_LINE

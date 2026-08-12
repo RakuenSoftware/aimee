@@ -71,6 +71,7 @@ Subcommands:
   structure        Show file structure
   span <file> [start] [end]  Read an exact line range (chainable with &&)
   callers          Find callers of a symbol
+  investigate "<question>" [...]  Ask the index; several questions, one call
 ```
 
 ### `aimee init`
