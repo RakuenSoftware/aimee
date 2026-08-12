@@ -292,6 +292,12 @@ RUN set -eux; \
 # the image, and aimee's resolver prefers the unambiguous name anyway -- so
 # shadowing a system command would buy nothing and could break unrelated
 # callers. The release ships a zip, so unzip is a build-time-only dependency.
+# Release downloads go through GitHub/CDN edges that return 5xx in bursts: the
+# first run of this step took six 503s inside twenty seconds while the same URL
+# served 200 from elsewhere. The retry budget has to outlast a CDN wobble rather
+# than a dropped packet, hence 8 attempts across 10 minutes with a 15s gap.
+# --retry-all-errors is required because -f turns a 503 into exit 22, which plain
+# --retry does NOT retry.
 ARG AST_GREP_VERSION=0.45.1
 RUN set -eux; \
     agarch="${TARGETARCH:-amd64}"; \
@@ -302,7 +308,7 @@ RUN set -eux; \
     esac; \
     apt-get update; \
     apt-get install -y --no-install-recommends unzip; \
-    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 \
+    curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors --retry-max-time 600 \
       --connect-timeout 30 \
       "https://github.com/ast-grep/ast-grep/releases/download/${AST_GREP_VERSION}/app-${agtriple}.zip" \
       -o /tmp/ast-grep.zip; \
