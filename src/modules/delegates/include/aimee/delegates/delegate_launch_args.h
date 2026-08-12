@@ -112,4 +112,20 @@ void delegate_register_route_filter_provider(delegate_route_filter_fn provider);
 int delegate_route_filter_apply(const uint8_t *request, size_t request_len, uint8_t *response,
                                 size_t response_cap, size_t *response_len);
 
+/* Did a successful write delegate actually change anything?
+ *
+ * FAILS OPEN, unlike the other seams here, and deliberately: with no verdict
+ * the run is ACCEPTED. This guard exists to catch a delegate that did nothing;
+ * failing closed would reject completed work over a missing judgement, which is
+ * the more damaging error of the two. */
+typedef int (*delegate_noop_write_fn)(unsigned flags, int named_count, int *noop, int *benign,
+                                      char *message, size_t message_cap);
+
+void delegate_register_noop_write_provider(delegate_noop_write_fn provider);
+
+/* Returns 1 when the run must be treated as incomplete, 0 otherwise. `message`
+ * carries the wording for both the refusal and the benign notes. */
+int delegate_noop_write_judge(unsigned flags, int named_count, int *benign, char *message,
+                              size_t message_cap);
+
 #endif

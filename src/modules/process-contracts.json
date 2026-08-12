@@ -216,6 +216,11 @@
           "id": 17,
           "name": "delegate-route-filter",
           "event_kind": 6673
+        },
+        {
+          "id": 18,
+          "name": "delegate-noop-write",
+          "event_kind": 6674
         }
       ]
     },
