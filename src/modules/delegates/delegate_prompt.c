@@ -13,6 +13,7 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <aimee/delegates/delegate_launch_args.h>
+#include <aimee/delegates/module_api.h>
 
 int delegate_resolve_prompt_inputs(const char *cli_prompt, const char *file_prompt,
                                    delegate_prompt_plan_t *out)
@@ -1097,18 +1098,6 @@ static int delegate_repo_has_uncommitted_changes(const char *repo_root)
    return dirty;
 }
 
-static int delegate_response_claims_missing_parent_diff(const char *response)
-{
-   if (!response || !response[0])
-      return 0;
-
-   return str_contains_ci(response, "no uncommitted diff exists") ||
-          str_contains_ci(response, "working tree is clean") ||
-          str_contains_ci(response, "there is nothing to review") ||
-          str_contains_ci(response, "cannot see the current diff") ||
-          str_contains_ci(response, "cannot verify the diff");
-}
-
 void delegate_apply_review_evidence_guard(const char *role, const char *repo_root, int *rc,
                                           agent_result_t *result, int target_provided)
 {
@@ -1116,20 +1105,29 @@ void delegate_apply_review_evidence_guard(const char *role, const char *repo_roo
        !repo_root[0])
       return;
 
-   /* When the caller supplied the review target (a diff in the prompt), there is
-    * no host-cwd evidence to drift against — the provided content IS the evidence.
-    * Guarding against the local worktree here would penalize a correct review of
-    * the provided diff, so skip it. */
+   /* Which roles are guarded, which of them have their citations checked against
+    * the checkout, and what counts as claiming there was nothing to review, are
+    * the module's (stage 20). The two facts it cannot compute travel with the
+    * question: whether the target came in the prompt, and whether the worktree
+    * is dirty. */
+   unsigned flags = 0;
    if (target_provided)
+      flags |= AIMEE_DELEGATES_REVIEW_TARGET_PROVIDED;
+   if (delegate_repo_has_uncommitted_changes(repo_root))
+      flags |= AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY;
+
+   unsigned verdict = 0;
+   char message[512] = "";
+   if (delegate_review_evidence_judge(role, result->response, flags, &verdict, message,
+                                      sizeof(message)) != 0)
+      return;
+   if (!(verdict & AIMEE_DELEGATES_REVIEW_GUARDED))
       return;
 
-   if (!role || (strcmp(role, "review") != 0 && strcmp(role, "validate") != 0 &&
-                 strcmp(role, "diagnose") != 0 && strcmp(role, "test") != 0 &&
-                 strcmp(role, "check") != 0 && strcmp(role, "inspect") != 0))
-      return;
-
-   if (strcmp(role, "review") == 0 || strcmp(role, "validate") == 0 || strcmp(role, "test") == 0 ||
-       strcmp(role, "check") == 0)
+   /* The snippet check reads the checkout, so it stays here. It runs FIRST: a
+    * citation that does not match the file is the more specific complaint, and
+    * reporting it beats reporting that the report contradicted `git status`. */
+   if (verdict & AIMEE_DELEGATES_REVIEW_CHECK_SNIPPETS)
    {
       char drift_err[512];
       if (delegate_check_review_evidence_drift(result->response, repo_root, drift_err,
@@ -1141,13 +1139,10 @@ void delegate_apply_review_evidence_guard(const char *role, const char *repo_roo
       }
    }
 
-   if (delegate_repo_has_uncommitted_changes(repo_root) &&
-       delegate_response_claims_missing_parent_diff(result->response))
+   if (verdict & AIMEE_DELEGATES_REVIEW_CONTRADICTION)
    {
       *rc = -1;
-      snprintf(result->error, sizeof(result->error),
-               "delegate evidence drift: response claimed the parent diff was clean or missing "
-               "while the parent worktree has uncommitted changes");
+      snprintf(result->error, sizeof(result->error), "%s", message);
    }
 }
 

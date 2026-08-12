@@ -199,6 +199,7 @@ int delegate_route_filter_apply(const uint8_t *request, size_t request_len, uint
 
 static delegate_noop_write_fn g_noop_write;
 static delegate_launch_plan_fn g_launch_plan;
+static delegate_review_evidence_fn g_review_evidence;
 
 void delegate_register_noop_write_provider(delegate_noop_write_fn provider)
 {
@@ -246,4 +247,25 @@ int delegate_launch_plan_call(const uint8_t *request, size_t request_len, uint8_
    if (!request || !response || !response_len)
       return -1;
    return g_launch_plan(request, request_len, response, response_cap, response_len);
+}
+
+void delegate_register_review_evidence_provider(delegate_review_evidence_fn provider)
+{
+   g_review_evidence = provider;
+}
+
+int delegate_review_evidence_judge(const char *role, const char *response, unsigned flags,
+                                   unsigned *verdict, char *message, size_t message_cap)
+{
+   if (verdict)
+      *verdict = 0;
+   if (message && message_cap)
+      message[0] = '\0';
+   if (!g_review_evidence)
+   {
+      LOG_ERROR("delegates",
+                "no review-evidence provider registered; accepting the review unchecked");
+      return -1;
+   }
+   return g_review_evidence(role, response, flags, verdict, message, message_cap);
 }

@@ -161,4 +161,22 @@ void delegate_register_launch_plan_provider(delegate_launch_plan_fn provider);
 int delegate_launch_plan_call(const uint8_t *request, size_t request_len, uint8_t *response,
                               size_t response_cap, size_t *response_len);
 
+/* Stage 20: does this review show it looked at the code?
+ *
+ * `verdict` receives AIMEE_DELEGATES_REVIEW_* flags and `message` the
+ * contradiction wording, if any.
+ *
+ * Fails CLOSED, and here that means NOT GUARDED: with no provider the review is
+ * accepted rather than rejected. Rejecting on a missing provider would fail
+ * honest reviews for a reason the operator cannot see or fix, which is worse
+ * than losing a check that only ever catches a specific dishonesty. */
+typedef int (*delegate_review_evidence_fn)(const char *role, const char *response, unsigned flags,
+                                           unsigned *verdict, char *message, size_t message_cap);
+
+void delegate_register_review_evidence_provider(delegate_review_evidence_fn provider);
+
+/* Returns 0 with *verdict filled, or -1 on any failure (logged, verdict 0). */
+int delegate_review_evidence_judge(const char *role, const char *response, unsigned flags,
+                                   unsigned *verdict, char *message, size_t message_cap);
+
 #endif
