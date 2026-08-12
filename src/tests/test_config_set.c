@@ -26,7 +26,7 @@ static int test_secret_writer(const char *name, const char *value)
 
 static void set_home(void)
 {
-   snprintf(g_home, sizeof(g_home), "/tmp/aimee-cfgset-XXXXXX");
+   snprintf(g_home, sizeof(g_home), "%s/aimee-cfgset-XXXXXX", platform_tmpdir());
    char *d = platform_mkdtemp(g_home);
    assert(d);
    setenv("HOME", d, 1);

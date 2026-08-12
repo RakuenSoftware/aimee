@@ -109,6 +109,23 @@ void delegate_register_may_write_provider(delegate_may_write_fn provider)
    g_may_write = provider;
 }
 
+/* The brief's half alone. Same provider, same one answer: stage 15 returns the
+ * two halves beside the composed verdict precisely so a caller that already
+ * knows the role can ask for the other one without a second rule existing. */
+int delegate_prompt_asks_for_writes(const char *prompt)
+{
+   if (!g_may_write)
+   {
+      LOG_ERROR("delegates",
+                "no may-write provider registered; treating the brief as not asking for writes");
+      return 0;
+   }
+   int may = 0, by_role = 0, by_prompt = 0;
+   if (g_may_write("", prompt, &may, &by_role, &by_prompt) != 0)
+      return 0;
+   return by_prompt;
+}
+
 int delegate_may_write(const char *role, const char *prompt)
 {
    if (!g_may_write)
@@ -181,6 +198,7 @@ int delegate_route_filter_apply(const uint8_t *request, size_t request_len, uint
 }
 
 static delegate_noop_write_fn g_noop_write;
+static delegate_launch_plan_fn g_launch_plan;
 
 void delegate_register_noop_write_provider(delegate_noop_write_fn provider)
 {
@@ -210,4 +228,22 @@ int delegate_noop_write_judge(unsigned flags, int named_count, int *benign, char
    if (benign)
       *benign = b;
    return noop;
+}
+
+void delegate_register_launch_plan_provider(delegate_launch_plan_fn provider)
+{
+   g_launch_plan = provider;
+}
+
+int delegate_launch_plan_call(const uint8_t *request, size_t request_len, uint8_t *response,
+                              size_t response_cap, size_t *response_len)
+{
+   if (!g_launch_plan)
+   {
+      LOG_ERROR("delegates", "no launch-plan provider registered; refusing to launch");
+      return -1;
+   }
+   if (!request || !response || !response_len)
+      return -1;
+   return g_launch_plan(request, request_len, response, response_cap, response_len);
 }
