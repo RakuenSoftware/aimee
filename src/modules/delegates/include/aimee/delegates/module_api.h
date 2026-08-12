@@ -1270,4 +1270,74 @@ static inline int aimee_delegates_reviewev_response_decode(const uint8_t *in, si
    return 0;
 }
 
+/* --- Named-file drift (stage 21): did the delegate touch the files its brief
+ * named?
+ *
+ * Length-prefixed, like the launch-plan stage: prose plus a variable number of
+ * paths. Build a request with _begin, then one _path per named file.
+ *
+ * The caller supplies, per path, only facts: does it exist, does `git diff`
+ * mention it, and which files the code index returned for its basename stem.
+ * An EMPTY hit list is meaningful -- it says the index was unreachable or the
+ * stem is unindexed, which is not the same as the index saying the path is not
+ * ours -- so send it empty rather than skipping the path. */
+
+#define AIMEE_DELEGATES_EVENT_DRIFT          6677u
+#define AIMEE_DELEGATES_STAGE_DRIFT          21u
+#define AIMEE_DELEGATES_DRIFT_REQUEST_MAGIC  0x51465244u /* "DRFQ" */
+#define AIMEE_DELEGATES_DRIFT_RESPONSE_MAGIC 0x53465244u /* "DRFS" */
+
+#define AIMEE_DELEGATES_DRIFT_ROLE_IS_WRITE (1u << 0)
+
+#define AIMEE_DELEGATES_DRIFT_PATH_EXISTS  (1u << 0)
+#define AIMEE_DELEGATES_DRIFT_PATH_IN_DIFF (1u << 1)
+
+/* Severities, matching the module's DriftSeverity. */
+#define AIMEE_DELEGATES_DRIFT_NONE 0u
+#define AIMEE_DELEGATES_DRIFT_SOFT 1u
+#define AIMEE_DELEGATES_DRIFT_HARD 2u
+
+static inline void aimee_delegates_drift_request_begin(aimee_delegates_wire_t *w, uint8_t *buf,
+                                                       size_t cap, unsigned flags,
+                                                       const char *prompt, const char *response,
+                                                       const char *worktree_path)
+{
+   aimee_delegates_wire_init(w, buf, cap);
+   aimee_delegates_wire_u32(w, AIMEE_DELEGATES_DRIFT_REQUEST_MAGIC);
+   aimee_delegates_wire_u32(w, (uint32_t)AIMEE_DELEGATES_WIRE_VERSION);
+   aimee_delegates_wire_u32(w, flags);
+   aimee_delegates_wire_str(w, prompt);
+   aimee_delegates_wire_str(w, response);
+   aimee_delegates_wire_str(w, worktree_path);
+}
+
+/* Append one named path. `hits` may be NULL when hit_count is 0. */
+static inline void aimee_delegates_drift_request_path(aimee_delegates_wire_t *w, const char *path,
+                                                      unsigned path_flags,
+                                                      const char *const *hits, int hit_count)
+{
+   aimee_delegates_wire_str(w, path);
+   aimee_delegates_wire_u32(w, path_flags);
+   aimee_delegates_wire_u32(w, (uint32_t)(hit_count > 0 ? hit_count : 0));
+   for (int i = 0; i < hit_count; i++)
+      aimee_delegates_wire_str(w, hits[i]);
+}
+
+static inline int aimee_delegates_drift_response_decode(const uint8_t *in, size_t len,
+                                                        unsigned *severity, char *message,
+                                                        size_t message_cap)
+{
+   aimee_delegates_rd_t r;
+   r.buf = in;
+   r.len = len;
+   r.at = 0;
+   r.bad = 0;
+   if (!in || !severity ||
+       aimee_delegates_rd_u32(&r) != AIMEE_DELEGATES_DRIFT_RESPONSE_MAGIC)
+      return -1;
+   *severity = aimee_delegates_rd_u32(&r);
+   aimee_delegates_rd_str(&r, message, message_cap);
+   return r.bad ? -1 : 0;
+}
+
 #endif

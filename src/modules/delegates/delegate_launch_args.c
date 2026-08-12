@@ -200,6 +200,7 @@ int delegate_route_filter_apply(const uint8_t *request, size_t request_len, uint
 static delegate_noop_write_fn g_noop_write;
 static delegate_launch_plan_fn g_launch_plan;
 static delegate_review_evidence_fn g_review_evidence;
+static delegate_drift_fn g_drift;
 
 void delegate_register_noop_write_provider(delegate_noop_write_fn provider)
 {
@@ -268,4 +269,24 @@ int delegate_review_evidence_judge(const char *role, const char *response, unsig
       return -1;
    }
    return g_review_evidence(role, response, flags, verdict, message, message_cap);
+}
+
+void delegate_register_drift_provider(delegate_drift_fn provider)
+{
+   g_drift = provider;
+}
+
+int delegate_drift_judge(const uint8_t *request, size_t request_len, unsigned *severity,
+                         char *message, size_t message_cap)
+{
+   if (severity)
+      *severity = 0;
+   if (message && message_cap)
+      message[0] = '\0';
+   if (!g_drift)
+   {
+      LOG_ERROR("delegates", "no drift provider registered; accepting the delegate unchecked");
+      return -1;
+   }
+   return g_drift(request, request_len, severity, message, message_cap);
 }

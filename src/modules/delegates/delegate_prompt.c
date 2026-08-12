@@ -180,21 +180,6 @@ int delegate_extract_named_paths(const char *prompt, char paths[][DELEGATE_DRIFT
    return n > 0 ? n : 0;
 }
 
-/* Returns 1 if prompt contains an explicit intent to create a new file. */
-static int has_create_intent(const char *prompt)
-{
-   /* Case-insensitive — capitalised verbs at sentence start ("Implement
-    * a foo …") were previously rejected by the literal strstr match,
-    * which surfaced as a false-positive 'no create intent found'
-    * pre-flight rejection. */
-   static const char *const create_keywords[] = {"create", "new file", "add file", "implement",
-                                                 "write",  "generate", NULL};
-   for (int i = 0; create_keywords[i]; i++)
-      if (str_contains_ci(prompt, create_keywords[i]))
-         return 1;
-   return 0;
-}
-
 /* Run git diff --name-only HEAD in wt_path; return heap-allocated output or NULL. */
 static char *drift_git_diff(const char *wt_path)
 {
@@ -245,30 +230,9 @@ static int drift_stat_named_path(const char *path, const char *base_path, struct
    return stat(full, st);
 }
 
-/* Return 1 if an absolute path does not resolve under the worktree root — i.e. a
- * referenced EXTERNAL path (another machine's file named by an scp target such as
- * `admin@host:/mnt/.../aimee.yaml`, or the `//host/...` residue of a URL) rather
- * than an in-worktree create target.  A delegate creates files inside its
- * worktree, never at an arbitrary absolute host path, so the pre-flight
- * create-intent guard must not hard-fail on these.  Relative paths always resolve
- * under the worktree and are never external. */
-static int drift_path_is_external(const char *path, const char *wt_path)
-{
-   if (!path || path[0] != '/')
-      return 0;
-   if (!wt_path || !wt_path[0])
-      return 1; /* absolute with no worktree root to anchor to */
-
-   size_t wlen = strlen(wt_path);
-   while (wlen > 0 && wt_path[wlen - 1] == '/')
-      wlen--;
-   if (strncmp(path, wt_path, wlen) != 0)
-      return 1; /* outside the worktree subtree */
-   /* Guard against prefix aliasing (wt=/a/b matching /a/bc): the char after the
-    * root must be a separator or end-of-string for the path to be truly under it. */
-   char after = path[wlen];
-   return (after != '\0' && after != '/');
-}
+/* Room for a set of named paths plus the brief and the reply. A request that
+ * does not fit is not judged rather than judged in part. */
+#define DRIFT_WIRE_CAP (256u * 1024u)
 
 int delegate_check_named_file_drift(const char *const *paths, int path_count, const char *prompt,
                                     const char *response, const char *wt_path, int role_is_write,
@@ -280,23 +244,28 @@ int delegate_check_named_file_drift(const char *const *paths, int path_count, co
    if (errbuf && errbuf_size > 0)
       errbuf[0] = '\0';
 
-   /* The delegate ROLE is the authoritative write-intent signal: only a
-    * write-capable role can be expected to CREATE a named file, so only it can
-    * hard-drift on one that is missing. A read/analysis delegate (WFE's
-    * understand/split/review, the judge) produces its artifact from its reply and
-    * modifies nothing, so a repo-relative path scraped out of reference content
-    * threaded into its prompt must never fail it. The prompt heuristic stays as a
-    * NARROWING override so an explicit "do not edit" still disables the hard-fail
-    * for a write role. */
-   int writes_allowed = role_is_write && delegate_prompt_asks_for_writes(prompt);
+   /* Everything below gathers FACTS. What they mean -- whether a missing file is
+    * a broken promise or a referenced one, whether an unmodified file is drift
+    * or context, and how hard to fail -- is the module's (stage 21). */
+   uint8_t *request = malloc(DRIFT_WIRE_CAP);
+   if (!request)
+      return 0;
 
-   int hard_drift = 0;
-   int soft_drift = 0;
+   unsigned flags = role_is_write ? AIMEE_DELEGATES_DRIFT_ROLE_IS_WRITE : 0u;
+   aimee_delegates_wire_t w;
+   aimee_delegates_drift_request_begin(&w, request, DRIFT_WIRE_CAP, flags, prompt ? prompt : "",
+                                       response ? response : "", wt_path ? wt_path : "");
 
    /* For the post-run git-diff path, fetch diff output once. */
    char *diff_out = NULL;
    if (response && wt_path && wt_path[0])
       diff_out = drift_git_diff(wt_path);
+
+   int sent = 0;
+   for (int i = 0; i < path_count; i++)
+      if (paths[i] && paths[i][0])
+         sent++;
+   aimee_delegates_wire_u32(&w, (uint32_t)sent);
 
    for (int i = 0; i < path_count; i++)
    {
@@ -305,151 +274,69 @@ int delegate_check_named_file_drift(const char *const *paths, int path_count, co
          continue;
 
       struct stat st;
-      int exists = (drift_stat_named_path(path, wt_path, &st) == 0);
+      unsigned path_flags = 0;
+      if (drift_stat_named_path(path, wt_path, &st) == 0)
+         path_flags |= AIMEE_DELEGATES_DRIFT_PATH_EXISTS;
+      if (diff_out && drift_in_diff(diff_out, path))
+         path_flags |= AIMEE_DELEGATES_DRIFT_PATH_IN_DIFF;
 
-      if (!response)
+      /* Ask the code index whether this is a real project file. Only pre-flight
+       * needs it, and only for a path that does not exist -- the index lookup is
+       * a network round trip, so it is not spent where the answer cannot matter.
+       *
+       * An EMPTY hit list is sent as empty and MEANS something: index down, or
+       * stem not indexed. The module treats that as ambiguous, which is how this
+       * behaved before it had a module. */
+      const char *hit_ptrs[8];
+      char hit_files[8][MAX_PATH_LEN];
+      int hit_count = 0;
+      if (!response && !(path_flags & AIMEE_DELEGATES_DRIFT_PATH_EXISTS) && prompt)
       {
-         /* Pre-flight: for nonexistent paths, require explicit create intent.
-          * Before hard-failing, confirm this is a real project file via the aimee
-          * index.  If the index is reachable, use the file's basename stem to find
-          * indexed symbols: if it has hits but none live in a file matching this
-          * path, the path was extracted from prompt examples (e.g. a system include)
-          * rather than naming a real project file — skip it silently. */
-         if (!exists && prompt)
+         const char *ibase = strrchr(path, '/');
+         ibase = ibase ? ibase + 1 : path;
+         char stem[128];
+         snprintf(stem, sizeof(stem), "%s", ibase);
+         char *idot = strrchr(stem, '.');
+         if (idot)
+            *idot = '\0';
+         if (stem[0])
          {
-            /* A path that can't be an in-worktree create target — an absolute
-             * host/scp/URL path outside the worktree — is a referenced external
-             * file, not an output.  Merely naming one (e.g. an ops/deploy brief
-             * that mentions admin@host:/mnt/.../aimee.yaml) must not hard-fail the
-             * delegate before it runs. */
-            if (drift_path_is_external(path, wt_path))
-               continue;
-
-            if (!writes_allowed)
-               continue;
-
-            const char *ibase = strrchr(path, '/');
-            ibase = ibase ? ibase + 1 : path;
-            char stem[128];
-            snprintf(stem, sizeof(stem), "%s", ibase);
-            char *idot = strrchr(stem, '.');
-            if (idot)
-               *idot = '\0';
-            if (stem[0])
+            term_hit_t idx_hits[8];
+            int nhits = kb_client_index_find(stem, idx_hits, 8);
+            for (int h = 0; h < nhits && h < 8; h++)
             {
-               term_hit_t idx_hits[8];
-               int nhits = kb_client_index_find(stem, idx_hits, 8);
-               if (nhits > 0)
-               {
-                  /* Index is reachable — check if any hit lives in this path. */
-                  int found = 0;
-                  size_t plen = strlen(path);
-                  for (int h = 0; h < nhits && !found; h++)
-                  {
-                     size_t flen = strlen(idx_hits[h].file_path);
-                     const char *tail = idx_hits[h].file_path + flen - plen;
-                     if (flen >= plen && strcmp(tail, path) == 0)
-                        found = 1;
-                  }
-                  if (!found)
-                     continue; /* not a project file — skip */
-               }
-               /* nhits == 0: index unreachable or stem not indexed; fall through
-                * to the create-intent check so existing behaviour is preserved. */
-            }
-
-            if (!has_create_intent(prompt))
-            {
-               if (errbuf && errbuf_size > 0)
-                  snprintf(errbuf, errbuf_size,
-                           "named file '%s' does not exist and no create intent found in prompt; "
-                           "use 'create', 'new file', or 'implement' to create it",
-                           path);
-               hard_drift = 1;
+               snprintf(hit_files[hit_count], sizeof(hit_files[0]), "%s", idx_hits[h].file_path);
+               hit_ptrs[hit_count] = hit_files[hit_count];
+               hit_count++;
             }
          }
       }
-      else if (wt_path && wt_path[0])
-      {
-         /* Post-run with worktree: use git diff as ground truth.
-          * A path in the diff was touched — no drift.
-          * A path not in diff that exists was context — soft warn only.
-          * A path not in diff that doesn't exist was never created — hard drift. */
-         if (drift_in_diff(diff_out, path))
-            continue;
 
-         if (exists)
-         {
-            /* Pre-existing context file the delegate didn't touch — soft drift. */
-            if (!soft_drift && errbuf && errbuf_size > 0)
-               snprintf(
-                   errbuf, errbuf_size,
-                   "named file '%s' was not modified by delegate (possible context-only reference)",
-                   path);
-            soft_drift = 1;
-         }
-         else
-         {
-            if (!writes_allowed)
-            {
-               if (!soft_drift && errbuf && errbuf_size > 0)
-                  snprintf(errbuf, errbuf_size,
-                           "named file '%s' was read-only context and was not created", path);
-               soft_drift = 1;
-               continue;
-            }
-
-            /* New file the delegate was supposed to create but didn't. */
-            if (errbuf && errbuf_size > 0)
-               snprintf(errbuf, errbuf_size, "named file '%s' was not created by delegate", path);
-            hard_drift = 1;
-         }
-      }
-      else
-      {
-         /* Post-run without worktree: fall back to response-text matching. */
-         if (!exists)
-            continue;
-
-         if (strstr(response, path))
-            continue;
-
-         const char *base = strrchr(path, '/');
-         base = base ? base + 1 : path;
-         if (strstr(response, base))
-         {
-            if (!soft_drift && errbuf && errbuf_size > 0)
-               snprintf(errbuf, errbuf_size,
-                        "named file '%s' matched only by basename '%s' in response (ambiguous)",
-                        path, base);
-            soft_drift = 1;
-         }
-         else
-         {
-            if (!writes_allowed)
-            {
-               if (!soft_drift && errbuf && errbuf_size > 0)
-                  snprintf(errbuf, errbuf_size,
-                           "named file '%s' was read-only context and not repeated in response",
-                           path);
-               soft_drift = 1;
-            }
-            else
-            {
-               if (errbuf && errbuf_size > 0)
-                  snprintf(errbuf, errbuf_size,
-                           "named file '%s' not found in delegate response (possible drift)", path);
-               hard_drift = 1;
-            }
-         }
-      }
+      aimee_delegates_drift_request_path(&w, path, path_flags, hit_ptrs, hit_count);
    }
-
    free(diff_out);
 
-   if (hard_drift)
+   if (w.overflow)
+   {
+      free(request);
+      LOG_WARN("delegate", "named-file drift check skipped: %d path(s) did not fit the request",
+               path_count);
+      return 0;
+   }
+
+   unsigned severity = AIMEE_DELEGATES_DRIFT_NONE;
+   char message[512] = "";
+   int rc = delegate_drift_judge(request, w.len, &severity, message, sizeof(message));
+   free(request);
+   if (rc != 0)
+      return 0;
+
+   if (message[0] && errbuf && errbuf_size > 0)
+      snprintf(errbuf, errbuf_size, "%s", message);
+
+   if (severity == AIMEE_DELEGATES_DRIFT_HARD)
       return -1;
-   if (soft_drift)
+   if (severity == AIMEE_DELEGATES_DRIFT_SOFT)
       return 1;
    return 0;
 }
