@@ -27,6 +27,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <aimee/delegates/delegate_launch_args.h>
 
 static long delegate_stat_mtime_nsec(const struct stat *st)
 {
@@ -120,11 +121,22 @@ void delegate_record_exit_learning(const char *sid, const char *role, const agen
 }
 
 /* Detect a no-op write delegate: a write role that reported success (rc==0) but
- * left its owned files / the worktree / HEAD unchanged. Returns 1 and fills
- * `err` with the "treated as incomplete" message when the run is a no-op; 0
- * otherwise (logging an INFO note for the benign cases — named paths that look
- * unchanged but HEAD/worktree advanced, or a missing HEAD snapshot). Extracted
- * verbatim from delegate_worker; the caller maps a 1 to rc=-1 + result.error. */
+ * left its owned files / the worktree / HEAD unchanged.
+ *
+ * This half GATHERS THE EVIDENCE -- file snapshots, `git status`, a HEAD
+ * comparison -- because all three are I/O. What the evidence means is the
+ * module's (stage 18), including the benign cases where nothing changed and the
+ * run was still real.
+ *
+ * ONE COST, STATED: the worktree and HEAD checks are now made whenever a write
+ * delegate finishes, rather than only after the named paths looked unchanged.
+ * The rule needs the whole picture to answer in one call, and the alternative --
+ * asking the module what it would like to know next -- would put the decision's
+ * shape back on this side. It is a `git status` per completed write delegate,
+ * against a run that just spent seconds in a model.
+ *
+ * Returns 1 and fills `err` when the run is a no-op; 0 otherwise, logging the
+ * benign notes the module returns. */
 int delegate_detect_noop_write(int is_write_role, int allows_writes, int handoff_json, int rc,
                                const char named_paths[][DELEGATE_DRIFT_PATH_MAX],
                                int named_path_count, const delegate_file_snapshot_t *pre_run_files,
@@ -132,83 +144,63 @@ int delegate_detect_noop_write(int is_write_role, int allows_writes, int handoff
                                const char *cwd, const char *deleg_id, const char *sid,
                                const char *role, char *err, size_t errsz)
 {
-   /* Treat unchanged named paths as incomplete unless the worktree or HEAD changed. */
-   if (is_write_role && allows_writes && named_path_count > 0 && rc == 0)
+   /* Only a successful write run can be a no-op; skip the I/O entirely
+    * otherwise. This is the same narrowing the rule applies, kept here so the
+    * ordinary read-only delegate pays nothing for a check that cannot fire. */
+   if (!is_write_role || !allows_writes || rc != 0)
+      return 0;
+
+   unsigned flags = AIMEE_DELEGATES_NOOP_IS_WRITE_ROLE | AIMEE_DELEGATES_NOOP_ALLOWS_WRITES |
+                    AIMEE_DELEGATES_NOOP_SUCCEEDED;
+   if (handoff_json)
+      flags |= AIMEE_DELEGATES_NOOP_HANDOFF_JSON;
+   if (worktree_path && worktree_path[0])
+      flags |= AIMEE_DELEGATES_NOOP_HAS_WORKTREE;
+   if (pre_run_head_sha && pre_run_head_sha[0])
+      flags |= AIMEE_DELEGATES_NOOP_HEAD_SNAPSHOT;
+
+   const char *check_root =
+       (worktree_path && worktree_path[0]) ? worktree_path : ((cwd && cwd[0]) ? cwd : NULL);
+
+   if (named_path_count > 0)
    {
-      const char *check_root = worktree_path[0] ? worktree_path : (cwd[0] ? cwd : ".");
-      int any_changed = 0;
+      const char *rel_root = check_root ? check_root : ".";
       for (int i = 0; i < named_path_count; i++)
       {
          char full[MAX_PATH_LEN];
          if (named_paths[i][0] == '/')
             snprintf(full, sizeof(full), "%s", named_paths[i]);
          else
-            snprintf(full, sizeof(full), "%s/%s", check_root, named_paths[i]);
+            snprintf(full, sizeof(full), "%s/%s", rel_root, named_paths[i]);
          if (delegate_file_snapshot_changed(pre_run_files[i], delegate_file_snapshot(full)))
          {
-            any_changed = 1;
+            flags |= AIMEE_DELEGATES_NOOP_ANY_NAMED;
             break;
          }
       }
-      if (!any_changed)
-      {
-         /* Named paths were stable; check for any worktree or HEAD changes. */
-         int wt_changed = delegate_worktree_has_changes(worktree_path[0] ? worktree_path
-                                                                         : (cwd[0] ? cwd : NULL));
-         /* A clean worktree can still be real progress if HEAD advanced. */
-         int head_advanced = 0;
-         if (!wt_changed && pre_run_head_sha[0])
-         {
-            const char *root = worktree_path[0] ? worktree_path : (cwd[0] ? cwd : NULL);
-            head_advanced = delegate_head_changed(root, pre_run_head_sha);
-         }
-         if (wt_changed || head_advanced)
-         {
-            aimee_log(LOG_INFO, "delegate",
-                      "delegate %s: named paths unchanged but %s — "
-                      "named-path heuristic likely matched context refs (session %s)",
-                      deleg_id,
-                      head_advanced ? "HEAD advanced (delegate committed)"
-                                    : "worktree has other changes",
-                      sid ? sid : "unknown");
-         }
-         else
-         {
-            aimee_log(LOG_WARN, "delegate",
-                      "delegate %s: no-op — role '%s' reported success but no owned files changed "
-                      "(session %s)",
-                      deleg_id, role, sid ? sid : "unknown");
-            snprintf(err, errsz,
-                     "delegate %s: no owned files changed; result treated as incomplete", role);
-            return 1;
-         }
-      }
    }
-   else if (is_write_role && allows_writes && named_path_count == 0 && !handoff_json && rc == 0)
+
+   if (delegate_worktree_has_changes(check_root))
+      flags |= AIMEE_DELEGATES_NOOP_WORKTREE_DIRTY;
+   else if (pre_run_head_sha && pre_run_head_sha[0] && check_root &&
+            delegate_head_changed(check_root, pre_run_head_sha))
+      flags |= AIMEE_DELEGATES_NOOP_HEAD_ADVANCED;
+
+   int benign = 0;
+   char message[256] = "";
+   int noop = delegate_noop_write_judge(flags, named_path_count, &benign, message, sizeof(message));
+
+   if (noop)
    {
-      const char *check_root = worktree_path[0] ? worktree_path : (cwd[0] ? cwd : NULL);
-      int wt_changed = delegate_worktree_has_changes(check_root);
-      int head_advanced = 0;
-      if (!wt_changed && pre_run_head_sha[0] && check_root)
-         head_advanced = delegate_head_changed(check_root, pre_run_head_sha);
-      if (worktree_path[0] && !pre_run_head_sha[0])
-      {
-         aimee_log(LOG_INFO, "delegate",
-                   "delegate %s: skipping global no-op check because delegate HEAD could not be "
-                   "snapshotted (session %s)",
-                   deleg_id, sid ? sid : "unknown");
-      }
-      else if (!wt_changed && !head_advanced)
-      {
-         aimee_log(LOG_WARN, "delegate",
-                   "delegate %s: no-op — write role '%s' reported success but produced no diff "
-                   "(session %s)",
-                   deleg_id, role, sid ? sid : "unknown");
-         snprintf(err, errsz, "delegate %s: no file changes detected; result treated as incomplete",
-                  role);
-         return 1;
-      }
+      aimee_log(LOG_WARN, "delegate", "delegate %s: no-op — role '%s' %s (session %s)", deleg_id,
+                role, message[0] ? message : "produced no change", sid ? sid : "unknown");
+      snprintf(err, errsz, "delegate %s: %s", role,
+               message[0] ? message : "no file changes detected; result treated as incomplete");
+      return 1;
    }
+   if (benign && message[0])
+      aimee_log(LOG_INFO, "delegate", "delegate %s: %s (session %s)", deleg_id, message,
+                sid ? sid : "unknown");
    return 0;
 }
 

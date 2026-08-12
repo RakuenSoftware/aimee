@@ -995,4 +995,62 @@ static inline int aimee_delegates_routefilter_response_decode(const uint8_t *in,
    return 0;
 }
 
+/* --- No-op write (stage 18): did a successful write delegate change anything?
+ *
+ * The caller gathers the evidence -- file snapshots, `git status`, a HEAD
+ * comparison -- because all three are I/O. Only the reading of it is the
+ * module's. */
+
+#define AIMEE_DELEGATES_EVENT_NOOPWRITE          6674u
+#define AIMEE_DELEGATES_STAGE_NOOPWRITE          18u
+#define AIMEE_DELEGATES_NOOPWRITE_REQUEST_MAGIC  0x51574e44u /* "DNWQ" */
+#define AIMEE_DELEGATES_NOOPWRITE_RESPONSE_MAGIC 0x53574e44u /* "DNWS" */
+#define AIMEE_DELEGATES_NOOPWRITE_REQUEST_LEN    16u
+
+#define AIMEE_DELEGATES_NOOP_IS_WRITE_ROLE  (1u << 0)
+#define AIMEE_DELEGATES_NOOP_ALLOWS_WRITES  (1u << 1)
+#define AIMEE_DELEGATES_NOOP_HANDOFF_JSON   (1u << 2)
+#define AIMEE_DELEGATES_NOOP_SUCCEEDED      (1u << 3)
+#define AIMEE_DELEGATES_NOOP_ANY_NAMED      (1u << 4)
+#define AIMEE_DELEGATES_NOOP_WORKTREE_DIRTY (1u << 5)
+#define AIMEE_DELEGATES_NOOP_HEAD_ADVANCED  (1u << 6)
+#define AIMEE_DELEGATES_NOOP_HEAD_SNAPSHOT  (1u << 7)
+#define AIMEE_DELEGATES_NOOP_HAS_WORKTREE   (1u << 8)
+
+static inline int aimee_delegates_noopwrite_request_encode(unsigned flags, int named_count,
+                                                           uint8_t *out, size_t cap)
+{
+   if (!out || cap < AIMEE_DELEGATES_NOOPWRITE_REQUEST_LEN || named_count < 0)
+      return -1;
+   memset(out, 0, AIMEE_DELEGATES_NOOPWRITE_REQUEST_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_NOOPWRITE_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   aimee_delegates_put_u32(out + 8, flags);
+   aimee_delegates_put_u32(out + 12, (uint32_t)named_count);
+   return 0;
+}
+
+/* `message` receives the operator-facing wording, NUL-terminated. It is present
+ * for the BENIGN cases too: nothing failed there, so what it says is the only
+ * evidence the guard ran at all. */
+static inline int aimee_delegates_noopwrite_response_decode(const uint8_t *in, size_t len,
+                                                            int *noop, int *benign, char *message,
+                                                            size_t message_cap)
+{
+   if (!in || len < 12 || !noop || !benign ||
+       aimee_delegates_get_u32(in) != AIMEE_DELEGATES_NOOPWRITE_RESPONSE_MAGIC)
+      return -1;
+   *noop = aimee_delegates_get_u32(in + 4) ? 1 : 0;
+   *benign = aimee_delegates_get_u32(in + 8) ? 1 : 0;
+   if (message && message_cap)
+   {
+      size_t n = len - 12;
+      if (n >= message_cap)
+         n = message_cap - 1;
+      memcpy(message, in + 12, n);
+      message[n] = '\0';
+   }
+   return 0;
+}
+
 #endif

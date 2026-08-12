@@ -179,3 +179,35 @@ int delegate_route_filter_apply(const uint8_t *request, size_t request_len, uint
    }
    return g_route_filter(request, request_len, response, response_cap, response_len);
 }
+
+static delegate_noop_write_fn g_noop_write;
+
+void delegate_register_noop_write_provider(delegate_noop_write_fn provider)
+{
+   g_noop_write = provider;
+}
+
+int delegate_noop_write_judge(unsigned flags, int named_count, int *benign, char *message,
+                              size_t message_cap)
+{
+   if (benign)
+      *benign = 0;
+   if (message && message_cap)
+      message[0] = '\0';
+   if (!g_noop_write)
+   {
+      /* Fails OPEN. This guard catches a delegate that did nothing; rejecting
+       * completed work because the guard could not run is the worse error. */
+      LOG_WARN("delegate", "no no-op-write provider registered; accepting the run unjudged");
+      return 0;
+   }
+   int noop = 0, b = 0;
+   if (g_noop_write(flags, named_count, &noop, &b, message, message_cap) != 0)
+   {
+      LOG_WARN("delegate", "no-op-write check could not be evaluated; accepting the run");
+      return 0;
+   }
+   if (benign)
+      *benign = b;
+   return noop;
+}

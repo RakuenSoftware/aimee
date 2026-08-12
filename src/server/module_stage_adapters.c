@@ -943,6 +943,23 @@ static int delegate_route_filter(const uint8_t *request, size_t request_len, uin
    return 0;
 }
 
+/* Did a successful write delegate change anything? A wire. */
+static int delegate_noop_write(unsigned flags, int named_count, int *noop, int *benign,
+                               char *message, size_t message_cap)
+{
+   uint8_t request[AIMEE_DELEGATES_NOOPWRITE_REQUEST_LEN];
+   if (aimee_delegates_noopwrite_request_encode(flags, named_count, request, sizeof(request)) != 0)
+      return -1;
+
+   uint8_t response[1024];
+   uint32_t response_len = 0;
+   if (call_module(AIMEE_DELEGATES_EVENT_NOOPWRITE, AIMEE_DELEGATES_STAGE_NOOPWRITE, request,
+                   sizeof(request), response, sizeof(response), &response_len) != 0)
+      return -1;
+   return aimee_delegates_noopwrite_response_decode(response, response_len, noop, benign, message,
+                                                    message_cap);
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -1165,6 +1182,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_may_write_provider(delegate_may_write_adapter);
    delegate_register_image_gc_provider(delegate_image_gc);
    delegate_register_route_filter_provider(delegate_route_filter);
+   delegate_register_noop_write_provider(delegate_noop_write);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path
