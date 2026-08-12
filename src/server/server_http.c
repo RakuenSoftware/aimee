@@ -419,8 +419,8 @@ int route_session_primary_set(const char *session_id, const char *body, char *re
    cJSON_Delete(req);
 
    /* Validate the agent exists in the pool before pinning it. */
-   agent_config_t acfg;
-   if (agent_load_config(&acfg) != 0 || !agent_find(&acfg, name))
+   agent_t agbuf;
+   if (agent_registry_find(name, &agbuf) != 0)
       return err_json(resp, cap, 404, "no such agent");
 
    session_primary_set(session_id, name);

@@ -1271,8 +1271,8 @@ int handle_primary_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (jo_need_str(req, "session_id", &sid) < 0 || jo_need_str(req, "agent", &agent) < 0)
       return server_send_error(conn, "missing session_id or agent", NULL);
 
-   agent_config_t acfg;
-   if (agent_load_config(&acfg) != 0 || !agent_find(&acfg, agent))
+   agent_t agbuf;
+   if (agent_registry_find(agent, &agbuf) != 0)
       return server_send_error(conn, "no such agent", NULL);
 
    session_primary_set(sid, agent);

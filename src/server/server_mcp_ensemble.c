@@ -339,8 +339,8 @@ cJSON *server_mcp_set_primary_agent(const char *session_id, cJSON *args)
           "error: set_primary_agent requires an 'agent' name (or clear:true)");
 
    const char *name = jagent->valuestring;
-   agent_config_t acfg;
-   if (agent_load_config(&acfg) != 0 || !agent_find(&acfg, name))
+   agent_t agbuf;
+   if (agent_registry_find(name, &agbuf) != 0)
    {
       char out[256];
       snprintf(out, sizeof(out), "error: no such agent '%s' (see 'aimee agent list')", name);

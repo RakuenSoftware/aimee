@@ -11,17 +11,15 @@
 #include <unistd.h>
 
 /* Validate first-boot delegate variables against the durable roster and return
- * its canonical spelling. agent_load_config is cached, so repeated lookups are
- * cheap. */
+ * its canonical spelling. The registry accessor reads the cached registry in
+ * place and copies out one agent; the old agent_load_config here was "cached"
+ * but still memset and memcpy'd 343 KB per call. */
 static int server_bootstrap_resolve_agent(const char *name, char *canon, size_t cap)
 {
-   agent_config_t cfg;
-   if (agent_load_config(&cfg) != 0)
+   agent_t agent;
+   if (agent_registry_find(name, &agent) != 0)
       return 0;
-   agent_t *agent = agent_find(&cfg, name);
-   if (!agent)
-      return 0;
-   snprintf(canon, cap, "%s", agent->name);
+   snprintf(canon, cap, "%s", agent.name);
    return 1;
 }
 
