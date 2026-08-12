@@ -501,13 +501,42 @@ static void handle_initialize(cJSON *id)
     *
     * Discovery is for what is NOT in the list. Leading with it taxes every session
     * to buy something almost none of them need. */
+   /* AND SAY WHICH SURFACE IS CHEAPER, because this text is the reason agents
+    * pick the expensive one.
+    *
+    * It used to say the listed tools were the "first move on repository
+    * questions", full stop. That is the ONE instruction guaranteed to reach every
+    * MCP session -- it rides the initialize handshake, before any work, whether or
+    * not the agent calls a tool we happen to hook. Measured result: 13.3 MCP tool
+    * calls per benchmark cell and ZERO `aimee ...` invocations across 13 cells,
+    * with the binary on PATH throughout.
+    *
+    * An MCP call is one call, one turn, and the whole conversation re-sent. The
+    * same lookups as commands join with && into a shell call the agent is already
+    * making. The tools are not worse; the SURFACE is, whenever more than one
+    * lookup is wanted. So the cheaper form leads and the tools stay named for the
+    * cases that have no command form.
+    *
+    * Hooking memory_recall(session_start) instead was tried first and did not
+    * work: that tool is optional, the agent simply never called it, and the
+    * guidance never arrived. Only the handshake is unskippable. */
    static const char *const base_instructions =
        "The tools in tools/list are directly callable — call them directly, by "
        "name, with their arguments. Do not route a listed tool through call_tool, "
-       "and do not look one up before using it. find_symbol, "
-       "preview_blast_radius, search_docs and search_memory are listed: use them "
-       "as your first move on repository questions rather than after a shell "
-       "search. Only when you need a tool that is NOT listed: find_tools("
+       "and do not look one up before using it. "
+       "PREFER THE COMMAND FORM WHEN THERE IS ONE: `aimee index find <symbol>`, "
+       "`aimee index callers <symbol>`, `aimee index blast-radius <file>`, "
+       "`aimee index structure <file>`, `aimee memory search <terms>` are ordinary "
+       "commands, so several of them join with && inside ONE shell call you are "
+       "already making, where the same lookups as separate tool calls cost one "
+       "turn each and re-send the whole conversation every time. "
+       "find_symbol, preview_blast_radius, search_docs and search_memory are "
+       "listed and remain the right move on a repository question when you cannot "
+       "run a shell command, or when you want exactly one lookup — reach for them "
+       "rather than a shell search. Tool calls cannot be chained, so when you do "
+       "call one, use its plural argument (spans, queries, symbols, identifiers) "
+       "instead of repeating the call. "
+       "Only when you need a tool that is NOT listed: find_tools("
        "\"<keyword>\") to locate it, describe_tool(\"<name>\") for its schema, "
        "then call_tool with that name and matching arguments. get_help(\"<topic>\") "
        "explains how aimee itself works — work queue, delegation, memory, git, "
