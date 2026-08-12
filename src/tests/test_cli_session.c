@@ -200,6 +200,27 @@ static cli_session_t fake_session(void)
    return s;
 }
 
+/* The wall-clock ceiling the recv tests below assert against.
+ *
+ * These ceilings answer "did recv terminate on its own bound, or run away?" —
+ * they are not performance targets, and the behaviour is already asserted
+ * separately by the return code above each one.
+ *
+ * It was 5000ms, which is 5x the 1000ms bound the first two tests pass in and
+ * 6x the 800ms grace the third one sets. That margin does not survive a busy
+ * machine: under the parallel suite this file failed 11 runs in 12, always on
+ * the clock and never on the behaviour — in the captured failure `rc == -4` and
+ * the `sendlog_has("Escape")` assertion both passed, and only `elapsed < 5000`
+ * did not.
+ *
+ * A ceiling only has to sit far enough below the WRONG outcome to tell the two
+ * apart. For the idle-timeout tests the wrong outcome is "never returns"; for
+ * the grace test it is riding the 30s idle bound instead of the 800ms grace.
+ * 15s is comfortably below both while giving scheduling ~15-18x the budget the
+ * code actually needs, so a correct run cannot lose the race and an incorrect
+ * one still cannot pass. */
+#define RECV_TERMINATION_CEILING_MS 15000
+
 static void test_recv_timeout_on_changing_pane(void)
 {
    setenv("FAKE_TMUX_MODE", "changing", 1);
@@ -211,7 +232,7 @@ static void test_recv_timeout_on_changing_pane(void)
    /* The pane never stabilises, so recv must hit the wall-clock bound (-2)
     * rather than hang. Allow generous slack above the 1000ms bound. */
    assert(rc == -2);
-   assert(elapsed < 5000);
+   assert(elapsed < RECV_TERMINATION_CEILING_MS);
 }
 
 static void test_recv_ok_on_stable_pane(void)
@@ -300,7 +321,7 @@ static void test_recv_busy_footer_not_finalized(void)
    int rc = cli_session_recv(&s, buf, sizeof(buf), 1000);
    long long elapsed = test_mono_ms() - t0;
    assert(rc == -2); /* never finalized; hit the wall-clock bound */
-   assert(elapsed < 5000);
+   assert(elapsed < RECV_TERMINATION_CEILING_MS);
 }
 
 /* --- cancel / steering-interrupt path --- */
@@ -378,7 +399,8 @@ static void test_recv_provider_error_returns_minus4(void)
    cli_session_set_error_grace_ms(0);
    assert(rc == -4);
    assert(sendlog_has("Escape")); /* stopped the retry loop */
-   assert(elapsed < 5000);        /* bounded by the 800ms grace, not the 30s timeout */
+   /* bounded by the 800ms grace, not the 30s idle timeout */
+   assert(elapsed < RECV_TERMINATION_CEILING_MS);
 }
 
 /* grace = 0 (default/opt-in off): the error pane is just a non-stabilising pane,
