@@ -688,15 +688,25 @@ static void test_tool_profile_filter(void)
 {
    /* Mirror of MCP_CORE_TOOLS in mcp_tool_profile.c — kept in sync intentionally.
     * Includes the P2 discovery meta-tools and schema-bound dispatch bridge. */
-   static const char *const core[] = {"get_help", "find_tools", "describe_tool", "call_tool",
-                                      "search_docs", "memory_recall", "get_identity",
-                                      /* find_symbol, preview_blast_radius, index and search_memory
-                                       * left the floor: each is an `aimee ...` command the standing
-                                       * guidance names, and a command chains where a tool call
-                                       * cannot. ast_grep_search stays -- it is the one code-intel
-                                       * capability with no command form. */
-                                      "ast_grep_search", "git", "delegate", "delegate_status",
-                                      "roundtable_review", "ask_user", "send_message", "note",
+   static const char *const core[] = {"get_help",
+                                      "find_tools",
+                                      "describe_tool",
+                                      "call_tool",
+                                      "search_docs",
+                                      "search_memory",
+                                      "memory_recall",
+                                      "get_identity",
+                                      "find_symbol",
+                                      "ast_grep_search",
+                                      "preview_blast_radius",
+                                      "index",
+                                      "git",
+                                      "delegate",
+                                      "delegate_status",
+                                      "roundtable_review",
+                                      "ask_user",
+                                      "send_message",
+                                      "note",
                                       NULL};
    int expect = 0;
    for (int i = 0; core[i]; i++)
@@ -743,23 +753,28 @@ static void test_tool_profile_filter(void)
     * blocks, so it needs no poller in the floor at all. */
    assert(profile_core_has("delegate_status", core));
 
-   /* `index` is deliberately NOT in the floor any more, and this assertion is
-    * inverted rather than deleted because the reason it existed still matters.
+   /* The retrieval an agent reaches for when the question is NOT a symbol name.
+    * Withholding `index` did not reduce retrieval; it moved it to a recursive
+    * shell search, because that was one visible call while index_hybrid cost a
+    * find_tools -> describe_tool -> call_tool detour. Measured across the
+    * benchmark's aimee cells: 87 shell searches emitting 2.4 MB, one large
+    * enough to hit the client's 1 MB output truncation.
     *
-    * IT USED TO ASSERT THE OPPOSITE, on this measurement: withholding `index`
-    * did not reduce retrieval, it moved retrieval to a recursive shell search --
-    * 87 shell searches emitting 2.4 MB across the benchmark's aimee cells, one
-    * large enough to hit the client's 1 MB truncation -- because that was one
-    * visible call while index_hybrid cost find_tools -> describe_tool ->
-    * call_tool.
+    * THIS ASSERTION WAS INVERTED ONCE, ON 2026-08-12, and inverted back the same
+    * night. The argument was that the fallback had changed -- `aimee index ...`
+    * now exists as a chainable command named in the standing guidance -- so the
+    * detour was no longer the alternative. Re-tested with the commands live and
+    * the guidance naming them, n=3 each side on a healthy box: CLI invocations
+    * went DOWN 2.3 -> 1.3 per cell, MCP calls 4.3 -> 6.3, searches 3 -> 4.3,
+    * search output 4.2 KB -> 6.1 KB, credits 15.52 -> 19.15 mean (+23%). The
+    * calls it did make were find_tools x4, describe_tool x2, call_tool x1: the
+    * detour, paid in full.
     *
-    * What changed is the ALTERNATIVE, not the argument. `aimee index ...` is now
-    * a command the standing guidance names by hand, so the fallback is no longer
-    * a recursive search: it is the same retrieval, chainable with && into a shell
-    * call the agent is already making. The failure mode that justified the old
-    * assertion is only reachable if the command form disappears -- which is what
-    * this now guards. */
-   assert(!profile_core_has("index", core));
+    * So the original finding survives a change that looked like it should have
+    * retired it. A schema present in every request outcompetes a sentence
+    * recommending a command, and removing the schema sends the agent to
+    * discovery and to grep rather than to the command. */
+   assert(profile_core_has("index", core));
    assert(profile_core_has("delegate_status", core));
    {
       cJSON *listed = mcp_build_tools_list();

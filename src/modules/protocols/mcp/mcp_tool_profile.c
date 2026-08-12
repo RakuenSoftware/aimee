@@ -28,13 +28,16 @@ static const char *const MCP_CORE_TOOLS[] = {
     "describe_tool", /* discovery */
     "call_tool",     /* schema-bound dispatch bridge for discovered tools */
     "search_docs",   /* orient */
+    "search_memory",
     "memory_recall",
     "get_identity", /* grounding */
-    /* ast_grep_search stays: it is the ONE code-intel capability with no command
-     * form, so withholding it would leave the agent nothing but a recursive text
-     * search for "does this pattern repeat". (It is separately withheld at
-     * runtime when no ast-grep binary resolves -- see server_mcp_surface.c.) */
+    /* ast_grep_search is additionally withheld at RUNTIME when no ast-grep
+     * binary resolves (server_mcp_surface.c) -- that part stayed, because a tool
+     * that cannot run is different from a tool with a cheaper alternative. */
+    AIMEE_CODE_TOOL_FIND_SYMBOL,
     AIMEE_CODE_TOOL_AST_GREP_SEARCH,
+    AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS,
+    AIMEE_CODE_TOOL_INDEX,
     /* SAME REASONING AS delegate_status BELOW, AND THE SAME MEASUREMENT.
      *
      * `index` multiplexes the retrieval an agent needs when the question is not a
@@ -49,26 +52,24 @@ static const char *const MCP_CORE_TOOLS[] = {
      * 1 MB truncation. index_hybrid answers that class of question with a capped,
      * ranked result set and was reachable the whole time -- just never in one
      * call. A tool the agent cannot afford to reach is a tool it does not have. */
-    /* THAT MEASUREMENT NO LONGER DESCRIBES THE ALTERNATIVE, which is why `index`,
-     * find_symbol, preview_blast_radius and search_memory now leave the floor.
+    /* RE-TESTED 2026-08-12 WITH THE COMMAND FORMS IN PLACE, AND THE OLD
+     * MEASUREMENT HELD. The argument for removing these four was that the
+     * fallback had changed: each is now an `aimee ...` command the standing
+     * guidance names, and a command chains where a tool call cannot. That
+     * argument was wrong about what the agent actually does.
      *
-     * When it was taken, dropping a tool from the floor meant the capability cost
-     * find_tools -> describe_tool -> call_tool, so agents used a recursive text
-     * search instead and emitted 2.4 MB doing it. The fallback today is not a
-     * recursive search: every one of those four is an `aimee ...` command the
-     * standing guidance names by hand, and a command CHAINS -- N of them cost one
-     * round trip inside a shell call the agent is already making, where N tool
-     * calls cost N turns.
+     * Trimmed vs untrimmed, same task, n=3 each, healthy box:
+     *   CLI invocations   2.3 -> 1.3 per cell   (DOWN, not up)
+     *   MCP calls         4.3 -> 6.3
+     *   shell commands    9.3 -> 11
+     *   searches            3 -> 4.3   (4.2 KB -> 6.1 KB of output)
+     *   credits         15.52 -> 19.15 mean     (+23%)
      *
-     * Measured 2026-08-12 after the guidance started naming them: aimee CLI
-     * invocations went from 0 across 13 cells to 7 across 3, in exactly the
-     * chained shape asked for. What did NOT happen is substitution -- the agent
-     * added CLI calls while still calling the tools, because a schema present in
-     * every request outcompetes a sentence. Removing them from the floor is what
-     * makes the cheaper surface the default one rather than an alternative.
-     *
-     * They remain reachable: in the "full" profile, and through
-     * find_tools/describe_tool/call_tool for a client with no shell at all. */
+     * The MCP calls it did make were find_tools x4, describe_tool x2,
+     * call_tool x1 -- the discovery detour the comment above describes, paid in
+     * full. Naming a command in guidance does not make the agent prefer it over
+     * a schema that is present in every request; removing the schema just sends
+     * it to discovery and to grep, exactly as before. */
     "git", /* all git/gh ops via one multiplexed tool (command=...) */
     "delegate",
     /* SAME REASONING AS `index` ABOVE, AND THE SAME MEASUREMENT.
