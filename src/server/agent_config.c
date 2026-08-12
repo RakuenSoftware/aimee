@@ -2,6 +2,8 @@
 #include "aimee.h"
 #include "util.h"
 #include "agent_config.h"
+
+#include "agent_registry.h"
 #include "agent_config_internal.h"
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX for the per-turn vault principal */
 #include "runtime_secret.h"
@@ -934,67 +936,6 @@ void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len)
 
 /* --- Load/Save config (with mtime cache) --- */
 
-/* The cache is read/written from many threads at once — every delegate
- * dispatch calls agent_load_config, and the parallel autonomy scheduler plus
- * the panel seats dispatch concurrently. An unguarded memcpy of this
- * multi-KB struct while a reloading thread rewrites it is a torn read (and
- * TSan-class UB), so all cache access holds g_agent_config_cache_lock. The
- * lock is NOT held across file I/O parsing — a reloader parses into the
- * caller's buffer first and only then publishes under the lock. */
-static agent_config_t g_agent_config_cache;
-static struct timespec g_agent_config_mtime;
-/* mtime alone is not a safe cache key. It is not monotonic and not always
- * distinct: a rewritten agents.json can land with a timestamp equal to (or
- * older than) the cached one, and the cache then serves stale content forever.
- * Observed live on the tiered appliance filesystem, where a freshly installed
- * agents.json arrived with an mtime ~9h in the past and /v1/agents kept failing
- * until the file was touched. Size and inode are free from the same stat() and
- * make an in-place rewrite detectable. */
-static off_t g_agent_config_size;
-static ino_t g_agent_config_ino;
-static int g_agent_config_cached;
-static pthread_mutex_t g_agent_config_cache_lock = PTHREAD_MUTEX_INITIALIZER;
-
-static struct timespec agent_config_stat_mtime(const struct stat *st)
-{
-   struct timespec ts;
-#if defined(__APPLE__)
-   ts = st->st_mtimespec;
-#elif defined(_WIN32) || defined(_WIN64)
-   ts.tv_sec = st->st_mtime;
-   ts.tv_nsec = 0;
-#elif defined(__linux__)
-   ts = st->st_mtim;
-#else
-   ts.tv_sec = st->st_mtime;
-   ts.tv_nsec = 0;
-#endif
-   return ts;
-}
-
-static int agent_config_mtime_eq(const struct timespec *a, const struct timespec *b)
-{
-   return a->tv_sec == b->tv_sec && a->tv_nsec == b->tv_nsec;
-}
-
-/* A cache hit requires the file to look identical on every cheap axis stat()
- * gives us: same mtime, same size, same inode. mtime alone is spoofable by a
- * same-timestamp rewrite (see g_agent_config_size). */
-static int agent_config_stat_eq(const struct stat *st)
-{
-   struct timespec mt = agent_config_stat_mtime(st);
-   return agent_config_mtime_eq(&mt, &g_agent_config_mtime) && st->st_size == g_agent_config_size &&
-          st->st_ino == g_agent_config_ino;
-}
-
-/* Record the identity of the file whose parsed contents are now cached. */
-static void agent_config_stat_remember(const struct stat *st)
-{
-   g_agent_config_mtime = agent_config_stat_mtime(st);
-   g_agent_config_size = st->st_size;
-   g_agent_config_ino = st->st_ino;
-}
-
 /* Materialize catalog figures as the agent's OWN values, once, at load.
  *
  * The bundled catalog is going away: it was a third-party snapshot that aged
@@ -1060,6 +1001,70 @@ static void agent_migrate_declare_from_catalog(agent_config_t *cfg)
    }
 }
 
+/* One agent out of the cached registry, without materialising the registry.
+ *
+ * The cache and its lock live in the config module (agent_registry.c); this side
+ * owns parsing and knows the file path, so it supplies the stat() identity. */
+static int agent_registry_pick(agent_t *out, agent_t *(*pick)(agent_config_t *, const void *),
+                               const void *arg)
+{
+   if (!out || !pick)
+      return -1;
+
+   const char *path = agent_config_path();
+   struct stat st;
+
+   /* FAST PATH: cache current, answer already in memory. Nearly every request. */
+   if (!getenv("AIMEE_NO_CACHE") && stat(path, &st) == 0)
+   {
+      int rc = agent_registry_pick_cached(&st, out, pick, arg);
+      if (rc >= 0)
+         return rc == 0 ? 0 : -1; /* 1 means "current cache, no such agent" */
+   }
+
+   /* SLOW PATH: cold or stale. Load once -- on the HEAP, because 343 KB has no
+    * business on a request thread's stack -- which republishes the cache as a
+    * side effect, then answer from the fresh copy. */
+   agent_config_t *tmp = malloc(sizeof(*tmp));
+   if (!tmp)
+      return -1;
+   int rc = -1;
+   if (agent_load_config(tmp) == 0)
+   {
+      agent_t *found = pick(tmp, arg);
+      if (found)
+      {
+         memcpy(out, found, sizeof(*out));
+         rc = 0;
+      }
+   }
+   free(tmp);
+   return rc;
+}
+
+static agent_t *agent_registry_pick_by_name(agent_config_t *cfg, const void *arg)
+{
+   return agent_find(cfg, (const char *)arg);
+}
+
+static agent_t *agent_registry_pick_default(agent_config_t *cfg, const void *arg)
+{
+   (void)arg;
+   return agent_default_primary(cfg);
+}
+
+int agent_registry_find(const char *name, agent_t *out)
+{
+   if (!name || !name[0])
+      return -1;
+   return agent_registry_pick(out, agent_registry_pick_by_name, name);
+}
+
+int agent_registry_default_primary(agent_t *out)
+{
+   return agent_registry_pick(out, agent_registry_pick_default, NULL);
+}
+
 int agent_load_config(agent_config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
@@ -1070,16 +1075,8 @@ int agent_load_config(agent_config_t *cfg)
    if (!getenv("AIMEE_NO_CACHE"))
    {
       struct stat st;
-      if (stat(path, &st) == 0)
-      {
-         pthread_mutex_lock(&g_agent_config_cache_lock);
-         int hit = g_agent_config_cached && agent_config_stat_eq(&st);
-         if (hit)
-            memcpy(cfg, &g_agent_config_cache, sizeof(*cfg));
-         pthread_mutex_unlock(&g_agent_config_cache_lock);
-         if (hit)
-            return 0;
-      }
+      if (stat(path, &st) == 0 && agent_registry_cache_get(&st, cfg) == 0)
+         return 0;
    }
 
    FILE *f = fopen(path, "r");
@@ -1785,11 +1782,7 @@ int agent_load_config(agent_config_t *cfg)
       struct stat st;
       if (stat(path, &st) == 0)
       {
-         pthread_mutex_lock(&g_agent_config_cache_lock);
-         memcpy(&g_agent_config_cache, cfg, sizeof(g_agent_config_cache));
-         agent_config_stat_remember(&st);
-         g_agent_config_cached = 1;
-         pthread_mutex_unlock(&g_agent_config_cache_lock);
+         agent_registry_cache_put(cfg, &st);
       }
    }
 
@@ -2147,9 +2140,7 @@ static int agent_save_config_impl(const agent_config_t *cfg, int emptied_by_remo
     * catalog capability lookup (so it advertised no tools). Dropping the entry
     * costs one re-parse of a small file on the next load, which then caches the
     * fully normalised result itself. */
-   pthread_mutex_lock(&g_agent_config_cache_lock);
-   g_agent_config_cached = 0;
-   pthread_mutex_unlock(&g_agent_config_cache_lock);
+   agent_registry_cache_invalidate();
    free(json);
    return 0;
 }

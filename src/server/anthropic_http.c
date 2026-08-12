@@ -48,14 +48,17 @@
 
 /* Resolve aimee's primary agent (the configured default, else the first enabled
  * agent — see agent_default_primary). Claude Code's requested model is
- * intentionally ignored — switching models is `aimee primary`. acfg is
- * caller-owned and must outlive the returned pointer (it indexes into acfg).
- * Returns NULL when no usable agent exists → caller reports 503. */
-static agent_t *resolve_primary(agent_config_t *acfg)
+ * intentionally ignored — switching models is `aimee primary`. Non-zero when no
+ * usable agent exists → caller reports 503.
+ *
+ * Fills `out` with the primary agent; returns 0 on success.
+ *
+ * Took an agent_config_t* purely so it could hand back a pointer into it, which
+ * put 350,968 bytes on the stack of every /v1/messages request to obtain one
+ * 16,720-byte agent. */
+static int resolve_primary(agent_t *out)
 {
-   if (agent_load_config(acfg) != 0)
-      return NULL;
-   return agent_default_primary(acfg);
+   return agent_registry_default_primary(out);
 }
 
 /* Mint a "msg_<epoch>" id for the response/stream. */
@@ -432,7 +435,7 @@ static char *anthropic_build_prov_body(cJSON *req, const delegate_driver_t *driv
 static int messages_buffered(const char *body, char *resp, int cap)
 {
    cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
-   agent_config_t acfg;
+   agent_t agbuf;
    agent_t *ag;
    cJSON *messages = NULL, *tools = NULL, *provider_resp = NULL, *out = NULL;
    char *system_text = NULL, *prov_body = NULL, *response = NULL;
@@ -484,7 +487,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * AIMEE_IR_SHADOW is set; never affects the response. */
    aimee_ir_shadow_observe_request(req, AIMEE_WIRE_ANTHROPIC);
 
-   ag = resolve_primary(&acfg);
+   ag = resolve_primary(&agbuf) == 0 ? &agbuf : NULL;
    if (!ag)
    {
       cJSON_Delete(req);
@@ -1192,8 +1195,8 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 {
    cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
    aimee_ir_shadow_observe_request(req, AIMEE_WIRE_ANTHROPIC); /* shadow (Slice 3), gated no-op */
-   agent_config_t acfg;
-   agent_t *ag = req ? resolve_primary(&acfg) : NULL;
+   agent_t agbuf;
+   agent_t *ag = (req && resolve_primary(&agbuf) == 0) ? &agbuf : NULL;
    cJSON *messages = NULL, *tools = NULL;
    char *system_text = NULL, *prov_body = NULL;
    char url[MAX_ENDPOINT_LEN + 64];
@@ -1398,8 +1401,8 @@ static int count_tokens(const char *body, char *resp, int cap)
     * when the primary speaks the Anthropic API; otherwise fall through to the
     * estimate. */
    {
-      agent_config_t acfg;
-      agent_t *ag = resolve_primary(&acfg);
+      agent_t agbuf;
+      agent_t *ag = resolve_primary(&agbuf) == 0 ? &agbuf : NULL;
       const delegate_driver_t *driver;
       delegate_drivers_init();
       driver = ag ? delegate_driver_get(ag->provider) : NULL;

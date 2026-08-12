@@ -35,4 +35,22 @@ extern ino_t g_config_ino;
 extern char g_config_cache_path[MAX_PATH_LEN];
 extern int g_config_cached;
 
+/* THE file-identity key for every cached loader in this module.
+ *
+ * mtime alone is not safe: it is neither monotonic nor always distinct, so an
+ * in-place rewrite can land with an equal (or older) timestamp and the cache then
+ * serves stale content forever. Size and inode are free from the same stat() and
+ * make that rewrite detectable. This was open-coded three times -- config_load_file,
+ * the seed watcher, and the agent registry -- which is three chances to get one
+ * subtle rule wrong. */
+typedef struct
+{
+   struct timespec mtime;
+   off_t size;
+   ino_t ino;
+} config_file_id_t;
+
+void config_file_id_from(const struct stat *st, config_file_id_t *out);
+int config_file_id_eq(const config_file_id_t *a, const config_file_id_t *b);
+
 #endif /* DEC_CONFIG_INTERNAL_H */
