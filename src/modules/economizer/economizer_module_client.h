@@ -96,6 +96,13 @@ extern "C"
 
       int folded_msgs;
       int retained_msgs;
+      /* Why the call ended the way it did (aimee_module_call_result_t). Set on
+       * EVERY path, including the ones that return non-zero, because "the module
+       * was not reachable" and "the module ran and found nothing to do" are the
+       * same silence from the caller's side and need telling apart. 1 is
+       * CAPABILITY_ABSENT: nothing is serving the reduce stage. */
+      int call_result;
+
       int reused_boundary;
       int epochs;
       int freeze_guarded;
