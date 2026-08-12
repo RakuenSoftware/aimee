@@ -166,7 +166,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "b2cbbd8ec0340de79fd1064b23e7285ffdba1f872015d0a1dc36ecc074fafaf8",
+      "source_sha256": "e9a6ca99bff9be07c0fa31c24e90e0d42be3b59a89bee002ed5d8d304c4332b1",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 10,
@@ -188,7 +188,8 @@
         6671,
         6672,
         6673,
-        6674
+        6674,
+        6675
       ]
     },
     {
@@ -504,16 +505,16 @@
       "version": "0.3.0",
       "commit": "7f66d5306a8511d057e011dc1080eb8b1479762c",
       "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "e43d50756535197c39697c3970c04f3658d313302a8d0b4f85295b2624312033",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 27,
       "serve": [
         11009
-      ],
-      "placements": [
-        "server"
-      ],
-      "source_sha256": "e43d50756535197c39697c3970c04f3658d313302a8d0b4f85295b2624312033"
+      ]
     }
   ]
 }

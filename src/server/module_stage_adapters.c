@@ -960,6 +960,19 @@ static int delegate_noop_write(unsigned flags, int named_count, int *noop, int *
                                                     message_cap);
 }
 
+/* What a delegate plan becomes. A passthrough: the caller encodes, because the
+ * caller is what holds the plan and the filesystem facts that go with it. */
+static int delegate_launch_plan(const uint8_t *request, size_t request_len, uint8_t *response,
+                                size_t response_cap, size_t *response_len)
+{
+   uint32_t got = 0;
+   if (call_module(AIMEE_DELEGATES_EVENT_LAUNCHPLAN, AIMEE_DELEGATES_STAGE_LAUNCHPLAN, request,
+                   (uint32_t)request_len, response, (uint32_t)response_cap, &got) != 0)
+      return -1;
+   *response_len = got;
+   return 0;
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -1183,6 +1196,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_image_gc_provider(delegate_image_gc);
    delegate_register_route_filter_provider(delegate_route_filter);
    delegate_register_noop_write_provider(delegate_noop_write);
+   delegate_register_launch_plan_provider(delegate_launch_plan);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path

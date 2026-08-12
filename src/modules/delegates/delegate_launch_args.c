@@ -198,6 +198,7 @@ int delegate_route_filter_apply(const uint8_t *request, size_t request_len, uint
 }
 
 static delegate_noop_write_fn g_noop_write;
+static delegate_launch_plan_fn g_launch_plan;
 
 void delegate_register_noop_write_provider(delegate_noop_write_fn provider)
 {
@@ -227,4 +228,22 @@ int delegate_noop_write_judge(unsigned flags, int named_count, int *benign, char
    if (benign)
       *benign = b;
    return noop;
+}
+
+void delegate_register_launch_plan_provider(delegate_launch_plan_fn provider)
+{
+   g_launch_plan = provider;
+}
+
+int delegate_launch_plan_call(const uint8_t *request, size_t request_len, uint8_t *response,
+                              size_t response_cap, size_t *response_len)
+{
+   if (!g_launch_plan)
+   {
+      LOG_ERROR("delegates", "no launch-plan provider registered; refusing to launch");
+      return -1;
+   }
+   if (!request || !response || !response_len)
+      return -1;
+   return g_launch_plan(request, request_len, response, response_cap, response_len);
 }

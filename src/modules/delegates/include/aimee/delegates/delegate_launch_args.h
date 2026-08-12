@@ -3,6 +3,7 @@
 
 #include <aimee/delegates/module_api.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* Where a delegate container's SHAPE comes from.
  *
@@ -137,5 +138,27 @@ void delegate_register_noop_write_provider(delegate_noop_write_fn provider);
  * carries the wording for both the refusal and the benign notes. */
 int delegate_noop_write_judge(unsigned flags, int named_count, int *benign, char *message,
                               size_t message_cap);
+
+/* Stage 19: what a delegate plan becomes.
+ *
+ * This seam passes BYTES rather than a struct, unlike its neighbours. The
+ * request carries a whole plan -- packets, owned files, per-file existence and
+ * basename candidates -- and the response carries steps, coord tasks and the
+ * briefs. Marshalling that through a C struct would mean inventing a second
+ * representation of the plan and keeping it in step with the wire; the caller
+ * already holds the cJSON and the filesystem facts, so it encodes directly with
+ * the helpers in module_api.h.
+ *
+ * Fails closed: with no provider the launch is refused, which is the safe
+ * direction -- nothing is written and the operator is told why. */
+typedef int (*delegate_launch_plan_fn)(const uint8_t *request, size_t request_len,
+                                       uint8_t *response, size_t response_cap,
+                                       size_t *response_len);
+
+void delegate_register_launch_plan_provider(delegate_launch_plan_fn provider);
+
+/* Returns 0 and fills `response` on success, -1 on any failure (logged). */
+int delegate_launch_plan_call(const uint8_t *request, size_t request_len, uint8_t *response,
+                              size_t response_cap, size_t *response_len);
 
 #endif

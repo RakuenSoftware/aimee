@@ -1053,4 +1053,150 @@ static inline int aimee_delegates_noopwrite_response_decode(const uint8_t *in, s
    return 0;
 }
 
+/* --- Launch plan (stage 19): what a delegate plan becomes.
+ *
+ * Every other stage here is fixed-width. This one carries prose -- titles,
+ * objectives, paths, and the briefs it returns -- so it is length-prefixed:
+ * each string is a u32 length followed by that many bytes, each list a u32
+ * count followed by its elements.
+ *
+ * The caller supplies two facts per owned file because the module does no I/O:
+ * whether the file exists, and (only when it does not) the tracked files that
+ * share its basename. Candidates rather than the whole file list, because the
+ * whole list does not fit: this repository's is 208KB against a 1MiB payload.
+ *
+ * The module returns rows; the caller writes them. Creating the execution plan,
+ * the coord job, and the task rows stays with the caller, which owns the
+ * database. */
+
+#define AIMEE_DELEGATES_EVENT_LAUNCHPLAN          6675u
+#define AIMEE_DELEGATES_STAGE_LAUNCHPLAN          19u
+#define AIMEE_DELEGATES_LAUNCHPLAN_REQUEST_MAGIC  0x514c5044u /* "DPLQ" */
+#define AIMEE_DELEGATES_LAUNCHPLAN_RESPONSE_MAGIC 0x534c5044u /* "DPLS" */
+
+/* A bounded append cursor. Once it overflows it stays overflowed, so a caller
+ * may build the whole request and check once at the end rather than after every
+ * field -- a check that is easy to forget on one field out of twenty. */
+typedef struct
+{
+   uint8_t *buf;
+   size_t cap;
+   size_t len;
+   int overflow;
+} aimee_delegates_wire_t;
+
+static inline void aimee_delegates_wire_init(aimee_delegates_wire_t *w, uint8_t *buf, size_t cap)
+{
+   w->buf = buf;
+   w->cap = cap;
+   w->len = 0;
+   w->overflow = 0;
+}
+
+static inline void aimee_delegates_wire_u32(aimee_delegates_wire_t *w, uint32_t v)
+{
+   if (w->overflow || w->len + 4 > w->cap)
+   {
+      w->overflow = 1;
+      return;
+   }
+   aimee_delegates_put_u32(w->buf + w->len, v);
+   w->len += 4;
+}
+
+static inline void aimee_delegates_wire_str(aimee_delegates_wire_t *w, const char *s)
+{
+   size_t n = s ? strlen(s) : 0;
+   aimee_delegates_wire_u32(w, (uint32_t)n);
+   if (w->overflow || w->len + n > w->cap)
+   {
+      w->overflow = 1;
+      return;
+   }
+   if (n)
+      memcpy(w->buf + w->len, s, n);
+   w->len += n;
+}
+
+/* Begin a request. Follow with the plan fields in wire order:
+ *   missing_owned_files: count, then each string
+ *   packets:             count, then per packet id, title, objective, role,
+ *                        handoff_schema, owned-file count, and per file its
+ *                        path, an exists flag, and its candidate list. */
+static inline void aimee_delegates_launchplan_request_begin(aimee_delegates_wire_t *w, uint8_t *buf,
+                                                            size_t cap, int max_concurrent,
+                                                            const char *schema, const char *title)
+{
+   aimee_delegates_wire_init(w, buf, cap);
+   aimee_delegates_wire_u32(w, AIMEE_DELEGATES_LAUNCHPLAN_REQUEST_MAGIC);
+   aimee_delegates_wire_u32(w, (uint32_t)AIMEE_DELEGATES_WIRE_VERSION);
+   aimee_delegates_wire_u32(w, (uint32_t)max_concurrent);
+   aimee_delegates_wire_str(w, schema);
+   aimee_delegates_wire_str(w, title);
+}
+
+/* A read cursor over the response, which refuses to read past its end. */
+typedef struct
+{
+   const uint8_t *buf;
+   size_t len;
+   size_t at;
+   int bad;
+} aimee_delegates_rd_t;
+
+static inline uint32_t aimee_delegates_rd_u32(aimee_delegates_rd_t *r)
+{
+   if (r->bad || r->at + 4 > r->len)
+   {
+      r->bad = 1;
+      return 0;
+   }
+   uint32_t v = aimee_delegates_get_u32(r->buf + r->at);
+   r->at += 4;
+   return v;
+}
+
+/* Copies the next string into `out` (always NUL-terminated when out_cap > 0).
+ * A string too long for `out` is TRUNCATED, not an error: the cursor still
+ * advances past all of it, so one oversized field cannot desynchronise the
+ * rest of the response. */
+static inline void aimee_delegates_rd_str(aimee_delegates_rd_t *r, char *out, size_t out_cap)
+{
+   uint32_t n = aimee_delegates_rd_u32(r);
+   if (r->bad || r->at + (size_t)n > r->len)
+   {
+      r->bad = 1;
+      if (out && out_cap)
+         out[0] = '\0';
+      return;
+   }
+   if (out && out_cap)
+   {
+      size_t copy = (size_t)n < out_cap - 1 ? (size_t)n : out_cap - 1;
+      memcpy(out, r->buf + r->at, copy);
+      out[copy] = '\0';
+   }
+   r->at += n;
+}
+
+/* Reads the response header: the error string (empty when the plan may launch)
+ * and the effective concurrency. Leaves `r` positioned at the step count. */
+static inline int aimee_delegates_launchplan_response_begin(aimee_delegates_rd_t *r,
+                                                            const uint8_t *in, size_t len,
+                                                            char *errbuf, size_t errbuf_cap,
+                                                            int *max_concurrent)
+{
+   r->buf = in;
+   r->len = len;
+   r->at = 0;
+   r->bad = 0;
+   if (!in || aimee_delegates_rd_u32(r) != AIMEE_DELEGATES_LAUNCHPLAN_RESPONSE_MAGIC)
+      return -1;
+   aimee_delegates_rd_str(r, errbuf, errbuf_cap);
+   uint32_t par = aimee_delegates_rd_u32(r);
+   if (max_concurrent)
+      *max_concurrent = (int)par;
+   return r->bad ? -1 : 0;
+}
+
 #endif
