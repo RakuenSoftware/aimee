@@ -656,23 +656,23 @@ static void test_provider_routes_and_marshaling(void)
    printf("  PASS: test_provider_routes_and_marshaling\n");
 }
 
-static void test_model_routes_and_marshaling(void)
+static void test_catalog_routes_and_marshaling(void)
 {
    cli_v1_route_t route;
 
    char *show_lookup[] = {"show", "openrouter:anthropic/claude-opus-4.6"};
-   assert(cli_v1_lookup("model", 2, show_lookup, &route));
-   assert(strcmp(route.method, "model.show") == 0);
+   assert(cli_v1_lookup("catalog", 2, show_lookup, &route));
+   assert(strcmp(route.method, "catalog.show") == 0);
    assert(route.skip_subcmd == 1);
 
    char *list_lookup[] = {"list", "--capability", "vision"};
-   assert(cli_v1_lookup("model", 3, list_lookup, &route));
-   assert(strcmp(route.method, "model.list") == 0);
+   assert(cli_v1_lookup("catalog", 3, list_lookup, &route));
+   assert(strcmp(route.method, "catalog.list") == 0);
    assert(route.skip_subcmd == 1);
 
    cJSON *req = marshal_model_show(1, &show_lookup[1]);
    assert(req != NULL);
-   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "model.show") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "catalog.show") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "name")->valuestring,
                  "openrouter:anthropic/claude-opus-4.6") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "provider")->valuestring, "openrouter") == 0);
@@ -682,7 +682,7 @@ static void test_model_routes_and_marshaling(void)
    char *list_argv[] = {"--capability", "vision", "--json", "--open-weights"};
    req = marshal_model_list(4, list_argv);
    assert(req != NULL);
-   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "model.list") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "catalog.list") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "capability")->valuestring, "vision") == 0);
    assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "json")));
    assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "open_weights_only")));
@@ -691,13 +691,13 @@ static void test_model_routes_and_marshaling(void)
    char *show_argv[] = {"openai:gpt-4o"};
    req = marshal_model_show(1, show_argv);
    assert(req != NULL);
-   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "model.show") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "catalog.show") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "name")->valuestring, "openai:gpt-4o") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "provider")->valuestring, "openai") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "model")->valuestring, "gpt-4o") == 0);
    cJSON_Delete(req);
 
-   printf("  PASS: test_model_routes_and_marshaling\n");
+   printf("  PASS: test_catalog_routes_and_marshaling\n");
 }
 
 static void test_memory_show_alias_route(void)
@@ -2118,7 +2118,7 @@ int main(void)
    test_delegate_prompt_stdin_rejects_prompt_file();
    test_delegate_depth_requires_parent_env();
    test_provider_routes_and_marshaling();
-   test_model_routes_and_marshaling();
+   test_catalog_routes_and_marshaling();
    test_memory_show_alias_route();
    test_memory_stats_route();
    test_ordered_memory_commands_marshal_active_scope();

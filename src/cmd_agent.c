@@ -388,7 +388,7 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
           * another vendor's API. Surfaced so the GUI can show provider+model. */
          cJSON_AddStringToObject(obj, "catalog_provider", agent_catalog_provider(ag));
          /* Canonical `provider:model` reference (the form model_capability_resolve_ref
-          * parses and `aimee model show` accepts) plus the catalog's human label,
+          * parses and `aimee catalog show` accepts) plus the catalog's human label,
           * so any surface that must name a SPECIFIC model — roundtable seats,
           * routing attribution, a picker — can show provider+model without
           * hand-maintained strings. display_name is omitted when the catalog has

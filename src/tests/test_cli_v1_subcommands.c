@@ -203,7 +203,7 @@ static void test_agent_roles_printer_reports_roles(void)
        "{\"name\":\"codex\",\"status\":\"ok\","
        "\"roles\":[\"code\",\"review\",\"validate\",\"all\"],\"personas\":[\"all\"]}";
    char out[1024] = "";
-   capture_printer(pt_print_agent_roles, "agent.roles", payload, out, sizeof(out));
+   capture_printer(pt_print_agent_roles, "model.roles", payload, out, sizeof(out));
 
    assert(strstr(out, "codex") != NULL);
    /* The roles that were written must be visible... */
@@ -224,7 +224,7 @@ static void test_agent_roles_printer_read_is_not_reported_as_a_write(void)
    static const char *payload = "{\"name\":\"codex\",\"read_only\":true,"
                                 "\"roles\":[\"code\",\"diagnose\",\"all\"]}";
    char out[1024] = "";
-   capture_printer(pt_print_agent_roles, "agent.roles", payload, out, sizeof(out));
+   capture_printer(pt_print_agent_roles, "model.roles", payload, out, sizeof(out));
 
    assert(strstr(out, "codex") != NULL);
    assert(strstr(out, "diagnose") != NULL);
@@ -239,7 +239,7 @@ static void test_agent_personas_printer_reports_personas(void)
    static const char *payload = "{\"name\":\"codex\",\"status\":\"ok\","
                                 "\"roles\":[\"code\"],\"personas\":[\"engineer\",\"qa\"]}";
    char out[1024] = "";
-   capture_printer(pt_print_agent_personas, "agent.personas", payload, out, sizeof(out));
+   capture_printer(pt_print_agent_personas, "model.personas", payload, out, sizeof(out));
 
    assert(strstr(out, "codex") != NULL);
    assert(strstr(out, "engineer") != NULL);
@@ -258,7 +258,7 @@ static void test_agent_list_printer_shows_roles(void)
        "\"model\":\"gpt-5.5\",\"endpoint\":\"https://example.invalid\",\"tools_enabled\":true,"
        "\"roles\":[\"code\",\"review\",\"validate\"]}]}";
    char out[2048] = "";
-   capture_printer(pt_print_agent_list, "agent.list", payload, out, sizeof(out));
+   capture_printer(pt_print_agent_list, "model.list", payload, out, sizeof(out));
 
    assert(strstr(out, "codex") != NULL);
    assert(strstr(out, "roles:") != NULL);

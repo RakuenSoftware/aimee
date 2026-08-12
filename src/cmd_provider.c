@@ -324,7 +324,7 @@ static void model_show(app_ctx_t *ctx, int argc, char **argv)
    (void)ctx;
    if (argc < 1)
    {
-      fprintf(stderr, "usage: aimee model show [provider:]<model>\n");
+      fprintf(stderr, "usage: aimee catalog show [provider:]<model>\n");
       return;
    }
 
@@ -371,7 +371,7 @@ static void model_list(app_ctx_t *ctx, int argc, char **argv)
          open_weights_only = 1;
       else
       {
-         fprintf(stderr, "usage: aimee model list [--capability <name>] [--open-weights]\n");
+         fprintf(stderr, "usage: aimee catalog list [--capability <name>] [--open-weights]\n");
          return;
       }
    }

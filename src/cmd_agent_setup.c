@@ -291,7 +291,7 @@ static void setup_server_oauth_cli(const char *vendor)
 
    cJSON *start_body = cJSON_CreateObject();
    cJSON_AddStringToObject(start_body, "vendor", vendor);
-   cJSON *started = cli_oauth_post("/v1/agent/cli_oauth_start", start_body);
+   cJSON *started = cli_oauth_post("/v1/model/cli_oauth_start", start_body);
    cJSON_Delete(start_body);
    if (!started)
    {
@@ -321,7 +321,7 @@ static void setup_server_oauth_cli(const char *vendor)
          cJSON_AddStringToObject(cb, "vendor", vendor);
          cJSON_AddStringToObject(cb, "session", session);
          cJSON_AddStringToObject(cb, "code", line);
-         cJSON *r = cli_oauth_post("/v1/agent/cli_oauth_code", cb);
+         cJSON *r = cli_oauth_post("/v1/model/cli_oauth_code", cb);
          cJSON_Delete(cb);
          if (!r)
          {
@@ -341,7 +341,7 @@ static void setup_server_oauth_cli(const char *vendor)
       cJSON *pb = cJSON_CreateObject();
       cJSON_AddStringToObject(pb, "vendor", vendor);
       cJSON_AddStringToObject(pb, "session", session);
-      cJSON *pr = cli_oauth_post("/v1/agent/cli_oauth_poll", pb);
+      cJSON *pr = cli_oauth_post("/v1/model/cli_oauth_poll", pb);
       cJSON_Delete(pb);
       if (!pr)
          continue;

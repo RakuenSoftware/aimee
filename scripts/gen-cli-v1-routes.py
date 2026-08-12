@@ -51,13 +51,30 @@ OPTIONAL_ROUTE_GUARDS = {
 
 
 def _routes(handler):
-    """(op, verb, path) for the RM_EXACT routes dispatched by `handler`, keyed by
-    op (first wins; op is unique) and sorted by op."""
+    """(op, verb, path) for the RM_EXACT routes dispatched by `handler`, one route
+    per op, sorted by op.
+
+    An op may be reachable under more than one path when a route is renamed and
+    the old spelling is kept as an alias. The descriptor is sorted by PATH, so
+    "first wins" would hand the client whichever alias sorts earliest -- e.g.
+    /v1/agent/list over /v1/model/list for model.list, pointing the thin client
+    at the deprecated spelling and breaking it the day the alias is dropped.
+    Prefer the path whose first segment matches the op's own namespace; fall back
+    to first-seen when nothing matches (ops whose route is not named after them).
+    """
     doc = json.loads(DESCRIPTOR.read_text(encoding="utf-8"))
     seen = {}
     for r in doc["routes"]:
-        if r["match"] == "exact" and r["handler"] == handler and r["op"]:
-            seen.setdefault(r["op"], (r["verb"], r["path"]))
+        if r["match"] != "exact" or r["handler"] != handler or not r["op"]:
+            continue
+        op = r["op"]
+        candidate = (r["verb"], r["path"])
+        if op not in seen:
+            seen[op] = candidate
+            continue
+        namespace = op.split(".", 1)[0]
+        if r["path"].startswith(f"/v1/{namespace}/"):
+            seen[op] = candidate
     return sorted((op, v, p) for op, (v, p) in seen.items())
 
 

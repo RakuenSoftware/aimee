@@ -1,11 +1,20 @@
+/* Models — the operator-facing list of RUNTIME TARGETS: one row per
+ * (endpoint, model) pair, which is exactly what routing schedules.
+ *
+ * This is the flat, per-target view. The Providers tab groups these same records
+ * by provider and nests its models underneath, so credentials and endpoints are
+ * entered once per provider rather than once per model. Both pages read the same
+ * roster; this one is where a single model's routing knobs and its role/persona
+ * bindings are edited.
+ */
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Panel, Badge, Spinner, Modal, InlineStatus, EmptyState, KeyValue, Button } from "@rakuensoftware/smoothgui";
 import PrimaryChooser from "../setup/PrimaryChooser";
 
 /* ---- API types ---- */
 
-// GET /api/agents -> one entry per configured delegate (server_agent_to_json).
-interface AgentCfg {
+// GET /api/models -> one entry per configured model (server_agent_to_json).
+interface ModelCfg {
   name: string;
   endpoint: string;
   model: string;
@@ -22,8 +31,8 @@ interface AgentCfg {
   personas?: string[];
 }
 
-// GET /api/agents/stats -> per-delegate run stats (agent_log JOIN token_audit).
-interface AgentStats {
+// GET /api/models/stats -> per-model run stats (agent_log JOIN token_audit).
+interface ModelStats {
   name: string;
   total_calls: number;
   successful_calls: number;
@@ -37,7 +46,7 @@ interface AgentStats {
   estimated_cost_usd: number;
 }
 
-// POST /api/agents/probe -> live reachability of one delegate.
+// POST /api/models/probe -> live reachability of one model.
 interface ProbeResult {
   name: string;
   execution_ok?: boolean;
@@ -79,21 +88,21 @@ const PROVIDERS = [
   "mistral",
 ];
 
-export default function Agents() {
-  const [agents, setAgents] = useState<AgentCfg[]>([]);
-  const [stats, setStats] = useState<Record<string, AgentStats>>({});
+export default function Models() {
+  const [models, setModels] = useState<ModelCfg[]>([]);
+  const [stats, setStats] = useState<Record<string, ModelStats>>({});
   const [probes, setProbes] = useState<Record<string, ProbeState>>({});
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<{ kind: "ok" | "err"; msg: string } | null>(
     null,
   );
   const [showAdd, setShowAdd] = useState(false);
-  // The agent currently open in the Edit modal (null = closed). ALL mutations —
+  // The model currently open in the Edit modal (null = closed). ALL mutations —
   // config fields, roles/personas binding, enable, remove — happen there; the base
   // list is read-only so a binding can never change from a stray click.
-  const [editing, setEditing] = useState<AgentCfg | null>(null);
+  const [editing, setEditing] = useState<ModelCfg | null>(null);
   // The known role + persona vocabularies, offered (with "all") when assigning
-  // an agent's roles/personas so they match what personas declare.
+  // a model's roles/personas so they match what personas declare.
   const [knownRoles, setKnownRoles] = useState<string[]>([]);
   const [knownPersonas, setKnownPersonas] = useState<string[]>([]);
 
@@ -106,12 +115,14 @@ export default function Agents() {
       .then((d) => setKnownPersonas((d.personas || []).map((p) => p.name)))
       .catch(() => setKnownPersonas([]));
     Promise.all([
-      getJSON<{ agents: AgentCfg[] }>("/api/agents")
-        .then((d) => setAgents(d.agents || []))
-        .catch(() => setAgents([])),
-      getJSON<{ stats: AgentStats[] }>("/api/agents/stats")
+      // `agents` is the pre-rename key; read either so this page also works
+      // against a server that has not been upgraded yet.
+      getJSON<{ models?: ModelCfg[]; agents?: ModelCfg[] }>("/api/models")
+        .then((d) => setModels(d.models || d.agents || []))
+        .catch(() => setModels([])),
+      getJSON<{ stats: ModelStats[] }>("/api/models/stats")
         .then((d) => {
-          const map: Record<string, AgentStats> = {};
+          const map: Record<string, ModelStats> = {};
           for (const s of d.stats || []) map[s.name] = s;
           setStats(map);
         })
@@ -126,7 +137,7 @@ export default function Agents() {
   const probe = useCallback(async (name: string) => {
     setProbes((p) => ({ ...p, [name]: { status: "probing" } }));
     try {
-      const res = await postArgs<ProbeResult>("/api/agents/probe", [name]);
+      const res = await postArgs<ProbeResult>("/api/models/probe", [name]);
       if (res.error) {
         setProbes((p) => ({ ...p, [name]: { status: "down", msg: res.error } }));
         return;
@@ -148,42 +159,42 @@ export default function Agents() {
   }, []);
 
   const probeAll = useCallback(() => {
-    for (const a of agents) void probe(a.name);
-  }, [agents, probe]);
+    for (const m of models) void probe(m.name);
+  }, [models, probe]);
 
-  // Keep the modal's view of the agent in sync after a save-triggered refresh so
-  // it reflects the persisted record (and closes cleanly if the agent was removed).
+  // Keep the modal's view of the model in sync after a save-triggered refresh so
+  // it reflects the persisted record (and closes cleanly if the model was removed).
   useEffect(() => {
     if (!editing) return;
-    const fresh = agents.find((a) => a.name === editing.name);
+    const fresh = models.find((m) => m.name === editing.name);
     if (fresh && fresh !== editing) setEditing(fresh);
-  }, [agents, editing]);
+  }, [models, editing]);
 
   return (
     <div style={{ padding: 16, fontFamily: "system-ui", height: "100%", overflow: "auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-        <strong style={{ fontSize: 18 }}>Agents</strong>
-        <Badge label={`${agents.length}`} variant="neutral" />
-        <Button onClick={refresh} size="md" title="Reload the delegate list and run stats.">
+        <strong style={{ fontSize: 18 }}>Models</strong>
+        <Badge label={`${models.length}`} variant="neutral" />
+        <Button onClick={refresh} size="md" title="Reload the model list and run stats.">
           Refresh
         </Button>
-        <Button onClick={probeAll} size="md" disabled={!agents.length} title="Test live reachability of every configured delegate.">
+        <Button onClick={probeAll} size="md" disabled={!models.length} title="Test live reachability of every configured model.">
           Probe all
         </Button>
         <Button
           variant="primary"
           size="md"
           onClick={() => setShowAdd((v) => !v)}
-          title="Show or hide the form for adding a new delegate."
+          title="Show or hide the form for adding a new model."
         >
-          {showAdd ? "Close" : "+ Add delegate"}
+          {showAdd ? "Close" : "+ Add model"}
         </Button>
         <Spinner loading={loading} text="loading…" />
         <InlineStatus status={status} />
       </div>
 
       {showAdd && (
-        <AddDelegate
+        <AddModel
           onDone={(msg, ok) => {
             setStatus({ kind: ok ? "ok" : "err", msg });
             if (ok) {
@@ -195,26 +206,26 @@ export default function Agents() {
       )}
 
       <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-        {agents.length === 0 && !loading && (
+        {models.length === 0 && !loading && (
           <div style={{ color: "#888", fontSize: 14 }}>
-            No delegates configured. Add one to get started.
+            No models configured. Add one to get started.
           </div>
         )}
-        {agents.map((a) => (
-          <AgentCard
-            key={a.name}
-            agent={a}
-            stats={stats[a.name]}
-            probe={probes[a.name]}
-            onProbe={() => probe(a.name)}
-            onEdit={() => setEditing(a)}
+        {models.map((m) => (
+          <ModelCard
+            key={m.name}
+            cfg={m}
+            stats={stats[m.name]}
+            probe={probes[m.name]}
+            onProbe={() => probe(m.name)}
+            onEdit={() => setEditing(m)}
           />
         ))}
       </div>
 
       {editing && (
-        <AgentEditModal
-          agent={editing}
+        <ModelEditModal
+          cfg={editing}
           knownRoles={knownRoles}
           knownPersonas={knownPersonas}
           onClose={() => setEditing(null)}
@@ -226,18 +237,18 @@ export default function Agents() {
   );
 }
 
-/* ---- one delegate: READ-ONLY overview (config + availability + stats). All
+/* ---- one model: READ-ONLY overview (config + availability + stats). All
    mutations live in the Edit modal, so no binding can change from this list. ---- */
 
-function AgentCard({
-  agent,
+function ModelCard({
+  cfg,
   stats,
   probe,
   onProbe,
   onEdit,
 }: {
-  agent: AgentCfg;
-  stats?: AgentStats;
+  cfg: ModelCfg;
+  stats?: ModelStats;
   probe?: ProbeState;
   onProbe: () => void;
   onEdit: () => void;
@@ -258,34 +269,34 @@ function AgentCard({
       : "—";
 
   return (
-    <Panel title={agent.name}>
+    <Panel title={cfg.name}>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
         {/* left: configuration (read-only) */}
         <div style={{ flex: "1 1 260px", minWidth: 240 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0 4px" }}>
             <Badge
-              label={agent.enabled ? "enabled" : "disabled"}
-              variant={agent.enabled ? "success" : "neutral"}
+              label={cfg.enabled ? "enabled" : "disabled"}
+              variant={cfg.enabled ? "success" : "neutral"}
             />
           </div>
-          <KeyValue label="provider" value={agent.provider || "—"} />
-          <KeyValue label="model" value={agent.model || "—"} />
-          <KeyValue label="endpoint" value={agent.endpoint || "(cli / none)"} mono />
-          {typeof agent.cost_tier === "number" && (
-            <KeyValue label="cost tier" value={String(agent.cost_tier)} />
+          <KeyValue label="provider" value={cfg.provider || "—"} />
+          <KeyValue label="model" value={cfg.model || "—"} />
+          <KeyValue label="endpoint" value={cfg.endpoint || "(cli / none)"} mono />
+          {typeof cfg.cost_tier === "number" && (
+            <KeyValue label="cost tier" value={String(cfg.cost_tier)} />
           )}
-          {typeof agent.max_parallel === "number" && agent.max_parallel > 0 && (
-            <KeyValue label="max parallel" value={String(agent.max_parallel)} />
+          {typeof cfg.max_parallel === "number" && cfg.max_parallel > 0 && (
+            <KeyValue label="max parallel" value={String(cfg.max_parallel)} />
           )}
-          {typeof agent.max_turns === "number" && agent.max_turns >= 0 && (
-            <KeyValue label="max turns" value={String(agent.max_turns)} />
+          {typeof cfg.max_turns === "number" && cfg.max_turns >= 0 && (
+            <KeyValue label="max turns" value={String(cfg.max_turns)} />
           )}
-          {agent.context_window ? (
-            <KeyValue label="context" value={`${agent.context_window.toLocaleString()} tok`} />
+          {cfg.context_window ? (
+            <KeyValue label="context" value={`${cfg.context_window.toLocaleString()} tok`} />
           ) : null}
-          <KeyValue label="tools" value={agent.tools_enabled ? "enabled" : "disabled"} />
-          <StaticChips label="roles" values={agent.roles || []} />
-          <StaticChips label="personas" values={agent.personas || []} emptyHint="(none = all)" />
+          <KeyValue label="tools" value={cfg.tools_enabled ? "enabled" : "disabled"} />
+          <StaticChips label="roles" values={cfg.roles || []} />
+          <StaticChips label="personas" values={cfg.personas || []} emptyHint="(none = all)" />
         </div>
 
         {/* middle: availability */}
@@ -320,7 +331,7 @@ function AgentCard({
             onClick={onProbe}
             style={{ marginTop: 6 }}
             disabled={pstate === "probing"}
-            title="Test whether this delegate is reachable right now."
+            title="Test whether this model is reachable right now."
           >
             {pstate === "probing" ? "probing…" : "Probe"}
           </Button>
@@ -357,7 +368,7 @@ function AgentCard({
           variant="primary"
           size="sm"
           onClick={onEdit}
-          title="Open the editor to change this delegate's config and role/persona bindings."
+          title="Open the editor to change this model's config and role/persona bindings."
         >
           Edit
         </Button>
@@ -366,36 +377,36 @@ function AgentCard({
   );
 }
 
-/* ---- per-agent Edit modal: edit ALL aspects; the one place binding changes are
-   made. Saves via a single surgical POST /api/agents/set. ---- */
+/* ---- per-model Edit modal: edit ALL aspects; the one place binding changes are
+   made. Saves via a single surgical POST /api/models/set. ---- */
 
-function AgentEditModal({
-  agent,
+function ModelEditModal({
+  cfg,
   knownRoles,
   knownPersonas,
   onClose,
   onSaved,
   onStatus,
 }: {
-  agent: AgentCfg;
+  cfg: ModelCfg;
   knownRoles: string[];
   knownPersonas: string[];
   onClose: () => void;
   onSaved: () => void;
   onStatus: (msg: string, ok: boolean) => void;
 }) {
-  const [provider, setProvider] = useState(agent.provider || "openai");
-  const [model, setModel] = useState(agent.model || "");
-  const [endpoint, setEndpoint] = useState(agent.endpoint || "");
-  const [costTier, setCostTier] = useState(String(agent.cost_tier ?? 0));
-  const [maxTurns, setMaxTurns] = useState(String(agent.max_turns ?? -1));
-  const [maxParallel, setMaxParallel] = useState(String(agent.max_parallel ?? 0));
-  const [contextWindow, setContextWindow] = useState(String(agent.context_window ?? 0));
-  const [tools, setTools] = useState(!!agent.tools_enabled);
-  const [enabled, setEnabled] = useState(!!agent.enabled);
-  const [primaryOnly, setPrimaryOnly] = useState(!!agent.primary_only);
-  const [roles, setRoles] = useState<string[]>(agent.roles || []);
-  const [personas, setPersonas] = useState<string[]>(agent.personas || []);
+  const [provider, setProvider] = useState(cfg.provider || "openai");
+  const [model, setModel] = useState(cfg.model || "");
+  const [endpoint, setEndpoint] = useState(cfg.endpoint || "");
+  const [costTier, setCostTier] = useState(String(cfg.cost_tier ?? 0));
+  const [maxTurns, setMaxTurns] = useState(String(cfg.max_turns ?? -1));
+  const [maxParallel, setMaxParallel] = useState(String(cfg.max_parallel ?? 0));
+  const [contextWindow, setContextWindow] = useState(String(cfg.context_window ?? 0));
+  const [tools, setTools] = useState(!!cfg.tools_enabled);
+  const [enabled, setEnabled] = useState(!!cfg.enabled);
+  const [primaryOnly, setPrimaryOnly] = useState(!!cfg.primary_only);
+  const [roles, setRoles] = useState<string[]>(cfg.roles || []);
+  const [personas, setPersonas] = useState<string[]>(cfg.personas || []);
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -409,7 +420,7 @@ function AgentEditModal({
     // is passed; an empty role selection remains empty, while personas empty resets
     // to "all".
     const args = [
-      agent.name,
+      cfg.name,
       "--provider", provider,
       "--model", model.trim(),
       "--endpoint", endpoint.trim(),
@@ -425,10 +436,10 @@ function AgentEditModal({
     ];
     if (apiKey.trim()) args.push("--key", apiKey.trim());
     try {
-      const res = await postArgs<{ error?: string }>("/api/agents/set", args);
+      const res = await postArgs<{ error?: string }>("/api/models/set", args);
       if (res.error) setErr(res.error);
       else {
-        onStatus(`${agent.name} saved`, true);
+        onStatus(`${cfg.name} saved`, true);
         onSaved();
         onClose();
       }
@@ -440,14 +451,14 @@ function AgentEditModal({
   };
 
   const remove = async () => {
-    if (!confirm(`Remove delegate “${agent.name}”? This edits agents.json.`)) return;
+    if (!confirm(`Remove model “${cfg.name}”? This edits the model roster on disk.`)) return;
     setBusy(true);
     setErr("");
     try {
-      const res = await postArgs<{ error?: string }>("/api/agents/remove", [agent.name]);
+      const res = await postArgs<{ error?: string }>("/api/models/remove", [cfg.name]);
       if (res.error) setErr(res.error);
       else {
-        onStatus(`removed ${agent.name}`, true);
+        onStatus(`removed ${cfg.name}`, true);
         onSaved();
         onClose();
       }
@@ -462,12 +473,12 @@ function AgentEditModal({
     <Modal
       open
       onClose={onClose}
-      title="Edit delegate"
-      headerExtra={<span style={{ fontSize: 13, color: "#667", fontFamily: "monospace" }}>{agent.name}</span>}
+      title="Edit model"
+      headerExtra={<span style={{ fontSize: 13, color: "#667", fontFamily: "monospace" }}>{cfg.name}</span>}
       size="lg"
     >
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <L label="provider" title="The backend provider used to run this delegate.">
+        <L label="provider" title="The backend provider used to run this model.">
           <select value={provider} onChange={(e) => setProvider(e.target.value)} style={inp} disabled={busy}>
             {(PROVIDERS.includes(provider) ? PROVIDERS : [provider, ...PROVIDERS]).map((p) => (
               <option key={p} value={p}>
@@ -476,12 +487,12 @@ function AgentEditModal({
             ))}
           </select>
         </L>
-        <L label="model" title="The model identifier this delegate calls.">
+        <L label="model" title="The model identifier this entry calls.">
           <input value={model} onChange={(e) => setModel(e.target.value)} style={inp} disabled={busy} />
         </L>
         <L
           label={cliProvider ? "endpoint (optional for CLI)" : "endpoint"}
-          title="API base URL for this delegate; optional for CLI providers."
+          title="API base URL for this model; optional for CLI providers."
         >
           <input
             value={endpoint}
@@ -491,13 +502,13 @@ function AgentEditModal({
             disabled={busy}
           />
         </L>
-        <L label="cost tier" title="Relative cost tier used when routing picks a delegate.">
+        <L label="cost tier" title="Relative cost tier used when routing picks a model.">
           <input type="number" value={costTier} onChange={(e) => setCostTier(e.target.value)} style={inp} min={0} disabled={busy} />
         </L>
-        <L label="max turns (-1 = default)" title="Cap on turns per run for this delegate; -1 uses the default.">
+        <L label="max turns (-1 = default)" title="Cap on turns per run for this model; -1 uses the default.">
           <input type="number" value={maxTurns} onChange={(e) => setMaxTurns(e.target.value)} style={inp} disabled={busy} />
         </L>
-        <L label="max parallel" title="Maximum number of concurrent runs of this delegate.">
+        <L label="max parallel" title="Maximum number of concurrent runs of this model.">
           <input type="number" value={maxParallel} onChange={(e) => setMaxParallel(e.target.value)} style={inp} min={0} disabled={busy} />
         </L>
         <L label="context window (tok, 0 = auto)" title="Context window in tokens; 0 auto-detects.">
@@ -518,24 +529,24 @@ function AgentEditModal({
       <div style={{ display: "flex", gap: 20, marginTop: 10 }}>
         <label
           style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}
-          title="Whether this delegate is available for routing."
+          title="Whether this model is available for routing."
         >
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} disabled={busy} />
           enabled
         </label>
         <label
           style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}
-          title="Whether this delegate is allowed to use tools."
+          title="Whether this model is allowed to use tools."
         >
           <input type="checkbox" checked={tools} onChange={(e) => setTools(e.target.checked)} disabled={busy} />
           tools enabled
         </label>
         <label
           style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}
-          title="When on, this agent can only be the primary — it is never routed as a delegate. Recommended for a Claude subscription (ToS)."
+          title="When on, this model can only be the primary — it is never routed as a delegate. Recommended for a Claude subscription (ToS)."
         >
           <input type="checkbox" checked={primaryOnly} onChange={(e) => setPrimaryOnly(e.target.checked)} disabled={busy} />
-          primary agent only
+          primary only
         </label>
       </div>
 
@@ -544,7 +555,7 @@ function AgentEditModal({
         selected={roles}
         options={knownRoles}
         onChange={setRoles}
-        hint="Toggle whether this delegate serves this role."
+        hint="Toggle whether this model serves this role."
       />
       <ChipSelect
         label="personas"
@@ -552,7 +563,7 @@ function AgentEditModal({
         options={knownPersonas}
         onChange={setPersonas}
         emptyHint="(none set = all)"
-        hint="Toggle whether this delegate is bound to this persona (none set = all)."
+        hint="Toggle whether this model is bound to this persona (none set = all)."
       />
 
       {err && <div style={{ fontSize: 12, color: "#c00", marginTop: 8 }}>{err}</div>}
@@ -563,7 +574,7 @@ function AgentEditModal({
           size="md"
           onClick={() => void save()}
           disabled={busy}
-          title="Save all changes to this delegate."
+          title="Save all changes to this model."
         >
           {busy ? "Saving…" : "Save"}
         </Button>
@@ -576,27 +587,27 @@ function AgentEditModal({
           onClick={() => void remove()}
           disabled={busy}
           style={{ marginLeft: "auto" }}
-          title="Remove this delegate, editing agents.json."
+          title="Remove this model from the roster."
         >
-          Remove delegate
+          Remove model
         </Button>
       </div>
     </Modal>
   );
 }
 
-/* ---- add delegate: the SAME chooser + flows as the wizard's add agent ----
- * One code path (PrimaryChooser) drives both surfaces; 'delegate' mode only
+/* ---- add model: the SAME chooser + flows as the wizard's add ----
+ * One code path (PrimaryChooser) drives both surfaces; its 'delegate' mode only
  * collects a roster name + roles and skips the --default promotion. Fine-tuning
  * (cost tier, disable, endpoint tweaks) lives in the edit modal afterwards. */
 
-function AddDelegate({ onDone }: { onDone: (msg: string, ok: boolean) => void }) {
+function AddModel({ onDone }: { onDone: (msg: string, ok: boolean) => void }) {
   return (
-    <Panel title="Add delegate">
+    <Panel title="Add model">
       <div style={{ padding: "12px" }}>
         <PrimaryChooser
           mode="delegate"
-          onConfigured={(provider) => onDone(`added ${provider} delegate`, true)}
+          onConfigured={(provider) => onDone(`added ${provider} model`, true)}
         />
       </div>
     </Panel>
@@ -607,7 +618,7 @@ function AddDelegate({ onDone }: { onDone: (msg: string, ok: boolean) => void })
 
 // Editable multi-select of tokens (roles or personas) as toggleable chips, fully
 // controlled by the parent (the Edit modal saves the whole set on Save). The "all"
-// wildcard is always offered; free selection keeps agents matched to what personas
+// wildcard is always offered; free selection keeps models matched to what personas
 // declare.
 function ChipSelect({
   label,

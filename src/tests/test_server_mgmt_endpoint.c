@@ -108,6 +108,16 @@ int main(void)
    server_mgmt_action_t a;
    const char *valid = "{\"agent\":\"a-1\",\"action\":\"agent.disable\"}";
    assert(server_mgmt_action_parse(valid, strlen(valid), &a) == 0);
+   /* Both spellings of the roster action are accepted: the ops were renamed to
+    * `model.*`, but this is an INGRESS contract and an external control plane
+    * still emitting `agent.*` is not redeployed in lockstep. Each is echoed
+    * verbatim into the canonical form, so neither is rewritten into the other. */
+   const char *renamed = "{\"agent\":\"a-1\",\"action\":\"model.disable\"}";
+   assert(server_mgmt_action_parse(renamed, strlen(renamed), &a) == 0);
+   assert(!strcmp(a.canonical, "{\"action\":\"model.disable\",\"agent\":\"a-1\"}"));
+   const char *renamed_on = "{\"agent\":\"a-1\",\"action\":\"model.enable\"}";
+   assert(server_mgmt_action_parse(renamed_on, strlen(renamed_on), &a) == 0);
+   assert(server_mgmt_action_parse(valid, strlen(valid), &a) == 0);
    const char *nul_action = "{\"action\":\"agent.enable\\u0000junk\",\"agent\":\"alpha\"}";
    const char *nul_agent = "{\"action\":\"agent.enable\",\"agent\":\"alpha\\u0000other\"}";
    assert(server_mgmt_action_parse(nul_action, strlen(nul_action), &a) != 0);

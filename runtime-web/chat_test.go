@@ -188,7 +188,7 @@ func TestHandleOpenAIModelsReturnsOpenAICompatibleList(t *testing.T) {
 func TestRPCV1CallDispatchesOverV1(t *testing.T) {
 	var gotMethod, gotPath string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/agent/list", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/model/list", func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath = r.Method, r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"status":"ok","agents":[{"name":"aimee"}]}`)
@@ -196,12 +196,12 @@ func TestRPCV1CallDispatchesOverV1(t *testing.T) {
 	cfg := startFakeV1(t, mux)
 	s := &server{cfg: cfg}
 
-	resp, err := s.rpcV1Call(context.Background(), map[string]any{"method": "agent.list"})
+	resp, err := s.rpcV1Call(context.Background(), map[string]any{"method": "model.list"})
 	if err != nil {
 		t.Fatalf("rpcV1Call: %v", err)
 	}
-	if gotMethod != http.MethodGet || gotPath != "/v1/agent/list" {
-		t.Fatalf("dispatched %s %s, want GET /v1/agent/list", gotMethod, gotPath)
+	if gotMethod != http.MethodGet || gotPath != "/v1/model/list" {
+		t.Fatalf("dispatched %s %s, want GET /v1/model/list", gotMethod, gotPath)
 	}
 	if _, ok := resp["agents"]; !ok {
 		t.Fatalf("decoded response missing agents: %v", resp)
@@ -245,14 +245,14 @@ func TestRPCV1CallForwardsBodyForPOSTRoute(t *testing.T) {
 // into an error (matching the legacy socket path's rpcError behaviour).
 func TestRPCV1CallSurfacesServerError(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/agent/list", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/model/list", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"status":"error","message":"nope"}`)
 	})
 	cfg := startFakeV1(t, mux)
 	s := &server{cfg: cfg}
 
-	if _, err := s.rpcV1Call(context.Background(), map[string]any{"method": "agent.list"}); err == nil {
+	if _, err := s.rpcV1Call(context.Background(), map[string]any{"method": "model.list"}); err == nil {
 		t.Fatal("expected an error from a status:error response")
 	}
 }

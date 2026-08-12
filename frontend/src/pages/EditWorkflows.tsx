@@ -72,9 +72,9 @@ interface PersonaInfo {
   description?: string;
   builtin?: boolean;
 }
-// A registered/known delegate (GET /api/agents). Used only to populate the
+// A registered/known model (GET /api/models). Used only to populate the
 // delegate picker's suggestions; the field also accepts free text.
-interface AgentInfo {
+interface ModelInfo {
   name: string;
 }
 
@@ -356,7 +356,7 @@ export default function EditWorkflows() {
   const [personas, setPersonas] = useState<PersonaInfo[]>([]);
   const [editBlock, setEditBlock] = useState<BlockForm | null>(null);
   const [blockStatus, setBlockStatus] = useState<string>("");
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [agents, setAgents] = useState<ModelInfo[]>([]);
   // This tab's selected project (per-tab project space). Held so the workflow
   // context can scope to it; execution-in-project flows through a chat session's
   // cwd today, so this primarily persists the selection + offers clone here.
@@ -391,10 +391,10 @@ export default function EditWorkflows() {
 
   useEffect(() => {
     refreshBlocks();
-    // Delegate suggestions: registered agents. Free text is also accepted, so an
-    // empty list (no agents connected) never blocks assigning a delegate.
-    getJSON<{ agents: AgentInfo[] }>("/api/agents")
-      .then((d) => setAgents(d.agents || []))
+    // Delegate suggestions: configured models. Free text is also accepted, so an
+    // empty list (no models configured) never blocks assigning a delegate.
+    getJSON<{ models?: ModelInfo[]; agents?: ModelInfo[] }>("/api/models")
+      .then((d) => setAgents(d.models || d.agents || []))
       .catch(() => {});
     refreshPersonas();
     refreshLists();
@@ -1069,7 +1069,7 @@ function NodeInspector({
   mutate: (fn: (g: GraphDef) => GraphDef) => void;
   onDelete: () => void;
   personas: PersonaInfo[];
-  agents: AgentInfo[];
+  agents: ModelInfo[];
   workflows: string[];
   onOpenWorkflow: (name: string) => void;
 }) {

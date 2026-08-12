@@ -3298,7 +3298,7 @@ static void test_session_isolation_guard(void)
  * mtime alone is not a safe cache key: it is neither monotonic nor guaranteed
  * distinct across a rewrite. Observed live on the appliance's tiered
  * filesystem, where a reinstalled agents.json landed with an mtime ~9h in the
- * past and every /v1/agents request kept failing (502) and /v1/agent/list kept
+ * past and every /v1/agents request kept failing (502) and /v1/model/list kept
  * returning an empty array until the file was touched. Size+inode come free
  * from the same stat() and make the rewrite detectable. */
 static void test_agent_config_cache_detects_same_mtime_rewrite(void)

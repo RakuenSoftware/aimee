@@ -37,7 +37,7 @@ export const RESTART_KEYS = new Set<string>([
  *    the Roundtable tab as global options instead.
  *  - kb_curator_*: owned by the kb console's Pipeline page, which configures the
  *    curator from the live stage registry.
- *  - provider / claude_model / openai_*: owned by the Agents tab. The openai_*
+ *  - provider / claude_model / openai_*: owned by the Models tab. The openai_*
  *    trio only feeds the legacy fallback agent that chat_agent_add_legacy_openai
  *    (src/posix/server_compute.c) synthesizes when the roster has no match;
  *    PrimaryChooser is the supported way to set a primary.
@@ -76,12 +76,12 @@ export const OWNED_ELSEWHERE: Record<string, string> = {
   kb_curator_extract_docs_workers: "Pipeline page (kb console)",
   kb_curator_extract_code_workers: "Pipeline page (kb console)",
   kb_evidence_embed_enabled: "Pipeline page (kb console)",
-  // Primary agent + its legacy provider breadcrumbs (Agents tab).
-  provider: "Agents tab",
-  claude_model: "Agents tab",
-  openai_endpoint: "Agents tab",
-  openai_model: "Agents tab",
-  openai_key_cmd: "Agents tab",
+  // Primary model + its legacy provider breadcrumbs (Models tab).
+  provider: "Models tab",
+  claude_model: "Models tab",
+  openai_endpoint: "Models tab",
+  openai_model: "Models tab",
+  openai_key_cmd: "Models tab",
   // Persona (Chat tab per session, Personas tab for the roster).
   default_persona: "Chat tab / Personas tab",
   /* KB-owned: aimee-kb runs the embedder and the synth tier, so

@@ -1111,7 +1111,7 @@ int handle_episode_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 }
 int handle_agent_episodes(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.episodes");
+   return stub_handler(conn, "model.episodes");
 }
 int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -1120,71 +1120,71 @@ int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.list");
+   return stub_handler(conn, "model.list");
 }
 int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.add");
+   return stub_handler(conn, "model.add");
 }
 int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.local");
+   return stub_handler(conn, "model.local");
 }
 int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.remove");
+   return stub_handler(conn, "model.remove");
 }
 int handle_agent_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.enable");
+   return stub_handler(conn, "model.enable");
 }
 int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.roles");
+   return stub_handler(conn, "model.roles");
 }
 int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.personas");
+   return stub_handler(conn, "model.personas");
 }
 int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.set");
+   return stub_handler(conn, "model.set");
 }
 int handle_agent_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.disable");
+   return stub_handler(conn, "model.disable");
 }
 int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.probe");
+   return stub_handler(conn, "model.probe");
 }
 int handle_agent_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.stats");
+   return stub_handler(conn, "model.stats");
 }
 int handle_agent_draft(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.draft");
+   return stub_handler(conn, "model.draft");
 }
 int handle_agent_setup(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.setup");
+   return stub_handler(conn, "model.setup");
 }
 int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.setup_poll");
+   return stub_handler(conn, "model.setup_poll");
 }
 int handle_agent_cli_oauth_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.cli_oauth_start");
+   return stub_handler(conn, "model.cli_oauth_start");
 }
 int handle_agent_cli_oauth_code(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.cli_oauth_code");
+   return stub_handler(conn, "model.cli_oauth_code");
 }
 int handle_agent_cli_oauth_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.cli_oauth_poll");
+   return stub_handler(conn, "model.cli_oauth_poll");
 }
 
 int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

@@ -1427,7 +1427,7 @@ paths:
               schema: { type: object }
   /agents:
     get:
-      summary: List configured agents and the default agent
+      summary: List configured models and the default agent
       responses:
         "200":
           description: Configured agents ({default, agents[]})
@@ -2454,10 +2454,10 @@ paths:
       summary: Cancel a durable job
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Cancelled, content: { application/json: { schema: { type: object } } } } }
-  /agent/list:
+  /model/list:
     get:
-      summary: List configured agents
-      responses: { "200": { description: Agent list, content: { application/json: { schema: { type: object } } } } }
+      summary: List configured models
+      responses: { "200": { description: Model list, content: { application/json: { schema: { type: object } } } } }
   /audit/verify:
     get:
       summary: Verify the WORM audit chain + checkpoint MACs (green/amber/red)
@@ -2483,51 +2483,51 @@ paths:
       summary: Replay one audit-on-bus capture file's governed-action rows as JSON (paged; observational)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Replay page, content: { application/json: { schema: { type: object } } } } }
-  /agent/local:
+  /model/local:
     get:
       summary: List local agents
       responses: { "200": { description: Local agent list, content: { application/json: { schema: { type: object } } } } }
-  /agent/add:
+  /model/add:
     post:
       summary: Add an agent
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Agent added, content: { application/json: { schema: { type: object } } } } }
-  /agent/remove:
+  /model/remove:
     post:
       summary: Remove an agent
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Agent removed, content: { application/json: { schema: { type: object } } } } }
-  /agent/enable:
+  /model/enable:
     post:
       summary: Enable an agent
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Agent enabled, content: { application/json: { schema: { type: object } } } } }
-  /agent/disable:
+  /model/disable:
     post:
       summary: Disable an agent
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Agent disabled, content: { application/json: { schema: { type: object } } } } }
-  /agent/roles:
+  /model/roles:
     post:
       summary: Set an agent's roles
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Agent roles updated, content: { application/json: { schema: { type: object } } } } }
-  /agent/personas:
+  /model/personas:
     post:
       summary: Set the personas an agent may be dispatched as ("all" = every persona)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Agent personas updated, content: { application/json: { schema: { type: object } } } } }
-  /agent/set:
+  /model/set:
     post:
       summary: Surgically patch only the provided fields of an existing agent (model, endpoint, provider, cost_tier, max_turns, max_parallel, context_window, tools, roles, personas, enabled, key)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Updated agent record, content: { application/json: { schema: { type: object } } } } }
-  /agent/probe:
+  /model/probe:
     post:
       summary: Probe an agent/provider
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Probe result, content: { application/json: { schema: { type: object } } } } }
-  /agent/stats:
+  /model/stats:
     get:
       summary: Per-delegate run statistics
       responses: { "200": { description: Per-delegate run stats, content: { application/json: { schema: { type: object } } } } }
@@ -2535,41 +2535,128 @@ paths:
     get:
       summary: Economizer telemetry (gateway mutation counters, tool-condense savings, avoided-$)
       responses: { "200": { description: Economizer stats, content: { application/json: { schema: { type: object } } } } }
-  /agent/draft:
+  /model/draft:
     post:
       summary: One-shot tool-free text generation (proposal drafting) via a non-CLI delegate
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: "{text, agent}", content: { application/json: { schema: { type: object } } } } }
-  /agent/setup:
+  /model/setup:
     post:
       summary: Set up an agent (async)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Setup started, content: { application/json: { schema: { type: object } } } } }
-  /agent/setup_poll:
+  /model/setup_poll:
     post:
       summary: Poll agent setup progress
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Setup status, content: { application/json: { schema: { type: object } } } } }
-  /agent/cli_oauth_start:
+  /model/cli_oauth_start:
     post:
       summary: Install a vendor CLI on the server and start its OAuth login (claude/codex)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Verification URL + code, content: { application/json: { schema: { type: object } } } } }
-  /agent/cli_oauth_code:
+  /model/cli_oauth_code:
     post:
       summary: Submit the operator-pasted code into a server-side CLI OAuth login (claude)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Submitted, content: { application/json: { schema: { type: object } } } } }
-  /agent/cli_oauth_poll:
+  /model/cli_oauth_poll:
     post:
       summary: Poll a server-side CLI OAuth login; register the agent on success
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Login state, content: { application/json: { schema: { type: object } } } } }
-  /agent/episodes:
+  /model/episodes:
     post:
       summary: List an agent's episodes
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Episode list, content: { application/json: { schema: { type: object } } } } }
+  /agent/list:
+    get:
+      summary: Roster list (deprecated alias of /model/list)
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/local:
+    get:
+      summary: Roster local (deprecated alias of /model/local)
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/add:
+    post:
+      summary: Roster add (deprecated alias of /model/add)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/remove:
+    post:
+      summary: Roster remove (deprecated alias of /model/remove)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/enable:
+    post:
+      summary: Roster enable (deprecated alias of /model/enable)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/roles:
+    post:
+      summary: Roster roles (deprecated alias of /model/roles)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/personas:
+    post:
+      summary: Roster personas (deprecated alias of /model/personas)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/set:
+    post:
+      summary: Roster set (deprecated alias of /model/set)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/disable:
+    post:
+      summary: Roster disable (deprecated alias of /model/disable)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/probe:
+    post:
+      summary: Roster probe (deprecated alias of /model/probe)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/stats:
+    get:
+      summary: Roster stats (deprecated alias of /model/stats)
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/draft:
+    post:
+      summary: Roster draft (deprecated alias of /model/draft)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/setup:
+    post:
+      summary: Roster setup (deprecated alias of /model/setup)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/setup_poll:
+    post:
+      summary: Roster setup_poll (deprecated alias of /model/setup_poll)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/cli_oauth_start:
+    post:
+      summary: Roster cli_oauth_start (deprecated alias of /model/cli_oauth_start)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/cli_oauth_code:
+    post:
+      summary: Roster cli_oauth_code (deprecated alias of /model/cli_oauth_code)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/cli_oauth_poll:
+    post:
+      summary: Roster cli_oauth_poll (deprecated alias of /model/cli_oauth_poll)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/episodes:
+    post:
+      summary: Roster episodes (deprecated alias of /model/episodes)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
   /episode/list:
     get:
       summary: List episodes
@@ -2607,15 +2694,15 @@ paths:
       summary: Test a provider
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Test result, content: { application/json: { schema: { type: object } } } } }
-  /model/list:
+  /catalog/list:
     get:
-      summary: List models (provider catalog)
+      summary: List catalogued models
       responses: { "200": { description: Model list, content: { application/json: { schema: { type: object } } } } }
-  /model/show:
+  /catalog/show:
     get:
-      summary: Show the current model
+      summary: Show a catalogued model
       responses: { "200": { description: Model, content: { application/json: { schema: { type: object } } } } }
-  /model/refresh:
+  /catalog/refresh:
     post:
       summary: Refresh the model catalog
       requestBody: { content: { application/json: { schema: { type: object } } } }
