@@ -4,6 +4,8 @@
 #include "server.h"
 #include "aimee.h"
 #include "kb_client.h"
+#include "code_span.h"
+#include "config_accessors.h"
 #include "log.h" /* aimee_log — name the real KB failure in the server log */
 #include <aimee/workspace/workspace.h>
 #include "cJSON.h"
@@ -196,6 +198,77 @@ int handle_index_structure(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON_AddNumberToObject(d, "line_end", defs[i].line_end);
       cJSON_AddItemToArray(arr, d);
    }
+   return send_and_free(conn, resp);
+}
+
+/* An indexed project's root directory. code_span_read needs it and the KB only
+ * reports it in the project list, so every surface that reads a span has to look
+ * it up this way. 0 on success. */
+static int index_project_root(const char *project, char *out, size_t cap)
+{
+   const int max_projs = 256;
+   project_info_t *projs = calloc((size_t)max_projs, sizeof(*projs));
+   if (!projs)
+      return -1;
+   int np = kb_client_index_list(projs, max_projs);
+   int found = -1;
+   for (int i = 0; i < np; i++)
+      if (strcmp(projs[i].name, project) == 0 && projs[i].root[0])
+      {
+         snprintf(out, cap, "%s", projs[i].root);
+         found = 0;
+         break;
+      }
+   free(projs);
+   return found;
+}
+
+/* Read an exact line range, as a COMMAND rather than only as an MCP tool.
+ *
+ * Reading a range was reachable only through the MCP tool surface
+ * (code_span_get / index command=span), and an MCP call cannot be chained: one
+ * call, one turn, the whole conversation re-sent. Measured on the benchmark,
+ * reading files is the operation an agent reaches for most, so the most common
+ * thing it does was also the thing it could only do one turn at a time. As a
+ * command it joins with && into a shell call the agent is already making. */
+int handle_index_span(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *file_path;
+   if (jo_need_str(req, "file_path", &file_path) < 0 || !file_path[0])
+      return server_send_error(conn, "missing file_path", NULL);
+
+   int line_start = jo_int(req, "line_start", 1);
+   if (line_start < 1)
+      line_start = 1;
+   /* Default to the single line, matching the MCP tool: line_end defaults to
+    * line_start rather than to end-of-file, so a mistyped range cannot silently
+    * pull a whole file into context. */
+   int line_end = jo_int(req, "line_end", line_start);
+   if (line_end < line_start)
+      line_end = line_start;
+
+   char project_buf[MAX_PATH_LEN] = "";
+   const char *project = jo_str(req, "project", NULL);
+   if (!project || !project[0])
+   {
+      const char *cwd = jo_str(req, "cwd", NULL);
+      if (!cwd || server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf)) != 0)
+         return server_send_error(conn, "scope_required: no active project", NULL);
+      project = project_buf;
+   }
+
+   char root[MAX_PATH_LEN] = "";
+   if (index_project_root(project, root, sizeof(root)) != 0)
+      return server_send_error(conn, "unknown project (no indexed root)", NULL);
+
+   int max_lines = config_code_span_max_lines() > 0 ? config_code_span_max_lines() : 400;
+   cJSON *span = code_span_read(project, root, file_path, line_start, line_end, max_lines);
+   if (!span)
+      return server_send_error(conn, "out of memory", NULL);
+
+   cJSON *resp = jo_ok();
+   cJSON_AddItemToObject(resp, "span", span);
    return send_and_free(conn, resp);
 }
 

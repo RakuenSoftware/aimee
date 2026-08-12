@@ -1094,6 +1094,32 @@ void pt_print_index_structure(const char *method, cJSON *resp)
 {
    print_index_structure(resp);
 }
+/* The span's CONTENT is the answer, so it is printed raw with a one-line header
+ * naming the file, the range actually returned and the source version. Anything
+ * more (a box, line numbers, a repeated path per line) is bytes the agent pays
+ * for on every later turn without learning anything. */
+void pt_print_index_span(const char *method, cJSON *resp)
+{
+   (void)method;
+   cJSON *span = cJSON_GetObjectItemCaseSensitive(resp, "span");
+   if (!span)
+   {
+      printf("index span: no result\n");
+      return;
+   }
+   const char *err = json_str(span, "error");
+   if (err && err[0] && strcmp(err, "-") != 0)
+   {
+      printf("index span: %s\n", err);
+      return;
+   }
+   printf("%s:%s-%s  (%s lines, source %s)\n", json_str(span, "file_path"),
+          json_str(span, "line_start"), json_str(span, "line_end"), json_str(span, "line_count"),
+          json_str(span, "source_version"));
+   const char *content = json_str(span, "content");
+   if (content && content[0])
+      printf("%s", content);
+}
 void pt_print_index_find_callers(const char *method, cJSON *resp)
 {
    print_index_callers(resp);

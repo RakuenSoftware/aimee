@@ -32,6 +32,7 @@
      "  watch <name> <root>  Install git hooks that re-index after branch changes\n"
      "  blast-radius     Show files affected by changes to a file\n"
      "  structure        Show file structure\n"
+     "  span <file> [start] [end]  Read an exact line range (chainable with &&)\n"
      "  callers          Find callers of a symbol\n"},
     {"workspace", "Workspace management (add, list, remove)", CLIENT_TIER_ADVANCED, 0,
      "  add <path>       Register a directory as a workspace and index its projects\n"
