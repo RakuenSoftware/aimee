@@ -1182,8 +1182,6 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       fatal("--worktree is only valid for write-capable delegates; read-only delegates must "
             "use the parent worktree");
    int delegate_needs_worktree = delegate_allows_writes;
-   effective_prompt = delegate_maybe_append_validation_bundle(
-       role, cwd_for_template, effective_prompt, prompt, caller_provided_target);
    if (source_path_count > 0)
    {
       const char *base = effective_prompt ? effective_prompt : prompt;

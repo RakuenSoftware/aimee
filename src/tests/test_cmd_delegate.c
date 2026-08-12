@@ -424,74 +424,9 @@ static void test_prompt_plan_requires_prompt_source(void)
    printf("  PASS: test_prompt_plan_requires_prompt_source\n");
 }
 
-static void test_validation_bundle_appended_for_review_roles(void)
-{
-   char *code_prompt = strdup("base prompt");
-   char *unchanged = delegate_maybe_append_validation_bundle("code", ".", code_prompt, NULL, 0);
-   assert(unchanged == code_prompt);
-   free(unchanged);
-
-   char *review_prompt =
-       delegate_maybe_append_validation_bundle("review", ".", NULL, "base prompt", 0);
-   assert(review_prompt != NULL);
-   assert(strstr(review_prompt, "base prompt") == review_prompt);
-   assert(strstr(review_prompt, "Validation Evidence Bundle") != NULL);
-   assert(strstr(review_prompt, "zero-result search command") != NULL);
-   assert(strstr(review_prompt, "Directory layout claims") != NULL);
-   assert(strstr(review_prompt, "whole relevant source tree") != NULL);
-   assert(strstr(review_prompt, "do not infer sibling headers") != NULL);
-   free(review_prompt);
-
-   char *diagnose_prompt =
-       delegate_maybe_append_validation_bundle("diagnose", ".", NULL, "base prompt", 0);
-   assert(diagnose_prompt != NULL);
-   assert(strstr(diagnose_prompt, "Validation Evidence Bundle") != NULL);
-   assert(strstr(diagnose_prompt, "Directory layout claims") != NULL);
-   assert(strstr(diagnose_prompt, "whole relevant source tree") != NULL);
-   free(diagnose_prompt);
-
-   char *inspect_prompt =
-       delegate_maybe_append_validation_bundle("inspect", ".", NULL, "base prompt", 0);
-   assert(inspect_prompt != NULL);
-   assert(strstr(inspect_prompt, "Validation Evidence Bundle") != NULL);
-   assert(strstr(inspect_prompt, "whole relevant source tree") != NULL);
-   free(inspect_prompt);
-
-   char *test_prompt = delegate_maybe_append_validation_bundle("test", ".", NULL, "base prompt", 0);
-   assert(test_prompt != NULL);
-   assert(strstr(test_prompt, "Validation Evidence Bundle") != NULL);
-   assert(strstr(test_prompt, "whole relevant source tree") != NULL);
-   free(test_prompt);
-   printf("  PASS: test_validation_bundle_appended_for_review_roles\n");
-}
-
 /* When the caller supplies the review target (target_provided=1, e.g. a diff via
  * --prompt-file), the host-cwd "Validation Evidence Bundle" is suppressed and the
  * reviewer is pointed at aimee's branch-indexed capabilities instead. */
-static void test_provided_target_suppresses_cwd_bundle(void)
-{
-   char *review =
-       delegate_maybe_append_validation_bundle("review", ".", NULL, "the diff to review", 1);
-   assert(review != NULL);
-   assert(strstr(review, "the diff to review") == review);
-   assert(strstr(review, "Review Target & Exploration") != NULL);
-   assert(strstr(review, "is NOT proof that anything is absent") != NULL);
-   assert(strstr(review, "uncertainty may be a non-blocking suggestion, never a blocker") != NULL);
-   assert(strstr(review, "are always available") == NULL);
-   assert(strstr(review, "explore_via_aimee") != NULL);
-   assert(strstr(review, "code_search") != NULL);
-   /* the wrong-tree cwd bundle must NOT be present */
-   assert(strstr(review, "Validation Evidence Bundle") == NULL);
-   free(review);
-
-   /* Applies to any role, not just review roles, when a target is provided. */
-   char *coder = delegate_maybe_append_validation_bundle("code", ".", NULL, "base", 1);
-   assert(coder != NULL);
-   assert(strstr(coder, "Review Target & Exploration") != NULL);
-   free(coder);
-   printf("  PASS: test_provided_target_suppresses_cwd_bundle\n");
-}
-
 /* Build an mkdtemp template under TMPDIR rather than hardcoding /tmp: a shared
  * /tmp accumulates an entry per run, and the sandbox gives each session its own
  * TMPDIR precisely so those land somewhere disposable. */
@@ -1372,8 +1307,6 @@ int main(void)
    test_prompt_plan_file_only();
    test_prompt_plan_prompt_and_file();
    test_prompt_plan_requires_prompt_source();
-   test_validation_bundle_appended_for_review_roles();
-   test_provided_target_suppresses_cwd_bundle();
    delegate_register_review_evidence_provider(test_review_evidence_provider);
    test_review_evidence_drift_detects_reversed_snippet();
    test_review_evidence_drift_ignores_historical_diff_snippet();

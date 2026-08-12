@@ -20,7 +20,7 @@ const (
 	rolePolicyRequestMagic  uint32 = 0x514c5244 /* "DRLQ" */
 	rolePolicyResponseMagic uint32 = 0x534c5244 /* "DRLS" */
 	rolePolicyRequestLen           = 16 + roleMax + 1
-	rolePolicyResponseLen          = 24
+	rolePolicyResponseLen          = 28
 )
 
 // canonicalRole folds an alias onto the role it names. Doing it here rather
@@ -81,6 +81,31 @@ func RoleResultCacheEnabled(role string) bool {
 	return false
 }
 
+// RoleNeedsParentDiffEvidence reports whether a read-only inspection role should
+// be grounded in the PARENT worktree's uncommitted diff.
+//
+// These roles run against an isolated checkout whose own `git diff` is clean or
+// different, so left to themselves they report on the wrong tree -- or announce
+// there is nothing to review while the work sits uncommitted next door. Copying
+// the parent's diff in makes the thing they were asked about visible.
+//
+// This answers the ROLE half only, and the caller composes the rest: the
+// evidence is suppressed for a delegate that may WRITE (it is producing the
+// diff, not reviewing one) and for a review target that arrived in the prompt
+// (an unrelated worktree diff is then competing evidence, which has made plan
+// reviewers demand implementation that was never in scope).
+//
+// Those two are conditions of the INVOCATION, not properties of the role, and
+// this stage answers one question per role for every op at once -- so folding
+// them in here would mean computing them for callers that did not ask.
+func RoleNeedsParentDiffEvidence(role string) bool {
+	switch canonicalRole(role) {
+	case "validate", "review", "diagnose", "test":
+		return true
+	}
+	return false
+}
+
 // RoleAutoToolsForInvocation applies the role default to one invocation.
 //
 // A single-turn run is a final-answer smoke probe, so it gets no implicit
@@ -133,5 +158,6 @@ func handleRolePolicy(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 	putBool(response[12:16], RoleResultCacheEnabled(role))
 	putBool(response[16:20], RoleAutoToolsForInvocation(role, maxTurns, explicitTools))
 	binary.LittleEndian.PutUint32(response[20:24], uint32(int32(RoleFinalAfterTurns(role))))
+	putBool(response[24:28], RoleNeedsParentDiffEvidence(role))
 	return response, bus.ModuleStatusOK
 }

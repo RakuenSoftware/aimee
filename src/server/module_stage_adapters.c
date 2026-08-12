@@ -787,6 +787,9 @@ static int delegate_role_policy(int op, const char *role, int a, int b, int *out
    case DELEGATE_ROLE_OP_FINAL_TURNS:
       *out = (int)aimee_delegates_get_u32(response + 20);
       return 0;
+   case DELEGATE_ROLE_OP_PARENT_DIFF:
+      *out = (int)aimee_delegates_get_u32(response + 24);
+      return 0;
    default:
       return -1;
    }

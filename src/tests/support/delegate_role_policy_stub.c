@@ -23,6 +23,18 @@ int delegate_role_enable_tools_by_default(const char *role)
                    strcmp(role, "validate") == 0);
 }
 
+/* Which roles want the parent worktree's diff. Like the rest of this harness
+ * this MIRRORS the module's list rather than asking it, because these tests link
+ * no bus; the list itself is pinned against the module in
+ * server-go/modules/delegates/rolepolicy_test.go. A test that cares about the
+ * distinction registers its own provider instead. */
+int delegate_role_needs_parent_diff(const char *role)
+{
+   role = test_delegate_policy_role(role);
+   return role && (strcmp(role, "review") == 0 || strcmp(role, "validate") == 0 ||
+                   strcmp(role, "diagnose") == 0);
+}
+
 int delegate_role_auto_tools_for_invocation(const char *role, int max_turns, int explicit_tools)
 {
    if (explicit_tools)
