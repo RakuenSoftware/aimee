@@ -163,7 +163,7 @@
         },
         {
           "path": "src/headers/agent_config.h",
-          "sha256": "91347370d07f20ba1dad231d8b96ac44ed2ad28b6fee1aefa6262bfc0a18043b"
+          "sha256": "f12fee798fbc8927aea98174332674d09c8ef06ac520617771a02baef9b8b45b"
         },
         {
           "path": "src/headers/agent_config_internal.h",
@@ -1628,7 +1628,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "86d4044a8882a7d4275a3c0a04c6e05d604d714c148785acf78e7dfb68116da3",
+      "sha256": "52b28399694b6bdb6fbd05153b750ee1c31c4a7aeeb0c01750987b6c0790a056",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

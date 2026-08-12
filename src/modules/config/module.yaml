@@ -9,6 +9,8 @@
   },
   "ownership_complete": true,
   "sources": [
+    "src/modules/config/agent_registry.c",
+    "src/modules/config/config.c",
     "src/modules/config/config_accessors_0.c",
     "src/modules/config/config_accessors_1.c",
     "src/modules/config/config_accessors_2.c",
@@ -17,7 +19,6 @@
     "src/modules/config/config_accessors_5.c",
     "src/modules/config/config_accessors_6.c",
     "src/modules/config/config_accessors_7.c",
-    "src/modules/config/config.c",
     "src/modules/config/config_charter.c",
     "src/modules/config/config_database.c",
     "src/modules/config/config_econ.c",
@@ -35,8 +36,9 @@
     "src/modules/config/config_trigger.c"
   ],
   "private_headers": [
-    "src/modules/config/config_accessors.h",
+    "src/modules/config/agent_registry.h",
     "src/modules/config/config.h",
+    "src/modules/config/config_accessors.h",
     "src/modules/config/config_database.h",
     "src/modules/config/config_embedder_dims.h",
     "src/modules/config/config_fields.h",

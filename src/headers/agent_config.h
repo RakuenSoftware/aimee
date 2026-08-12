@@ -67,6 +67,29 @@ agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
                                       const agent_route_policy_t *policy, unsigned required_caps,
                                       int min_context, agent_scope_t scope);
 agent_t *agent_find(agent_config_t *cfg, const char *name);
+
+/* REGISTRY ACCESSORS: ask for the one agent you need, not the whole registry.
+ *
+ * The overwhelming majority of callers do the same three lines -- declare an
+ * agent_config_t, agent_load_config() into it, agent_find() one agent -- and
+ * agent_config_t is 350,968 bytes. Every such lookup therefore costs a stat(), a
+ * 343 KB memset (which touches every page) and a 343 KB memcpy out of a cache
+ * that already holds exactly the answer. There are 262 by-value declarations of
+ * this struct in the tree, on paths including routing, workflows and roundtable,
+ * so the copies land on request threads and churn straight into per-thread
+ * malloc arenas.
+ *
+ * These read the cached registry IN PLACE under its existing lock and copy out a
+ * single agent_t (16,720 bytes) -- ~21x less per lookup, and no memset at all.
+ * The slow path (cache cold or stale) still performs one full load, because that
+ * is genuinely a load; it just does not happen per request.
+ *
+ * Return 0 and fill `out` on success, non-zero when no such agent exists. `out`
+ * is untouched on failure. */
+int agent_registry_find(const char *name, agent_t *out);
+
+/* As agent_default_primary, against the cached registry. */
+int agent_registry_default_primary(agent_t *out);
 /* Select the default "primary" agent for ingress paths that don't name a model:
  * an explicitly configured default when it is enabled, else the first enabled
  * agent, else NULL. Never returns a disabled agent. */
