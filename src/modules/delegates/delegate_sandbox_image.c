@@ -127,57 +127,6 @@ static int ensure_built(const char *tag, const char *dockerfile_text, char *out,
 
 /* --- cache management (list + gc of aimee-sbx:* images) --- */
 
-/* Parse a `docker image ls` CreatedAt field ("2026-07-15 12:34:56 +0000 UTC")
- * into a UTC epoch. Docker always emits the local-daemon time with an explicit
- * offset; we read the wall-clock fields and the numeric offset and normalise to
- * UTC ourselves (no timegm/strptime, so no feature-macro or TZ dependence).
- * Returns 0 on success, -1 if the leading "Y-M-D H:M:S" does not parse. Pure. */
-int delegate_sandbox_parse_created_epoch(const char *created, long long *out)
-{
-   if (!created || !out)
-      return -1;
-   int y, mo, d, h, mi, s;
-   char sign = '+';
-   int oh = 0, om = 0;
-   int fields =
-       sscanf(created, "%d-%d-%d %d:%d:%d %c%2d%2d", &y, &mo, &d, &h, &mi, &s, &sign, &oh, &om);
-   if (fields < 6)
-      return -1;
-   if (mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || h > 23 || mi < 0 || mi > 59 || s < 0 ||
-       s > 60)
-      return -1;
-   /* days from 1970-01-01 to y-mo-d (proleptic Gregorian), via a civil-days algorithm. */
-   int yy = (mo <= 2) ? y - 1 : y;
-   int era = (yy >= 0 ? yy : yy - 399) / 400;
-   unsigned yoe = (unsigned)(yy - era * 400);
-   unsigned doy = (unsigned)((153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1);
-   unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-   long long days = (long long)era * 146097 + (long long)doe - 719468;
-   long long epoch = days * 86400 + h * 3600 + mi * 60 + s;
-   if (fields >= 7)
-   {
-      long long off = (long long)oh * 3600 + (long long)om * 60;
-      epoch += (sign == '-') ? off : -off; /* subtract the offset to reach UTC */
-   }
-   *out = epoch;
-   return 0;
-}
-
-#define SBX_IMG_MAX 512
-
-typedef struct
-{
-   char tag[128];
-   char id[80];
-   char created[48];
-   char size[32];
-   long long created_epoch;
-   int in_use;
-} sbx_img_t;
-
-/* True when a container (running or stopped) references image ref `ref`. `used`
- * is the newline-joined `docker ps -a` image column. Matches a whole line only,
- * so "aimee-sbx:ab" never matches "aimee-sbx:abcd". Pure. */
 static int sbx_ref_in_use(const char *ref, const char *used)
 {
    if (!ref || !*ref || !used)
@@ -197,15 +146,16 @@ static int sbx_ref_in_use(const char *ref, const char *used)
    return 0;
 }
 
-static int sbx_epoch_desc(const void *a, const void *b)
+#define SBX_IMG_MAX 512
+typedef struct
 {
-   long long ea = ((const sbx_img_t *)a)->created_epoch;
-   long long eb = ((const sbx_img_t *)b)->created_epoch;
-   return (eb > ea) - (eb < ea); /* most-recent first */
-}
+   char tag[128];
+   char id[80];
+   char created[48];
+   char size[32];
+   int in_use;
+} sbx_img_t;
 
-/* Enumerate every aimee-sbx:* image, newest first, marking in-use. Returns the
- * count (>=0) into *n and 0, or -1 if the docker daemon is unreachable. */
 static int sbx_collect(sbx_img_t *imgs, int cap, int *n)
 {
    *n = 0;
@@ -254,14 +204,14 @@ static int sbx_collect(sbx_img_t *imgs, int cap, int *n)
       snprintf(im->tag, sizeof(im->tag), "%s", f_tag);
       snprintf(im->created, sizeof(im->created), "%s", f_created);
       snprintf(im->size, sizeof(im->size), "%s", f_size ? f_size : "");
-      im->created_epoch = 0;
-      delegate_sandbox_parse_created_epoch(im->created, &im->created_epoch);
       im->in_use = !ps_ok || sbx_ref_in_use(im->tag, used) || sbx_ref_in_use(im->id, used);
       (*n)++;
    }
    free(out);
    free(used);
-   qsort(imgs, (size_t)*n, sizeof(imgs[0]), sbx_epoch_desc);
+   /* NOT sorted here. Recency ordering is part of the keep-the-most-recent
+    * rule, so the module does it and returns verdicts in the order it was
+    * given. Sorting again here would be a second ordering to disagree with. */
    return 0;
 }
 
@@ -317,27 +267,6 @@ static int docker_image_rm(const char *tag)
    return rc;
 }
 
-int delegate_sandbox_gc_should_remove(int in_use, int index, int keep_min, long long created_epoch,
-                                      long long now, long max_age_secs, const char **reason_out)
-{
-   const char *reason;
-   int remove = 0;
-   if (in_use)
-      reason = "in-use";
-   else if (index < keep_min)
-      reason = "kept-recent";
-   else if (created_epoch > 0 && (now - created_epoch) < max_age_secs)
-      reason = "within-max-age";
-   else
-   {
-      remove = 1;
-      reason = "aged-out";
-   }
-   if (reason_out)
-      *reason_out = reason;
-   return remove;
-}
-
 int delegate_sandbox_gc(long max_age_secs, int keep_min, int dry_run, char **report_json_out)
 {
    if (report_json_out)
@@ -361,12 +290,49 @@ int delegate_sandbox_gc(long max_age_secs, int keep_min, int dry_run, char **rep
    int removed = 0, kept = 0;
    cJSON *arr = cJSON_CreateArray();
 
-   /* imgs is newest-first; index < keep_min is a protected recent image. */
+   /* The whole inventory in one call: the decision is positional -- "keep the
+    * keep_min most recent" -- so the ORDERING is part of the rule and is done
+    * module-side. Nothing here re-sorts; the verdicts come back in the order
+    * the images were sent. */
+   size_t req_cap = AIMEE_DELEGATES_IMGGC_HEADER_LEN + (size_t)n * (12 + 2 * 512) + 64;
+   size_t resp_cap = 8 + (size_t)n * 64 + 64;
+   uint8_t *gc_req = malloc(req_cap);
+   uint8_t *gc_resp = malloc(resp_cap);
+   size_t gc_resp_len = 0;
+   int judged = -1;
+   if (gc_req && gc_resp)
+   {
+      size_t at = aimee_delegates_imggc_request_begin((unsigned)n, keep_min, now, max_age_secs,
+                                                      gc_req, req_cap);
+      for (int i = 0; at && i < n; i++)
+         at = aimee_delegates_imggc_request_add(gc_req, req_cap, at, imgs[i].tag, imgs[i].created,
+                                                imgs[i].in_use);
+      if (at)
+         judged = delegate_image_gc_judge(gc_req, at, gc_resp, resp_cap, &gc_resp_len);
+   }
+   free(gc_req);
+   if (judged != 0)
+   {
+      /* No verdict: keep everything. An image kept costs disk; an image deleted
+       * on a policy nothing applied costs a rebuild of something that may be in
+       * use right now. */
+      free(gc_resp);
+      free(imgs);
+      cJSON_Delete(arr);
+      return -1;
+   }
+
    for (int i = 0; i < n; i++)
    {
-      const char *reason;
-      int remove = delegate_sandbox_gc_should_remove(
-          imgs[i].in_use, i, keep_min, imgs[i].created_epoch, now, max_age_secs, &reason);
+      char reason_buf[64] = "";
+      int remove = 0;
+      if (aimee_delegates_imggc_response_at(gc_resp, gc_resp_len, (unsigned)i, &remove, reason_buf,
+                                            sizeof(reason_buf)) != 0)
+      {
+         remove = 0;
+         snprintf(reason_buf, sizeof(reason_buf), "unjudged");
+      }
+      const char *reason = reason_buf;
 
       if (remove && !dry_run && docker_image_rm(imgs[i].tag) != 0)
       {
@@ -388,6 +354,7 @@ int delegate_sandbox_gc(long max_age_secs, int keep_min, int dry_run, char **rep
          cJSON_AddItemToArray(arr, o);
       }
    }
+   free(gc_resp);
    free(imgs);
 
    if (report_json_out && arr)
