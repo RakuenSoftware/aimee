@@ -648,7 +648,7 @@ func (c *HTTPAgentClient) delegateCandidates(ctx context.Context) ([]delegateCan
 			Personas        []string `json:"personas"`
 		} `json:"agents"`
 	}
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/agent/list", nil, &response); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/model/list", nil, &response); err != nil {
 		return nil, err
 	}
 	var candidates []delegateCandidate

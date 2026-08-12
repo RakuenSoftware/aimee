@@ -1959,6 +1959,29 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/model/cli_oauth_code", NULL, RM_EXACT, "model.cli_oauth_code", 0, rh_dispatch_op},
     {"POST", "/v1/model/cli_oauth_poll", NULL, RM_EXACT, "model.cli_oauth_poll", 0, rh_dispatch_op},
     {"POST", "/v1/model/episodes", NULL, RM_EXACT, "model.episodes", 0, rh_dispatch_op},
+    /* Pre-rename spelling of the roster routes, kept because /v1 is a PUBLISHED
+     * contract (api/openapi-server-v1.yaml, the generated SDKs, third-party
+     * clients) and nothing required this path to be freed -- unlike the model
+     * routes, which the catalog had to vacate. They dispatch the same ops, so
+     * the two spellings cannot diverge in behaviour. */
+    {"GET", "/v1/agent/list", NULL, RM_EXACT, "model.list", 0, rh_dispatch_op},
+    {"GET", "/v1/agent/local", NULL, RM_EXACT, "model.local", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/add", NULL, RM_EXACT, "model.add", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/remove", NULL, RM_EXACT, "model.remove", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/enable", NULL, RM_EXACT, "model.enable", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/roles", NULL, RM_EXACT, "model.roles", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/personas", NULL, RM_EXACT, "model.personas", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/set", NULL, RM_EXACT, "model.set", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/disable", NULL, RM_EXACT, "model.disable", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/probe", NULL, RM_EXACT, "model.probe", 0, rh_dispatch_op},
+    {"GET", "/v1/agent/stats", NULL, RM_EXACT, "model.stats", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/draft", NULL, RM_EXACT, "model.draft", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/setup", NULL, RM_EXACT, "model.setup", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/setup_poll", NULL, RM_EXACT, "model.setup_poll", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/cli_oauth_start", NULL, RM_EXACT, "model.cli_oauth_start", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/cli_oauth_code", NULL, RM_EXACT, "model.cli_oauth_code", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/cli_oauth_poll", NULL, RM_EXACT, "model.cli_oauth_poll", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/episodes", NULL, RM_EXACT, "model.episodes", 0, rh_dispatch_op},
     {"GET", "/v1/episode/list", NULL, RM_EXACT, "episode.list", 0, rh_dispatch_op},
 
     /* provider.* / model.* / api.* (op-parity wave 3). */

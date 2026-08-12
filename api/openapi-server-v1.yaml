@@ -2570,6 +2570,93 @@ paths:
       summary: List an agent's episodes
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Episode list, content: { application/json: { schema: { type: object } } } } }
+  /agent/list:
+    get:
+      summary: Roster list (deprecated alias of /model/list)
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/local:
+    get:
+      summary: Roster local (deprecated alias of /model/local)
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/add:
+    post:
+      summary: Roster add (deprecated alias of /model/add)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/remove:
+    post:
+      summary: Roster remove (deprecated alias of /model/remove)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/enable:
+    post:
+      summary: Roster enable (deprecated alias of /model/enable)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/roles:
+    post:
+      summary: Roster roles (deprecated alias of /model/roles)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/personas:
+    post:
+      summary: Roster personas (deprecated alias of /model/personas)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/set:
+    post:
+      summary: Roster set (deprecated alias of /model/set)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/disable:
+    post:
+      summary: Roster disable (deprecated alias of /model/disable)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/probe:
+    post:
+      summary: Roster probe (deprecated alias of /model/probe)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/stats:
+    get:
+      summary: Roster stats (deprecated alias of /model/stats)
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/draft:
+    post:
+      summary: Roster draft (deprecated alias of /model/draft)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/setup:
+    post:
+      summary: Roster setup (deprecated alias of /model/setup)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/setup_poll:
+    post:
+      summary: Roster setup_poll (deprecated alias of /model/setup_poll)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/cli_oauth_start:
+    post:
+      summary: Roster cli_oauth_start (deprecated alias of /model/cli_oauth_start)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/cli_oauth_code:
+    post:
+      summary: Roster cli_oauth_code (deprecated alias of /model/cli_oauth_code)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/cli_oauth_poll:
+    post:
+      summary: Roster cli_oauth_poll (deprecated alias of /model/cli_oauth_poll)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/episodes:
+    post:
+      summary: Roster episodes (deprecated alias of /model/episodes)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
   /episode/list:
     get:
       summary: List episodes

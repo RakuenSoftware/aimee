@@ -92,15 +92,15 @@ static const struct
     {"workspace.remove", pt_print_workspace_remove},
     {"workspace.mirror-sync", pt_print_workspace_mirror_sync},
     {"hud.status", pt_print_hud_status},
-    {"agent.list", pt_print_agent_list},
-    {"agent.local", pt_print_agent_local},
-    {"agent.add", pt_print_agent_add},
-    {"agent.remove", pt_print_agent_remove},
-    {"agent.enable", pt_print_agent_enable},
-    {"agent.roles", pt_print_agent_roles},
-    {"agent.personas", pt_print_agent_personas},
-    {"agent.disable", pt_print_agent_disable},
-    {"agent.probe", pt_print_agent_probe},
+    {"model.list", pt_print_agent_list},
+    {"model.local", pt_print_agent_local},
+    {"model.add", pt_print_agent_add},
+    {"model.remove", pt_print_agent_remove},
+    {"model.enable", pt_print_agent_enable},
+    {"model.roles", pt_print_agent_roles},
+    {"model.personas", pt_print_agent_personas},
+    {"model.disable", pt_print_agent_disable},
+    {"model.probe", pt_print_agent_probe},
     {"mcp.audit", pt_print_mcp_audit},
     {"mcp.recheck", pt_print_mcp_recheck},
     {"toolset.list", pt_print_toolset_list},
@@ -138,7 +138,7 @@ static const struct
     {"aux.test", pt_print_aux_test},
     {"delegate.log", pt_print_delegate_log},
     {"episode.list", pt_print_delegate_log},
-    {"agent.episodes", pt_print_delegate_log},
+    {"model.episodes", pt_print_delegate_log},
     {"delegate.launch", pt_print_delegate_launch},
     {"kb.search", pt_print_kb_search},
     {"kb.build", pt_print_kb_build},
@@ -2048,7 +2048,7 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
    {
       exit_rc = 1;
    }
-   else if (strcmp(route->method, "agent.probe") == 0 && agent_probe_response_is_failure(resp))
+   else if (strcmp(route->method, "model.probe") == 0 && agent_probe_response_is_failure(resp))
    {
       exit_rc = 1;
    }
