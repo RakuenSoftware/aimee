@@ -770,4 +770,153 @@ static inline int aimee_delegates_isolation_response_decode(const uint8_t *in, s
    return 0;
 }
 
+/* --- May write (stage 15): the role AND the brief, composed ---------------
+ *
+ * One answer, because it is the one fact stages 11 and 12 must agree on. The
+ * halves come back too, so a refusal is debuggable: "the delegate could not
+ * edit anything" is otherwise a mystery. */
+
+#define AIMEE_DELEGATES_EVENT_MAYWRITE          6671u
+#define AIMEE_DELEGATES_STAGE_MAYWRITE          15u
+#define AIMEE_DELEGATES_MAYWRITE_REQUEST_MAGIC  0x51575744u /* "DWWQ" */
+#define AIMEE_DELEGATES_MAYWRITE_RESPONSE_MAGIC 0x53575744u /* "DWWS" */
+#define AIMEE_DELEGATES_MAYWRITE_HEADER_LEN     16u
+#define AIMEE_DELEGATES_MAYWRITE_RESPONSE_LEN   16u
+#define AIMEE_DELEGATES_MAYWRITE_PROMPT_MAX     (1u << 20)
+
+/* Returns the encoded length, or 0 when it does not fit. */
+static inline size_t aimee_delegates_maywrite_request_encode(const char *role, const char *prompt,
+                                                             uint8_t *out, size_t cap)
+{
+   size_t role_len = role ? strlen(role) : 0;
+   size_t prompt_len = prompt ? strlen(prompt) : 0;
+   size_t total = AIMEE_DELEGATES_MAYWRITE_HEADER_LEN + role_len + prompt_len;
+   if (!out || cap < total || role_len > AIMEE_DELEGATES_ROLE_MAX ||
+       prompt_len > AIMEE_DELEGATES_MAYWRITE_PROMPT_MAX)
+      return 0;
+   memset(out, 0, AIMEE_DELEGATES_MAYWRITE_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_MAYWRITE_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   aimee_delegates_put_u32(out + 8, (uint32_t)role_len);
+   aimee_delegates_put_u32(out + 12, (uint32_t)prompt_len);
+   if (role_len)
+      memcpy(out + AIMEE_DELEGATES_MAYWRITE_HEADER_LEN, role, role_len);
+   if (prompt_len)
+      memcpy(out + AIMEE_DELEGATES_MAYWRITE_HEADER_LEN + role_len, prompt, prompt_len);
+   return total;
+}
+
+/* `by_role` and `by_prompt` are optional and are for reporting only -- the
+ * decision is `may_write`. */
+static inline int aimee_delegates_maywrite_response_decode(const uint8_t *in, size_t len,
+                                                           int *may_write, int *by_role,
+                                                           int *by_prompt)
+{
+   if (!in || len != AIMEE_DELEGATES_MAYWRITE_RESPONSE_LEN || !may_write ||
+       aimee_delegates_get_u32(in) != AIMEE_DELEGATES_MAYWRITE_RESPONSE_MAGIC)
+      return -1;
+   *may_write = aimee_delegates_get_u32(in + 4) ? 1 : 0;
+   if (by_role)
+      *by_role = aimee_delegates_get_u32(in + 8) ? 1 : 0;
+   if (by_prompt)
+      *by_prompt = aimee_delegates_get_u32(in + 12) ? 1 : 0;
+   return 0;
+}
+
+/* --- Image GC (stage 16): which built sandbox images may be deleted --------
+ *
+ * The whole inventory goes at once. The decision is POSITIONAL -- "keep the
+ * keep_min most recent" cannot be answered one image at a time -- so the
+ * ordering belongs with the rule rather than with the caller. */
+
+#define AIMEE_DELEGATES_EVENT_IMGGC          6672u
+#define AIMEE_DELEGATES_STAGE_IMGGC          16u
+#define AIMEE_DELEGATES_IMGGC_REQUEST_MAGIC  0x51434744u /* "DGCQ" */
+#define AIMEE_DELEGATES_IMGGC_RESPONSE_MAGIC 0x53434744u /* "DGCS" */
+#define AIMEE_DELEGATES_IMGGC_HEADER_LEN     32u
+#define AIMEE_DELEGATES_IMGGC_MAX_IMAGES     4096u
+
+static inline void aimee_delegates_put_u64(uint8_t *p, uint64_t v)
+{
+   for (unsigned i = 0; i < 8; ++i)
+      p[i] = (uint8_t)(v >> (8u * i));
+}
+
+/* Begin a request. Returns the offset to append images at, or 0 on failure. */
+static inline size_t aimee_delegates_imggc_request_begin(unsigned count, int keep_min,
+                                                         long long now, long long max_age_secs,
+                                                         uint8_t *out, size_t cap)
+{
+   if (!out || cap < AIMEE_DELEGATES_IMGGC_HEADER_LEN ||
+       count > AIMEE_DELEGATES_IMGGC_MAX_IMAGES)
+      return 0;
+   memset(out, 0, AIMEE_DELEGATES_IMGGC_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_IMGGC_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   aimee_delegates_put_u32(out + 8, count);
+   aimee_delegates_put_u32(out + 12, (uint32_t)keep_min);
+   aimee_delegates_put_u64(out + 16, (uint64_t)now);
+   aimee_delegates_put_u64(out + 24, (uint64_t)max_age_secs);
+   return AIMEE_DELEGATES_IMGGC_HEADER_LEN;
+}
+
+/* Append one image. Returns the new offset, or 0 when it does not fit. */
+static inline size_t aimee_delegates_imggc_request_add(uint8_t *out, size_t cap, size_t at,
+                                                       const char *tag, const char *created_at,
+                                                       int in_use)
+{
+   size_t tag_len = tag ? strlen(tag) : 0;
+   size_t created_len = created_at ? strlen(created_at) : 0;
+   if (at + 12 + tag_len + created_len > cap)
+      return 0;
+   aimee_delegates_put_u32(out + at, in_use ? 1u : 0u);
+   aimee_delegates_put_u32(out + at + 4, (uint32_t)tag_len);
+   aimee_delegates_put_u32(out + at + 8, (uint32_t)created_len);
+   at += 12;
+   if (tag_len)
+      memcpy(out + at, tag, tag_len);
+   at += tag_len;
+   if (created_len)
+      memcpy(out + at, created_at, created_len);
+   return at + created_len;
+}
+
+/* Read the verdict for image `index`, in the order they were sent. `reason`
+ * receives a NUL-terminated word. Returns 0, or -1. */
+static inline int aimee_delegates_imggc_response_at(const uint8_t *in, size_t len, unsigned index,
+                                                    int *remove_out, char *reason,
+                                                    size_t reason_cap)
+{
+   if (!in || len < 8 || !remove_out ||
+       aimee_delegates_get_u32(in) != AIMEE_DELEGATES_IMGGC_RESPONSE_MAGIC)
+      return -1;
+   unsigned count = aimee_delegates_get_u32(in + 4);
+   if (index >= count)
+      return -1;
+   size_t at = 8;
+   for (unsigned i = 0; i <= index; i++)
+   {
+      if (at + 8 > len)
+         return -1;
+      unsigned rm = aimee_delegates_get_u32(in + at);
+      size_t n = aimee_delegates_get_u32(in + at + 4);
+      at += 8;
+      if (at + n > len)
+         return -1;
+      if (i == index)
+      {
+         *remove_out = rm ? 1 : 0;
+         if (reason && reason_cap)
+         {
+            size_t copy = n < reason_cap - 1 ? n : reason_cap - 1;
+            memcpy(reason, in + at, copy);
+            reason[copy] = '\0';
+         }
+         return 0;
+      }
+      at += n;
+   }
+   return -1;
+}
+
 #endif

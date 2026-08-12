@@ -18,6 +18,7 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include <aimee/delegates/delegate_backend.h>
+#include <aimee/delegates/delegate_launch_args.h>
 
 /* A delegate runs in its own container or not at all, so a delegation with no
  * container runtime now REFUSES rather than falling back to running in-process
@@ -3671,9 +3672,31 @@ static int compute_test_handoff_provider(const char *text, const char *owned_fil
    return 0;
 }
 
+/* The composed write permission, as the module answers it.
+ *
+ * Composed here from the SAME two inputs the module uses -- the role policy
+ * stub these tests already link, and the prompt rule -- rather than restating
+ * either, so this harness cannot drift from what it is standing in for. */
+int delegate_prompt_allows_writes(const char *prompt);
+
+static int compute_test_may_write(const char *role, const char *prompt, int *may_write,
+                                  int *by_role, int *by_prompt)
+{
+   int r = delegate_role_is_write(role);
+   int pw = delegate_prompt_allows_writes(prompt);
+   if (by_role)
+      *by_role = r;
+   if (by_prompt)
+      *by_prompt = pw;
+   if (may_write)
+      *may_write = r && pw;
+   return 0;
+}
+
 int main(void)
 {
    register_test_workspace_root();
+   delegate_register_may_write_provider(compute_test_may_write);
    assert(delegate_backend_register(&g_fake_docker) == 0);
    delegate_register_handoff_provider(compute_test_handoff_provider);
    test_codex_oauth_vault_server_principal_fallback();

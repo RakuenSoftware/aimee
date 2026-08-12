@@ -32,9 +32,15 @@ cJSON *mcp_build_tools_list_flat(void);
 const char *mcp_tool_profile_effective(const char *explicit_profile);
 
 /* Filter a served tools/list IN PLACE to the named profile (NULL => resolve via
- * mcp_tool_profile_effective). "full" / unknown is a no-op (fail open); "core"
- * or "lean" keeps only the Tier-0 set. Returns the number of tools removed. */
-int mcp_filter_tools_for_profile(cJSON *tools, const char *profile);
+ * mcp_tool_profile_effective). "full" / unknown is a no-op for the PROFILE (fail
+ * open); "core" or "lean" keeps only the Tier-0 set. Returns tools removed.
+ *
+ * delegates_enabled == 0 additionally removes the delegate tools, on EVERY
+ * profile including "full": a profile decides how much of a working surface to
+ * show, whereas delegation being off decides what exists at all. Passed in
+ * rather than read from config because this module may not reach the config
+ * module directly; the server supplies it. Pass 1 to keep them. */
+int mcp_filter_tools_for_profile(cJSON *tools, const char *profile, int delegates_enabled);
 
 /* Byte caps for the trimmed presentation. A top-level description keeps roughly a
  * sentence. Parameter hints are dropped outright (cap 0): they were 7,841 of the

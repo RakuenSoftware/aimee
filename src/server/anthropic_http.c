@@ -22,7 +22,7 @@
 #include "anthropic_ingress.h"
 #include "cJSON.h"
 #include <aimee/delegates/delegate_driver.h>
-#include "economizer_wire_snapshot.h"
+#include "wire_fence.h"
 #include "gateway_mutate_wire.h"
 #include "server_http_identity.h"
 #include <aimee/gateway/gateway_policy.h>
@@ -442,7 +442,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    char msg_id[48];
    const delegate_driver_t *driver;
    parsed_response_t parsed = {0}; /* freed only on the success path, but init defensively */
-   econ_wire_snapshot_t *wire_snapshot = NULL;
+   wire_fence_t *wire_snapshot = NULL;
    gw_mutate_ctx_t gwmc;
    int status, http_status, rc;
    const char *model;
@@ -511,8 +511,9 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * the pointer cached above (line ~397) could now dangle. */
    model = jo_cstr(req, "model");
 
-   /* Only AGGRESSIVE and only an OpenAI-family upstream. Native Anthropic
-    * requests keep the client's exact cache prefix and cache_control layout. */
+   /* Only AGGRESSIVE. Native Anthropic requests are mutated too now: the gateway
+    * holds a per-session freeze, so a folded prefix stays byte-identical after the
+    * turn it first engages, which is what the client's cache prefix needs. */
    if (gw_mutate_upstream_ok(parity))
    {
       char *mut_sys = anthropic_system_to_text(req);
@@ -551,12 +552,12 @@ static int messages_buffered(const char *body, char *resp, int cap)
                                          responses_wire);
    const char *pristine_body = prov_body ? prov_body : "{}";
    int economizer_active = econ_mode_current() != ECON_MODE_OFF;
-   econ_wire_route_t wire_route = parity           ? ECON_WIRE_ANTHROPIC_MESSAGES
-                                  : responses_wire ? ECON_WIRE_OPENAI_RESPONSES
-                                                   : ECON_WIRE_OPENAI_CHAT;
-   econ_wire_bytes_t wire_body;
-   if (econ_wire_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
-                        &wire_snapshot, &wire_body) != 0)
+   wire_fence_route_t wire_route = parity           ? WIRE_FENCE_ANTHROPIC_MESSAGES
+                                   : responses_wire ? WIRE_FENCE_OPENAI_RESPONSES
+                                                    : WIRE_FENCE_OPENAI_CHAT;
+   wire_fence_bytes_t wire_body;
+   if (wire_fence_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
+                         &wire_snapshot, &wire_body) != 0)
    {
       status = write_error(resp, cap, 503, "api_error", "economizer wire fence unavailable",
                            AIMEE_ERR_REQUEST_PIPELINE);
@@ -642,7 +643,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    agent_free_parsed_response(&parsed);
 
 cleanup:
-   econ_wire_snapshot_destroy(wire_snapshot);
+   wire_fence_destroy(wire_snapshot);
    gw_mutate_ctx_free(&gwmc);
    cJSON_Delete(out);
    cJSON_Delete(provider_resp);
@@ -1204,7 +1205,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    anthropic_stream_xlate_t *xl;
    int input_est;
    int responses_wire = 0;
-   econ_wire_snapshot_t *wire_snapshot = NULL;
+   wire_fence_t *wire_snapshot = NULL;
    gw_mutate_ctx_t gwmc;
    const void *wire_prov_body = NULL;
    size_t wire_prov_body_len = 0;
@@ -1322,12 +1323,12 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    const char *pristine_body = prov_body ? prov_body : "{}";
    int economizer_active = econ_mode_current() != ECON_MODE_OFF;
-   econ_wire_route_t wire_route = parity           ? ECON_WIRE_ANTHROPIC_MESSAGES
-                                  : responses_wire ? ECON_WIRE_OPENAI_RESPONSES
-                                                   : ECON_WIRE_OPENAI_CHAT;
-   econ_wire_bytes_t wire_body;
-   if (econ_wire_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
-                        &wire_snapshot, &wire_body) != 0)
+   wire_fence_route_t wire_route = parity           ? WIRE_FENCE_ANTHROPIC_MESSAGES
+                                   : responses_wire ? WIRE_FENCE_OPENAI_RESPONSES
+                                                    : WIRE_FENCE_OPENAI_CHAT;
+   wire_fence_bytes_t wire_body;
+   if (wire_fence_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
+                         &wire_snapshot, &wire_body) != 0)
    {
       xl = anthropic_stream_begin(msg_id, model, 0, emit, ctx);
       if (xl)
@@ -1376,7 +1377,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    messages_stream_xlate(url, auth, wire_prov_body, wire_prov_body_len, extra, ag, model, msg_id,
                          input_est, emit, ctx);
 cleanup:
-   econ_wire_snapshot_destroy(wire_snapshot);
+   wire_fence_destroy(wire_snapshot);
    gw_mutate_ctx_free(&gwmc);
    free(prov_body);
    free(system_text);

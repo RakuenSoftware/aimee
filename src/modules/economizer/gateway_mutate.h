@@ -8,8 +8,39 @@
 #ifndef DEC_GATEWAY_MUTATE_H
 #define DEC_GATEWAY_MUTATE_H 1
 
-#include "economizer.h"
 #include <cJSON.h>
+
+/* What the module reported for one reduction.
+ *
+ * The reducer's own types went to Go with context_reduce; this is the small
+ * C-side view the gateway seam needs to decide whether to dispatch. Keeping it
+ * here rather than importing a reducer header is the point: the C side holds no
+ * reduction policy any more. */
+typedef enum
+{
+   GW_REDUCE_REASON_NONE = 0,
+   GW_REDUCE_REASON_REDUCED,
+   GW_REDUCE_REASON_MEASURED,
+   GW_REDUCE_REASON_SKIP_NO_GAIN,
+   GW_REDUCE_REASON_ALREADY,
+} gw_reduce_reason_t;
+
+typedef struct
+{
+   cJSON *messages; /* the reduced array, or NULL */
+   int mutated;
+   gw_reduce_reason_t reason;
+   int baseline_tokens;
+   int reduced_tokens;
+   int removed_tokens;
+   int foldable_tokens;
+} gw_reduce_report_t;
+
+/* Provenance across the two seams of one request. */
+typedef struct
+{
+   int reduced;
+} gw_provenance_t;
 
 #ifdef __cplusplus
 extern "C"
@@ -55,7 +86,7 @@ extern "C"
     * message_history_repair run on a COPY of the reduced result reports no structural
     * violation. Otherwise returns the specific hard-bypass reason. Pure: does not
     * mutate `res` or emit telemetry. */
-   gw_bypass_reason_t gw_should_apply(int reduce_rc, const reduce_result_t *res);
+   gw_bypass_reason_t gw_should_apply(int reduce_rc, const gw_reduce_report_t *res);
 
    /* Install `reduced` as container[key], replacing the existing array. Takes
     * ownership of `reduced` on success (it is added to `container`). Returns 0 on
@@ -67,8 +98,8 @@ extern "C"
     * after replace succeeds; clear on EVERY hard-bypass / restore / OOM path so a
     * partially-applied request never leaves a falsely reduced=true marker that the
     * delegate seam would skip. NULL-safe. */
-   void gw_provenance_mark_reduced(reduce_state_t *st);
-   void gw_provenance_clear(reduce_state_t *st);
+   void gw_provenance_mark_reduced(gw_provenance_t *st);
+   void gw_provenance_clear(gw_provenance_t *st);
 
 #ifdef __cplusplus
 }

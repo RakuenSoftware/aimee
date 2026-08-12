@@ -282,38 +282,10 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
    (void)source;
    (void)usage_kind;
 }
-/* Context economizer (gateway seam) is default-off and not under test here; the
- * shadow-mode hook in messages_run_request_pipeline references these three, so stub
- * them as no-ops to keep the minimal P2c link from pulling the economizer + its
- * db1/token_tracker dependency chain. */
-#include "context_reduce.h"
-int context_reduce(cJSON *messages, const char *system_prompt, const char *model,
-                   const char *session_id, reduce_seam_t seam, const reduce_config_t *cfg,
-                   reduce_state_t *st, reduce_result_t *out)
-{
-   (void)messages;
-   (void)system_prompt;
-   (void)model;
-   (void)session_id;
-   (void)seam;
-   (void)cfg;
-   (void)st;
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return 0;
-}
-void context_reduce_result_free(reduce_result_t *out)
-{
-   (void)out;
-}
-void agent_record_reduce_ledger(const struct reduce_result_s *r, const char *model,
-                                const char *agent_name, const char *role)
-{
-   (void)r;
-   (void)model;
-   (void)agent_name;
-   (void)role;
-}
+/* The context_reduce / result_free / reduce-ledger stubs that stood here are gone:
+ * the C reducer moved to the Go economizer module, so messages_run_request_pipeline
+ * references none of those symbols any more and the minimal P2c link stays minimal
+ * without them. */
 void agent_ingress_record_cost(const char *agent_name, const char *agent_model,
                                const char *requested_model, const char *stop_reason,
                                int prompt_tokens, int completion_tokens, int cache_write_tokens,

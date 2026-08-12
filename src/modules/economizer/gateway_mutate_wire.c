@@ -3,15 +3,86 @@
 #include "aimee.h"
 #include "gateway_mutate_wire.h"
 
+#include "economizer_module_client.h"
+
 #include <string.h>
 
 #include "agent_protocol.h" /* message_history_repair */
 #include "config.h"
 #include "gateway_mutate.h"
 #include "gw_mutate_stats.h"
+#include "log.h"
+#include "token_tracker.h" /* token_estimate_cost_ex, for the freeze guardrail */
+
+/* Declared rather than including db1.h, the same way agent_runtime.c does: this
+ * seam needs exactly two calls, and pulling the whole db1 surface into an
+ * economizer translation unit would widen the module's dependencies for nothing. */
+int db1_economizer_state_save(const char *session_id, const char *json);
+int db1_economizer_state_load(const char *session_id, char *out, size_t out_sz);
+
+/* The gateway's reducer state is keyed by session key AND a conversation
+ * fingerprint, in its own namespace.
+ *
+ * The namespace prefix keeps it clear of the delegate seam, which keys state by
+ * conversation id: without it a gateway key that happened to equal a conversation
+ * id would load and overwrite that conversation's freeze boundary.
+ *
+ * The fingerprint is the part that matters for correctness. msg_session_key_resolve
+ * is deliberately per-IDENTITY -- "to group one identity's sessions under a stable
+ * key" -- so one user with two concurrent conversations resolves to ONE key. Keyed
+ * on that alone, the two would share a freeze boundary and thrash: each turn would
+ * find the other's prefix digest, fail the match, and re-epoch, so the freeze would
+ * never hold and folding would cost cache reads instead of saving them. Hashing the
+ * first message separates conversations, and it is stable across their turns because
+ * a conversation's opening message does not change. If a client rewrites its history
+ * the fingerprint moves, which correctly reads as a different conversation. */
+static uint64_t gw_fnv1a(const char *s)
+{
+   uint64_t h = 1469598103934665603ull;
+   for (; s && *s; s++)
+   {
+      h ^= (unsigned char)*s;
+      h *= 1099511628211ull;
+   }
+   return h;
+}
+
+static void gw_state_key(const char *skey, cJSON *msgs, char *out, size_t out_sz)
+{
+   uint64_t fp = 0;
+   cJSON *first = msgs ? cJSON_GetArrayItem(msgs, 0) : NULL;
+   if (first)
+   {
+      char *txt = cJSON_PrintUnformatted(first);
+      if (txt)
+      {
+         fp = gw_fnv1a(txt);
+         free(txt);
+      }
+   }
+   snprintf(out, out_sz, "gw:%s:%016llx", skey ? skey : "", (unsigned long long)fp);
+}
+
+/* The module overwrites its loaded state's turn with the request's, so the seam
+ * has to supply an increasing one. The gateway has no turn counter of its own,
+ * so read it back out of the state we persisted last time. Turn drives only the
+ * recall page-table TTL, so a restart resetting it to 0 costs recall freshness
+ * for one session, never correctness. */
+static int gw_state_next_turn(const char *state_json)
+{
+   if (!state_json || !state_json[0])
+      return 0;
+   cJSON *root = cJSON_Parse(state_json);
+   if (!root)
+      return 0;
+   cJSON *turn = cJSON_GetObjectItemCaseSensitive(root, "turn");
+   int next = cJSON_IsNumber(turn) ? turn->valueint + 1 : 0;
+   cJSON_Delete(root);
+   return next;
+}
 
 int gw_economizer_measure(cJSON *messages, const char *system_prompt, const char *model,
-                          int retained_msgs, reduce_result_t *out)
+                          int retained_msgs, gw_reduce_report_t *out)
 {
    if (!out)
       return 1;
@@ -19,13 +90,29 @@ int gw_economizer_measure(cJSON *messages, const char *system_prompt, const char
    if (!cJSON_IsArray(messages))
       return 1; /* nothing to measure; out is zeroed so the caller's free is safe */
 
-   reduce_config_t rcfg;
-   memset(&rcfg, 0, sizeof(rcfg));
-   rcfg.gateway_seam = 1;
-   rcfg.measure_only = 1; /* shadow mode: never mutates the request */
-   rcfg.fold.retained_msgs = retained_msgs;
-   return context_reduce(messages, system_prompt, model, NULL, REDUCE_SEAM_GATEWAY, &rcfg, NULL,
-                         out);
+   /* Shadow mode: the module measures and never mutates. Only the ledger fields
+    * the callers read are populated; a failed call leaves them zero, which reads
+    * as "no opportunity" rather than a fabricated one. */
+   econ_module_request_t mreq;
+   memset(&mreq, 0, sizeof mreq);
+   mreq.measure_only = 1;
+   mreq.retained_msgs = retained_msgs;
+
+   cJSON *ignored = NULL;
+   econ_module_result_t mres;
+   int rc = econ_module_reduce(messages, system_prompt, ECON_MODULE_SEAM_GATEWAY, &mreq, &ignored,
+                               &mres);
+   cJSON_Delete(ignored); /* measure_only never returns an array; defensive */
+   if (rc == 0)
+   {
+      out->baseline_tokens = mres.baseline_tokens;
+      out->reduced_tokens = mres.reduced_tokens;
+      out->removed_tokens = mres.removed_tokens;
+      out->foldable_tokens = mres.foldable_tokens;
+      out->reason = GW_REDUCE_REASON_MEASURED;
+   }
+   econ_module_result_free(&mres);
+   return rc;
 }
 
 void gw_mutate_ctx_init(gw_mutate_ctx_t *ctx)
@@ -53,14 +140,29 @@ int gw_mutate_is_enabled(void)
 
 int gw_mutate_upstream_ok(int upstream_is_anthropic)
 {
-   /* Gateway wire-mutation is OpenAI-only by policy. An Anthropic upstream serves a
-    * byte-verbatim, prompt-cached passthrough (build_anthropic_parity_headers); mutating
-    * the wire there would bust the cached prefix AND force the request off the parity
-    * passthrough. Reducing that upstream cache-coherently is the pre-economize seam's job
-    * (delegate seam / tool_condense), not the gateway's. So the live mutator engages only
-    * when the serving upstream is NOT Anthropic. `upstream_is_anthropic` is the caller's
-    * driver_is_anthropic()/parity signal. */
-   return !upstream_is_anthropic && gw_mutate_is_enabled();
+   /* ANTHROPIC MUTATES TOO, now that the gateway holds a freeze boundary.
+    *
+    * The old policy was OpenAI-only, because mutating an Anthropic wire "would bust
+    * the cached prefix". That was true of a gateway with no state: every turn
+    * re-folded from cold, so every turn moved the prefix and every turn missed the
+    * cache. It is not true of one that persists a freeze per session. The fold moves
+    * the prefix ONCE, when it first engages; from the next turn the frozen prefix is
+    * byte-identical and the cache reads resume. One miss, bounded, in exchange for
+    * every later turn carrying a folded history.
+    *
+    * Deferring to "the pre-economize seam" was not a real alternative either: that
+    * seam is the delegate loop, which a proxied client never enters. An Anthropic
+    * client through the gateway had NO reduction path at all.
+    *
+    * On the provider's cache breakpoints: the economizer still neither adds, removes,
+    * nor moves one, and the live-surface guard greps this file to keep it that way --
+    * strictly enough that naming the field here in prose trips it, which is the right
+    * trade. Folding can retire a message that happened to carry a breakpoint, leaving
+    * FEWER of them, and fewer is legal (Anthropic caps them at four rather than
+    * requiring them). What it must never do is leave one attached to content that
+    * moved, which is exactly what the freeze prevents. */
+   (void)upstream_is_anthropic;
+   return gw_mutate_is_enabled();
 }
 
 void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
@@ -109,39 +211,126 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
       return;
    }
 
-   reduce_config_t rc;
-   memset(&rc, 0, sizeof(rc));
-   rc.gateway_seam = 1;
-   rc.compress = 1; /* D3: compress-only at the gateway in v1 (fold deferred) */
-   rc.measure_only = 0;
-   rc.fold.retained_msgs = config_fold_retained_msgs();
+   /* The reduction itself lives in the Go economizer module now; this seam
+    * resolves config and owns the pristine/restore contract.
+    *
+    * THE GATEWAY FOLDS. It used to be compress-only, for the stated reason that
+    * "there is no per-conversation state here to hold a freeze boundary" -- true
+    * of the seam, but not of the deployment: the per-identity session key resolved
+    * above is exactly such a handle, and the reducer state keyed by it survives
+    * between requests in the same place the delegate seam keeps its own. Without
+    * this the gateway could never fold for ANY provider, so the biggest context
+    * consumer aimee has was reachable only through its own agent loop. */
+   char state_blob[ECON_MODULE_STATE_MAX];
+   state_blob[0] = '\0';
+   char skey_ns[MSG_SESSION_KEY_LEN + 24];
+   gw_state_key(ctx->skey, msgs, skey_ns, sizeof skey_ns);
+   (void)db1_economizer_state_load(skey_ns, state_blob, sizeof state_blob);
 
-   reduce_result_t res;
+   econ_module_request_t mreq;
+   memset(&mreq, 0, sizeof mreq);
+   mreq.compress = 1;
+   mreq.history_fold = 1;
+   mreq.retained_msgs = config_fold_retained_msgs();
+   mreq.min_fold_msgs = config_fold_min_fold_msgs();
+   mreq.excerpt_bytes = config_fold_excerpt_bytes();
+   mreq.compact_head_bytes = config_compact_head_bytes();
+   mreq.compact_tail_bytes = config_compact_tail_bytes();
+   mreq.register_enabled = config_fold_register_enabled();
+   mreq.closet_enabled = config_coord_closet_enabled();
+   mreq.closet_budget_bytes = config_coord_closet_budget_bytes();
+   mreq.closet_max_ratio_pct = config_coord_closet_max_ratio_pct();
+   mreq.recall_enabled = config_fold_recall_enabled();
+   mreq.recall_ttl_turns = config_fold_recall_ttl_turns();
+   mreq.recall_inject = config_fold_recall_inject();
+   mreq.state = state_blob[0] ? state_blob : NULL;
+   mreq.turn = gw_state_next_turn(state_blob);
+
+   char closet_denylist[CONFIG_COPY_MAX];
+   config_coord_closet_denylist_copy(closet_denylist, sizeof(closet_denylist));
+   mreq.closet_denylist = closet_denylist[0] ? closet_denylist : NULL;
+
+   /* The freeze is what makes folding safe for a prefix-cached upstream, so it is
+    * not optional here the way it is a tunable on the delegate seam. The module
+    * does the arithmetic; this side supplies the per-tier rates. */
+   mreq.freeze_guard_enabled = 1;
+   mreq.freeze_guard_horizon = ep.freeze_guard_horizon;
+   {
+      token_usage_t w = {0}, in = {0}, rd = {0};
+      w.cache_write_tokens = 1000;
+      in.input_tokens = 1000;
+      rd.cache_read_tokens = 1000;
+      int priced = 0;
+      double wc = token_estimate_cost_ex(model, &w, &priced);
+      if (priced)
+      {
+         mreq.priced = 1;
+         mreq.write_cost = wc;
+         mreq.input_cost = token_estimate_cost_ex(model, &in, NULL);
+         mreq.read_cost = token_estimate_cost_ex(model, &rd, NULL);
+      }
+   }
+
+   cJSON *reduced = NULL;
+   econ_module_result_t mres;
+   int rrc =
+       econ_module_reduce(msgs, system_prompt, ECON_MODULE_SEAM_GATEWAY, &mreq, &reduced, &mres);
+
+   /* Persist BEFORE the apply decision, and regardless of it. The freeze boundary
+    * has to advance on every turn the module saw, not only the ones that shipped a
+    * reduced payload: drop it on a bypass and the next turn re-folds from cold,
+    * which moves the prefix and costs the cache read the freeze exists to keep.
+    * Mirrors the delegate seam, which persists on the same unconditional terms. */
+   if (mres.state && mres.state[0])
+      (void)db1_economizer_state_save(skey_ns, mres.state);
+
+   /* One line per gateway reduction, because until now this seam was invisible:
+    * its telemetry goes to the obs bus, nothing reached server.log, and proving
+    * whether it had run at all meant inferring from token deltas. reused=1 is the
+    * signal that actually matters -- it means the freeze held and the folded prefix
+    * was byte-identical to last turn, which is the difference between folding that
+    * pays for itself and folding that burns a cache read every turn. */
+   if (rrc == 0)
+      aimee_log(LOG_INFO, "economizer.gateway",
+                "seam=gateway mutated=%d reason=%s baseline=%d reduced=%d removed=%d "
+                "folded=%d retained=%d reused=%d",
+                mres.mutated, mres.reason[0] ? mres.reason : "none", mres.baseline_tokens,
+                mres.reduced_tokens, mres.removed_tokens, mres.folded_msgs, mres.retained_msgs,
+                mres.reused_boundary);
+
+   /* Reuse the pure decision helper by handing it the module's ledger. An
+    * unreachable module is a no-op, not an internal error: the request is
+    * pristine and forwarding it is correct. */
+   gw_reduce_report_t res;
    memset(&res, 0, sizeof(res));
-   int rrc = context_reduce(msgs, system_prompt, model, NULL, REDUCE_SEAM_GATEWAY, &rc, NULL, &res);
+   res.messages = reduced;
+   res.mutated = mres.mutated;
+   res.reason = mres.mutated ? GW_REDUCE_REASON_REDUCED : GW_REDUCE_REASON_NONE;
+   res.baseline_tokens = mres.baseline_tokens;
+   res.reduced_tokens = mres.reduced_tokens;
 
-   gw_bypass_reason_t bypass = gw_should_apply(rrc, &res);
+   gw_bypass_reason_t bypass = gw_should_apply(rrc == 0 ? 0 : 1, &res);
    if (bypass != GW_BYPASS_NONE)
    {
       gw_stat_inc_reason("hard_bypass", gw_bypass_reason_str(bypass));
       gw_provenance_clear(&ctx->st);
-      context_reduce_result_free(&res);
+      cJSON_Delete(reduced);
+      econ_module_result_free(&mres);
       /* keep pristine: not mutated, but harmless; freed in ctx_free */
       return;
    }
 
-   /* Apply: install the reduced array (ownership transfers on success). */
-   if (gw_replace_messages(container, key, res.messages) != 0)
+   if (gw_replace_messages(container, key, reduced) != 0)
    {
       gw_stat_inc_reason("hard_bypass", "replace_failed");
       gw_provenance_clear(&ctx->st);
-      context_reduce_result_free(&res); /* res.messages still owned by res -> freed here */
+      cJSON_Delete(reduced);
+      econ_module_result_free(&mres);
       return;
    }
-   res.messages = NULL;                    /* ownership moved into container */
-   int baseline_tok = res.baseline_tokens; /* capture the token counts before freeing res */
-   int reduced_tok = res.reduced_tokens;
-   context_reduce_result_free(&res);
+   int baseline_tok = mres.baseline_tokens;
+   int reduced_tok = mres.reduced_tokens;
+   econ_module_result_free(&mres);
 
    gw_provenance_mark_reduced(&ctx->st); /* mark ONLY after replace succeeds */
    ctx->mutated = 1;

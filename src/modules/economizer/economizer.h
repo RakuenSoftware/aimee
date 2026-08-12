@@ -1,20 +1,26 @@
-/* economizer.h -- the single public facade for the context-economizer module
- * (src/modules/economizer/). The economizer is the unified context-reduction subsystem:
- *   - the reduce orchestrator (context_reduce),
- *   - history folding (context_fold + fold_budget / fold_register / fold_recall + coord_closet
- *     + episode_seal + task_rail),
- *   - tool-output condensation (tool_condense).
- * External callers include ONLY this header; the individual sub-headers are module-internal
- * (they remain on the -Imodules/economizer path so the module's own .c files cross-include them,
- * but new external code should depend on economizer.h, not the sub-headers). */
+/* economizer.h -- the public facade for what REMAINS of the economizer in C.
+ *
+ * Context reduction, folding, condensation policy and the proof planner all live
+ * in server-go/modules/economizer now and are reached over the event bus;
+ * economizer_module_client.h is the whole call surface.
+ *
+ * What stays here is the C-side seam plus the units that still have callers
+ * OUTSIDE the economizer:
+ *   - coord_closet    -- session_compact conserves identifiers with it
+ *   - economizer_json -- agent_runtime compacts fresh tool results with it
+ *   - fold_register   -- session_compact classifies turns with it
+ *   - tool_condense   -- the tool_output_get recall handle and the stats endpoint
+ *
+ * Each of those is a separate cut-over rather than a leftover: they move when
+ * their own callers do. Nothing here holds reduction policy any more.
+ */
 #ifndef DEC_ECONOMIZER_H
 #define DEC_ECONOMIZER_H 1
 
-#include "economizer_proof.h" /* provider-specific cost-proof gate; empty live registry */
-#include "economizer_json.h"  /* strict fresh-tool-result JSON compaction */
-#include "context_reduce.h"   /* context_reduce(), reduce_config_t / reduce_result_t / seams */
-#include "context_fold.h"     /* context_fold_view / context_compress_view, fold_config_t */
-#include "tool_condense.h"    /* tool_condense_apply / _recall / _enabled, family parsers */
-#include "fold_register.h" /* fold_register_parse / _label: settled-vs-transient turn classes */
+#include "coord_closet.h"
+#include "economizer_json.h"
+#include "economizer_module_client.h"
+#include "fold_register.h"
+#include "tool_condense.h"
 
 #endif /* DEC_ECONOMIZER_H */

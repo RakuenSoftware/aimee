@@ -36,7 +36,7 @@
 #include "agent_protocol.h"                  /* parsed_response_t, message_history_repair */
 #include <aimee/delegates/delegate_driver.h> /* single provider step for the Codex proxy */
 #include "http_retry.h"
-#include "economizer_wire_snapshot.h"
+#include "wire_fence.h"
 #include "gateway_mutate_wire.h"
 #include "server_http_identity.h"
 #include "cJSON.h"
@@ -1183,9 +1183,10 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
 
    int tok = agent_request_max_tokens(agent, max_tokens);
 
-   /* AGGRESSIVE may apply the existing lossy reducer to OpenAI-family request
-    * history. SAFE never enters this path. Anthropic-backed routes remain
-    * untouched to preserve their cache prefix. */
+   /* AGGRESSIVE may apply the existing lossy reducer to request history. SAFE
+    * never enters this path. Anthropic-backed routes are no longer excluded: the
+    * gateway's per-session freeze keeps a folded prefix byte-identical, which is
+    * what their cache prefix actually requires. */
    gw_mutate_ctx_t gwmc;
    gw_mutate_ctx_init(&gwmc);
    cJSON *mbox = NULL;
@@ -1220,13 +1221,13 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
 
    int economizer_active = econ_mode_current() != ECON_MODE_OFF;
    int wire_anthropic = driver && driver->name && strcmp(driver->name, "anthropic") == 0;
-   econ_wire_route_t wire_route = wire_anthropic              ? ECON_WIRE_ANTHROPIC_MESSAGES
-                                  : strstr(url, "/responses") ? ECON_WIRE_OPENAI_RESPONSES
-                                                              : ECON_WIRE_OPENAI_CHAT;
-   econ_wire_snapshot_t *wire_snapshot = NULL;
-   econ_wire_bytes_t wire_body;
-   if (econ_wire_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
-                        &wire_body) != 0)
+   wire_fence_route_t wire_route = wire_anthropic              ? WIRE_FENCE_ANTHROPIC_MESSAGES
+                                   : strstr(url, "/responses") ? WIRE_FENCE_OPENAI_RESPONSES
+                                                               : WIRE_FENCE_OPENAI_CHAT;
+   wire_fence_t *wire_snapshot = NULL;
+   wire_fence_bytes_t wire_body;
+   if (wire_fence_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
+                         &wire_body) != 0)
    {
       free(body);
       cJSON_Delete(mbox);
@@ -1243,7 +1244,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
                                                    &response_body, agent->timeout_ms, extra_headers,
                                                    ra, rb, rm, agent->provider, agent->model, NULL);
    free(body);
-   econ_wire_snapshot_destroy(wire_snapshot);
+   wire_fence_destroy(wire_snapshot);
 
    cJSON_Delete(mbox);
    gw_mutate_ctx_free(&gwmc);

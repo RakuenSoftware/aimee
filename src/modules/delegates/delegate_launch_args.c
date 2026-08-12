@@ -101,3 +101,58 @@ int delegate_isolation_judge(const char *report, int probe_failed, int require_i
    return g_isolation(report, probe_failed, require_isolation, refuse, warn, is_error, reason,
                       reason_cap);
 }
+
+static delegate_may_write_fn g_may_write;
+
+void delegate_register_may_write_provider(delegate_may_write_fn provider)
+{
+   g_may_write = provider;
+}
+
+int delegate_may_write(const char *role, const char *prompt)
+{
+   if (!g_may_write)
+   {
+      LOG_ERROR("delegates",
+                "no may-write provider registered; treating the delegate as read-only");
+      return 0;
+   }
+   int may = 0, by_role = 0, by_prompt = 0;
+   if (g_may_write(role, prompt, &may, &by_role, &by_prompt) != 0)
+   {
+      LOG_ERROR("delegates",
+                "could not resolve write permission for role '%s'; "
+                "treating the delegate as read-only",
+                role ? role : "");
+      return 0;
+   }
+   if (!may)
+      LOG_INFO("delegates",
+               "delegate role '%s' is read-only for this turn (role permits=%d, "
+               "brief asks=%d)",
+               role ? role : "", by_role, by_prompt);
+   return may;
+}
+
+static delegate_image_gc_fn g_image_gc;
+
+void delegate_register_image_gc_provider(delegate_image_gc_fn provider)
+{
+   g_image_gc = provider;
+}
+
+int delegate_image_gc_judge(const uint8_t *request, size_t request_len, uint8_t *response,
+                            size_t response_cap, size_t *response_len)
+{
+   if (!request || !response || !response_len)
+      return -1;
+   *response_len = 0;
+   if (!g_image_gc)
+   {
+      LOG_ERROR("delegate-sandbox-image",
+                "no image-gc provider registered; keeping every image rather than deleting on "
+                "a policy nothing applied");
+      return -1;
+   }
+   return g_image_gc(request, request_len, response, response_cap, response_len);
+}

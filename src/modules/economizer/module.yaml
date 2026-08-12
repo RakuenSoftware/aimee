@@ -1,0 +1,91 @@
+{
+  "descriptor_version": 1,
+  "id": "economizer",
+  "dependencies": [
+    "config",
+    "ir",
+    "module-runtime"
+  ],
+  "enabled_by_default": false,
+  "runtime_toggle": {
+    "supported": false
+  },
+  "ownership_complete": true,
+  "sources": [
+    "src/modules/economizer/coord_closet.c",
+    "src/modules/economizer/economizer_json.c",
+    "src/modules/economizer/economizer_module_client.c",
+    "src/modules/economizer/fold_register.c",
+    "src/modules/economizer/gateway_mutate.c",
+    "src/modules/economizer/gateway_mutate_wire.c",
+    "src/modules/economizer/tool_condense.c"
+  ],
+  "go_sources": [
+    "server-go/modules/economizer/budget.go",
+    "server-go/modules/economizer/cjson.go",
+    "server-go/modules/economizer/closet.go",
+    "server-go/modules/economizer/compact.go",
+    "server-go/modules/economizer/condense_apply.go",
+    "server-go/modules/economizer/condense_family.go",
+    "server-go/modules/economizer/condense_primitives.go",
+    "server-go/modules/economizer/condense_recognize.go",
+    "server-go/modules/economizer/eager.go",
+    "server-go/modules/economizer/episode.go",
+    "server-go/modules/economizer/fold.go",
+    "server-go/modules/economizer/gateway.go",
+    "server-go/modules/economizer/gateway_wire.go",
+    "server-go/modules/economizer/json_compact.go",
+    "server-go/modules/economizer/jsonval.go",
+    "server-go/modules/economizer/module.go",
+    "server-go/modules/economizer/planner_anthropic.go",
+    "server-go/modules/economizer/planner_openai.go",
+    "server-go/modules/economizer/proof.go",
+    "server-go/modules/economizer/provenance.go",
+    "server-go/modules/economizer/rail.go",
+    "server-go/modules/economizer/recall.go",
+    "server-go/modules/economizer/reduce.go",
+    "server-go/modules/economizer/register.go",
+    "server-go/modules/economizer/state.go"
+  ],
+  "go_tests": [
+    "server-go/modules/economizer/budget_test.go",
+    "server-go/modules/economizer/cjson_test.go",
+    "server-go/modules/economizer/closet_test.go",
+    "server-go/modules/economizer/compact_test.go",
+    "server-go/modules/economizer/condense_family_test.go",
+    "server-go/modules/economizer/condense_primitives_test.go",
+    "server-go/modules/economizer/condense_recognize_test.go",
+    "server-go/modules/economizer/eager_test.go",
+    "server-go/modules/economizer/episode_test.go",
+    "server-go/modules/economizer/fold_test.go",
+    "server-go/modules/economizer/gateway_anthropic_test.go",
+    "server-go/modules/economizer/gateway_test.go",
+    "server-go/modules/economizer/gateway_wire_test.go",
+    "server-go/modules/economizer/json_compact_test.go",
+    "server-go/modules/economizer/module_test.go",
+    "server-go/modules/economizer/planner_anthropic_test.go",
+    "server-go/modules/economizer/planner_openai_test.go",
+    "server-go/modules/economizer/proof_test.go",
+    "server-go/modules/economizer/provenance_test.go",
+    "server-go/modules/economizer/rail_test.go",
+    "server-go/modules/economizer/recall_test.go",
+    "server-go/modules/economizer/reduce_test.go",
+    "server-go/modules/economizer/register_test.go",
+    "server-go/modules/economizer/state_test.go"
+  ],
+  "public_headers": [],
+  "private_headers": [
+    "src/modules/economizer/coord_closet.h",
+    "src/modules/economizer/economizer.h",
+    "src/modules/economizer/economizer_json.h",
+    "src/modules/economizer/economizer_module_client.h",
+    "src/modules/economizer/fold_register.h",
+    "src/modules/economizer/gateway_mutate.h",
+    "src/modules/economizer/gateway_mutate_wire.h",
+    "src/modules/economizer/tool_condense.h"
+  ],
+  "tests": [],
+  "docs": [
+    "docs/modules/economizer.md"
+  ]
+}

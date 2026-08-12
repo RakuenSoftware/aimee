@@ -53,32 +53,16 @@ int gw_snapshot_token_count(cJSON *messages)
 }
 
 /* Map the reducer's internal-error class to a gateway bypass reason. */
-static gw_bypass_reason_t reduce_error_to_bypass(reduce_error_t e)
-{
-   switch (e)
-   {
-   case REDUCE_ERR_ALLOC_FAILED:
-      return GW_BYPASS_REDUCE_ALLOC_FAILED;
-   case REDUCE_ERR_PARSE_FAILED:
-      return GW_BYPASS_REDUCE_PARSE_FAILED;
-   case REDUCE_ERR_FORMAT_UNSUPPORTED:
-      return GW_BYPASS_REDUCE_FORMAT_UNSUPPORTED;
-   case REDUCE_ERR_INTERNAL_ASSERTION:
-   case REDUCE_ERR_NONE:
-   default:
-      return GW_BYPASS_REDUCE_INTERNAL_ASSERTION;
-   }
-}
 
-gw_bypass_reason_t gw_should_apply(int reduce_rc, const reduce_result_t *res)
+gw_bypass_reason_t gw_should_apply(int reduce_rc, const gw_reduce_report_t *res)
 {
    if (reduce_rc != 0 || !res)
-      return reduce_error_to_bypass(res ? res->error : REDUCE_ERR_INTERNAL_ASSERTION);
+      return GW_BYPASS_REDUCE_INTERNAL_ASSERTION;
 
    /* A genuine, applied reduction is the only thing worth mutating for: a new array,
     * marked mutated, with REASON_REDUCED. measure-only / already / skip / not-array
     * all land here as no-ops. */
-   if (!res->messages || !res->mutated || res->reason != REDUCE_REASON_REDUCED)
+   if (!res->messages || !res->mutated || res->reason != GW_REDUCE_REASON_REDUCED)
       return GW_BYPASS_NO_OP;
 
    /* Net shrink: a reduce that did not actually shrink is not worth the blast radius. */
@@ -124,13 +108,13 @@ int gw_replace_messages(cJSON *container, const char *key, cJSON *reduced)
    return 0;
 }
 
-void gw_provenance_mark_reduced(reduce_state_t *st)
+void gw_provenance_mark_reduced(gw_provenance_t *st)
 {
    if (st)
       st->reduced = 1;
 }
 
-void gw_provenance_clear(reduce_state_t *st)
+void gw_provenance_clear(gw_provenance_t *st)
 {
    if (st)
       st->reduced = 0;
