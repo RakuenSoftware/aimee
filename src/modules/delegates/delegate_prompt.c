@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <aimee/delegates/delegate_launch_args.h>
 
 int delegate_resolve_prompt_inputs(const char *cli_prompt, const char *file_prompt,
                                    delegate_prompt_plan_t *out)
@@ -193,64 +194,6 @@ static int has_create_intent(const char *prompt)
    return 0;
 }
 
-/* RETAINED FOR THE CLI ONLY, and duplicated in the module on purpose.
- *
- * The server no longer calls this: it asks the module (stage 15), which
- * composes this rule with the role's default into one answer. The CLI still
- * calls it because the CLI cannot reach the bus -- it registers no stage
- * adapters -- and a fail-closed seam there would not fail closed usefully, it
- * would just always say "read-only".
- *
- * That is not hypothetical. delegate_role_is_write() is already a seam with no
- * provider in the CLI, so it returns 0 unconditionally there and the branch at
- * cmd_agent_delegate.c that tests it is dead. Adding a second one would add a
- * second silent misbehaviour rather than remove a duplicate.
- *
- * This copy goes when the CLI can reach the module. Until then it must track
- * PromptAllowsWrites in server-go/modules/delegates/promptwrites.go. */
-int delegate_prompt_allows_writes(const char *prompt)
-{
-   if (!prompt || !prompt[0])
-      return 1;
-
-   if (str_contains_ci(prompt, "do not edit files") ||
-       str_contains_ci(prompt, "do not modify anything") ||
-       str_contains_ci(prompt, "do not write files") ||
-       str_contains_ci(prompt, "do not change files") ||
-       str_contains_ci(prompt, "do not make changes") || str_contains_ci(prompt, "read-only") ||
-       str_contains_ci(prompt, "read only") || str_contains_ci(prompt, "inspect only") ||
-       str_contains_ci(prompt, "analysis only"))
-      return 0;
-
-   int scoped_no_write =
-       str_contains_ci(prompt, "do not edit") || str_contains_ci(prompt, "do not modify") ||
-       str_contains_ci(prompt, "do not write") || str_contains_ci(prompt, "do not change");
-   if (scoped_no_write)
-   {
-      static const char *const scoped_write_keywords[] = {
-          "create", "new file", "add ",   "add file", "implement ", "update",
-          "fix",    "refactor", "delete", "remove",   NULL};
-      int has_scoped_write_intent = 0;
-      for (int i = 0; scoped_write_keywords[i]; i++)
-         if (str_contains_ci(prompt, scoped_write_keywords[i]))
-         {
-            has_scoped_write_intent = 1;
-            break;
-         }
-      if (!has_scoped_write_intent)
-         return 0;
-   }
-
-   static const char *const write_keywords[] = {
-       "create",    "new file", "add file", "edit",   "modify", "update", "fix",
-       "implement", "write",    "refactor", "delete", "remove", NULL};
-   for (int i = 0; write_keywords[i]; i++)
-      if (str_contains_ci(prompt, write_keywords[i]))
-         return 1;
-
-   return 0;
-}
-
 /* Run git diff --name-only HEAD in wt_path; return heap-allocated output or NULL. */
 static char *drift_git_diff(const char *wt_path)
 {
@@ -344,7 +287,7 @@ int delegate_check_named_file_drift(const char *const *paths, int path_count, co
     * threaded into its prompt must never fail it. The prompt heuristic stays as a
     * NARROWING override so an explicit "do not edit" still disables the hard-fail
     * for a write role. */
-   int writes_allowed = role_is_write && delegate_prompt_allows_writes(prompt);
+   int writes_allowed = role_is_write && delegate_prompt_asks_for_writes(prompt);
 
    int hard_drift = 0;
    int soft_drift = 0;

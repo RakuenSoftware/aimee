@@ -33,6 +33,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <aimee/delegates/delegate_launch_args.h>
 
 /* Max bytes of pre-loaded content (per --file block, --context-file block, and the
    symbol block) handed to a delegate/roundtable. 256KB (~62k tokens) sits well inside
@@ -1205,7 +1206,10 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       }
    }
 
-   int delegate_allows_writes = delegate_prompt_allows_writes(prompt);
+   /* The composed answer from the module (stage 15): the role's default AND
+    * what the brief asks for. Was a local prompt scan, which was a second copy
+    * of a rule the module owns. */
+   int delegate_allows_writes = delegate_may_write(role, prompt);
    if (worktree_branch && worktree_branch[0] && !delegate_allows_writes)
       fatal("--worktree is only valid for write-capable delegates; read-only delegates must "
             "use the parent worktree");
