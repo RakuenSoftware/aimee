@@ -211,6 +211,11 @@
           "id": 16,
           "name": "delegate-image-gc",
           "event_kind": 6672
+        },
+        {
+          "id": 17,
+          "name": "delegate-route-filter",
+          "event_kind": 6673
         }
       ]
     },

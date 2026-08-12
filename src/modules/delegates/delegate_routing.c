@@ -7,6 +7,7 @@
 #include "log.h"
 #include <ctype.h>
 #include <string.h>
+#include <aimee/delegates/delegate_launch_args.h>
 
 static delegate_capability_provider_fn g_capability_provider;
 
@@ -36,47 +37,49 @@ void delegate_infer_capability_requirements(const char *prompt, int tools_enable
       *min_context_out = min_context;
 }
 
-/* Does this agent satisfy the filter (caps + min_context, and not a dropped
- * deprecated model)? Pure predicate — no mutation — so the relaxation pass below
- * can dry-run it before deciding which capabilities to actually enforce.
- * Effective context window prefers the agent's explicit override (agents.json
- * `middleware.context_window`, via `aimee agent --ctx` or `ag_probe_slots`), then
- * the model capability catalog, so onboarding a model is a config/catalog change
- * not a registry code edit. */
-static int agent_meets_filter(const agent_t *ag, unsigned required_caps, int min_context,
-                              int drop_deprecated)
+/* Resolve one agent's facts for the router.
+ *
+ * This is the half that STAYS: it reads the model capability catalog, the
+ * agent's own registry record and the vendor CLI adapter. What those facts MEAN
+ * -- whether the agent qualifies, which of the three context windows applies,
+ * and whether inferred modality should be relaxed -- is decided by the module,
+ * which reads none of them.
+ *
+ * The three windows are all sent rather than resolved here on purpose: the
+ * PRECEDENCE between them is part of the rule, and resolving it locally would
+ * put half the rule back on this side. */
+static unsigned route_agent_facts(const agent_t *ag, int has_role, unsigned *cap_flags_out,
+                                  int *catalog_ctx_out, int *cli_ctx_out)
 {
    model_capability_t cap;
    int have_cap = model_capability_get(agent_catalog_provider(ag), ag->model, &cap);
-   if (drop_deprecated && have_cap && cap.deprecated)
-      return 0;
-   unsigned effective_flags = have_cap ? cap.flags : 0;
+
+   unsigned flags = AIMEE_DELEGATES_RF_ENABLED;
+   if (!ag->enabled)
+      flags = 0;
+   if (has_role)
+      flags |= AIMEE_DELEGATES_RF_HAS_ROLE;
+   if (have_cap)
+      flags |= AIMEE_DELEGATES_RF_HAVE_CAP;
+   if (have_cap && cap.deprecated)
+      flags |= AIMEE_DELEGATES_RF_DEPRECATED;
    if (ag->tools_enabled)
-      effective_flags |= MODEL_CAP_TOOLS;
-   else
-      effective_flags &= ~MODEL_CAP_TOOLS;
-   if (required_caps && (effective_flags & required_caps) != required_caps)
-      return 0;
-   if (min_context > 0)
+      flags |= AIMEE_DELEGATES_RF_TOOLS;
+
+   *cap_flags_out = have_cap ? cap.flags : 0u;
+   *catalog_ctx_out = have_cap ? cap.context_window : 0;
+
+   /* A tmux-CLI agent usually carries no `model` to resolve a window from -- the
+    * vendor's CLI picks the model itself -- so its adapter's declared window is
+    * offered as the last candidate. Whether it is USED is the module's call. */
+   *cli_ctx_out = 0;
+   if (ag->cli_kind[0])
    {
-      int effective_ctx = ag->middleware.context_window > 0 ? ag->middleware.context_window
-                                                            : (have_cap ? cap.context_window : 0);
-      /* Still no window: a tmux-CLI agent (codex/claude-oauth) usually carries no
-       * `model` to resolve one from — the vendor CLI picks the model itself — so
-       * fall back to the window its CLI adapter declares. Reached only when the
-       * model produced nothing (effective_ctx<=0), so model-backed agents are
-       * untouched. Covers records written before context_window was persisted
-       * onto the agent (no re-registration needed). */
-      if (effective_ctx <= 0 && ag->cli_kind[0])
-      {
-         const provider_cli_adapter_t *adapter = provider_cli_adapter_get(ag->cli_kind);
-         if (adapter && adapter->caps.max_context_tokens > 0)
-            effective_ctx = adapter->caps.max_context_tokens;
-      }
-      if (effective_ctx <= 0 || effective_ctx < min_context)
-         return 0;
+      const provider_cli_adapter_t *adapter = provider_cli_adapter_get(ag->cli_kind);
+      if (adapter && adapter->caps.max_context_tokens > 0)
+         *cli_ctx_out = adapter->caps.max_context_tokens;
    }
-   return 1;
+   return flags;
 }
 
 /* Disable every agent whose declared ceiling cannot serve this packet's scope.
@@ -134,64 +137,97 @@ int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
       return 0;
    if (!required_caps && min_context <= 0 && !drop_deprecated)
       return 0;
+   if (cfg->agent_count <= 0 || (unsigned)cfg->agent_count > AIMEE_DELEGATES_ROUTEFILTER_MAX_AGENTS)
+      return 0;
 
+   /* No agent serves this role at all: not this filter's refusal to phrase. The
+    * preflight that follows says something far more useful than "no model
+    * supports the required capabilities", so leave the fleet untouched and let
+    * it. Refusing here reads as a capability problem when it is a roster one. */
    int role_candidates = 0;
    for (int i = 0; i < cfg->agent_count; i++)
-   {
-      agent_t *ag = &cfg->agents[i];
-      if (ag->enabled && agent_has_role(ag, role))
+      if (cfg->agents[i].enabled && agent_has_role(&cfg->agents[i], role))
          role_candidates++;
-   }
    if (role_candidates == 0)
       return 0;
 
-   /* Modality caps (vision/pdf/audio) are inferred from prompt TEXT and so are
-    * best-effort: if requiring them would disable EVERY role candidate but the
-    * hard caps (tools + min_context) alone would keep some, relax the modality
-    * caps and route on the hard set — never hard-fail a text task fleet-wide just
-    * because it mentioned an image/pdf/audio filename. */
-   unsigned eff = required_caps;
-   if (required_caps & MODEL_CAP_MODALITY_SOFT)
+   unsigned count = (unsigned)cfg->agent_count;
+   size_t req_len = AIMEE_DELEGATES_ROUTEFILTER_HEADER_LEN +
+                    (size_t)count * AIMEE_DELEGATES_ROUTEFILTER_AGENT_LEN;
+   size_t resp_cap = 16u + (size_t)count * 4u;
+   uint8_t *req = malloc(req_len);
+   uint8_t *resp = malloc(resp_cap);
+   int *keep = calloc(count, sizeof(*keep));
+   if (!req || !resp || !keep)
    {
-      int kept_full = 0, kept_hard = 0;
-      unsigned hard = required_caps & ~MODEL_CAP_MODALITY_SOFT;
-      for (int i = 0; i < cfg->agent_count; i++)
-      {
-         agent_t *ag = &cfg->agents[i];
-         if (!ag->enabled || !agent_has_role(ag, role))
-            continue;
-         if (agent_meets_filter(ag, required_caps, min_context, drop_deprecated))
-            kept_full++;
-         if (agent_meets_filter(ag, hard, min_context, drop_deprecated))
-            kept_hard++;
-      }
-      if (kept_full == 0 && kept_hard > 0)
-      {
-         char sc[128];
-         model_capability_flags_string(required_caps & MODEL_CAP_MODALITY_SOFT, sc, sizeof(sc));
-         aimee_log(LOG_WARN, "delegate.route",
-                   "no model satisfies inferred modality caps (%s) for role '%s'; routing on hard "
-                   "caps only",
-                   sc[0] ? sc : "-", role);
-         eff = hard;
-      }
+      free(req);
+      free(resp);
+      free(keep);
+      return 0;
    }
 
-   int kept = 0;
-   for (int i = 0; i < cfg->agent_count; i++)
+   if (aimee_delegates_routefilter_request_begin(count, required_caps, min_context, drop_deprecated,
+                                                 req, req_len) == 0)
+   {
+      free(req);
+      free(resp);
+      free(keep);
+      return 0;
+   }
+   for (unsigned i = 0; i < count; i++)
+   {
+      const agent_t *ag = &cfg->agents[i];
+      unsigned cap_flags = 0;
+      int catalog_ctx = 0, cli_ctx = 0;
+      unsigned flags =
+          route_agent_facts(ag, agent_has_role(ag, role), &cap_flags, &catalog_ctx, &cli_ctx);
+      aimee_delegates_routefilter_request_set(req, i, flags, cap_flags,
+                                              ag->middleware.context_window, catalog_ctx, cli_ctx);
+   }
+
+   size_t resp_len = 0;
+   int rc = delegate_route_filter_apply(req, req_len, resp, resp_cap, &resp_len);
+   free(req);
+
+   int kept = 0, relaxed = 0;
+   unsigned effective = required_caps;
+   if (rc == 0)
+      rc = aimee_delegates_routefilter_response_decode(resp, resp_len, count, &kept, &relaxed,
+                                                       &effective, keep, count);
+   free(resp);
+
+   if (rc != 0)
+   {
+      /* No verdict: refuse to route rather than route on requirements nothing
+       * checked. The whole point of the filter is that a packet needing tools
+       * or a large window does not land on an agent with neither. */
+      free(keep);
+      if (errbuf && errbuf_sz > 0)
+         snprintf(errbuf, errbuf_sz, "could not evaluate model capabilities for role '%s'", role);
+      return -1;
+   }
+
+   if (relaxed)
+   {
+      char sc[128];
+      model_capability_flags_string(required_caps & MODEL_CAP_MODALITY_SOFT, sc, sizeof(sc));
+      aimee_log(LOG_WARN, "delegate.route",
+                "no model satisfies inferred modality caps (%s) for role '%s'; routing on hard "
+                "caps only",
+                sc[0] ? sc : "-", role);
+   }
+
+   /* Apply the answer. Only role candidates are touched: an agent that does not
+    * serve this role keeps whatever state it had. */
+   for (unsigned i = 0; i < count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled)
+      if (!ag->enabled || !agent_has_role(ag, role))
          continue;
-      if (!agent_has_role(ag, role))
-         continue;
-      if (!agent_meets_filter(ag, eff, min_context, drop_deprecated))
-      {
+      if (!keep[i])
          ag->enabled = 0;
-         continue;
-      }
-      kept++;
    }
+   free(keep);
 
    if (kept == 0)
    {
