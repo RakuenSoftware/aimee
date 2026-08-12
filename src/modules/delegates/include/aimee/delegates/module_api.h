@@ -1199,4 +1199,75 @@ static inline int aimee_delegates_launchplan_response_begin(aimee_delegates_rd_t
    return r->bad ? -1 : 0;
 }
 
+/* --- Review evidence (stage 20): did a review look at what it reviewed?
+ *
+ * The caller supplies the two facts the module cannot compute -- whether the
+ * review target arrived IN the prompt, and whether the worktree is dirty -- and
+ * gets back what to check and what is already wrong.
+ *
+ * The citation-vs-checkout comparison stays with the caller because it reads
+ * the checkout. What the module decides is which roles warrant it. */
+
+#define AIMEE_DELEGATES_EVENT_REVIEWEV          6676u
+#define AIMEE_DELEGATES_STAGE_REVIEWEV          20u
+#define AIMEE_DELEGATES_REVIEWEV_REQUEST_MAGIC  0x51455244u /* "DREQ" */
+#define AIMEE_DELEGATES_REVIEWEV_RESPONSE_MAGIC 0x53455244u /* "DRES" */
+#define AIMEE_DELEGATES_REVIEWEV_HEADER_LEN     16u
+
+#define AIMEE_DELEGATES_REVIEW_TARGET_PROVIDED (1u << 0)
+#define AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY  (1u << 1)
+
+#define AIMEE_DELEGATES_REVIEW_GUARDED        (1u << 0)
+#define AIMEE_DELEGATES_REVIEW_CHECK_SNIPPETS (1u << 1)
+#define AIMEE_DELEGATES_REVIEW_CONTRADICTION  (1u << 2)
+
+#define AIMEE_DELEGATES_REVIEW_ROLE_MAX 64u
+
+/* Returns the encoded length, or -1 when the buffer is too small (in which case
+ * nothing is written -- a truncated response would be judged on a partial
+ * report, which is exactly the failure this stage exists to catch). */
+static inline int aimee_delegates_reviewev_request_encode(const char *role, const char *response,
+                                                          unsigned flags, uint8_t *out, size_t cap)
+{
+   size_t role_len = role ? strlen(role) : 0;
+   size_t response_len = response ? strlen(response) : 0;
+   if (!out || role_len > AIMEE_DELEGATES_REVIEW_ROLE_MAX)
+      return -1;
+   size_t need = AIMEE_DELEGATES_REVIEWEV_HEADER_LEN + role_len + response_len;
+   if (need > cap)
+      return -1;
+
+   memset(out, 0, AIMEE_DELEGATES_REVIEWEV_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_REVIEWEV_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   aimee_delegates_put_u32(out + 8, flags);
+   aimee_delegates_put_u32(out + 12, (uint32_t)role_len);
+   if (role_len)
+      memcpy(out + AIMEE_DELEGATES_REVIEWEV_HEADER_LEN, role, role_len);
+   if (response_len)
+      memcpy(out + AIMEE_DELEGATES_REVIEWEV_HEADER_LEN + role_len, response, response_len);
+   return (int)need;
+}
+
+/* `message` receives the contradiction wording, NUL-terminated and empty when
+ * there is none. */
+static inline int aimee_delegates_reviewev_response_decode(const uint8_t *in, size_t len,
+                                                           unsigned *verdict, char *message,
+                                                           size_t message_cap)
+{
+   if (!in || len < 8 || !verdict ||
+       aimee_delegates_get_u32(in) != AIMEE_DELEGATES_REVIEWEV_RESPONSE_MAGIC)
+      return -1;
+   *verdict = aimee_delegates_get_u32(in + 4);
+   if (message && message_cap)
+   {
+      size_t n = len - 8;
+      if (n >= message_cap)
+         n = message_cap - 1;
+      memcpy(message, in + 8, n);
+      message[n] = '\0';
+   }
+   return 0;
+}
+
 #endif

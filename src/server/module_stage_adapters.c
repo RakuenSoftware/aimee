@@ -973,6 +973,27 @@ static int delegate_launch_plan(const uint8_t *request, size_t request_len, uint
    return 0;
 }
 
+/* Did a review look at what it reviewed? A wire. */
+static int delegate_review_evidence(const char *role, const char *response, unsigned flags,
+                                    unsigned *verdict, char *message, size_t message_cap)
+{
+   /* A delegate's report, plus a short role. Larger than any real review; a
+    * report that does not fit is not judged rather than judged in part. */
+   static _Thread_local uint8_t request[256 * 1024];
+   int request_len =
+       aimee_delegates_reviewev_request_encode(role, response, flags, request, sizeof(request));
+   if (request_len < 0)
+      return -1;
+
+   uint8_t buf[1024];
+   uint32_t response_len = 0;
+   if (call_module(AIMEE_DELEGATES_EVENT_REVIEWEV, AIMEE_DELEGATES_STAGE_REVIEWEV, request,
+                   (uint32_t)request_len, buf, sizeof(buf), &response_len) != 0)
+      return -1;
+   return aimee_delegates_reviewev_response_decode(buf, response_len, verdict, message,
+                                                   message_cap);
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -1197,6 +1218,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_route_filter_provider(delegate_route_filter);
    delegate_register_noop_write_provider(delegate_noop_write);
    delegate_register_launch_plan_provider(delegate_launch_plan);
+   delegate_register_review_evidence_provider(delegate_review_evidence);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path

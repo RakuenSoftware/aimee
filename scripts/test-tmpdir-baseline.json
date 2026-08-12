@@ -45,7 +45,7 @@
     "src/tests/test_cli_v1_delegate.c": 19,
     "src/tests/test_cli_v1_subcommands.c": 2,
     "src/tests/test_client_integrations.c": 16,
-    "src/tests/test_cmd_delegate.c": 8,
+    "src/tests/test_cmd_delegate.c": 6,
     "src/tests/test_cmd_hooks_scope.c": 8,
     "src/tests/test_cmd_profile.c": 2,
     "src/tests/test_code_audit.c": 1,
