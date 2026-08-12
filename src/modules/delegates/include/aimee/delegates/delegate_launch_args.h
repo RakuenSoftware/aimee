@@ -82,4 +82,19 @@ void delegate_register_may_write_provider(delegate_may_write_fn provider);
  * failure, which is logged). */
 int delegate_may_write(const char *role, const char *prompt);
 
+/* Which built sandbox images may be deleted.
+ *
+ * `request` is built with the imggc encoders above; `response` receives the
+ * raw reply for the per-image readers. FAILS CLOSED: with no provider there is
+ * no verdict and nothing is deleted, which is the safe direction -- an image
+ * kept costs disk, an image deleted in error costs a rebuild of something that
+ * may be in use. */
+typedef int (*delegate_image_gc_fn)(const uint8_t *request, size_t request_len, uint8_t *response,
+                                    size_t response_cap, size_t *response_len);
+
+void delegate_register_image_gc_provider(delegate_image_gc_fn provider);
+
+int delegate_image_gc_judge(const uint8_t *request, size_t request_len, uint8_t *response,
+                            size_t response_cap, size_t *response_len);
+
 #endif
