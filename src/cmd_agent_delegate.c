@@ -456,16 +456,6 @@ static void cmd_delegate_plan(int argc, char **argv)
    cJSON_Delete(plan);
 }
 
-/* Nested delegate creation is denied at runtime; do not add a prompt block that
- * tells delegates to fan out work they cannot actually create. */
-char *delegate_build_tier_context(const char *via_name, int tier_override, const char *role)
-{
-   (void)via_name;
-   (void)tier_override;
-   (void)role;
-   return NULL;
-}
-
 void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
@@ -836,28 +826,6 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
             sys_prompt = skill_sys_prompt;
             skill_sys_prompt = NULL; /* ownership transferred to template_sys_prompt */
          }
-      }
-   }
-
-   /* Inject tier orchestration context for tools-enabled mid-tier delegates */
-   {
-      char *tier_ctx = delegate_build_tier_context(via_agent_name, tier_override, role);
-      if (tier_ctx)
-      {
-         size_t base_len = sys_prompt ? strlen(sys_prompt) : 0;
-         size_t ctx_len = strlen(tier_ctx);
-         char *combined = malloc(base_len + ctx_len + 1);
-         if (combined)
-         {
-            if (sys_prompt)
-               memcpy(combined, sys_prompt, base_len);
-            memcpy(combined + base_len, tier_ctx, ctx_len + 1);
-            if (template_sys_prompt)
-               free(template_sys_prompt);
-            template_sys_prompt = combined;
-            sys_prompt = combined;
-         }
-         free(tier_ctx);
       }
    }
 

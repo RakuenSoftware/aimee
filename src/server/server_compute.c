@@ -1347,11 +1347,6 @@ void delegate_worker(void *arg)
    delegate_append_owned_block(&system_prompt, &template_sys_prompt,
                                delegate_inject_graph_context(prompt, cwd));
 
-   /* Tier orchestration context: for tools-enabled mid-tier delegates, append
-    * instructions describing how to fan out sub-tasks to lower-tier agents. */
-   delegate_append_owned_block(&system_prompt, &template_sys_prompt,
-                               delegate_build_tier_context(via_name, tier_override, role));
-
    /* Named-file drift guard: extract any repo-relative paths named in the prompt
     * and check pre-flight conditions before running the agent. */
    char named_paths[DELEGATE_DRIFT_MAX_PATHS][DELEGATE_DRIFT_PATH_MAX];
