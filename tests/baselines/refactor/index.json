@@ -7,7 +7,7 @@
       "files": [
         {
           "path": "docs/gen/cli-commands.md",
-          "sha256": "19e089ac3d7ca51781dc3c90ae64fac3d21eb4d92a924fec6220ae4ca9d6d2fe"
+          "sha256": "efbc1569b1db43a8e75030a12becef5b6e25c79c1aa06f95e0758296534c22a9"
         },
         {
           "path": "src/gateway/gateway_main.c",
@@ -255,7 +255,7 @@
         },
         {
           "path": "src/headers/aimee_session_guidance.h",
-          "sha256": "8d8c8822e62a1990e81aa19b5ffd72c99f918032cd0b62fe77e986a7e0dd2c46"
+          "sha256": "7a7337134945c302f366dcacbf55668ecc0df5a55cbc96fbf318a42e328390ef"
         },
         {
           "path": "src/headers/aimee_sha256.h",
@@ -363,7 +363,7 @@
         },
         {
           "path": "src/headers/cli_v1_routes_internal.h",
-          "sha256": "b53ad697fc014016e5395e242e2b4d770619e6c78d7c79941d38aab3f032f6df"
+          "sha256": "f6381ba737ec2aebf25ea5d7f1ea444a9ee7f6db7450941c21304e7505a07bc5"
         },
         {
           "path": "src/headers/client_constants.h",
@@ -1099,7 +1099,7 @@
         },
         {
           "path": "src/headers/server.h",
-          "sha256": "0e38be418b955ebc0b4a748bf85ff1438f8d88a75e38df918f5c06cfd1b6ff77"
+          "sha256": "7b343eac04c670dce856efe90eac916ef600fb7f04d33610f86762119b4ed00e"
         },
         {
           "path": "src/headers/server_cli_oauth.h",
@@ -1628,14 +1628,14 @@
       ]
     },
     "public-symbols": {
-      "sha256": "08458f5e94e5ecb46262586a54a36fabc19d1d901847017906773472bf173b89",
+      "sha256": "f3b09c3c2f2370e6a6ea10f7ccfc46cadf48c9585860abaa719709171b311e4a",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
       "files": [
         {
           "path": "docs/gen/v1-route-descriptor.json",
-          "sha256": "f13193dafa077f38ed580163f3613f1700f1fb6745ac90d383b094e8721d9aab"
+          "sha256": "bdda22aa6560c2206d8f21be677885ef5635f51ada0fe24f55f349d8413ab67f"
         }
       ]
     }

@@ -640,6 +640,10 @@ int handle_index_span(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "index.span");
 }
+int handle_index_investigate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "index.investigate");
+}
 int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "index.find_callers");

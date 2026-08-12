@@ -1120,6 +1120,42 @@ void pt_print_index_span(const char *method, cJSON *resp)
    if (content && content[0])
       printf("%s", content);
 }
+/* One block per question. The result payload is the KB's own evidence object, so
+ * it is printed as JSON rather than flattened: an agent chaining this wants the
+ * structure, and a human reading it gets the query line as a header. */
+void pt_print_index_investigate(const char *method, cJSON *resp)
+{
+   (void)method;
+   cJSON *results = cJSON_GetObjectItemCaseSensitive(resp, "results");
+   if (!cJSON_IsArray(results) || cJSON_GetArraySize(results) == 0)
+   {
+      printf("index investigate: no results\n");
+      return;
+   }
+   cJSON *row;
+   cJSON_ArrayForEach(row, results)
+   {
+      printf("--- %s\n", json_str(row, "query"));
+      cJSON *result = cJSON_GetObjectItemCaseSensitive(row, "result");
+      if (result)
+      {
+         char *s = cJSON_PrintUnformatted(result);
+         if (s)
+         {
+            printf("%s\n", s);
+            free(s);
+         }
+      }
+      else
+      {
+         const char *raw = json_str(row, "result_raw");
+         if (raw && raw[0] && strcmp(raw, "-") != 0)
+            printf("%s\n", raw);
+         else
+            printf("(no answer; error_status %s)\n", json_str(row, "error_status"));
+      }
+   }
+}
 void pt_print_index_find_callers(const char *method, cJSON *resp)
 {
    print_index_callers(resp);
