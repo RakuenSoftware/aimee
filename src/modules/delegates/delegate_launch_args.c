@@ -156,3 +156,26 @@ int delegate_image_gc_judge(const uint8_t *request, size_t request_len, uint8_t 
    }
    return g_image_gc(request, request_len, response, response_cap, response_len);
 }
+
+static delegate_route_filter_fn g_route_filter;
+
+void delegate_register_route_filter_provider(delegate_route_filter_fn provider)
+{
+   g_route_filter = provider;
+}
+
+int delegate_route_filter_apply(const uint8_t *request, size_t request_len, uint8_t *response,
+                                size_t response_cap, size_t *response_len)
+{
+   if (!request || !response || !response_len)
+      return -1;
+   *response_len = 0;
+   if (!g_route_filter)
+   {
+      LOG_ERROR("delegate.route",
+                "no route-filter provider registered; refusing to route on requirements nothing "
+                "checked");
+      return -1;
+   }
+   return g_route_filter(request, request_len, response, response_cap, response_len);
+}

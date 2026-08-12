@@ -919,4 +919,80 @@ static inline int aimee_delegates_imggc_response_at(const uint8_t *in, size_t le
    return -1;
 }
 
+/* --- Route filter (stage 17): which agents may serve this packet -----------
+ *
+ * The whole fleet at once. The modality relaxation is a decision ABOUT the
+ * fleet -- it fires only when requiring modality would leave nobody and
+ * dropping it would leave somebody -- so it cannot be asked per agent. */
+
+#define AIMEE_DELEGATES_EVENT_ROUTEFILTER          6673u
+#define AIMEE_DELEGATES_STAGE_ROUTEFILTER          17u
+#define AIMEE_DELEGATES_ROUTEFILTER_REQUEST_MAGIC  0x51525444u /* "DTRQ" */
+#define AIMEE_DELEGATES_ROUTEFILTER_RESPONSE_MAGIC 0x53525444u /* "DTRS" */
+#define AIMEE_DELEGATES_ROUTEFILTER_HEADER_LEN     24u
+#define AIMEE_DELEGATES_ROUTEFILTER_AGENT_LEN      32u
+#define AIMEE_DELEGATES_ROUTEFILTER_MAX_AGENTS     4096u
+
+#define AIMEE_DELEGATES_RF_ENABLED    1u
+#define AIMEE_DELEGATES_RF_HAS_ROLE   2u
+#define AIMEE_DELEGATES_RF_HAVE_CAP   4u
+#define AIMEE_DELEGATES_RF_DEPRECATED 8u
+#define AIMEE_DELEGATES_RF_TOOLS      16u
+
+static inline size_t aimee_delegates_routefilter_request_begin(unsigned count,
+                                                               unsigned required_caps,
+                                                               int min_context, int drop_deprecated,
+                                                               uint8_t *out, size_t cap)
+{
+   if (!out || count > AIMEE_DELEGATES_ROUTEFILTER_MAX_AGENTS ||
+       cap < AIMEE_DELEGATES_ROUTEFILTER_HEADER_LEN +
+                 (size_t)count * AIMEE_DELEGATES_ROUTEFILTER_AGENT_LEN)
+      return 0;
+   memset(out, 0, AIMEE_DELEGATES_ROUTEFILTER_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_ROUTEFILTER_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   out[5] = drop_deprecated ? 1u : 0u;
+   aimee_delegates_put_u32(out + 8, count);
+   aimee_delegates_put_u32(out + 12, required_caps);
+   aimee_delegates_put_u32(out + 16, (uint32_t)min_context);
+   return AIMEE_DELEGATES_ROUTEFILTER_HEADER_LEN;
+}
+
+/* Every agent slot is fixed-width, so `index` addresses it directly. */
+static inline void aimee_delegates_routefilter_request_set(uint8_t *out, unsigned index,
+                                                           unsigned flags, unsigned cap_flags,
+                                                           int override_ctx, int catalog_ctx,
+                                                           int cli_ctx)
+{
+   uint8_t *at = out + AIMEE_DELEGATES_ROUTEFILTER_HEADER_LEN +
+                 (size_t)index * AIMEE_DELEGATES_ROUTEFILTER_AGENT_LEN;
+   memset(at, 0, AIMEE_DELEGATES_ROUTEFILTER_AGENT_LEN);
+   aimee_delegates_put_u32(at, flags);
+   aimee_delegates_put_u32(at + 4, cap_flags);
+   aimee_delegates_put_u32(at + 8, (uint32_t)override_ctx);
+   aimee_delegates_put_u32(at + 12, (uint32_t)catalog_ctx);
+   aimee_delegates_put_u32(at + 16, (uint32_t)cli_ctx);
+}
+
+/* `keep` receives one int per agent, in the order they were sent. */
+static inline int aimee_delegates_routefilter_response_decode(const uint8_t *in, size_t len,
+                                                              unsigned count, int *kept_out,
+                                                              int *relaxed_out,
+                                                              unsigned *effective_caps_out,
+                                                              int *keep, size_t keep_cap)
+{
+   if (!in || len != 16u + (size_t)count * 4u || !keep || keep_cap < count ||
+       aimee_delegates_get_u32(in) != AIMEE_DELEGATES_ROUTEFILTER_RESPONSE_MAGIC)
+      return -1;
+   if (kept_out)
+      *kept_out = (int)aimee_delegates_get_u32(in + 4);
+   if (relaxed_out)
+      *relaxed_out = aimee_delegates_get_u32(in + 8) ? 1 : 0;
+   if (effective_caps_out)
+      *effective_caps_out = aimee_delegates_get_u32(in + 12);
+   for (unsigned i = 0; i < count; i++)
+      keep[i] = aimee_delegates_get_u32(in + 16 + i * 4) ? 1 : 0;
+   return 0;
+}
+
 #endif

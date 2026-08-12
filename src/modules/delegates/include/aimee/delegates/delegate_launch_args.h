@@ -97,4 +97,19 @@ void delegate_register_image_gc_provider(delegate_image_gc_fn provider);
 int delegate_image_gc_judge(const uint8_t *request, size_t request_len, uint8_t *response,
                             size_t response_cap, size_t *response_len);
 
+/* Which agents in a fleet may serve this packet.
+ *
+ * FAILS CLOSED: with no provider there is no verdict and the caller must refuse
+ * to route, rather than routing on requirements nothing checked -- the point of
+ * the filter is that a packet needing tools or a large window does not land on
+ * an agent that has neither. */
+typedef int (*delegate_route_filter_fn)(const uint8_t *request, size_t request_len,
+                                        uint8_t *response, size_t response_cap,
+                                        size_t *response_len);
+
+void delegate_register_route_filter_provider(delegate_route_filter_fn provider);
+
+int delegate_route_filter_apply(const uint8_t *request, size_t request_len, uint8_t *response,
+                                size_t response_cap, size_t *response_len);
+
 #endif

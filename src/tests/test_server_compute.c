@@ -3693,10 +3693,48 @@ static int compute_test_may_write(const char *role, const char *prompt, int *may
    return 0;
 }
 
+/* The route filter, as the module answers it.
+ *
+ * These cases are about compute and dispatch behaviour, not about capability
+ * routing, so the fleet is small and every candidate qualifies. The decode side
+ * is exercised for real, which is what keeps the harness honest about the wire
+ * shape even though the policy is tested against the module. */
+static int compute_test_route_filter(const uint8_t *request, size_t request_len, uint8_t *response,
+                                     size_t response_cap, size_t *response_len)
+{
+   if (request_len < AIMEE_DELEGATES_ROUTEFILTER_HEADER_LEN)
+      return -1;
+   unsigned count = aimee_delegates_get_u32(request + 8);
+   size_t need = 16u + (size_t)count * 4u;
+   if (response_cap < need)
+      return -1;
+
+   memset(response, 0, need);
+   aimee_delegates_put_u32(response, AIMEE_DELEGATES_ROUTEFILTER_RESPONSE_MAGIC);
+   unsigned kept = 0;
+   for (unsigned i = 0; i < count; i++)
+   {
+      const uint8_t *at = request + AIMEE_DELEGATES_ROUTEFILTER_HEADER_LEN +
+                          (size_t)i * AIMEE_DELEGATES_ROUTEFILTER_AGENT_LEN;
+      unsigned flags = aimee_delegates_get_u32(at);
+      int candidate = (flags & AIMEE_DELEGATES_RF_ENABLED) && (flags & AIMEE_DELEGATES_RF_HAS_ROLE);
+      if (candidate)
+      {
+         aimee_delegates_put_u32(response + 16 + i * 4, 1u);
+         kept++;
+      }
+   }
+   aimee_delegates_put_u32(response + 4, kept);
+   aimee_delegates_put_u32(response + 12, aimee_delegates_get_u32(request + 12));
+   *response_len = need;
+   return 0;
+}
+
 int main(void)
 {
    register_test_workspace_root();
    delegate_register_may_write_provider(compute_test_may_write);
+   delegate_register_route_filter_provider(compute_test_route_filter);
    assert(delegate_backend_register(&g_fake_docker) == 0);
    delegate_register_handoff_provider(compute_test_handoff_provider);
    test_codex_oauth_vault_server_principal_fallback();
