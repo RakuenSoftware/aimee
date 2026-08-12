@@ -99,165 +99,193 @@ static void make_file(const char *relpath)
 
 /* ---- delegate_check_named_file_drift (pre-flight) ---- */
 
-static void test_preflight_nonexistent_no_create_intent(void)
+/* A drift provider the tests drive directly, which also RECORDS what it was
+ * asked.
+ *
+ * What a missing file means, whether an unmodified one is drift or context, and
+ * how hard to fail are the module's rules, pinned against the module
+ * (server-go/modules/delegates/namedfiledrift_test.go) -- the fixtures that used
+ * to prove them here were ported case for case, by name.
+ *
+ * What only this side can test is the half it still owns: that the FACTS it
+ * gathers from a real filesystem are the right ones, and that it honours the
+ * verdict it gets back. So this decodes the request into something the tests can
+ * assert on, and answers with whatever the test asked for. */
+typedef struct
 {
-   char errbuf[512] = {0};
-   const char *paths[] = {"src/nonexistent.c"};
-   int rc = delegate_check_named_file_drift(paths, 1, "Edit src/nonexistent.c to fix the bug.",
-                                            NULL, NULL, 1, errbuf, sizeof(errbuf));
-   assert(rc == -1);
-   assert(strstr(errbuf, "nonexistent.c") != NULL);
-   assert(strstr(errbuf, "create intent") != NULL);
-   printf("  preflight_nonexistent_no_create_intent: ok\n");
+   char path[512];
+   unsigned flags;
+   int hit_count;
+} drift_seen_path_t;
+
+static struct
+{
+   char prompt[1024];
+   char response[1024];
+   char worktree[512];
+   unsigned flags;
+   int path_count;
+   drift_seen_path_t paths[8];
+   int calls;
+} g_drift_seen;
+
+static unsigned g_drift_severity;
+static const char *g_drift_message = "";
+
+static int shed_test_drift(const uint8_t *request, size_t request_len, unsigned *severity,
+                           char *message, size_t message_cap)
+{
+   memset(&g_drift_seen, 0, sizeof(g_drift_seen));
+
+   aimee_delegates_rd_t r;
+   r.buf = request;
+   r.len = request_len;
+   r.at = 0;
+   r.bad = 0;
+   if (aimee_delegates_rd_u32(&r) != AIMEE_DELEGATES_DRIFT_REQUEST_MAGIC ||
+       aimee_delegates_rd_u32(&r) != (uint32_t)AIMEE_DELEGATES_WIRE_VERSION)
+      return -1;
+
+   g_drift_seen.flags = aimee_delegates_rd_u32(&r);
+   aimee_delegates_rd_str(&r, g_drift_seen.prompt, sizeof(g_drift_seen.prompt));
+   aimee_delegates_rd_str(&r, g_drift_seen.response, sizeof(g_drift_seen.response));
+   aimee_delegates_rd_str(&r, g_drift_seen.worktree, sizeof(g_drift_seen.worktree));
+
+   uint32_t count = aimee_delegates_rd_u32(&r);
+   for (uint32_t i = 0; i < count && !r.bad; i++)
+   {
+      drift_seen_path_t seen;
+      memset(&seen, 0, sizeof(seen));
+      aimee_delegates_rd_str(&r, seen.path, sizeof(seen.path));
+      seen.flags = aimee_delegates_rd_u32(&r);
+      uint32_t hits = aimee_delegates_rd_u32(&r);
+      seen.hit_count = (int)hits;
+      for (uint32_t h = 0; h < hits && !r.bad; h++)
+      {
+         char scratch[512];
+         aimee_delegates_rd_str(&r, scratch, sizeof(scratch));
+      }
+      if (g_drift_seen.path_count < 8)
+         g_drift_seen.paths[g_drift_seen.path_count++] = seen;
+   }
+   if (r.bad)
+      return -1;
+
+   g_drift_seen.calls++;
+   if (severity)
+      *severity = g_drift_severity;
+   if (message && message_cap)
+      snprintf(message, message_cap, "%s", g_drift_message);
+   return 0;
 }
 
-static void test_preflight_nonexistent_with_create_intent(void)
+static const drift_seen_path_t *drift_seen(const char *path)
 {
-   char errbuf[512] = {0};
-   const char *paths[] = {"src/newfile.c"};
-   int rc =
-       delegate_check_named_file_drift(paths, 1, "Create a new file src/newfile.c with the module.",
-                                       NULL, NULL, 1, errbuf, sizeof(errbuf));
-   assert(rc == 0);
-   printf("  preflight_nonexistent_with_create_intent: ok\n");
+   for (int i = 0; i < g_drift_seen.path_count; i++)
+      if (strcmp(g_drift_seen.paths[i].path, path) == 0)
+         return &g_drift_seen.paths[i];
+   return NULL;
 }
 
-static void test_preflight_readonly_missing_file_as_context(void)
-{
-   char errbuf[512] = {0};
-   const char *paths[] = {"src/newfile.c"};
-   int rc = delegate_check_named_file_drift(paths, 1,
-                                            "Read-only review of src/newfile.c. Do not edit files.",
-                                            NULL, NULL, 1, errbuf, sizeof(errbuf));
-   assert(rc == 0);
-   printf("  preflight_readonly_missing_file_as_context: ok\n");
-}
-
-static void test_preflight_existing_file_no_error(void)
+/* The existence flag comes from the filesystem, resolved against the worktree
+ * for a relative path. This is the fact the whole check is built on. */
+static void test_drift_sends_existence_from_the_filesystem(void)
 {
    setup_tmpdir();
    char subdir[512];
    snprintf(subdir, sizeof(subdir), "%s/src", g_tmpdir);
    mkdir(subdir, 0755);
-   make_file("src/config.c");
-
-   char full_path[512];
-   snprintf(full_path, sizeof(full_path), "%s/src/config.c", g_tmpdir);
+   make_file("src/present.c");
 
    char errbuf[512] = {0};
-   const char *paths[] = {full_path};
-   int rc =
-       delegate_check_named_file_drift(paths, 1, "Edit the config parser to handle edge cases.",
-                                       NULL, NULL, 1, errbuf, sizeof(errbuf));
-   /* Existing file: pre-flight passes regardless */
-   assert(rc == 0);
+   const char *paths[] = {"src/present.c", "src/absent.c"};
+   g_drift_severity = AIMEE_DELEGATES_DRIFT_NONE;
+   g_drift_message = "";
+   (void)delegate_check_named_file_drift(paths, 2, "Edit the files.", NULL, g_tmpdir, 1, errbuf,
+                                         sizeof(errbuf));
+
+   assert(g_drift_seen.calls == 1);
+   assert(g_drift_seen.path_count == 2);
+   const drift_seen_path_t *present = drift_seen("src/present.c");
+   const drift_seen_path_t *absent = drift_seen("src/absent.c");
+   assert(present && (present->flags & AIMEE_DELEGATES_DRIFT_PATH_EXISTS));
+   assert(absent && !(absent->flags & AIMEE_DELEGATES_DRIFT_PATH_EXISTS));
+
    cleanup_tmpdir();
-   printf("  preflight_existing_file_no_error: ok\n");
+   printf("  drift_sends_existence_from_the_filesystem: ok\n");
 }
 
-static void test_preflight_relative_existing_file_with_base(void)
+/* The brief, the reply, the worktree and the role all travel with the question.
+ * A module that never learns the role cannot tell a write delegate that failed
+ * from a reviewer that was never going to write. */
+static void test_drift_sends_the_context_it_owns(void)
 {
-   setup_tmpdir();
-   char subdir[512];
-   snprintf(subdir, sizeof(subdir), "%s/isolated", g_tmpdir);
-   mkdir(subdir, 0755);
-   make_file("isolated/context.c");
-
    char errbuf[512] = {0};
-   const char *paths[] = {"isolated/context.c"};
-   int rc = delegate_check_named_file_drift(
-       paths, 1, "Read isolated/context.c and summarize it without edits.", NULL, g_tmpdir, 1,
-       errbuf, sizeof(errbuf));
-   assert(rc == 0);
-   cleanup_tmpdir();
-   printf("  preflight_relative_existing_file_with_base: ok\n");
+   const char *paths[] = {"src/a.c"};
+   g_drift_severity = AIMEE_DELEGATES_DRIFT_NONE;
+
+   (void)delegate_check_named_file_drift(paths, 1, "the brief", "the reply", "/some/worktree", 1,
+                                         errbuf, sizeof(errbuf));
+   assert(strcmp(g_drift_seen.prompt, "the brief") == 0);
+   assert(strcmp(g_drift_seen.response, "the reply") == 0);
+   assert(strcmp(g_drift_seen.worktree, "/some/worktree") == 0);
+   assert(g_drift_seen.flags & AIMEE_DELEGATES_DRIFT_ROLE_IS_WRITE);
+
+   (void)delegate_check_named_file_drift(paths, 1, "the brief", NULL, NULL, 0, errbuf,
+                                         sizeof(errbuf));
+   /* Pre-flight: no reply yet, and a read role. */
+   assert(g_drift_seen.response[0] == '\0');
+   assert(!(g_drift_seen.flags & AIMEE_DELEGATES_DRIFT_ROLE_IS_WRITE));
+
+   printf("  drift_sends_the_context_it_owns: ok\n");
 }
 
-static void test_preflight_remote_scp_path_skipped(void)
+/* An empty index-hit list is SENT, not treated as a reason to drop the path.
+ * Empty means "the index could not say", which the module reads as ambiguous;
+ * skipping the path instead would silently excuse every missing file whenever
+ * the index is down. */
+static void test_drift_sends_paths_even_when_the_index_says_nothing(void)
 {
-   /* An ops/deploy brief that names a remote scp target must NOT hard-fail the
-    * delegate: the tokenizer strips the `user@host:` prefix and extracts the bare
-    * absolute host path, which does not resolve under the worktree. */
-   const char *prompt =
-       "Update aimee-server on the host. The server config lives at "
-       "admin@192.168.1.254:/mnt/media/.plugins/aimee-server/server/home/aimee.yaml; "
-       "read it over SSH and confirm the bearer token.";
-
-   /* The subject here is the PREFLIGHT, not the extraction: a named path that
-    * does not resolve under the worktree must not hard-fail the delegate. What
-    * the tokenizer yields for this brief is pinned in the delegates module's own
-    * tests (server-go/modules/delegates/paths_test.go), so it is stated as a
-    * literal rather than recomputed through a stage this binary cannot reach. */
-   char extracted[DELEGATE_DRIFT_MAX_PATHS][DELEGATE_DRIFT_PATH_MAX];
-   snprintf(extracted[0], DELEGATE_DRIFT_PATH_MAX, "%s",
-            "/mnt/media/.plugins/aimee-server/server/home/aimee.yaml");
-
    char errbuf[512] = {0};
-   const char *paths[] = {extracted[0]};
-   int rc = delegate_check_named_file_drift(paths, 1, prompt, NULL, "/home/virant/dev/aimee", 1,
-                                            errbuf, sizeof(errbuf));
-   assert(rc == 0);
-   assert(errbuf[0] == '\0');
-   printf("  preflight_remote_scp_path_skipped: ok\n");
+   const char *paths[] = {"src/definitely_absent_xyz.c"};
+   g_drift_severity = AIMEE_DELEGATES_DRIFT_NONE;
+
+   (void)delegate_check_named_file_drift(paths, 1, "Edit src/definitely_absent_xyz.c.", NULL, NULL,
+                                         1, errbuf, sizeof(errbuf));
+   assert(g_drift_seen.path_count == 1);
+   assert(strcmp(g_drift_seen.paths[0].path, "src/definitely_absent_xyz.c") == 0);
+   printf("  drift_sends_paths_even_when_the_index_says_nothing: ok\n");
 }
 
-static void test_preflight_absolute_outside_worktree_skipped(void)
+/* The verdict is the module's; this side only translates it into the return
+ * code its callers branch on, and surfaces the wording verbatim. */
+static void test_drift_honours_the_verdict(void)
 {
-   /* A bare absolute path outside the worktree root is a referenced external
-    * file, not an in-repo create target — pre-flight must not hard-fail. */
    char errbuf[512] = {0};
-   const char *paths[] = {"/mnt/media/other/thing.c"};
-   int rc = delegate_check_named_file_drift(
-       paths, 1, "Update /mnt/media/other/thing.c on the remote host.", NULL,
-       "/home/virant/dev/aimee", 1, errbuf, sizeof(errbuf));
-   assert(rc == 0);
-   printf("  preflight_absolute_outside_worktree_skipped: ok\n");
-}
+   const char *paths[] = {"src/a.c"};
 
-static void test_preflight_relative_under_worktree_still_fails(void)
-{
-   /* Regression guard: a relative, in-worktree path that doesn't exist and has no
-    * create verb MUST still hard-fail — the external-path skip must not weaken
-    * the guard for real in-repo targets. */
-   char errbuf[512] = {0};
-   const char *paths[] = {"src/nonexistent_xyz.c"};
-   int rc =
-       delegate_check_named_file_drift(paths, 1, "Edit src/nonexistent_xyz.c to fix the bug.", NULL,
-                                       "/home/virant/dev/aimee", 1, errbuf, sizeof(errbuf));
-   assert(rc == -1);
-   assert(strstr(errbuf, "create intent") != NULL);
-   printf("  preflight_relative_under_worktree_still_fails: ok\n");
-}
-
-static void test_read_role_scraped_path_no_hard_drift(void)
-{
-   /* WFE regression: a read/analysis delegate (understand/split/review) threads a
-    * reference doc into its prompt whose markdown links get scraped as named
-    * paths. It produces its artifact from its reply and creates no files, so a
-    * missing scraped path must NEVER hard-fail it — the role, not the prompt's
-    * write-y wording, is the authoritative gate. The SAME inputs under a write
-    * role still hard-fail (proving the gate is what changed). An edit-verb prompt
-    * with no create intent isolates the gate: a write role hard-drifts on the
-    * missing path, a read role does not. */
-   const char *prompt = "Edit done/full-autonomous-development.md to revise the plan.";
-   const char *paths[] = {"done/full-autonomous-development.md"};
-
-   char errbuf[512] = {0};
-   int rc_read = delegate_check_named_file_drift(paths, 1, prompt, NULL, "/home/virant/dev/aimee",
-                                                 0 /* read role */, errbuf, sizeof(errbuf));
-   assert(rc_read == 0);
-   assert(errbuf[0] == '\0');
+   g_drift_severity = AIMEE_DELEGATES_DRIFT_HARD;
+   g_drift_message = "the wording the module chose";
+   assert(delegate_check_named_file_drift(paths, 1, "p", NULL, NULL, 1, errbuf, sizeof(errbuf)) ==
+          -1);
+   assert(strcmp(errbuf, "the wording the module chose") == 0);
 
    errbuf[0] = '\0';
-   int rc_write = delegate_check_named_file_drift(paths, 1, prompt, NULL, "/home/virant/dev/aimee",
-                                                  1 /* write role */, errbuf, sizeof(errbuf));
-   assert(rc_write == -1);
-   printf("  read_role_scraped_path_no_hard_drift: ok\n");
-}
+   g_drift_severity = AIMEE_DELEGATES_DRIFT_SOFT;
+   g_drift_message = "a softer complaint";
+   assert(delegate_check_named_file_drift(paths, 1, "p", NULL, NULL, 1, errbuf, sizeof(errbuf)) ==
+          1);
+   assert(strcmp(errbuf, "a softer complaint") == 0);
 
-/* The prompt write-intent rule moved to the module (stage 15), which composes it
- * with the role's default into one answer. Its fixtures went with it and are
- * pinned there. */
+   errbuf[0] = '\0';
+   g_drift_severity = AIMEE_DELEGATES_DRIFT_NONE;
+   g_drift_message = "";
+   assert(delegate_check_named_file_drift(paths, 1, "p", NULL, NULL, 1, errbuf, sizeof(errbuf)) ==
+          0);
+   assert(errbuf[0] == '\0');
+
+   printf("  drift_honours_the_verdict: ok\n");
+}
 
 static void test_validation_bundle_identifies_source_worktree(void)
 {
@@ -361,179 +389,55 @@ static void test_validation_bundle_keeps_large_diff_handlers(void)
 
 /* ---- delegate_check_named_file_drift (post-run) ---- */
 
-static void test_postrun_path_in_response(void)
+/* Post-run with a worktree, `git diff` is the ground truth, and whether it
+ * mentions a path is a fact this side looks up. */
+static void test_drift_sends_diff_membership_post_run(void)
 {
    setup_tmpdir();
+   char cmd[1024];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q", g_tmpdir);
+   if (system(cmd) != 0)
+   {
+      cleanup_tmpdir();
+      printf("  drift_sends_diff_membership_post_run: skipped (git unavailable)\n");
+      return;
+   }
    char subdir[512];
    snprintf(subdir, sizeof(subdir), "%s/src", g_tmpdir);
    mkdir(subdir, 0755);
-   make_file("src/config.c");
-
-   char full_path[512];
-   snprintf(full_path, sizeof(full_path), "%s/src/config.c", g_tmpdir);
-
-   char response[1024];
-   snprintf(response, sizeof(response),
-            "I edited %s to fix the parsing bug by updating the token loop.", full_path);
-
-   char errbuf[512] = {0};
-   const char *paths[] = {full_path};
-   int rc =
-       delegate_check_named_file_drift(paths, 1, NULL, response, NULL, 1, errbuf, sizeof(errbuf));
-   assert(rc == 0);
-   cleanup_tmpdir();
-   printf("  postrun_path_in_response: ok\n");
-}
-
-static void test_postrun_path_absent_hard_drift(void)
-{
-   setup_tmpdir();
-   char subdir[512];
-   snprintf(subdir, sizeof(subdir), "%s/src", g_tmpdir);
-   mkdir(subdir, 0755);
-   make_file("src/config.c");
-
-   char full_path[512];
-   snprintf(full_path, sizeof(full_path), "%s/src/config.c", g_tmpdir);
-
-   const char *response = "I fixed the authentication module by updating the session handler.";
-
-   char errbuf[512] = {0};
-   const char *paths[] = {full_path};
-   int rc =
-       delegate_check_named_file_drift(paths, 1, NULL, response, NULL, 1, errbuf, sizeof(errbuf));
-   assert(rc == -1);
-   assert(strstr(errbuf, "drift") != NULL || strstr(errbuf, "not found") != NULL);
-   cleanup_tmpdir();
-   printf("  postrun_path_absent_hard_drift: ok\n");
-}
-
-static void test_postrun_readonly_path_absent_soft_drift(void)
-{
-   setup_tmpdir();
-   char subdir[512];
-   snprintf(subdir, sizeof(subdir), "%s/src", g_tmpdir);
-   mkdir(subdir, 0755);
-   make_file("src/config.c");
-
-   char full_path[512];
-   snprintf(full_path, sizeof(full_path), "%s/src/config.c", g_tmpdir);
-
-   const char *prompt = "Review src/config.c. Do not edit files.";
-   const char *response = "No blocking findings.";
-
-   char errbuf[512] = {0};
-   const char *paths[] = {full_path};
-   int rc =
-       delegate_check_named_file_drift(paths, 1, prompt, response, NULL, 1, errbuf, sizeof(errbuf));
-   assert(rc == 1);
-   assert(strstr(errbuf, "read-only context") != NULL);
-   cleanup_tmpdir();
-   printf("  postrun_readonly_path_absent_soft_drift: ok\n");
-}
-
-static void test_postrun_basename_only_soft_drift(void)
-{
-   setup_tmpdir();
-   char subdir[512];
-   snprintf(subdir, sizeof(subdir), "%s/src", g_tmpdir);
-   mkdir(subdir, 0755);
-   make_file("src/config.c");
-
-   char full_path[512];
-   snprintf(full_path, sizeof(full_path), "%s/src/config.c", g_tmpdir);
-
-   /* Response mentions "config.c" but not the full path */
-   const char *response = "I edited config.c to fix the parsing bug.";
-
-   char errbuf[512] = {0};
-   const char *paths[] = {full_path};
-   int rc =
-       delegate_check_named_file_drift(paths, 1, NULL, response, NULL, 1, errbuf, sizeof(errbuf));
-   assert(rc == 1); /* soft drift — only basename matched */
-   assert(strstr(errbuf, "ambiguous") != NULL || strstr(errbuf, "basename") != NULL);
-   cleanup_tmpdir();
-   printf("  postrun_basename_only_soft_drift: ok\n");
-}
-
-static void test_postrun_nonexistent_skipped(void)
-{
-   /* Nonexistent files are skipped in the post-run check */
-   const char *response = "I completed the task without touching that file.";
-   char errbuf[512] = {0};
-   const char *paths[] = {"/tmp/definitely_nonexistent_file_xyz.c"};
-   int rc =
-       delegate_check_named_file_drift(paths, 1, NULL, response, NULL, 1, errbuf, sizeof(errbuf));
-   assert(rc == 0);
-   printf("  postrun_nonexistent_skipped: ok\n");
-}
-
-static void test_postrun_wt_readonly_missing_file_soft_drift(void)
-{
-   setup_tmpdir();
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q && git -C '%s' commit --allow-empty -m init -q",
+   make_file("src/touched.c");
+   make_file("src/untouched.c");
+   snprintf(cmd, sizeof(cmd),
+            "git -C '%s' add -A && git -C '%s' -c user.email=t@t "
+            "-c user.name=t commit -qm base",
             g_tmpdir, g_tmpdir);
    if (system(cmd) != 0)
    {
       cleanup_tmpdir();
-      printf("  postrun_wt_readonly_missing_file_soft_drift: skipped (git unavailable)\n");
+      printf("  drift_sends_diff_membership_post_run: skipped (git unavailable)\n");
       return;
    }
 
-   char missing_path[512];
-   snprintf(missing_path, sizeof(missing_path), "%s/src/missing.c", g_tmpdir);
-   const char *prompt = "Read-only review of src/missing.c. Do not edit files.";
-   const char *response = "No blocking findings.";
+   char path[512];
+   snprintf(path, sizeof(path), "%s/src/touched.c", g_tmpdir);
+   FILE *f = fopen(path, "a");
+   assert(f != NULL);
+   fputs("/* changed */\n", f);
+   fclose(f);
+
    char errbuf[512] = {0};
-   const char *paths[] = {missing_path};
-   int rc = delegate_check_named_file_drift(paths, 1, prompt, response, g_tmpdir, 1, errbuf,
-                                            sizeof(errbuf));
-   assert(rc == 1);
-   assert(strstr(errbuf, "read-only context") != NULL);
+   const char *paths[] = {"src/touched.c", "src/untouched.c"};
+   g_drift_severity = AIMEE_DELEGATES_DRIFT_NONE;
+   (void)delegate_check_named_file_drift(paths, 2, "p", "a reply", g_tmpdir, 1, errbuf,
+                                         sizeof(errbuf));
+
+   const drift_seen_path_t *touched = drift_seen("src/touched.c");
+   const drift_seen_path_t *untouched = drift_seen("src/untouched.c");
+   assert(touched && (touched->flags & AIMEE_DELEGATES_DRIFT_PATH_IN_DIFF));
+   assert(untouched && !(untouched->flags & AIMEE_DELEGATES_DRIFT_PATH_IN_DIFF));
+
    cleanup_tmpdir();
-   printf("  postrun_wt_readonly_missing_file_soft_drift: ok\n");
-}
-
-/* With a real worktree, an existing context file not touched by the delegate
- * must produce soft drift (rc=1), not hard drift. */
-static void test_postrun_wt_context_file_soft_drift(void)
-{
-   setup_tmpdir();
-   /* Create a minimal git repo so git diff --name-only HEAD works. */
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q && git -C '%s' commit --allow-empty -m init -q",
-            g_tmpdir, g_tmpdir);
-   if (system(cmd) != 0)
-   {
-      cleanup_tmpdir();
-      printf("  postrun_wt_context_file_soft_drift: skipped (git unavailable)\n");
-      return;
-   }
-
-   char subdir[512];
-   snprintf(subdir, sizeof(subdir), "%s/src", g_tmpdir);
-   mkdir(subdir, 0755);
-   make_file("src/context.c"); /* pre-existing file, staged in git */
-
-   snprintf(cmd, sizeof(cmd), "git -C '%s' add src/context.c && git -C '%s' commit -m add -q",
-            g_tmpdir, g_tmpdir);
-   (void)system(cmd);
-
-   char full_path[512];
-   snprintf(full_path, sizeof(full_path), "%s/src/context.c", g_tmpdir);
-
-   /* Delegate's response doesn't mention the context file — response mentions only new work. */
-   const char *response = "Created src/new_module.c with the requested functionality.";
-   char errbuf[512] = {0};
-   const char *paths[] = {full_path};
-   int rc = delegate_check_named_file_drift(paths, 1, NULL, response, g_tmpdir, 1, errbuf,
-                                            sizeof(errbuf));
-   /* context file not in git diff, exists on disk → soft drift, not hard */
-   assert(rc == 1);
-   assert(strstr(errbuf, "context") != NULL || strstr(errbuf, "not modified") != NULL);
-   cleanup_tmpdir();
-   printf("  postrun_wt_context_file_soft_drift: ok\n");
+   printf("  drift_sends_diff_membership_post_run: ok\n");
 }
 
 static void test_null_inputs(void)
@@ -560,26 +464,16 @@ int main(void)
    printf("test_delegate_context_shed:\n");
 
    delegate_register_may_write_provider(shed_test_may_write);
+   delegate_register_drift_provider(shed_test_drift);
 
-   test_preflight_nonexistent_no_create_intent();
-   test_preflight_nonexistent_with_create_intent();
-   test_preflight_readonly_missing_file_as_context();
-   test_preflight_existing_file_no_error();
-   test_preflight_relative_existing_file_with_base();
-   test_preflight_remote_scp_path_skipped();
-   test_preflight_absolute_outside_worktree_skipped();
-   test_preflight_relative_under_worktree_still_fails();
-   test_read_role_scraped_path_no_hard_drift();
+   test_drift_sends_existence_from_the_filesystem();
+   test_drift_sends_the_context_it_owns();
+   test_drift_sends_paths_even_when_the_index_says_nothing();
+   test_drift_honours_the_verdict();
+   test_drift_sends_diff_membership_post_run();
    test_validation_bundle_identifies_source_worktree();
    test_validation_bundle_keeps_large_diff_handlers();
 
-   test_postrun_path_in_response();
-   test_postrun_path_absent_hard_drift();
-   test_postrun_readonly_path_absent_soft_drift();
-   test_postrun_basename_only_soft_drift();
-   test_postrun_nonexistent_skipped();
-   test_postrun_wt_readonly_missing_file_soft_drift();
-   test_postrun_wt_context_file_soft_drift();
    test_null_inputs();
 
    printf("All delegate_context_shed tests passed.\n");
