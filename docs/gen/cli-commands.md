@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 66
+Total commands: 67
 
 ## Core commands
 
@@ -232,20 +232,14 @@ Subcommands:
 
 ### `aimee agent`
 
-Sub-agent management.
+Deprecated alias for `model`.
 
 Subcommands:
 
 ```
-  list             List configured delegates
-  add              Add or update a delegate provider
-  setup            Run an agent provider's attended OAuth setup
-  local            Register/update a local OpenAI-compatible delegate
-                   (--provider openai|llama-eval for request shaping)
-  remove           Remove a configured delegate
-  enable           Enable a configured delegate
-  disable          Disable a configured delegate
-  probe            Probe delegate endpoint, slots, and execution
+  Every subcommand of `aimee model`, kept working under the old name.
+  A roster entry is one (endpoint, model) target, so it is now a MODEL;
+  `aimee catalog` is the separate per-model capability metadata.
 ```
 
 ### `aimee api`
@@ -286,6 +280,18 @@ Subcommands:
   config           Show resolved aux task->provider/model mapping
   test <task> "<prompt>"
                    Execute a single auxiliary task call
+```
+
+### `aimee catalog`
+
+Model capability metadata.
+
+Subcommands:
+
+```
+  list             List catalogued models (--capability <name>, --open-weights)
+  show <model>     Show context, cost, flags, cutoff, deprecation
+  refresh          Refresh model metadata cache
 ```
 
 ### `aimee claude-proxy`
@@ -494,14 +500,20 @@ Subcommands:
 
 ### `aimee model`
 
-Model capability metadata.
+Model roster management.
 
 Subcommands:
 
 ```
-  list             List known models (--capability <name>, --open-weights)
-  show <model>     Show context, cost, flags, cutoff, deprecation
-  refresh          Refresh model metadata cache
+  list             List configured models
+  add              Add or update a model
+  setup            Run a provider's attended OAuth setup
+  local            Register/update a local OpenAI-compatible model
+                   (--provider openai|llama-eval for request shaping)
+  remove           Remove a configured model
+  enable           Enable a configured model
+  disable          Disable a configured model
+  probe            Probe a model's endpoint, slots, and execution
 ```
 
 ### `aimee notes`
