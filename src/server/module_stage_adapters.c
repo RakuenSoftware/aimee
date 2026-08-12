@@ -994,6 +994,20 @@ static int delegate_review_evidence(const char *role, const char *response, unsi
                                                    message_cap);
 }
 
+/* Did the delegate touch the files its brief named? A passthrough: the caller
+ * encodes, because the caller holds the paths and the facts about them. */
+static int delegate_drift(const uint8_t *request, size_t request_len, unsigned *severity,
+                          char *message, size_t message_cap)
+{
+   uint8_t response[4096];
+   uint32_t response_len = 0;
+   if (call_module(AIMEE_DELEGATES_EVENT_DRIFT, AIMEE_DELEGATES_STAGE_DRIFT, request,
+                   (uint32_t)request_len, response, sizeof(response), &response_len) != 0)
+      return -1;
+   return aimee_delegates_drift_response_decode(response, response_len, severity, message,
+                                                message_cap);
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -1219,6 +1233,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_noop_write_provider(delegate_noop_write);
    delegate_register_launch_plan_provider(delegate_launch_plan);
    delegate_register_review_evidence_provider(delegate_review_evidence);
+   delegate_register_drift_provider(delegate_drift);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path

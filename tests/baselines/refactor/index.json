@@ -107,7 +107,7 @@
         },
         {
           "path": "Dockerfile.server",
-          "sha256": "91b06328210dbe6b23fc54423b9258ebc256939585988d48cb46a3bb6a7da742"
+          "sha256": "39d54732d065b10c1290800c9c6eaa73b47345e08d266c1d142e85f000694e7c"
         },
         {
           "path": "Dockerfile.status-authority",
@@ -255,7 +255,7 @@
         },
         {
           "path": "src/headers/aimee_session_guidance.h",
-          "sha256": "ea7b3692d842bef51682c30169b80e0f78b23b1dcb36ebc7b5d2dfdb24782c49"
+          "sha256": "ef451c5a10af976119830b891cdb017de947c4ded0c54ae205f2da3f00ec5944"
         },
         {
           "path": "src/headers/aimee_sha256.h",
@@ -1435,7 +1435,7 @@
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_launch_args.h",
-          "sha256": "59483fd8c870ed99a9e0e78070e421c4b045d5e248a74925ae7d1b000fd20fec"
+          "sha256": "53def22ce166ebe5ca81685d62b0db22055ff6c976d281cf9db236bd9ee0515a"
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_patch_coordinator.h",
@@ -1471,7 +1471,7 @@
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/module_api.h",
-          "sha256": "8bee29851c1ccf31d51b31c0ab23bee0a9369d1051150ec5f7a85c8e305001bf"
+          "sha256": "7dcadfd14c26e8c875b2a79e3fcea19d4f698d9028136eec767c0fd9b69b4cd9"
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/panel_provider.h",
@@ -1628,7 +1628,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "821f50cb30a9d54718b028d32d742ac4df771311730762937887ffd0aec4a3d8",
+      "sha256": "a645fb767564eb103f66727c649108433f726309d6e31116abc2a0febb9a1e61",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

@@ -179,4 +179,23 @@ void delegate_register_review_evidence_provider(delegate_review_evidence_fn prov
 int delegate_review_evidence_judge(const char *role, const char *response, unsigned flags,
                                    unsigned *verdict, char *message, size_t message_cap);
 
+/* Stage 21: did the delegate touch the files its brief named?
+ *
+ * Bytes rather than a struct, for the same reason as the launch-plan seam: the
+ * request carries a whole set of paths with their facts, and the caller already
+ * holds them.
+ *
+ * Fails CLOSED, and here that means NO DRIFT: with no provider the delegate is
+ * accepted. A hard verdict FAILS a delegate that may have done its job
+ * perfectly, so inventing one because a module is missing would turn an
+ * infrastructure problem into a wrong answer about the user's work. */
+typedef int (*delegate_drift_fn)(const uint8_t *request, size_t request_len, unsigned *severity,
+                                 char *message, size_t message_cap);
+
+void delegate_register_drift_provider(delegate_drift_fn provider);
+
+/* Returns 0 with *severity filled, or -1 on any failure (logged, severity 0). */
+int delegate_drift_judge(const uint8_t *request, size_t request_len, unsigned *severity,
+                         char *message, size_t message_cap);
+
 #endif
