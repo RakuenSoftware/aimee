@@ -118,6 +118,16 @@ static const char *ast_grep_binary(void)
    return NULL;
 }
 
+/* Expose resolution so the tool surface can withhold ast_grep_search when no
+ * ast-grep exists. Advertising a search that cannot run is the same defect as
+ * advertising delegate tools with delegation off: the agent spends a call to
+ * learn the capability is absent, and before the resolver was fixed it did not
+ * even learn that -- it was told there were no matches. */
+int ast_grep_available(void)
+{
+   return ast_grep_binary() != NULL;
+}
+
 #define AST_GREP_MAX_OUTPUT (256 * 1024)
 
 cJSON *tool_ast_grep_search(cJSON *args)
@@ -140,9 +150,10 @@ cJSON *tool_ast_grep_search(cJSON *args)
       return text_content(
           "error: ast-grep is not installed (a `sg` on PATH that is util-linux's "
           "set-group-ID command does not count, and is why this used to answer 'No matches "
-          "found' instead). Install it with: curl -fsSL "
-          "https://github.com/ast-grep/ast-grep/releases/latest/download/"
-          "sg-x86_64-unknown-linux-musl.tar.gz | tar xz -C ~/.local/bin");
+          "found' instead). Install the release asset for your platform from "
+          "https://github.com/ast-grep/ast-grep/releases/latest into ~/.local/bin "
+          "(x86_64 Linux: app-x86_64-unknown-linux-gnu.zip, which unzips to "
+          "ast-grep and sg)");
    const char *argv[] = {sg, "--json", "--pattern", pattern, "--lang", lang, path, NULL};
 
    char *output = NULL;
@@ -152,10 +163,10 @@ cJSON *tool_ast_grep_search(cJSON *args)
    if (rc == 127 || (!output && rc != 0))
    {
       free(output);
-      return text_content("error: ast-grep binary (sg) not found. "
-                          "Install it with: curl -fsSL "
-                          "https://github.com/ast-grep/ast-grep/releases/latest/download/"
-                          "sg-x86_64-unknown-linux-musl.tar.gz | tar xz -C ~/.local/bin");
+      return text_content("error: ast-grep failed to run. Install the release asset for "
+                          "your platform from "
+                          "https://github.com/ast-grep/ast-grep/releases/latest into "
+                          "~/.local/bin");
    }
 
    if (!output || !output[0])

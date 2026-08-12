@@ -1167,7 +1167,7 @@
         },
         {
           "path": "src/headers/server_mcp_internal.h",
-          "sha256": "1cd7285ec96ea9e2f6dfaea2fc9ccfa25b4c6c4c35b54e0e3bc97eb023934fd7"
+          "sha256": "27b431c632c235e6dc9b97117f6f93e7eec720ca5f38093bd54f621d8cce77b9"
         },
         {
           "path": "src/headers/server_mcp_learning.h",
@@ -1628,7 +1628,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "4898f86bfb48c3e4f8ca777e952cb54cb09ee84679e49768988877f3d1525ab2",
+      "sha256": "9939a03ac45661ae28ee422e34793a49b7209aa90259427fdaa9cac7a0766ecb",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
