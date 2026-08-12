@@ -832,13 +832,21 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(OBJDIR)/aimee-module $(UNIT_TEST_
 	@# while this suite runs. A few white-box tests invoke handle_git_verify again;
 	@# give those nested test invocations their own lock instead of deadlocking on
 	@# their parent process, while still serializing them with one another.
+	@# The failure markers live in their OWN directory, NOT in $$th.
+	@# $$th is the tests' HOME and TMPDIR, and (per the note above) most tests
+	@# that create anything create it there; a test that removes or recreates its
+	@# HOME takes every other parallel job's marker with it. The runner then
+	@# printed "Unit test failures:" followed by NOTHING, which is the least
+	@# useful possible output: a red suite that will not say what went red, so the
+	@# whole run has to be repeated serially just to recover the name.
 	@th="$$(mktemp -d /tmp/aut.XXXXXX)"; \
+	fd="$$(mktemp -d /tmp/autf.XXXXXX)"; \
 	export HOME="$$th" TMPDIR="$$th" AIMEE_VERIFY_LOCK_FILE="$$th/nested-verify.lock"; \
 	unset AIMEE_HOME AIMEE_API_REMOTE_WRITES AIMEE_API_MTLS AIMEE_API_BEARER_TOKEN \
 	  AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL \
 	  AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET; \
-	trap 'rm -rf "$$th"' EXIT; \
-	export AIMEE_TEST_FAILURE_DIR="$$th"; \
+	trap 'rm -rf "$$th" "$$fd"' EXIT; \
+	export AIMEE_TEST_FAILURE_DIR="$$fd"; \
 	export AIMEE_TEST_MODULE_BIN="$(CURDIR)/$(OBJDIR)/aimee-module"; \
 	jobs="$(TEST_RUN_JOBS)"; \
 	if [ "$$jobs" -le 1 ]; then \
@@ -855,7 +863,10 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(OBJDIR)/aimee-module $(UNIT_TEST_
 	  if ! printf '%s\0' $(UNIT_TEST_TARGETS) | \
 	    xargs -0 -n1 -P "$$jobs" sh -c 't="$$1"; log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; echo "  $$t"; "./$$t" >"$$log" 2>&1; rc="$$?"; cat "$$log"; rm -f "$$log"; if [ "$$rc" -ne 0 ]; then echo "FAILED: $$t" >&2; printf "FAILED: %s\\n" "$$t" >"$$AIMEE_TEST_FAILURE_DIR/failure.$$$$"; fi; exit "$$rc"' _; then \
 	    echo "Unit test failures:" >&2; \
-	    cat "$$th"/failure.* 2>/dev/null >&2 || true; \
+	    if ! cat "$$fd"/failure.* >&2 2>/dev/null; then \
+	      echo "  (no marker written: a test was killed by a signal before it could" >&2; \
+	      echo "   record itself, or xargs itself failed - re-run with TEST_RUN_JOBS=1)" >&2; \
+	    fi; \
 	    exit 1; \
 	  fi; \
 	fi
