@@ -23,6 +23,12 @@ grep -q 'preset.json_compact' posix/agent_runtime.c ||
     fail "safe JSON compaction is not controlled by its preset"
 grep -q '!anthropic && (preset.history_fold || preset.compress)' posix/agent_runtime.c ||
     fail "agent history reduction is not gated to aggressive OpenAI-family routes"
+# The chatgpt route folds. It was excluded for years as "unverified", which made
+# the fold unreachable on exactly the route a codex-provider deployment uses --
+# measured as a 0-token difference on CT 403. Anthropic stays excluded above (its
+# exact prefix controls cache reuse); chatgpt must not be re-added beside it.
+grep -q 'mreq.history_fold = preset.history_fold || config_fold_enabled();' posix/agent_runtime.c ||
+    fail "the delegate history fold is gated again (chatgpt exclusion reintroduced?)"
 grep -q 'gw_mutate_upstream_ok(parity)' server/anthropic_http.c ||
     fail "Anthropic ingress mutation does not preserve native Anthropic prefixes"
 grep -q 'gw_mutate_upstream_ok(upstream_is_anthropic)' server/openai_chat.c ||

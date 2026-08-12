@@ -58,6 +58,7 @@
     "server-go/modules/economizer/eager_test.go",
     "server-go/modules/economizer/episode_test.go",
     "server-go/modules/economizer/fold_test.go",
+    "server-go/modules/economizer/gateway_anthropic_test.go",
     "server-go/modules/economizer/gateway_test.go",
     "server-go/modules/economizer/gateway_wire_test.go",
     "server-go/modules/economizer/json_compact_test.go",

@@ -840,8 +840,23 @@ native_provider_http:
             memset(&mreq, 0, sizeof mreq);
             /* The fold is reachable on its own, not only via the AGGRESSIVE
              * preset: fold.enabled had zero live callers before, so the only way
-             * to turn it on was a tier that also enables wire mutation. */
-            mreq.history_fold = (preset.history_fold || config_fold_enabled()) && !chatgpt;
+             * to turn it on was a tier that also enables wire mutation.
+             *
+             * THE CHATGPT ROUTE FOLDS TOO. It was excluded in #913 as "unverified"
+             * rather than as known-broken, and the exclusion then outlived the
+             * doubt that motivated it: chatgpt is what a codex-provider deployment
+             * actually uses, so excluding it meant the fold never ran there at all.
+             * Measured on CT 403 with the module attached and mode=aggressive, the
+             * same request cost an IDENTICAL 38826 prompt tokens with the
+             * economizer attached and detached — the lever was structurally
+             * unreachable on the only route the box uses.
+             *
+             * The original doubt was about SHAPE: folded turns are {role, content}
+             * with a string content, and agent_build_request_responses forwards
+             * `input` without converting to typed items. The Responses API accepts
+             * that string shorthand, which is why this is safe, and it is verified
+             * live against the real backend rather than argued from the spec. */
+            mreq.history_fold = preset.history_fold || config_fold_enabled();
             mreq.compress = preset.compress;
             mreq.freeze_guard_enabled = 1;
             mreq.freeze_guard_horizon = preset.freeze_guard_horizon;
@@ -883,6 +898,18 @@ native_provider_http:
                                    &reduced_messages, &econ_res) == 0 &&
                 econ_res.mutated && reduced_messages)
                reduce_active = 1;
+            /* Same line the gateway seam emits, for the same reason: the delegate
+             * seam recorded NOTHING about what a reduction saved.
+             * agent_record_reduce_ledger was deleted as having no callers and
+             * nothing replaced it, so the only way to tell whether the fold had run
+             * was to diff token counts between two deploys. reused=1 means the
+             * freeze held and the prefix was byte-identical to last turn. */
+            aimee_log(LOG_INFO, "economizer.delegate",
+                      "seam=delegate mutated=%d reason=%s baseline=%d reduced=%d removed=%d "
+                      "folded=%d retained=%d reused=%d",
+                      econ_res.mutated, econ_res.reason[0] ? econ_res.reason : "none",
+                      econ_res.baseline_tokens, econ_res.reduced_tokens, econ_res.removed_tokens,
+                      econ_res.folded_msgs, econ_res.retained_msgs, econ_res.reused_boundary);
             /* Persist the state the module handed back, so the freeze boundary
              * and page table survive into the next turn. */
             if (econ_res.state && econ_res.state[0])

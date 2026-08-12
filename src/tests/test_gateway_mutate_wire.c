@@ -15,6 +15,29 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 
+/* The seam now carries reducer state per session so it can hold a freeze boundary.
+ * These fixtures stand in for db1 rather than linking sqlite into what is a pure
+ * decision fixture: every test below runs with the module unreachable, so the seam
+ * bypasses before it would ever read a state blob. Persistence itself is covered by
+ * the Go module's state tests and verified live on the deploy. */
+int db1_economizer_state_save(const char *session_id, const char *json);
+int db1_economizer_state_load(const char *session_id, char *out, size_t out_sz);
+
+int db1_economizer_state_save(const char *session_id, const char *json)
+{
+   (void)session_id;
+   (void)json;
+   return 0;
+}
+
+int db1_economizer_state_load(const char *session_id, char *out, size_t out_sz)
+{
+   (void)session_id;
+   if (out && out_sz)
+      out[0] = '\0';
+   return -1; /* "no state": the first turn of a session takes this path */
+}
+
 /* A container {"messages":[<msg>]} whose single message tags which array it is. */
 static cJSON *container_with(const char *tag)
 {
@@ -252,14 +275,15 @@ static void test_no_behavior_change_when_off(void)
 
 static void test_upstream_provider_gate(void)
 {
-   /* Policy: gateway wire-mutation is OpenAI-only. An Anthropic upstream is ALWAYS excluded,
-    * regardless of the enable state, so its prompt-cached verbatim passthrough is never
-    * mutated. For a non-Anthropic upstream the helper simply mirrors the base enable gate
-    * (off under this test's default config HOME). */
-   assert(gw_mutate_upstream_ok(1) == 0);                      /* Anthropic: never mutate */
-   assert(gw_mutate_upstream_ok(0) == gw_mutate_is_enabled()); /* non-Anthropic: base gate */
+   /* Policy: the upstream's provider no longer decides. Anthropic was excluded while
+    * the gateway had no freeze boundary to keep a folded prefix byte-stable; now that
+    * it persists one per session, BOTH providers follow the same base enable gate.
+    * The gate that matters is the tier, not the vendor. */
+   assert(gw_mutate_upstream_ok(1) == gw_mutate_is_enabled()); /* Anthropic: base gate */
+   assert(gw_mutate_upstream_ok(0) == gw_mutate_is_enabled()); /* non-Anthropic: same */
    assert(gw_mutate_is_enabled() == 0);                        /* default config -> dark */
    assert(gw_mutate_upstream_ok(0) == 0);                      /* so both are off here */
+   assert(gw_mutate_upstream_ok(1) == 0);                      /* including Anthropic */
 }
 
 /* gw_stat_to_json: the JSON the /v1/economizer/stats endpoint serves reflects the
