@@ -1492,6 +1492,7 @@ static const struct
     {"index.structure", marshal_index_structure},
     {"index.span", marshal_index_span},
     {"index.investigate", marshal_index_investigate},
+    {"index.hybrid", marshal_index_hybrid},
     {"insights.overview", marshal_insights_overview},
     {"job.list", marshal_coord_jobs_list},
     {"job.start", marshal_coord_job_start},

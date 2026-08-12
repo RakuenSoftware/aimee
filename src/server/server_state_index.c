@@ -272,6 +272,97 @@ int handle_index_span(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* One fused lexical+semantic query against the index. */
+static cJSON *hybrid_row(const char *query, const char *symbol, const char *project,
+                         int all_projects, int max_results)
+{
+   cJSON *row = cJSON_CreateObject();
+   if (!row)
+      return NULL;
+   jo_add_str(row, "query", query);
+   int st = -1;
+   char *j = kb_client_code_hybrid_scoped(query, symbol, project, all_projects, max_results, &st);
+   if (j)
+   {
+      cJSON *parsed = cJSON_Parse(j);
+      if (parsed)
+         cJSON_AddItemToObject(row, "result", parsed);
+      else
+         jo_add_str(row, "result_raw", j);
+      free(j);
+   }
+   else
+      cJSON_AddNumberToObject(row, "error_status", st);
+   return row;
+}
+
+/* Search the index for a PHRASE rather than a symbol -- an error string, a
+ * config key, a concept -- as a command.
+ *
+ * The MCP twin additionally does §3 cite-capture, which observes retrieved paths
+ * against an MCP session id so a re-cited source earns trust across turns. That
+ * is deliberately NOT mirrored here: it is keyed on a session this path does not
+ * have, and inventing one would write trust records against an identity that
+ * does not exist. The retrieval itself is the same kb_client call, so the
+ * ANSWERS match; only the side-effect is absent.
+ *
+ *   aimee index hybrid "connection pool lease" "retry backoff"
+ */
+int handle_index_hybrid(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cJSON *queries = cJSON_GetObjectItemCaseSensitive(req, "queries");
+   int batch = cJSON_IsArray(queries) && cJSON_GetArraySize(queries) > 0;
+   const char *single = jo_str(req, "query", NULL);
+   if (!batch && (!single || !single[0]))
+      return server_send_error(conn, "missing query", NULL);
+
+   const char *symbol = jo_str(req, "symbol", NULL);
+   const char *scope = jo_str(req, "scope", NULL);
+   if (scope && strcmp(scope, "all") != 0 && strcmp(scope, "current") != 0)
+      return server_send_error(conn, "index.hybrid scope must be current or all", NULL);
+   int all_projects = (scope && strcmp(scope, "all") == 0) ? 1 : 0;
+
+   char project_buf[MAX_PATH_LEN] = "";
+   const char *project = jo_str(req, "project", NULL);
+   if (!project || !project[0])
+   {
+      const char *cwd = jo_str(req, "cwd", NULL);
+      if (cwd)
+         (void)server_active_project_from_cwd(cwd, project_buf, sizeof(project_buf));
+      project = project_buf;
+   }
+   if (!all_projects && (!project || !project[0]))
+      return server_send_error(
+          conn, "scope_required: no active project; pass --scope all explicitly", NULL);
+
+   int max_results = jo_int(req, "max_results", 20);
+   if (max_results < 1 || max_results > 100)
+      max_results = 20;
+
+   cJSON *resp = jo_ok();
+   cJSON *arr = cJSON_AddArrayToObject(resp, "results");
+   if (batch)
+   {
+      cJSON *e;
+      cJSON_ArrayForEach(e, queries)
+      {
+         if (!cJSON_IsString(e) || !e->valuestring[0])
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         cJSON *row = hybrid_row(e->valuestring, symbol, project, all_projects, max_results);
+         if (row)
+            cJSON_AddItemToArray(arr, row);
+      }
+   }
+   else
+   {
+      cJSON *row = hybrid_row(single, symbol, project, all_projects, max_results);
+      if (row)
+         cJSON_AddItemToArray(arr, row);
+   }
+   return send_and_free(conn, resp);
+}
+
 /* One question, answered from the index with the code attached. */
 static cJSON *investigate_one(const char *query, const char *symbol, const char *project)
 {

@@ -167,6 +167,7 @@ static const struct
     {"index", "structure", "index.structure", NULL, NULL, 0},
     {"index", "span", "index.span", NULL, NULL, 0},
     {"index", "investigate", "index.investigate", NULL, NULL, 0},
+    {"index", "hybrid", "index.hybrid", NULL, NULL, 0},
     {"index", "callers", "index.find_callers", NULL, NULL, 0},
     {"index", "deps", "index.deps", NULL, NULL, 0},
     {"workspace", "add", "workspace.add", NULL, NULL, 300000},
@@ -655,6 +656,33 @@ cJSON *marshal_index_span(int argc, char **argv)
  * EVERY positional is a question, so several become one invocation and one
  * round trip -- the same reason the MCP tool grew a `queries` array. A single
  * question still works and is sent as `query`, matching the tool's shape. */
+/* `aimee index hybrid "<phrase>" ["<phrase>" ...]` -- same positional-as-query
+ * shape as investigate, for the same reason: several phrases in one invocation
+ * is one round trip. --scope all widens beyond the active project. */
+cJSON *marshal_index_hybrid(int argc, char **argv)
+{
+   static const char *bools[] = {"json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bools, &opts);
+
+   cJSON *req = marshal_no_args("index.hybrid");
+   if (opts.pos_count == 1)
+      cJSON_AddStringToObject(req, "query", opts.positional[0]);
+   else if (opts.pos_count > 1)
+   {
+      cJSON *arr = cJSON_AddArrayToObject(req, "queries");
+      for (int i = 0; i < opts.pos_count; i++)
+         cJSON_AddItemToArray(arr, cJSON_CreateString(opts.positional[i]));
+   }
+   const char *scope = rpc_get(&opts, "scope");
+   if (scope && scope[0])
+      cJSON_AddStringToObject(req, "scope", scope);
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
+   return req;
+}
+
 cJSON *marshal_index_investigate(int argc, char **argv)
 {
    static const char *bools[] = {"json", NULL};
