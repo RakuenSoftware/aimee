@@ -107,9 +107,17 @@ int econ_module_reduce(const cJSON *messages, const char *system_prompt, econ_mo
    if (req->state && req->state[0])
       cJSON_AddStringToObject(payload, "state", req->state);
 
+   /* Ask for the result code instead of discarding it. Passing NULL here made an
+    * economizer that was never reached indistinguishable from one that ran and
+    * declined: both surface as "no reduction", both are silent, and the only
+    * visible difference is a token bill that does not fall. That ambiguity cost a
+    * full night of bisecting a deployment which turned out to be fine. */
+   aimee_module_call_result_t call_result = AIMEE_MODULE_CALL_OK;
    cJSON *reply =
        aimee_module_json_call(AIMEE_ECONOMIZER_EVENT_REDUCE, AIMEE_ECONOMIZER_STAGE_REDUCE, payload,
-                              ECON_MODULE_CALL_MAX_BODY, ECON_MODULE_CALL_TIMEOUT_MS, NULL);
+                              ECON_MODULE_CALL_MAX_BODY, ECON_MODULE_CALL_TIMEOUT_MS, &call_result);
+   if (out)
+      out->call_result = (int)call_result;
    /* Detach the borrowed transcript before the payload is freed, so the caller's
     * array survives regardless of how the call went. */
    cJSON_DetachItemFromObjectCaseSensitive(payload, "messages");
