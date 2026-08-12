@@ -59,3 +59,23 @@ Keep one purpose per PR. Include:
 - security and failure behavior when the change crosses a trust boundary.
 
 Do not include generated artifacts without their source change.
+
+### When `testing` moves under you
+
+`tests/baselines/refactor/index.json` is generated: a digest per file of the
+public surface. Two branches touching the same file rewrite the same digest
+line, so rebasing onto a moved `testing` conflicts there routinely. Neither
+side's bytes are the answer: the answer is whatever the merged tree produces.
+
+    make -C src resolve-generated     # regenerate it, stage it
+    git rebase --continue
+
+This is a script rather than a git merge driver deliberately. A driver runs
+DURING the merge, before git has necessarily written every merged file, so a
+whole-tree digest computed there can be silently wrong: measured, a driver made
+the rebase complete clean with a baseline that did not match the tree. A loud
+conflict is better than a quiet mismatch, so the conflict stays and only its
+resolution is automated.
+
+The check itself is unchanged and still runs in CI. If you regenerate a baseline
+you did not mean to change, that is a real finding. Read the diff.
