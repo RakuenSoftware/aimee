@@ -323,6 +323,23 @@ ino_t g_config_ino;
 char g_config_cache_path[MAX_PATH_LEN];
 int g_config_cached;
 
+void config_file_id_from(const struct stat *st, config_file_id_t *out)
+{
+   if (!st || !out)
+      return;
+   out->mtime = AIMEE_STAT_MTIM(*st);
+   out->size = st->st_size;
+   out->ino = st->st_ino;
+}
+
+int config_file_id_eq(const config_file_id_t *a, const config_file_id_t *b)
+{
+   if (!a || !b)
+      return 0;
+   return a->mtime.tv_sec == b->mtime.tv_sec && a->mtime.tv_nsec == b->mtime.tv_nsec &&
+          a->size == b->size && a->ino == b->ino;
+}
+
 static int timespec_eq(const struct timespec *a, const struct timespec *b)
 {
    return a->tv_sec == b->tv_sec && a->tv_nsec == b->tv_nsec;

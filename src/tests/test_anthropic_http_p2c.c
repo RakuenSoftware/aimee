@@ -125,6 +125,33 @@ agent_t *agent_default_primary(agent_config_t *cfg)
    return cfg && cfg->agent_count ? &cfg->agents[0] : NULL;
 }
 
+/* Registry accessors (see agent_config.h): the production ones read a cached
+ * registry in place; here they answer from this file's stubbed loader so the
+ * test's fixture still decides the outcome. */
+int agent_registry_find(const char *name, agent_t *out)
+{
+   agent_config_t cfg;
+   if (!name || !out || agent_load_config(&cfg) != 0)
+      return -1;
+   agent_t *found = agent_find(&cfg, name);
+   if (!found)
+      return -1;
+   *out = *found;
+   return 0;
+}
+
+int agent_registry_default_primary(agent_t *out)
+{
+   agent_config_t cfg;
+   if (!out || agent_load_config(&cfg) != 0)
+      return -1;
+   agent_t *found = agent_default_primary(&cfg);
+   if (!found)
+      return -1;
+   *out = *found;
+   return 0;
+}
+
 void delegate_drivers_init(void)
 {
 }

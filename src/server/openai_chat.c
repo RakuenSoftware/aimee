@@ -179,32 +179,24 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
     * (or empty) means the default agent; any other value selects a configured
     * agent by name, and is rejected with model_not_found when it matches none
     * (never silently falls back to a different model). */
-   agent_config_t acfg;
-   if (agent_load_config(&acfg) != 0)
-   {
-      free(pi_env);
-      free(prompt);
-      openai_format_error_code(resp, cap, "server_error", "no agent configuration available",
-                               AIMEE_ERR_NO_PRIMARY);
-      return 503;
-   }
+   agent_t agbuf;
    agent_t *ag = NULL;
    if (model[0] && strcmp(model, "aimee") != 0)
    {
       /* An explicitly requested model must match a configured agent — never
        * silently fall back to the default (that would run a different model than
        * the client asked for and echo the wrong name back). */
-      ag = agent_find(&acfg, model);
-      if (!ag)
+      if (agent_registry_find(model, &agbuf) != 0)
       {
          free(pi_env);
          free(prompt);
          openai_format_error(resp, cap, "model_not_found", "the requested model is not available");
          return 404;
       }
+      ag = &agbuf;
    }
-   if (!ag)
-      ag = agent_default_primary(&acfg);
+   if (!ag && agent_registry_default_primary(&agbuf) == 0)
+      ag = &agbuf;
    if (!ag)
    {
       free(pi_env);
@@ -672,28 +664,21 @@ static int responses_handler(const char *body, char *resp, int cap)
       return 400;
    }
 
-   agent_config_t acfg;
-   if (agent_load_config(&acfg) != 0)
-   {
-      free(prompt);
-      openai_format_error_code(resp, cap, "server_error", "no agent configuration available",
-                               AIMEE_ERR_NO_PRIMARY);
-      return 503;
-   }
+   agent_t agbuf;
    agent_t *ag = NULL;
    if (model[0] && strcmp(model, "aimee") != 0)
    {
       /* Explicit model must match a configured agent — no silent fallback. */
-      ag = agent_find(&acfg, model);
-      if (!ag)
+      if (agent_registry_find(model, &agbuf) != 0)
       {
          free(prompt);
          openai_format_error(resp, cap, "model_not_found", "the requested model is not available");
          return 404;
       }
+      ag = &agbuf;
    }
-   if (!ag)
-      ag = agent_default_primary(&acfg);
+   if (!ag && agent_registry_default_primary(&agbuf) == 0)
+      ag = &agbuf;
    if (!ag)
    {
       free(prompt);
@@ -791,16 +776,19 @@ static void emit_text_chunk(server_http_sse_emit emit, void *ctx, const char *id
 
 /* Resolve the agent for `model` into *acfg (caller-owned, must outlive the
  * returned pointer — it indexes into acfg). Returns NULL when none configured. */
-static agent_t *stream_pick_agent(agent_config_t *acfg, const char *model)
+/* Fills `out` with the selected agent; returns 0 on success.
+ *
+ * Took an agent_config_t* and returned a pointer into it, which meant every
+ * caller put 350,968 bytes on the stack of a request thread to obtain one
+ * 16,720-byte agent. It now asks the registry for just that agent. */
+static int stream_pick_agent(agent_t *out, const char *model)
 {
-   if (agent_load_config(acfg) != 0)
-      return NULL;
-   /* An explicitly requested model must match a configured agent. Returning NULL
+   /* An explicitly requested model must match a configured agent. Failing
     * (rather than falling back to the default) makes callers refuse instead of
     * silently streaming a different model than the client asked for. */
    if (model[0] && strcmp(model, "aimee") != 0)
-      return agent_find(acfg, model);
-   return agent_default_primary(acfg);
+      return agent_registry_find(model, out);
+   return agent_registry_default_primary(out);
 }
 
 static int chat_stream_handler(const char *body, server_http_sse_emit emit, void *ctx)
@@ -820,8 +808,8 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
       return 0;
    }
 
-   agent_config_t acfg;
-   agent_t *ag = stream_pick_agent(&acfg, model);
+   agent_t agbuf;
+   agent_t *ag = stream_pick_agent(&agbuf, model) == 0 ? &agbuf : NULL;
    if (!ag)
    {
       emit_chunk(emit, ctx, id, model, created, 1, "no agent configured", 0);
@@ -954,8 +942,8 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
       return 0;
    }
 
-   agent_config_t acfg;
-   agent_t *ag = stream_pick_agent(&acfg, model);
+   agent_t agbuf;
+   agent_t *ag = stream_pick_agent(&agbuf, model) == 0 ? &agbuf : NULL;
    if (!ag)
    {
       emit_text_chunk(emit, ctx, id, model, created, "no agent configured", 0);
@@ -1329,8 +1317,8 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    }
    (void)stream; /* this handler is the streaming path; flag is informational */
 
-   agent_config_t acfg;
-   agent_t *ag = stream_pick_agent(&acfg, model);
+   agent_t agbuf;
+   agent_t *ag = stream_pick_agent(&agbuf, model) == 0 ? &agbuf : NULL;
    if (!ag)
    {
       if (openai_format_responses_created(id, model, created, frame, sizeof(frame)) > 0)
@@ -1606,7 +1594,8 @@ static void *run_job_worker(void *arg)
                                   run_status_json(j, "in_progress", buf, RUN_JSON_CAP));
 
    agent_config_t acfg;
-   agent_t *ag = stream_pick_agent(&acfg, j->model);
+   agent_t agbuf;
+   agent_t *ag = stream_pick_agent(&agbuf, j->model) == 0 ? &agbuf : NULL;
    if (!ag)
    {
       openai_runs_store_append_event(j->run_id, "error", "{\"error\":\"no agent configured\"}");
@@ -1737,8 +1726,8 @@ static int runs_handler(const char *body, char *resp, int cap)
    }
 
    /* Validate an agent is configured synchronously so callers still get 503 fast. */
-   agent_config_t acfg;
-   agent_t *ag = stream_pick_agent(&acfg, model);
+   agent_t agbuf;
+   agent_t *ag = stream_pick_agent(&agbuf, model) == 0 ? &agbuf : NULL;
    if (!ag)
    {
       free(prompt);

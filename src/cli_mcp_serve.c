@@ -501,13 +501,45 @@ static void handle_initialize(cJSON *id)
     *
     * Discovery is for what is NOT in the list. Leading with it taxes every session
     * to buy something almost none of them need. */
+   /* AND SAY WHICH SURFACE IS CHEAPER, because this text is the reason agents
+    * pick the expensive one.
+    *
+    * It used to say the listed tools were the "first move on repository
+    * questions", full stop. That is the ONE instruction guaranteed to reach every
+    * MCP session -- it rides the initialize handshake, before any work, whether or
+    * not the agent calls a tool we happen to hook. Measured result: 13.3 MCP tool
+    * calls per benchmark cell and ZERO `aimee ...` invocations across 13 cells,
+    * with the binary on PATH throughout.
+    *
+    * An MCP call is one call, one turn, and the whole conversation re-sent. The
+    * same lookups as commands join with && into a shell call the agent is already
+    * making. The tools are not worse; the SURFACE is, whenever more than one
+    * lookup is wanted. So the cheaper form leads and the tools stay named for the
+    * cases that have no command form.
+    *
+    * Hooking memory_recall(session_start) instead was tried first and did not
+    * work: that tool is optional, the agent simply never called it, and the
+    * guidance never arrived. Only the handshake is unskippable. */
    static const char *const base_instructions =
        "The tools in tools/list are directly callable — call them directly, by "
        "name, with their arguments. Do not route a listed tool through call_tool, "
-       "and do not look one up before using it. find_symbol, "
-       "preview_blast_radius, search_docs and search_memory are listed: use them "
-       "as your first move on repository questions rather than after a shell "
-       "search. Only when you need a tool that is NOT listed: find_tools("
+       "and do not look one up before using it. "
+       "IF YOU CAN RUN A SHELL COMMAND, USE THE COMMAND FORM, NOT THE TOOL. "
+       "`aimee index find <symbol>`, `aimee index callers <symbol>`, `aimee index "
+       "blast-radius <file>`, `aimee index structure <file>`, `aimee index deps "
+       "<file>` and `aimee memory search <terms>` answer the same questions as the "
+       "listed tools. They are ordinary commands, so they join with && inside a "
+       "shell call you are already making — one round trip for as many lookups as "
+       "you want. Every tool call is instead its own turn and re-sends the whole "
+       "conversation, so N tool calls cost N times what the same N commands cost. "
+       "This holds for a single lookup too: fold it into the command you were "
+       "already going to run. "
+       "Use the listed tools when there is no command form — ast_grep_search, and "
+       "index with command=span, command=hybrid or command=investigate — or when "
+       "you genuinely cannot run a shell command. Tool calls cannot be chained, so "
+       "when you do call one, use its plural argument (spans, queries, symbols, "
+       "identifiers) instead of repeating the call. "
+       "Only when you need a tool that is NOT listed: find_tools("
        "\"<keyword>\") to locate it, describe_tool(\"<name>\") for its schema, "
        "then call_tool with that name and matching arguments. get_help(\"<topic>\") "
        "explains how aimee itself works — work queue, delegation, memory, git, "
