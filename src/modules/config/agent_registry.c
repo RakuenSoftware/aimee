@@ -16,6 +16,8 @@
  * and publishes into this cache through the small API in agent_registry.h. */
 #include "agent_registry.h"
 
+#include "config_internal.h"
+
 #include <pthread.h>
 #include <string.h>
 
@@ -26,55 +28,18 @@
  * access holds g_cache_lock. The lock is NOT held across file I/O parsing: a
  * reloader parses into its own buffer first and only then publishes. */
 static agent_config_t g_cache;
-static struct timespec g_mtime;
-/* mtime alone is not a safe cache key. It is not monotonic and not always
- * distinct: a rewritten agents.json can land with a timestamp equal to (or older
- * than) the cached one, and the cache then serves stale content forever. Observed
- * live on the tiered appliance filesystem, where a freshly installed agents.json
- * arrived with an mtime ~9h in the past and /v1/agents kept failing until the
- * file was touched. Size and inode are free from the same stat() and make an
- * in-place rewrite detectable. */
-static off_t g_size;
-static ino_t g_ino;
+static config_file_id_t g_id;
 static int g_cached;
 static pthread_mutex_t g_cache_lock = PTHREAD_MUTEX_INITIALIZER;
-
-static struct timespec stat_mtime(const struct stat *st)
-{
-   struct timespec ts;
-#if defined(__APPLE__)
-   ts = st->st_mtimespec;
-#elif defined(_WIN32) || defined(_WIN64)
-   ts.tv_sec = st->st_mtime;
-   ts.tv_nsec = 0;
-#elif defined(__linux__)
-   ts = st->st_mtim;
-#else
-   ts.tv_sec = st->st_mtime;
-   ts.tv_nsec = 0;
-#endif
-   return ts;
-}
-
-static int mtime_eq(const struct timespec *a, const struct timespec *b)
-{
-   return a->tv_sec == b->tv_sec && a->tv_nsec == b->tv_nsec;
-}
-
-/* A cache hit requires the file to look identical on every cheap axis stat()
- * gives us: same mtime, same size, same inode. */
-static int stat_eq(const struct stat *st)
-{
-   struct timespec mt = stat_mtime(st);
-   return mtime_eq(&mt, &g_mtime) && st->st_size == g_size && st->st_ino == g_ino;
-}
 
 int agent_registry_cache_get(const struct stat *st, agent_config_t *cfg)
 {
    if (!st || !cfg)
       return -1;
    pthread_mutex_lock(&g_cache_lock);
-   int hit = g_cached && stat_eq(st);
+   config_file_id_t id;
+   config_file_id_from(st, &id);
+   int hit = g_cached && config_file_id_eq(&id, &g_id);
    if (hit)
       memcpy(cfg, &g_cache, sizeof(*cfg));
    pthread_mutex_unlock(&g_cache_lock);
@@ -87,9 +52,7 @@ void agent_registry_cache_put(const agent_config_t *cfg, const struct stat *st)
       return;
    pthread_mutex_lock(&g_cache_lock);
    memcpy(&g_cache, cfg, sizeof(g_cache));
-   g_mtime = stat_mtime(st);
-   g_size = st->st_size;
-   g_ino = st->st_ino;
+   config_file_id_from(st, &g_id);
    g_cached = 1;
    pthread_mutex_unlock(&g_cache_lock);
 }
@@ -107,8 +70,10 @@ int agent_registry_pick_cached(const struct stat *st, agent_t *out,
    if (!st || !out || !pick)
       return -1;
    pthread_mutex_lock(&g_cache_lock);
+   config_file_id_t id;
+   config_file_id_from(st, &id);
    int rc = -1;
-   if (g_cached && stat_eq(st))
+   if (g_cached && config_file_id_eq(&id, &g_id))
    {
       /* `pick` runs with the lock HELD and must only select and copy: no I/O, no
        * allocation, no reentry into the loader. Everything it needs is here. */
