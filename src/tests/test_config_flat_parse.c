@@ -15,7 +15,7 @@
 static void load_with(const char *yaml, config_t *out)
 {
    char home[512];
-   snprintf(home, sizeof(home), "/tmp/aimee-flatparse-XXXXXX");
+   snprintf(home, sizeof(home), "%s/aimee-flatparse-XXXXXX", platform_tmpdir());
    char *d = platform_mkdtemp(home);
    assert(d);
    setenv("HOME", d, 1);
