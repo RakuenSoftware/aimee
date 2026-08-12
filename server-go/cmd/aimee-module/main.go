@@ -122,6 +122,7 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 			{EventKind: delegates.EventImageGC, StageID: delegates.StageImageGC},
 			{EventKind: delegates.EventRouteFilter, StageID: delegates.StageRouteFilter},
 			{EventKind: delegates.EventNoopWrite, StageID: delegates.StageNoopWrite},
+			{EventKind: delegates.EventLaunchPlan, StageID: delegates.StageLaunchPlan},
 		}
 		config.Handler = delegates.Handle
 	case "tools":
