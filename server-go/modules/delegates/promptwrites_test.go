@@ -93,3 +93,27 @@ func TestDelegateMayWriteNeedsBoth(t *testing.T) {
 		t.Error("an alias for a write role should behave as that role")
 	}
 }
+
+// The exact fixtures the C implementation was pinned on, kept after it was
+// deleted. A port is only as good as the cases the original guaranteed, and
+// these were the guarantee.
+func TestPortedFromTheCFixtures(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"", true},
+		{"Implement src/foo.c and update tests.", true},
+		{"Add focused tests. Do not edit implementation files.", true},
+		{"Do not edit implementation files.", false},
+		{"Read-only review of src/foo.c. Do not edit files.", false},
+		{"Inspect src/foo.c but do not modify anything.", false},
+		{"Ownership: inspect only for now.", false},
+		{"Analysis only: identify the lowest-risk split.", false},
+	}
+	for _, c := range cases {
+		if got := PromptAllowsWrites(c.in); got != c.want {
+			t.Errorf("PromptAllowsWrites(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}

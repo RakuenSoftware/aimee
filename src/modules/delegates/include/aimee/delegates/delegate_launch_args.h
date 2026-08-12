@@ -82,6 +82,16 @@ void delegate_register_may_write_provider(delegate_may_write_fn provider);
  * failure, which is logged). */
 int delegate_may_write(const char *role, const char *prompt);
 
+/* Just the BRIEF's half of that answer: does the prompt ask for changes?
+ *
+ * Used where the role half is already known and only the narrowing matters --
+ * the named-file drift check, where a prompt that forbids edits must disable a
+ * hard-fail that a write role would otherwise trigger.
+ *
+ * Fails to 0, which is the safe direction HERE specifically: 0 disables a
+ * hard-fail rather than causing one. Do not reuse this reasoning elsewhere. */
+int delegate_prompt_asks_for_writes(const char *prompt);
+
 /* Which built sandbox images may be deleted.
  *
  * `request` is built with the imggc encoders above; `response` receives the

@@ -109,6 +109,23 @@ void delegate_register_may_write_provider(delegate_may_write_fn provider)
    g_may_write = provider;
 }
 
+/* The brief's half alone. Same provider, same one answer: stage 15 returns the
+ * two halves beside the composed verdict precisely so a caller that already
+ * knows the role can ask for the other one without a second rule existing. */
+int delegate_prompt_asks_for_writes(const char *prompt)
+{
+   if (!g_may_write)
+   {
+      LOG_ERROR("delegates",
+                "no may-write provider registered; treating the brief as not asking for writes");
+      return 0;
+   }
+   int may = 0, by_role = 0, by_prompt = 0;
+   if (g_may_write("", prompt, &may, &by_role, &by_prompt) != 0)
+      return 0;
+   return by_prompt;
+}
+
 int delegate_may_write(const char *role, const char *prompt)
 {
    if (!g_may_write)
