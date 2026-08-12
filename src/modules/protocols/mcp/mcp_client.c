@@ -139,14 +139,39 @@ typedef struct
    size_t read_cap;
 } stdio_state_t;
 
+/* Writing to a server that has already exited must be an ERROR, not a death.
+ *
+ * An MCP server is a child process on the other end of a pipe, and it can exit
+ * at any moment -- it crashed, it was scripted to answer once, the peer decided
+ * the session was over. The next write then raises SIGPIPE, whose default
+ * disposition kills the WRITER. A host that has not globally ignored SIGPIPE
+ * therefore dies mid-call, and dies silently: buffered stdout is lost, so there
+ * is no message and no assertion, only a process that stopped existing. That is
+ * what made unit-test-mcp-client-integration flaky under a parallel run -- it
+ * exited 141 (128+SIGPIPE) roughly 4% of the time with no output to say why.
+ *
+ * aimee-server ignores SIGPIPE process-wide (posix/server_main.c), which is why
+ * this never reproduced in production, but a transport must not depend on its
+ * host having done that. Guarded locally instead, the same way the other places
+ * that write to a child's stdin do it (provider_cli_adapter.c,
+ * posix/workspace_provider.c), so write() returns EPIPE and the caller sees a
+ * transport error it already knows how to handle. */
 static int stdio_send(mcp_transport_t *t, const char *json, size_t len)
 {
    stdio_state_t *st = (stdio_state_t *)t->state;
    if (st->in_fd < 0)
       return -1;
 
+   struct sigaction old_pipe;
+   struct sigaction ignore_pipe;
+   memset(&ignore_pipe, 0, sizeof(ignore_pipe));
+   ignore_pipe.sa_handler = SIG_IGN;
+   sigemptyset(&ignore_pipe.sa_mask);
+   int restore_pipe = sigaction(SIGPIPE, &ignore_pipe, &old_pipe) == 0;
+
    const char *p = json;
    size_t remaining = len;
+   int rc = 0;
    while (remaining > 0)
    {
       ssize_t n = write(st->in_fd, p, remaining);
@@ -154,12 +179,16 @@ static int stdio_send(mcp_transport_t *t, const char *json, size_t len)
       {
          if (errno == EINTR)
             continue;
-         return -1;
+         rc = -1;
+         break;
       }
       p += n;
       remaining -= (size_t)n;
    }
-   return 0;
+
+   if (restore_pipe)
+      sigaction(SIGPIPE, &old_pipe, NULL);
+   return rc;
 }
 
 /* Ensure the read buffer has room for at least |want| more bytes. */

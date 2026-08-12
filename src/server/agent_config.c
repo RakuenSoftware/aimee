@@ -66,46 +66,24 @@ int agent_endpoint_valid(const char *endpoint)
  * was retired in P4b.) */
 static _Thread_local char g_request_session_id[128];
 
-/* The roster array. `models` is the current key; `agents` is what every file
- * written before the rename carries. Both are read so an existing deployment
- * loads unchanged; agent_save_config writes the canonical `models`. */
+/* Roster array: `models`, or the pre-rename `agents` older files carry. */
 static cJSON *agent_roster_array(cJSON *root)
 {
-   cJSON *arr = cJSON_GetObjectItemCaseSensitive(root, "models");
-   if (cJSON_IsArray(arr))
-      return arr;
-   return cJSON_GetObjectItemCaseSensitive(root, "agents");
+   cJSON *a = cJSON_GetObjectItemCaseSensitive(root, "models");
+   return cJSON_IsArray(a) ? a : cJSON_GetObjectItemCaseSensitive(root, "agents");
 }
 
-/* --- Config path --- */
-
-/* The roster file. `models.json` is the current name -- a roster entry is one
- * (endpoint, model) target, so it is a model, not an agent.
- *
- * `agents.json` is the pre-rename name and every existing deployment has one.
- * Resolution is therefore: use models.json when it exists, else fall back to an
- * existing agents.json, else models.json for a fresh install. Deliberately
- * resolved per call rather than migrated at startup, so a save rewrites the file
- * the operator actually has instead of silently forking the roster into two
- * files -- one of which nothing would read again. */
+/* --- Config path ---
+ * models.json, else a pre-rename agents.json. Resolved per call, not migrated, so
+ * a save rewrites the file the operator has instead of forking the roster in two. */
 const char *agent_config_path(void)
 {
    static char path[MAX_PATH_LEN];
-   const char *dir = config_default_dir();
-
-   snprintf(path, sizeof(path), "%s/models.json", dir);
-   if (access(path, F_OK) == 0)
-      return path;
-
    char legacy[MAX_PATH_LEN];
-   snprintf(legacy, sizeof(legacy), "%s/agents.json", dir);
-   if (access(legacy, F_OK) == 0)
-   {
+   snprintf(path, sizeof(path), "%s/models.json", config_default_dir());
+   snprintf(legacy, sizeof(legacy), "%s/agents.json", config_default_dir());
+   if (access(path, F_OK) != 0 && access(legacy, F_OK) == 0)
       snprintf(path, sizeof(path), "%s", legacy);
-      return path;
-   }
-
-   snprintf(path, sizeof(path), "%s/models.json", dir);
    return path;
 }
 
