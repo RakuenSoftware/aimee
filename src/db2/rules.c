@@ -1,5 +1,6 @@
 /* db2/rules.c: agent rules — Postgres via libpq. */
 
+#include "config.h"
 #include "rules.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
@@ -403,7 +404,7 @@ char *db2_rules_generate(void)
    if (!conn)
       return NULL;
 
-   if (!getenv("AIMEE_NO_CACHE") && g_rules_cache_hash[0])
+   if (!config_cache_disabled() && g_rules_cache_hash[0])
    {
       char cur[32];
       db2_rules_signature(cur, sizeof(cur));
@@ -466,7 +467,7 @@ char *db2_rules_generate(void)
 
    buf[pos] = '\0';
 
-   if (!getenv("AIMEE_NO_CACHE"))
+   if (!config_cache_disabled())
    {
       free(g_rules_cache_output);
       g_rules_cache_output = strdup(buf);

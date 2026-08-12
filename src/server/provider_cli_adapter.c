@@ -5,6 +5,7 @@
 #include "cJSON.h"
 #include "aimee_home.h"                  /* aimee_home() — the delegate's /v1 socket path */
 #include "modules/git/git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no strip */
+#include "agent_config.h"                /* agent_api_key_secret: resolve at use, not at load */
 #include "runtime_secret.h"
 #include "util.h"
 
@@ -122,11 +123,10 @@ int provider_cli_adapter_prepare_native_agent(const provider_cli_adapter_t *adap
    if (strcmp(adapter->native_provider, "gemini") == 0 && !native_agent->auth_cmd[0])
    {
       char key[MAX_API_KEY_LEN] = {0};
-      if (native_agent->api_key[0])
-      {
-         snprintf(key, sizeof(key), "%s", native_agent->api_key);
+      /* api_key holds what agents.json holds -- possibly a "$VAR" reference --
+       * so resolve it rather than copying the field. */
+      if (agent_api_key_secret(native_agent, key, sizeof(key)))
          native_agent->api_key[0] = '\0';
-      }
       else if (adapter->native_api_key_env)
          (void)provider_cli_resolve_native_env_key(adapter->native_api_key_env, key, sizeof(key));
       if (!key[0])
@@ -163,6 +163,9 @@ int provider_cli_adapter_prepare_native_agent(const provider_cli_adapter_t *adap
    }
    else if (!native_agent->api_key[0] && !native_agent->auth_cmd[0] && adapter->native_api_key_env)
    {
+      /* Nothing on disk: fall back to the provider's vault slot. Writing the
+       * resolved secret into api_key here is deliberate and local -- native_agent
+       * is this call's mutable copy, not the cached registry. */
       (void)provider_cli_resolve_native_env_key(adapter->native_api_key_env, native_agent->api_key,
                                                 sizeof(native_agent->api_key));
       if (!native_agent->api_key[0])

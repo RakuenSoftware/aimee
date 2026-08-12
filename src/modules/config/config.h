@@ -2510,6 +2510,18 @@ int config_remove_model_concurrency(const char *model);
 const char *config_default_dir(void);
 
 /* Default config path: ~/.config/aimee/aimee.yaml */
+/* Is cache-bypass requested (AIMEE_NO_CACHE)?
+ *
+ * One knob, one meaning -- "do not serve anything from a cache" -- was read with
+ * a raw getenv() in seven places across three modules and db2, including two
+ * file-identity cache loaders on the request path, so a lookup paid a getenv()
+ * per call. Reading it here also puts it where the other 200-plus AIMEE_* knobs
+ * belong: behind the config module, not scattered through callers.
+ *
+ * Deliberately NOT cached itself: tests toggle it between cases and expect the
+ * next call to observe the change. getenv() is a pointer chase, not I/O. */
+int config_cache_disabled(void);
+
 const char *config_default_path(void);
 
 /* Output directory (same as config dir). */

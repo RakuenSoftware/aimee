@@ -41,8 +41,19 @@ static void test_apikey_ref_not_serialized(void)
    assert(agent_load_config(&loaded) == 0);
    agent_t *ag = agent_find(&loaded, "reftest");
    assert(ag != NULL);
-   assert(strcmp(ag->api_key, "sk-super-secret-value") == 0);       /* resolved at runtime */
-   assert(strcmp(ag->api_key_disk, "$AIMEE_APIKEY_REF_TEST") == 0); /* reference preserved */
+   /* Config keeps the REFERENCE, in both fields: it does not resolve credentials,
+    * so the cached registry (copied per lookup, resident for the process's life)
+    * never holds a secret. */
+   assert(strcmp(ag->api_key, "$AIMEE_APIKEY_REF_TEST") == 0);
+   assert(strcmp(ag->api_key_disk, "$AIMEE_APIKEY_REF_TEST") == 0);
+
+   /* The secret is reachable, at the point of use, from the vault module. */
+   {
+      char secret[MAX_API_KEY_LEN];
+      assert(agent_api_key_secret(ag, secret, sizeof(secret)) == 1);
+      assert(strcmp(secret, "sk-super-secret-value") == 0);
+      runtime_secret_wipe(secret, sizeof(secret));
+   }
 
    /* Save, then read the raw file: it must keep the $VAR ref, not the secret. */
    assert(agent_save_config(&loaded) == 0);
@@ -61,7 +72,13 @@ static void test_apikey_ref_not_serialized(void)
    agent_config_t reloaded;
    assert(agent_load_config(&reloaded) == 0);
    agent_t *ag2 = agent_find(&reloaded, "reftest");
-   assert(ag2 != NULL && strcmp(ag2->api_key, "sk-super-secret-value") == 0);
+   assert(ag2 != NULL && strcmp(ag2->api_key, "$AIMEE_APIKEY_REF_TEST") == 0);
+   {
+      char secret[MAX_API_KEY_LEN];
+      assert(agent_api_key_secret(ag2, secret, sizeof(secret)) == 1);
+      assert(strcmp(secret, "sk-super-secret-value") == 0);
+      runtime_secret_wipe(secret, sizeof(secret));
+   }
 
    runtime_secret_remove("AIMEE_APIKEY_REF_TEST");
    printf("  PASS: test_apikey_ref_not_serialized\n");
