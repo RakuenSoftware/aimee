@@ -28,6 +28,7 @@
 #include <aimee/delegates/delegate_economics.h>
 #include <aimee/delegates/delegate_patch_coordinator.h>
 #include "platform_path.h"
+#include "aimee_session_guidance.h" /* THE standing guidance; one definition, all surfaces */
 #include "lsp.h"
 #include "server_mcp_learning.h"
 #include "server_mcp_process.h"
@@ -305,7 +306,43 @@ static cJSON *mcph_memory_recall(struct mcp_call *c)
       cJSON_Delete(detached);
    }
    cJSON_Delete(resp);
+
+   /* SESSION-START GUIDANCE, on the one channel an MCP-only agent actually has.
+    *
+    * The standing guidance is injected by cli_session_start (CLI) and
+    * gw_stage_memory (gateway). Both of those work on a request aimee is
+    * PROXYING. An MCP client talks straight to its provider and aimee only
+    * serves tools, so aimee never sees that request and neither site can fire:
+    * an MCP-only agent received no guidance at all. Measured consequence -- 13.3
+    * MCP tool calls per cell and ZERO aimee CLI invocations across 13 benchmark
+    * cells, because nothing ever told it the chainable command form exists.
+    *
+    * memory_recall(session_start=true) is the seam: Codex issues it as its FIRST
+    * tool call of a session, before any exploration. Attaching here makes the
+    * guidance arrive once, at the start, on every surface -- the same text from
+    * the same header, with no per-transport variant.
+    *
+    * Prepended to the TEXT rather than added as a JSON field: a field is easy to
+    * skip, and this has to be read to be acted on. Emitted even when recall
+    * itself returns nothing, because "no memories yet" is exactly a fresh session
+    * -- the case where the guidance matters most and where returning only an
+    * error would drop it. */
    cJSON *content;
+   if (session_start)
+   {
+      size_t n = sizeof(AIMEE_GUIDANCE_BLOCK) + (rendered ? strlen(rendered) + 2 : 1);
+      char *both = malloc(n);
+      if (both)
+      {
+         snprintf(both, n, "%s%s%s", AIMEE_GUIDANCE_BLOCK, rendered ? "\n" : "",
+                  rendered ? rendered : "");
+         free(rendered);
+         content = text_content(both);
+         free(both);
+         return content;
+      }
+      /* OOM: fall through and return what we have rather than nothing. */
+   }
    if (!rendered)
       content = mcph_kb_last_result("memory recall returned no result");
    else
