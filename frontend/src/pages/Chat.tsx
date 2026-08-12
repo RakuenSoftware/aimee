@@ -98,7 +98,7 @@ interface MetricRow {
   estimated_cost_usd: number;
 }
 
-interface AgentInfo {
+interface ModelInfo {
   name: string;
   family: string;
   slot: number;
@@ -1002,7 +1002,7 @@ function ChannelSidebar({
 interface ChannelViewProps {
   channelName: string;
   messages: ChannelMessage[];
-  agents: AgentInfo[];
+  agents: ModelInfo[];
   onSend: (text: string) => void;
 }
 
@@ -1403,7 +1403,7 @@ export default function Chat() {
   const [activePersona, setActivePersona] = useState<string>('');
   /* The agent serving this tab's turns. `activeAgent` is the SESSION PIN (empty
    * = not pinned); `defaultAgent` is what an unpinned turn actually lands on,
-   * reported by /api/agents (server-side agent_default_primary). The selector
+   * reported by /api/models (server-side agent_default_primary). The selector
    * shows the pin when there is one, else the default, so it always names the
    * agent you are really talking to. */
   const [activeAgent, setActiveAgent] = useState<string>('');
@@ -1417,7 +1417,7 @@ export default function Chat() {
   const [pluginLoaderAvailable, setPluginLoaderAvailable] = useState(false);
   const [pluginsLoading, setPluginsLoading] = useState(false);
   const [pluginsError, setPluginsError] = useState<string | null>(null);
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [agents, setAgents] = useState<ModelInfo[]>([]);
 
   /* Channel state */
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
@@ -1900,10 +1900,10 @@ export default function Chat() {
   }, []);
 
   useEffect(() => {
-    fetch('/api/agents')
+    fetch('/api/models')
       .then(r => r.json())
-      .then((d: { agents?: AgentInfo[]; default_agent?: string }) => {
-        setAgents(d.agents ?? []);
+      .then((d: { models?: ModelInfo[]; agents?: ModelInfo[]; default_agent?: string }) => {
+        setAgents(d.models ?? d.agents ?? []);
         setDefaultAgent(d.default_agent ?? '');
       })
       .catch(() => {});

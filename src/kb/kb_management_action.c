@@ -78,8 +78,15 @@ int kb_management_action_body_parse(const char *raw, size_t len, kb_management_a
    const cJSON *n = j ? cJSON_GetObjectItemCaseSensitive(j, "agent") : NULL;
    const char *action = cJSON_IsString(a) ? cJSON_GetStringValue(a) : NULL;
    const char *agent = cJSON_IsString(n) ? cJSON_GetStringValue(n) : NULL;
+   /* INGRESS contract: both spellings of the roster action are accepted. The ops
+    * are `model.*` since the roster was named for what an entry is, but a
+    * control plane still emitting the pre-rename `agent.*` is not redeployed in
+    * lockstep with this service. The value is echoed verbatim into the canonical
+    * form that gets digested, so neither spelling is rewritten into the other. */
    if (!exact_two(j, "action", "agent") || !action || !agent ||
-       (strcmp(action, "agent.enable") && strcmp(action, "agent.disable")) || !token(agent, 63))
+       (strcmp(action, "model.enable") && strcmp(action, "model.disable") &&
+        strcmp(action, "agent.enable") && strcmp(action, "agent.disable")) ||
+       !token(agent, 63))
    {
       cJSON_Delete(j);
       return -1;

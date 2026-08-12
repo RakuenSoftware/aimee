@@ -268,27 +268,17 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/setup/account", s.requireAuth(s.handleSetupAccount))
 
 	// Live endpoints backed by aimee-server socket
-	mux.HandleFunc("/api/agents", s.requireAuth(s.handleAgents))
 	mux.HandleFunc("/api/hosts", s.requireAuth(s.handleHosts))
-	mux.HandleFunc("GET /api/agents/stats", s.requireAuth(s.handleAgentStats))
-	mux.HandleFunc("POST /api/agents/add", s.requireAuth(s.handleAgentAdd))
-	mux.HandleFunc("POST /api/agents/remove", s.requireAuth(s.agentOpHandler("agent.remove")))
-	mux.HandleFunc("POST /api/agents/enable", s.requireAuth(s.agentOpHandler("agent.enable")))
-	mux.HandleFunc("POST /api/agents/disable", s.requireAuth(s.agentOpHandler("agent.disable")))
-	mux.HandleFunc("POST /api/agents/probe", s.requireAuth(s.agentOpHandler("agent.probe")))
-	mux.HandleFunc("POST /api/agents/roles", s.requireAuth(s.agentOpHandler("agent.roles")))
-	mux.HandleFunc("POST /api/agents/personas", s.requireAuth(s.agentOpHandler("agent.personas")))
-	mux.HandleFunc("POST /api/agents/set", s.requireAuth(s.agentOpHandler("agent.set")))
+	// The model roster. A roster entry is one (endpoint, model) runtime target,
+	// so the tab and these routes are "models"; "/api/agents" is the pre-rename
+	// spelling, still served so an older GUI build keeps working.
+	s.registerModelRoutes(mux, "/api/models")
+	s.registerModelRoutes(mux, "/api/agents")
 	// Provider registry: the menu of providers and the models each one offers,
 	// backing the Providers tab. Read-only -- configuring a model still goes
 	// through agent.add/agent.set above.
 	mux.HandleFunc("GET /api/providers", s.requireAuth(s.handleProviderList))
 	mux.HandleFunc("POST /api/providers/models", s.requireAuth(s.handleProviderModels))
-	// Subscription-OAuth setup (Claude / Codex). `start` may install the vendor
-	// CLI server-side, so it carries a much longer timeout than the poll/code hops.
-	mux.HandleFunc("POST /api/agents/oauth/start", s.requireAuth(s.cliOauthHandler("agent.cli_oauth_start", 180*time.Second)))
-	mux.HandleFunc("POST /api/agents/oauth/code", s.requireAuth(s.cliOauthHandler("agent.cli_oauth_code", 30*time.Second)))
-	mux.HandleFunc("POST /api/agents/oauth/poll", s.requireAuth(s.cliOauthHandler("agent.cli_oauth_poll", 15*time.Second)))
 	// Role registry (the shared vocabulary matched between personas and agents).
 	mux.HandleFunc("/api/roles", s.requireAuth(s.handleRoles))
 	mux.HandleFunc("/api/roles/", s.requireAuth(s.handleRoleItem))

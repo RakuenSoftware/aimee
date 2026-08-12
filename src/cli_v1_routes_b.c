@@ -42,7 +42,7 @@ static cJSON *marshal_agent_episodes(int argc, char **argv)
    rpc_opts_t opts;
    rpc_parse(argc, argv, NULL, &opts);
 
-   cJSON *req = marshal_no_args("agent.episodes");
+   cJSON *req = marshal_no_args("model.episodes");
 
    const char *agent = opts.pos_count > 0 ? opts.positional[0] : rpc_get(&opts, "agent");
    if (agent && agent[0])
@@ -942,7 +942,7 @@ static cJSON *marshal_model_list(int argc, char **argv)
    static const char *bool_flags[] = {"json", "open-weights", NULL};
    rpc_opts_t opts;
    rpc_parse(argc, argv, bool_flags, &opts);
-   cJSON *req = marshal_no_args("model.list");
+   cJSON *req = marshal_no_args("catalog.list");
    if (!req)
       return NULL;
    const char *capability = rpc_get(&opts, "capability");
@@ -961,10 +961,10 @@ static cJSON *marshal_model_show(int argc, char **argv)
    rpc_parse(argc, argv, NULL, &opts);
    if (opts.pos_count < 1)
    {
-      fprintf(stderr, "aimee: usage: aimee model show [provider:]<model>\n");
+      fprintf(stderr, "aimee: usage: aimee catalog show [provider:]<model>\n");
       return NULL;
    }
-   cJSON *req = marshal_no_args("model.show");
+   cJSON *req = marshal_no_args("catalog.show");
    if (!req)
       return NULL;
    const char *spec = opts.positional[0];
@@ -1431,7 +1431,7 @@ static const char *const MARSHAL_NO_ARGS[] = {
     "kb.ingest.status",
     "mcp.audit",
     "memory.stats",
-    "model.refresh",
+    "catalog.refresh",
     "notes.list",
     "provider.get",
     "ranker.export_view",
@@ -1451,7 +1451,7 @@ static const struct
    const char *method;
    marshal_argv_fn fn;
 } MARSHAL_ARGV[] = {
-    {"agent.episodes", marshal_agent_episodes},
+    {"model.episodes", marshal_agent_episodes},
     {"api.enable", marshal_api_enable},
     {"aux.test", marshal_aux_test},
     {"cert.issue", marshal_cert_issue},
@@ -1516,8 +1516,8 @@ static const struct
     {"memory.recall", marshal_memory_recall},
     {"memory.search", marshal_memory_search},
     {"memory.store", marshal_memory_store},
-    {"model.list", marshal_model_list},
-    {"model.show", marshal_model_show},
+    {"catalog.list", marshal_model_list},
+    {"catalog.show", marshal_model_show},
     {"notes.search", marshal_notes_search},
     {"primary.set", marshal_primary},
     {"provider.list", marshal_provider_list},
@@ -1712,7 +1712,7 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
    /* Prefix fallbacks (after all exact matches). */
    if (strncmp(method, "skill.", 6) == 0)
       return marshal_skill_request(method, argc, argv);
-   if (strncmp(method, "agent.", 6) == 0)
+   if (strncmp(method, "model.", 6) == 0 || strncmp(method, "agent.", 6) == 0)
       return marshal_agent_args(method, argc, argv);
    if (strncmp(method, "pipeline.", 9) == 0)
       return marshal_pipeline_request(method, argc, argv);

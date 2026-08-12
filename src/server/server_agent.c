@@ -974,7 +974,7 @@ int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!name || !name[0])
       name = "local";
    if (!endpoint_arg || !endpoint_arg[0])
-      return server_send_error(conn, "agent.local requires endpoint", NULL);
+      return server_send_error(conn, "model.local requires endpoint", NULL);
 
    char endpoint[MAX_ENDPOINT_LEN];
    server_agent_normalize_endpoint(endpoint_arg, endpoint, sizeof(endpoint));
@@ -1004,7 +1004,7 @@ int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                      sizeof(slot_probe_msg));
    }
    if (!model[0])
-      return server_send_error(conn, "agent.local could not determine model; pass --model", NULL);
+      return server_send_error(conn, "model.local could not determine model; pass --model", NULL);
    if (slots <= 0 && detected_slots > 0)
       slots = detected_slots;
    if (slots <= 0)
@@ -1073,7 +1073,7 @@ int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 1 || !argv[0][0])
-      return server_send_error(conn, "agent.remove requires name", NULL);
+      return server_send_error(conn, "model.remove requires name", NULL);
 
    agent_config_t cfg;
    if (agent_load_config(&cfg) != 0)
@@ -1153,7 +1153,7 @@ static int handle_agent_set_enabled(server_ctx_t *ctx, server_conn_t *conn, cJSO
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 1 || !argv[0][0])
       return server_send_error(
-          conn, enabled ? "agent.enable requires name" : "agent.disable requires name", NULL);
+          conn, enabled ? "model.enable requires name" : "model.disable requires name", NULL);
 
    cJSON *resp = NULL;
    if (agent_set_enabled_commit(argv[0], enabled, &resp) != 0)
@@ -1181,7 +1181,7 @@ int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 1 || !argv[0][0])
-      return server_send_error(conn, "agent.roles requires name", NULL);
+      return server_send_error(conn, "model.roles requires name", NULL);
 
    agent_config_t cfg;
    if (agent_load_config(&cfg) != 0)
@@ -1221,7 +1221,7 @@ int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 1 || !argv[0][0])
-      return server_send_error(conn, "agent.personas requires name", NULL);
+      return server_send_error(conn, "model.personas requires name", NULL);
 
    agent_config_t cfg;
    if (agent_load_config(&cfg) != 0)
@@ -1260,7 +1260,7 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 1 || !argv[0][0])
-      return server_send_error(conn, "agent.set requires name", NULL);
+      return server_send_error(conn, "model.set requires name", NULL);
    /* Value --flags are present iff opt_get returns non-NULL — that presence check
     * is what makes the patch surgical. `--default` is the one BOOL flag: when
     * given it promotes this agent to the global primary (default_agent), the same
@@ -1426,7 +1426,7 @@ int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    opt_parse(argc, argv, bool_flags, &opts);
    const char *name = opt_pos(&opts, 0);
    if (!name || !name[0])
-      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "agent.probe requires name",
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "model.probe requires name",
                                     NULL);
 
    agent_config_t cfg;
@@ -1601,7 +1601,7 @@ int handle_agent_setup(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    (void)req;
    return server_send_error(
-       conn, "agent.setup is retired (use: openai, anthropic, codex-oauth, claude-oauth)", NULL);
+       conn, "model.setup is retired (use: openai, anthropic, codex-oauth, claude-oauth)", NULL);
 }
 
 int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -1609,7 +1609,7 @@ int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    (void)req;
    return server_send_error(
-       conn, "agent.setup_poll is retired (use: openai, anthropic, codex-oauth, claude-oauth)",
+       conn, "model.setup_poll is retired (use: openai, anthropic, codex-oauth, claude-oauth)",
        NULL);
 }
 

@@ -66,12 +66,24 @@ int agent_endpoint_valid(const char *endpoint)
  * was retired in P4b.) */
 static _Thread_local char g_request_session_id[128];
 
-/* --- Config path --- */
+/* Roster array: `models`, or the pre-rename `agents` older files carry. */
+static cJSON *agent_roster_array(cJSON *root)
+{
+   cJSON *a = cJSON_GetObjectItemCaseSensitive(root, "models");
+   return cJSON_IsArray(a) ? a : cJSON_GetObjectItemCaseSensitive(root, "agents");
+}
 
+/* --- Config path ---
+ * models.json, else a pre-rename agents.json. Resolved per call, not migrated, so
+ * a save rewrites the file the operator has instead of forking the roster in two. */
 const char *agent_config_path(void)
 {
    static char path[MAX_PATH_LEN];
-   snprintf(path, sizeof(path), "%s/agents.json", config_default_dir());
+   char legacy[MAX_PATH_LEN];
+   snprintf(path, sizeof(path), "%s/models.json", config_default_dir());
+   snprintf(legacy, sizeof(legacy), "%s/agents.json", config_default_dir());
+   if (access(path, F_OK) != 0 && access(legacy, F_OK) == 0)
+      snprintf(path, sizeof(path), "%s", legacy);
    return path;
 }
 
@@ -1119,8 +1131,8 @@ int agent_load_config(agent_config_t *cfg)
       }
    }
 
-   /* Agents array */
-   cJSON *agents = cJSON_GetObjectItem(root, "agents");
+   /* Roster array (models, or the pre-rename `agents`). */
+   cJSON *agents = agent_roster_array(root);
    if (agents && cJSON_IsArray(agents))
    {
       int n = cJSON_GetArraySize(agents);
@@ -1817,7 +1829,7 @@ static int agent_config_existing_agent_count(void)
    free(buf);
    if (!root)
       return -1;
-   cJSON *arr = cJSON_GetObjectItemCaseSensitive(root, "agents");
+   cJSON *arr = agent_roster_array(root);
    int n = cJSON_IsArray(arr) ? cJSON_GetArraySize(arr) : -1;
    cJSON_Delete(root);
    return n;
@@ -1975,7 +1987,7 @@ static int agent_save_config_impl(const agent_config_t *cfg, int emptied_by_remo
 
       cJSON_AddItemToArray(agents, a);
    }
-   cJSON_AddItemToObject(root, "agents", agents);
+   cJSON_AddItemToObject(root, "models", agents);
 
    /* Network config (only write if ssh_entry is set) */
    if (cfg->network.ssh_entry[0])

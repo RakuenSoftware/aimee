@@ -16,7 +16,7 @@ export const NAV_ITEMS: Tab[] = [
   { label: 'Edit Workflows', icon: '🔀', route: '/edit-workflows', hint: 'Design multi-step workflows — each step sets a task, persona, delegate, and role.' },
   { label: 'Workflows', icon: '📝', route: '/workflow-actions', hint: 'The runtime queue — workflow items waiting on you to approve or reject.' },
   { label: 'Providers', icon: '🔌', route: '/providers', hint: 'Your model providers and the models under each — set context window, output cap and prices per model.' },
-  { label: 'Agents', icon: '🤝', route: '/agents', hint: 'Your delegates, their run history and stats — bind each to a persona and allowed roles.' },
+  { label: 'Models', icon: '🤝', route: '/models', hint: 'Every model aimee can route to, with its run history and stats — bind each to a persona and allowed roles.' },
   { label: 'Personas', icon: '🎭', route: '/personas', hint: 'Edit who Aimee can be — each persona is an identity plus the roles it may use.' },
   { label: 'Roles', icon: '🎬', route: '/roles', hint: 'The shared role vocabulary — each role’s prompt template and per-role turn cap.' },
   { label: 'Roundtable', icon: '⚖️', route: '/roundtable', hint: 'Configure the multi-model review panels — seats, aggregator, and loop knobs.' },

@@ -54,7 +54,7 @@ func (s *server) handleProposalDraft(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), draftTimeout+5*time.Second)
 	defer cancel()
 	st, data, err := s.v1RequestWebuserT(ctx, currentUser(r), http.MethodPost,
-		"/v1/agent/draft", body, draftTimeout)
+		"/v1/model/draft", body, draftTimeout)
 	if err != nil {
 		writeJSONError(w, http.StatusBadGateway, "draft service unavailable")
 		return

@@ -249,7 +249,7 @@ static void test_populated_config_lists_agents(void)
 }
 
 /* primary_only survives parse -> agent_load_config -> server_agent_to_json (the
- * /v1/agent/list surface the Web GUI reads to render the checkbox). An agent that
+ * /v1/model/list surface the Web GUI reads to render the checkbox). An agent that
  * omits the field defaults to false. */
 static void test_primary_only_round_trips(void)
 {
