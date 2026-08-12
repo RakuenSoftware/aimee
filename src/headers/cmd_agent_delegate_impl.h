@@ -189,8 +189,6 @@ int delegate_check_named_file_drift(const char *const *paths, int path_count, co
  * The bundle includes HEAD ref, diff --stat, and changed files.
  * Returns a heap-allocated string; caller must free.  Returns NULL on failure. */
 char *delegate_build_validation_bundle(const char *cwd);
-char *delegate_maybe_append_validation_bundle(const char *role, const char *cwd, char *owned_prompt,
-                                              const char *fallback_prompt, int target_provided);
 /* Validate Location-backed review snippets against the current checkout.
  * Returns 1 and fills errbuf when a fenced code block following a
  * `Location: `path:line`` marker does not match that file near the cited line,

@@ -176,3 +176,45 @@ func TestRolePolicyStageRejectsInvalidEnvelope(t *testing.T) {
 		t.Errorf("expired status = %d", status)
 	}
 }
+
+// The parent-diff evidence roles are the read-only INSPECTION ones: they run
+// against an isolated checkout whose diff is not the one they were asked about.
+func TestRoleNeedsParentDiffEvidence(t *testing.T) {
+	for _, role := range []string{"validate", "review", "diagnose", "test"} {
+		if !RoleNeedsParentDiffEvidence(role) {
+			t.Errorf("%q inspects; it needs the parent diff", role)
+		}
+	}
+	// A write role is PRODUCING the diff, and a role with no inspection duty has
+	// nothing to ground.
+	for _, role := range []string{"code", "refactor", "explain", "summarize", ""} {
+		if RoleNeedsParentDiffEvidence(role) {
+			t.Errorf("%q should not be handed the parent diff", role)
+		}
+	}
+	// Aliases resolve first, so "reviewer" cannot get a different answer from
+	// "review".
+	if RoleNeedsParentDiffEvidence("review") != RoleNeedsParentDiffEvidence("reviewer") {
+		t.Error("an alias must not change the answer")
+	}
+}
+
+func TestRolePolicyStageCarriesParentDiffEvidence(t *testing.T) {
+	response, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+		rolePolicyRequestBytes("review", -1, false))
+	if status != bus.ModuleStatusOK || len(response) != rolePolicyResponseLen {
+		t.Fatalf("status %v len %d", status, len(response))
+	}
+	if binary.LittleEndian.Uint32(response[24:28]) == 0 {
+		t.Error("review needs the parent diff and the wire should say so")
+	}
+
+	response, status = Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+		rolePolicyRequestBytes("code", -1, false))
+	if status != bus.ModuleStatusOK {
+		t.Fatalf("status %v", status)
+	}
+	if binary.LittleEndian.Uint32(response[24:28]) != 0 {
+		t.Error("a write role must not be handed the parent diff")
+	}
+}

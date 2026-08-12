@@ -9,6 +9,7 @@
 #include "aimee.h"
 #include "cmd_agent_delegate_impl.h"
 #include <aimee/delegates/delegate_launch_args.h>
+#include <aimee/delegates/delegate_role.h>
 
 /* The drift check narrows its hard-fail with the module's write-intent rule,
  * reached through delegate_prompt_asks_for_writes(). A C test cannot call the
@@ -287,6 +288,72 @@ static void test_drift_honours_the_verdict(void)
    printf("  drift_honours_the_verdict: ok\n");
 }
 
+/* A role-policy provider the test drives, so the parent-diff question has a
+ * settable answer without this harness deciding which roles want one. */
+static int g_needs_parent_diff;
+
+static int shed_test_role_policy(int op, const char *role, int a, int b, int *out)
+{
+   (void)role;
+   (void)a;
+   (void)b;
+   if (op != DELEGATE_ROLE_OP_PARENT_DIFF || !out)
+      return -1;
+   *out = g_needs_parent_diff;
+   return 0;
+}
+
+/* The live parent-diff evidence path, which had NO test before this: the
+ * fixtures that pinned "which roles get a bundle" were driving
+ * delegate_maybe_append_validation_bundle, a wrapper whose only caller ships in
+ * no binary. This exercises the one server_compute.c actually calls.
+ *
+ * The ROLE list is the module's and is pinned there; what is asserted here is
+ * the composition C still owns -- a delegate that may write is never handed the
+ * parent's diff, however the module answers. */
+static void test_parent_diff_evidence_respects_write_capability(void)
+{
+   setup_tmpdir();
+   char cmd[1024];
+   snprintf(cmd, sizeof(cmd),
+            "git -C '%s' init -q && "
+            "git -C '%s' config user.email test@example.com && "
+            "git -C '%s' config user.name Test",
+            g_tmpdir, g_tmpdir, g_tmpdir);
+   if (system(cmd) != 0)
+   {
+      cleanup_tmpdir();
+      printf("  parent_diff_evidence_respects_write_capability: skipped (git unavailable)\n");
+      return;
+   }
+   make_file("changed.txt");
+
+   g_needs_parent_diff = 1;
+
+   /* A read-only inspection role gets the parent's diff prepended. */
+   char *grounded =
+       delegate_prepend_parent_diff_evidence("review this", "review", 0, g_tmpdir, "deleg-test");
+   assert(grounded != NULL);
+   assert(strstr(grounded, "Parent Worktree Diff Evidence") != NULL);
+   assert(strncmp(grounded, "review this", strlen("review this")) == 0);
+   free(grounded);
+
+   /* The same role that may WRITE gets nothing: it is producing the diff, not
+    * reviewing one. */
+   char *writer =
+       delegate_prepend_parent_diff_evidence("review this", "review", 1, g_tmpdir, "deleg-test");
+   assert(writer == NULL);
+
+   /* And when the module says the role has no inspection duty, nothing either. */
+   g_needs_parent_diff = 0;
+   char *unrelated =
+       delegate_prepend_parent_diff_evidence("do it", "code", 0, g_tmpdir, "deleg-test");
+   assert(unrelated == NULL);
+
+   cleanup_tmpdir();
+   printf("  parent_diff_evidence_respects_write_capability: ok\n");
+}
+
 static void test_validation_bundle_identifies_source_worktree(void)
 {
    setup_tmpdir();
@@ -465,12 +532,14 @@ int main(void)
 
    delegate_register_may_write_provider(shed_test_may_write);
    delegate_register_drift_provider(shed_test_drift);
+   delegate_register_role_policy_provider(shed_test_role_policy);
 
    test_drift_sends_existence_from_the_filesystem();
    test_drift_sends_the_context_it_owns();
    test_drift_sends_paths_even_when_the_index_says_nothing();
    test_drift_honours_the_verdict();
    test_drift_sends_diff_membership_post_run();
+   test_parent_diff_evidence_respects_write_capability();
    test_validation_bundle_identifies_source_worktree();
    test_validation_bundle_keeps_large_diff_handlers();
 

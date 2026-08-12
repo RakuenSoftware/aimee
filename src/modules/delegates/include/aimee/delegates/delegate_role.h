@@ -22,6 +22,7 @@ void delegate_role_register_canonicalizer(delegate_role_canonicalizer_fn canonic
 #define DELEGATE_ROLE_OP_CACHE        2
 #define DELEGATE_ROLE_OP_AUTO_TOOLS   3
 #define DELEGATE_ROLE_OP_FINAL_TURNS  4
+#define DELEGATE_ROLE_OP_PARENT_DIFF  5
 
 typedef int (*delegate_role_policy_fn)(int op, const char *role, int a, int b, int *out);
 void delegate_register_role_policy_provider(delegate_role_policy_fn provider);
@@ -40,6 +41,17 @@ int delegate_role_result_cache_enabled(const char *role);
  * invocation. A one-turn override is treated as a final-answer smoke probe
  * unless the caller explicitly requests tools. */
 int delegate_role_auto_tools_for_invocation(const char *role, int max_turns, int explicit_tools);
+
+/* Returns 1 when a read-only inspection role should be grounded in the PARENT
+ * worktree's uncommitted diff.
+ *
+ * The ROLE half only. The caller composes the rest -- suppressed for a delegate
+ * that may write, and for a review target supplied in the prompt -- because both
+ * are conditions of the invocation rather than properties of the role.
+ *
+ * Fails to 0: with no provider the delegate simply runs without the extra
+ * context, which is what it did before this evidence existed. */
+int delegate_role_needs_parent_diff(const char *role);
 
 /* Apply a one-shot CLI max-turn override to every configured delegate route.
  * max_turns < 0 means "no override"; 0 preserves the runtime's unlimited

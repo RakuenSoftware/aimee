@@ -675,70 +675,6 @@ char *delegate_build_validation_bundle(const char *cwd)
    return bundle;
 }
 
-/* Guidance appended when the CALLER supplied the review target in the prompt
- * (--prompt-file / --prompt-stdin), e.g. a diff for an external code review. The
- * target is the provided content — NOT the delegate host's working directory, which
- * may be absent, on a different branch, or carry unrelated changes. For surrounding
- * context the reviewer may explore the DEFAULT BRANCH through aimee's own
- * index/memory (code_search, find_symbol, search_memory, search_docs). Those
- * services are useful positive context when available, but a failed, stale, or
- * empty lookup cannot prove absence. Returned string is heap-owned. */
-static char *delegate_build_provided_target_block(void)
-{
-   return strdup(
-       "\n\n---\n"
-       "## Review Target & Exploration\n"
-       "review_target: the diff / content provided in the prompt ABOVE is the sole subject of "
-       "this review. Base every finding on it.\n"
-       "no_local_worktree: do NOT run read_file/list_files/grep/git_diff/git_status against a "
-       "local checkout — this delegate has no such worktree for the target; that path is empty, "
-       "stale, or unrelated, and is not the review target.\n"
-       "explore_via_aimee: to inspect surrounding code, callers, or prior context on the DEFAULT "
-       "BRANCH, use aimee's own capabilities — code_search and find_symbol (branch-indexed code), "
-       "search_memory and search_docs (project memory/knowledge). When available and current, "
-       "positive results provide surrounding default-branch context; never assume the service is "
-       "available, complete, or fresh.\n"
-       "absence_claims: a no-match, unavailable, failed, stale, or incomplete code_search / "
-       "find_symbol / memory result is NOT proof that anything is absent. Assert absence only from "
-       "affirmative authoritative evidence that covers the relevant current source or complete "
-       "registration/call-site set. Otherwise omit the claim; uncertainty may be a non-blocking "
-       "suggestion, never a blocker. Never infer absence from an unreadable worktree.\n"
-       "---\n");
-}
-
-char *delegate_maybe_append_validation_bundle(const char *role, const char *cwd, char *owned_prompt,
-                                              const char *fallback_prompt, int target_provided)
-{
-   if (!role)
-      return owned_prompt;
-
-   const char *canonical_role = delegate_role_canonicalize(role);
-   int is_review_role = strcmp(canonical_role, "review") == 0 ||
-                        strcmp(canonical_role, "validate") == 0 ||
-                        strcmp(canonical_role, "diagnose") == 0;
-
-   /* Caller-supplied target (a diff via --prompt-file/--prompt-stdin) wins: the
-    * provided content is the review subject, so the host-cwd auto-diff bundle is
-    * suppressed (it would review the wrong tree) and the reviewer is pointed at
-    * aimee's branch-indexed capabilities for context instead of the filesystem. */
-   char *bundle = target_provided ? delegate_build_provided_target_block()
-                                  : (is_review_role ? delegate_build_validation_bundle(cwd) : NULL);
-   if (!bundle)
-      return owned_prompt;
-
-   const char *base = owned_prompt ? owned_prompt : (fallback_prompt ? fallback_prompt : "");
-   size_t cap = strlen(base) + strlen(bundle) + 1;
-   char *combined = malloc(cap);
-   if (combined)
-   {
-      snprintf(combined, cap, "%s%s", base, bundle);
-      free(owned_prompt);
-      owned_prompt = combined;
-   }
-   free(bundle);
-   return owned_prompt;
-}
-
 static void review_norm_line(const char *src, char *dst, size_t dst_sz)
 {
    if (!dst || dst_sz == 0)
@@ -1412,11 +1348,12 @@ const char *delegate_assemble_system_prompt(const char *in, const char *role, co
 char *delegate_prepend_parent_diff_evidence(const char *prompt, const char *role, int allows_writes,
                                             const char *cwd, const char *deleg_id)
 {
-   const char *canon_role = delegate_role_canonicalize(role);
-   int needs_diff_bundle = strcmp(canon_role, "validate") == 0 ||
-                           strcmp(canon_role, "review") == 0 ||
-                           strcmp(canon_role, "diagnose") == 0 || strcmp(canon_role, "test") == 0;
-   if (!needs_diff_bundle || allows_writes)
+   /* WHICH roles want the parent's diff is the module's (role policy). The two
+    * conditions the module deliberately does not fold in are composed here,
+    * because both are facts about this INVOCATION rather than the role: a
+    * delegate that may write is producing the diff, not reviewing one, and a
+    * caller-supplied review target is handled by the caller above. */
+   if (allows_writes || !delegate_role_needs_parent_diff(role))
       return NULL;
 
    char bundle_cwd_buf[MAX_PATH_LEN];

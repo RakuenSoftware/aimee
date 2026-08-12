@@ -4464,6 +4464,7 @@ $(TESTPREFIX)/unit-test-delegate-token-budget: $(OBJDIR)/tests/test_delegate_tok
 $(TESTPREFIX)/unit-test-delegate-context-shed: $(OBJDIR)/tests/test_delegate_context_shed.o \
                                        $(OBJDIR)/modules/delegates/delegate_prompt.o \
                                        $(OBJDIR)/modules/delegates/delegate_launch_args.o \
+                                       $(OBJDIR)/modules/delegates/delegate_role.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
