@@ -1,4 +1,5 @@
 /* agent_config.c: config loading/saving, agent routing, role checking, auth resolution */
+#include "config.h"
 #include "aimee.h"
 #include "util.h"
 #include "agent_config.h"
@@ -731,7 +732,7 @@ static int agent_registry_pick(agent_t *out, agent_t *(*pick)(agent_config_t *, 
    struct stat st;
 
    /* FAST PATH: cache current, answer already in memory. Nearly every request. */
-   if (!getenv("AIMEE_NO_CACHE") && stat(path, &st) == 0)
+   if (!config_cache_disabled() && stat(path, &st) == 0)
    {
       int rc = agent_registry_pick_cached(&st, out, pick, arg);
       if (rc >= 0)
@@ -788,7 +789,7 @@ int agent_load_config(agent_config_t *cfg)
    const char *path = agent_config_path();
 
    /* Return cached config if mtime unchanged and caching enabled */
-   if (!getenv("AIMEE_NO_CACHE"))
+   if (!config_cache_disabled())
    {
       struct stat st;
       if (stat(path, &st) == 0 && agent_registry_cache_get(&st, cfg) == 0)
