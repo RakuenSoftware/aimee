@@ -240,7 +240,7 @@ func TestHTTPAgentClientGroupDelegatesEverySpecificationWithoutResolvingRandom(t
 	var vias []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/model/list":
+		case "/v1/agent/list":
 			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
 				{"name": "a-down", "provider": "third", "model": "down", "enabled": true, "delegate_available": false, "max_parallel": 10, "roles": []string{"review"}, "personas": []string{"all"}},
 				{"name": "codex", "provider": "openai", "model": "gpt", "enabled": true, "max_parallel": 2, "roles": []string{"review"}, "personas": []string{"all"}},
@@ -1156,7 +1156,7 @@ func TestGroupRoutingSkipsAnAgentAlreadyAtItsConcurrencyLimit(t *testing.T) {
 	var vias []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/model/list":
+		case "/v1/agent/list":
 			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
 				// Saturated by work outside this group.
 				{"name": "busy", "provider": "p1", "model": "m1", "enabled": true, "max_parallel": 3,
@@ -1205,7 +1205,7 @@ func TestGroupRoutingStillFillsASeatWhenEveryAgentIsSaturated(t *testing.T) {
 	var vias []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/model/list":
+		case "/v1/agent/list":
 			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
 				{"name": "busy-a", "provider": "p1", "model": "m1", "enabled": true, "max_parallel": 2,
 					"active_delegates": 2, "roles": []string{"review"}, "personas": []string{"all"}},
@@ -1247,7 +1247,7 @@ func TestGroupRoutingTreatsUnreportedOccupancyAsRoutable(t *testing.T) {
 	var vias []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/model/list":
+		case "/v1/agent/list":
 			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
 				{"name": "unreported", "provider": "p1", "model": "m1", "enabled": true, "max_parallel": 1,
 					"roles": []string{"review"}, "personas": []string{"all"}},
