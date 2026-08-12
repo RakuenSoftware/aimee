@@ -10,6 +10,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "aimee.h"
+#include <aimee/delegates/module_api.h>
+
+/* When set, the launch-plan stub near the bottom of this file refuses with this
+ * wording and returns no rows. It is how the refusal test provokes a refusal
+ * without deciding here what deserves one. */
+static const char *g_launch_refusal;
 #include "db.h"
 #include "db_schema.h"
 #include "db1.h"
@@ -1991,58 +1997,41 @@ static void test_delegate_launch_creates_coord_job(void)
    printf("  PASS: test_delegate_launch_creates_coord_job\n");
 }
 
-static void test_delegate_launch_rejects_packet_without_owned_files(void)
+/* The SERVER's half of a refused launch: whatever the module says is what the
+ * caller is told, verbatim, and nothing is written.
+ *
+ * This used to be two tests, each pinning one of the module's error strings --
+ * "packet missing owned_files" and "missing handoff_schema delegate_result_v1".
+ * Those are rules, and they are pinned where the rule now lives
+ * (server-go/modules/delegates/launchplan_test.go). Keeping copies here would
+ * have meant two places to update and one of them silently wrong. What could
+ * only be tested here is that the wording survives the trip. */
+static void test_delegate_launch_relays_the_modules_refusal(void)
 {
    reset_last_response();
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
    server_conn_t *conn = calloc(1, sizeof(*conn));
    assert(ctx != NULL && conn != NULL);
+
    cJSON *req = cJSON_CreateObject();
    cJSON *plan = cJSON_AddObjectToObject(req, "plan");
    cJSON_AddStringToObject(plan, "schema", "delegate_plan_v1");
-   cJSON_AddStringToObject(plan, "title", "Invalid Launch Plan");
+   cJSON_AddStringToObject(plan, "title", "Refused Launch Plan");
    cJSON *packets = cJSON_AddArrayToObject(plan, "packets");
-   cJSON *packet = cJSON_CreateObject();
-   cJSON_AddStringToObject(packet, "id", "packet-bad");
-   cJSON_AddStringToObject(packet, "role", "code");
-   cJSON_AddStringToObject(packet, "title", "Missing owned files");
-   cJSON_AddItemToArray(packets, packet);
+   add_launch_packet(packets, "packet-one", "Edit foo", "src/foo.c");
+
+   g_launch_refusal = "delegate plan packet missing owned_files";
    assert(handle_delegate_launch(ctx, conn, req) == 0);
+   g_launch_refusal = NULL;
+
    assert(g_last_response == NULL);
    assert(strcmp(g_last_error, "delegate plan packet missing owned_files") == 0);
+
    cJSON_Delete(req);
    reset_last_response();
    free(conn);
    free(ctx);
-   printf("  PASS: test_delegate_launch_rejects_packet_without_owned_files\n");
-}
-static void test_delegate_launch_rejects_packet_without_handoff_schema(void)
-{
-   reset_last_response();
-   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
-   server_conn_t *conn = calloc(1, sizeof(*conn));
-   assert(ctx != NULL && conn != NULL);
-   cJSON *req = cJSON_CreateObject();
-   cJSON *plan = cJSON_AddObjectToObject(req, "plan");
-   cJSON_AddStringToObject(plan, "schema", "delegate_plan_v1");
-   cJSON_AddStringToObject(plan, "title", "Invalid Launch Plan");
-   cJSON *packets = cJSON_AddArrayToObject(plan, "packets");
-   cJSON *packet = cJSON_CreateObject();
-   cJSON_AddStringToObject(packet, "id", "packet-bad-handoff");
-   cJSON_AddStringToObject(packet, "role", "code");
-   cJSON_AddStringToObject(packet, "title", "Missing handoff schema");
-   cJSON *owned = cJSON_AddArrayToObject(packet, "owned_files");
-   cJSON_AddItemToArray(owned, cJSON_CreateString("src/foo.c"));
-   cJSON_AddItemToArray(packets, packet);
-   assert(handle_delegate_launch(ctx, conn, req) == 0);
-   assert(g_last_response == NULL);
-   assert(strcmp(g_last_error, "delegate plan packet missing handoff_schema delegate_result_v1") ==
-          0);
-   cJSON_Delete(req);
-   reset_last_response();
-   free(conn);
-   free(ctx);
-   printf("  PASS: test_delegate_launch_rejects_packet_without_handoff_schema\n");
+   printf("  PASS: test_delegate_launch_relays_the_modules_refusal\n");
 }
 
 /* Async-only (WP-B): handle_delegate returns a {job_id,"pending"} envelope,
@@ -3788,10 +3777,145 @@ static int compute_test_route_filter(const uint8_t *request, size_t request_len,
    return 0;
 }
 
+/* A launch-plan provider that mirrors the wire's SHAPE, not its policy.
+ *
+ * These tests are about what the SERVER does with a launch -- that a plan row
+ * and a coord job appear, with the right task count and concurrency, and that
+ * the response says so. What makes a packet launchable, how a missing path is
+ * repaired, and what a delegate is briefed with are the module's rules, and
+ * they are tested against the module (launchplan_test.go). Restating them here
+ * would be a second copy of exactly the kind this migration removes.
+ *
+ * So this reads the packets and emits one step and one task per non-review
+ * packet. It mirrors exactly ONE branch of the module's rule -- a path that
+ * does not exist and has exactly one candidate becomes that candidate -- because
+ * one fixture below is about the request's `cwd` reaching the candidate lookup,
+ * and that lookup is now the CALLER's half. Nothing else here decides anything. */
+static int compute_test_launch_plan(const uint8_t *request, size_t request_len, uint8_t *response,
+                                    size_t response_cap, size_t *response_len)
+{
+   aimee_delegates_rd_t r = {.buf = request, .len = request_len, .at = 0, .bad = 0};
+   if (aimee_delegates_rd_u32(&r) != AIMEE_DELEGATES_LAUNCHPLAN_REQUEST_MAGIC ||
+       aimee_delegates_rd_u32(&r) != (uint32_t)AIMEE_DELEGATES_WIRE_VERSION)
+      return -1;
+   int max_concurrent = (int)aimee_delegates_rd_u32(&r);
+
+   char scratch[1024];
+   aimee_delegates_rd_str(&r, scratch, sizeof(scratch)); /* schema */
+   aimee_delegates_rd_str(&r, scratch, sizeof(scratch)); /* title */
+
+   uint32_t missing = aimee_delegates_rd_u32(&r);
+   for (uint32_t i = 0; i < missing && !r.bad; i++)
+      aimee_delegates_rd_str(&r, scratch, sizeof(scratch));
+
+   /* Collect the launchable packets before writing anything: the response
+    * states its step count up front. */
+   struct
+   {
+      char id[256];
+      char title[256];
+      char objective[512];
+      char role[64];
+      char files[8][512];
+      uint32_t file_count;
+   } launchable[64];
+   uint32_t launch_count = 0;
+
+   uint32_t packets = aimee_delegates_rd_u32(&r);
+   for (uint32_t i = 0; i < packets && !r.bad; i++)
+   {
+      char id[256], title[256], objective[512], role[64], schema[128];
+      aimee_delegates_rd_str(&r, id, sizeof(id));
+      aimee_delegates_rd_str(&r, title, sizeof(title));
+      aimee_delegates_rd_str(&r, objective, sizeof(objective));
+      aimee_delegates_rd_str(&r, role, sizeof(role));
+      aimee_delegates_rd_str(&r, schema, sizeof(schema));
+
+      char paths[8][512];
+      uint32_t kept = 0;
+      uint32_t file_count = aimee_delegates_rd_u32(&r);
+      for (uint32_t f = 0; f < file_count && !r.bad; f++)
+      {
+         char path[512];
+         aimee_delegates_rd_str(&r, path, sizeof(path));
+         int exists = aimee_delegates_rd_u32(&r) != 0;
+         uint32_t candidates = aimee_delegates_rd_u32(&r);
+         char sole_candidate[512] = "";
+         for (uint32_t c = 0; c < candidates && !r.bad; c++)
+         {
+            char candidate[512];
+            aimee_delegates_rd_str(&r, candidate, sizeof(candidate));
+            if (candidates == 1 && !exists)
+               snprintf(sole_candidate, sizeof(sole_candidate), "%s", candidate);
+         }
+         if (kept < 8)
+            snprintf(paths[kept++], sizeof(paths[0]), "%s",
+                     sole_candidate[0] ? sole_candidate : path);
+      }
+
+      if (strcmp(role, "review") == 0 || kept == 0 || launch_count >= 64)
+         continue;
+      snprintf(launchable[launch_count].id, sizeof(launchable[0].id), "%s", id);
+      snprintf(launchable[launch_count].title, sizeof(launchable[0].title), "%s", title);
+      snprintf(launchable[launch_count].objective, sizeof(launchable[0].objective), "%s",
+               objective);
+      snprintf(launchable[launch_count].role, sizeof(launchable[0].role), "%s",
+               role[0] ? role : "execute");
+      for (uint32_t f = 0; f < kept; f++)
+         snprintf(launchable[launch_count].files[f], sizeof(launchable[0].files[0]), "%s",
+                  paths[f]);
+      launchable[launch_count].file_count = kept;
+      launch_count++;
+   }
+   if (r.bad)
+      return -1;
+
+   aimee_delegates_wire_t w;
+   aimee_delegates_wire_init(&w, response, response_cap);
+   aimee_delegates_wire_u32(&w, AIMEE_DELEGATES_LAUNCHPLAN_RESPONSE_MAGIC);
+   if (g_launch_refusal)
+   {
+      aimee_delegates_wire_str(&w, g_launch_refusal);
+      launch_count = 0;
+   }
+   else
+      aimee_delegates_wire_str(&w,
+                               launch_count ? "" : "delegate plan has no implementation packets");
+   aimee_delegates_wire_u32(&w, (uint32_t)(max_concurrent > 0 ? max_concurrent : 3));
+
+   aimee_delegates_wire_u32(&w, launch_count);
+   for (uint32_t i = 0; i < launch_count; i++)
+   {
+      aimee_delegates_wire_str(&w, launchable[i].title);
+      aimee_delegates_wire_str(&w, launchable[i].id);
+      aimee_delegates_wire_str(&w, launchable[i].objective);
+      aimee_delegates_wire_str(&w, "");
+   }
+
+   aimee_delegates_wire_u32(&w, launch_count);
+   for (uint32_t i = 0; i < launch_count; i++)
+   {
+      aimee_delegates_wire_u32(&w, launchable[i].file_count);
+      for (uint32_t f = 0; f < launchable[i].file_count; f++)
+         aimee_delegates_wire_str(&w, launchable[i].files[f]);
+      aimee_delegates_wire_str(&w, launchable[i].role);
+      aimee_delegates_wire_str(&w, launchable[i].objective);
+   }
+
+   aimee_delegates_wire_u32(&w, 0); /* repairs */
+   aimee_delegates_wire_u32(&w, 0); /* warnings */
+
+   if (w.overflow)
+      return -1;
+   *response_len = w.len;
+   return 0;
+}
+
 int main(void)
 {
    register_test_workspace_root();
    delegate_register_may_write_provider(compute_test_may_write);
+   delegate_register_launch_plan_provider(compute_test_launch_plan);
    delegate_register_route_filter_provider(compute_test_route_filter);
    assert(delegate_backend_register(&g_fake_docker) == 0);
    delegate_register_handoff_provider(compute_test_handoff_provider);
@@ -3832,8 +3956,7 @@ int main(void)
    test_direct_delegate_rejects_raw_tool_call_markup();
    test_delegate_launch_creates_coord_job();
    test_delegate_launch_repairs_paths_from_request_cwd();
-   test_delegate_launch_rejects_packet_without_owned_files();
-   test_delegate_launch_rejects_packet_without_handoff_schema();
+   test_delegate_launch_relays_the_modules_refusal();
    test_direct_delegate_handoff_json_response();
    test_direct_delegate_handoff_repair_attempt();
    test_direct_delegate_handoff_repair_failure_is_error();
