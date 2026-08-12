@@ -11,6 +11,7 @@
   },
   "ownership_complete": true,
   "sources": [
+    "src/modules/vault/agent_credentials.c",
     "src/modules/vault/runtime_secret.c",
     "src/modules/vault/vault_capability.c",
     "src/modules/vault/vault_config_bootstrap.c",

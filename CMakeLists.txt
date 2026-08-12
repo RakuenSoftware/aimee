@@ -694,7 +694,9 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/session_worktree_key.c
     ${AIMEE_SRC_DIR}/worktree_gc.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_manifest.c
-    ${AIMEE_SRC_DIR}/server/agent_config.c
+    ${AIMEE_SRC_DIR}/modules/config/agent_config.c
+    ${AIMEE_SRC_DIR}/modules/config/agent_registry.c
+    ${AIMEE_SRC_DIR}/modules/vault/agent_credentials.c
     ${AIMEE_SRC_DIR}/modules/routing/routing.c
     ${AIMEE_SRC_DIR}/agent_tier_lint.c
     ${AIMEE_SRC_DIR}/cmd_describe.c

@@ -9,6 +9,7 @@
   },
   "ownership_complete": true,
   "sources": [
+    "src/modules/config/agent_config.c",
     "src/modules/config/agent_registry.c",
     "src/modules/config/config.c",
     "src/modules/config/config_accessors_0.c",
