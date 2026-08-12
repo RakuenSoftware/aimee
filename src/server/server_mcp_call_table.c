@@ -720,29 +720,29 @@ static cJSON *mcph_task_list(struct mcp_call *c)
    return json_result_content(result);
 }
 
-static cJSON *mcph_index_find_callers(struct mcp_call *c)
+/* One symbol's caller list, as its own object. Returns NULL only on OOM; a
+ * lookup that fails reports status "error" so one bad symbol cannot void the
+ * rest of a batch. */
+static cJSON *find_callers_one(const char *project, int all_projects, const char *symbol)
 {
-   cJSON *js = cJSON_GetObjectItemCaseSensitive(c->jargs, "symbol");
-   if (!cJSON_IsString(js) || !js->valuestring[0])
-      return text_content("error: index_find_callers requires 'symbol'");
-   int all_projects = mcp_code_scope_all(c->jargs);
-   if (all_projects < 0)
-      return text_content("error: scope must be 'current' or 'all'");
-   const char *project = mcp_code_project_from_args(c->jargs);
-   if (!all_projects && !project)
-      return text_content("error: no active project determined from cwd; pass 'project' or "
-                          "scope='all' explicitly");
    const int max = 200;
    caller_hit_t *hits = calloc((size_t)max, sizeof(*hits));
    if (!hits)
-      return text_content("error: out of memory");
-   int n = kb_client_index_find_callers_scoped(project, all_projects, js->valuestring, hits, max);
-   if (n < 0)
+      return NULL;
+   int n = kb_client_index_find_callers_scoped(project, all_projects, symbol, hits, max);
+   cJSON *result = cJSON_CreateObject();
+   if (!result)
    {
       free(hits);
-      return mcph_kb_last_result("index_find_callers failed");
+      return NULL;
    }
-   cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "symbol", symbol);
+   if (n < 0)
+   {
+      cJSON_AddStringToObject(result, "status", "error");
+      free(hits);
+      return result;
+   }
    cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(result, "callers");
    for (int i = 0; i < n; i++)
@@ -757,6 +757,54 @@ static cJSON *mcph_index_find_callers(struct mcp_call *c)
    }
    cJSON_AddNumberToObject(result, "count", n);
    free(hits);
+   return result;
+}
+
+static cJSON *mcph_index_find_callers(struct mcp_call *c)
+{
+   cJSON *js = cJSON_GetObjectItemCaseSensitive(c->jargs, "symbol");
+   cJSON *jss = cJSON_GetObjectItemCaseSensitive(c->jargs, "symbols");
+   int batch = cJSON_IsArray(jss) && cJSON_GetArraySize(jss) > 0;
+   if (!batch && (!cJSON_IsString(js) || !js->valuestring[0]))
+      return text_content("error: index_find_callers requires 'symbol' or 'symbols'");
+   int all_projects = mcp_code_scope_all(c->jargs);
+   if (all_projects < 0)
+      return text_content("error: scope must be 'current' or 'all'");
+   const char *project = mcp_code_project_from_args(c->jargs);
+   if (!all_projects && !project)
+      return text_content("error: no active project determined from cwd; pass 'project' or "
+                          "scope='all' explicitly");
+
+   /* Batched because the measured shape is find_callers(a), find_callers(b),
+    * find_callers(c) -- three round trips for three independent lookups, at the
+    * end of a cell where the agent already knows all three names. Nothing about
+    * b's callers depends on a's answer. */
+   if (batch)
+   {
+      cJSON *out = cJSON_CreateArray();
+      if (!out)
+         return text_content("error: out of memory");
+      cJSON *e;
+      cJSON_ArrayForEach(e, jss)
+      {
+         if (!cJSON_IsString(e) || !e->valuestring[0])
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         cJSON *one = find_callers_one(project, all_projects, e->valuestring);
+         if (one)
+            cJSON_AddItemToArray(out, one);
+      }
+      return json_result_content(out);
+   }
+
+   cJSON *result = find_callers_one(project, all_projects, js->valuestring);
+   if (!result)
+      return text_content("error: out of memory");
+   cJSON *st = cJSON_GetObjectItemCaseSensitive(result, "status");
+   if (cJSON_IsString(st) && strcmp(st->valuestring, "error") == 0)
+   {
+      cJSON_Delete(result);
+      return mcph_kb_last_result("index_find_callers failed");
+   }
    return json_result_content(result);
 }
 

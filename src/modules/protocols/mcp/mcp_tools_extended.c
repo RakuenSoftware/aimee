@@ -73,6 +73,11 @@ void mcp_add_extended_tools(cJSON *tools)
                 "Find call sites of a symbol across the indexed code: project, file, calling "
                 "function, line.");
    ext_prop(t, "symbol", "string", "Symbol / function name to find callers of.");
+   ext_prop(t, "symbols", "array",
+            "Look up SEVERAL symbols in ONE call: [\"a\", \"b\", ...]. Prefer this whenever you "
+            "want callers of more than one symbol -- the lookups are independent, so they cost "
+            "one round trip together. Replaces 'symbol' when present; returns one {symbol, "
+            "status, callers, count} per entry, in order.");
    ext_prop(t, "project", "string",
             "Indexed project id. Optional; defaults from the MCP request cwd.");
    ext_prop(t, "scope", "string",
