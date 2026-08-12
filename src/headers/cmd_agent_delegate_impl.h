@@ -159,7 +159,6 @@ int delegate_extract_named_paths(const char *prompt, char paths[][DELEGATE_DRIFT
 /* Returns 1 when a delegate prompt asks for writes/edits, 0 when it is
  * explicitly read-only ("read-only", "do not edit", etc.). Empty prompts are
  * treated as write-capable to preserve legacy behavior. */
-int delegate_prompt_allows_writes(const char *prompt);
 
 /* Named-file drift guard.
  *

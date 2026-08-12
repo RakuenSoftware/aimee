@@ -379,7 +379,7 @@
         },
         {
           "path": "src/headers/cmd_agent_delegate_impl.h",
-          "sha256": "b1e19a5e79e3350e0e2391ebec1e5e1d53aae796bfa0173039ba80eefff4f8da"
+          "sha256": "6e68f7769c0119c4346136f52e0eb735c8b7bd3d49855779f0188de2a61efb80"
         },
         {
           "path": "src/headers/cmd_agent_delegate_internal.h",
@@ -1435,7 +1435,7 @@
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_launch_args.h",
-          "sha256": "8b25d1cafaaaff2c574689f2e7f855e937fa7c905074ee580391cf8ce393eb06"
+          "sha256": "147623abb96a84572c1e3e388798bad578fd09362d2a13a29d2e061240c09ed6"
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_patch_coordinator.h",
@@ -1628,7 +1628,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "5bb2e816aae0000a756b37ee5768ccb0c3303d12785ceb9ee0b9017fb9ac4775",
+      "sha256": "b90824bf2d40221fe62921be8b865f593ada64f9f5e64b50779caff5a8d04c66",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
