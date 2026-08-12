@@ -848,12 +848,14 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
    {
       if (strcmp(argv[i], "--key") == 0 && i + 1 < argc)
       {
-         /* Preserve the verbatim reference (e.g. "$VAR") for save so a resolved
-          * secret is never written to agents.json; resolve a runtime copy.
-          * Mirrors agent_load_config. */
+         /* Store the verbatim reference (e.g. "$VAR") in BOTH fields and resolve
+          * nothing here. Mirrors agent_load_config, which no longer resolves
+          * either: a resolved secret must never be written to agents.json, and
+          * must never sit in the in-memory registry. agent_api_key_secret()
+          * resolves at the point of use. */
          const char *raw_key = argv[++i];
          snprintf(ag->api_key_disk, MAX_API_KEY_LEN, "%s", raw_key);
-         agent_expand_env(raw_key, ag->api_key, MAX_API_KEY_LEN);
+         snprintf(ag->api_key, MAX_API_KEY_LEN, "%s", raw_key);
       }
       else if (strcmp(argv[i], "--auth-cmd") == 0 && i + 1 < argc)
          snprintf(ag->auth_cmd, MAX_AUTH_CMD_LEN, "%s", argv[++i]);

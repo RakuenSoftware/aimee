@@ -877,11 +877,13 @@ int agent_load_config(agent_config_t *cfg)
          v = cJSON_GetObjectItem(a, "api_key");
          if (v && cJSON_IsString(v))
          {
-            /* Keep the verbatim on-disk form ($VAR ref) for re-save, and resolve
-             * a separate runtime copy. Without this, a save would write the
-             * expanded secret back to agents.json as plaintext. */
+            /* VERBATIM, both copies. Config does not resolve credentials: the
+             * registry is cached for the process's lifetime and copied per
+             * lookup, so a resolved secret here would be a credential living in
+             * config and duplicated on every copy. agent_api_key_secret()
+             * resolves at the point of use, in the vault module. */
             snprintf(ag->api_key_disk, MAX_API_KEY_LEN, "%s", v->valuestring);
-            agent_expand_env(v->valuestring, ag->api_key, MAX_API_KEY_LEN);
+            snprintf(ag->api_key, MAX_API_KEY_LEN, "%s", v->valuestring);
          }
 
          /* Optional credential pool. Each entry is {name, api_key_env};

@@ -87,6 +87,28 @@ static int agent_api_key_literal(const char *api_key)
    return api_key && api_key[0] && api_key[0] != '$';
 }
 
+/* See agent_config.h. The config module hands us whatever agents.json holds --
+ * a literal key or a "$VAR" reference -- and never resolves it, so the resolution
+ * lives here and the registry never carries a credential. */
+int agent_api_key_secret(const agent_t *agent, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return 0;
+   out[0] = '\0';
+   if (!agent || !agent->api_key[0])
+      return 0;
+   if (agent->api_key[0] == '$')
+   {
+      /* Credential environment variables are consumed and unset before config
+       * loading; the only runtime view is the locked-memory cache hydrated from
+       * Vault. dotenv and direct getenv fallbacks stay forbidden. */
+      agent_expand_env(agent->api_key, out, out_len);
+      return out[0] ? 1 : 0;
+   }
+   snprintf(out, out_len, "%s", agent->api_key);
+   return 1;
+}
+
 static int agent_provider_env_value(const char *provider, char *dst, size_t dst_len)
 {
    const char *const *envs = agent_provider_env_vars(provider);
@@ -114,8 +136,17 @@ int agent_has_resolvable_credentials(const agent_t *agent)
       return 0;
    if (!agent_provider_requires_credentials(agent->provider))
       return 1;
-   if (agent->auth_cmd[0] || agent_api_key_literal(agent->api_key))
+   if (agent->auth_cmd[0])
       return 1;
+   {
+      /* A "$VAR" reference counts only if it actually resolves; an unresolved one
+       * carries no credential and must fall through to the vault probe below. */
+      char probe[MAX_API_KEY_LEN];
+      int have = agent_api_key_secret(agent, probe, sizeof(probe));
+      runtime_secret_wipe(probe, sizeof(probe));
+      if (have)
+         return 1;
+   }
    /* A credential in the permanent vault (this turn's principal or the server
     * principal) makes the agent usable with no on-disk key — the P4 primary path.
     * For codex we probe the TOKEN, not the account id: a vaulted account without a
@@ -587,10 +618,15 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
          snprintf(buf, buf_len, "x-api-key: %s", token);
          return 0;
       }
-      if (agent_api_key_literal(agent->api_key))
       {
-         snprintf(buf, buf_len, "x-api-key: %s", agent->api_key);
-         return 0;
+         char key[MAX_API_KEY_LEN];
+         if (agent_api_key_secret(agent, key, sizeof(key)))
+         {
+            snprintf(buf, buf_len, "x-api-key: %s", key);
+            runtime_secret_wipe(key, sizeof(key));
+            return 0;
+         }
+         runtime_secret_wipe(key, sizeof(key));
       }
       char token[MAX_API_KEY_LEN];
       if (agent_provider_env_value(agent->provider, token, sizeof(token)))

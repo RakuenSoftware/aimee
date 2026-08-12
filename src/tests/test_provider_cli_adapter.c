@@ -13,6 +13,24 @@
 #include "provider_cli_adapter.h"
 #include "runtime_secret.h"
 
+/* provider_cli_adapter now resolves an agent's key through the vault module
+ * rather than reading agent_t.api_key directly, because config stores the
+ * on-disk form verbatim. This minimal-link test does not pull the vault module,
+ * so mirror the contract exactly: a literal is the key; a "$VAR" reference is
+ * resolved from the runtime secret cache. */
+int agent_api_key_secret(const agent_t *agent, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return 0;
+   out[0] = '\0';
+   if (!agent || !agent->api_key[0])
+      return 0;
+   if (agent->api_key[0] == '$')
+      return (runtime_secret_get(agent->api_key + 1, out, out_len) && out[0]) ? 1 : 0;
+   snprintf(out, out_len, "%s", agent->api_key);
+   return 1;
+}
+
 static agent_t g_seen_agent;
 static char g_seen_system[256];
 static char g_seen_user[256];

@@ -248,6 +248,20 @@ int agent_has_role(const agent_t *agent, const char *role);
 int agent_supports_persona(const agent_t *agent, const char *persona);
 int agent_is_exec_role(const agent_t *agent, const char *role);
 void agent_expand_env(const char *src, char *dst, size_t dst_len);
+
+/* The agent's API key AS A SECRET, resolved on demand.
+ *
+ * agents.json may carry either a literal key or a "$VAR" reference. The config
+ * module stores whatever is on disk VERBATIM and never resolves it, so the
+ * registry -- a 350,968-byte struct that is copied per lookup and cached in
+ * memory for the process's lifetime -- holds a reference rather than a
+ * credential. Resolution happens here, in the module that owns credentials,
+ * at the moment of use.
+ *
+ * Returns 1 and fills `out` when a key is available, 0 otherwise (`out` is left
+ * empty). Callers own the copy and should runtime_secret_wipe() it when done. */
+int agent_api_key_secret(const agent_t *agent, char *out, size_t out_len);
+
 int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len);
 /* An explicit, actionable reason the LAST agent_resolve_auth call failed (e.g.
  * codex REAUTH_REQUIRED), or NULL. Lets the delegate/chat error path surface a
