@@ -54,7 +54,24 @@ class RefactorBaselineTests(unittest.TestCase):
         )
 
     def test_repository_baseline_is_cwd_independent(self) -> None:
-        with tempfile.TemporaryDirectory() as cwd:
+        """The checker resolves the repository from its own location, not $PWD.
+
+        This asserts the two runs AGREE, not that they succeed. Asserting success
+        made this test double as a surface-drift gate on every branch: any change
+        to a public header failed it until the baseline was re-frozen, which is
+        the release question the CI workflow deliberately scopes to `main`
+        (see the "Enforce refactor surface baselines" step in
+        .github/workflows/module-inventory.yml). The gate belonged in one place;
+        this test kept enforcing it from another, and did so later and less
+        legibly, because `make lint` no longer runs the check at all.
+
+        Agreement is the property the name promises and the one worth holding:
+        a checker that reads a different tree depending on where it was invoked
+        would pass in CI and fail on a developer's machine, or worse, the
+        reverse.
+        """
+
+        def run(cwd: str) -> tuple[int, str]:
             result = subprocess.run(
                 [sys.executable, "-I", "-S", str(SCRIPT)],
                 cwd=cwd,
@@ -62,7 +79,17 @@ class RefactorBaselineTests(unittest.TestCase):
                 capture_output=True,
                 check=False,
             )
-        self.assertEqual(result.returncode, 0, result.stderr)
+            return result.returncode, result.stdout + result.stderr
+
+        from_root = run(str(ROOT))
+        with tempfile.TemporaryDirectory() as elsewhere:
+            from_elsewhere = run(elsewhere)
+
+        self.assertEqual(
+            from_root,
+            from_elsewhere,
+            "the checker gave different answers from different working directories",
+        )
 
     def test_output_is_deterministic_and_sorted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

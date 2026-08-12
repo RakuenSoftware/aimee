@@ -97,9 +97,8 @@
    "phrases in one call; --scope all to widen). "                                                  \
    "Only this one has no command form: a pattern or repeated shape "                               \
    "-> " AIMEE_CODE_TOOL_AST_GREP_SEARCH ". "                                                      \
-   "Tool calls cannot be chained, so batch WITHIN one: each takes a PLURAL "                       \
-   "argument that answers several at once (spans, queries, symbols) -- use it "                    \
-   "rather than repeating the call. "                                                              \
+   "These commands take PLURAL arguments -- several spans, questions or phrases "                  \
+   "in one invocation -- so ask once rather than repeating the call. "                             \
    "Shell stays right for building, running tests, and editing.\n"
 
 /* The scope policy. explore-with names the tools; it does not say WHEN one

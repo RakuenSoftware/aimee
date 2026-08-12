@@ -107,7 +107,7 @@
         },
         {
           "path": "Dockerfile.server",
-          "sha256": "39d54732d065b10c1290800c9c6eaa73b47345e08d266c1d142e85f000694e7c"
+          "sha256": "a236e9ad97b9e1b07e5b94e6b1e1b3073ea0f1db1204ad26170dc5336968a94f"
         },
         {
           "path": "Dockerfile.status-authority",
@@ -255,7 +255,7 @@
         },
         {
           "path": "src/headers/aimee_session_guidance.h",
-          "sha256": "ef451c5a10af976119830b891cdb017de947c4ded0c54ae205f2da3f00ec5944"
+          "sha256": "ea7b3692d842bef51682c30169b80e0f78b23b1dcb36ebc7b5d2dfdb24782c49"
         },
         {
           "path": "src/headers/aimee_sha256.h",
@@ -1628,7 +1628,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "a645fb767564eb103f66727c649108433f726309d6e31116abc2a0febb9a1e61",
+      "sha256": "b23ec28afb8ae965177cc077931d18408a3c24a34a4d1123c1145dad0791690e",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
