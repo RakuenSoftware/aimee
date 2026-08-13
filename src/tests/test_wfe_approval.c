@@ -11,6 +11,7 @@
 #include "wfe_approval.h"
 #include "wfe_engine.h"
 #include "wfe_iface.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static const char *HUM = "name: hum\n"
                          "start: draft\n"
@@ -35,11 +36,13 @@ static const char *HUM = "name: hum\n"
                          "    in:\n"
                          "      pr: pr.out\n";
 
-static char g_home[64];
+/* 256, not 64: the path now carries TMPDIR in front of the template, and a
+ * truncated mkdtemp template fails somewhere far less obvious. */
+static char g_home[256];
 
 static void setup_home(void)
 {
-   strcpy(g_home, "/tmp/wfe_appr_XXXXXX");
+   snprintf(g_home, sizeof g_home, "%s/wfe_appr_XXXXXX", platform_tmpdir());
    char *dir = wfe_test_mkdtemp(g_home);
    assert(dir);
    char wf[128];

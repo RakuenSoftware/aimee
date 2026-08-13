@@ -17,6 +17,7 @@
 #include "wfe_engine.h"
 #include "wfe_iface.h"
 #include "wfe_store.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* managed-change shape: understand -> split -> implement -> freeze -> review ->
  * gate.roundtable -> gate.deliver. Distinct node ids so the mock can pick the
@@ -185,7 +186,8 @@ static wfe_step_result_t stub_adv(wfe_ctx *c, const wfe_node_t *n)
 
 static void setup_home(void)
 {
-   char tmpl[] = "/tmp/wfe_mgr_home_XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/wfe_mgr_home_XXXXXX", platform_tmpdir());
    char *dir = wfe_test_mkdtemp(tmpl);
    assert(dir);
    char wf[512];

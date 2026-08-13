@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "modules/memory/memory_profile_pack.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char s_tmpdir[256];
 
@@ -142,7 +143,8 @@ int main(void)
 {
    printf("memory_profile_pack:\n");
 
-   char tmpl[] = "/tmp/aimee-pack-test-XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee-pack-test-XXXXXX", platform_tmpdir());
    char *dir = mkdtemp(tmpl);
    assert(dir);
    snprintf(s_tmpdir, sizeof(s_tmpdir), "%s", dir);

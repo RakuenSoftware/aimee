@@ -17,6 +17,7 @@
 #include "wfe_engine.h"
 #include "wfe_iface.h"
 #include "wfe_store.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* ---- mock delegate provider ---- */
 static int g_deleg_calls;
@@ -204,7 +205,8 @@ static int run_fresh(const char *suffix)
 int main(void)
 {
    printf("wfe-delegate-seam: ");
-   char home[] = "/tmp/wfe_ds_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/wfe_ds_XXXXXX", platform_tmpdir());
    assert(wfe_test_mkdtemp(home));
    char wf[160];
    snprintf(wf, sizeof wf, "%s/workflows", home);
@@ -437,7 +439,8 @@ int main(void)
           "delegate code: no owned files changed; result treated as incomplete"));
       assert(!wfe_delegate_error_is_no_change("provider connection failed"));
 
-      char repo[] = "/tmp/wfe_noop_repo_XXXXXX";
+      char repo[256];
+      snprintf(repo, sizeof repo, "%s/wfe_noop_repo_XXXXXX", platform_tmpdir());
       assert(wfe_test_mkdtemp(repo));
       char cmd[800];
       snprintf(cmd, sizeof cmd,
@@ -573,7 +576,8 @@ int main(void)
    /* E: per-work-item git worktree (F2) — ensure creates + persists + is
     *    idempotent; cleanup removes it. */
    {
-      char repo[] = "/tmp/wfe_f2_repo_XXXXXX";
+      char repo[256];
+      snprintf(repo, sizeof repo, "%s/wfe_f2_repo_XXXXXX", platform_tmpdir());
       assert(wfe_test_mkdtemp(repo));
       char cmd[640];
       snprintf(cmd, sizeof cmd,
@@ -610,7 +614,8 @@ int main(void)
    /* F: orphan-worktree GC + inode cap — reap worktrees no LIVE item owns, keep
     *    active ones, honour the grace window, and fail-closed at the cap. */
    {
-      char repo[] = "/tmp/wfe_gc_repo_XXXXXX";
+      char repo[256];
+      snprintf(repo, sizeof repo, "%s/wfe_gc_repo_XXXXXX", platform_tmpdir());
       assert(wfe_test_mkdtemp(repo));
       char cmd[640];
       snprintf(cmd, sizeof cmd,

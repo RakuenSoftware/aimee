@@ -18,6 +18,7 @@
 #include "support/module_bus_stub.h"
 
 #include <aimee/workflows/module_api.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static wfe_verdict_t mk(const char *persona, wfe_verdict_kind_t k, const char *hash, int hs)
 {
@@ -87,7 +88,8 @@ static const char *RT = "name: rt\n"
 
 static void setup_home(void)
 {
-   char d[] = "/tmp/wfe_rt_XXXXXX";
+   char d[256];
+   snprintf(d, sizeof d, "%s/wfe_rt_XXXXXX", platform_tmpdir());
    char *dir = wfe_test_mkdtemp(d);
    assert(dir);
    char wf[128];
@@ -165,7 +167,8 @@ int main(void)
       g_mode = 0;
       wfe_set_panel_provider(mock_panel);
       /* a real proposal file so read_text_capped returns its content to the panel */
-      char pp[] = "/tmp/wfe_rt_proposal_XXXXXX";
+      char pp[256];
+      snprintf(pp, sizeof pp, "%s/wfe_rt_proposal_XXXXXX", platform_tmpdir());
       int fd = mkstemp(pp);
       assert(fd >= 0);
       const char *PTEXT = "PROPOSAL: add a widget with tests.";

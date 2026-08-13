@@ -10,6 +10,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* run_cmd cwd control (util.c): exec_shell honors this thread-local, mirroring
  * how the mcp_git tools set their working directory before shelling out. */
@@ -19,7 +20,7 @@ static char g_tmp[256];
 
 static void make_tmpdir(void)
 {
-   snprintf(g_tmp, sizeof(g_tmp), "/tmp/ws_provider_test.XXXXXX");
+   snprintf(g_tmp, sizeof(g_tmp), "%s/ws_provider_test.XXXXXX", platform_tmpdir());
    char *d = mkdtemp(g_tmp);
    assert(d != NULL);
 }

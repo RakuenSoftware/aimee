@@ -18,6 +18,7 @@
 #include "wfe_binding.h"
 #include "wfe_engine.h"
 #include "wfe_store.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* linear non-enforced workflow; stub executors advance each block along `next`.
  * understand is exempt from the input-binding rule (it is the start); split /
@@ -40,7 +41,8 @@ static const char *WF = "name: t\n"
 
 static void setup_home(void)
 {
-   char tmpl[] = "/tmp/wfe_adv_home_XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/wfe_adv_home_XXXXXX", platform_tmpdir());
    char *dir = wfe_test_mkdtemp(tmpl);
    assert(dir);
    char wf[512];

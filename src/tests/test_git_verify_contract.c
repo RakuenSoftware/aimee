@@ -18,6 +18,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static verify_step_t mk_step(const char *name, const char *tier)
 {
@@ -154,7 +155,8 @@ static void test_unavailable_reason_names_the_root(void)
    char why[768];
 
    /* A directory with no Makefile: say so, and say where. */
-   char tmpl[] = "/tmp/aimee-verify-reason-XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee-verify-reason-XXXXXX", platform_tmpdir());
    char *dir = mkdtemp(tmpl);
    assert(dir != NULL);
    verify_config_unavailable_reason(dir, why, sizeof(why));
@@ -209,7 +211,8 @@ static void test_git_toplevel_rejects_a_non_repo(void)
 {
    char out[1024];
 
-   char tmpl[] = "/tmp/aimee-verify-root-XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee-verify-root-XXXXXX", platform_tmpdir());
    char *dir = mkdtemp(tmpl);
    assert(dir != NULL);
 

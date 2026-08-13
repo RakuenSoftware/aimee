@@ -14,6 +14,7 @@
 #include "wfe_block_resolve.h"
 #include "wfe_engine.h"
 #include "wfe_store.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* ENFORCED workflow (terminal gate.deliver per I2), valid manager shape:
  * understand(READONLY) -> split -> implement -> freeze -> review -> gate.roundtable
@@ -83,7 +84,8 @@ static void write_wf(const char *dir, const char *name, const char *body)
 
 static void setup_home(void)
 {
-   char tmpl[] = "/tmp/wfe_res_home_XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/wfe_res_home_XXXXXX", platform_tmpdir());
    char *dir = wfe_test_mkdtemp(tmpl);
    assert(dir);
    char wf[512];

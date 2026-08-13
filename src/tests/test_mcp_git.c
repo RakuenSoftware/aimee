@@ -20,6 +20,7 @@
 #include "../db2/db2.h"
 #include "../db2/db2_internal.h"
 #include "support/git_module_fixture.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* --- Helpers --- */
 
@@ -48,7 +49,7 @@ static void init_nested_git_repo(const char *path, const char *label);
 
 static void setup_git_repo(void)
 {
-   strcpy(g_tmpdir, "/tmp/aimee-test-mcp-git-XXXXXX");
+   snprintf(g_tmpdir, sizeof g_tmpdir, "%s/aimee-test-mcp-git-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_tmpdir) != NULL);
 
    char cmd[1024];
@@ -139,7 +140,8 @@ static void test_mcp_chdir_session_cwd_precedes_proxy_cwd(void)
    snprintf(proxy_repo, sizeof(proxy_repo), "%s", g_tmpdir);
 
    char tracked_repo[256];
-   strcpy(tracked_repo, "/tmp/aimee-test-mcp-git-tracked-XXXXXX");
+   snprintf(tracked_repo, sizeof tracked_repo, "%s/aimee-test-mcp-git-tracked-XXXXXX",
+            platform_tmpdir());
    assert(mkdtemp(tracked_repo) != NULL);
    char cmd[1024];
    snprintf(cmd, sizeof(cmd), "cd '%s' && git init -q", tracked_repo);
@@ -515,7 +517,8 @@ static void test_git_commit_reads_masked_global_identity(void)
    assert(system("git checkout -q -b global-identity-test && "
                  "git config --unset-all user.name && git config --unset-all user.email") == 0);
 
-   char fake_home[256] = "/tmp/aimee-test-git-identity-XXXXXX";
+   char fake_home[256];
+   snprintf(fake_home, sizeof fake_home, "%s/aimee-test-git-identity-XXXXXX", platform_tmpdir());
    assert(mkdtemp(fake_home) != NULL);
    const char *env_names[] = {"HOME",
                               "XDG_CONFIG_HOME",
@@ -668,7 +671,8 @@ static void test_git_container_provider_runs_on_server(void)
 
 static void test_git_push_requires_branch(void)
 {
-   char tmpdir[] = "/tmp/aimee-test-push-XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee-test-push-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char saved[4096];
@@ -752,7 +756,8 @@ static void test_git_branch_create_and_list(void)
  * are writable. This reproduces the incident configuration exactly. */
 static void test_git_fetch_never_writes_or_prunes_local_branches(void)
 {
-   char root[] = "/tmp/aimee-test-safe-fetch-XXXXXX";
+   char root[256];
+   snprintf(root, sizeof root, "%s/aimee-test-safe-fetch-XXXXXX", platform_tmpdir());
    assert(mkdtemp(root) != NULL);
    char remote[512], seed[512], local[512], cmd[4096];
    snprintf(remote, sizeof(remote), "%s/remote.git", root);
@@ -1011,7 +1016,8 @@ static void test_git_pr_create_missing_title(void)
 {
    /* Run in an isolated temp repo so merged-PR and verify gates don't
     * interfere with the missing-title error we're testing for. */
-   char tmpdir[] = "/tmp/aimee-test-pr-XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee-test-pr-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[512];
@@ -1052,7 +1058,8 @@ static void test_git_pr_create_missing_title(void)
  * checkout's origin, and it arrives before any API call. */
 static void test_git_pr_create_without_github_origin(void)
 {
-   char tmpdir[] = "/tmp/aimee-test-pr-noorigin-XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee-test-pr-noorigin-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[512];
@@ -1143,7 +1150,8 @@ static void test_git_pr_wait_missing_number(void)
 
 static void test_git_pr_wait_is_rejected_without_running_gh(void)
 {
-   char tmpdir[] = "/tmp/aimee-test-gh-XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee-test-gh-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char gh_path[512];
@@ -1187,7 +1195,8 @@ static void test_git_pr_wait_is_rejected_without_running_gh(void)
 
 static void test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge(void)
 {
-   char tmpdir[] = "/tmp/aimee-test-gh-auto-XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee-test-gh-auto-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char gh_path[512];
@@ -1501,7 +1510,7 @@ static int g_verify_path_saved;
 
 static void verify_test_setup_repo(char *tmpdir, size_t tmpdir_len, const char *prefix)
 {
-   snprintf(tmpdir, tmpdir_len, "/tmp/%s-XXXXXX", prefix);
+   snprintf(tmpdir, tmpdir_len, "%s/%s-XXXXXX", platform_tmpdir(), prefix);
    assert(mkdtemp(tmpdir) != NULL);
    char cmd[1024];
    snprintf(cmd, sizeof(cmd),
@@ -1550,7 +1559,7 @@ static void verify_test_set_fake_home(char *fake_home, size_t fake_home_len)
       g_verify_aimee_profile_was_set = 0;
    }
 
-   snprintf(fake_home, fake_home_len, "/tmp/aimee-test-home-XXXXXX");
+   snprintf(fake_home, fake_home_len, "%s/aimee-test-home-XXXXXX", platform_tmpdir());
    assert(mkdtemp(fake_home) != NULL);
    setenv("HOME", fake_home, 1);
    unsetenv("AIMEE_HOME");
@@ -1571,7 +1580,7 @@ static void verify_test_set_fake_path(char *fake_bin_dir, size_t fake_bin_dir_le
       g_verify_path_was_set = 0;
    }
 
-   snprintf(fake_bin_dir, fake_bin_dir_len, "/tmp/aimee-test-bin-XXXXXX");
+   snprintf(fake_bin_dir, fake_bin_dir_len, "%s/aimee-test-bin-XXXXXX", platform_tmpdir());
    assert(mkdtemp(fake_bin_dir) != NULL);
    {
       char new_path[8192];
@@ -2163,7 +2172,8 @@ static char g_verifytest_saved_cwd[4096];
 
 static void setup_feature_branch_repo(void)
 {
-   strcpy(g_verifytest_dir, "/tmp/aimee-test-push-XXXXXX");
+   snprintf(g_verifytest_dir, sizeof g_verifytest_dir, "%s/aimee-test-push-XXXXXX",
+            platform_tmpdir());
    assert(mkdtemp(g_verifytest_dir) != NULL);
 
    char cmd[1024];
@@ -3003,7 +3013,8 @@ static void test_switch_routes_to_branch_switch(void)
 
 static void test_switch_creates_tracking_branch_from_origin(void)
 {
-   char root[] = "/tmp/aimee-test-tracking-switch-XXXXXX";
+   char root[256];
+   snprintf(root, sizeof root, "%s/aimee-test-tracking-switch-XXXXXX", platform_tmpdir());
    assert(mkdtemp(root) != NULL);
    char remote[512], seed[512], local[512], cmd[4096];
    snprintf(remote, sizeof(remote), "%s/remote.git", root);
@@ -3721,7 +3732,8 @@ static void test_git_verify_sync_rejects_same_session_overlap(void)
  * on a check that could not run. */
 static void test_pr_conflict_gate(void)
 {
-   char tmp[] = "/tmp/aimee-test-pr-conflict-XXXXXX";
+   char tmp[256];
+   snprintf(tmp, sizeof tmp, "%s/aimee-test-pr-conflict-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmp) != NULL);
    char saved[4096];
    assert(getcwd(saved, sizeof(saved)) != NULL);

@@ -22,6 +22,7 @@
 #include "kb_curator_grounding.h"
 #include "kb_curator_provider.h"
 #include "kb_curator_sidecar.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* The deep-curator code-extract gate is now ON by compiled default, but the
  * gate-off tests below need it OFF. Point AIMEE_HOME at an isolated temp config
@@ -44,7 +45,8 @@ static void ccu_set_extract_code_gate(int on)
 
 static void test_force_curator_gate_off(void)
 {
-   static char dir[] = "/tmp/aimee-curtest-XXXXXX";
+   static char dir[256];
+   snprintf(dir, sizeof dir, "%s/aimee-curtest-XXXXXX", platform_tmpdir());
    static int done = 0;
    if (done)
       return;
@@ -327,7 +329,8 @@ static void run_extract_scenario(const char *side_effects_json, const char *call
    assert(db != NULL);
 
    /* A real source file on disk: ccu_read_body() fopen()s job.file_path. */
-   char src_path[] = "/tmp/aimee_ccu_src_XXXXXX";
+   char src_path[256];
+   snprintf(src_path, sizeof src_path, "%s/aimee_ccu_src_XXXXXX", platform_tmpdir());
    int src_fd = mkstemp(src_path);
    assert(src_fd >= 0);
    const char *src_body = "int target_fn(void) { return 0; }\n";
@@ -336,7 +339,8 @@ static void run_extract_scenario(const char *side_effects_json, const char *call
 
    /* The stubbed sidecar response. `cat <file>` ignores the redirected stdin
     * the C harness supplies and just prints this canned JSON. */
-   char resp_path[] = "/tmp/aimee_ccu_resp_XXXXXX";
+   char resp_path[256];
+   snprintf(resp_path, sizeof resp_path, "%s/aimee_ccu_resp_XXXXXX", platform_tmpdir());
    int resp_fd = mkstemp(resp_path);
    assert(resp_fd >= 0);
    char resp[1024];
@@ -462,7 +466,8 @@ static void test_extract_reads_body_from_db2_when_file_absent(void)
    assert(db != NULL);
 
    const char *src_body = "int target_fn(void) { return 0; }\n";
-   char resp_path[] = "/tmp/aimee_ccu_resp_XXXXXX";
+   char resp_path[256];
+   snprintf(resp_path, sizeof resp_path, "%s/aimee_ccu_resp_XXXXXX", platform_tmpdir());
    int resp_fd = mkstemp(resp_path);
    assert(resp_fd >= 0);
    const char *resp =
@@ -720,7 +725,8 @@ static void test_pick_sidecar_command_resolution(void)
 
    /* (b) first READABLE candidate is chosen; a missing one ahead of it is skipped,
     *     and a 0644 (non-executable) file still qualifies. */
-   char tmpl[] = "/tmp/aimee_sidecar_XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee_sidecar_XXXXXX", platform_tmpdir());
    int fd = mkstemp(tmpl);
    assert(fd >= 0);
    close(fd);

@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "wfe_replay_worktree.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void write_file(const char *dir, const char *rel, const char *content)
 {
@@ -26,7 +27,8 @@ int main(void)
 {
    printf("wfe-replay-worktree: ");
 
-   char dir[] = "/tmp/wfe-replay-wt-XXXXXX";
+   char dir[256];
+   snprintf(dir, sizeof dir, "%s/wfe-replay-wt-XXXXXX", platform_tmpdir());
    assert(mkdtemp(dir) != NULL);
    char sub[600];
    snprintf(sub, sizeof sub, "%s/src", dir);

@@ -4,9 +4,10 @@
 #include <string.h>
 #include <aimee/delegates/delegate_role.h>
 #include "agent_types.h"
-#include "config.h"   /* config_default_dir */
-#include <stdlib.h>   /* mkdtemp */
-#include <sys/stat.h> /* mkdir */
+#include "config.h"             /* config_default_dir */
+#include <stdlib.h>             /* mkdtemp */
+#include <sys/stat.h>           /* mkdir */
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* delegate_agent_supports_role() now defers to the canonical agent_has_role()
  * (declared-role membership, `all` wildcard included). Stub it here — the real
@@ -42,7 +43,7 @@ static void write_role_template(const char *canonical, int max_turns)
 }
 static void setup_role_templates(void)
 {
-   snprintf(g_roles_dir, sizeof(g_roles_dir), "/tmp/aimee-test-roles-XXXXXX");
+   snprintf(g_roles_dir, sizeof(g_roles_dir), "%s/aimee-test-roles-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_roles_dir));
    char sub[512];
    snprintf(sub, sizeof(sub), "%s/role_templates", g_roles_dir);
