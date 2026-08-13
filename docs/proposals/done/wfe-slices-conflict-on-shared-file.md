@@ -5,7 +5,7 @@
 > **Archived after partial delivery.** New slices now branch from and integrate the fetched remote
 > feature tip, and content merge conflicts terminate rather than retry forever. The proposal's
 > separately recommended atomic sibling-freeze collision check is not implemented; it is now
-> [`wfe-sibling-freeze-collision-residual.md`](../pending/wfe-sibling-freeze-collision-residual.md).
+> [`wfe-sibling-freeze-collision-residual.md`](wfe-sibling-freeze-collision-residual.md).
 
 ## Symptom
 
