@@ -84,7 +84,7 @@
     "src/tests/test_git_verify_contract.c": 2,
     "src/tests/test_git_verify_select.c": 2,
     "src/tests/test_git_verify_state_bus.c": 1,
-    "src/tests/test_guardrails.c": 81,
+    "src/tests/test_guardrails.c": 45,
     "src/tests/test_guardrails_computer_use.c": 1,
     "src/tests/test_guardrails_semantic.c": 2,
     "src/tests/test_gw_stage_memory.c": 1,

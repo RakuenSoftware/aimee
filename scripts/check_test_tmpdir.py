@@ -35,12 +35,20 @@ what the test asserts:
       must NOT exist; its absence is the whole point of the case
 
 Judge the SITE, never the file. The same file usually holds both: in
-test_guardrails.c the literals above sit a few hundred lines from
-`char tmpdir[] = "/tmp/test_wt_branch_XXXXXX"; mkdtemp(tmpdir);`, which is a
-real leak. So the floor is not zero, but it is much nearer zero than the raw
-count suggests -- roughly 290 of the 663 sites recorded here reach a creation
-call. Before you skip a site, check for mkdtemp/mkstemp/mkdir/fopen/system on
-that path; if something creates it, it is debt, not a fixture.
+test_guardrails.c the fixtures above sat a few hundred lines from
+`char tmpdir[] = "/tmp/test_wt_branch_XXXXXX"; mkdtemp(tmpdir);` -- 36 real
+leaks in the file, now fixed, with the fixtures left exactly as they were.
+
+So the floor is not zero, but it is much nearer zero than the raw count
+suggests. The sharpest signal is an "XXXXXX" template: it exists only to be
+handed to mkdtemp/mkstemp, so it is always created, and ~216 of the sites still
+recorded here carry one. Before you skip a site, look for
+mkdtemp/mkstemp/mkdir/fopen/system on that path; if something creates it, it is
+debt, not a fixture.
+
+Note also that ~64 of those template sites live in tests owned by a vendored
+module (see tests/baselines/refactor/module-test-registration.json). Fixing one
+re-pins that module's mirror, which is a deliberate act -- not hygiene.
 """
 from __future__ import annotations
 
