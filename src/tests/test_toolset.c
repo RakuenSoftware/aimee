@@ -226,12 +226,16 @@ static void test_core_edit_flows_to_include(void)
 
 static void test_delegate_role_toolset(void)
 {
+   /* Canonical roles only. Aliases are the delegates module's table, resolved by
+      the caller: this file kept a copy of that table until it drifted. */
    assert(strcmp(toolset_for_delegate_role("review"), "review_indexed") == 0);
-   assert(strcmp(toolset_for_delegate_role("inspect"), "current_code") == 0);
+   assert(strcmp(toolset_for_delegate_role("diagnose"), "current_code") == 0);
    assert(strcmp(toolset_for_delegate_role("validate"), "validate") == 0);
-   assert(strcmp(toolset_for_delegate_role("test"), "validate") == 0);
-   assert(strcmp(toolset_for_delegate_role("check"), "validate") == 0);
    assert(strcmp(toolset_for_delegate_role("search"), "readonly") == 0);
+   assert(strcmp(toolset_for_delegate_role("code"), "full_stack") == 0);
+   /* An alias reaching here unresolved gets no toolset, rather than a guess. */
+   assert(toolset_for_delegate_role("inspect") == NULL);
+   assert(toolset_for_delegate_role("") == NULL);
    toolset_registry_t reg;
    toolset_registry_init(&reg);
    char tools[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];

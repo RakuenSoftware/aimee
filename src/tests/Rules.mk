@@ -343,6 +343,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-cmd-delegate \
                $(TESTPREFIX)/unit-test-delegate-plan \
                $(TESTPREFIX)/unit-test-delegate-role \
+               $(TESTPREFIX)/unit-test-delegate-permissions \
                $(TESTPREFIX)/unit-test-sse-parser \
                $(TESTPREFIX)/unit-test-anthropic-ingress \
                $(TESTPREFIX)/unit-test-anthropic-http \
@@ -1409,6 +1410,8 @@ $(TESTPREFIX)/unit-test-tasks: $(OBJDIR)/tests/test_tasks.o $(OBJDIR)/tasks.o $(
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test_agent_caps.o \
+                      $(OBJDIR)/tests/support/delegate_role_seam_stub.o \
+                      $(OBJDIR)/tests/support/role_template_toolset_stub.o \
                       $(OBJDIR)/modules/execution-policy/execution_policy.o \
                       $(OBJDIR)/modules/workflows/tool_egress.o \
                       $(OBJDIR)/tests/test_agent_responses.o \
@@ -1452,6 +1455,7 @@ $(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
 # agents.json secret-serialization test split out of test_agent.c (2000-line
 # limit). Mirrors unit-test-agent's link line.
 $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/test_agent_apikey.o \
+                      $(OBJDIR)/tests/support/role_template_toolset_stub.o \
                       $(OBJDIR)/modules/execution-policy/execution_policy.o \
                       $(OBJDIR)/server/agent_cli_shell.o \
                       $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
@@ -1848,6 +1852,7 @@ $(TESTPREFIX)/unit-test-cli-provider: $(OBJDIR)/tests/test_cli_provider.o $(OBJD
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-context-assembly: $(OBJDIR)/tests/test_context_assembly.o \
+                                 $(OBJDIR)/tests/support/delegate_role_policy_stub.o \
                                  $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -2021,6 +2026,7 @@ $(TESTPREFIX)/unit-test-agent-list-handler: $(OBJDIR)/tests/test_agent_list_hand
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-jobs-aux: $(OBJDIR)/tests/test_server_jobs_aux.o \
+                               $(OBJDIR)/tests/support/delegate_role_seam_stub.o \
                                $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                $(OBJDIR)/db1/agent_jobs.o $(OBJDIR)/db1/execution_plans.o \
                                $(OBJDIR)/db1/coord_jobs.o $(OBJDIR)/modules/delegates/delegate_role.o \
@@ -4072,6 +4078,7 @@ $(TESTPREFIX)/unit-test-cmd-cancel: $(OBJDIR)/tests/test_cmd_cancel.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-delegate: $(OBJDIR)/tests/test_cmd_delegate.o \
+                      $(OBJDIR)/tests/support/delegate_role_seam_stub.o \
                              $(OBJDIR)/modules/delegates/delegate_depth.o $(OBJDIR)/modules/delegates/delegate_role.o \
                              $(OBJDIR)/role_templates.o \
                              $(OBJDIR)/modules/delegates/delegate_prompt.o $(OBJDIR)/modules/delegates/delegate_routing.o $(OBJDIR)/modules/delegates/delegate_launch_args.o \
@@ -4086,6 +4093,13 @@ $(TESTPREFIX)/unit-test-delegate-plan: $(OBJDIR)/tests/test_delegate_plan.o \
 
 $(TESTPREFIX)/unit-test-delegate-role: $(OBJDIR)/tests/test_delegate_role.o \
                              $(OBJDIR)/modules/delegates/delegate_role.o $(OBJDIR)/role_templates.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+# The C side of the resolved permission set: reading the module's answer into a
+# fixed-size held set. Minimal by design — the seam and the wire, nothing else.
+$(TESTPREFIX)/unit-test-delegate-permissions: $(OBJDIR)/tests/test_delegate_permissions.o \
+                             $(OBJDIR)/modules/delegates/delegate_launch_args.o \
+                             $(OBJDIR)/log.o $(OBJDIR)/aimee_home.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 # Core panel-provider boundary (#1845). Part of the roundtable-profiles CI gate's
@@ -4816,6 +4830,7 @@ $(TESTPREFIX)/unit-test-workspace-provider-container: \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-toolset-thread-scope: \
+                      $(OBJDIR)/tests/support/role_template_toolset_stub.o \
                                        $(OBJDIR)/tests/test_toolset_thread_scope.o \
                                        $(OBJDIR)/server/agent_tools.o \
                                        $(OBJDIR)/modules/delegates/delegate_role.o \
@@ -5593,6 +5608,8 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
+                     $(OBJDIR)/modules/delegates/delegate_launch_args.o \
+                     $(OBJDIR)/tests/delegate_permissions_stub.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                            $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/workspace_register_args.o $(OBJDIR)/server/workflow_control_bus.o \
                      $(OBJDIR)/server/server_runtime_identity.o \
@@ -5709,6 +5726,7 @@ $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
 # dependencies). The provider itself is faked in the test: the point under test is
 # the routing, not any MCP handler.
 $(TESTPREFIX)/unit-test-mcp-native-dispatch: \
+                      $(OBJDIR)/tests/support/role_template_toolset_stub.o \
                                        $(OBJDIR)/tests/test_mcp_native_dispatch.o \
                                        $(OBJDIR)/modules/tools/agent_tools_dispatch.o \
                                        $(OBJDIR)/modules/tools/agent_tools_completion.o \

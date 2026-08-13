@@ -11,6 +11,8 @@
 #include <aimee/audit/obs_bus.h>
 #include "agent_config.h"
 #include "config.h"
+#include "role_templates.h"
+#include "delegate_permissions_stub.h"
 #include "cJSON.h"
 #include "db1.h"
 #include "openai_runs_store.h"
@@ -335,8 +337,72 @@ static void test_workflow_control_reports_an_unattached_module(void)
    assert(strstr(response, "not attached to the event bus") != NULL);
 }
 
+/* `aimee roles show` has to answer the question a log line was answering: what
+ * did this role actually come to?
+ *
+ * A permission nothing enforces and a tool the set withholds are both invisible
+ * in the frontmatter an operator wrote, and both change what the delegate can
+ * do. The route carries them structurally so the CLI can print them and the
+ * Personas tab can render them.
+ *
+ * WHAT the resolved set is belongs to the delegates module and is proved there.
+ * What is proved HERE is that the route asks and reports faithfully, including
+ * the case where resolution fails: a role that holds nothing is not the same as
+ * a role that grants nothing, and the response says which. */
+static void test_role_template_show_reports_what_the_role_came_to(void)
+{
+   delegate_permissions_stub_install();
+   assert(role_template_write("gatekeeper",
+                              "---\npermissions:\n  - tools\n  - name: deploy\n"
+                              "    enforced_at: deploy-gate\n---\n\nYou gate deploys.\n") == 0);
+
+   /* The route writes the JSON body and returns the status; the envelope is the
+      caller's job. */
+   char resp[8192];
+   assert(route_role_template_show("gatekeeper", resp, (int)sizeof(resp)) == 200);
+   cJSON *o = cJSON_Parse(resp);
+   assert(o != NULL);
+
+   cJSON *perms = cJSON_GetObjectItemCaseSensitive(o, "permissions");
+   assert(cJSON_IsObject(perms));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(perms, "resolved")));
+
+   /* Held, with the point each is bound to. */
+   cJSON *held = cJSON_GetObjectItemCaseSensitive(perms, "held");
+   assert(cJSON_GetArraySize(held) == 2);
+   int saw_deploy_gate = 0;
+   cJSON *g = NULL;
+   cJSON_ArrayForEach(g, held)
+   {
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(g, "name"));
+      const char *at = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(g, "enforced_at"));
+      if (name && strcmp(name, "deploy") == 0 && at && strcmp(at, "deploy-gate") == 0)
+         saw_deploy_gate = 1;
+   }
+   assert(saw_deploy_gate);
+
+   /* This role holds no shell and no repo_write, so those tools are withheld
+      whatever toolset it runs with -- the thing an operator cannot see. */
+   cJSON *denied = cJSON_GetObjectItemCaseSensitive(perms, "denied_tools");
+   assert(cJSON_GetArraySize(denied) > 0);
+   int saw_bash = 0, saw_write = 0;
+   cJSON *d = NULL;
+   cJSON_ArrayForEach(d, denied)
+   {
+      const char *tool = cJSON_GetStringValue(d);
+      saw_bash |= (tool && strcmp(tool, "bash") == 0);
+      saw_write |= (tool && strcmp(tool, "write_file") == 0);
+   }
+   assert(saw_bash && saw_write);
+
+   cJSON_Delete(o);
+   (void)role_template_delete("gatekeeper");
+   printf("  PASS: test_role_template_show_reports_what_the_role_came_to\n");
+}
+
 int main(void)
 {
+   test_role_template_show_reports_what_the_role_came_to();
    printf("server_http: ");
 
    test_workflow_control_reports_an_unattached_module();
