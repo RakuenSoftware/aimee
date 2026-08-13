@@ -2070,6 +2070,55 @@ CREATE POLICY p_project_member ON kb_project
          OR id IN (SELECT project FROM kb_project_membership
                    WHERE identity_key = current_setting('aimee.principal', true))));
 
+-- ---------------------------------------------------------------------------
+-- CONTENT SCOPE, part 1: the referent and the predicate. Neither enforces
+-- anything on its own; the policies that read them land with the backfill.
+-- See docs/proposals/pending/per-user-content-scope-visibility.md.
+--
+-- WHY A COLUMN ON `projects` AND NOT ON EACH CONTENT TABLE. kb_documents,
+-- kb_file_index, kb_embeddings and kb_pdf_embeddings all carry `project`, which
+-- holds projects.name (bound at ingest in kb_payload.c). projects.name is
+-- globally UNIQUE, so it identifies exactly one row; one link here therefore
+-- gives every content table a route to tenancy.
+--
+-- AND WHY NOT BY NAME. kb_project is UNIQUE(parent, name): two teams may each
+-- own a project called `aimee`, so a name identifies NOTHING on its own.
+-- Resolving content to tenancy by name lets a member of one team read another
+-- team's content, which is a cross-tenant leak introduced by the control meant
+-- to prevent one. Reproduced in
+-- docs/validation/per-user-content-scope-prototype.md; do not "simplify" this
+-- into a name match.
+--
+-- NULL means unattributed, and kb_project_visible() denies it. Nothing reads
+-- that yet, so an existing deployment is unaffected until the policies land.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS kb_project BIGINT REFERENCES kb_project(id);
+CREATE INDEX IF NOT EXISTS idx_projects_kb_project ON projects(kb_project);
+
+-- May the current principal see this tenancy project? The rule is
+-- p_project_member's, said ONCE so every content policy calls it rather than
+-- carrying its own copy: (a) the parent team is one of the principal's teams;
+-- (b) a selected billing team narrows it further; (c) a `restricted` project
+-- needs an explicit membership where `team-open` does not.
+--
+-- STABLE, not IMMUTABLE: it reads current_setting and the membership tables.
+-- SECURITY INVOKER (the default) on purpose -- it must see exactly what the
+-- caller sees, and a definer function here would hand back rows the caller's
+-- own RLS denies.
+CREATE OR REPLACE FUNCTION kb_project_visible(p BIGINT) RETURNS boolean
+LANGUAGE sql STABLE AS $$
+  SELECT p IS NOT NULL AND EXISTS (
+    SELECT 1 FROM kb_project k
+     WHERE k.id = p
+       AND k.parent IN (SELECT team FROM kb_team_membership
+                        WHERE identity_key = current_setting('aimee.principal', true))
+       AND (current_setting('aimee.team', true) IS NULL
+            OR current_setting('aimee.team', true) = ''
+            OR k.parent = current_setting('aimee.team', true)::bigint)
+       AND (k.access_mode = 'team-open'
+            OR k.id IN (SELECT project FROM kb_project_membership
+                        WHERE identity_key = current_setting('aimee.principal', true))));
+$$;
+
 -- Admin-gated tenant WRITES (slice 4). Writes are permitted only when the current
 -- principal holds an active org-admin grant, OR is the bootstrap owner. The admin
 -- check keys on the principal's OWN grant row (own-rows policy on kb_admin_grant),

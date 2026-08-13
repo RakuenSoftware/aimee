@@ -5274,6 +5274,16 @@ $(TESTPREFIX)/p7-vault-rewrap-live: $(OBJDIR)/tests/test_kb_vault_rewrap_live.o 
 # [C, SQL, C] kb_audit_event chain and asserts the C verifier accepts it + the SQL row
 # hashes byte-identically in C. Same KB object closure as unit-test-vault-pg (real libpq
 # via db_postgres.o + the kb db2 layer that carries kb_audit_worm.o/schema.sql).
+# Content-scope referent + predicate (slice 1). REAL-PG test: SKIPs cleanly
+# without AIMEE_TEST_PG_URL, because RLS and current_setting mean nothing on the
+# SQLite shim.
+$(TESTPREFIX)/unit-test-content-scope-pg: $(OBJDIR)/tests/test_content_scope_pg.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB)
+
 $(TESTPREFIX)/unit-test-kb-audit-worm-pg: $(OBJDIR)/tests/test_kb_audit_worm_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
@@ -6911,6 +6921,7 @@ $(TESTPREFIX)/unit-test-config-set-section: $(OBJDIR)/tests/test_config_set_sect
 # cache from binaries that do not reference it.
 TEST_KB_RUNTIME_TARGETS = \
   $(TESTPREFIX)/unit-test-kb-audit-worm-pg \
+  $(TESTPREFIX)/unit-test-content-scope-pg \
   $(TESTPREFIX)/unit-test-kb-bedrock-live \
   $(TESTPREFIX)/unit-test-kb-p2b-egress-live \
   $(TESTPREFIX)/unit-test-kb-vault-key-use-live \
