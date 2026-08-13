@@ -822,8 +822,40 @@ void delegate_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
+   /* What this delegate may do, resolved ONCE, here, because this is the first
+    * point at which the role is known to be real. Everything downstream reads
+    * this: the tool default below, the mount, the drift check, the no-op check.
+    *
+    * It is resolved before the tool default rather than after because that
+    * default used to answer from the built-in table while the mount answered
+    * from the resolved set -- so a role an operator defined without `tools` was
+    * handed them here and refused at dispatch. Same fact, two sources, and the
+    * one that ran first was the one that could not see the definition.
+    *
+    * Failure holds nothing: a delegate whose permissions cannot be established
+    * reads and changes nothing. */
+   delegate_permissions_t delegate_perms;
+   {
+      char *role_definition = role_template_frontmatter(cwd[0] ? cwd : NULL, role);
+      int perms_rc = delegate_permissions_for_role(role, role_definition, &delegate_perms);
+      free(role_definition);
+      if (perms_rc != 0)
+      {
+         char permsmsg[256];
+         snprintf(permsmsg, sizeof(permsmsg),
+                  "refusing to run delegate: the permissions for role '%s' could not be "
+                  "resolved, so it holds none. Check the role template's `permissions:` block.",
+                  role);
+         delegation_compute_error(cctx, permsmsg);
+         compute_ctx_free(cctx);
+         return;
+      }
+   }
+
    int explicit_tools = cJSON_IsTrue(jtools),
-       force_tools = delegate_role_auto_tools_for_invocation(role, max_turns, explicit_tools);
+       force_tools = delegate_auto_tools_for_invocation(
+           delegate_permissions_has(&delegate_perms, AIMEE_DELEGATES_PERM_TOOLS), max_turns,
+           explicit_tools);
    force_tools = force_tools || (toolset_override && toolset_override[0]);
    /* An explicit `tools:false` (CLI --no-tools) overrides the role's tools-on
     * default: an artifact-provided panel review of an inline diff must run
@@ -1231,25 +1263,33 @@ void delegate_worker(void *arg)
       if (resolved_prompt)
          prompt = resolved_prompt;
    }
-   /* What this delegate may do, resolved ONCE and read from here on.
+   /* Read, not resolved: delegate_perms was established when the role was
+    * validated, above. The worktree plan and the container spec both consume
+    * this, and it is the one fact they must agree on -- working it out in two
+    * places is how a delegate ends up planned read-only and mounted writable.
     *
-    * The worktree plan and the container spec both consume this, and it is the
-    * one fact they must agree on: working it out in two places is how a delegate
-    * ends up planned read-only and mounted writable, or the reverse.
-    *
-    * The brief is no longer consulted. A phrase like "do not edit files" used to
+    * The brief is not consulted. A phrase like "do not edit files" used to
     * narrow a write role to read-only, which meant the same delegate had
     * different powers depending on how its prompt was worded. The role decides;
-    * a read-only run is a read-only role.
+    * a read-only run is a read-only role. */
+   /* Scoped against the repository the CALLER named. That is the object an
+    * operator means by `scopes: [/srv/repo-a]`, and it is the only one known
+    * this early -- the delegate's own worktree does not exist yet, and its path
+    * would not match a scope anyone wrote.
     *
-    * Failure holds nothing: a delegate whose permissions cannot be established
-    * reads and changes nothing. */
-   delegate_permissions_t delegate_perms;
-   if (delegate_permissions_for_role(role, &delegate_perms) != 0)
-      aimee_log(LOG_WARN, "delegate",
-                "delegate %s: permissions for role '%s' could not be resolved; it holds none",
-                deleg_id, role ? role : "");
-   int delegate_allows_writes = delegate_permissions_has(&delegate_perms, "repo_write");
+    * Matching is exact, so a delegate pointed at a subdirectory of a scoped
+    * repository is read-only. That is the documented rule and the safe one: the
+    * alternative is a prefix match, where /srv/repo grants /srv/repo-secrets.
+    *
+    * No cwd and a scoped grant means read-only too. Nothing shows the target is
+    * in scope, and "probably fine" is not a permission. */
+   int delegate_allows_writes =
+       delegate_permissions_allow(&delegate_perms, AIMEE_DELEGATES_PERM_REPO_WRITE, cwd);
+   if (!delegate_allows_writes &&
+       delegate_permissions_has(&delegate_perms, AIMEE_DELEGATES_PERM_REPO_WRITE))
+      aimee_log(LOG_INFO, "delegate",
+                "delegate %s: role '%s' holds repo_write but not for '%s', so it runs read-only",
+                deleg_id, role, cwd[0] ? cwd : "(no workspace named)");
    if (branch && !delegate_allows_writes)
    {
       delegation_compute_error(cctx, "read-only delegates must use the parent worktree; branch "

@@ -16,11 +16,11 @@ const (
 	driftRequestMagic  uint32 = 0x51465244 /* "DRFQ" */
 	driftResponseMagic uint32 = 0x53465244 /* "DRFS" */
 
-	driftMaxPaths             = 256
-	driftMaxIndexHits         = 64
+	driftMaxPaths                 = 256
+	driftMaxIndexHits             = 64
 	driftFlagWritesAllowed uint32 = 1 << 0
-	driftFlagPathExist uint32 = 1 << 0
-	driftFlagPathDiff  uint32 = 1 << 1
+	driftFlagPathExist     uint32 = 1 << 0
+	driftFlagPathDiff      uint32 = 1 << 1
 )
 
 func handleNamedFileDrift(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
@@ -35,9 +35,9 @@ func handleNamedFileDrift(invocation bus.ModuleInvocation, request []byte) ([]by
 	}
 
 	facts := DriftFacts{
-		Prompt:       r.str(),
-		Response:     r.str(),
-		WorktreePath: r.str(),
+		Prompt:        r.str(),
+		Response:      r.str(),
+		WorktreePath:  r.str(),
 		WritesAllowed: flags&driftFlagWritesAllowed != 0,
 	}
 

@@ -97,41 +97,123 @@ same effects by running commands, so a tool-layer rule cannot bind it. This is
 why `repo_write` lives at the mount rather than removing `write_file` from a
 toolset: with a shell available, the absence of a tool stops nothing.
 
+`shell` itself is refused at dispatch, and deliberately not by choosing a toolset
+without `bash`. Which toolset a role gets is a map keyed on the role name, so a
+role you define without `shell` still resolves to whichever toolset its name
+implies. The permission is checked whatever that map returns.
+
 Scope inherits the same limit, because a scope is only real where the
 enforcement point can see the object.
 
-- **`repo_write` narrowed to two repositories works.** The mount decides which
-  are read-write.
-- **`knowledge_write` narrowed to a namespace works.** The API sees what is being
-  written.
-- **`shell` narrowed to a directory does not work at the tool layer.** A shell
-  goes wherever the filesystem lets it. Written anyway, that scope is a statement
-  about what gets mounted, and is enforced there or not at all.
+- **`repo_write` narrowed to a list of repositories is enforced.** The object
+  matched is the repository the caller pointed the delegate at. Named one that is
+  not on the list, or none at all, and the delegate runs read-only.
+- **It is the only built-in that can be scoped, and the others are refused.**
+  Nothing evaluates a scope for `knowledge_write` or `tools`, and `shell` cannot
+  be scoped at the tool layer at all: a shell goes wherever the filesystem lets
+  it. Writing one is an error that names what can be scoped, rather than a
+  narrowing that silently does nothing.
+- **A permission you define yourself may be scoped however your point evaluates
+  it.** The scope is carried to you untouched; what it means is yours.
 
 Scopes match exactly. A prefix rule would make `/srv/repo` grant
-`/srv/repo-secrets`, and nobody writing the first means the second. (A
+`/srv/repo-secrets`, and nobody writing the first means the second. A
 subdirectory is a different object too: `/srv/repo` does not cover
-`/srv/repo/sub`. List what you mean.)
+`/srv/repo/sub`, so a delegate pointed at the subdirectory runs read-only. List
+what you mean.
 
 ## Defining a role at runtime
 
-A definition replaces the built-in rather than adding to it. "Composed of these
-permissions" has to mean the list is the whole answer, or reading a definition
-would not tell you what the role can do.
+A role is defined in its template's frontmatter, beside `max_turns`:
 
-```yaml
+```markdown
+---
+max_turns: 40
 permissions:
   - tools
   - shell
   - name: repo_write
     scopes: [/srv/repo-a, /srv/repo-b]
+---
+
+You are a delegate that ...
 ```
 
 That role runs commands anywhere it can reach, and writes only those two
 repositories, because only those two are mounted read-write.
 
-A definition granting nothing is a deliberate powerless role. It is not the same
-as having no definition, which falls back to the built-in.
+Templates resolve project first, then user, then bundled:
+
+| where | path |
+|---|---|
+| project | `.aimee/role_templates/<role>.md` |
+| user | `~/.config/aimee/role_templates/<role>.md` |
+
+**A definition replaces the built-in rather than adding to it.** "Composed of
+these permissions" has to mean the list is the whole answer, or reading a
+definition would not tell you what the role can do.
+
+**A definition granting nothing is a deliberate powerless role.** It is not the
+same as having no definition, which falls back to the built-in. A template with
+no `permissions:` key has no definition.
+
+**A block that cannot be read is refused, and the delegate does not run.** Not
+partly applied, and not quietly replaced by the built-in set: either of those
+would hand a delegate powers while you believe it holds the ones you wrote.
+Unknown fields, a permission with no name, block-style scope lists and unclosed
+brackets all fail this way.
+
+**Write scopes in the flow form, `[a, b]`, and never empty.** A permission scoped
+to nothing is a permission you did not grant. Leave it out instead.
+
+**Say each permission once.** A name listed twice is refused, naming the name.
+Merging them would mean choosing which line you meant, and the permissive choice
+is the dangerous one: an unscoped mention beside a scoped one reads as a grant
+over everything you had just narrowed away.
+
+**There are limits, and passing one is a refusal rather than a trim.** A role may
+hold up to **16** permissions with up to **8** scopes each, and a permission name
+may be up to **63** characters. A definition that exceeds any of them fails to
+resolve, and the delegate does not run: a set quietly shortened to fit would be a
+delegate holding something other than what you wrote. The log line names the
+limit and the value.
+
+## Permissions are a ceiling, not a toolset
+
+A role's permissions say what it may do. Its **toolset** says which tools it is
+handed to do it with. They are different questions, and both are answered.
+
+A template names its toolset in the same frontmatter:
+
+```markdown
+---
+toolset: readonly
+permissions:
+  - tools
+---
+```
+
+Resolution runs template, then the built-in map for the roles that ship, then
+`readonly`. That last step matters: a role you define matches no built-in entry,
+and the filter used to read "no toolset" as "do not filter", so a custom role was
+handed every tool aimee has. **A role nobody described gets the set that can do
+the least.** Ask for more by naming a toolset.
+
+Whatever the toolset offers, the permissions clamp:
+
+| withheld | tools withheld with it |
+|---|---|
+| `shell` | `bash`, `execute_script`, and the background-process tools |
+| `repo_write` | `write_file`, `edit_file`, `git_commit`, `git_push`, `git_branch`, `git_pr` |
+| `knowledge_write` | `create_note`, `record_attempt` |
+
+So a role you define as `code` without `repo_write` does not keep `write_file`,
+even though the name resolves to a toolset that carries it. The same list drives
+what is advertised to the model and what dispatch will run, so a delegate is
+never offered a tool that would be refused.
+
+Tools not in that table need no permission beyond `tools`. Reading is implicit,
+and a tool nobody has classified is not treated as privileged.
 
 ## Your own permissions and enforcement points
 
@@ -158,8 +240,28 @@ What aimee owes you is the gap, stated:
 Declare `deploy` with nothing bound to evaluate it and that permission is listed
 as unenforced when the delegate is created. It is still carried. It is not
 silently treated as granted, nor silently as denied, because both are guesses.
-Call `Permissions.Unenforced()`, or read the operator warning it drives, when a
-permission you declared appears to be doing nothing.
+
+**`aimee roles show <role>` is where you read this.** It prints what the role
+came to, not what you wrote: each permission with the point it is bound to, the
+ones nothing enforces, and the tools the set withholds. The last two are
+invisible in the frontmatter and are the ones that change what a delegate can
+do.
+
+```
+Permissions:
+  tools            enforced at tools
+  deploy           enforced at deploy-gate
+
+Nothing enforces: deploy
+  These are carried and evaluated by no one, so they grant nothing and
+  deny nothing. Bind a point that consults them, or drop them.
+
+Tools withheld: bash write_file git_push
+  Refused whatever toolset this role runs with.
+```
+
+A role whose permissions cannot be resolved says so there too, and a delegate for
+it is refused rather than run holding nothing.
 
 Three things decide whether a custom point is worth having.
 

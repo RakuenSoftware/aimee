@@ -64,7 +64,7 @@ static int coord_spawn_delegate(void *ctx, const char *role, const char *brief)
     * tools it mutates nothing, the run is flagged "produced no diff", and a WFE
     * implement slice loops to max_iters and never lands a change. Forcing tools
     * also makes the router require a tool-capable model (MODEL_CAP_TOOLS). Read
-    * roles already opt in via delegate_role_enable_tools_by_default; a caller can
+    * roles already opt in through their `tools` permission; a caller can
     * still pass tools:false explicitly, which server_compute honors. */
    if (delegate_role_is_write(req_role))
    {

@@ -77,7 +77,7 @@ func TestPreflightRemoteScpPathSkipped(t *testing.T) {
 		Paths: []NamedPath{{Path: "/mnt/media/other/thing.c"}},
 		Prompt: "Update aimee-server on the host. The server config lives at " +
 			"admin@192.168.1.254:/mnt/media/.plugins/aimee-server/server/home/aimee.yaml.",
-		WorktreePath: "/home/user/repo",
+		WorktreePath:  "/home/user/repo",
 		WritesAllowed: true,
 	})
 	if v.Severity != DriftNone {
@@ -87,9 +87,9 @@ func TestPreflightRemoteScpPathSkipped(t *testing.T) {
 
 func TestPreflightAbsoluteOutsideWorktreeSkipped(t *testing.T) {
 	v := JudgeNamedFileDrift(DriftFacts{
-		Paths:        []NamedPath{{Path: "/etc/aimee/other.c"}},
-		Prompt:       "Edit /etc/aimee/other.c to fix the bug.",
-		WorktreePath: "/home/user/repo",
+		Paths:         []NamedPath{{Path: "/etc/aimee/other.c"}},
+		Prompt:        "Edit /etc/aimee/other.c to fix the bug.",
+		WorktreePath:  "/home/user/repo",
 		WritesAllowed: true,
 	})
 	if v.Severity != DriftNone {
@@ -100,9 +100,9 @@ func TestPreflightAbsoluteOutsideWorktreeSkipped(t *testing.T) {
 // A path UNDER the worktree is a genuine create target and still fails.
 func TestPreflightRelativeUnderWorktreeStillFails(t *testing.T) {
 	v := JudgeNamedFileDrift(DriftFacts{
-		Paths:        []NamedPath{{Path: "/home/user/repo/src/missing.c"}},
-		Prompt:       "Edit src/missing.c to fix the bug.",
-		WorktreePath: "/home/user/repo",
+		Paths:         []NamedPath{{Path: "/home/user/repo/src/missing.c"}},
+		Prompt:        "Edit src/missing.c to fix the bug.",
+		WorktreePath:  "/home/user/repo",
 		WritesAllowed: true,
 	})
 	if v.Severity != DriftHard {
@@ -156,10 +156,10 @@ func TestAnUnreachableIndexDoesNotExcuseAMissingFile(t *testing.T) {
 
 func postRunWithWorktree(roleIsWrite bool, paths ...NamedPath) DriftVerdict {
 	return JudgeNamedFileDrift(DriftFacts{
-		Paths:        paths,
-		Prompt:       "implement the fix in the named file",
-		Response:     "done",
-		WorktreePath: "/repo",
+		Paths:         paths,
+		Prompt:        "implement the fix in the named file",
+		Response:      "done",
+		WorktreePath:  "/repo",
 		WritesAllowed: roleIsWrite,
 	})
 }
@@ -204,9 +204,9 @@ func TestPostRunWorktreeReadonlyMissingFileIsSoft(t *testing.T) {
 
 func postRunNoWorktree(response string, roleIsWrite bool, paths ...NamedPath) DriftVerdict {
 	return JudgeNamedFileDrift(DriftFacts{
-		Paths:       paths,
-		Prompt:      "implement the fix in the named file",
-		Response:    response,
+		Paths:         paths,
+		Prompt:        "implement the fix in the named file",
+		Response:      response,
 		WritesAllowed: roleIsWrite,
 	})
 }

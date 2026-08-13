@@ -56,7 +56,7 @@ func handleNoopWrite(invocation bus.ModuleInvocation, request []byte) ([]byte, b
 	}
 
 	verdict := JudgeNoopWrite(NoopWriteEvidence{
-		WritesAllowed:      flags&noopFlagWritesAllowed != 0,
+		WritesAllowed:     flags&noopFlagWritesAllowed != 0,
 		HandoffJSON:       flags&noopFlagHandoffJSON != 0,
 		Succeeded:         flags&noopFlagSucceeded != 0,
 		NamedPathCount:    namedCount,

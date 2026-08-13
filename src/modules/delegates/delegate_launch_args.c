@@ -270,7 +270,47 @@ int delegate_permissions_resolve(const uint8_t *request, size_t request_len, uin
  * malformed response cannot be believed rather than to bound real data. */
 #define DELEGATE_PERM_WIRE_CAP 8192u
 
-int delegate_permissions_for_role(const char *role, delegate_permissions_t *out)
+/* Larger than every destination in delegate_permissions_t, so a value that
+ * overflows a field is visible here rather than silently shortened. */
+#define PERMS_SCRATCH 1024
+
+/* Copy an answer into the held set, or fail.
+ *
+ * The wire reader truncates a string that does not fit and says nothing, which
+ * for a PERMISSION name is a different permission: `Has("deploy_to_production")`
+ * against a name cut at 63 characters simply does not match, and the delegate
+ * quietly holds less (or, for a withheld tool, quietly holds MORE) than the
+ * operator wrote. The scratch buffer is larger than every destination, so
+ * anything that does not fit here did not fit the wire read either. */
+static int perms_copy(char *dst, size_t dst_cap, const char *src, const char *what)
+{
+   size_t len = strlen(src);
+   if (len >= dst_cap)
+   {
+      LOG_ERROR("delegates", "%s '%.32s...' is longer than this build can hold (%zu >= %zu)", what,
+                src, len, dst_cap);
+      return -1;
+   }
+   memcpy(dst, src, len + 1);
+   return 0;
+}
+
+/* A count the held set cannot store. Refusing is the only honest answer: a
+ * silently shortened list of GRANTS is a delegate with powers the operator did
+ * not write, and a silently shortened list of DENIED TOOLS is a delegate holding
+ * tools they withheld. */
+static int perms_fits(int count, int limit, const char *what)
+{
+   if (count > limit)
+   {
+      LOG_ERROR("delegates", "%s: %d is more than this build can hold (%d)", what, count, limit);
+      return 0;
+   }
+   return 1;
+}
+
+int delegate_permissions_for_role(const char *role, const char *definition,
+                                  delegate_permissions_t *out)
 {
    if (!out)
       return -1;
@@ -278,7 +318,10 @@ int delegate_permissions_for_role(const char *role, delegate_permissions_t *out)
 
    uint8_t request[DELEGATE_PERM_WIRE_CAP];
    aimee_delegates_wire_t w;
-   aimee_delegates_perms_request_begin(&w, request, sizeof(request), 0u, role ? role : "");
+   unsigned flags = (definition && definition[0]) ? AIMEE_DELEGATES_PERMS_DEFINED : 0u;
+   aimee_delegates_perms_request_begin(&w, request, sizeof(request), flags, role ? role : "");
+   if (flags)
+      aimee_delegates_perms_request_definition(&w, definition);
    if (w.overflow)
       return -1;
 
@@ -292,38 +335,65 @@ int delegate_permissions_for_role(const char *role, delegate_permissions_t *out)
    if (count < 0)
       return -1;
 
+   if (!perms_fits(count, DELEGATE_PERM_MAX, "permissions held"))
+      goto too_big;
+
    for (int i = 0; i < count; i++)
    {
-      char name[DELEGATE_PERM_NAME_MAX], enforced_at[DELEGATE_PERM_NAME_MAX];
+      char name[PERMS_SCRATCH], enforced_at[PERMS_SCRATCH];
       int scope_count = 0;
       if (aimee_delegates_perms_response_grant(&r, name, sizeof(name), enforced_at,
                                                sizeof(enforced_at), &scope_count) != 0)
          return -1;
 
-      delegate_grant_t *grant = NULL;
-      if (out->count < DELEGATE_PERM_MAX)
-      {
-         grant = &out->grants[out->count++];
-         snprintf(grant->name, sizeof(grant->name), "%s", name);
-         snprintf(grant->enforced_at, sizeof(grant->enforced_at), "%s", enforced_at);
-      }
+      if (out->count >= DELEGATE_PERM_MAX)
+         goto too_big; /* belt: the count was checked above, and this array is fixed */
+      delegate_grant_t *grant = &out->grants[out->count++];
+      if (perms_copy(grant->name, sizeof(grant->name), name, "permission") != 0 ||
+          perms_copy(grant->enforced_at, sizeof(grant->enforced_at), enforced_at,
+                     "enforcement point") != 0)
+         goto too_big;
 
+      if (!perms_fits(scope_count, DELEGATE_PERM_SCOPE_MAX, "scopes on one permission"))
+         goto too_big;
       for (int scope = 0; scope < scope_count; scope++)
       {
-         char object[DELEGATE_PERM_OBJECT_MAX];
+         char object[PERMS_SCRATCH];
          aimee_delegates_rd_str(&r, object, sizeof(object));
-         if (grant && grant->scope_count < DELEGATE_PERM_SCOPE_MAX)
-            snprintf(grant->scopes[grant->scope_count++], DELEGATE_PERM_OBJECT_MAX, "%s", object);
+         if (grant->scope_count >= DELEGATE_PERM_SCOPE_MAX)
+            goto too_big; /* belt */
+         if (perms_copy(grant->scopes[grant->scope_count++], DELEGATE_PERM_OBJECT_MAX, object,
+                        "scope") != 0)
+            goto too_big;
       }
    }
 
    uint32_t unenforced = aimee_delegates_rd_u32(&r);
+   if (!r.bad && !perms_fits((int)unenforced, DELEGATE_PERM_MAX, "unenforced permissions"))
+      goto too_big;
    for (uint32_t i = 0; i < unenforced && !r.bad; i++)
    {
-      char name[DELEGATE_PERM_NAME_MAX];
+      char name[PERMS_SCRATCH];
       aimee_delegates_rd_str(&r, name, sizeof(name));
-      if (out->unenforced_count < DELEGATE_PERM_MAX)
-         snprintf(out->unenforced[out->unenforced_count++], DELEGATE_PERM_NAME_MAX, "%s", name);
+      if (out->unenforced_count >= DELEGATE_PERM_MAX)
+         goto too_big; /* belt */
+      if (perms_copy(out->unenforced[out->unenforced_count++], DELEGATE_PERM_NAME_MAX, name,
+                     "unenforced permission") != 0)
+         goto too_big;
+   }
+
+   uint32_t denied = aimee_delegates_rd_u32(&r);
+   if (!r.bad && !perms_fits((int)denied, DELEGATE_PERM_TOOL_MAX, "withheld tools"))
+      goto too_big;
+   for (uint32_t i = 0; i < denied && !r.bad; i++)
+   {
+      char name[PERMS_SCRATCH];
+      aimee_delegates_rd_str(&r, name, sizeof(name));
+      if (out->denied_tool_count >= DELEGATE_PERM_TOOL_MAX)
+         goto too_big; /* belt */
+      if (perms_copy(out->denied_tools[out->denied_tool_count++], DELEGATE_PERM_NAME_MAX, name,
+                     "withheld tool") != 0)
+         goto too_big;
    }
 
    if (r.bad)
@@ -340,6 +410,13 @@ int delegate_permissions_for_role(const char *role, delegate_permissions_t *out)
 
    out->resolved = 1;
    return 0;
+
+too_big:
+   /* The answer did not fit, so we do not have the answer. Callers treat that as
+      a refusal, which is the same thing they do when the module cannot be
+      reached: a delegate whose powers cannot be established does not run. */
+   memset(out, 0, sizeof(*out));
+   return -1;
 }
 
 static const delegate_grant_t *delegate_permissions_find(const delegate_permissions_t *p,
@@ -370,6 +447,16 @@ int delegate_permissions_allow(const delegate_permissions_t *p, const char *perm
       return 0;
    for (int i = 0; i < grant->scope_count; i++)
       if (strcmp(grant->scopes[i], object) == 0)
+         return 1;
+   return 0;
+}
+
+int delegate_permissions_denies_tool(const delegate_permissions_t *p, const char *tool)
+{
+   if (!p || !tool)
+      return 0;
+   for (int i = 0; i < p->denied_tool_count; i++)
+      if (strcmp(p->denied_tools[i], tool) == 0)
          return 1;
    return 0;
 }

@@ -186,7 +186,6 @@ void agent_set_ingress_source(const char *source);
 int agent_get_stats(const char *name, agent_stats_t *out, int max);
 
 /* Task type classification */
-task_type_t task_type_classify(const char *prompt);
 
 /* Resolve the effective max-turns limit for an agent invocation.
  * Primary sessions (role == NULL) ignore agent->max_turns; only delegates cap. */
@@ -207,7 +206,7 @@ char *agent_build_exec_context(const agent_t *agent, const agent_network_t *netw
 /* The task a delegate is actually running. A declared role wins over guessing
  * from prose, which cannot be trusted for a review: the panel prompt contains
  * bug-fix vocabulary and the classifier scans its keyword table in order. */
-task_type_t agent_task_type_for_role(const char *role, const char *prompt);
+task_type_t agent_task_type_for_role(const char *role);
 
 const char *agent_exec_instructions(task_type_t task_type);
 

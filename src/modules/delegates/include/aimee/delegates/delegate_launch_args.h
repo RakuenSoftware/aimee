@@ -204,6 +204,7 @@ int delegate_permissions_resolve(const uint8_t *request, size_t request_len, uin
 #define DELEGATE_PERM_NAME_MAX   64
 #define DELEGATE_PERM_SCOPE_MAX  8
 #define DELEGATE_PERM_OBJECT_MAX 512
+#define DELEGATE_PERM_TOOL_MAX   32
 
 typedef struct
 {
@@ -222,13 +223,28 @@ typedef struct
     * rather than treated as granted or as denied. */
    char unenforced[DELEGATE_PERM_MAX][DELEGATE_PERM_NAME_MAX];
    int unenforced_count;
+   /* Tools this set withholds, whatever toolset the delegate resolved to. The
+    * module decides which tool needs which permission; this side filters the
+    * advertised array and refuses at dispatch against the same list, so what is
+    * offered and what is allowed cannot disagree. */
+   char denied_tools[DELEGATE_PERM_TOOL_MAX][DELEGATE_PERM_NAME_MAX];
+   int denied_tool_count;
    int resolved;
 } delegate_permissions_t;
 
-/* Resolve what a role may do. Returns 0 on success; on failure `out` is zeroed,
- * which holds NOTHING: a delegate whose powers cannot be established reads and
- * changes nothing. */
-int delegate_permissions_for_role(const char *role, delegate_permissions_t *out);
+/* Resolve what a role may do.
+ *
+ * `definition` is the role template's frontmatter when the operator wrote one,
+ * or NULL for a role that ships as-is. Pass the TEXT, not a parse of it: the
+ * module reads it, so there is one reading.
+ *
+ * Returns 0 on success. On failure `out` is zeroed, which holds NOTHING: a
+ * delegate whose powers cannot be established reads and changes nothing. A
+ * definition the module refuses fails HERE rather than quietly resolving to the
+ * built-in set, which would hand the delegate the powers its role ships with
+ * while the operator believes it holds the ones they wrote. */
+int delegate_permissions_for_role(const char *role, const char *definition,
+                                  delegate_permissions_t *out);
 
 /* Whether the permission is held at all, ignoring any narrowing.
  *
@@ -242,5 +258,9 @@ int delegate_permissions_has(const delegate_permissions_t *p, const char *permis
  * scoped grants match exactly. */
 int delegate_permissions_allow(const delegate_permissions_t *p, const char *permission,
                                const char *object);
+
+/* Whether this set withholds a tool. Answered from the list the module sent, so
+ * the filter that advertises tools and the dispatch that runs them agree. */
+int delegate_permissions_denies_tool(const delegate_permissions_t *p, const char *tool);
 
 #endif
