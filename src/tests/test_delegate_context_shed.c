@@ -233,11 +233,12 @@ static void test_drift_honours_the_verdict(void)
  * settable answer without this harness deciding which roles want one. */
 static int g_needs_parent_diff;
 
-static int shed_test_role_policy(int op, const char *role, int a, int b, int *out)
+static int shed_test_role_policy(int op, const char *role, int a, int b, int c, int *out)
 {
    (void)role;
    (void)a;
    (void)b;
+   (void)c;
    if (op != DELEGATE_ROLE_OP_PARENT_DIFF || !out)
       return -1;
    *out = g_needs_parent_diff;

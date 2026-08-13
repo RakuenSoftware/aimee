@@ -232,6 +232,29 @@ type RoleDefinition struct {
 	Grants []Grant
 }
 
+// scopeIsEvaluated says whether anything actually narrows this built-in
+// permission by object.
+//
+// Only repo_write does: the write decision matches the repository the caller
+// named. `knowledge_write` and `tools` carry scopes that nothing reads, and
+// `shell` cannot be scoped at the tool layer at all -- a shell goes wherever the
+// filesystem lets it.
+//
+// A scope nobody evaluates is worse than an unenforced permission. An unenforced
+// permission is reported; a scope that is silently ignored reads as a narrowing
+// the operator can point at, while the delegate holds the permission in full.
+// So it is refused, and the refusal says which permissions can be scoped.
+func scopeIsEvaluated(permission string) bool {
+	return normalisePermission(permission) == PermRepoWrite
+}
+
+// ScopableBuiltins names the built-in permissions a scope actually narrows.
+// Operator-defined permissions are not listed: what their points evaluate is
+// theirs to say.
+func ScopableBuiltins() []string {
+	return []string{PermRepoWrite}
+}
+
 // ResolveRolePermissions answers what a role may do, preferring a definition
 // supplied at runtime over the built-in role table.
 //
@@ -247,28 +270,19 @@ func ResolveRolePermissions(role string, defined *RoleDefinition) Permissions {
 		}
 		return out
 	}
+	// A name appearing twice is refused by ParseRoleDefinition, so there is no
+	// contradiction to resolve here. Merging them used to widen to the union of
+	// their scopes with an unscoped mention winning outright, which turned a
+	// repeated line into a grant over every object it had been scoped away from.
+	// Choosing the permissive reading of a mistake is not a decision this should
+	// be making; the operator is told and picks.
 	for _, grant := range defined.Grants {
 		name := normalisePermission(grant.Name)
 		if name == "" {
 			continue
 		}
 		grant.Name = name
-		existing, ok := out.grants[name]
-		if !ok {
-			out.grants[name] = grant
-			continue
-		}
-		// The same permission listed twice widens to the union of its scopes,
-		// and an unscoped mention wins outright.
-		if len(existing.Scopes) == 0 || len(grant.Scopes) == 0 {
-			existing.Scopes = nil
-		} else {
-			existing.Scopes = append(existing.Scopes, grant.Scopes...)
-		}
-		if grant.EnforcedAt != EnforceNone {
-			existing.EnforcedAt = grant.EnforcedAt
-		}
-		out.grants[name] = existing
+		out.grants[name] = grant
 	}
 	return out
 }

@@ -25,9 +25,9 @@ describe('computeReadiness (local KB path)', () => {
     expect(r.steps.project.ok).toBe(false);
     expect(r.steps.connection.ok).toBe(false);
     expect(r.steps.connection.optional).toBe(true);
-    // account, provider, embedding, project are the 4 required-incomplete steps (knowledge_base
-    // + db2 are ok, connection is optional).
-    expect(stepsRemaining(r)).toBe(4);
+    expect(r.steps.git_identity.ok).toBe(false);
+    // account, provider, embedding, git identity, and project are incomplete.
+    expect(stepsRemaining(r)).toBe(5);
   });
 
   it('a db2_url reads as an existing database, still ok', () => {
@@ -49,15 +49,15 @@ describe('computeReadiness (local KB path)', () => {
 
   it('a fully configured local instance with a project is ready', () => {
     const cfg = { provider: 'claude', embedder_url: 'http://e', db2_url: 'postgres://x' };
-    const r = computeReadiness(cfg, { accountReady: true, projectCount: 1 });
+    const r = computeReadiness(cfg, { accountReady: true, projectCount: 1, gitIdentityReady: true });
     expect(r.ready).toBe(true);
     expect(stepsRemaining(r)).toBe(0);
   });
 
   it('a cloned project flips only the project step', () => {
     const base = { provider: 'claude', embedder_command: 'e.sh', db2_url: 'x' };
-    expect(computeReadiness(base, { accountReady: true, projectCount: 0 }).ready).toBe(false);
-    const ready = computeReadiness(base, { accountReady: true, projectCount: 19 });
+    expect(computeReadiness(base, { accountReady: true, projectCount: 0, gitIdentityReady: true }).ready).toBe(false);
+    const ready = computeReadiness(base, { accountReady: true, projectCount: 19, gitIdentityReady: true });
     expect(ready.ready).toBe(true);
     expect(ready.steps.project.detail).toBe('19 projects cloned');
   });
@@ -66,7 +66,7 @@ describe('computeReadiness (local KB path)', () => {
 describe('computeReadiness (remote KB path)', () => {
   it('remote KB satisfies embedding + db2 automatically; only the KB URL matters', () => {
     const cfg = { provider: 'claude', kb_mode: 'remote', kb_client_url: 'https://kb.example' };
-    const r = computeReadiness(cfg, { accountReady: true, projectCount: 1 });
+    const r = computeReadiness(cfg, { accountReady: true, projectCount: 1, gitIdentityReady: true });
     expect(r.steps.knowledge_base.ok).toBe(true);
     expect(r.steps.embedding.ok).toBe(true);
     expect(r.steps.embedding.detail).toMatch(/n\/a/i);
@@ -76,7 +76,7 @@ describe('computeReadiness (remote KB path)', () => {
 
   it('remote with no KB URL blocks readiness on the knowledge_base step', () => {
     const cfg = { provider: 'claude', kb_mode: 'remote' };
-    const r = computeReadiness(cfg, { accountReady: true, projectCount: 1 });
+    const r = computeReadiness(cfg, { accountReady: true, projectCount: 1, gitIdentityReady: true });
     expect(r.steps.knowledge_base.ok).toBe(false);
     expect(r.ready).toBe(false);
     expect(stepsRemaining(r)).toBe(1); // only knowledge_base is required-incomplete
@@ -86,10 +86,10 @@ describe('computeReadiness (remote KB path)', () => {
 describe('computeReadiness (connection step)', () => {
   it('is optional and reflects the connected-host count without blocking ready', () => {
     const cfg = { provider: 'claude', embedder_command: 'e.sh', db2_url: 'x' };
-    const none = computeReadiness(cfg, { accountReady: true, projectCount: 1, hostsConnected: 0 });
+    const none = computeReadiness(cfg, { accountReady: true, projectCount: 1, hostsConnected: 0, gitIdentityReady: true });
     expect(none.steps.connection.ok).toBe(false);
     expect(none.ready).toBe(true); // optional never blocks
-    const two = computeReadiness(cfg, { accountReady: true, projectCount: 1, hostsConnected: 2 });
+    const two = computeReadiness(cfg, { accountReady: true, projectCount: 1, hostsConnected: 2, gitIdentityReady: true });
     expect(two.steps.connection.ok).toBe(true);
     expect(two.steps.connection.detail).toMatch(/2 hosts/);
   });
@@ -111,6 +111,7 @@ describe('completedSteps (affirmative completion — hides wizard sections on re
     expect(completedSteps({ kb_mode: 'local' }, { accountReady: false, projectCount: 0 }).has('knowledge_base')).toBe(true);
     expect(completedSteps({ embedder_model: 'bekko-a25m' }, { accountReady: false, projectCount: 0 }).has('embedding')).toBe(true);
     expect(completedSteps({}, { accountReady: false, projectCount: 0, hostsConnected: 1 }).has('connection')).toBe(true);
+    expect(completedSteps({}, { accountReady: false, projectCount: 0, gitIdentityReady: true }).has('git_identity')).toBe(true);
     expect(completedSteps({}, { accountReady: false, projectCount: 19 }).has('project')).toBe(true);
   });
 
@@ -128,8 +129,8 @@ describe('completedSteps (affirmative completion — hides wizard sections on re
   it('a fully set-up instance completes every step', () => {
     const done = completedSteps(
       { provider: 'claude', kb_mode: 'local', embedder_model: 'bekko-a25m', db2_url: '' },
-      { accountReady: true, projectCount: 19, hostsConnected: 1 },
+      { accountReady: true, projectCount: 19, hostsConnected: 1, gitIdentityReady: true },
     );
-    expect(done.size).toBe(7);
+    expect(done.size).toBe(8);
   });
 });

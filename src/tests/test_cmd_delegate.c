@@ -1,4 +1,5 @@
 /* test_cmd_delegate.c: unit tests for CLI delegation chain depth guard */
+#include "support/delegate_role_seam_stub.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1286,6 +1287,7 @@ static int chain_via_module(unsigned op, int has_depth, int has_parent, int pare
 
 int main(void)
 {
+   delegate_role_seam_install();
    /* Fails closed until the module is reachable: no capability is asserted from
     * a local guess. */
    {

@@ -27,9 +27,10 @@ export interface WizardStep {
   /** A step whose body is a bespoke component rather than the generic key inputs:
    * 'account' = replacement login, 'chooser' = primary chooser, 'kb' = knowledge-base fork, 'deploy' = deploy
    * topology (LLM placement), 'db2' = shared-store (bundled vs existing Postgres),
-   * 'connection' = git-host auth, 'workspace' = org enumerate + bulk clone.
+   * 'git_identity' = vaulted commit author, 'connection' = git-host auth,
+   * 'workspace' = org enumerate + bulk clone.
    * Rendered specially by SetupWizard. */
-  kind?: 'account' | 'chooser' | 'kb' | 'deploy' | 'db2' | 'connection' | 'workspace';
+  kind?: 'account' | 'chooser' | 'kb' | 'deploy' | 'db2' | 'git_identity' | 'connection' | 'workspace';
   /** When present, the step is only shown for the kb modes it returns true for.
    * Absent ⇒ always shown. */
   showWhen?: (kbMode: WizardKbMode) => boolean;
@@ -48,6 +49,7 @@ export const WIZARD_STEPS: WizardStep[] = [
   // step: spawning your own KB deploys a bundled Postgres automatically (no URL),
   // so db2_url is asked for only when pointing at an existing database.
   { id: 'db2', title: 'Shared store (DB2)', keys: [], kind: 'db2', showWhen: (m) => m === 'local' },
+  { id: 'git_identity', title: 'Git commit identity', keys: [], kind: 'git_identity', skipNote: 'Without it, every commit is refused rather than attributed to an invented author.' },
   // Always: authenticate to git hosts (OAuth / token / SSH). Optional — public
   // repos clone without it.
   { id: 'connection', title: 'Connection', keys: [], kind: 'connection', optional: true, skipNote: 'Skipping leaves no git host connected — you can still clone public repos and connect private hosts later.' },

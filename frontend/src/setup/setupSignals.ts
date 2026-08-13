@@ -33,6 +33,20 @@ export async function fetchHostCount(): Promise<number> {
   return ok && Array.isArray(data.hosts) ? data.hosts.length : 0;
 }
 
+export async function fetchGitIdentityReady(): Promise<boolean> {
+  const { ok, data } = await getJSON('/api/vault/credentials');
+  if (!ok || !Array.isArray(data.credentials)) return false;
+  const names = new Set(
+    data.credentials
+      .filter((entry): entry is { agent: string; cred: string } =>
+        typeof entry === 'object' && entry !== null &&
+        (entry as { agent?: unknown }).agent === 'git' &&
+        typeof (entry as { cred?: unknown }).cred === 'string')
+      .map((entry) => entry.cred),
+  );
+  return names.has('author_name') && names.has('author_email');
+}
+
 export async function fetchAppliance(): Promise<boolean> {
   const { ok, data } = await getJSON('/api/setup/appliance');
   return ok && data.appliance === true;

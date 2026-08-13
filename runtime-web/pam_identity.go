@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
 	"sort"
+	"strings"
 
 	"github.com/RakuenSoftware/smoothgui/auth"
 )
@@ -41,6 +41,7 @@ type managedUsers interface {
 // or remove the logins it provisioned, never arbitrary host users.
 type pamAccounts struct {
 	service string
+	group   string
 	users   managedUsers
 	// Seams: PAM and chpasswd shell out, so tests substitute them.
 	authenticate func(service, username, password string) error
@@ -79,6 +80,7 @@ func newPAMAccounts(service, group string) (*pamAccounts, error) {
 	}
 	p := &pamAccounts{
 		service:      service,
+		group:        group,
 		users:        users,
 		authenticate: auth.PAMAuthenticate,
 		setPassword:  auth.SetPassword,
@@ -157,44 +159,52 @@ func (p *pamAccounts) Exists(username string) bool {
 	return p.managed(username)
 }
 
-// groupLookup is os/user's group lookup, indirected so the collision check can
-// be tested without depending on which groups the test host happens to ship.
-var groupLookup = func(name string) error {
-	_, err := user.LookupGroup(name)
-	return err
+// userAdd is indirected so the exact account-creation contract is testable
+// without provisioning a real host account.
+var userAdd = func(args ...string) ([]byte, error) {
+	return exec.Command("useradd", args...).CombinedOutput()
 }
 
-// userLookup reports whether an account of this name already exists.
-var userLookup = func(name string) error {
-	_, err := user.Lookup(name)
-	return err
+var userDelete = func(args ...string) ([]byte, error) {
+	return exec.Command("userdel", args...).CombinedOutput()
 }
 
-// errUsernameIsGroup explains a collision the operator can actually act on.
-//
-// useradd allocates a user-private group and fails with "group <name> exists"
-// and exit status 9 when one is already there. The server image ships the usual
-// Unix groups, so operator, backup, staff, users, news, mail, proxy, adm and
-// aimee itself are all taken. That list is not obscure: the wizard's first field
-// asks an operator to name their account, and "operator" is the obvious answer.
-//
-// Without this the shell error reaches the browser verbatim, doubled prefix and
-// exit status included, naming neither the real problem nor a way out.
-func errUsernameIsGroup(username string) error {
-	return fmt.Errorf("%q is already a group on this host, so it cannot also be an account name; choose another", username)
+func createManagedSystemUser(group, username, password string,
+	setPassword func(string, string) error) error {
+	if err := auth.ValidateUsername(username); err != nil {
+		return err
+	}
+	// Name the managed group explicitly as both primary and supplementary.
+	// useradd therefore never allocates a same-named private group, so standard
+	// names such as operator/backup/aimee no longer collide. The supplementary
+	// membership preserves smoothgui/auth's group-member listing.
+	out, err := userAdd("--create-home", "--gid", group, "--groups", group,
+		"--shell", "/usr/sbin/nologin", username)
+	if err != nil {
+		return fmt.Errorf("useradd: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	if err := setPassword(username, password); err != nil {
+		// Match account creation's all-or-nothing contract: a failed chpasswd
+		// must not leave a passwordless, managed system account behind. Preserve
+		// the password error as the cause and report cleanup failure as context.
+		if cleanupOut, cleanupErr := userDelete("--remove", username); cleanupErr != nil {
+			return fmt.Errorf("set password: %w (rollback userdel: %s: %v)", err,
+				strings.TrimSpace(string(cleanupOut)), cleanupErr)
+		}
+		return err
+	}
+	return nil
 }
 
 func (p *pamAccounts) Create(username, password string) error {
 	if err := auth.ValidateUsername(username); err != nil {
 		return err
 	}
-	// Only a collision for a name that is NOT already an account: an existing
-	// account owns a like-named private group, and reporting that as a clash
-	// would mask the real "user exists" condition the caller handles.
-	if userLookup(username) != nil && groupLookup(username) == nil {
-		return errUsernameIsGroup(username)
-	}
-	if err := p.users.Create(username, password); err != nil {
+	if p.group != "" {
+		if err := createManagedSystemUser(p.group, username, password, p.setPassword); err != nil {
+			return err
+		}
+	} else if err := p.users.Create(username, password); err != nil {
 		return err
 	}
 	p.recordIdentities()

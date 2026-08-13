@@ -498,9 +498,14 @@ static inline size_t aimee_delegates_patch_put_task(int id, int step_id, const c
 #define AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN    (16u + AIMEE_DELEGATES_ROLE_MAX + 1u)
 #define AIMEE_DELEGATES_ROLEPOL_RESPONSE_LEN   32u
 
+/* `holds_tools` is the delegate's resolved `tools` permission, and only the
+ * auto-tools answer reads it. It is passed rather than looked up from the role
+ * because a role an operator DEFINED is visible only in the resolved set: asking
+ * about the role inside the module would answer from the built-in table and hand
+ * tools to a role that was defined without them. */
 static inline int aimee_delegates_rolepol_request_encode(const char *role, int max_turns,
-                                                         int explicit_tools, uint8_t *out,
-                                                         size_t cap)
+                                                         int explicit_tools, int holds_tools,
+                                                         uint8_t *out, size_t cap)
 {
    size_t len = role ? strlen(role) : 0;
    if (!out || cap < AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN || len > AIMEE_DELEGATES_ROLE_MAX)
@@ -509,6 +514,7 @@ static inline int aimee_delegates_rolepol_request_encode(const char *role, int m
    aimee_delegates_put_u32(out, AIMEE_DELEGATES_ROLEPOL_REQUEST_MAGIC);
    out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
    out[5] = explicit_tools ? 1u : 0u;
+   out[6] = holds_tools ? 1u : 0u;
    aimee_delegates_put_u32(out + 8, (uint32_t)max_turns);
    aimee_delegates_put_u32(out + 12, (uint32_t)len);
    if (len)
@@ -1380,17 +1386,18 @@ static inline void aimee_delegates_perms_request_begin(aimee_delegates_wire_t *w
    aimee_delegates_wire_str(w, role);
 }
 
-/* Append one declared grant. `enforced_at` may be "" to take the built-in
- * default; `scopes` may be NULL when the grant is unrestricted. */
-static inline void aimee_delegates_perms_request_grant(aimee_delegates_wire_t *w, const char *name,
-                                                       const char *enforced_at,
-                                                       const char *const *scopes, int scope_count)
+/* Append the role template frontmatter an operator wrote, verbatim.
+ *
+ * Only when AIMEE_DELEGATES_PERMS_DEFINED is set. The module parses it: what a
+ * permission block MEANS is a rule, and this side's job is to hand over the
+ * bytes it found on disk. A block the module cannot read fails the whole
+ * request rather than falling back to the built-in table -- falling back would
+ * hand a delegate the powers its role ships with while the operator believes it
+ * holds the ones they wrote. */
+static inline void aimee_delegates_perms_request_definition(aimee_delegates_wire_t *w,
+                                                            const char *frontmatter)
 {
-   aimee_delegates_wire_str(w, name);
-   aimee_delegates_wire_str(w, enforced_at ? enforced_at : "");
-   aimee_delegates_wire_u32(w, (uint32_t)(scope_count > 0 ? scope_count : 0));
-   for (int i = 0; i < scope_count; i++)
-      aimee_delegates_wire_str(w, scopes[i]);
+   aimee_delegates_wire_str(w, frontmatter ? frontmatter : "");
 }
 
 /* Reads the response header and leaves `r` positioned at the first grant.
