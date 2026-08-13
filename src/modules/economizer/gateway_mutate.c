@@ -8,6 +8,35 @@
 #include "agent_protocol.h"  /* message_history_repair */
 #include "session_compact.h" /* session_compact_estimate_tokens */
 
+/* Is any ->next chain in this tree circular? Floyd's, read-only, no allocation,
+ * applied at every level because a cycle nested inside one message is exactly as
+ * fatal to a walker as one at the top.
+ *
+ * Deliberately here rather than reusing cJSON's internals: this is a POLICY
+ * question (does the reduced view deserve to ship) and its answer has to be
+ * distinguishable from an allocation failure, which a NULL out of
+ * cJSON_Duplicate is not. */
+int gw_messages_have_cycle(const cJSON *node)
+{
+   /* One pass settles this whole chain, so the descent below can walk it without
+    * risking the very loop we are looking for. */
+   const cJSON *slow = node;
+   const cJSON *fast = node;
+   while ((fast != NULL) && (fast->next != NULL))
+   {
+      slow = slow->next;
+      fast = fast->next->next;
+      if (slow == fast)
+         return 1;
+   }
+   for (const cJSON *n = node; n != NULL; n = n->next)
+   {
+      if (gw_messages_have_cycle(n->child))
+         return 1;
+   }
+   return 0;
+}
+
 const char *gw_bypass_reason_str(gw_bypass_reason_t reason)
 {
    switch (reason)
@@ -68,6 +97,23 @@ gw_bypass_reason_t gw_should_apply(int reduce_rc, const gw_reduce_report_t *res)
    /* Net shrink: a reduce that did not actually shrink is not worth the blast radius. */
    if (res->reduced_tokens >= res->baseline_tokens)
       return GW_BYPASS_NO_OP;
+
+   /* A cyclic ->next in the reduced view is a structural violation, and naming it
+    * one matters twice over.
+    *
+    * It USED TO BE the whole failure: cJSON_Duplicate's sibling walk was unbounded,
+    * so this very probe -- the defence -- span here allocating a node per iteration
+    * until aimee-server went 0.2 -> 6.9 GB in about ten seconds and was OOM-killed.
+    * Duplicate now fails instead of hanging, which is what makes the check below
+    * reachable at all.
+    *
+    * But Duplicate returns NULL for a cycle and for a genuine allocation failure
+    * alike, and folding the two together would file every cycle under
+    * "snapshot_oom" -- a stat that would send the next reader looking at memory
+    * pressure instead of at whatever produced a malformed array. So detect it here,
+    * before the probe, and report it as what it is. */
+   if (gw_messages_have_cycle(res->messages))
+      return GW_BYPASS_STRUCTURAL_VIOLATION;
 
    /* Structural check (defense in depth): the reduced view must have no orphaned
     * tool_use/tool_result pair. Run repair on a COPY so `res` is not mutated; any
