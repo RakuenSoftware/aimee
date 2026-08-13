@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -84,6 +85,20 @@ func TestVaultResponsesNeverLeakSecrets(t *testing.T) {
 	rr := httptest.NewRecorder()
 	s.handleVaultCredentials(rr, withUser(httptest.NewRequest(http.MethodGet, "/api/vault/credentials", nil), "eve"))
 	body := rr.Body.String()
+	var listed struct {
+		Status      string `json:"status"`
+		Credentials []struct {
+			Agent string `json:"agent"`
+			Cred  string `json:"cred"`
+		} `json:"credentials"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("list response is not JSON: %v", err)
+	}
+	if rr.Code != http.StatusOK || listed.Status != "ok" || len(listed.Credentials) != 1 ||
+		listed.Credentials[0].Agent != "claude" || listed.Credentials[0].Cred != "api_key" {
+		t.Fatalf("list response shape = status %d, body %s", rr.Code, body)
+	}
 	for _, leak := range []string{"sk-LEAKED", "sk-LEAKED2", "WRAPKEYLEAK"} {
 		if strings.Contains(body, leak) {
 			t.Fatalf("list leaked %q to the browser: %s", leak, body)

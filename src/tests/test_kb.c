@@ -254,8 +254,14 @@ static void test_build_single_file(void)
    char *result = kb_search("test_single", "installation", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(result != NULL);
    /* Should find the Installation section */
-   assert(strstr(result, "README.md") != NULL || strcmp(result, "No results found.") != 0);
+   assert(strstr(result, "README.md") != NULL);
    free(result);
+
+   /* Build, search, and status must describe the same active corpus. */
+   db2_kb_service_project_status_t status;
+   assert(db2_kb_service_collect_project_status("test_single", &status) == 0);
+   assert(status.chunks > 0);
+   assert(status.chunks == stats.chunks_added);
 
    close_test_db();
 
@@ -745,7 +751,8 @@ static void test_search_json_empty(void)
    assert(result != NULL);
    /* Empty result set must be valid JSON with a results array and fusion_mode field. */
    assert(strstr(result, "\"results\":[]") != NULL);
-   assert(strstr(result, "\"fusion_mode\":") != NULL);
+   /* The configured/default strategy is still reported when there are no hits. */
+   assert(strstr(result, "\"fusion_mode\":\"rrf\"") != NULL);
    free(result);
    close_test_db();
    printf("  PASS: kb_search_json empty KB returns valid JSON with results array\n");
@@ -764,10 +771,17 @@ static void test_search_json_structured(void)
                      "## Authentication\n\n"
                      "Bearer token in the Authorization header.\n");
 
+   char storage_path[512];
+   snprintf(storage_path, sizeof(storage_path), "%s/storage.md", tmpdir);
+   write_file(storage_path, "# Storage\n\nDatabase retention and backup windows.\n");
+   char network_path[512];
+   snprintf(network_path, sizeof(network_path), "%s/network.md", tmpdir);
+   write_file(network_path, "# Network\n\nProxy routes and connection timeouts.\n");
+
    open_test_db();
    kb_stats_t stats;
    kb_build(tmpdir, "test_jsearch", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
-   assert(stats.chunks_added > 0);
+   assert(stats.chunks_added >= 3);
 
    char *result =
        kb_search_json("test_jsearch", "bearer token authentication", MEMORY_EMBED_TEST_FIXTURE, 3);
@@ -783,10 +797,42 @@ static void test_search_json_structured(void)
    assert(strstr(result, "api.md") != NULL);
    /* The legacy [path:line-range] header MUST NOT leak into the JSON payload. */
    assert(strstr(result, "[") == NULL || strstr(result, "[") > strstr(result, "\"results\":["));
+
+   cJSON *strong_root = cJSON_Parse(result);
+   assert(strong_root != NULL);
+   cJSON *strong_mode = cJSON_GetObjectItemCaseSensitive(strong_root, "fusion_mode");
+   cJSON *strong_results = cJSON_GetObjectItemCaseSensitive(strong_root, "results");
+   cJSON *strong_first = cJSON_GetArrayItem(strong_results, 0);
+   cJSON *strong_score_item = cJSON_GetObjectItemCaseSensitive(strong_first, "score");
+   assert(cJSON_IsString(strong_mode) && strcmp(strong_mode->valuestring, "rrf") == 0);
+   assert(cJSON_IsNumber(strong_score_item));
+   double strong_score = strong_score_item->valuedouble;
+   assert(strong_score > 0.0 && strong_score < 0.04);
+   cJSON_Delete(strong_root);
    free(result);
+
+   /* MEMORY_EMBED_TEST_FIXTURE deliberately embeds distinct text differently.
+    * A dense-only weak query must use the same RRF score space as the strong
+    * lexical+dense hit above, not retain a raw cosine that can look larger. */
+   char *weak = kb_search_json("test_jsearch", "authenticatio", MEMORY_EMBED_TEST_FIXTURE, 3);
+   assert(weak != NULL);
+   cJSON *weak_root = cJSON_Parse(weak);
+   assert(weak_root != NULL);
+   cJSON *weak_mode = cJSON_GetObjectItemCaseSensitive(weak_root, "fusion_mode");
+   cJSON *weak_results = cJSON_GetObjectItemCaseSensitive(weak_root, "results");
+   cJSON *weak_first = cJSON_GetArrayItem(weak_results, 0);
+   cJSON *weak_score_item = cJSON_GetObjectItemCaseSensitive(weak_first, "score");
+   assert(cJSON_IsString(weak_mode) && strcmp(weak_mode->valuestring, "rrf") == 0);
+   assert(cJSON_IsNumber(weak_score_item));
+   /* The old path exposed the raw dense score here (typically >0.5). */
+   assert(weak_score_item->valuedouble > 0.0 && weak_score_item->valuedouble < 0.02);
+   cJSON_Delete(weak_root);
+   free(weak);
 
    close_test_db();
    unlink(fpath);
+   unlink(storage_path);
+   unlink(network_path);
    platform_test_rmrf(tmpdir);
    printf("  PASS: kb_search_json returns structured per-hit fields\n");
 }

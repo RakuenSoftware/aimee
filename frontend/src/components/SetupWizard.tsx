@@ -3,7 +3,7 @@ import { Button, useToast } from '@rakuensoftware/smoothgui';
 import { loadConfig, saveConfigValue, type ConfigMap } from '../setup/configApi';
 import { visibleSteps, isRestartKey, helpFor, APPLIANCE_HIDDEN_STEPS, type WizardKbMode } from '../setup/wizardSteps';
 import { completedSteps, computeReadiness, type StepId } from '../setup/readiness';
-import { fetchAppliance, fetchHostCount, fetchProjectCount, fetchSetupAccountReady } from '../setup/setupSignals';
+import { fetchAppliance, fetchGitIdentityReady, fetchHostCount, fetchProjectCount, fetchSetupAccountReady } from '../setup/setupSignals';
 import { setDismissed, notifySetupUpdated } from '../setup/setupState';
 import CreateAccount from '../setup/CreateAccount';
 import PrimaryChooser from '../setup/PrimaryChooser';
@@ -13,6 +13,7 @@ import SharedStore from '../setup/SharedStore';
 import DeployPanel from '../setup/DeployPanel';
 import ConnectHosts from '../setup/ConnectHosts';
 import ConnectWorkspace from '../setup/ConnectWorkspace';
+import GitIdentity from '../setup/GitIdentity';
 import type { KbMode } from '../setup/deployTopology';
 
 /* First-run setup wizard. A modal over the app that walks the operator through the
@@ -58,6 +59,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   const [hostsConnected, setHostsConnected] = useState(0);
   const [projectCount, setProjectCount] = useState(0);
   const [accountReady, setAccountReady] = useState(false);
+  const [gitIdentityReady, setGitIdentityReady] = useState(false);
   // The all-in-one appliance bakes the KB + LLM + store, so its wizard drops the
   // infra steps. Detected from a webchat signal (AIMEE_WIZARD_APPLIANCE).
   const [appliance, setAppliance] = useState(false);
@@ -90,11 +92,13 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
     setDoneAtOpen(new Set());
     Promise.all([
       loadConfig(), fetchHostCount(), fetchProjectCount(), fetchSetupAccountReady(), fetchAppliance(),
-    ]).then(([c, hosts, projects, account, appl]) => {
+      fetchGitIdentityReady(),
+    ]).then(([c, hosts, projects, account, appl, identity]) => {
       setCfg(c);
       setHostsConnected(hosts);
       setProjectCount(projects);
       setAccountReady(account);
+      setGitIdentityReady(identity);
       setAppliance(appl);
       const d: Record<string, string> = {};
       for (const s of visibleSteps(String(c.kb_mode) === 'remote' ? 'remote' : 'local')) {
@@ -104,7 +108,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
         }
       }
       setDraft(d);
-      const done = completedSteps(c, { accountReady: account, projectCount: projects, hostsConnected: hosts });
+      const done = completedSteps(c, { accountReady: account, projectCount: projects, hostsConnected: hosts, gitIdentityReady: identity });
       setDoneAtOpen(done);
       setBooted(true);
     });
@@ -121,8 +125,8 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   }, [open, close]);
 
   const readiness = useMemo(
-    () => computeReadiness(cfg, { accountReady, projectCount, hostsConnected }),
-    [cfg, accountReady, projectCount, hostsConnected],
+    () => computeReadiness(cfg, { accountReady, projectCount, hostsConnected, gitIdentityReady }),
+    [cfg, accountReady, projectCount, hostsConnected, gitIdentityReady],
   );
 
   if (!open) return null;
@@ -304,6 +308,8 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
               <DeployTopology onSaved={handleDeploySaved} />
             ) : step.kind === 'db2' ? (
               <SharedStore onSaved={handleDb2Saved} />
+            ) : step.kind === 'git_identity' ? (
+              <GitIdentity onSaved={() => { setGitIdentityReady(true); notifySetupUpdated(); advance(); }} onSkip={advance} />
             ) : step.kind === 'connection' ? (
               <ConnectHosts onDone={advance} onHostsChanged={setHostsConnected} />
             ) : step.kind === 'workspace' ? (

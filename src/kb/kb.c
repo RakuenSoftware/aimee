@@ -1956,19 +1956,17 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
          fusion_mode = "rrf";
       }
    }
-   else if (n_lex > 0)
+   else if (n_lex > 0 || n_vec > 0)
    {
-      int copy = (n_lex < max_results) ? n_lex : max_results;
-      memcpy(merged, lex_res, (size_t)copy * sizeof(kb_result_t));
-      n_results = copy;
-      fusion_mode = "rrf";
-   }
-   else if (n_vec > 0)
-   {
-      int copy = (n_vec < max_results) ? n_vec : max_results;
-      memcpy(merged, vec_res, (size_t)copy * sizeof(kb_result_t));
-      n_results = copy;
-      fusion_mode = "rrf";
+      /* Keep `score` in one relevance space. Copying a lone leg preserved its
+       * raw ts_rank/cosine score while a two-leg result used RRF. On a one-doc
+       * corpus that made an exact lexical+dense match print 0.0328 and a
+       * dense-only nonsense query print 0.56, even though higher is documented
+       * as better. A missing leg is still a one-list fusion: rank it with RRF so
+       * callers never compare unrelated scales. */
+      n_results = rrf_merge(lex_res, n_lex, vec_res, n_vec, merged, max_results);
+      if (n_results > 0)
+         fusion_mode = "rrf";
    }
 
    if (fusion_mode_out)

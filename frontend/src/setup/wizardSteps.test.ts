@@ -7,7 +7,7 @@ import type { StepId } from './readiness';
 describe('WIZARD_STEPS structure', () => {
   it('covers every readiness StepId exactly once, in dependency order', () => {
     const ids = WIZARD_STEPS.map((s) => s.id);
-    expect(ids).toEqual<StepId[]>(['account', 'provider', 'knowledge_base', 'embedding', 'db2', 'connection', 'project']);
+    expect(ids).toEqual<StepId[]>(['account', 'provider', 'knowledge_base', 'embedding', 'db2', 'git_identity', 'connection', 'project']);
     expect(new Set(ids).size).toBe(ids.length); // no dupes
   });
 
@@ -21,7 +21,7 @@ describe('WIZARD_STEPS structure', () => {
     expect(kb.keys).toEqual([]);
   });
 
-  it('deploy-topology + DB2 are local-only; the tail is connection → workspaces', () => {
+  it('deploy-topology + DB2 are local-only; the tail is identity → connection → workspaces', () => {
     const embedding = WIZARD_STEPS.find((s) => s.id === 'embedding')!;
     const db2 = WIZARD_STEPS.find((s) => s.id === 'db2')!;
     expect(embedding.kind).toBe('deploy');
@@ -35,8 +35,11 @@ describe('WIZARD_STEPS structure', () => {
     expect(db2.showWhen!('remote')).toBe(false);
 
     const connection = WIZARD_STEPS.find((s) => s.id === 'connection')!;
+    const identity = WIZARD_STEPS.find((s) => s.id === 'git_identity')!;
     const project = WIZARD_STEPS.find((s) => s.id === 'project')!;
     expect(connection.optional).toBe(true);
+    expect(identity.kind).toBe('git_identity');
+    expect(identity.optional).not.toBe(true);
     expect(connection.kind).toBe('connection');
     expect(project.kind).toBe('workspace');
     // Folded in: no longer a route hand-off.
@@ -47,15 +50,15 @@ describe('WIZARD_STEPS structure', () => {
   it('visibleSteps forks on kb_mode: remote hides deploy + db2', () => {
     const local = visibleSteps('local').map((s) => s.id);
     const remote = visibleSteps('remote').map((s) => s.id);
-    expect(local).toEqual(['account', 'provider', 'knowledge_base', 'embedding', 'db2', 'connection', 'project']);
-    expect(remote).toEqual(['account', 'provider', 'knowledge_base', 'connection', 'project']);
+    expect(local).toEqual(['account', 'provider', 'knowledge_base', 'embedding', 'db2', 'git_identity', 'connection', 'project']);
+    expect(remote).toEqual(['account', 'provider', 'knowledge_base', 'git_identity', 'connection', 'project']);
   });
 
   it('appliance mode hides the baked-infra steps (kb/deploy/db2)', () => {
     const applianceLocal = visibleSteps('local', true).map((s) => s.id);
-    expect(applianceLocal).toEqual(['account', 'provider', 'connection', 'project']);
+    expect(applianceLocal).toEqual(['account', 'provider', 'git_identity', 'connection', 'project']);
     // Same regardless of kb mode — the appliance bakes it.
-    expect(visibleSteps('remote', true).map((s) => s.id)).toEqual(['account', 'provider', 'connection', 'project']);
+    expect(visibleSteps('remote', true).map((s) => s.id)).toEqual(['account', 'provider', 'git_identity', 'connection', 'project']);
   });
 
   it('every keyed step references documented config keys', () => {
