@@ -94,6 +94,12 @@ extern "C"
     * `container` byte-intact, and does NOT take ownership (caller frees `reduced`). */
    int gw_replace_messages(cJSON *container, const char *key, cJSON *reduced);
 
+   /* 1 when any ->next chain in the tree is circular, at any depth. Read-only and
+    * allocation-free. A cycle is a structural violation, and gw_should_apply reports
+    * it as one rather than letting it arrive as a NULL from cJSON_Duplicate, which is
+    * indistinguishable from an allocation failure. */
+   int gw_messages_have_cycle(const cJSON *node);
+
    /* Provenance (§2.2): the gateway owns reduce_state.reduced explicitly. Mark ONLY
     * after replace succeeds; clear on EVERY hard-bypass / restore / OOM path so a
     * partially-applied request never leaves a falsely reduced=true marker that the

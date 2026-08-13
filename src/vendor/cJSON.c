@@ -251,10 +251,67 @@ static cJSON *cJSON_New_Item(const internal_hooks *const hooks)
    return node;
 }
 
+/* Cut a cyclic ->next chain so a caller can walk it exactly once.
+ *
+ * Floyd's algorithm, read-only until it cuts, no allocation. Returns 1 when a
+ * cycle was found and severed.
+ *
+ * cJSON's own invariants forbid a cyclic sibling chain, so this only ever fires
+ * on a tree some producer built wrong. That is not hypothetical: a reduced
+ * message array reached cJSON_Duplicate with a cyclic ->next and spun there
+ * allocating a node per iteration until the box died (aimee-server RSS 0.2 ->
+ * 6.9 GB in about ten seconds, measured). Duplicate is bounded below; Delete is
+ * the worse case, because it FREES as it walks, so a cycle brings it back to a
+ * node it has already deallocated and it reads ->next out of freed memory. A
+ * use-after-free is a strictly worse failure than the hang it would replace, so
+ * bounding Duplicate without this would trade a visible hang for silent heap
+ * corruption. */
+static int cjson_sever_next_cycle(cJSON *head)
+{
+   cJSON *slow = head;
+   cJSON *fast = head;
+   while ((fast != NULL) && (fast->next != NULL))
+   {
+      slow = slow->next;
+      fast = fast->next->next;
+      if (slow != fast)
+      {
+         continue;
+      }
+      /* Met inside the loop. Walking one step at a time from the head and from
+       * the meeting point converges on the node the cycle re-enters. */
+      slow = head;
+      while (slow != fast)
+      {
+         slow = slow->next;
+         fast = fast->next;
+      }
+      /* Cut the back edge that closes the loop onto that entry node. */
+      {
+         cJSON *tail = slow;
+         while (tail->next != slow)
+         {
+            tail = tail->next;
+         }
+         tail->next = NULL;
+         if (slow->prev == tail)
+         {
+            slow->prev = NULL;
+         }
+      }
+      return 1;
+   }
+   return 0;
+}
+
 /* Delete a cJSON structure. */
 CJSON_PUBLIC(void) cJSON_Delete(cJSON *item)
 {
    cJSON *next = NULL;
+   /* Before the first deallocate, not during: see cjson_sever_next_cycle. Each
+    * level severs its own sibling chain, and a child level is severed by its own
+    * cJSON_Delete call below. */
+   (void)cjson_sever_next_cycle(item);
    while (item != NULL)
    {
       next = item->next;
@@ -2886,34 +2943,63 @@ cJSON *cJSON_Duplicate_rec(const cJSON *item, size_t depth, cJSON_bool recurse)
    {
       return newitem;
    }
-   /* Walk the ->next chain for the child. */
+   /* Walk the ->next chain for the child.
+    *
+    * CJSON_CIRCULAR_LIMIT bounds NESTING ONLY, despite the name. `depth` does not
+    * change anywhere in this loop -- only `depth + 1` is handed to the recursive
+    * call -- so the test below is loop-invariant and cannot stop a sibling chain,
+    * however long or however circular. The compiler says so out loud: in the
+    * shipped build it hoists the compare above the loop entry.
+    *
+    * A cyclic ->next therefore duplicated a node, and strdup'd its key and value,
+    * forever. Measured on a reduced message array that reached here from the
+    * economizer's own structural probe: aimee-server went 0.2 -> 6.9 GB in about
+    * ten seconds of 5- and 10-byte allocations, hung the request, and was
+    * OOM-killed. `slow` walks at half speed beside `child` so the chain is bounded
+    * by its real length rather than by a constant, which keeps a legitimately long
+    * array working and still terminates on a loop. */
    child = item->child;
-   while (child != NULL)
    {
-      if (depth >= CJSON_CIRCULAR_LIMIT)
+      const cJSON *slow = child;
+      int advance_slow = 0;
+      while (child != NULL)
       {
-         goto fail;
+         if (depth >= CJSON_CIRCULAR_LIMIT)
+         {
+            goto fail;
+         }
+         newchild = cJSON_Duplicate_rec(
+             child, depth + 1, true); /* Duplicate (with recurse) each item in the ->next chain */
+         if (!newchild)
+         {
+            goto fail;
+         }
+         if (next != NULL)
+         {
+            /* If newitem->child already set, then crosswire ->prev and ->next and move on */
+            next->next = newchild;
+            newchild->prev = next;
+            next = newchild;
+         }
+         else
+         {
+            /* Set newitem->child and move to it */
+            newitem->child = newchild;
+            next = newchild;
+         }
+         child = child->next;
+         /* Half-speed chaser: if the chain loops, `child` laps `slow` within one
+          * cycle length and we fail instead of allocating forever. */
+         if (advance_slow)
+         {
+            slow = slow->next;
+         }
+         advance_slow = !advance_slow;
+         if ((child != NULL) && (child == slow))
+         {
+            goto fail;
+         }
       }
-      newchild = cJSON_Duplicate_rec(
-          child, depth + 1, true); /* Duplicate (with recurse) each item in the ->next chain */
-      if (!newchild)
-      {
-         goto fail;
-      }
-      if (next != NULL)
-      {
-         /* If newitem->child already set, then crosswire ->prev and ->next and move on */
-         next->next = newchild;
-         newchild->prev = next;
-         next = newchild;
-      }
-      else
-      {
-         /* Set newitem->child and move to it */
-         newitem->child = newchild;
-         next = newchild;
-      }
-      child = child->next;
    }
    if (newitem && newitem->child)
    {

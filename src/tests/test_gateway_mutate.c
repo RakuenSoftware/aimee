@@ -198,6 +198,66 @@ static void test_provenance(void)
    gw_provenance_clear(NULL);
 }
 
+/* Build a messages array whose sibling chain loops back on itself, i.e. exactly
+ * the malformed reduced view that took aimee-server from 0.2 to 6.9 GB in about
+ * ten seconds and hung the request.
+ *
+ * EVERY assertion in this test would have HUNG rather than failed before the fix,
+ * so a regression here reads as a timeout, not a red assert. */
+static cJSON *cyclic_messages(void)
+{
+   cJSON *arr = cJSON_CreateArray();
+   for (int i = 0; i < 3; i++)
+   {
+      cJSON *m = cJSON_CreateObject();
+      cJSON_AddStringToObject(m, "role", "user");
+      cJSON_AddStringToObject(m, "content", "hi");
+      cJSON_AddItemToArray(arr, m);
+   }
+   cJSON *first = arr->child;
+   cJSON *last = first;
+   while (last->next != NULL)
+      last = last->next;
+   last->next = first; /* close the loop */
+   return arr;
+}
+
+static void test_cycle_is_contained(void)
+{
+   /* 1. Detection: the policy answer, at the top level and nested. */
+   cJSON *arr = cyclic_messages();
+   assert(gw_messages_have_cycle(arr) == 1);
+   cJSON *clean = clean_messages();
+   assert(gw_messages_have_cycle(clean) == 0);
+   cJSON_Delete(clean);
+
+   /* 2. Duplicate REFUSES instead of allocating forever. */
+   assert(cJSON_Duplicate(arr, 1) == NULL);
+
+   /* 3. Delete severs the loop first, so it never walks back into a node it has
+    * already freed. Under ASan this is the assertion that matters; unsanitised it
+    * simply has to return. */
+   cJSON_Delete(arr);
+
+   /* 4. A cycle nested inside a message is just as fatal to a walker, so it is
+    * detected too. */
+   cJSON *outer = cJSON_CreateArray();
+   cJSON *msg = cJSON_CreateObject();
+   cJSON_AddStringToObject(msg, "role", "user");
+   cJSON *inner = cJSON_CreateArray();
+   for (int i = 0; i < 3; i++)
+      cJSON_AddItemToArray(inner, cJSON_CreateString("x"));
+   cJSON *ifirst = inner->child;
+   cJSON *ilast = ifirst;
+   while (ilast->next != NULL)
+      ilast = ilast->next;
+   ilast->next = ifirst;
+   cJSON_AddItemToObject(msg, "content", inner);
+   cJSON_AddItemToArray(outer, msg);
+   assert(gw_messages_have_cycle(outer) == 1);
+   cJSON_Delete(outer);
+}
+
 int main(void)
 {
    printf("gateway_mutate: ");
@@ -205,6 +265,7 @@ int main(void)
    test_snapshot_independence();
    test_replace();
    test_provenance();
+   test_cycle_is_contained();
    printf("ok\n");
    return 0;
 }
