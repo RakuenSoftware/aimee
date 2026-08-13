@@ -9,6 +9,7 @@
 #include "../db2/kb_service_backend_export.h"
 #include "../kb_export_json.h"
 #include "../kb_export_obsidian.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static cJSON *sample_export(void)
 {
@@ -54,7 +55,7 @@ static cJSON *sample_export(void)
 static void make_tmp_dir(char *out, size_t out_len, const char *prefix)
 {
    char tmpl[256];
-   snprintf(tmpl, sizeof(tmpl), "/tmp/%s-XXXXXX", prefix);
+   snprintf(tmpl, sizeof(tmpl), "%s/%s-XXXXXX", platform_tmpdir(), prefix);
    char *dir = mkdtemp(tmpl);
    assert(dir);
    snprintf(out, out_len, "%s", dir);

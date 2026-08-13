@@ -100,7 +100,8 @@ static void test_refuses_unresolved_secret(const char *path)
 
 int main(void)
 {
-   char path[] = "/tmp/test_trajectory_XXXXXX.db";
+   char path[256];
+   snprintf(path, sizeof path, "%s/test_trajectory_XXXXXX.db", platform_tmpdir());
    int fd = mkstemps(path, 3);
    if (fd >= 0)
       close(fd);

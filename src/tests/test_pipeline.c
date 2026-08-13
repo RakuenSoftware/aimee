@@ -15,6 +15,7 @@
 #include "../db1/db1.h"
 #include "../headers/agent_tasks.h"
 #include "../headers/agent_pipeline.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static int insert_plan(const char *task, const char *action)
 {
@@ -45,7 +46,7 @@ extern sqlite3 *db1_conn(void);
 
 static void setup_db(void)
 {
-   snprintf(g_tmpdir, sizeof(g_tmpdir), "/tmp/aimee-pipeline-test-XXXXXX");
+   snprintf(g_tmpdir, sizeof(g_tmpdir), "%s/aimee-pipeline-test-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_tmpdir) != NULL);
 
    char path[512];

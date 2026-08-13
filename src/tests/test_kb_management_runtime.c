@@ -20,6 +20,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static kb_workload_result_t provider_result = KB_WORKLOAD_UNAVAILABLE;
 static kb_management_cert_result_t lifecycle_result = KB_MANAGEMENT_CERT_OK;
@@ -502,9 +503,13 @@ static void clear_packet(void)
       unsetenv(names[i]);
 }
 
-static void write_ca(char path[64], int garbage)
+static void write_ca(char path[256], int garbage)
 {
-   assert(snprintf(path, 64, "/tmp/aimee-p5b3b-ca-XXXXXX") > 0);
+   /* Widened from 64 with the callers': the path now carries TMPDIR, and the
+    * old `> 0` check passes on TRUNCATION too, which would hand mkstemp a
+    * chopped template and fail somewhere less obvious. Check it fits. */
+   int n = snprintf(path, 256, "%s/aimee-p5b3b-ca-XXXXXX", platform_tmpdir());
+   assert(n > 0 && n < 256);
    int fd = mkstemp(path);
    assert(fd >= 0);
    EVP_PKEY_CTX *key_ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_ED25519, NULL);
@@ -573,7 +578,7 @@ static void *stop_thread(void *unused)
 
 int main(void)
 {
-   char ca_path[64], garbage_path[64];
+   char ca_path[256], garbage_path[256];
    char status_public_hex[65];
    unsigned char status_public_key[32];
    EVP_PKEY_CTX *status_ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_ED25519, NULL);

@@ -12,6 +12,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* Unused production transport seams; verify_with injects the fake below. */
 int kb_mgmt_endpoint_validate(const char *e)
@@ -159,7 +160,8 @@ int main(void)
    a[0] = 'A';
    assert(!server_mgmt_checkpoint_pin_matches(a, a, NULL));
 
-   char dbpath[] = "/tmp/aimee-checkpoint-client-XXXXXX";
+   char dbpath[256];
+   snprintf(dbpath, sizeof dbpath, "%s/aimee-checkpoint-client-XXXXXX", platform_tmpdir());
    int fd = mkstemp(dbpath);
    assert(fd >= 0);
    close(fd);

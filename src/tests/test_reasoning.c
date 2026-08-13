@@ -16,6 +16,7 @@
 #include "../kb_reasoning.h"
 #include "config.h"
 #include "config_learning.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* The "disabled" cases below assert that an unset reasoning.datalog_command
  * returns -1. They used to guarantee that precondition with memset on a local
@@ -28,7 +29,7 @@ static char g_home[256];
 
 static void isolate_home(void)
 {
-   snprintf(g_home, sizeof(g_home), "/tmp/aimee-test-reasoning-XXXXXX");
+   snprintf(g_home, sizeof(g_home), "%s/aimee-test-reasoning-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_home) != NULL);
    assert(setenv("HOME", g_home, 1) == 0);
    assert(unsetenv("AIMEE_HOME") == 0);

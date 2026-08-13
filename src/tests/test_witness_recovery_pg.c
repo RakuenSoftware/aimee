@@ -42,6 +42,7 @@
 #include "db2/db_postgres.h"
 #include "modules/vault/vault_witness_offline.h"
 #include "modules/vault/vault_witness_signer.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define MUST(cond, ...)                                                                            \
    do                                                                                              \
@@ -117,7 +118,8 @@ int main(void)
       return 0;
    }
    snprintf(g_url, sizeof g_url, "%s", url);
-   char home[] = "/tmp/aimee-witness-recovery-home-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-witness-recovery-home-XXXXXX", platform_tmpdir());
    MUST(mkdtemp(home) != NULL, "mkdtemp failed");
    setenv("AIMEE_HOME", home, 1);
    MUST(db2_init(url) == 0, "db2_init failed for %s", url);

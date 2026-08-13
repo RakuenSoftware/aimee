@@ -13,12 +13,13 @@
 #include "db2_test_shim.h"
 #include "memory.h"
 #include "session_briefing.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char *make_tmpdir(void)
 {
    char *tmp = malloc(64);
    assert(tmp);
-   snprintf(tmp, 64, "/tmp/test_session_briefing_XXXXXX");
+   snprintf(tmp, 64, "%s/test_session_briefing_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmp) != NULL);
    return tmp;
 }

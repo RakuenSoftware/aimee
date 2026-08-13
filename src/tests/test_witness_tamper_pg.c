@@ -38,6 +38,7 @@
 #include "kb/kb_witness_cadence.h"
 #include "modules/vault/vault_witness_offline.h"
 #include "modules/vault/vault_witness_signer.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* Every step of this test either performs the tampering or checks for it, so none
  * of it may be compiled away. assert() would vanish under NDEBUG and leave a
@@ -137,7 +138,8 @@ int main(void)
       printf("witness_tamper_pg: SKIP (AIMEE_TEST_PG_URL unset)\n");
       return 0;
    }
-   char home[] = "/tmp/aimee-witness-tamper-home-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-witness-tamper-home-XXXXXX", platform_tmpdir());
    if (!mkdtemp(home))
    {
       fprintf(stderr, "mkdtemp failed\n");

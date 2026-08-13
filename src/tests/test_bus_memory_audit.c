@@ -20,6 +20,7 @@
 #include "log.h"       /* audit_log_open */
 #include <aimee/audit/obs_bus.h>
 #include "server/memory_audit_bridge.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* audit_ledger.h is not on the default include path from tests/ the same way;
  * declare the one function we use. */
@@ -52,7 +53,8 @@ int main(void)
 {
    printf("test_bus_memory_audit:\n");
 
-   char home[] = "/tmp/aimee-busmem-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-busmem-XXXXXX", platform_tmpdir());
    if (!mkdtemp(home))
    {
       fprintf(stderr, "FAIL: tmp home\n");

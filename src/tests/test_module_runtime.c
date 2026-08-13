@@ -37,6 +37,7 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define TEST_KIND            5889U
 #define EMPTY_KIND           5890U
@@ -614,7 +615,8 @@ int main(int argc, char **argv)
    size_t serve_count = 1;
    if (argc == 3)
       assert(production_contract(argv[2], &test_kind, &module_ref, served, &serve_count) == 0);
-   char directory[] = "/tmp/aimee-module-runtime-XXXXXX";
+   char directory[256];
+   snprintf(directory, sizeof directory, "%s/aimee-module-runtime-XXXXXX", platform_tmpdir());
    assert(mkdtemp(directory) != NULL);
    /* Point the spawned module at a throwaway home BEFORE it is forked: the
     * sandbox module persists what it learns under AIMEE_HOME, and a test that
