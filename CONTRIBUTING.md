@@ -73,7 +73,15 @@ the digest, and any two concurrent PRs then collided on the same regenerated
 lines. It cost nineteen rebases in one migration and surfaced no real change to
 the surface in any of them.
 
-So on `testing`: do not re-freeze it. `make -C src lint` no longer asks you to.
+So on `testing`: do not re-freeze it. `make -C src lint` no longer asks you to,
+and CI now REFUSES a pull request into `testing` that changes the baseline. If
+you have already re-frozen it, revert that one file and push again:
+
+    git checkout origin/testing -- tests/baselines/refactor/index.json
+
+Adding or changing a public header does NOT require a re-freeze. The baseline is
+expected to be stale on `testing`; that is what makes the promotion diff worth
+reading.
 
 When promoting `testing` into `main`:
 
