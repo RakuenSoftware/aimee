@@ -435,6 +435,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-vault-tpm-runtime-lock \
                $(TESTPREFIX)/unit-test-vault-maintenance-guard \
                $(TESTPREFIX)/unit-test-vault-d3b-custody \
+               $(TESTPREFIX)/unit-test-vault-provider-credential \
                $(TESTPREFIX)/unit-test-kb-vault-key-use \
                $(TESTPREFIX)/unit-test-kb-vault-key-use-live \
                $(TESTPREFIX)/unit-test-kb-vault-rotation \
@@ -1865,6 +1866,12 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
                            $(OBJDIR)/modules/protocols/acp/acp_server.o \
                            $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+# vault_provider_has_credential only calls vault_service_list, which the test
+# stubs, so agent_credentials.o is the sole real object needed here.
+$(TESTPREFIX)/unit-test-vault-provider-credential: $(OBJDIR)/tests/test_vault_provider_credential.o \
+                      $(OBJDIR)/modules/vault/agent_credentials.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server/provider_settable.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
 	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o \
