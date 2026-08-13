@@ -82,7 +82,7 @@ static const int g_golden_n = (int)(sizeof(g_golden) / sizeof(g_golden[0]));
 int main(void)
 {
    char tmp[512];
-   snprintf(tmp, sizeof(tmp), "/tmp/aimee-golden-XXXXXX");
+   snprintf(tmp, sizeof(tmp), "%s/aimee-golden-XXXXXX", platform_tmpdir());
    char *d = platform_mkdtemp(tmp);
    assert(d);
    setenv("HOME", d, 1);

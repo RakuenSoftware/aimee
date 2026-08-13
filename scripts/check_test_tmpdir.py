@@ -20,7 +20,24 @@ prefixes account for only 27% of it.
 
 The baseline below is DEBT, not permission. It may only fall. Fix a test to
 build its path from TMPDIR (getenv("TMPDIR") or platform_tmpdir()), run
---update-baseline, commit. Done means the baseline is empty.
+--update-baseline, commit.
+
+BUT NOT EVERY LITERAL IS A LEAK, and "empty baseline" is the wrong target.
+A "/tmp/..." string only leaks if something CREATES it. Plenty of them are
+fixtures -- data fed to code that reasons about paths -- and converting those
+changes what the test asserts:
+
+  test_guardrails.c        "/tmp/file_a.c", "/tmp/.aimee/worktrees/test/main"
+                           are inputs to path-policy checks, created by nothing
+  test_attention_guard.c   attn_session_isolation_blocked(..., "/tmp/.aimee-xyz/
+                           src/x.c", ...) is a path being JUDGED, not made
+  test_cmd_delegate.c      "/tmp/aimee-missing-*-worktree" must NOT exist; that
+                           is the whole point of the case
+
+So the floor is not zero. Before converting a site, check that something
+actually creates it (mkdir/mkdtemp/mkstemp/fopen on that path). If it is a
+fixture, leave it and let the count stand -- a lower number is not worth a test
+that no longer tests what it says.
 """
 from __future__ import annotations
 
@@ -102,7 +119,9 @@ def main() -> int:
         print(
             "A test that hardcodes /tmp escapes the runner's TMPDIR sandbox and leaks one\n"
             "entry per run; /tmp already holds ~40k of them. Build the path from TMPDIR\n"
-            'instead: getenv("TMPDIR") (falling back to "/tmp") or platform_tmpdir().',
+            'instead: getenv("TMPDIR") (falling back to "/tmp") or platform_tmpdir().\n'
+            "If nothing CREATES the path -- it is a fixture string fed to code that only\n"
+            "reasons about paths -- leave it as it is and record it with --update-baseline.",
             file=sys.stderr,
         )
         for line in regressions:
