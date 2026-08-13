@@ -219,31 +219,31 @@ func TestRolePolicyStageCarriesParentDiffEvidence(t *testing.T) {
 	}
 }
 
-func TestRoleSeesCurrentCodeOnly(t *testing.T) {
+// Which roles may mutate what aimee knows.
+//
+// This was RoleSeesCurrentCodeOnly, phrased the other way round and answered by
+// its own list. It is now the `knowledge_write` permission, and these are the
+// same answers: the equivalence was proved role by role against the predicate
+// in the commit that introduced the permission, before it was deleted.
+func TestWhichRolesMayMutateWhatAimeeKnows(t *testing.T) {
 	for _, role := range []string{"review", "diagnose", "inspect"} {
-		if !RoleSeesCurrentCodeOnly(role) {
+		if RoleHasPermission(role, PermKnowledgeWrite) {
 			t.Errorf("%q answers about the code as it is now", role)
 		}
 	}
-	for _, role := range []string{"code", "validate", "execute", "search", "plan", ""} {
-		if RoleSeesCurrentCodeOnly(role) {
+	for _, role := range []string{"code", "validate", "execute", "search", "plan"} {
+		if !RoleHasPermission(role, PermKnowledgeWrite) {
 			t.Errorf("%q should keep its index and memory tools", role)
 		}
 	}
 }
 
-// An alias is confined exactly as the name it resolves to.
+// An alias holds exactly what the name it resolves to holds.
 //
 // This replaces a test that pinned the opposite. The C compared the raw role, so
 // `--role reviewer` kept the index, memory, docs, notes and remote MCP tools
 // that `--role review` was denied: the same delegate, doing the same job, with a
-// different tool surface depending on which spelling the caller typed. That was
-// not a decision anyone made -- it is what a raw strcmp does in a system where
-// aliases resolve everywhere else -- and it is now fixed.
-//
-// "reviewer" is the only alias whose answer changes: it is now confined.
-// "inspect" already resolved to "diagnose", which was listed explicitly before
-// and is covered by canonicalisation now.
+// different tool surface depending on which spelling the caller typed.
 func TestAnAliasIsConfinedLikeTheRoleItResolvesTo(t *testing.T) {
 	for _, pair := range [][2]string{
 		{"reviewer", "review"},
@@ -252,33 +252,18 @@ func TestAnAliasIsConfinedLikeTheRoleItResolvesTo(t *testing.T) {
 		{"implement", "code"},
 	} {
 		alias, canonical := pair[0], pair[1]
-		if RoleSeesCurrentCodeOnly(alias) != RoleSeesCurrentCodeOnly(canonical) {
+		if RoleHasPermission(alias, PermKnowledgeWrite) != RoleHasPermission(canonical, PermKnowledgeWrite) {
 			t.Errorf("%q and %q must agree: an alias is the same role", alias, canonical)
 		}
 	}
 	// The change this test exists for.
-	if !RoleSeesCurrentCodeOnly("reviewer") {
+	if RoleHasPermission("reviewer", PermKnowledgeWrite) {
 		t.Error("reviewer resolves to review, and review is confined")
 	}
 	// And what did NOT change: validate and its aliases keep their tools.
-	if RoleSeesCurrentCodeOnly("verifier") || RoleSeesCurrentCodeOnly("validate") {
+	if !RoleHasPermission("verifier", PermKnowledgeWrite) ||
+		!RoleHasPermission("validate", PermKnowledgeWrite) {
 		t.Error("validate is not confined, so neither is its alias")
 	}
 }
 
-func TestRolePolicyStageCarriesCurrentCodeOnly(t *testing.T) {
-	response, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
-		rolePolicyRequestBytes("review", -1, false))
-	if status != bus.ModuleStatusOK || len(response) != rolePolicyResponseLen {
-		t.Fatalf("status %v len %d", status, len(response))
-	}
-	if binary.LittleEndian.Uint32(response[28:32]) == 0 {
-		t.Error("review is current-code-only and the wire should say so")
-	}
-
-	response, _ = Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
-		rolePolicyRequestBytes("code", -1, false))
-	if binary.LittleEndian.Uint32(response[28:32]) != 0 {
-		t.Error("a write role keeps its tools")
-	}
-}

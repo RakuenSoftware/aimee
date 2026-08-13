@@ -30,10 +30,13 @@ func TestPermissionsReproduceTheOldToolsRule(t *testing.T) {
 }
 
 // Knowledge writes were previously denied by the "current code only" flag, whose
-// real job was "may read aimee's state but not mutate it".
-func TestPermissionsReproduceTheOldKnowledgeRule(t *testing.T) {
+// real job was "may read aimee's state but not mutate it". That predicate has
+// been deleted, so this pins the answers it used to give: the equivalence itself
+// was proved role by role while both existed.
+func TestPermissionsCarryTheOldKnowledgeAnswers(t *testing.T) {
+	confined := map[string]bool{"review": true, "diagnose": true}
 	for _, role := range builtInRoles {
-		got, want := RoleHasPermission(role, PermKnowledgeWrite), !RoleSeesCurrentCodeOnly(role)
+		got, want := RoleHasPermission(role, PermKnowledgeWrite), !confined[role]
 		if got != want {
 			t.Errorf("%q: knowledge_write = %v, want %v", role, got, want)
 		}

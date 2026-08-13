@@ -2100,7 +2100,7 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
           active_role, "indexed, memory, docs, notes, and remote MCP tools are "
                        "disabled for this role");
    }
-   if (agent_tools_role_current_code_only(active_role))
+   if (!agent_tools_knowledge_write_allowed())
    {
       const char *command = NULL;
       if (strcmp(name, "bash") == 0)
