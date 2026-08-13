@@ -58,8 +58,19 @@ P5B3C_LIVE_SERVER_OBJS = $(filter-out $(OBJDIR)/server/server_main.o,$(SERVER_OB
                            $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(PLATFORM_OBJS) \
                            $(MCP_GIT_OBJS) $(OBJDIR)/aimee_client.o
 
+# No log_stub.o here: this target links the real server objects, and those
+# already carry log.o. Having both put two definitions of aimee_log in one link
+# and the target had not built AT ALL -- it is absent from UNIT_TEST_TARGETS, so
+# nothing ran it and nothing reported it. The stub cannot replace log.o either;
+# it defines aimee_log and nothing else, while the server needs log_init,
+# log_set_level, audit_last_event and friends from the same object.
+# The two core libraries are prerequisites for the same reason they are on the
+# $(SERVER) rule: nothing else here builds them, so on a clean tree the link
+# failed with "cannot find build/obj/libaimee-core-connection.a". It only ever
+# appeared to work when a previous server build happened to leave them behind.
 $(TESTPREFIX)/unit-test-server-management-listener-live: \
-    $(OBJDIR)/tests/test_server_management_listener_live.o $(P5B3C_LIVE_SERVER_OBJS) $(OBJDIR)/tests/support/log_stub.o
+    $(OBJDIR)/tests/test_server_management_listener_live.o $(P5B3C_LIVE_SERVER_OBJS) \
+    $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB)
 	$(TESTLINK) -o $@ $^ $(L_SERVER)
 
 # Common object sets for tests
@@ -350,6 +361,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-coord-jobs \
                $(TESTPREFIX)/unit-test-deploy-apply \
                $(TESTPREFIX)/unit-test-cli-v1-subcommands \
+               $(TESTPREFIX)/unit-test-cli-v1-poll-deadline \
+               $(TESTPREFIX)/unit-test-cli-v1-uds-timeout \
                $(TESTPREFIX)/unit-test-plan-waves \
                $(TESTPREFIX)/unit-test-history \
                $(TESTPREFIX)/unit-test-events \
@@ -434,6 +447,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-vault-tpm-runtime-lock \
                $(TESTPREFIX)/unit-test-vault-maintenance-guard \
                $(TESTPREFIX)/unit-test-vault-d3b-custody \
+               $(TESTPREFIX)/unit-test-vault-provider-credential \
                $(TESTPREFIX)/unit-test-kb-vault-key-use \
                $(TESTPREFIX)/unit-test-kb-vault-key-use-live \
                $(TESTPREFIX)/unit-test-kb-vault-rotation \
@@ -1323,6 +1337,22 @@ $(TESTPREFIX)/unit-test-workspace-add-noscan: $(OBJDIR)/tests/test_workspace_add
                                   $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-cli-v1-uds-timeout: $(OBJDIR)/tests/test_cli_v1_uds_timeout.o \
+                                  $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o \
+                                  $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_v1_routes_e.o \
+                                  $(OBJDIR)/cli_client.o $(OBJDIR)/posix/cli_client.o \
+                                  $(OBJDIR)/aimee_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
+                                  $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-cli-v1-poll-deadline: $(OBJDIR)/tests/test_cli_v1_poll_deadline.o \
+                                  $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o \
+                                  $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_v1_routes_e.o \
+                                  $(OBJDIR)/cli_client.o $(OBJDIR)/posix/cli_client.o \
+                                  $(OBJDIR)/aimee_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
+                                  $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-cli-v1-subcommands: $(OBJDIR)/tests/test_cli_v1_subcommands.o \
                                   $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o \
                                   $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_v1_routes_e.o \
@@ -1856,6 +1886,12 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
                            $(OBJDIR)/modules/protocols/acp/acp_server.o \
                            $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+# vault_provider_has_credential only calls vault_service_list, which the test
+# stubs, so agent_credentials.o is the sole real object needed here.
+$(TESTPREFIX)/unit-test-vault-provider-credential: $(OBJDIR)/tests/test_vault_provider_credential.o \
+                      $(OBJDIR)/modules/vault/agent_credentials.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server/provider_settable.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
 	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o \
