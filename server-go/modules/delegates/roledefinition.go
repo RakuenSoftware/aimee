@@ -101,10 +101,21 @@ func ParseRoleDefinition(text string) (*RoleDefinition, error) {
 		}
 	}
 
+	seen := map[string]bool{}
 	for _, grant := range definition.Grants {
 		if grant.Name == "" {
 			return nil, fmt.Errorf("a permission has no name")
 		}
+		// A permission listed twice is a contradiction, and resolving it here
+		// would mean choosing for the operator. The old merge chose the
+		// permissive reading -- an unscoped mention beat a scoped one -- so
+		// repeating `repo_write` after scoping it granted every repository.
+		// Say which name, and let them decide which line they meant.
+		if seen[normalisePermission(grant.Name)] {
+			return nil, fmt.Errorf("%q is listed twice: say it once, with the scopes you mean",
+				grant.Name)
+		}
+		seen[normalisePermission(grant.Name)] = true
 		// A scope on a built-in that nothing narrows by object would read as a
 		// restriction the delegate does not actually have. Refuse it here, where
 		// the operator is looking, rather than carrying it to no effect.

@@ -101,3 +101,31 @@ func TestAnEmptyScopeListIsRefused(t *testing.T) {
 		t.Errorf("the error should say what to do instead: %v", err)
 	}
 }
+
+// A permission listed twice is refused rather than merged.
+//
+// The merge that used to happen chose the permissive reading: an unscoped
+// mention beat a scoped one, so repeating `repo_write` under a scoped grant
+// silently granted every repository. A contradiction in a permission block is
+// the operator's to resolve, and they cannot resolve one nobody told them about.
+func TestAPermissionListedTwiceIsRefused(t *testing.T) {
+	_, err := ParseRoleDefinition(
+		"permissions:\n  - name: repo_write\n    scopes: [/srv/repo-a]\n  - repo_write\n")
+	if err == nil {
+		t.Fatal("a repeated permission parsed")
+	}
+	if !strings.Contains(err.Error(), "listed twice") ||
+		!strings.Contains(err.Error(), PermRepoWrite) {
+		t.Errorf("the error should name the permission: %v", err)
+	}
+
+	// Case is the same name, not two.
+	if _, err := ParseRoleDefinition("permissions:\n  - tools\n  - name: TOOLS\n"); err == nil {
+		t.Error("a repeat in different case parsed")
+	}
+
+	// Two DIFFERENT permissions are of course fine.
+	if _, err := ParseRoleDefinition("permissions:\n  - tools\n  - shell\n"); err != nil {
+		t.Errorf("two distinct permissions: %v", err)
+	}
+}

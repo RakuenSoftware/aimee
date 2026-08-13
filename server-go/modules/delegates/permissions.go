@@ -270,28 +270,19 @@ func ResolveRolePermissions(role string, defined *RoleDefinition) Permissions {
 		}
 		return out
 	}
+	// A name appearing twice is refused by ParseRoleDefinition, so there is no
+	// contradiction to resolve here. Merging them used to widen to the union of
+	// their scopes with an unscoped mention winning outright, which turned a
+	// repeated line into a grant over every object it had been scoped away from.
+	// Choosing the permissive reading of a mistake is not a decision this should
+	// be making; the operator is told and picks.
 	for _, grant := range defined.Grants {
 		name := normalisePermission(grant.Name)
 		if name == "" {
 			continue
 		}
 		grant.Name = name
-		existing, ok := out.grants[name]
-		if !ok {
-			out.grants[name] = grant
-			continue
-		}
-		// The same permission listed twice widens to the union of its scopes,
-		// and an unscoped mention wins outright.
-		if len(existing.Scopes) == 0 || len(grant.Scopes) == 0 {
-			existing.Scopes = nil
-		} else {
-			existing.Scopes = append(existing.Scopes, grant.Scopes...)
-		}
-		if grant.EnforcedAt != EnforceNone {
-			existing.EnforcedAt = grant.EnforcedAt
-		}
-		out.grants[name] = existing
+		out.grants[name] = grant
 	}
 	return out
 }

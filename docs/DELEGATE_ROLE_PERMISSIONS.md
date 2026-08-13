@@ -166,6 +166,11 @@ brackets all fail this way.
 **Write scopes in the flow form, `[a, b]`, and never empty.** A permission scoped
 to nothing is a permission you did not grant. Leave it out instead.
 
+**Say each permission once.** A name listed twice is refused, naming the name.
+Merging them would mean choosing which line you meant, and the permissive choice
+is the dangerous one: an unscoped mention beside a scoped one reads as a grant
+over everything you had just narrowed away.
+
 **There are limits, and passing one is a refusal rather than a trim.** A role may
 hold up to **16** permissions with up to **8** scopes each, and a permission name
 may be up to **63** characters. A definition that exceeds any of them fails to
