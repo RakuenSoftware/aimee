@@ -2,7 +2,6 @@
   "_comment": "Ratchet baseline for check_test_tmpdir.py. Each entry is a test that hardcodes /tmp instead of honouring TMPDIR, and so leaks one entry per suite run. DEBT, not permission: these counts may only fall. Fix a test, run --update-baseline, commit.",
   "files": {
     "src/tests/bench_perf.c": 2,
-    "src/tests/support/git_module_fixture.c": 1,
     "src/tests/test_agent.c": 8,
     "src/tests/test_agent_delegate_root.c": 1,
     "src/tests/test_agent_key_import.c": 1,
