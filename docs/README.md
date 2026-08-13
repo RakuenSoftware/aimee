@@ -12,7 +12,7 @@ Start here:
 | configure a deployment | [Settings](SETTINGS.md) and [generated configuration](gen/configuration.md) |
 | call the API | [Public API](PUBLIC_API.md) and [generated routes](gen/api-v1.md) |
 | find a command | [Generated command reference](gen/cli-commands.md) |
-| operate delegates and workflows | [Delegates](DELEGATES.md), [sandbox](DELEGATE_SANDBOX.md), and [workflows](WORKFLOWS.md) |
+| operate delegates and workflows | [Delegates](DELEGATES.md), [sandbox](DELEGATE_SANDBOX.md), [role permissions](DELEGATE_ROLE_PERMISSIONS.md), and [workflows](WORKFLOWS.md) |
 | understand memory and retrieval | [Knowledge](KNOWLEDGE.md), [curator](CURATOR_PIPELINE.md), and [retrieval](retrieval-stack.md) |
 | understand KB scaling and model placement | [KB fleet and model placement](KB_FLEET.md) |
 | check support or feature state | [Compatibility](COMPATIBILITY.md) and [status](STATUS.md) |
