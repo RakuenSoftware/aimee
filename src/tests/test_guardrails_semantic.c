@@ -251,7 +251,8 @@ static void test_gsem_record(const char *path)
    assert(server_obs_bus_configure() == 0);
    /* gsem_record publishes over the event bus now; give the bus a writable home
     * for its capture stream so it does not litter the real config dir. */
-   char home[] = "/tmp/aimee-gsemrec-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-gsemrec-XXXXXX", platform_tmpdir());
    if (mkdtemp(home))
       setenv("AIMEE_HOME", home, 1);
 
@@ -323,7 +324,8 @@ int main(void)
 {
    printf("guardrails_semantic: ");
 
-   char path[] = "/tmp/test_gsem_XXXXXX.db";
+   char path[256];
+   snprintf(path, sizeof path, "%s/test_gsem_XXXXXX.db", platform_tmpdir());
    int fd = mkstemps(path, 3);
    if (fd >= 0)
       close(fd);

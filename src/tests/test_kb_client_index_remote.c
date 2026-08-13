@@ -15,6 +15,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* ------------------------------------------------------------------ */
 /* Stubs                                                               */
@@ -132,7 +133,8 @@ static void test_local_mode_no_files_array(void)
    reset_stub();
    g_remote_mode = 0;
 
-   char tmpdir[] = "/tmp/aimee_idx_test_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_idx_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char p[4096];
@@ -161,7 +163,8 @@ static void test_remote_mode_pushes_files(void)
    reset_stub();
    g_remote_mode = 1;
 
-   char tmpdir[] = "/tmp/aimee_idx_test_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_idx_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    /* Source files that should be collected. */
@@ -257,7 +260,8 @@ static void test_remote_mode_empty_dir(void)
    reset_stub();
    g_remote_mode = 1;
 
-   char tmpdir[] = "/tmp/aimee_idx_test_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_idx_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    kb_client_index_scan_result_t res;
@@ -284,7 +288,8 @@ static void test_remote_mode_batches_large_tree(void)
    reset_stub();
    g_remote_mode = 1;
 
-   char tmpdir[] = "/tmp/aimee_idx_test_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_idx_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    /* 5 x 200 KB source files = ~1 MB of content against the 600 KB batch

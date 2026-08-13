@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define TEST(name) static void name(void)
 #define RUN(name)                                                                                  \
@@ -17,7 +18,9 @@
 /* Write content to a tmp file, return path (caller must unlink). */
 static char *write_tmp(const char *content)
 {
-   char *path = strdup("/tmp/kb_lab_test_XXXXXX.md");
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/kb_lab_test_XXXXXX.md", platform_tmpdir());
+   char *path = strdup(tmpl);
    int fd = mkstemps(path, 3);
    assert(fd >= 0);
    size_t len = strlen(content);
@@ -150,7 +153,8 @@ TEST(test_chunk_preview)
 TEST(test_code_file_kind)
 {
    /* Write to a .c file so doc_kind detection works */
-   char path[] = "/tmp/kb_lab_test_XXXXXX.c";
+   char path[256];
+   snprintf(path, sizeof path, "%s/kb_lab_test_XXXXXX.c", platform_tmpdir());
    int fd = mkstemps(path, 2);
    assert(fd >= 0);
    const char *content = "/* test */\nint main(void) { return 0; }\n";
@@ -328,7 +332,9 @@ TEST(test_per_kind_dispatch)
    }
    /* AUTO on plain text → PARAGRAPH */
    {
-      char *path = strdup("/tmp/kb_lab_test_XXXXXX.txt");
+      char tmpl[256];
+      snprintf(tmpl, sizeof tmpl, "%s/kb_lab_test_XXXXXX.txt", platform_tmpdir());
+      char *path = strdup(tmpl);
       int fd = mkstemps(path, 4);
       assert(fd >= 0);
       const char *c = "Plain text content here.\n";
