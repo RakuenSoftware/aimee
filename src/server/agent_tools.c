@@ -550,14 +550,31 @@ static const char *delegate_toolset_for_role(const char *role)
 {
    if (!role || !role[0])
       return NULL;
+
+   /* One entry, per thread, keyed on the role.
+    *
+    * This is called once per ADVERTISED TOOL by the filter and again at every
+    * dispatch, and reading the template means opening a file: without this a
+    * turn with thirty tools opened thirty of them to answer the same question
+    * thirty times. The role does not change within a run, which is the same
+    * reason the permissions themselves are resolved once and carried.
+    *
+    * An operator editing a template mid-run is therefore not seen until the next
+    * run, which is exactly how their `permissions:` block already behaves. */
+   static _Thread_local char cached_role[128];
+   static _Thread_local char cached_toolset[TOOLSET_NAME_MAX];
+   if (cached_role[0] && strcmp(cached_role, role) == 0)
+      return cached_toolset[0] ? cached_toolset : NULL;
+
    const char *canonical = delegate_role_canonicalize(role);
-
    const char *named = role_template_toolset(NULL, canonical);
-   if (named && named[0])
-      return named;
+   const char *answer = (named && named[0]) ? named : toolset_for_delegate_role(canonical);
+   if (!answer)
+      answer = "readonly";
 
-   const char *builtin = toolset_for_delegate_role(canonical);
-   return builtin ? builtin : "readonly";
+   snprintf(cached_role, sizeof(cached_role), "%s", role);
+   snprintf(cached_toolset, sizeof(cached_toolset), "%s", answer);
+   return cached_toolset;
 }
 
 /* The three read-only worktree tools review_indexed carries under slice 7. Kept as
