@@ -118,11 +118,13 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 			{EventKind: delegates.EventLaunchArgs, StageID: delegates.StageLaunchArgs},
 			{EventKind: delegates.EventImageSpec, StageID: delegates.StageImageSpec},
 			{EventKind: delegates.EventIsolation, StageID: delegates.StageIsolation},
-			{EventKind: delegates.EventMayWrite, StageID: delegates.StageMayWrite},
+			{EventKind: delegates.EventPermissions, StageID: delegates.StagePermissions},
 			{EventKind: delegates.EventImageGC, StageID: delegates.StageImageGC},
 			{EventKind: delegates.EventRouteFilter, StageID: delegates.StageRouteFilter},
 			{EventKind: delegates.EventNoopWrite, StageID: delegates.StageNoopWrite},
 			{EventKind: delegates.EventLaunchPlan, StageID: delegates.StageLaunchPlan},
+			{EventKind: delegates.EventReviewEvidence, StageID: delegates.StageReviewEvidence},
+			{EventKind: delegates.EventNamedFileDrift, StageID: delegates.StageNamedFileDrift},
 		}
 		config.Handler = delegates.Handle
 	case "tools":

@@ -97,7 +97,9 @@ static void test_recall_zero(void)
 /* Write a minimal JSON corpus to a temp file and return the path. Caller frees. */
 static char *write_temp_corpus(const char *json)
 {
-   char *path = strdup("/tmp/test_corpus_XXXXXX.json");
+   char path_tmpl[256];
+   snprintf(path_tmpl, sizeof path_tmpl, "%s/test_corpus_XXXXXX.json", platform_tmpdir());
+   char *path = strdup(path_tmpl);
    int fd = mkstemps(path, 5);
    assert(fd >= 0);
    write(fd, json, strlen(json));
@@ -108,7 +110,9 @@ static char *write_temp_corpus(const char *json)
 /* Write a minimal baseline JSON to a temp file and return the path. Caller frees. */
 static char *write_temp_baseline(const char *json)
 {
-   char *path = strdup("/tmp/test_baseline_XXXXXX.json");
+   char path_tmpl[256];
+   snprintf(path_tmpl, sizeof path_tmpl, "%s/test_baseline_XXXXXX.json", platform_tmpdir());
+   char *path = strdup(path_tmpl);
    int fd = mkstemps(path, 5);
    assert(fd >= 0);
    write(fd, json, strlen(json));
@@ -386,7 +390,9 @@ static void test_baseline_load_save_roundtrip(void)
        .n_cases = 42,
    };
 
-   char *path = strdup("/tmp/test_baseline_rt_XXXXXX.json");
+   char path_tmpl[256];
+   snprintf(path_tmpl, sizeof path_tmpl, "%s/test_baseline_rt_XXXXXX.json", platform_tmpdir());
+   char *path = strdup(path_tmpl);
    int fd = mkstemps(path, 5);
    close(fd);
 

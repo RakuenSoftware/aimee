@@ -29,7 +29,7 @@ static const char *YAML = "provider: openai\n"
 int main(void)
 {
    char home[512];
-   snprintf(home, sizeof(home), "/tmp/aimee-schemaderive-XXXXXX");
+   snprintf(home, sizeof(home), "%s/aimee-schemaderive-XXXXXX", platform_tmpdir());
    char *d = platform_mkdtemp(home);
    assert(d);
    setenv("HOME", d, 1);

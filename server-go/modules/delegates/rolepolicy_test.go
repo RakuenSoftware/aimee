@@ -22,26 +22,28 @@ func TestRoleIsWrite(t *testing.T) {
 }
 
 // A write role with tools off cannot fail visibly -- it returns a diff summary
-// of code it never wrote -- so tools-on is the only honest default.
-func TestRoleEnablesToolsByDefault(t *testing.T) {
+// of code it never wrote -- so tools-on is the only honest default. That default
+// IS the `tools` permission now, so this pins the permission and the aliases
+// that resolve onto it.
+func TestTheRolesThatHoldToolsByDefault(t *testing.T) {
 	on := []string{"code", "refactor", "review", "search", "execute", "diagnose",
 		"validate", "continuity", "beat-check"}
 	for _, role := range on {
-		if !RoleEnablesToolsByDefault(role) {
-			t.Errorf("%q should enable tools by default", role)
+		if !RoleHasPermission(role, PermTools) {
+			t.Errorf("%q should hold tools", role)
 		}
 	}
 	off := []string{"summarize", "format", "draft", "explain", "reason", "plan", ""}
 	for _, role := range off {
-		if RoleEnablesToolsByDefault(role) {
-			t.Errorf("%q should not enable tools by default", role)
+		if RoleHasPermission(role, PermTools) {
+			t.Errorf("%q should not hold tools", role)
 		}
 	}
-	// Aliases resolve before the policy is applied.
+	// Aliases resolve before permissions are read.
 	for _, alias := range []string{"implement", "reviewer", "inspect", "recall",
 		"verifier", "research", "test", "check", "enforce", "build"} {
-		if !RoleEnablesToolsByDefault(alias) {
-			t.Errorf("alias %q did not resolve to a tools-on role", alias)
+		if !RoleHasPermission(alias, PermTools) {
+			t.Errorf("alias %q did not resolve to a role holding tools", alias)
 		}
 	}
 }
@@ -61,20 +63,37 @@ func TestRoleResultCacheEnabled(t *testing.T) {
 	}
 }
 
-func TestRoleAutoToolsForInvocation(t *testing.T) {
+// The invocation's conditions, applied to the permission the caller resolved.
+// The role is not consulted: a role an operator defined is visible only in that
+// resolved set, and asking about the role here would answer from the built-in
+// table and hand tools to a role defined without them.
+func TestAutoToolsForInvocation(t *testing.T) {
+	const holdsTools, holdsNone = true, false
+
 	// An explicit request always wins, even for a one-turn probe.
-	if !RoleAutoToolsForInvocation("summarize", 1, true) {
+	if !AutoToolsForInvocation(holdsNone, 1, true) {
 		t.Error("explicit tools were ignored")
 	}
 	// One turn is a final-answer smoke probe, so no implicit tools.
-	if RoleAutoToolsForInvocation("code", 1, false) {
+	if AutoToolsForInvocation(holdsTools, 1, false) {
 		t.Error("a one-turn run got implicit tools")
 	}
-	if !RoleAutoToolsForInvocation("code", 8, false) {
-		t.Error("a multi-turn write role did not get its default tools")
+	if !AutoToolsForInvocation(holdsTools, 8, false) {
+		t.Error("a multi-turn run holding tools did not get them")
 	}
-	if RoleAutoToolsForInvocation("summarize", 8, false) {
-		t.Error("a text-transform role got implicit tools")
+	if AutoToolsForInvocation(holdsNone, 8, false) {
+		t.Error("a run that does not hold tools was given them")
+	}
+
+	// The case the permission exists for: a role an operator defined without
+	// tools does not get them, whatever the built-in table says about the name.
+	definition, err := ParseRoleDefinition("permissions:\n  - knowledge_write\n")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	held := ResolveRolePermissions("code", definition).Has(PermTools)
+	if AutoToolsForInvocation(held, 8, false) {
+		t.Error("a defined role without tools was handed the built-in default")
 	}
 }
 
@@ -101,21 +120,30 @@ func TestRoleNovelInspectionRoles(t *testing.T) {
 			t.Errorf("%q must not be a write role", role)
 		}
 	}
-	if !RoleAutoToolsForInvocation("continuity", -1, false) {
-		t.Error("continuity did not get its default tools")
-	}
-	if !RoleAutoToolsForInvocation("beat-check", 2, false) {
-		t.Error("beat-check did not get its default tools")
-	}
-	if RoleAutoToolsForInvocation("continuity", 1, false) {
-		t.Error("a one-turn continuity probe got implicit tools")
+	for _, role := range []string{"continuity", "beat-check"} {
+		if !RoleHasPermission(role, PermTools) {
+			t.Errorf("%q inspects the world bible, so it holds tools", role)
+		}
+		if !AutoToolsForInvocation(RoleHasPermission(role, PermTools), 2, false) {
+			t.Errorf("%q did not get its default tools", role)
+		}
+		if AutoToolsForInvocation(RoleHasPermission(role, PermTools), 1, false) {
+			t.Errorf("a one-turn %q probe got implicit tools", role)
+		}
 	}
 }
 
 func rolePolicyRequestBytes(role string, maxTurns int, explicitTools bool) []byte {
+	return rolePolicyRequestBytesHolding(role, maxTurns, explicitTools, false)
+}
+
+func rolePolicyRequestBytesHolding(role string, maxTurns int, explicitTools, holdsTools bool) []byte {
 	request := make([]byte, rolePolicyRequestLen)
 	binary.LittleEndian.PutUint32(request[0:4], rolePolicyRequestMagic)
 	request[4] = wireVersion
+	if holdsTools {
+		request[6] = 1
+	}
 	if explicitTools {
 		request[5] = 1
 	}
@@ -136,9 +164,6 @@ func TestRolePolicyStageRoundTrip(t *testing.T) {
 	if binary.LittleEndian.Uint32(response[4:8]) != 1 {
 		t.Error("alias did not resolve to a write role")
 	}
-	if binary.LittleEndian.Uint32(response[8:12]) != 1 {
-		t.Error("write role did not enable tools by default")
-	}
 	if binary.LittleEndian.Uint32(response[12:16]) != 0 {
 		t.Error("a write role was reported cacheable")
 	}
@@ -154,6 +179,33 @@ func TestRolePolicyStageRoundTrip(t *testing.T) {
 	}
 	if binary.LittleEndian.Uint32(response[16:20]) != 0 {
 		t.Error("a one-turn probe got implicit tools")
+	}
+}
+
+// The auto-tools answer comes from the byte the caller sent, not from the role.
+//
+// This is the whole point of carrying the permission: `code` ships with tools,
+// so a stage that asked about the role would say yes here no matter what the
+// caller resolved.
+func TestTheStageAnswersAutoToolsFromTheCarriedPermission(t *testing.T) {
+	response, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+		rolePolicyRequestBytesHolding("code", 8, false, false))
+	if status != bus.ModuleStatusOK {
+		t.Fatalf("status %v", status)
+	}
+	if binary.LittleEndian.Uint32(response[16:20]) != 0 {
+		t.Error("a run that does not hold tools was given them")
+	}
+
+	response, _ = Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+		rolePolicyRequestBytesHolding("code", 8, false, true))
+	if binary.LittleEndian.Uint32(response[16:20]) == 0 {
+		t.Error("a run holding tools did not get them")
+	}
+
+	// And the role field is still what the other answers are computed from.
+	if binary.LittleEndian.Uint32(response[4:8]) != 1 {
+		t.Error("code is still a write role")
 	}
 }
 
@@ -174,5 +226,95 @@ func TestRolePolicyStageRejectsInvalidEnvelope(t *testing.T) {
 	if _, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy, DeadlineNS: 1},
 		good); status != bus.ModuleStatusCancelled {
 		t.Errorf("expired status = %d", status)
+	}
+}
+
+// The parent-diff evidence roles are the read-only INSPECTION ones: they run
+// against an isolated checkout whose diff is not the one they were asked about.
+func TestRoleNeedsParentDiffEvidence(t *testing.T) {
+	for _, role := range []string{"validate", "review", "diagnose", "test"} {
+		if !RoleNeedsParentDiffEvidence(role) {
+			t.Errorf("%q inspects; it needs the parent diff", role)
+		}
+	}
+	// A write role is PRODUCING the diff, and a role with no inspection duty has
+	// nothing to ground.
+	for _, role := range []string{"code", "refactor", "explain", "summarize", ""} {
+		if RoleNeedsParentDiffEvidence(role) {
+			t.Errorf("%q should not be handed the parent diff", role)
+		}
+	}
+	// Aliases resolve first, so "reviewer" cannot get a different answer from
+	// "review".
+	if RoleNeedsParentDiffEvidence("review") != RoleNeedsParentDiffEvidence("reviewer") {
+		t.Error("an alias must not change the answer")
+	}
+}
+
+func TestRolePolicyStageCarriesParentDiffEvidence(t *testing.T) {
+	response, status := Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+		rolePolicyRequestBytes("review", -1, false))
+	if status != bus.ModuleStatusOK || len(response) != rolePolicyResponseLen {
+		t.Fatalf("status %v len %d", status, len(response))
+	}
+	if binary.LittleEndian.Uint32(response[24:28]) == 0 {
+		t.Error("review needs the parent diff and the wire should say so")
+	}
+
+	response, status = Handle(bus.ModuleInvocation{StageID: StageRolePolicy},
+		rolePolicyRequestBytes("code", -1, false))
+	if status != bus.ModuleStatusOK {
+		t.Fatalf("status %v", status)
+	}
+	if binary.LittleEndian.Uint32(response[24:28]) != 0 {
+		t.Error("a write role must not be handed the parent diff")
+	}
+}
+
+// Which roles may mutate what aimee knows.
+//
+// This was RoleSeesCurrentCodeOnly, phrased the other way round and answered by
+// its own list. It is now the `knowledge_write` permission, and these are the
+// same answers: the equivalence was proved role by role against the predicate
+// in the commit that introduced the permission, before it was deleted.
+func TestWhichRolesMayMutateWhatAimeeKnows(t *testing.T) {
+	for _, role := range []string{"review", "diagnose", "inspect"} {
+		if RoleHasPermission(role, PermKnowledgeWrite) {
+			t.Errorf("%q answers about the code as it is now", role)
+		}
+	}
+	for _, role := range []string{"code", "validate", "execute", "search", "plan"} {
+		if !RoleHasPermission(role, PermKnowledgeWrite) {
+			t.Errorf("%q should keep its index and memory tools", role)
+		}
+	}
+}
+
+// An alias holds exactly what the name it resolves to holds.
+//
+// This replaces a test that pinned the opposite. The C compared the raw role, so
+// `--role reviewer` kept the index, memory, docs, notes and remote MCP tools
+// that `--role review` was denied: the same delegate, doing the same job, with a
+// different tool surface depending on which spelling the caller typed.
+func TestAnAliasIsConfinedLikeTheRoleItResolvesTo(t *testing.T) {
+	for _, pair := range [][2]string{
+		{"reviewer", "review"},
+		{"inspect", "diagnose"},
+		{"verifier", "validate"},
+		{"implement", "code"},
+	} {
+		alias, canonical := pair[0], pair[1]
+		if RoleHasPermission(alias, PermKnowledgeWrite) != RoleHasPermission(canonical, PermKnowledgeWrite) {
+			t.Errorf("%q and %q must agree: an alias is the same role", alias, canonical)
+		}
+	}
+	// The change this test exists for.
+	if RoleHasPermission("reviewer", PermKnowledgeWrite) {
+		t.Error("reviewer resolves to review, and review is confined")
+	}
+	// And what did NOT change: validate and its aliases keep their tools.
+	if !RoleHasPermission("verifier", PermKnowledgeWrite) ||
+		!RoleHasPermission("validate", PermKnowledgeWrite) {
+		t.Error("validate is not confined, so neither is its alias")
 	}
 }

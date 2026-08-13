@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -178,47 +179,82 @@ func TestPAMListReportsOnlyManagedLogins(t *testing.T) {
 	}
 }
 
-// A username that already names a host group must be refused with a sentence an
-// operator can act on, instead of useradd's "group X exists ... exit status 9"
-// reaching the browser. The image ships operator, backup, staff, users and aimee
-// as groups, and the wizard's first field is where someone meets them.
-func TestCreateRefusesUsernameThatIsAlreadyAGroup(t *testing.T) {
-	origGroup, origUser := groupLookup, userLookup
-	defer func() { groupLookup, userLookup = origGroup, origUser }()
-
-	users := &fakeUsers{members: map[string]bool{}, created: map[string]string{}}
-	p := &pamAccounts{users: users}
-
-	// "operator" is a group and not an account.
-	groupLookup = func(name string) error {
-		if name == "operator" {
+// A username that already names a host group remains creatable because the
+// wizard names its managed primary group instead of asking useradd to allocate a
+// colliding private group.
+func TestCreateUsesManagedPrimaryGroup(t *testing.T) {
+	orig := userAdd
+	origDelete := userDelete
+	defer func() { userAdd = orig; userDelete = origDelete }()
+	var args []string
+	userAdd = func(got ...string) ([]byte, error) {
+		args = append([]string(nil), got...)
+		return nil, nil
+	}
+	passwordSet := false
+	p := &pamAccounts{
+		group: "aimee-webchat",
+		users: newFakeUsers(),
+		setPassword: func(username, password string) error {
+			passwordSet = username == "operator" && password == "secret"
 			return nil
-		}
-		return errors.New("no such group")
+		},
 	}
-	userLookup = func(string) error { return errors.New("no such user") }
+	if err := p.Create("operator", "secret"); err != nil {
+		t.Fatalf("Create(operator) = %v", err)
+	}
+	want := []string{"--create-home", "--gid", "aimee-webchat", "--groups", "aimee-webchat", "--shell", "/usr/sbin/nologin", "operator"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("useradd args = %v; want %v", args, want)
+	}
+	if !passwordSet {
+		t.Fatal("created account password was not set")
+	}
+}
 
-	err := p.Create("operator", "irrelevant")
-	if err == nil {
-		t.Fatal("expected a refusal for a username that is already a group")
+func TestCreateRollsBackAccountWhenPasswordSetupFails(t *testing.T) {
+	orig := userAdd
+	origDelete := userDelete
+	defer func() { userAdd = orig; userDelete = origDelete }()
+	userAdd = func(...string) ([]byte, error) { return nil, nil }
+	var deleted []string
+	userDelete = func(args ...string) ([]byte, error) {
+		deleted = append([]string(nil), args...)
+		return nil, nil
 	}
-	if !strings.Contains(err.Error(), "already a group") {
-		t.Fatalf("error should name the collision, got: %v", err)
+	wantErr := errors.New("chpasswd failed")
+	p := &pamAccounts{
+		group: "aimee-webchat", users: newFakeUsers(),
+		setPassword: func(string, string) error { return wantErr },
 	}
-	if len(users.created) != 0 {
-		t.Fatalf("must not reach the user manager, created=%v", users.created)
+	if err := p.Create("operator", "secret"); !errors.Is(err, wantErr) {
+		t.Fatalf("Create error = %v; want %v", err, wantErr)
 	}
+	if want := []string{"--remove", "operator"}; !reflect.DeepEqual(deleted, want) {
+		t.Fatalf("userdel args = %v; want %v", deleted, want)
+	}
+}
 
-	// A free name still goes through.
-	if err := p.Create("admin", "irrelevant"); err != nil {
-		t.Fatalf("a name that is not a group should be created: %v", err)
+func TestCreateSurfacesUseraddDiagnostic(t *testing.T) {
+	orig := userAdd
+	defer func() { userAdd = orig }()
+	userAdd = func(...string) ([]byte, error) {
+		return []byte("useradd: user 'operator' already exists"), errors.New("exit status 9")
 	}
+	p := &pamAccounts{group: "aimee-webchat", users: newFakeUsers()}
+	err := p.Create("operator", "secret")
+	if err == nil || !strings.Contains(err.Error(), "already exists") || !strings.Contains(err.Error(), "exit status 9") {
+		t.Fatalf("Create error = %v; want useradd diagnostic and exit status", err)
+	}
+}
 
-	// An EXISTING account owns a like-named private group. That must not be
-	// reported as a collision, or the caller's real "user exists" path is masked.
-	groupLookup = func(string) error { return nil }
-	userLookup = func(string) error { return nil }
-	if err := p.Create("existing", "irrelevant"); err != nil {
-		t.Fatalf("an existing account must not be refused as a group clash: %v", err)
+func TestCreateWithoutGroupUsesManagedUserInterface(t *testing.T) {
+	users := newFakeUsers()
+	p := &pamAccounts{users: users}
+	if err := p.Create("operator", "secret"); err != nil {
+		t.Fatal(err)
+	}
+	if users.created["operator"] != "secret" {
+		t.Fatalf("fallback Create did not reach managed user interface: %#v", users.created)
 	}
 }

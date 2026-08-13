@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "cli_codex.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void test_parse_agent_message_extracts_text(void)
 {
@@ -252,7 +253,8 @@ static void test_server_restart_command_detection_allows_read_only_checks(void)
 
 static void test_spawn_failure_captures_stderr_and_exit_status(void)
 {
-   char path[] = "/tmp/aimee-codex-fixture-XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee-codex-fixture-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    const char *script =
@@ -314,7 +316,8 @@ static void test_parse_tool_action_skips_other_methods(void)
 
 static void test_agent_execute_cli_codex_uses_requested_cwd(void)
 {
-   char root[] = "/tmp/aimee-codex-cwd-XXXXXX";
+   char root[256];
+   snprintf(root, sizeof root, "%s/aimee-codex-cwd-XXXXXX", platform_tmpdir());
    assert(mkdtemp(root) != NULL);
 
    char workdir[512];
@@ -420,7 +423,8 @@ static int codex_capture_cb(const char *event, const char *value, void *userdata
 
 static void test_chat_stream_splits_distinct_agent_message_items(void)
 {
-   char root[] = "/tmp/aimee-codex-stream-XXXXXX";
+   char root[256];
+   snprintf(root, sizeof root, "%s/aimee-codex-stream-XXXXXX", platform_tmpdir());
    assert(mkdtemp(root) != NULL);
 
    char script[512];
@@ -488,7 +492,8 @@ static void test_chat_stream_splits_distinct_agent_message_items(void)
 
 static void test_chat_stream_splits_completed_delta_items_without_ids(void)
 {
-   char root[] = "/tmp/aimee-codex-stream-noids-XXXXXX";
+   char root[256];
+   snprintf(root, sizeof root, "%s/aimee-codex-stream-noids-XXXXXX", platform_tmpdir());
    assert(mkdtemp(root) != NULL);
 
    char script[512];
@@ -554,7 +559,8 @@ static void test_chat_stream_splits_completed_delta_items_without_ids(void)
 
 static void test_chat_stream_replaces_invalid_utf8_prompt_bytes(void)
 {
-   char root[] = "/tmp/aimee-codex-utf8-XXXXXX";
+   char root[256];
+   snprintf(root, sizeof root, "%s/aimee-codex-utf8-XXXXXX", platform_tmpdir());
    assert(mkdtemp(root) != NULL);
 
    char script[512];

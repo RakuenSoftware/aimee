@@ -9,6 +9,7 @@
 
 #include <aimee/skills/skill.h>
 #include "modules/skills/skill_trigger_policy.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* --- Helpers --- */
 
@@ -19,7 +20,7 @@ static char *make_tmpdir(void)
 {
    char *tmp = malloc(64);
    assert(tmp);
-   snprintf(tmp, 64, "/tmp/test_skill_XXXXXX");
+   snprintf(tmp, 64, "%s/test_skill_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmp) != NULL);
    return tmp;
 }

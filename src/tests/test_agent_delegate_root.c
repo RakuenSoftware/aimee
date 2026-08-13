@@ -534,7 +534,9 @@ void test_container_execute_script_runs_in_sandbox(void)
     * turns carry the repository/worktree root in their thread-local cwd. Give
     * this routing test the same context so it tests the container seam rather
     * than being rejected earlier for running from a source subdirectory. */
-   char sandbox_root[] = "/tmp/aimee-container-route.XXXXXX";
+   char sandbox_root[256];
+   snprintf(sandbox_root, sizeof sandbox_root, "%s/aimee-container-route.XXXXXX",
+            platform_tmpdir());
    assert(mkdtemp(sandbox_root) != NULL);
    char sandbox_cwd[MAX_PATH_LEN];
    assert(snprintf(sandbox_cwd, sizeof(sandbox_cwd), "%s/.aimee/worktrees/unit-test-agent/main",

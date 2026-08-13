@@ -15,6 +15,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 extern aimee_module_status_t aimee_workspace_module_handler(const aimee_module_invocation_t *,
                                                             const uint8_t *, uint32_t, uint8_t *,
@@ -41,7 +42,8 @@ static int validate_ref_via_module(const char *ref, size_t ref_len, int *allowed
 
 int main(void)
 {
-   char dir[] = "/tmp/ws_scope.XXXXXX";
+   char dir[256];
+   snprintf(dir, sizeof dir, "%s/ws_scope.XXXXXX", platform_tmpdir());
    assert(mkdtemp(dir) != NULL);
    setenv("AIMEE_WORKSPACES_DIR", dir, 1);
 

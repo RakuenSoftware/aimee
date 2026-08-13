@@ -822,8 +822,40 @@ void delegate_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
+   /* What this delegate may do, resolved ONCE, here, because this is the first
+    * point at which the role is known to be real. Everything downstream reads
+    * this: the tool default below, the mount, the drift check, the no-op check.
+    *
+    * It is resolved before the tool default rather than after because that
+    * default used to answer from the built-in table while the mount answered
+    * from the resolved set -- so a role an operator defined without `tools` was
+    * handed them here and refused at dispatch. Same fact, two sources, and the
+    * one that ran first was the one that could not see the definition.
+    *
+    * Failure holds nothing: a delegate whose permissions cannot be established
+    * reads and changes nothing. */
+   delegate_permissions_t delegate_perms;
+   {
+      char *role_definition = role_template_frontmatter(cwd[0] ? cwd : NULL, role);
+      int perms_rc = delegate_permissions_for_role(role, role_definition, &delegate_perms);
+      free(role_definition);
+      if (perms_rc != 0)
+      {
+         char permsmsg[256];
+         snprintf(permsmsg, sizeof(permsmsg),
+                  "refusing to run delegate: the permissions for role '%s' could not be "
+                  "resolved, so it holds none. Check the role template's `permissions:` block.",
+                  role);
+         delegation_compute_error(cctx, permsmsg);
+         compute_ctx_free(cctx);
+         return;
+      }
+   }
+
    int explicit_tools = cJSON_IsTrue(jtools),
-       force_tools = delegate_role_auto_tools_for_invocation(role, max_turns, explicit_tools);
+       force_tools = delegate_auto_tools_for_invocation(
+           delegate_permissions_has(&delegate_perms, AIMEE_DELEGATES_PERM_TOOLS), max_turns,
+           explicit_tools);
    force_tools = force_tools || (toolset_override && toolset_override[0]);
    /* An explicit `tools:false` (CLI --no-tools) overrides the role's tools-on
     * default: an artifact-provided panel review of an inline diff must run
@@ -1231,11 +1263,33 @@ void delegate_worker(void *arg)
       if (resolved_prompt)
          prompt = resolved_prompt;
    }
-   /* ONE answer, composed by the module from the role AND the brief. This is the
-    * boolean the worktree plan and the container spec both consume, and it is
-    * the one fact they must agree on -- composing it in two places is how a
-    * delegate ends up planned read-only and mounted writable, or the reverse. */
-   int delegate_allows_writes = delegate_may_write(role, prompt);
+   /* Read, not resolved: delegate_perms was established when the role was
+    * validated, above. The worktree plan and the container spec both consume
+    * this, and it is the one fact they must agree on -- working it out in two
+    * places is how a delegate ends up planned read-only and mounted writable.
+    *
+    * The brief is not consulted. A phrase like "do not edit files" used to
+    * narrow a write role to read-only, which meant the same delegate had
+    * different powers depending on how its prompt was worded. The role decides;
+    * a read-only run is a read-only role. */
+   /* Scoped against the repository the CALLER named. That is the object an
+    * operator means by `scopes: [/srv/repo-a]`, and it is the only one known
+    * this early -- the delegate's own worktree does not exist yet, and its path
+    * would not match a scope anyone wrote.
+    *
+    * Matching is exact, so a delegate pointed at a subdirectory of a scoped
+    * repository is read-only. That is the documented rule and the safe one: the
+    * alternative is a prefix match, where /srv/repo grants /srv/repo-secrets.
+    *
+    * No cwd and a scoped grant means read-only too. Nothing shows the target is
+    * in scope, and "probably fine" is not a permission. */
+   int delegate_allows_writes =
+       delegate_permissions_allow(&delegate_perms, AIMEE_DELEGATES_PERM_REPO_WRITE, cwd);
+   if (!delegate_allows_writes &&
+       delegate_permissions_has(&delegate_perms, AIMEE_DELEGATES_PERM_REPO_WRITE))
+      aimee_log(LOG_INFO, "delegate",
+                "delegate %s: role '%s' holds repo_write but not for '%s', so it runs read-only",
+                deleg_id, role, cwd[0] ? cwd : "(no workspace named)");
    if (branch && !delegate_allows_writes)
    {
       delegation_compute_error(cctx, "read-only delegates must use the parent worktree; branch "
@@ -1347,11 +1401,6 @@ void delegate_worker(void *arg)
    delegate_append_owned_block(&system_prompt, &template_sys_prompt,
                                delegate_inject_graph_context(prompt, cwd));
 
-   /* Tier orchestration context: for tools-enabled mid-tier delegates, append
-    * instructions describing how to fan out sub-tasks to lower-tier agents. */
-   delegate_append_owned_block(&system_prompt, &template_sys_prompt,
-                               delegate_build_tier_context(via_name, tier_override, role));
-
    /* Named-file drift guard: extract any repo-relative paths named in the prompt
     * and check pre-flight conditions before running the agent. */
    char named_paths[DELEGATE_DRIFT_MAX_PATHS][DELEGATE_DRIFT_PATH_MAX];
@@ -1384,8 +1433,7 @@ void delegate_worker(void *arg)
    /* Snapshot mtimes and HEAD to detect no-op write delegates. */
    delegate_file_snapshot_t pre_run_files[DELEGATE_DRIFT_MAX_PATHS];
    char pre_run_head_sha[64] = "";
-   int is_write_role = delegate_role_is_write(role);
-   if (is_write_role)
+   if (delegate_allows_writes)
    {
       const char *check_root =
           delegate_worktree_path[0] ? delegate_worktree_path : (cwd[0] ? cwd : ".");
@@ -1414,7 +1462,7 @@ void delegate_worker(void *arg)
           delegate_worktree_path[0] ? delegate_worktree_path : (cwd[0] ? cwd : NULL);
       int drift_rc =
           delegate_check_named_file_drift(path_ptrs, named_path_count, prompt, NULL, drift_root,
-                                          is_write_role, drift_err, sizeof(drift_err));
+                                          delegate_allows_writes, drift_err, sizeof(drift_err));
       if (drift_rc < 0)
       {
          aimee_log(LOG_WARN, "delegate", "named-file drift guard (pre-flight): %s", drift_err);
@@ -1775,7 +1823,7 @@ void delegate_worker(void *arg)
       int drift_rc =
           delegate_check_named_file_drift(path_ptrs, named_path_count, prompt, result.response,
                                           delegate_worktree_path[0] ? delegate_worktree_path : NULL,
-                                          is_write_role, drift_err, sizeof(drift_err));
+                                          delegate_allows_writes, drift_err, sizeof(drift_err));
       if (drift_rc < 0)
       {
          aimee_log(LOG_WARN, "delegate", "named-file drift (post-run): %s", drift_err);
@@ -1791,8 +1839,8 @@ void delegate_worker(void *arg)
    /* Flag a write delegate that reported success but changed nothing. */
    {
       char noop_err[256] = "";
-      if (delegate_detect_noop_write(is_write_role, delegate_allows_writes, handoff_json, rc,
-                                     named_paths, named_path_count, pre_run_files, pre_run_head_sha,
+      if (delegate_detect_noop_write(delegate_allows_writes, handoff_json, rc, named_paths,
+                                     named_path_count, pre_run_files, pre_run_head_sha,
                                      delegate_worktree_path, cwd, deleg_id, sid, role, noop_err,
                                      sizeof(noop_err)))
       {
@@ -1862,8 +1910,8 @@ void delegate_worker(void *arg)
    int delegate_applied_changes = -1;
    char delegate_apply_error[512] = "";
    char delegate_parent_root[MAX_PATH_LEN] = "";
-   if (rc == 0 && is_write_role && delegate_allows_writes && delegate_worktree_path[0] &&
-       delegate_git_root[0] && !delegate_shared_worktree)
+   if (rc == 0 && delegate_allows_writes && delegate_worktree_path[0] && delegate_git_root[0] &&
+       !delegate_shared_worktree)
    {
       /* The drift check guards against the PARENT worktree's HEAD moving during
        * the delegation, so its baseline must be the parent's HEAD at launch

@@ -69,30 +69,6 @@ int delegate_isolation_judge(const char *report, int probe_failed, int require_i
                              int *refuse, int *warn, int *is_error, char *reason,
                              size_t reason_cap);
 
-/* May this delegate write? The role and the brief, composed by the module.
- *
- * FAILS CLOSED: with no provider the answer is NO. A delegate that cannot be
- * shown to be permitted does not get a writable tree -- the mount is the
- * enforcement, so guessing yes is the one direction with no recovery. */
-typedef int (*delegate_may_write_fn)(const char *role, const char *prompt, int *may_write,
-                                     int *by_role, int *by_prompt);
-
-void delegate_register_may_write_provider(delegate_may_write_fn provider);
-
-/* Returns 1 when the delegate may write, 0 otherwise (including on any
- * failure, which is logged). */
-int delegate_may_write(const char *role, const char *prompt);
-
-/* Just the BRIEF's half of that answer: does the prompt ask for changes?
- *
- * Used where the role half is already known and only the narrowing matters --
- * the named-file drift check, where a prompt that forbids edits must disable a
- * hard-fail that a write role would otherwise trigger.
- *
- * Fails to 0, which is the safe direction HERE specifically: 0 disables a
- * hard-fail rather than causing one. Do not reuse this reasoning elsewhere. */
-int delegate_prompt_asks_for_writes(const char *prompt);
-
 /* Which built sandbox images may be deleted.
  *
  * `request` is built with the imggc encoders above; `response` receives the
@@ -160,5 +136,131 @@ void delegate_register_launch_plan_provider(delegate_launch_plan_fn provider);
 /* Returns 0 and fills `response` on success, -1 on any failure (logged). */
 int delegate_launch_plan_call(const uint8_t *request, size_t request_len, uint8_t *response,
                               size_t response_cap, size_t *response_len);
+
+/* Stage 20: does this review show it looked at the code?
+ *
+ * `verdict` receives AIMEE_DELEGATES_REVIEW_* flags and `message` the
+ * contradiction wording, if any.
+ *
+ * Fails CLOSED, and here that means NOT GUARDED: with no provider the review is
+ * accepted rather than rejected. Rejecting on a missing provider would fail
+ * honest reviews for a reason the operator cannot see or fix, which is worse
+ * than losing a check that only ever catches a specific dishonesty. */
+typedef int (*delegate_review_evidence_fn)(const char *role, const char *response, unsigned flags,
+                                           unsigned *verdict, char *message, size_t message_cap);
+
+void delegate_register_review_evidence_provider(delegate_review_evidence_fn provider);
+
+/* Returns 0 with *verdict filled, or -1 on any failure (logged, verdict 0). */
+int delegate_review_evidence_judge(const char *role, const char *response, unsigned flags,
+                                   unsigned *verdict, char *message, size_t message_cap);
+
+/* Stage 21: did the delegate touch the files its brief named?
+ *
+ * Bytes rather than a struct, for the same reason as the launch-plan seam: the
+ * request carries a whole set of paths with their facts, and the caller already
+ * holds them.
+ *
+ * Fails CLOSED, and here that means NO DRIFT: with no provider the delegate is
+ * accepted. A hard verdict FAILS a delegate that may have done its job
+ * perfectly, so inventing one because a module is missing would turn an
+ * infrastructure problem into a wrong answer about the user's work. */
+typedef int (*delegate_drift_fn)(const uint8_t *request, size_t request_len, unsigned *severity,
+                                 char *message, size_t message_cap);
+
+void delegate_register_drift_provider(delegate_drift_fn provider);
+
+/* Returns 0 with *severity filled, or -1 on any failure (logged, severity 0). */
+int delegate_drift_judge(const uint8_t *request, size_t request_len, unsigned *severity,
+                         char *message, size_t message_cap);
+
+/* Stage 15: what a delegate may do.
+ *
+ * Bytes rather than a struct, like the other seams that carry a set: the caller
+ * holds the role and whatever definition an operator wrote, and the answer is a
+ * list whose length nobody knows in advance.
+ *
+ * Fails CLOSED, which here means NO PERMISSIONS. A delegate whose powers cannot
+ * be established gets none: it reads, and it changes nothing. That is the safe
+ * direction for every permission in the set, which is not true of most seams in
+ * this file and is why it is stated here. */
+typedef int (*delegate_permissions_fn)(const uint8_t *request, size_t request_len,
+                                       uint8_t *response, size_t response_cap,
+                                       size_t *response_len);
+
+void delegate_register_permissions_provider(delegate_permissions_fn provider);
+
+/* Returns 0 and fills `response` on success, -1 on any failure (logged). */
+int delegate_permissions_resolve(const uint8_t *request, size_t request_len, uint8_t *response,
+                                 size_t response_cap, size_t *response_len);
+
+/* The resolved set, held for the life of a delegate.
+ *
+ * Resolve ONCE when the delegate is created, then read it. Every query below is
+ * a local lookup against what was resolved, not another question: a permission
+ * asked twice is a permission that can answer differently the second time, which
+ * is the defect this replaced. */
+#define DELEGATE_PERM_MAX        16
+#define DELEGATE_PERM_NAME_MAX   64
+#define DELEGATE_PERM_SCOPE_MAX  8
+#define DELEGATE_PERM_OBJECT_MAX 512
+#define DELEGATE_PERM_TOOL_MAX   32
+
+typedef struct
+{
+   char name[DELEGATE_PERM_NAME_MAX];
+   char enforced_at[DELEGATE_PERM_NAME_MAX];
+   char scopes[DELEGATE_PERM_SCOPE_MAX][DELEGATE_PERM_OBJECT_MAX];
+   int scope_count;
+} delegate_grant_t;
+
+typedef struct
+{
+   delegate_grant_t grants[DELEGATE_PERM_MAX];
+   int count;
+   /* Permissions the module reported as held with nothing enforcing them. An
+    * operator declared them and no point evaluates them, so they are surfaced
+    * rather than treated as granted or as denied. */
+   char unenforced[DELEGATE_PERM_MAX][DELEGATE_PERM_NAME_MAX];
+   int unenforced_count;
+   /* Tools this set withholds, whatever toolset the delegate resolved to. The
+    * module decides which tool needs which permission; this side filters the
+    * advertised array and refuses at dispatch against the same list, so what is
+    * offered and what is allowed cannot disagree. */
+   char denied_tools[DELEGATE_PERM_TOOL_MAX][DELEGATE_PERM_NAME_MAX];
+   int denied_tool_count;
+   int resolved;
+} delegate_permissions_t;
+
+/* Resolve what a role may do.
+ *
+ * `definition` is the role template's frontmatter when the operator wrote one,
+ * or NULL for a role that ships as-is. Pass the TEXT, not a parse of it: the
+ * module reads it, so there is one reading.
+ *
+ * Returns 0 on success. On failure `out` is zeroed, which holds NOTHING: a
+ * delegate whose powers cannot be established reads and changes nothing. A
+ * definition the module refuses fails HERE rather than quietly resolving to the
+ * built-in set, which would hand the delegate the powers its role ships with
+ * while the operator believes it holds the ones they wrote. */
+int delegate_permissions_for_role(const char *role, const char *definition,
+                                  delegate_permissions_t *out);
+
+/* Whether the permission is held at all, ignoring any narrowing.
+ *
+ * Use where the object is not yet known, such as deciding whether to mount a
+ * workspace read-write at all. Where the object IS known, use
+ * delegate_permissions_allow, which this would answer yes to when the scope
+ * forbids it. */
+int delegate_permissions_has(const delegate_permissions_t *p, const char *permission);
+
+/* Whether the permission covers this object. Unscoped grants cover everything;
+ * scoped grants match exactly. */
+int delegate_permissions_allow(const delegate_permissions_t *p, const char *permission,
+                               const char *object);
+
+/* Whether this set withholds a tool. Answered from the list the module sent, so
+ * the filter that advertises tools and the dispatch that runs them agree. */
+int delegate_permissions_denies_tool(const delegate_permissions_t *p, const char *tool);
 
 #endif

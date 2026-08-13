@@ -72,7 +72,6 @@ struct cJSON *build_tools_array_anthropic(void);
 struct cJSON *delegate_respond_spec(void);
 int agent_tools_append_delegate_respond_tool(struct cJSON *tools);
 int agent_tools_strip_delegate_respond(parsed_response_t *parsed);
-int agent_tools_role_current_code_only(const char *role);
 int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name);
 void agent_tools_filter_for_role(struct cJSON *tools, const char *role);
 
@@ -258,6 +257,45 @@ void agent_tools_parent_write_guard_clear(void);
 const char *agent_tools_parent_write_guard_root(void);
 const char *agent_tools_parent_write_guard_write_root(void);
 int agent_tools_parent_write_guard_blocks(const char *path, const char *cwd);
+
+/* May this delegate mutate what aimee knows: its memory, code index, notes and
+ * docs? The `knowledge_write` permission, resolved once when the delegate was
+ * created and set here for the run.
+ *
+ * Withheld, three things follow: aimee's own knowledge is kept out of the
+ * system prompt, the indexed and memory tools are refused, and an `aimee ...`
+ * shell command that would mutate that state is refused. The delegate still
+ * reads the checkout it was given.
+ *
+ * DEFAULTS TO ALLOWED, and that is the honest default: an ordinary turn that
+ * never had a delegate role behaves as it always did. The withholding is what
+ * has to be declared. */
+/* May this delegate run commands? The `shell` permission, resolved once when the
+ * delegate was created and set here for the run.
+ *
+ * Withheld, `bash` and `execute_script` are refused at dispatch whatever toolset
+ * the delegate was given. That independence is the point: which toolset a role
+ * resolves to is a separate map with its own alias list, and a role an operator
+ * defined without `shell` still resolves to whatever toolset its NAME implies.
+ * The permission is what actually binds.
+ *
+ * DEFAULTS TO ALLOWED, like knowledge_write and for the same reason: an ordinary
+ * turn that never had a delegate role behaves as it always did. Withholding is
+ * what has to be declared. */
+/* The tools this delegate's permissions withhold, whatever toolset it resolved
+ * to. Set once per run from the resolved set; read by the filter that advertises
+ * tools AND by dispatch, so what is offered and what is allowed cannot disagree.
+ *
+ * `denied` is borrowed, not copied: it must outlive the run. Passing NULL (or a
+ * count of 0) withholds nothing, which is what an ordinary turn wants. */
+void agent_tools_denied_set(const char *const *denied, int count);
+int agent_tools_tool_denied(const char *tool);
+
+void agent_tools_shell_set(int allowed);
+int agent_tools_shell_allowed(void);
+
+void agent_tools_knowledge_write_set(int allowed);
+int agent_tools_knowledge_write_allowed(void);
 
 /* Read-only-delegate gate (backend-agnostic write capability). A delegate that
  * is not write-capable (see the write_capable field, derived once at dispatch

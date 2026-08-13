@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include "config.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 int main(void)
 {
@@ -146,7 +147,8 @@ int main(void)
     * are fine"). The reachable failure is strict mode + a validation error, which returns
     * -1 from config_load_file with defaults applied and field parsing not yet reached. */
    {
-      char tmpl[] = "/tmp/aimee-accessor-default-XXXXXX";
+      char tmpl[256];
+      snprintf(tmpl, sizeof tmpl, "%s/aimee-accessor-default-XXXXXX", platform_tmpdir());
       const char *dir = mkdtemp(tmpl);
       assert(dir);
       char cfgdir[512], cfgpath[600];

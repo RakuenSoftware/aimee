@@ -28,6 +28,7 @@
 #include <aimee/core/event_bus/bus_wire.h>
 #include "db1/db1.h"
 #include "db1/user_memory.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void must(int cond, const char *what)
 {
@@ -189,7 +190,8 @@ int main(void)
 {
    printf("test_bus_memory_upsert:\n");
 
-   char home[] = "/tmp/aimee-busups-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-busups-XXXXXX", platform_tmpdir());
    must(mkdtemp(home) != NULL, "tmp home");
    setenv("AIMEE_HOME", home, 1);
    must(db1_init(":memory:") == 0, "db1 init");

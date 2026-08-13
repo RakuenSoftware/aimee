@@ -28,6 +28,7 @@
 #include "config_database.h"
 #include "runtime_secret.h"
 #include "vault_config_bootstrap.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* --- stubs for the config surface deploy_apply.c pulls in --- */
 
@@ -102,7 +103,8 @@ static int envp_key_count(char **envp, const char *key)
 
 static void test_managed_llm_service_credential(void)
 {
-   char tmp[] = "/tmp/aimee-deploy-llm-token-XXXXXX";
+   char tmp[256];
+   snprintf(tmp, sizeof tmp, "%s/aimee-deploy-llm-token-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmp) != NULL);
    assert(setenv("AIMEE_HOME", tmp, 1) == 0);
    runtime_secret_remove("SYNTHESIS_API_KEY");

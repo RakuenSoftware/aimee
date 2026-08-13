@@ -71,11 +71,27 @@ static const char *server_provider_first_env_var(const model_provider_t *p)
    return NULL;
 }
 
+/* The runtime-secret table checked below is NOT the whole credential store. It
+ * is loaded by vault_config_bootstrap.c from a single agent namespace
+ * ("environment") for a hardcoded list of AIMEE_* names, so a key stored the way
+ * an operator stores one — `aimee vault set minimax api_key ...`, filed under
+ * the provider's own name — never reaches it.
+ *
+ * Measured on a live server before the vault check existed: the vault held
+ * Minimax/api_key, Kimi/api_key, codex/oauth and claude/oauth, and
+ * `provider list --all` reported [no key] for every one of them.
+ *
+ * vault_provider_has_credential lives in the vault module rather than here,
+ * beside agent_has_resolvable_credentials, because that is where credential
+ * resolution was deliberately gathered so callers stop reaching into
+ * vault_service.h from outside it. */
 static int server_provider_has_credentials(const model_provider_t *p)
 {
    if (!p)
       return 0;
    if (p->auth_type && strcmp(p->auth_type, "none") == 0)
+      return 1;
+   if (vault_provider_has_credential(p->name))
       return 1;
    if (!p->env_vars)
       return 0;
@@ -155,6 +171,12 @@ static int server_provider_is_configured(const model_provider_t *p, const char *
    if (!p)
       return 0;
    if (selected_provider && selected_provider[0] && strcmp(p->name, selected_provider) == 0)
+      return 1;
+   /* Putting a key in the vault under a provider's name IS the deliberate choice
+    * this function looks for. Without this, a provider configured only through
+    * the vault was missing from the default listing and reported [no key] under
+    * --all, so neither view mentioned the credential. */
+   if (vault_provider_has_credential(p->name))
       return 1;
    if (!p->env_vars)
       return 0;

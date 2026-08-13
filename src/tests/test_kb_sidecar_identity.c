@@ -31,6 +31,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static int failures = 0;
 
@@ -123,7 +124,8 @@ typedef struct
  * own data dir, so one hop's state cannot satisfy another's assertions. */
 static void check_hop(const hop_t *hop)
 {
-   char tmpl[] = "/tmp/aimee-sidecar-idXXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee-sidecar-idXXXXXX", platform_tmpdir());
    const char *dir = mkdtemp(tmpl);
    assert(dir && "need a scratch dir");
 
@@ -197,7 +199,8 @@ static void check_hop(const hop_t *hop)
  * material, and the subjects must differ so a sidecar can say who called it. */
 static void check_independence(void)
 {
-   char tmpl[] = "/tmp/aimee-sidecar-indepXXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee-sidecar-indepXXXXXX", platform_tmpdir());
    const char *dir = mkdtemp(tmpl);
    assert(dir && "need a scratch dir");
 
@@ -242,7 +245,8 @@ static void check_independence(void)
 /* The generic entry point rejects what the named wrappers cannot get wrong. */
 static void check_generic_guards(void)
 {
-   char tmpl[] = "/tmp/aimee-sidecar-genXXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee-sidecar-genXXXXXX", platform_tmpdir());
    const char *dir = mkdtemp(tmpl);
    assert(dir && "need a scratch dir");
 

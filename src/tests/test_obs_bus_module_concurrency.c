@@ -24,6 +24,7 @@
 
 #include <aimee/audit/obs_bus.h>
 #include <aimee/core/event_bus/module_client.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 void audit_log_open(void);
 
@@ -109,7 +110,8 @@ static void test_expired_deadline_does_not_block(void)
 int main(void)
 {
    printf("obs_bus_module_concurrency:\n");
-   char home[] = "/tmp/aimee-busconc-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-busconc-XXXXXX", platform_tmpdir());
    if (!mkdtemp(home))
    {
       fprintf(stderr, "FAIL: tmp home\n");

@@ -14,6 +14,11 @@ void mcp_session_register(server_conn_t *conn, const char *sid);
 cJSON *text_content(const char *text);
 cJSON *tool_ast_grep_search(cJSON *args);
 
+/* Is a REAL ast-grep binary resolvable? Used to withhold ast_grep_search from
+ * tools/list when it is not, so the surface stops advertising a search that
+ * cannot run. Verified once per process and cached. */
+int ast_grep_available(void);
+
 struct mcp_call
 {
    server_ctx_t *ctx;

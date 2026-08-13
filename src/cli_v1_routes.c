@@ -1887,9 +1887,9 @@ cJSON *marshal_roundtable_review(int argc, char **argv)
    }
    char *artifact_text = NULL;
    if (artifact_stdin)
-      artifact_text = marshal_read_stdin_limited(16u * 1024u * 1024u);
+      artifact_text = marshal_read_stdin_limited(CLI_V1_MAX_ROUNDTABLE_ARTIFACT);
    else if (artifact_path)
-      artifact_text = marshal_read_file_limited(artifact_path, 16u * 1024u * 1024u);
+      artifact_text = marshal_read_file_limited(artifact_path, CLI_V1_MAX_ROUNDTABLE_ARTIFACT);
    else if (opts.pos_count > 0 && opts.positional[0])
    {
       FILE *probe = fopen(opts.positional[0], "rb");
@@ -1897,7 +1897,8 @@ cJSON *marshal_roundtable_review(int argc, char **argv)
       {
          fclose(probe);
          artifact_positional = 1;
-         artifact_text = marshal_read_file_limited(opts.positional[0], 16u * 1024u * 1024u);
+         artifact_text =
+             marshal_read_file_limited(opts.positional[0], CLI_V1_MAX_ROUNDTABLE_ARTIFACT);
          if (!artifact_text)
          {
             cJSON_Delete(req);

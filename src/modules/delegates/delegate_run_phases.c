@@ -137,7 +137,7 @@ void delegate_record_exit_learning(const char *sid, const char *role, const agen
  *
  * Returns 1 and fills `err` when the run is a no-op; 0 otherwise, logging the
  * benign notes the module returns. */
-int delegate_detect_noop_write(int is_write_role, int allows_writes, int handoff_json, int rc,
+int delegate_detect_noop_write(int writes_allowed, int handoff_json, int rc,
                                const char named_paths[][DELEGATE_DRIFT_PATH_MAX],
                                int named_path_count, const delegate_file_snapshot_t *pre_run_files,
                                const char *pre_run_head_sha, const char *worktree_path,
@@ -147,11 +147,10 @@ int delegate_detect_noop_write(int is_write_role, int allows_writes, int handoff
    /* Only a successful write run can be a no-op; skip the I/O entirely
     * otherwise. This is the same narrowing the rule applies, kept here so the
     * ordinary read-only delegate pays nothing for a check that cannot fire. */
-   if (!is_write_role || !allows_writes || rc != 0)
+   if (!writes_allowed || rc != 0)
       return 0;
 
-   unsigned flags = AIMEE_DELEGATES_NOOP_IS_WRITE_ROLE | AIMEE_DELEGATES_NOOP_ALLOWS_WRITES |
-                    AIMEE_DELEGATES_NOOP_SUCCEEDED;
+   unsigned flags = AIMEE_DELEGATES_NOOP_WRITES_ALLOWED | AIMEE_DELEGATES_NOOP_SUCCEEDED;
    if (handoff_json)
       flags |= AIMEE_DELEGATES_NOOP_HANDOFF_JSON;
    if (worktree_path && worktree_path[0])

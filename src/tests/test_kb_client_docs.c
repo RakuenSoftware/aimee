@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char *g_last_path;
 static char *g_last_body;
@@ -95,7 +96,8 @@ static void queue_response(const char *response)
 
 static char *write_temp_doc(const char *content)
 {
-   char tmpl[] = "/tmp/aimee-kb-client-docs-XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee-kb-client-docs-XXXXXX", platform_tmpdir());
    int fd = mkstemp(tmpl);
    assert(fd >= 0);
    size_t len = strlen(content);
@@ -106,7 +108,8 @@ static char *write_temp_doc(const char *content)
 
 static char *write_temp_doc_bytes(const char *content, size_t len)
 {
-   char tmpl[] = "/tmp/aimee-kb-client-docs-XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee-kb-client-docs-XXXXXX", platform_tmpdir());
    int fd = mkstemp(tmpl);
    assert(fd >= 0);
    assert(write(fd, content, len) == (ssize_t)len);

@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char g_message[1024];
 static int g_was_error;
@@ -88,7 +89,8 @@ static int list_refused(attested_transport_t transport, const char *principal)
 
 int main(void)
 {
-   char path[] = "/tmp/aimee-vault-gate-XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee-vault-gate-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    close(fd);

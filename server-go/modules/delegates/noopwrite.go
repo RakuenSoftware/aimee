@@ -16,8 +16,9 @@ package delegates
 // established; none is inferred here.
 type NoopWriteEvidence struct {
 	// The run itself.
-	IsWriteRole    bool
-	AllowsWrites   bool
+	// WritesAllowed is the delegate's repo_write permission, resolved once
+	// when it was created. There is no second write signal to agree with.
+	WritesAllowed  bool
 	HandoffJSON    bool
 	Succeeded      bool // the delegate's own rc == 0
 	NamedPathCount int
@@ -53,11 +54,11 @@ type NoopWriteVerdict struct {
 
 // JudgeNoopWrite decides whether a completed delegate did anything.
 //
-// Only a WRITE role that was ALLOWED to write and REPORTED SUCCESS can be a
-// no-op. A read-only role changing nothing is the expected outcome, and a role
+// Only a delegate that COULD write and REPORTED SUCCESS can be a no-op. One
+// that cannot write and changed nothing did exactly what it was for, and one
 // that already failed has its own error.
 func JudgeNoopWrite(e NoopWriteEvidence) NoopWriteVerdict {
-	if !e.IsWriteRole || !e.AllowsWrites || !e.Succeeded {
+	if !e.WritesAllowed || !e.Succeeded {
 		return NoopWriteVerdict{}
 	}
 

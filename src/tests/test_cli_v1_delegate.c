@@ -22,6 +22,7 @@
 #include "../cli_v1_routes_c.c"
 #include "../cli_v1_routes_d.c"
 #include "../cli_v1_routes_e.c"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void test_delegate_max_turns_marshaled(void)
 {
@@ -345,7 +346,8 @@ static void test_delegate_roundtable_invalid_brief_json_exits(void)
  * test_delegate_context_file_folded_into_prompt for the roundtable path. */
 static void test_delegate_roundtable_context_file_folded_into_prompt(void)
 {
-   char path[] = "/tmp/aimee_rt_ctx_test_XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee_rt_ctx_test_XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    const char *marker = "ROUNDTABLE_PRELOAD_MARKER_77 review_block_body";
@@ -454,7 +456,8 @@ static void test_roundtable_stdin_is_authoritative_artifact(void)
 
 static void test_roundtable_path_is_read_not_forwarded(void)
 {
-   char path[] = "/tmp/aimee_rt_artifact_test_XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee_rt_artifact_test_XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    const char *artifact = "diff --git a/ONLY1828 b/ONLY1828\n+exact bytes\n";
@@ -889,8 +892,10 @@ static void test_agent_probe_failure_controls_exit_status(void)
 static void test_kb_docs_push_route_and_marshal(void)
 {
    cli_v1_route_t route;
-   char path1[] = "/tmp/aimee-cli-doc-one-XXXXXX";
-   char path2[] = "/tmp/aimee-cli-doc-two-XXXXXX";
+   char path1[256];
+   snprintf(path1, sizeof path1, "%s/aimee-cli-doc-one-XXXXXX", platform_tmpdir());
+   char path2[256];
+   snprintf(path2, sizeof path2, "%s/aimee-cli-doc-two-XXXXXX", platform_tmpdir());
    int fd1 = mkstemp(path1), fd2 = mkstemp(path2);
    assert(fd1 >= 0 && fd2 >= 0);
    assert(write(fd1, "alpha doc\n", 10) == 10);
@@ -1578,7 +1583,8 @@ static void test_insights_text_output(void)
    cJSON_AddNumberToObject(resp, "estimated_cost_usd", 0.25);
    cJSON_AddItemToObject(resp, "models", cJSON_CreateArray());
 
-   char path[] = "/tmp/aimee-insights-output-XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee-insights-output-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    int old_stdout = dup(STDOUT_FILENO);
@@ -1717,7 +1723,8 @@ static void test_client_endpoint_selection(void)
    unsetenv("AIMEE_API_ENDPOINT");
    unsetenv("AIMEE_API_BEARER");
 
-   char home[] = "/tmp/aimee-rpce-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-rpce-XXXXXX", platform_tmpdir());
    assert(mkdtemp(home) != NULL);
    setenv("AIMEE_HOME", home, 1);
    unsetenv("AIMEE_PROFILE");
@@ -1772,7 +1779,8 @@ static void test_client_endpoint_selection(void)
  * the bug where these advertised flags were silently dropped. */
 static void test_delegate_context_file_folded_into_prompt(void)
 {
-   char path[] = "/tmp/aimee_ctx_test_XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee_ctx_test_XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    const char *marker = "UNIQUE_PRELOAD_MARKER_42 token_normalize_xyz";
@@ -1899,8 +1907,10 @@ static void grant_render(const char *method, const char *json, char *out, size_t
    cJSON *resp = cJSON_Parse(json);
    assert(resp != NULL);
 
-   char opath[] = "/tmp/aimee-grant-out-XXXXXX";
-   char epath[] = "/tmp/aimee-grant-err-XXXXXX";
+   char opath[256];
+   snprintf(opath, sizeof opath, "%s/aimee-grant-out-XXXXXX", platform_tmpdir());
+   char epath[256];
+   snprintf(epath, sizeof epath, "%s/aimee-grant-err-XXXXXX", platform_tmpdir());
    int ofd = mkstemp(opath), efd = mkstemp(epath);
    assert(ofd >= 0 && efd >= 0);
    int old_out = dup(STDOUT_FILENO), old_err = dup(STDERR_FILENO);

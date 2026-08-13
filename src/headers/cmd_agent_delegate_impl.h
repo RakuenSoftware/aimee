@@ -178,19 +178,18 @@ int delegate_extract_named_paths(const char *prompt, char paths[][DELEGATE_DRIFT
  *     full-path match → ok; basename-only → soft drift (rc=1);
  *     absent from response → hard drift (rc=-1).
  *   Returns -1 on hard drift, 1 on soft drift, 0 when all paths are ok.
- *   role_is_write is the authoritative write-intent gate: a read/analysis role
- *   (0) can never hard-drift on a missing named file (it produces no files), so a
- *   path scraped from reference content in its prompt never fails it. */
+ *   writes_allowed is the delegate's repo_write permission, resolved once when it
+ *   was created and passed in here. A delegate that cannot write can never
+ *   hard-drift on a missing named file (it produces no files), so a path scraped
+ *   from reference content in its prompt never fails it. */
 int delegate_check_named_file_drift(const char *const *paths, int path_count, const char *prompt,
-                                    const char *response, const char *wt_path, int role_is_write,
+                                    const char *response, const char *wt_path, int writes_allowed,
                                     char *errbuf, size_t errbuf_size);
 
 /* Build a compact validation evidence bundle for validate/review delegates.
  * The bundle includes HEAD ref, diff --stat, and changed files.
  * Returns a heap-allocated string; caller must free.  Returns NULL on failure. */
 char *delegate_build_validation_bundle(const char *cwd);
-char *delegate_maybe_append_validation_bundle(const char *role, const char *cwd, char *owned_prompt,
-                                              const char *fallback_prompt, int target_provided);
 /* Validate Location-backed review snippets against the current checkout.
  * Returns 1 and fills errbuf when a fenced code block following a
  * `Location: `path:line`` marker does not match that file near the cited line,
@@ -216,7 +215,6 @@ int delegate_worktree_has_changes(const char *wt_path);
  *   via_name      — pin by agent name (mutually exclusive with tier_override)
  *   tier_override — pin by tier number (-1 = use default routing)
  *   role          — the delegation role (used to resolve the agent) */
-char *delegate_build_tier_context(const char *via_name, int tier_override, const char *role);
 
 /* Route override helpers shared by the direct CLI and server-routed delegate
  * paths. Provider routing picks the cheapest enabled agent for the requested

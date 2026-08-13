@@ -204,7 +204,7 @@
         },
         {
           "id": 15,
-          "name": "delegate-may-write",
+          "name": "delegate-permissions",
           "event_kind": 6671
         },
         {
@@ -226,6 +226,16 @@
           "id": 19,
           "name": "delegate-launch-plan",
           "event_kind": 6675
+        },
+        {
+          "id": 20,
+          "name": "delegate-review-evidence",
+          "event_kind": 6676
+        },
+        {
+          "id": 21,
+          "name": "delegate-named-file-drift",
+          "event_kind": 6677
         }
       ]
     },

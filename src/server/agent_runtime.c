@@ -5,6 +5,8 @@
 #include "db1.h"
 #include "db1/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
 #include <aimee/delegates/delegate_role.h>
+#include <aimee/delegates/delegate_launch_args.h>
+#include "role_templates.h"
 #include "provider_catalog.h"
 #include "db2/agent_hints.h"
 #include "db2/agent_outcomes.h"
@@ -645,9 +647,60 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
    if (agent_apply_request_tool_loop_cap(cfg, ag, out) != 0)
       return -1;
    ag->ablation = cfg->ablation;
-   ag->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
+   /* What this run may do, resolved once here and read from here on: the write
+    * gate below, the tool allowlist, the dispatch guard and the system prompt
+    * all take THIS answer rather than asking about the role again.
+    *
+    * A run with no role is not a delegate and is not confined. Resolving an
+    * empty role would return an empty set and silently strip an operator's own
+    * session of tools it has always had. */
+   if (role && role[0])
+   {
+      /* Thread-local because the denied-tool list is BORROWED for the length of
+         the run: the tool filter and dispatch both read it, and a copy would be
+         a second answer to keep in step. One run per thread, so one set. */
+      static _Thread_local delegate_permissions_t perms;
+      static _Thread_local const char *denied[DELEGATE_PERM_TOOL_MAX];
 
-   char *hint = (agent_tools_role_current_code_only(role) || agent_uses_mistral_delegate_path(ag))
+      char *definition = role_template_frontmatter(NULL, role);
+      int perms_rc = delegate_permissions_for_role(role, definition, &perms);
+      free(definition);
+      if (perms_rc != 0)
+      {
+         /* Holding nothing is not the same as being confined. The carriers below
+            would withhold shell and knowledge writes, but the denied-tool list
+            arrives EMPTY on failure, so the tool filter would go on offering
+            write_file and the git-write tools: confined in two places and open in
+            the third. A run whose permissions cannot be established does not run,
+            which is what the delegate path does with the same failure. */
+         snprintf(out->error, sizeof(out->error),
+                  "refusing to run: the permissions for role '%s' could not be resolved, so it "
+                  "holds none. Check the role template's `permissions:` block.",
+                  role);
+         return -1;
+      }
+      agent_tools_knowledge_write_set(
+          delegate_permissions_has(&perms, AIMEE_DELEGATES_PERM_KNOWLEDGE_WRITE));
+      agent_tools_shell_set(delegate_permissions_has(&perms, AIMEE_DELEGATES_PERM_SHELL));
+      for (int i = 0; i < perms.denied_tool_count; i++)
+         denied[i] = perms.denied_tools[i];
+      agent_tools_denied_set(denied, perms.denied_tool_count);
+      ag->write_capable =
+          enforce_writes && delegate_permissions_has(&perms, AIMEE_DELEGATES_PERM_REPO_WRITE) ? 1
+                                                                                              : 0;
+   }
+   else
+   {
+      /* Stated, not left over. These carriers outlive a run, so a turn that
+         inherits them from the delegate before it would be confined by a
+         permission nobody withheld from IT. Every run sets its own posture. */
+      agent_tools_knowledge_write_set(1);
+      agent_tools_shell_set(1);
+      agent_tools_denied_set(NULL, 0);
+      ag->write_capable = enforce_writes ? 1 : 0;
+   }
+
+   char *hint = (!agent_tools_knowledge_write_allowed() || agent_uses_mistral_delegate_path(ag))
                     ? NULL
                     : kb_client_agent_hint_consume(role, user_prompt);
    const char *effective_prompt = user_prompt;
@@ -1341,68 +1394,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    return out->success ? 0 : -1;
 }
 
-/* --- Task type classification --- */
-
-typedef struct
-{
-   const char *word;
-   task_type_t type;
-} task_keyword_t;
-
-static const task_keyword_t task_keywords[] = {
-    {"fix", TASK_TYPE_BUG_FIX},         {"bug", TASK_TYPE_BUG_FIX},
-    {"error", TASK_TYPE_BUG_FIX},       {"crash", TASK_TYPE_BUG_FIX},
-    {"fail", TASK_TYPE_BUG_FIX},        {"broken", TASK_TYPE_BUG_FIX},
-    {"regression", TASK_TYPE_BUG_FIX},  {"refactor", TASK_TYPE_REFACTOR},
-    {"rename", TASK_TYPE_REFACTOR},     {"extract", TASK_TYPE_REFACTOR},
-    {"reorganize", TASK_TYPE_REFACTOR}, {"clean", TASK_TYPE_REFACTOR},
-    {"add", TASK_TYPE_FEATURE},         {"implement", TASK_TYPE_FEATURE},
-    {"create", TASK_TYPE_FEATURE},      {"new", TASK_TYPE_FEATURE},
-    {"build", TASK_TYPE_FEATURE},       {"support", TASK_TYPE_FEATURE},
-    {"review", TASK_TYPE_REVIEW},       {"check", TASK_TYPE_REVIEW},
-    {"audit", TASK_TYPE_REVIEW},        {"verify", TASK_TYPE_REVIEW},
-    {"validate", TASK_TYPE_REVIEW},     {"test", TASK_TYPE_TEST},
-    {"coverage", TASK_TYPE_TEST},       {"assert", TASK_TYPE_TEST},
-    {"spec", TASK_TYPE_TEST},           {NULL, TASK_TYPE_GENERAL}};
-
-task_type_t task_type_classify(const char *prompt)
-{
-   if (!prompt || !prompt[0])
-      return TASK_TYPE_GENERAL;
-
-   /* Lowercase copy for matching */
-   char lower[512];
-   size_t len = strlen(prompt);
-   if (len >= sizeof(lower))
-      len = sizeof(lower) - 1;
-   for (size_t i = 0; i < len; i++)
-      lower[i] = (char)((prompt[i] >= 'A' && prompt[i] <= 'Z') ? prompt[i] + 32 : prompt[i]);
-   lower[len] = '\0';
-
-   /* Scan for keyword matches (first match wins) */
-   for (int i = 0; task_keywords[i].word; i++)
-   {
-      const char *kw = task_keywords[i].word;
-      size_t kwlen = strlen(kw);
-      const char *p = lower;
-      while ((p = strstr(p, kw)) != NULL)
-      {
-         /* Check word boundary: must be at start or after non-alpha */
-         int at_start = (p == lower) || (*(p - 1) == ' ' || *(p - 1) == '\t' || *(p - 1) == '-' ||
-                                         *(p - 1) == '_' || *(p - 1) == '/');
-         /* Check end boundary: must be at end or before non-alpha */
-         char after = p[kwlen];
-         int at_end = (after == '\0' || after == ' ' || after == '\t' || after == '-' ||
-                       after == '_' || after == '/' || after == '.' || after == ',' ||
-                       after == 'e' || after == 'i' || after == 's');
-         if (at_start && at_end)
-            return task_keywords[i].type;
-         p += kwlen;
-      }
-   }
-
-   return TASK_TYPE_GENERAL;
-}
+/* --- Task type --- */
 
 const char *task_type_name(task_type_t type)
 {
@@ -1518,17 +1510,12 @@ static const char *agent_context_cwd(char *buf, size_t buf_len)
  * calling tools and is killed with "max turns exhausted without final
  * response". Tools stay available -- a reviewer may need evidence -- but
  * gathering it is optional and answering is mandatory. */
-task_type_t agent_task_type_for_role(const char *role, const char *prompt)
+task_type_t agent_task_type_for_role(const char *role)
 {
-   /* A caller that declares its role has told us the task; classifying the
-    * prose as well can only disagree with it. It did: the roundtable panel
-    * prompt says "must fail closed" and "must be fixed", and the keyword table
-    * is scanned in its own order with bug-fix terms ahead of "review", so every
-    * review classified as a bug fix and was handed execution-agent
-    * instructions. */
-   if (role && role[0] && strcmp(role, "review") == 0)
-      return TASK_TYPE_REVIEW;
-   return task_type_classify(prompt);
+   int shape = delegate_role_task_shape(role);
+   if (shape < 0 || shape >= TASK_TYPE_COUNT)
+      return TASK_TYPE_GENERAL;
+   return (task_type_t)shape;
 }
 
 const char *agent_exec_instructions(task_type_t task_type)
@@ -1565,7 +1552,7 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
                                         const char *role, const char *custom_prompt,
                                         int skip_kb_context)
 {
-   task_type_t task_type = agent_task_type_for_role(role, custom_prompt);
+   task_type_t task_type = agent_task_type_for_role(role);
    if (task_type != TASK_TYPE_GENERAL)
       aimee_log(LOG_DEBUG, "agent_context", "context assembly: task_type=%s",
                 task_type_name(task_type));

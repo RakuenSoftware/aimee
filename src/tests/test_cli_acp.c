@@ -7,6 +7,7 @@
 
 #include "cli_acp.h"
 #include "provider_cli_adapter.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* Minimal stubs needed for provider_cli_adapter_get without the full agent stack */
 int agent_execute_with_tools(const agent_t *a, const agent_network_t *n, const char *sys,
@@ -201,7 +202,7 @@ static void test_turn_ignores_noise(void)
 
 static char *make_workdir(char *dir, size_t sz)
 {
-   snprintf(dir, sz, "/tmp/acp_serve_XXXXXX");
+   snprintf(dir, sz, "%s/acp_serve_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(dir);
    assert(d != NULL);
    return d;

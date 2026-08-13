@@ -17,6 +17,7 @@
 #include <aimee/audit/obs_bus.h> /* obs_bus_*, guardrail_event_t, db1_guardrail_event_* */
 #include "db1/db1.h"
 #include "server/obs_bus_adapter.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define N 2000
 
@@ -24,7 +25,8 @@ int main(void)
 {
    printf("test_bus_guardrail_durability:\n");
 
-   char home[] = "/tmp/aimee-busgr-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-busgr-XXXXXX", platform_tmpdir());
    if (!mkdtemp(home))
    {
       fprintf(stderr, "FAIL: tmp home\n");

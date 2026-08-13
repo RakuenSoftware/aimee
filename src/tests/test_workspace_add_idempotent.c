@@ -28,12 +28,13 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char g_home[256];
 
 static void set_home(void)
 {
-   snprintf(g_home, sizeof(g_home), "/tmp/aimee-wsidem-XXXXXX");
+   snprintf(g_home, sizeof(g_home), "%s/aimee-wsidem-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_home) != NULL);
    setenv("AIMEE_HOME", g_home, 1);
    setenv("HOME", g_home, 1);

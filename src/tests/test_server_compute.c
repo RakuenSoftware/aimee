@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include "aimee.h"
 #include <aimee/delegates/module_api.h>
+#include "delegate_permissions_stub.h"
 
 /* When set, the launch-plan stub near the bottom of this file refuses with this
  * wording and returns no rows. It is how the refusal test provokes a refusal
@@ -392,6 +393,22 @@ char *role_template_build(const char *project_root, const char *role, const char
    (void)task;
    (void)context;
    return NULL;
+}
+
+/* The role definition an operator wrote, if these fixtures set one. NULL is the
+ * usual case: no operator wrote a role, so every role is the one that ships.
+ *
+ * What a definition MEANS is proved where it is read (the parse, in
+ * server-go/modules/delegates/roledefinition_test.go) and where it is loaded
+ * (the handover, in unit-test-role-templates). What is proved HERE is that it
+ * reaches the delegate and changes what the delegate is given. */
+static const char *g_role_definition;
+
+char *role_template_frontmatter(const char *project_root, const char *role)
+{
+   (void)project_root;
+   (void)role;
+   return g_role_definition ? strdup(g_role_definition) : NULL;
 }
 
 void agent_http_init(void)
@@ -2070,7 +2087,15 @@ static void test_direct_delegate_handoff_json_response(void)
                       "\"summary\":\"server handoff ok\""
                       "}";
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "role", "code");
+   /* `execute`, not `code`: these cases are about the handoff contract and the
+    * turn loop, and any role that runs will show them. A `code` delegate holds
+    * repo_write, and a write-capable delegate refuses a workspace that has no
+    * checkout -- which is what this harness provides -- so it would never reach
+    * the thing under test. `execute` also keeps the prompt small: the roles that
+    * ask for parent-diff evidence arrive carrying the whole parent diff, which
+    * pushes the contract past the prompt cap. The write path has its own cases
+    * below. */
+   cJSON_AddStringToObject(req, "role", "execute");
    cJSON_AddStringToObject(req, "persona", "engineer");
    cJSON_AddStringToObject(req, "prompt", "run the direct delegate handoff json test prompt");
    cJSON_AddTrueToObject(req, "handoff_json");
@@ -2120,7 +2145,7 @@ static void test_direct_delegate_handoff_repair_attempt(void)
        "\"summary\":\"repair handoff ok\""
        "}";
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "role", "code");
+   cJSON_AddStringToObject(req, "role", "execute");
    cJSON_AddStringToObject(req, "persona", "engineer");
    cJSON_AddStringToObject(req, "prompt", "run the delegate malformed handoff repair test prompt");
    cJSON_AddTrueToObject(req, "handoff_json");
@@ -2163,7 +2188,7 @@ static void test_direct_delegate_handoff_repair_failure_is_error(void)
    g_agent_response = "not json";
    g_agent_repair_response = "still not json";
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "role", "code");
+   cJSON_AddStringToObject(req, "role", "execute");
    cJSON_AddStringToObject(req, "persona", "engineer");
    cJSON_AddStringToObject(req, "prompt", "run the delegate failed handoff repair test prompt");
    cJSON_AddTrueToObject(req, "handoff_json");
@@ -2330,7 +2355,7 @@ static void test_direct_delegate_tool_loop_cap_is_request_wide(void)
    g_last_request_tool_loop_deadline = -999;
    g_last_agent_tool_loop_cap = -999;
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "role", "code");
+   cJSON_AddStringToObject(req, "role", "execute");
    cJSON_AddStringToObject(req, "persona", "engineer");
    cJSON_AddStringToObject(req, "prompt", "run the request-wide timeout cap test");
    cJSON_AddTrueToObject(req, "tools");
@@ -2416,7 +2441,7 @@ static void test_direct_delegate_one_turn_diagnose_suppresses_default_tools(void
    conn->fd = fds[1];
    g_agent_response = "diagnose completed without implicit tools";
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "role", "diagnose");
+   cJSON_AddStringToObject(req, "role", "execute");
    cJSON_AddStringToObject(req, "persona", "engineer");
    cJSON_AddStringToObject(req, "prompt", "run the one turn diagnose final answer smoke test");
    cJSON_AddNumberToObject(req, "max_turns", 1);
@@ -2437,86 +2462,113 @@ static void test_direct_delegate_one_turn_diagnose_suppresses_default_tools(void
    free(ctx);
 }
 
-static void test_readonly_code_delegate_disables_write_enforce(void)
+/* A role an operator defined WITHOUT tools does not get them, even though the
+ * role it is named after ships with them.
+ *
+ * This is the case the permission has to be resolved early for. The tool default
+ * is decided when the request is handled and the mount is decided later; while
+ * those were answered from different places, the early one could only see the
+ * built-in table, so `code` was handed tools here and refused at dispatch. Both
+ * now read the set resolved once when the role was validated.
+ *
+ * The recorded answer for this definition lives in delegate_permissions_stub.c;
+ * nothing here decides what the block means. */
+static void test_a_defined_role_without_tools_is_not_given_them(void)
 {
    reset_last_response();
+   g_role_definition = "permissions:\n  - knowledge_write\n";
+   g_agent_run_calls = g_agent_tool_run_calls = 0;
+
    int fds[2];
    assert(pipe(fds) == 0);
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
    server_conn_t *conn = calloc(1, sizeof(*conn));
    assert(ctx != NULL && conn != NULL);
    conn->fd = fds[1];
-   g_agent_response = "readonly inspection complete";
+   g_agent_response = "defined role ran";
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "role", "code");
    cJSON_AddStringToObject(req, "persona", "engineer");
-   cJSON_AddStringToObject(req, "prompt",
-                           "Read-only inspection only. Do not edit files or make changes.");
-   cJSON_AddTrueToObject(req, "tools");
+   cJSON_AddStringToObject(req, "prompt", "run the defined role tools test prompt");
    assert(handle_delegate(ctx, conn, req) == 0);
-   assert(g_submitted_fn == delegate_worker);
-   assert(g_submitted_arg != NULL);
+   assert(g_submitted_fn == delegate_worker && g_submitted_arg != NULL);
    g_submitted_fn(g_submitted_arg);
    g_submitted_arg = NULL;
    close(fds[1]);
    char buf[2048];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
-   buf[n] = '\0';
+   assert(n >= 0);
    close(fds[0]);
-   /* (WP-B) async-only: read the persisted job, not the connection. */
-   db1_agent_job_t job;
-   assert(delegate_current_job(&job) == 0);
-   assert(strcmp(job.status, "done") == 0);
-   db1_agent_job_free(&job);
-   assert(g_agent_tool_run_calls == 1);
-   assert(g_last_write_enforce == 0);
+
+   /* The harness tells the two apart by which entry point ran: a delegate given
+      tools goes through agent_run_with_tools, one without through agent_run. */
+   assert(g_agent_tool_run_calls == 0);
+   assert(g_agent_run_calls == 1);
+
+   g_role_definition = NULL;
    cJSON_Delete(req);
    reset_last_response();
    free(conn);
    free(ctx);
-   printf("  PASS: test_readonly_code_delegate_disables_write_enforce\n");
+   printf("  PASS: test_a_defined_role_without_tools_is_not_given_them\n");
 }
-static void test_readonly_refactor_delegate_disables_write_enforce(void)
+
+/* A scoped `repo_write` only covers what it lists.
+ *
+ * The delegate below names no workspace at all, so nothing shows its target is
+ * in scope and it runs read-only. It RUNS, which is the assertion: a
+ * write-capable delegate cannot get through this harness, so reaching "done" is
+ * how read-only shows up here.
+ *
+ * The object matched is the repository the CALLER named, because that is what an
+ * operator means by a path in `scopes:` and the only thing that exists when the
+ * decision is made. The recorded answer lives in delegate_permissions_stub.c. */
+static void test_a_scoped_repo_write_does_not_cover_an_unnamed_workspace(void)
 {
    reset_last_response();
+   g_role_definition = "permissions:\n  - name: repo_write\n    scopes: [/srv/repo-a]\n";
+   g_agent_run_calls = g_agent_tool_run_calls = 0;
+
    int fds[2];
    assert(pipe(fds) == 0);
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
    server_conn_t *conn = calloc(1, sizeof(*conn));
    assert(ctx != NULL && conn != NULL);
    conn->fd = fds[1];
-   g_agent_response = "readonly refactor inspection complete";
+   g_agent_response = "scoped role ran";
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "role", "refactor");
+   cJSON_AddStringToObject(req, "role", "code");
    cJSON_AddStringToObject(req, "persona", "engineer");
-   cJSON_AddStringToObject(req, "prompt",
-                           "Ownership: inspect only for now. Identify the safest split.");
-   cJSON_AddTrueToObject(req, "tools");
+   cJSON_AddStringToObject(req, "prompt", "run the scoped repo_write test prompt");
+   /* No cwd, which is the other half of the rule: with a scoped grant and
+      nothing naming the target, there is no way to show it is in scope, so the
+      delegate is read-only. "Probably fine" is not a permission. */
    assert(handle_delegate(ctx, conn, req) == 0);
-   assert(g_submitted_fn == delegate_worker);
-   assert(g_submitted_arg != NULL);
+   assert(g_submitted_fn == delegate_worker && g_submitted_arg != NULL);
    g_submitted_fn(g_submitted_arg);
    g_submitted_arg = NULL;
    close(fds[1]);
    char buf[2048];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
-   buf[n] = '\0';
+   assert(n >= 0);
    close(fds[0]);
-   /* (WP-B) async-only: read the persisted job, not the connection. */
+
    db1_agent_job_t job;
    assert(delegate_current_job(&job) == 0);
+   /* It RAN. A write-capable delegate in this harness cannot: it refuses a
+      workspace with no checkout. Read-only is the whole assertion. */
    assert(strcmp(job.status, "done") == 0);
    db1_agent_job_free(&job);
-   assert(g_agent_tool_run_calls == 1);
-   assert(g_last_write_enforce == 0);
+
+   g_role_definition = NULL;
+   run_cmd_set_cwd(NULL);
    cJSON_Delete(req);
    reset_last_response();
    free(conn);
    free(ctx);
-   printf("  PASS: test_readonly_refactor_delegate_disables_write_enforce\n");
+   printf("  PASS: test_a_scoped_repo_write_does_not_cover_an_unnamed_workspace\n");
 }
+
 static void test_direct_delegate_max_turns_override(void)
 {
    reset_last_response();
@@ -2529,7 +2581,7 @@ static void test_direct_delegate_max_turns_override(void)
    g_agent_response = "delegate max turns override ok";
    g_last_agent_max_turns = -999;
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "role", "code");
+   cJSON_AddStringToObject(req, "role", "execute");
    cJSON_AddStringToObject(req, "persona", "engineer");
    cJSON_AddStringToObject(req, "prompt", "run the direct delegate max turns override test");
    cJSON_AddNumberToObject(req, "max_turns", 40);
@@ -3661,85 +3713,6 @@ static int compute_test_handoff_provider(const char *text, const char *owned_fil
    return 0;
 }
 
-/* The composed write permission, standing in for the module (stage 15).
- *
- * The ROLE half is the real thing: the role-policy stub these tests already
- * link. The BRIEF half is answered only for the two prompts these fixtures use,
- * because the rule itself is tested against the module and re-implementing it
- * here would be the second copy this migration exists to remove. A prompt this
- * harness has not been told about aborts rather than guessing, so adding a
- * fixture cannot silently get a wrong answer from a stale stand-in. */
-/* Every prompt this file sends, and whether the module says it asks for writes.
- *
- * A C test cannot call the Go module, so rather than restate its rule -- the
- * second copy this migration exists to remove -- the harness carries the
- * module's ANSWERS. The table was generated by feeding each prompt below to
- * delegates.PromptAllowsWrites and recording what came back.
- *
- * An unlisted prompt aborts. That is the point: a new fixture cannot quietly
- * receive a guessed answer, and whoever adds one has to ask the module. */
-static const struct
-{
-   const char *prompt;
-   int asks_for_writes;
-} k_prompt_write_answers[] = {
-    {"BEGIN_ARTIFACT_DATA (plan)\nPLAN_TARGET_MARKER\nEND_ARTIFACT_DATA", 0},
-    {"Ownership: inspect only for now. Identify the safest split.", 0},
-    {"Read-only inspection only. Do not edit files or make changes.", 0},
-    {"Read-only. Validate the changes in the current diff for correctness.", 0},
-    {"This prompt plus the conservative provider framing cannot fit the sub-token workflow cost "
-     "allowance.",
-     0},
-    {"characterize state restore", 0},
-    {"error-path restore characterization", 0},
-    {"implement the fix: edit native_runner.go and write a clarifying sentence", 1},
-    {"implement the fix: edit util.c and write the guard", 1},
-    {"read-only: review the current diff for correctness and report", 0},
-    {"response shape characterization", 0},
-    {"run a delegate that verifies compute budget release timing", 0},
-    {"run raw tool-call regression", 0},
-    {"run the delegate failed handoff repair test prompt", 0},
-    {"run the delegate malformed handoff repair test prompt", 0},
-    {"run the direct delegate explicit tools policy test prompt", 0},
-    {"run the direct delegate handoff json test prompt", 0},
-    {"run the direct delegate max turns override test", 0},
-    {"run the direct delegate no-tools policy test prompt", 0},
-    {"run the direct delegate review tool policy test prompt", 0},
-    {"run the direct delegate reviewer alias policy test", 0},
-    {"run the one turn diagnose final answer smoke test", 0},
-    {"run the request-wide timeout cap test", 0},
-    {"session-during-run characterization", 0},
-    {"validate the changes in the current diff for correctness and coverage", 0},
-};
-
-static int compute_test_prompt_asks_for_writes(const char *prompt)
-{
-   if (!prompt)
-      return 1; /* The module abstains on an empty brief; the role decides. */
-   for (size_t i = 0; i < sizeof(k_prompt_write_answers) / sizeof(k_prompt_write_answers[0]); i++)
-      if (strcmp(k_prompt_write_answers[i].prompt, prompt) == 0)
-         return k_prompt_write_answers[i].asks_for_writes;
-   fprintf(stderr,
-           "test_server_compute: no recorded module answer for prompt \"%s\".\n"
-           "Ask delegates.PromptAllowsWrites for it and add the row; do not guess.\n",
-           prompt);
-   abort();
-}
-
-static int compute_test_may_write(const char *role, const char *prompt, int *may_write,
-                                  int *by_role, int *by_prompt)
-{
-   int r = delegate_role_is_write(role);
-   int pw = compute_test_prompt_asks_for_writes(prompt);
-   if (by_role)
-      *by_role = r;
-   if (by_prompt)
-      *by_prompt = pw;
-   if (may_write)
-      *may_write = r && pw;
-   return 0;
-}
-
 /* The route filter, as the module answers it.
  *
  * These cases are about compute and dispatch behaviour, not about capability
@@ -3914,7 +3887,7 @@ static int compute_test_launch_plan(const uint8_t *request, size_t request_len, 
 int main(void)
 {
    register_test_workspace_root();
-   delegate_register_may_write_provider(compute_test_may_write);
+   delegate_permissions_stub_install();
    delegate_register_launch_plan_provider(compute_test_launch_plan);
    delegate_register_route_filter_provider(compute_test_route_filter);
    assert(delegate_backend_register(&g_fake_docker) == 0);
@@ -3966,8 +3939,8 @@ int main(void)
    test_direct_delegate_tool_loop_cap_is_request_wide();
    test_direct_delegate_no_tools_forces_no_tools();
    test_direct_delegate_one_turn_diagnose_suppresses_default_tools();
-   test_readonly_code_delegate_disables_write_enforce();
-   test_readonly_refactor_delegate_disables_write_enforce();
+   test_a_defined_role_without_tools_is_not_given_them();
+   test_a_scoped_repo_write_does_not_cover_an_unnamed_workspace();
    test_direct_delegate_max_turns_override();
    test_read_only_delegate_uses_parent_workspace();
    test_provided_review_target_suppresses_worktree_evidence();

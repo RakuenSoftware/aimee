@@ -2,12 +2,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "support/delegate_role_seam_stub.h"
 #include "aimee.h"
 #include "db1.h"
 #include "server.h"
 #include "cJSON.h"
 
-#include <sys/stat.h> /* mkdir */
+#include <sys/stat.h>           /* mkdir */
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 /* agent_job_to_json() serializes default_max_turns = delegate_default_max_turns_for_role
  * (role_template_max_turns), which reads the role_templates dir under
  * config_default_dir() (-1 when absent). The handler tests assert default_max_turns==20
@@ -19,7 +21,7 @@ const char *config_default_dir(void)
 }
 static void setup_role_templates(void)
 {
-   snprintf(g_roles_dir, sizeof(g_roles_dir), "/tmp/aimee-test-jobsaux-XXXXXX");
+   snprintf(g_roles_dir, sizeof(g_roles_dir), "%s/aimee-test-jobsaux-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_roles_dir));
    char sub[512];
    snprintf(sub, sizeof(sub), "%s/role_templates", g_roles_dir);
@@ -114,6 +116,21 @@ static void reset_last_response(void)
    g_last_error[0] = '\0';
 }
 
+/* Fetch a field that MUST be there.
+ *
+ * `must_get(job, "x")->valueint` returns NULL and segfaults when the
+ * field is absent, which is how a wrong answer arrives here as a crash with no
+ * line number rather than an assertion naming the field. It cost an afternoon
+ * once; it should not cost a second. */
+static cJSON *must_get(cJSON *o, const char *field)
+{
+   cJSON *item = cJSON_GetObjectItem(o, field);
+   if (!item)
+      fprintf(stderr, "test_server_jobs_aux: expected field '%s' is absent\n", field);
+   assert(item != NULL);
+   return item;
+}
+
 static void test_jobs_handlers(void)
 {
    server_ctx_t ctx = {0};
@@ -129,10 +146,10 @@ static void test_jobs_handlers(void)
    assert(cJSON_IsArray(jobs));
    assert(cJSON_GetArraySize(jobs) == 1);
    cJSON *job = cJSON_GetArrayItem(jobs, 0);
-   assert(cJSON_GetObjectItem(job, "id")->valueint == list_job_id);
-   assert(strcmp(cJSON_GetObjectItem(job, "status")->valuestring, "running") == 0);
+   assert(must_get(job, "id")->valueint == list_job_id);
+   assert(strcmp(must_get(job, "status")->valuestring, "running") == 0);
    assert(cJSON_GetObjectItem(job, "prompt") == NULL);
-   assert(cJSON_GetObjectItem(job, "default_max_turns")->valueint == 20);
+   assert(must_get(job, "default_max_turns")->valueint == 20);
    assert(cJSON_GetObjectItem(job, "final_after_turns") == NULL);
    cJSON_Delete(req);
    reset_last_response();
@@ -140,12 +157,12 @@ static void test_jobs_handlers(void)
    req = cJSON_CreateObject();
    cJSON_AddNumberToObject(req, "job_id", list_job_id);
    assert(handle_jobs_status(&ctx, &conn, req) == 0);
-   assert(strcmp(cJSON_GetObjectItem(g_last_response, "job_status")->valuestring, "running") == 0);
+   assert(strcmp(must_get(g_last_response, "job_status")->valuestring, "running") == 0);
    job = cJSON_GetObjectItem(g_last_response, "job");
    assert(cJSON_IsObject(job));
-   assert(strcmp(cJSON_GetObjectItem(job, "prompt")->valuestring, "list this job") == 0);
-   assert(strcmp(cJSON_GetObjectItem(job, "result")->valuestring, "progress") == 0);
-   assert(cJSON_GetObjectItem(job, "default_max_turns")->valueint == 20);
+   assert(strcmp(must_get(job, "prompt")->valuestring, "list this job") == 0);
+   assert(strcmp(must_get(job, "result")->valuestring, "progress") == 0);
+   assert(must_get(job, "default_max_turns")->valueint == 20);
    assert(cJSON_GetObjectItem(job, "final_after_turns") == NULL);
    cJSON_Delete(req);
    reset_last_response();
@@ -153,19 +170,18 @@ static void test_jobs_handlers(void)
    req = cJSON_CreateObject();
    cJSON_AddNumberToObject(req, "job_id", list_job_id);
    assert(handle_jobs_logs(&ctx, &conn, req) == 0);
-   assert(strcmp(cJSON_GetObjectItem(g_last_response, "job_status")->valuestring, "running") == 0);
-   assert(strcmp(cJSON_GetObjectItem(g_last_response, "log")->valuestring, "progress") == 0);
+   assert(strcmp(must_get(g_last_response, "job_status")->valuestring, "running") == 0);
+   assert(strcmp(must_get(g_last_response, "log")->valuestring, "progress") == 0);
    job = cJSON_GetObjectItem(g_last_response, "job");
    assert(cJSON_IsObject(job));
-   assert(strcmp(cJSON_GetObjectItem(job, "result")->valuestring, "progress") == 0);
+   assert(strcmp(must_get(job, "result")->valuestring, "progress") == 0);
    cJSON_Delete(req);
    reset_last_response();
 
    req = cJSON_CreateObject();
    cJSON_AddNumberToObject(req, "job_id", 999999);
    assert(handle_jobs_logs(&ctx, &conn, req) == 0);
-   assert(strcmp(cJSON_GetObjectItem(g_last_response, "job_status")->valuestring, "not_found") ==
-          0);
+   assert(strcmp(must_get(g_last_response, "job_status")->valuestring, "not_found") == 0);
    assert(cJSON_GetObjectItem(g_last_response, "job") == NULL);
    assert(cJSON_GetObjectItem(g_last_response, "log") == NULL);
    cJSON_Delete(req);
@@ -197,8 +213,8 @@ static void test_jobs_handlers(void)
    cJSON_AddNumberToObject(req, "job_id", 999999);
    assert(handle_jobs_cancel(&ctx, &conn, req) == 0);
    assert(cJSON_IsFalse(cJSON_GetObjectItem(g_last_response, "cancelled")));
-   assert(cJSON_GetObjectItem(g_last_response, "changed")->valueint == 0);
-   assert(strcmp(cJSON_GetObjectItem(g_last_response, "message")->valuestring,
+   assert(must_get(g_last_response, "changed")->valueint == 0);
+   assert(strcmp(must_get(g_last_response, "message")->valuestring,
                  "No pending or running job found.") == 0);
    cJSON_Delete(req);
    reset_last_response();
@@ -243,10 +259,10 @@ static void test_coord_job_handlers(void)
    cJSON_AddNumberToObject(req, "plan_id", plan_id);
    cJSON_AddNumberToObject(req, "parallel", 2);
    assert(handle_coord_job_start(&ctx, &conn, req) == 0);
-   int job_id = cJSON_GetObjectItem(g_last_response, "job_id")->valueint;
+   int job_id = must_get(g_last_response, "job_id")->valueint;
    assert(job_id > 0);
-   assert(cJSON_GetObjectItem(g_last_response, "tasks")->valueint == 2);
-   assert(cJSON_GetObjectItem(g_last_response, "max_concurrent")->valueint == 2);
+   assert(must_get(g_last_response, "tasks")->valueint == 2);
+   assert(must_get(g_last_response, "max_concurrent")->valueint == 2);
    cJSON_Delete(req);
    reset_last_response();
 
@@ -257,18 +273,18 @@ static void test_coord_job_handlers(void)
    assert(cJSON_IsArray(jobs));
    assert(cJSON_GetArraySize(jobs) == 1);
    cJSON *job = cJSON_GetArrayItem(jobs, 0);
-   assert(cJSON_GetObjectItem(job, "id")->valueint == job_id);
-   assert(cJSON_GetObjectItem(job, "plan_id")->valueint == plan_id);
+   assert(must_get(job, "id")->valueint == job_id);
+   assert(must_get(job, "plan_id")->valueint == plan_id);
    cJSON_Delete(req);
    reset_last_response();
 
    req = cJSON_CreateObject();
    cJSON_AddNumberToObject(req, "job_id", job_id);
    assert(handle_coord_job_status(&ctx, &conn, req) == 0);
-   assert(strcmp(cJSON_GetObjectItem(g_last_response, "job_status")->valuestring, "pending") == 0);
+   assert(strcmp(must_get(g_last_response, "job_status")->valuestring, "pending") == 0);
    job = cJSON_GetObjectItem(g_last_response, "job");
    assert(cJSON_IsObject(job));
-   assert(cJSON_GetObjectItem(job, "total")->valueint == 2);
+   assert(must_get(job, "total")->valueint == 2);
    cJSON *tasks = cJSON_GetObjectItem(g_last_response, "tasks");
    assert(cJSON_IsArray(tasks));
    assert(cJSON_GetArraySize(tasks) == 2);
@@ -297,7 +313,7 @@ static void test_aux_handlers(void)
    cJSON *aux = cJSON_GetObjectItem(g_last_response, "auxiliary");
    assert(cJSON_IsObject(aux));
    assert(cJSON_IsTrue(cJSON_GetObjectItem(aux, "enabled")));
-   assert(strcmp(cJSON_GetObjectItem(aux, "default_provider")->valuestring, "local") == 0);
+   assert(strcmp(must_get(aux, "default_provider")->valuestring, "local") == 0);
    cJSON *tasks = cJSON_GetObjectItem(aux, "tasks");
    assert(cJSON_IsArray(tasks));
    assert(cJSON_GetArraySize(tasks) == 1);
@@ -309,7 +325,7 @@ static void test_aux_handlers(void)
    cJSON_AddStringToObject(req, "prompt", "summarize this");
    cJSON_AddNumberToObject(req, "max_tokens", 32);
    assert(handle_aux_test(&ctx, &conn, req) == 0);
-   assert(strcmp(cJSON_GetObjectItem(g_last_response, "response")->valuestring, "aux ok") == 0);
+   assert(strcmp(must_get(g_last_response, "response")->valuestring, "aux ok") == 0);
    cJSON_Delete(req);
    reset_last_response();
 
@@ -318,6 +334,7 @@ static void test_aux_handlers(void)
 
 int main(void)
 {
+   delegate_role_seam_install();
    setup_role_templates();
    assert(db1_init(":memory:") == 0);
    printf("test_server_jobs_aux\n");

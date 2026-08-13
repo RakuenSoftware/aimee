@@ -2091,6 +2091,22 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       }
    }
 
+   /* The `shell` permission, enforced where the command would run.
+    *
+    * Deliberately ahead of the toolset check and independent of it: a delegate
+    * gets its toolset from a map keyed on the role NAME, so a role an operator
+    * defined without `shell` still resolves to one carrying bash. This is the
+    * check that binds it. */
+   if ((strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0) &&
+       !agent_tools_shell_allowed())
+   {
+      cJSON_Delete(args);
+      td_outcome_set("refused", "permission");
+      return safe_strdup("error: this delegate does not hold the `shell` permission, so it "
+                         "cannot run commands. Use the file and index tools, or give the role "
+                         "`shell` in its template's permissions block.");
+   }
+
    const char *active_role = agent_tools_dispatch_role();
    if (!agent_tools_tool_allowed_for_role(active_role, name))
    {
@@ -2100,7 +2116,7 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
           active_role, "indexed, memory, docs, notes, and remote MCP tools are "
                        "disabled for this role");
    }
-   if (agent_tools_role_current_code_only(active_role))
+   if (!agent_tools_knowledge_write_allowed())
    {
       const char *command = NULL;
       if (strcmp(name, "bash") == 0)

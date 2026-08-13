@@ -19,8 +19,8 @@ const (
 	noopWriteResponseMagic uint32 = 0x53574e44 /* "DNWS" */
 	noopWriteReqLen               = 16
 
-	noopFlagIsWriteRole   uint32 = 1 << 0
-	noopFlagAllowsWrites  uint32 = 1 << 1
+	// Bit 0 was IsWriteRole, which said the same thing as this one.
+	noopFlagWritesAllowed uint32 = 1 << 1
 	noopFlagHandoffJSON   uint32 = 1 << 2
 	noopFlagSucceeded     uint32 = 1 << 3
 	noopFlagAnyNamed      uint32 = 1 << 4
@@ -29,7 +29,7 @@ const (
 	noopFlagHeadSnapshot  uint32 = 1 << 7
 	noopFlagHasWorktree   uint32 = 1 << 8
 
-	noopFlagsKnown = noopFlagIsWriteRole | noopFlagAllowsWrites | noopFlagHandoffJSON |
+	noopFlagsKnown = noopFlagWritesAllowed | noopFlagHandoffJSON |
 		noopFlagSucceeded | noopFlagAnyNamed | noopFlagWorktreeDirty | noopFlagHeadAdvanced |
 		noopFlagHeadSnapshot | noopFlagHasWorktree
 )
@@ -56,8 +56,7 @@ func handleNoopWrite(invocation bus.ModuleInvocation, request []byte) ([]byte, b
 	}
 
 	verdict := JudgeNoopWrite(NoopWriteEvidence{
-		IsWriteRole:       flags&noopFlagIsWriteRole != 0,
-		AllowsWrites:      flags&noopFlagAllowsWrites != 0,
+		WritesAllowed:     flags&noopFlagWritesAllowed != 0,
 		HandoffJSON:       flags&noopFlagHandoffJSON != 0,
 		Succeeded:         flags&noopFlagSucceeded != 0,
 		NamedPathCount:    namedCount,

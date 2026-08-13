@@ -31,9 +31,13 @@ static const char *const MCP_CORE_TOOLS[] = {
     "search_memory",
     "memory_recall",
     "get_identity", /* grounding */
+    /* ast_grep_search is additionally withheld at RUNTIME when no ast-grep
+     * binary resolves (server_mcp_surface.c) -- that part stayed, because a tool
+     * that cannot run is different from a tool with a cheaper alternative. */
     AIMEE_CODE_TOOL_FIND_SYMBOL,
     AIMEE_CODE_TOOL_AST_GREP_SEARCH,
-    AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS, /* direct adoption-critical code intel */
+    AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS,
+    AIMEE_CODE_TOOL_INDEX,
     /* SAME REASONING AS delegate_status BELOW, AND THE SAME MEASUREMENT.
      *
      * `index` multiplexes the retrieval an agent needs when the question is not a
@@ -48,7 +52,24 @@ static const char *const MCP_CORE_TOOLS[] = {
      * 1 MB truncation. index_hybrid answers that class of question with a capped,
      * ranked result set and was reachable the whole time -- just never in one
      * call. A tool the agent cannot afford to reach is a tool it does not have. */
-    AIMEE_CODE_TOOL_INDEX,
+    /* RE-TESTED 2026-08-12 WITH THE COMMAND FORMS IN PLACE, AND THE OLD
+     * MEASUREMENT HELD. The argument for removing these four was that the
+     * fallback had changed: each is now an `aimee ...` command the standing
+     * guidance names, and a command chains where a tool call cannot. That
+     * argument was wrong about what the agent actually does.
+     *
+     * Trimmed vs untrimmed, same task, n=3 each, healthy box:
+     *   CLI invocations   2.3 -> 1.3 per cell   (DOWN, not up)
+     *   MCP calls         4.3 -> 6.3
+     *   shell commands    9.3 -> 11
+     *   searches            3 -> 4.3   (4.2 KB -> 6.1 KB of output)
+     *   credits         15.52 -> 19.15 mean     (+23%)
+     *
+     * The MCP calls it did make were find_tools x4, describe_tool x2,
+     * call_tool x1 -- the discovery detour the comment above describes, paid in
+     * full. Naming a command in guidance does not make the agent prefer it over
+     * a schema that is present in every request; removing the schema just sends
+     * it to discovery and to grep, exactly as before. */
     "git", /* all git/gh ops via one multiplexed tool (command=...) */
     "delegate",
     /* SAME REASONING AS `index` ABOVE, AND THE SAME MEASUREMENT.

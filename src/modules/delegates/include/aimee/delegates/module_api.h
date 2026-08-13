@@ -496,11 +496,16 @@ static inline size_t aimee_delegates_patch_put_task(int id, int step_id, const c
 #define AIMEE_DELEGATES_ROLEPOL_REQUEST_MAGIC  0x514c5244u /* "DRLQ" */
 #define AIMEE_DELEGATES_ROLEPOL_RESPONSE_MAGIC 0x534c5244u /* "DRLS" */
 #define AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN    (16u + AIMEE_DELEGATES_ROLE_MAX + 1u)
-#define AIMEE_DELEGATES_ROLEPOL_RESPONSE_LEN   24u
+#define AIMEE_DELEGATES_ROLEPOL_RESPONSE_LEN   32u
 
+/* `holds_tools` is the delegate's resolved `tools` permission, and only the
+ * auto-tools answer reads it. It is passed rather than looked up from the role
+ * because a role an operator DEFINED is visible only in the resolved set: asking
+ * about the role inside the module would answer from the built-in table and hand
+ * tools to a role that was defined without them. */
 static inline int aimee_delegates_rolepol_request_encode(const char *role, int max_turns,
-                                                         int explicit_tools, uint8_t *out,
-                                                         size_t cap)
+                                                         int explicit_tools, int holds_tools,
+                                                         uint8_t *out, size_t cap)
 {
    size_t len = role ? strlen(role) : 0;
    if (!out || cap < AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN || len > AIMEE_DELEGATES_ROLE_MAX)
@@ -509,6 +514,7 @@ static inline int aimee_delegates_rolepol_request_encode(const char *role, int m
    aimee_delegates_put_u32(out, AIMEE_DELEGATES_ROLEPOL_REQUEST_MAGIC);
    out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
    out[5] = explicit_tools ? 1u : 0u;
+   out[6] = holds_tools ? 1u : 0u;
    aimee_delegates_put_u32(out + 8, (uint32_t)max_turns);
    aimee_delegates_put_u32(out + 12, (uint32_t)len);
    if (len)
@@ -1007,8 +1013,8 @@ static inline int aimee_delegates_routefilter_response_decode(const uint8_t *in,
 #define AIMEE_DELEGATES_NOOPWRITE_RESPONSE_MAGIC 0x53574e44u /* "DNWS" */
 #define AIMEE_DELEGATES_NOOPWRITE_REQUEST_LEN    16u
 
-#define AIMEE_DELEGATES_NOOP_IS_WRITE_ROLE  (1u << 0)
-#define AIMEE_DELEGATES_NOOP_ALLOWS_WRITES  (1u << 1)
+/* Bit 0 was IS_WRITE_ROLE, which said the same thing as WRITES_ALLOWED. */
+#define AIMEE_DELEGATES_NOOP_WRITES_ALLOWED (1u << 1)
 #define AIMEE_DELEGATES_NOOP_HANDOFF_JSON   (1u << 2)
 #define AIMEE_DELEGATES_NOOP_SUCCEEDED      (1u << 3)
 #define AIMEE_DELEGATES_NOOP_ANY_NAMED      (1u << 4)
@@ -1197,6 +1203,232 @@ static inline int aimee_delegates_launchplan_response_begin(aimee_delegates_rd_t
    if (max_concurrent)
       *max_concurrent = (int)par;
    return r->bad ? -1 : 0;
+}
+
+/* --- Review evidence (stage 20): did a review look at what it reviewed?
+ *
+ * The caller supplies the two facts the module cannot compute -- whether the
+ * review target arrived IN the prompt, and whether the worktree is dirty -- and
+ * gets back what to check and what is already wrong.
+ *
+ * The citation-vs-checkout comparison stays with the caller because it reads
+ * the checkout. What the module decides is which roles warrant it. */
+
+#define AIMEE_DELEGATES_EVENT_REVIEWEV          6676u
+#define AIMEE_DELEGATES_STAGE_REVIEWEV          20u
+#define AIMEE_DELEGATES_REVIEWEV_REQUEST_MAGIC  0x51455244u /* "DREQ" */
+#define AIMEE_DELEGATES_REVIEWEV_RESPONSE_MAGIC 0x53455244u /* "DRES" */
+#define AIMEE_DELEGATES_REVIEWEV_HEADER_LEN     16u
+
+#define AIMEE_DELEGATES_REVIEW_TARGET_PROVIDED (1u << 0)
+#define AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY  (1u << 1)
+
+#define AIMEE_DELEGATES_REVIEW_GUARDED        (1u << 0)
+#define AIMEE_DELEGATES_REVIEW_CHECK_SNIPPETS (1u << 1)
+#define AIMEE_DELEGATES_REVIEW_CONTRADICTION  (1u << 2)
+
+#define AIMEE_DELEGATES_REVIEW_ROLE_MAX 64u
+
+/* Returns the encoded length, or -1 when the buffer is too small (in which case
+ * nothing is written -- a truncated response would be judged on a partial
+ * report, which is exactly the failure this stage exists to catch). */
+static inline int aimee_delegates_reviewev_request_encode(const char *role, const char *response,
+                                                          unsigned flags, uint8_t *out, size_t cap)
+{
+   size_t role_len = role ? strlen(role) : 0;
+   size_t response_len = response ? strlen(response) : 0;
+   if (!out || role_len > AIMEE_DELEGATES_REVIEW_ROLE_MAX)
+      return -1;
+   size_t need = AIMEE_DELEGATES_REVIEWEV_HEADER_LEN + role_len + response_len;
+   if (need > cap)
+      return -1;
+
+   memset(out, 0, AIMEE_DELEGATES_REVIEWEV_HEADER_LEN);
+   aimee_delegates_put_u32(out, AIMEE_DELEGATES_REVIEWEV_REQUEST_MAGIC);
+   out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
+   aimee_delegates_put_u32(out + 8, flags);
+   aimee_delegates_put_u32(out + 12, (uint32_t)role_len);
+   if (role_len)
+      memcpy(out + AIMEE_DELEGATES_REVIEWEV_HEADER_LEN, role, role_len);
+   if (response_len)
+      memcpy(out + AIMEE_DELEGATES_REVIEWEV_HEADER_LEN + role_len, response, response_len);
+   return (int)need;
+}
+
+/* `message` receives the contradiction wording, NUL-terminated and empty when
+ * there is none. */
+static inline int aimee_delegates_reviewev_response_decode(const uint8_t *in, size_t len,
+                                                           unsigned *verdict, char *message,
+                                                           size_t message_cap)
+{
+   if (!in || len < 8 || !verdict ||
+       aimee_delegates_get_u32(in) != AIMEE_DELEGATES_REVIEWEV_RESPONSE_MAGIC)
+      return -1;
+   *verdict = aimee_delegates_get_u32(in + 4);
+   if (message && message_cap)
+   {
+      size_t n = len - 8;
+      if (n >= message_cap)
+         n = message_cap - 1;
+      memcpy(message, in + 8, n);
+      message[n] = '\0';
+   }
+   return 0;
+}
+
+/* --- Named-file drift (stage 21): did the delegate touch the files its brief
+ * named?
+ *
+ * Length-prefixed, like the launch-plan stage: prose plus a variable number of
+ * paths. Build a request with _begin, then one _path per named file.
+ *
+ * The caller supplies, per path, only facts: does it exist, does `git diff`
+ * mention it, and which files the code index returned for its basename stem.
+ * An EMPTY hit list is meaningful -- it says the index was unreachable or the
+ * stem is unindexed, which is not the same as the index saying the path is not
+ * ours -- so send it empty rather than skipping the path. */
+
+#define AIMEE_DELEGATES_EVENT_DRIFT          6677u
+#define AIMEE_DELEGATES_STAGE_DRIFT          21u
+#define AIMEE_DELEGATES_DRIFT_REQUEST_MAGIC  0x51465244u /* "DRFQ" */
+#define AIMEE_DELEGATES_DRIFT_RESPONSE_MAGIC 0x53465244u /* "DRFS" */
+
+#define AIMEE_DELEGATES_DRIFT_WRITES_ALLOWED (1u << 0)
+
+#define AIMEE_DELEGATES_DRIFT_PATH_EXISTS  (1u << 0)
+#define AIMEE_DELEGATES_DRIFT_PATH_IN_DIFF (1u << 1)
+
+/* Severities, matching the module's DriftSeverity. */
+#define AIMEE_DELEGATES_DRIFT_NONE 0u
+#define AIMEE_DELEGATES_DRIFT_SOFT 1u
+#define AIMEE_DELEGATES_DRIFT_HARD 2u
+
+static inline void aimee_delegates_drift_request_begin(aimee_delegates_wire_t *w, uint8_t *buf,
+                                                       size_t cap, unsigned flags,
+                                                       const char *prompt, const char *response,
+                                                       const char *worktree_path)
+{
+   aimee_delegates_wire_init(w, buf, cap);
+   aimee_delegates_wire_u32(w, AIMEE_DELEGATES_DRIFT_REQUEST_MAGIC);
+   aimee_delegates_wire_u32(w, (uint32_t)AIMEE_DELEGATES_WIRE_VERSION);
+   aimee_delegates_wire_u32(w, flags);
+   aimee_delegates_wire_str(w, prompt);
+   aimee_delegates_wire_str(w, response);
+   aimee_delegates_wire_str(w, worktree_path);
+}
+
+/* Append one named path. `hits` may be NULL when hit_count is 0. */
+static inline void aimee_delegates_drift_request_path(aimee_delegates_wire_t *w, const char *path,
+                                                      unsigned path_flags,
+                                                      const char *const *hits, int hit_count)
+{
+   aimee_delegates_wire_str(w, path);
+   aimee_delegates_wire_u32(w, path_flags);
+   aimee_delegates_wire_u32(w, (uint32_t)(hit_count > 0 ? hit_count : 0));
+   for (int i = 0; i < hit_count; i++)
+      aimee_delegates_wire_str(w, hits[i]);
+}
+
+static inline int aimee_delegates_drift_response_decode(const uint8_t *in, size_t len,
+                                                        unsigned *severity, char *message,
+                                                        size_t message_cap)
+{
+   aimee_delegates_rd_t r;
+   r.buf = in;
+   r.len = len;
+   r.at = 0;
+   r.bad = 0;
+   if (!in || !severity ||
+       aimee_delegates_rd_u32(&r) != AIMEE_DELEGATES_DRIFT_RESPONSE_MAGIC)
+      return -1;
+   *severity = aimee_delegates_rd_u32(&r);
+   aimee_delegates_rd_str(&r, message, message_cap);
+   return r.bad ? -1 : 0;
+}
+
+/* --- Delegate permissions (stage 15): what a delegate may do.
+ *
+ * Resolved ONCE, when the delegate is created, and carried for the life of the
+ * run. Nothing downstream works the answer out again: the mount reads it, the
+ * tool allowlist reads it, the API reads it. A permission derived twice can
+ * disagree with itself, which this codebase has done twice.
+ *
+ * The caller sends the role, and the role definition when an operator wrote one.
+ * What comes back is the resolved set: each permission, where it is enforced,
+ * what it is scoped to, and the list of permissions nothing is enforcing.
+ *
+ * See docs/DELEGATE_ROLE_PERMISSIONS.md. */
+
+#define AIMEE_DELEGATES_EVENT_PERMS          6671u
+#define AIMEE_DELEGATES_STAGE_PERMS          15u
+#define AIMEE_DELEGATES_PERMS_REQUEST_MAGIC  0x51524550u /* "PERQ" */
+#define AIMEE_DELEGATES_PERMS_RESPONSE_MAGIC 0x53524550u /* "PERS" */
+
+/* A role definition follows. Absent, the built-in table answers, and the two
+ * differ: a definition granting nothing is a deliberate powerless role, while no
+ * definition at all falls back to what ships. */
+#define AIMEE_DELEGATES_PERMS_DEFINED (1u << 0)
+
+/* The permissions this build guarantees, and where each is enforced. Names are
+ * the contract with whoever writes a role definition. */
+#define AIMEE_DELEGATES_PERM_TOOLS           "tools"
+#define AIMEE_DELEGATES_PERM_SHELL           "shell"
+#define AIMEE_DELEGATES_PERM_REPO_WRITE      "repo_write"
+#define AIMEE_DELEGATES_PERM_KNOWLEDGE_WRITE "knowledge_write"
+
+static inline void aimee_delegates_perms_request_begin(aimee_delegates_wire_t *w, uint8_t *buf,
+                                                       size_t cap, unsigned flags, const char *role)
+{
+   aimee_delegates_wire_init(w, buf, cap);
+   aimee_delegates_wire_u32(w, AIMEE_DELEGATES_PERMS_REQUEST_MAGIC);
+   aimee_delegates_wire_u32(w, (uint32_t)AIMEE_DELEGATES_WIRE_VERSION);
+   aimee_delegates_wire_u32(w, flags);
+   aimee_delegates_wire_str(w, role);
+}
+
+/* Append the role template frontmatter an operator wrote, verbatim.
+ *
+ * Only when AIMEE_DELEGATES_PERMS_DEFINED is set. The module parses it: what a
+ * permission block MEANS is a rule, and this side's job is to hand over the
+ * bytes it found on disk. A block the module cannot read fails the whole
+ * request rather than falling back to the built-in table -- falling back would
+ * hand a delegate the powers its role ships with while the operator believes it
+ * holds the ones they wrote. */
+static inline void aimee_delegates_perms_request_definition(aimee_delegates_wire_t *w,
+                                                            const char *frontmatter)
+{
+   aimee_delegates_wire_str(w, frontmatter ? frontmatter : "");
+}
+
+/* Reads the response header and leaves `r` positioned at the first grant.
+ * Returns the grant count, or -1 on a malformed response. */
+static inline int aimee_delegates_perms_response_begin(aimee_delegates_rd_t *r, const uint8_t *in,
+                                                       size_t len)
+{
+   r->buf = in;
+   r->len = len;
+   r->at = 0;
+   r->bad = 0;
+   if (!in || aimee_delegates_rd_u32(r) != AIMEE_DELEGATES_PERMS_RESPONSE_MAGIC)
+      return -1;
+   uint32_t count = aimee_delegates_rd_u32(r);
+   return r->bad ? -1 : (int)count;
+}
+
+/* Reads one grant: its name, where it is enforced, and how many scopes follow.
+ * The scopes themselves are read with aimee_delegates_rd_str. */
+static inline int aimee_delegates_perms_response_grant(aimee_delegates_rd_t *r, char *name,
+                                                       size_t name_cap, char *enforced_at,
+                                                       size_t enforced_cap, int *scope_count)
+{
+   aimee_delegates_rd_str(r, name, name_cap);
+   aimee_delegates_rd_str(r, enforced_at, enforced_cap);
+   uint32_t count = aimee_delegates_rd_u32(r);
+   if (r->bad)
+      return -1;
+   if (scope_count)
+      *scope_count = (int)count;
+   return 0;
 }
 
 #endif

@@ -15,6 +15,7 @@
 #include "log.h" /* audit_log_open */
 #include "memory.h"
 #include <aimee/audit/obs_bus.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 extern struct cJSON *audit_ledger_read(const char *from_ts, const char *to_ts);
 
@@ -107,7 +108,8 @@ int main(void)
     * on_memory_mutation field mapping) and that the fingerprinted, content-free
     * row actually lands in the ledger — not just that the hook fires. */
    {
-      char home[] = "/tmp/aimee-kbmem-XXXXXX";
+      char home[256];
+      snprintf(home, sizeof home, "%s/aimee-kbmem-XXXXXX", platform_tmpdir());
       assert(mkdtemp(home));
       setenv("AIMEE_HOME", home, 1);
       audit_log_open();

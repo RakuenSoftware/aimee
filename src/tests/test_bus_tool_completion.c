@@ -34,6 +34,7 @@
 
 #include <aimee/tools/agent_tools.h> /* agent_tool_completion_t, agent_tools_fire_tool_completion_for_test */
 #include "server/tool_completion_audit_bridge.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static const char *sval(cJSON *row, const char *key)
 {
@@ -66,7 +67,8 @@ int main(void)
 {
    printf("test_bus_tool_completion:\n");
 
-   char home[] = "/tmp/aimee-bustc-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-bustc-XXXXXX", platform_tmpdir());
    if (!mkdtemp(home))
    {
       fprintf(stderr, "FAIL: tmp home\n");

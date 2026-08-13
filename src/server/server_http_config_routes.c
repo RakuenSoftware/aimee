@@ -22,6 +22,7 @@
 #include "roundtable_preset.h"
 #endif
 #include "role_templates.h"
+#include <aimee/delegates/delegate_launch_args.h>
 #include "util.h" /* safe_strdup, aimee_base64_* */
 #include "cli_session_pty.h"
 #include "aimee_home.h"
@@ -259,6 +260,44 @@ int route_role_template_show(const char *name, char *resp, int cap)
     * as a dedicated field (edited via the `max_turns:` frontmatter in `content`).
     * -1 = infinite, the default. */
    cJSON_AddNumberToObject(o, "max_turns", role_template_max_turns(name));
+
+   /* What this role may do, resolved the same way a delegate resolves it.
+    *
+    * Structural rather than left in `content`, because the interesting part is
+    * not what the operator WROTE but what it came to: a permission with nothing
+    * enforcing it, or a tool the set withholds, is invisible in the frontmatter
+    * and is exactly what someone reading this wants to know. Until now it went
+    * to a log line and nowhere else. */
+   {
+      delegate_permissions_t perms;
+      char *definition = role_template_frontmatter(NULL, name);
+      int rc = delegate_permissions_for_role(name, definition, &perms);
+      free(definition);
+
+      cJSON *p = cJSON_AddObjectToObject(o, "permissions");
+      /* A role whose permissions will not resolve holds NONE, and a delegate for
+         it is refused. Say so here rather than showing an empty set that reads
+         like a role which simply grants nothing. */
+      cJSON_AddBoolToObject(p, "resolved", rc == 0);
+      cJSON *held = cJSON_AddArrayToObject(p, "held");
+      for (int i = 0; rc == 0 && i < perms.count; i++)
+      {
+         cJSON *g = cJSON_CreateObject();
+         cJSON_AddStringToObject(g, "name", perms.grants[i].name);
+         cJSON_AddStringToObject(g, "enforced_at", perms.grants[i].enforced_at);
+         cJSON *scopes = cJSON_AddArrayToObject(g, "scopes");
+         for (int j = 0; j < perms.grants[i].scope_count; j++)
+            cJSON_AddItemToArray(scopes, cJSON_CreateString(perms.grants[i].scopes[j]));
+         cJSON_AddItemToArray(held, g);
+      }
+      cJSON *unenforced = cJSON_AddArrayToObject(p, "unenforced");
+      for (int i = 0; rc == 0 && i < perms.unenforced_count; i++)
+         cJSON_AddItemToArray(unenforced, cJSON_CreateString(perms.unenforced[i]));
+      cJSON *denied = cJSON_AddArrayToObject(p, "denied_tools");
+      for (int i = 0; rc == 0 && i < perms.denied_tool_count; i++)
+         cJSON_AddItemToArray(denied, cJSON_CreateString(perms.denied_tools[i]));
+   }
+
    free(raw);
    return emit(resp, cap, o);
 }

@@ -277,6 +277,51 @@ RUN set -eux; \
     rm -rf "/tmp/gh_${GH_CLI_VERSION}_linux_${gharch}"; \
     gh --version
 
+# ast-grep — the binary behind the ast_grep_search MCP tool.
+#
+# NOTHING installed it before, in this image or any deploy script, so the tool
+# has never worked in a container. Worse than absent: `sg` is ALSO util-linux's
+# set-group-ID command and is present on every Debian base, so the resolver used
+# to find /usr/bin/sg, exec it with --json, capture its usage error as output,
+# parse that as NDJSON, and answer "No matches found." An agent asking whether a
+# pattern repeats was told no, authoritatively, on a machine where the search
+# never ran.
+#
+# Installed ONLY as `ast-grep`, deliberately. The zip also contains an `sg`, but
+# putting that in /usr/local/bin would shadow util-linux's sg for everything in
+# the image, and aimee's resolver prefers the unambiguous name anyway -- so
+# shadowing a system command would buy nothing and could break unrelated
+# callers. The release ships a zip, so unzip is a build-time-only dependency.
+# Release downloads go through GitHub/CDN edges that return 5xx in bursts: the
+# first run of this step took six 503s inside twenty seconds while the same URL
+# served 200 from elsewhere. The retry budget has to outlast a CDN wobble rather
+# than a dropped packet, hence 8 attempts across 10 minutes with a 15s gap.
+# --retry-all-errors is required because -f turns a 503 into exit 22, which plain
+# --retry does NOT retry.
+ARG AST_GREP_VERSION=0.45.1
+RUN set -eux; \
+    agarch="${TARGETARCH:-amd64}"; \
+    case "$agarch" in \
+      amd64) agtriple="x86_64-unknown-linux-gnu" ;; \
+      arm64) agtriple="aarch64-unknown-linux-gnu" ;; \
+      *) echo "unsupported TARGETARCH=${agarch}" >&2; exit 1 ;; \
+    esac; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends unzip; \
+    curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors --retry-max-time 600 \
+      --connect-timeout 30 \
+      "https://github.com/ast-grep/ast-grep/releases/download/${AST_GREP_VERSION}/app-${agtriple}.zip" \
+      -o /tmp/ast-grep.zip; \
+    unzip -o /tmp/ast-grep.zip -d /tmp/ast-grep; \
+    install -m0755 /tmp/ast-grep/ast-grep /usr/local/bin/ast-grep; \
+    rm -rf /tmp/ast-grep /tmp/ast-grep.zip; \
+    apt-get purge -y unzip; \
+    apt-get autoremove -y; \
+    rm -rf /var/lib/apt/lists/*; \
+    # Prove it is really ast-grep and not the util-linux sg we just shadowed --
+    # the whole point of shipping it is that the resolver's --version check passes.
+    ast-grep --version | grep -q '^ast-grep '
+
 # The managed compose the server launches for the orchestrated deploy (default
 # AIMEE_DEPLOY_COMPOSE_FILE). Inert until AIMEE_DEPLOY_ENABLED=1 + a mounted socket.
 COPY deploy/container/aimee-managed.compose.yaml /opt/aimee/deploy/aimee-managed.compose.yaml

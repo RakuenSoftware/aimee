@@ -556,27 +556,17 @@ int toolset_resolve_effective(const char *name, char out[][TOOLSET_TOOL_MAX], in
    return toolset_resolve(&registry, name, out, max_tools, err, err_len);
 }
 
+/* Which toolset a role runs with.
+ *
+ * Takes a CANONICAL role. Aliases are resolved by the delegates module, which
+ * owns that table, and this file used to keep a copy of it: a copy that had
+ * already drifted, missing `synthesize`, `planner` and `rank-fuse` while adding
+ * `evaluate-optimize` of its own. A role list duplicated across two functions is
+ * how `--role reviewer` came to hold powers `--role review` was denied. */
 const char *toolset_for_delegate_role(const char *role)
 {
    if (!role || !role[0])
       return NULL;
-   if (strcmp(role, "implement") == 0 || strcmp(role, "build") == 0)
-      role = "code";
-   else if (strcmp(role, "test") == 0 || strcmp(role, "check") == 0 ||
-            strcmp(role, "verifier") == 0 || strcmp(role, "evaluate") == 0 ||
-            strcmp(role, "evaluate-optimize") == 0)
-      role = "validate";
-   else if (strcmp(role, "inspect") == 0)
-      role = "diagnose";
-   else if (strcmp(role, "research") == 0 || strcmp(role, "enforce") == 0)
-      role = "execute";
-   else if (strcmp(role, "recall") == 0)
-      role = "search";
-   else if (strcmp(role, "reviewer") == 0)
-      role = "review";
-   /* review works index-only: the change under review reaches it as a diff in the
-    * prompt, and it navigates the current repo via the branch-indexed tools rather
-    * than sweeping a worktree a remote delegate may not even be able to reach. */
    if (strcmp(role, "review") == 0)
       return "review_indexed";
    if (strcmp(role, "diagnose") == 0)

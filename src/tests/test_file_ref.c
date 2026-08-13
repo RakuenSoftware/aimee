@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "agent_coord.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* --- helpers --- */
 
@@ -14,7 +15,7 @@ static char g_tmpdir[256];
 
 static void setup_tmpdir(void)
 {
-   snprintf(g_tmpdir, sizeof(g_tmpdir), "/tmp/test_file_ref_XXXXXX");
+   snprintf(g_tmpdir, sizeof(g_tmpdir), "%s/test_file_ref_XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_tmpdir) != NULL);
 }
 

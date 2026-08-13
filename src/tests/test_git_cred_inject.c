@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* Return the value of `key=` in envp, or NULL; also count matches into *count. */
 static const char *env_val(char *const *envp, const char *key, int *count)
@@ -251,7 +252,8 @@ int main(void)
     * Force the collision rather than hoping for it: put the directory ON the
     * target number. */
    {
-      char tmpl[] = "/tmp/aimee_fdclash_XXXXXX";
+      char tmpl[256];
+      snprintf(tmpl, sizeof tmpl, "%s/aimee_fdclash_XXXXXX", platform_tmpdir());
       assert(mkdtemp(tmpl));
       int dirfd = open(tmpl, O_RDONLY | O_DIRECTORY);
       assert(dirfd >= 0);

@@ -10,6 +10,7 @@
 #include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
 #include "agent_code_capabilities.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static const char *g_http_response;
 static int g_http_status = -1;
@@ -132,7 +133,7 @@ static const char *mock_server_path(void)
 
 static void make_package_manager_link(char *dir, size_t dir_len, char *path, size_t path_len)
 {
-   snprintf(dir, dir_len, "/tmp/aimee-mcp-registry-XXXXXX");
+   snprintf(dir, dir_len, "%s/aimee-mcp-registry-XXXXXX", platform_tmpdir());
    assert(mkdtemp(dir) != NULL);
    snprintf(path, path_len, "%s/npx", dir);
    char target[512];
@@ -758,7 +759,22 @@ static void test_tool_profile_filter(void)
     * shell search, because that was one visible call while index_hybrid cost a
     * find_tools -> describe_tool -> call_tool detour. Measured across the
     * benchmark's aimee cells: 87 shell searches emitting 2.4 MB, one large
-    * enough to hit the client's 1 MB output truncation. */
+    * enough to hit the client's 1 MB output truncation.
+    *
+    * THIS ASSERTION WAS INVERTED ONCE, ON 2026-08-12, and inverted back the same
+    * night. The argument was that the fallback had changed -- `aimee index ...`
+    * now exists as a chainable command named in the standing guidance -- so the
+    * detour was no longer the alternative. Re-tested with the commands live and
+    * the guidance naming them, n=3 each side on a healthy box: CLI invocations
+    * went DOWN 2.3 -> 1.3 per cell, MCP calls 4.3 -> 6.3, searches 3 -> 4.3,
+    * search output 4.2 KB -> 6.1 KB, credits 15.52 -> 19.15 mean (+23%). The
+    * calls it did make were find_tools x4, describe_tool x2, call_tool x1: the
+    * detour, paid in full.
+    *
+    * So the original finding survives a change that looked like it should have
+    * retired it. A schema present in every request outcompetes a sentence
+    * recommending a command, and removing the schema sends the agent to
+    * discovery and to grep rather than to the command. */
    assert(profile_core_has("index", core));
    assert(profile_core_has("delegate_status", core));
    {

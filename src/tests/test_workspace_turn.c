@@ -349,6 +349,60 @@ int main(void)
          assert(g_acquires == 0);
          rmdir("/tmp/aimee-root-authorized");
 
+         /* A mirror workspace that cannot be resolved must SAY SO.
+          *
+          * Every failure path in mirror_reconstruct_cwd used to return 0 in silence.
+          * The caller then left the client-side path in place, the request fell
+          * through to the workspace runner, waited out WS_RUNNER_OP_MS (600s) and
+          * failed with "unavailable through the registered workspace runner" -- an
+          * error naming a subsystem that was never the problem, with nothing in the
+          * log to contradict it. Diagnosing that took hours and produced three wrong
+          * theories. A diagnostic nobody can see is the defect, so assert the line is
+          * actually emitted rather than trusting that it was added. */
+         {
+            c.workspace_count = 1;
+            snprintf(c.workspaces[0], MAX_PATH_LEN, "/tmp/ws-mirror-unresolvable");
+            snprintf(c.workspace_providers[0], sizeof(c.workspace_providers[0]), "mirror");
+            snprintf(c.workspace_vcs_remote[0], sizeof(c.workspace_vcs_remote[0]),
+                     "https://example.invalid/r.git");
+            c.workspace_vcs_head[0][0] = '\0'; /* no client head -> cannot reconstruct */
+            assert(config_save(&c) == 0);
+
+            char capture[512];
+            snprintf(capture, sizeof(capture), "%s/wsturn-log-XXXXXX", platform_tmpdir());
+            int cap_fd = mkstemp(capture);
+            assert(cap_fd >= 0);
+            fflush(stderr);
+            int saved = dup(STDERR_FILENO);
+            assert(saved >= 0);
+            assert(dup2(cap_fd, STDERR_FILENO) >= 0);
+
+            char out[MAX_PATH_LEN] = "sentinel";
+            int rc = workspace_turn_resolve_mirror_cwd("/tmp/ws-mirror-unresolvable/src", out,
+                                                       sizeof(out));
+
+            fflush(stderr);
+            assert(dup2(saved, STDERR_FILENO) >= 0);
+            close(saved);
+
+            assert(rc == 0); /* behaviour unchanged: still refuses to resolve */
+            assert(!out[0]); /* and still clears the output */
+
+            FILE *f = fopen(capture, "r");
+            assert(f);
+            char logged[4096] = "";
+            size_t n = fread(logged, 1, sizeof(logged) - 1, f);
+            logged[n] = '\0';
+            fclose(f);
+            unlink(capture);
+            close(cap_fd);
+
+            /* The point of the change: it is no longer silent. */
+            assert(strstr(logged, "mirror resolve") != NULL);
+            assert(strstr(logged, "/tmp/ws-mirror-unresolvable") != NULL);
+            printf("  unresolvable mirror is reported, not silent: ok\n");
+         }
+
          /* restore the real roots for the cases below */
          memset(&c, 0, sizeof(c));
          config_load(&c);

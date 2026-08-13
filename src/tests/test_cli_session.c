@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include "cJSON.h"
 #include "cli_session.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char g_claude_vault_oauth[512];
 static char g_codex_vault_oauth[512];
@@ -58,7 +59,8 @@ static char g_capturelog[320];
 
 static void install_fake_tmux(void)
 {
-   snprintf(g_fake_dir, sizeof(g_fake_dir), "/tmp/aimee_faketmux_%d", (int)getpid());
+   snprintf(g_fake_dir, sizeof(g_fake_dir), "%s/aimee_faketmux_%d", platform_tmpdir(),
+            (int)getpid());
    mkdir(g_fake_dir, 0700);
    char counter[300];
    snprintf(counter, sizeof(counter), "%s/counter", g_fake_dir);
@@ -175,13 +177,17 @@ static int capturelog_has(const char *needle)
 static void test_create_multiword_cli_cmd_single_arg(void)
 {
    unlink(g_createlog);
+   char quoting_wd[256];
+   snprintf(quoting_wd, sizeof quoting_wd, "%s/aimee quoting wd", platform_tmpdir());
    cli_session_t s;
    int rc = cli_session_create(&s, "aimee-quoting-test",
                                "AIMEE_SESSION_ID=web-1 claude --dangerously-skip-permissions",
-                               "/tmp/aimee quoting wd", 0);
+                               quoting_wd, 0);
    assert(rc == 0);
    assert(createlog_has("ARG:[AIMEE_SESSION_ID=web-1 claude --dangerously-skip-permissions]"));
-   assert(createlog_has("ARG:[/tmp/aimee quoting wd]"));
+   char expect_wd[300];
+   snprintf(expect_wd, sizeof expect_wd, "ARG:[%s]", quoting_wd);
+   assert(createlog_has(expect_wd));
    /* No fragment may arrive as its own argument (the word-split regression). */
    assert(!createlog_has("ARG:[AIMEE_SESSION_ID=web-1]"));
    s.active = 0; /* fake tmux: no real session to tear down */
@@ -912,11 +918,14 @@ static char *slurp(const char *path)
 
 static void test_prepare_claude_seeds_gates(void)
 {
-   char home[] = "/tmp/aimee_clitest_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee_clitest_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home) != NULL);
    setenv("HOME", home, 1); /* cli_claude_home() resolves HOME first */
    setenv("AIMEE_HOME", home, 1);
-   const char *wt = "/tmp/aimee_clitest_wt/session-abc";
+   char wt_buf[256];
+   snprintf(wt_buf, sizeof wt_buf, "%s/aimee_clitest_wt/session-abc", platform_tmpdir());
+   const char *wt = wt_buf;
 
    cli_session_prepare_claude(wt, 1);
 
@@ -957,7 +966,8 @@ static void test_prepare_claude_seeds_gates(void)
 
 static void test_prepare_claude_preserves_existing_settings(void)
 {
-   char home[] = "/tmp/aimee_clitest_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee_clitest_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home) != NULL);
    setenv("HOME", home, 1); /* cli_claude_home() resolves HOME first */
    setenv("AIMEE_HOME", home, 1);
@@ -971,7 +981,9 @@ static void test_prepare_claude_preserves_existing_settings(void)
    fputs("{\"theme\":\"dark\"}", f);
    fclose(f);
 
-   cli_session_prepare_claude("/tmp/aimee_clitest_wt2", 1);
+   char wt2[256];
+   snprintf(wt2, sizeof wt2, "%s/aimee_clitest_wt2", platform_tmpdir());
+   cli_session_prepare_claude(wt2, 1);
 
    char *s = slurp(p);
    cJSON *sroot = cJSON_Parse(s);
@@ -991,7 +1003,8 @@ static void test_prepare_claude_preserves_existing_settings(void)
  * trust map, and history. prepare must leave it byte-for-byte untouched. */
 static void test_prepare_claude_skips_unparseable_config(void)
 {
-   char home[] = "/tmp/aimee_clitest_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee_clitest_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home) != NULL);
    setenv("HOME", home, 1);
    setenv("AIMEE_HOME", home, 1);
@@ -1004,7 +1017,9 @@ static void test_prepare_claude_skips_unparseable_config(void)
    fputs(corrupt, f);
    fclose(f);
 
-   cli_session_prepare_claude("/tmp/aimee_clitest_wt3", 1);
+   char wt3[256];
+   snprintf(wt3, sizeof wt3, "%s/aimee_clitest_wt3", platform_tmpdir());
+   cli_session_prepare_claude(wt3, 1);
 
    char *after = slurp(jp);
    assert(after != NULL);
@@ -1017,11 +1032,14 @@ static void test_prepare_claude_skips_unparseable_config(void)
  * isn't passed, so the operator's dangerous-mode prompt is left untouched). */
 static void test_prepare_claude_nonautonomous_skips_bypass_seed(void)
 {
-   char home[] = "/tmp/aimee_clitest_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee_clitest_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home) != NULL);
    setenv("HOME", home, 1);
    setenv("AIMEE_HOME", home, 1);
-   const char *wt = "/tmp/aimee_clitest_wt4";
+   char wt_buf[256];
+   snprintf(wt_buf, sizeof wt_buf, "%s/aimee_clitest_wt4", platform_tmpdir());
+   const char *wt = wt_buf;
 
    cli_session_prepare_claude(wt, 0); /* not autonomous */
 
@@ -1056,9 +1074,9 @@ static void test_prepare_claude_nonautonomous_skips_bypass_seed(void)
 static void test_isolated_claude_home(void)
 {
    char shared[128];
-   snprintf(shared, sizeof(shared), "/tmp/aimee-iso-%d", (int)getpid());
+   snprintf(shared, sizeof(shared), "%s/aimee-iso-%d", platform_tmpdir(), (int)getpid());
    char runtime[160], cdir[192], json[288], settings[288];
-   snprintf(runtime, sizeof(runtime), "/tmp/aimee-iso-runtime-%d", (int)getpid());
+   snprintf(runtime, sizeof(runtime), "%s/aimee-iso-runtime-%d", platform_tmpdir(), (int)getpid());
    snprintf(cdir, sizeof(cdir), "%s/.claude", shared);
    mkdir(shared, 0700);
    mkdir(cdir, 0700);
@@ -1109,7 +1127,7 @@ static void test_isolated_claude_home(void)
 static void test_isolated_home_reclaimed_on_destroy(void)
 {
    char shared[128];
-   snprintf(shared, sizeof(shared), "/tmp/aimee-isorm-%d", (int)getpid());
+   snprintf(shared, sizeof(shared), "%s/aimee-isorm-%d", platform_tmpdir(), (int)getpid());
    char cdir[192], creds[288], json[288];
    snprintf(cdir, sizeof(cdir), "%s/.claude", shared);
    mkdir(shared, 0700);
@@ -1126,7 +1144,8 @@ static void test_isolated_home_reclaimed_on_destroy(void)
    fclose(f);
    setenv("HOME", shared, 1);
    char runtime[160];
-   snprintf(runtime, sizeof(runtime), "/tmp/aimee-isorm-runtime-%d", (int)getpid());
+   snprintf(runtime, sizeof(runtime), "%s/aimee-isorm-runtime-%d", platform_tmpdir(),
+            (int)getpid());
    setenv("AIMEE_OAUTH_RUNTIME_DIR", runtime, 1);
    snprintf(g_claude_vault_oauth, sizeof(g_claude_vault_oauth), "{\"token\":\"vault-y\"}");
 
@@ -1162,8 +1181,9 @@ static void test_isolated_home_reclaimed_on_destroy(void)
 static void test_isolated_codex_home(void)
 {
    char shared[160], runtime[180], codex_dir[220], config[280];
-   snprintf(shared, sizeof(shared), "/tmp/aimee-codex-shared-%d", (int)getpid());
-   snprintf(runtime, sizeof(runtime), "/tmp/aimee-codex-runtime-%d", (int)getpid());
+   snprintf(shared, sizeof(shared), "%s/aimee-codex-shared-%d", platform_tmpdir(), (int)getpid());
+   snprintf(runtime, sizeof(runtime), "%s/aimee-codex-runtime-%d", platform_tmpdir(),
+            (int)getpid());
    snprintf(codex_dir, sizeof(codex_dir), "%s/.codex", shared);
    assert(mkdir(shared, 0700) == 0);
    assert(mkdir(codex_dir, 0700) == 0);

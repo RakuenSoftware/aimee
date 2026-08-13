@@ -1,3 +1,4 @@
+#include "support/delegate_role_seam_stub.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -617,12 +618,12 @@ static void test_tool_surface_single_source(void)
    cJSON_Delete(resp);
 }
 
-static void test_current_code_only_role_tool_policy(void)
+static void test_knowledge_write_gates_the_tool_policy(void)
 {
-   assert(agent_tools_role_current_code_only("review") == 1 &&
-          agent_tools_role_current_code_only("diagnose") == 1);
-   assert(agent_tools_role_current_code_only("inspect") == 1 &&
-          agent_tools_role_current_code_only("validate") == 0);
+   /* The carried permission, not the role, is what the tool policy reads. */
+   agent_tools_knowledge_write_set(0);
+   assert(agent_tools_tool_allowed_for_role("diagnose", "search_memory") == 0);
+   agent_tools_knowledge_write_set(1);
    assert(agent_tools_tool_allowed_for_role("validate", "bash") == 1);
    assert(agent_tools_tool_allowed_for_role("validate", "write_file") == 0);
    assert(agent_tools_tool_allowed_for_role("search", "bash") == 0);
@@ -658,9 +659,122 @@ static void test_current_code_only_role_tool_policy(void)
    cJSON_Delete(tools);
 }
 
-static void test_current_code_only_dispatch_blocks_stale_context_tools(void)
+/* A delegate that does not hold `shell` cannot run commands, whatever toolset it
+ * was given.
+ *
+ * The independence is the point. A toolset comes from a map keyed on the role
+ * NAME, so a role an operator defined without `shell` still resolves to one
+ * carrying bash. `code` is used here for exactly that reason: it is a role whose
+ * toolset has bash, and the permission is what refuses it.
+ */
+/* A permission the delegate does not hold withholds its tools, whatever toolset
+ * the role resolved to.
+ *
+ * `code` is the case that mattered: its toolset carries write_file, and a role
+ * an operator defined under that name without repo_write used to be handed it
+ * anyway. The advertised array and the dispatch check read the SAME list, so
+ * what is offered and what is allowed cannot disagree -- both are asserted.
+ *
+ * WHICH tool needs which permission is the module's list, pinned against the
+ * module in server-go/modules/delegates/toolpermissions_test.go. */
+/* One delegate's permissions must not become another's.
+ *
+ * Delegate turns run on pooled worker threads and overlap by design, so these
+ * carriers are thread-local. They were not when they were written, which is the
+ * bug this pins: a confined delegate would be silently un-confined by whichever
+ * concurrent turn wrote last. The same defect was measured once for the active
+ * toolset -- three of four turns resolved the last writer's -- and the fix there
+ * is the reason this one is stated.
+ */
+static void *permission_posture_thread(void *unused)
+{
+   (void)unused;
+   /* A second turn, withholding everything. */
+   agent_tools_knowledge_write_set(0);
+   agent_tools_shell_set(0);
+   static const char *const denied[] = {"read_file"};
+   agent_tools_denied_set(denied, 1);
+
+   assert(agent_tools_knowledge_write_allowed() == 0);
+   assert(agent_tools_shell_allowed() == 0);
+   assert(agent_tools_tool_denied("read_file") == 1);
+   return NULL;
+}
+
+static void test_one_delegates_permissions_are_not_anothers(void)
+{
+   agent_tools_knowledge_write_set(1);
+   agent_tools_shell_set(1);
+   agent_tools_denied_set(NULL, 0);
+
+   pthread_t t;
+   assert(pthread_create(&t, NULL, permission_posture_thread, NULL) == 0);
+   assert(pthread_join(t, NULL) == 0);
+
+   /* This turn is untouched by the other one. */
+   assert(agent_tools_knowledge_write_allowed() == 1);
+   assert(agent_tools_shell_allowed() == 1);
+   assert(agent_tools_tool_denied("read_file") == 0);
+   printf("  PASS: test_one_delegates_permissions_are_not_anothers\n");
+}
+
+static void test_permissions_clamp_the_toolset(void)
+{
+   static const char *const denied[] = {"write_file", "edit_file", "git_push"};
+   agent_tools_denied_set(denied, 3);
+
+   /* Offered: the tool is gone from the array a `code` delegate is handed. */
+   cJSON *tools = build_tools_array();
+   assert(tools_array_has_name(tools, "write_file"));
+   agent_tools_filter_for_role(tools, "code");
+   assert(!tools_array_has_name(tools, "write_file"));
+   assert(!tools_array_has_name(tools, "edit_file"));
+   /* And what the permission does NOT withhold survives the same filter. */
+   assert(tools_array_has_name(tools, "read_file"));
+   cJSON_Delete(tools);
+
+   /* Allowed: and the same answer at the gate that runs it. */
+   assert(agent_tools_tool_allowed_for_role("code", "write_file") == 0);
+   assert(agent_tools_tool_allowed_for_role("code", "read_file") == 1);
+
+   /* Withholding nothing restores it: the clamp is the list, not the role. */
+   agent_tools_denied_set(NULL, 0);
+   assert(agent_tools_tool_allowed_for_role("code", "write_file") == 1);
+   printf("  PASS: test_permissions_clamp_the_toolset\n");
+}
+
+static void test_a_delegate_without_shell_cannot_run_commands(void)
+{
+   agent_tools_set_dispatch_role("code");
+   agent_tools_shell_set(0);
+
+   char *result = dispatch_tool_call("bash", "{\"command\":\"ls\"}", 1000);
+   assert(result != NULL);
+   assert(strstr(result, "`shell` permission") != NULL);
+   free(result);
+
+   result = dispatch_tool_call("execute_script", "{\"body\":\"echo hi\"}", 1000);
+   assert(result != NULL);
+   assert(strstr(result, "`shell` permission") != NULL);
+   free(result);
+
+   /* Holding it, the refusal is gone: whatever bash does next, it is not this. */
+   agent_tools_shell_set(1);
+   result = dispatch_tool_call("bash", "{\"command\":\"true\"}", 1000);
+   assert(result != NULL);
+   assert(strstr(result, "`shell` permission") == NULL);
+   free(result);
+
+   agent_tools_set_dispatch_role(NULL);
+   printf("  PASS: test_a_delegate_without_shell_cannot_run_commands\n");
+}
+
+static void test_withheld_knowledge_write_blocks_stale_context_tools(void)
 {
    agent_tools_set_dispatch_role("diagnose");
+   /* Withheld knowledge_write is what closes these doors, and it is carried
+    * into the run rather than worked out per call. */
+   agent_tools_knowledge_write_set(0);
 
    char *result = dispatch_tool_call("find_symbol", "{\"identifier\":\"main\"}", 1000);
    assert(result != NULL);
@@ -677,6 +791,7 @@ static void test_current_code_only_dispatch_blocks_stale_context_tools(void)
    assert(strstr(result, "mutating or broad aimee context commands are disabled") != NULL);
    free(result);
 
+   agent_tools_knowledge_write_set(1);
    agent_tools_set_dispatch_role(NULL);
 }
 
@@ -777,7 +892,8 @@ static void test_codex_oauth_reads_vault_only(void)
    char saved_home[600] = "";
    if (old_home)
       snprintf(saved_home, sizeof(saved_home), "%s", old_home);
-   char dir[] = "/tmp/aimee-codex-home.XXXXXX";
+   char dir[256];
+   snprintf(dir, sizeof dir, "%s/aimee-codex-home.XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(dir) != NULL);
    char sub[512], authpath[600];
    snprintf(sub, sizeof(sub), "%s/.codex", dir);
@@ -1354,7 +1470,7 @@ static void test_tool_bash_delegate_unsandboxed_refused(void)
 static void test_detached_skips_worktree_rewrite(void)
 {
    char repo[256];
-   snprintf(repo, sizeof(repo), "/tmp/det_wt_test.XXXXXX");
+   snprintf(repo, sizeof(repo), "%s/det_wt_test.XXXXXX", platform_tmpdir());
    assert(mkdtemp(repo) != NULL);
    char shellcmd[512];
    snprintf(shellcmd, sizeof(shellcmd), "git init -q '%s' >/dev/null 2>&1", repo);
@@ -1410,7 +1526,7 @@ static void test_detached_skips_worktree_rewrite(void)
 static void test_shell_worktree_rewrite_is_applied_not_refused(void)
 {
    char repo[256];
-   snprintf(repo, sizeof(repo), "/tmp/shell_wt_rw.XXXXXX");
+   snprintf(repo, sizeof(repo), "%s/shell_wt_rw.XXXXXX", platform_tmpdir());
    assert(mkdtemp(repo) != NULL);
    char shellcmd[512];
    snprintf(shellcmd, sizeof(shellcmd), "git init -q '%s' >/dev/null 2>&1", repo);
@@ -2625,7 +2741,8 @@ static void test_dispatch_tool_call(void)
 
    /* execute_script is write-capable and therefore requires the managed
     * worktree context that a real delegate turn supplies. */
-   char script_root[] = "/tmp/aimee-script-dispatch.XXXXXX";
+   char script_root[256];
+   snprintf(script_root, sizeof script_root, "%s/aimee-script-dispatch.XXXXXX", platform_tmpdir());
    assert(mkdtemp(script_root) != NULL);
    char script_cwd[MAX_PATH_LEN];
    assert(snprintf(script_cwd, sizeof(script_cwd), "%s/.aimee/worktrees/unit-test-agent/main",
@@ -3533,6 +3650,7 @@ static void test_agent_save_config_does_not_cache_underived_agents(void)
 
 int main(void)
 {
+   delegate_role_seam_install();
    char tmp_home[512];
    snprintf(tmp_home, sizeof(tmp_home), "%s/aimee-test-agent-home-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(tmp_home) != NULL);
@@ -3567,8 +3685,11 @@ int main(void)
    test_agent_routing_block_reason();
    test_agent_route_with_caps_honors_tools_enabled();
    test_agent_route_with_caps_honors_context_override();
-   test_current_code_only_role_tool_policy();
-   test_current_code_only_dispatch_blocks_stale_context_tools();
+   test_knowledge_write_gates_the_tool_policy();
+   test_withheld_knowledge_write_blocks_stale_context_tools();
+   test_a_delegate_without_shell_cannot_run_commands();
+   test_permissions_clamp_the_toolset();
+   test_one_delegates_permissions_are_not_anothers();
    test_provider_env_credentials_and_headers();
    test_codex_oauth_request_creds();
    test_codex_oauth_reads_vault_only();

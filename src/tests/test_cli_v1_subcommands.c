@@ -20,6 +20,7 @@
 #include "cJSON.h"
 #include "cli_client.h"
 #include "cli_v1_routes_internal.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* A command that is not in the table at all: must report zero and must not walk
  * into the NULL sentinel. This is the segfault guard. */
@@ -122,7 +123,8 @@ static void test_kb_status_reports_backlog_and_degradation(void)
    cJSON *resp = cJSON_Parse(payload);
    assert(resp);
 
-   char path[] = "/tmp/aimee-kbstatus-XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee-kbstatus-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    fflush(stdout);
@@ -163,7 +165,8 @@ static void capture_printer(void (*printer)(const char *, cJSON *), const char *
 {
    cJSON *resp = cJSON_Parse(payload);
    assert(resp);
-   char path[] = "/tmp/aimee-v1print-XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee-v1print-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    fflush(stdout);

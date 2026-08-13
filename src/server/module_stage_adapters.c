@@ -757,13 +757,14 @@ static void delegate_patch_coord(const db1_coord_task_t *tasks, int task_count,
 /* What a role implies about how it is run. One call answers whichever question
  * the caller asked; the module resolves the alias itself, so every answer is
  * computed from the same canonical spelling. */
-static int delegate_role_policy(int op, const char *role, int a, int b, int *out)
+static int delegate_role_policy(int op, const char *role, int a, int b, int c, int *out)
 {
    uint8_t request[AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN];
    uint8_t response[AIMEE_DELEGATES_ROLEPOL_RESPONSE_LEN];
    uint32_t response_len = 0;
 
-   if (!out || aimee_delegates_rolepol_request_encode(role, a, b, request, sizeof(request)) != 0 ||
+   if (!out ||
+       aimee_delegates_rolepol_request_encode(role, a, b, c, request, sizeof(request)) != 0 ||
        call_module(AIMEE_DELEGATES_EVENT_ROLEPOL, AIMEE_DELEGATES_STAGE_ROLEPOL, request,
                    sizeof(request), response, sizeof(response), &response_len) != 0 ||
        response_len != AIMEE_DELEGATES_ROLEPOL_RESPONSE_LEN ||
@@ -775,7 +776,7 @@ static int delegate_role_policy(int op, const char *role, int a, int b, int *out
    case DELEGATE_ROLE_OP_IS_WRITE:
       *out = (int)aimee_delegates_get_u32(response + 4);
       return 0;
-   case DELEGATE_ROLE_OP_TOOLS:
+   case DELEGATE_ROLE_OP_BUILTIN:
       *out = (int)aimee_delegates_get_u32(response + 8);
       return 0;
    case DELEGATE_ROLE_OP_CACHE:
@@ -786,6 +787,12 @@ static int delegate_role_policy(int op, const char *role, int a, int b, int *out
       return 0;
    case DELEGATE_ROLE_OP_FINAL_TURNS:
       *out = (int)aimee_delegates_get_u32(response + 20);
+      return 0;
+   case DELEGATE_ROLE_OP_PARENT_DIFF:
+      *out = (int)aimee_delegates_get_u32(response + 24);
+      return 0;
+   case DELEGATE_ROLE_OP_TASK_SHAPE:
+      *out = (int)aimee_delegates_get_u32(response + 28);
       return 0;
    default:
       return -1;
@@ -891,33 +898,6 @@ static int delegate_isolation(const char *report, int probe_failed, int require_
                                                     reason, reason_cap);
 }
 
-/* The role and the brief, composed by the module into one permission. */
-static int delegate_may_write_adapter(const char *role, const char *prompt, int *may_write,
-                                      int *by_role, int *by_prompt)
-{
-   size_t prompt_len = prompt ? strlen(prompt) : 0;
-   size_t cap = AIMEE_DELEGATES_MAYWRITE_HEADER_LEN + AIMEE_DELEGATES_ROLE_MAX + prompt_len + 8;
-   uint8_t *request = malloc(cap);
-   if (!request)
-      return -1;
-   size_t request_len = aimee_delegates_maywrite_request_encode(role, prompt, request, cap);
-   if (request_len == 0)
-   {
-      free(request);
-      return -1;
-   }
-
-   uint8_t response[AIMEE_DELEGATES_MAYWRITE_RESPONSE_LEN];
-   uint32_t response_len = 0;
-   int rc = call_module(AIMEE_DELEGATES_EVENT_MAYWRITE, AIMEE_DELEGATES_STAGE_MAYWRITE, request,
-                        (uint32_t)request_len, response, sizeof(response), &response_len);
-   free(request);
-   if (rc != 0)
-      return -1;
-   return aimee_delegates_maywrite_response_decode(response, response_len, may_write, by_role,
-                                                   by_prompt);
-}
-
 /* Which built sandbox images may be deleted. A wire: the inventory goes out and
  * the verdicts come back, and nothing here decides either. */
 static int delegate_image_gc(const uint8_t *request, size_t request_len, uint8_t *response,
@@ -967,6 +947,54 @@ static int delegate_launch_plan(const uint8_t *request, size_t request_len, uint
 {
    uint32_t got = 0;
    if (call_module(AIMEE_DELEGATES_EVENT_LAUNCHPLAN, AIMEE_DELEGATES_STAGE_LAUNCHPLAN, request,
+                   (uint32_t)request_len, response, (uint32_t)response_cap, &got) != 0)
+      return -1;
+   *response_len = got;
+   return 0;
+}
+
+/* Did a review look at what it reviewed? A wire. */
+static int delegate_review_evidence(const char *role, const char *response, unsigned flags,
+                                    unsigned *verdict, char *message, size_t message_cap)
+{
+   /* A delegate's report, plus a short role. Larger than any real review; a
+    * report that does not fit is not judged rather than judged in part. */
+   static _Thread_local uint8_t request[256 * 1024];
+   int request_len =
+       aimee_delegates_reviewev_request_encode(role, response, flags, request, sizeof(request));
+   if (request_len < 0)
+      return -1;
+
+   uint8_t buf[1024];
+   uint32_t response_len = 0;
+   if (call_module(AIMEE_DELEGATES_EVENT_REVIEWEV, AIMEE_DELEGATES_STAGE_REVIEWEV, request,
+                   (uint32_t)request_len, buf, sizeof(buf), &response_len) != 0)
+      return -1;
+   return aimee_delegates_reviewev_response_decode(buf, response_len, verdict, message,
+                                                   message_cap);
+}
+
+/* Did the delegate touch the files its brief named? A passthrough: the caller
+ * encodes, because the caller holds the paths and the facts about them. */
+static int delegate_drift(const uint8_t *request, size_t request_len, unsigned *severity,
+                          char *message, size_t message_cap)
+{
+   uint8_t response[4096];
+   uint32_t response_len = 0;
+   if (call_module(AIMEE_DELEGATES_EVENT_DRIFT, AIMEE_DELEGATES_STAGE_DRIFT, request,
+                   (uint32_t)request_len, response, sizeof(response), &response_len) != 0)
+      return -1;
+   return aimee_delegates_drift_response_decode(response, response_len, severity, message,
+                                                message_cap);
+}
+
+/* What a delegate may do. A passthrough: the caller encodes, because the caller
+ * holds the role and the definition that came with it. */
+static int delegate_permissions(const uint8_t *request, size_t request_len, uint8_t *response,
+                                size_t response_cap, size_t *response_len)
+{
+   uint32_t got = 0;
+   if (call_module(AIMEE_DELEGATES_EVENT_PERMS, AIMEE_DELEGATES_STAGE_PERMS, request,
                    (uint32_t)request_len, response, (uint32_t)response_cap, &got) != 0)
       return -1;
    *response_len = got;
@@ -1192,11 +1220,13 @@ void server_module_stage_adapters_configure(void)
    delegate_register_launch_args_provider(delegate_launch_args);
    delegate_register_image_spec_provider(delegate_image_spec);
    delegate_register_isolation_provider(delegate_isolation);
-   delegate_register_may_write_provider(delegate_may_write_adapter);
    delegate_register_image_gc_provider(delegate_image_gc);
    delegate_register_route_filter_provider(delegate_route_filter);
    delegate_register_noop_write_provider(delegate_noop_write);
    delegate_register_launch_plan_provider(delegate_launch_plan);
+   delegate_register_review_evidence_provider(delegate_review_evidence);
+   delegate_register_drift_provider(delegate_drift);
+   delegate_register_permissions_provider(delegate_permissions);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path

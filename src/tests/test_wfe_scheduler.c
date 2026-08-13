@@ -16,6 +16,7 @@
 #include "wfe_engine.h"
 #include "wfe_scheduler.h"
 #include "wfe_store.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* author.proposal with no `next` -> terminal after one advance. */
 static const char *WF = "name: sc\nstart: au\nnodes:\n"
@@ -73,7 +74,8 @@ static int wait_flag(int *flag, int seconds)
 int main(void)
 {
    printf("wfe-scheduler: ");
-   char home[] = "/tmp/wfe_sc_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/wfe_sc_XXXXXX", platform_tmpdir());
    assert(wfe_test_mkdtemp(home));
    char wf[160];
    snprintf(wf, sizeof wf, "%s/workflows", home);

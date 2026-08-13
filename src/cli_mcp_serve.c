@@ -154,6 +154,43 @@ static int session_id_read_published(const char *path, char *out, size_t cap)
    return 0;
 }
 
+/* How long the proxy will wait for the host's SessionStart hook to publish the
+ * real session id before minting one of its own, and how often it looks.
+ *
+ * Only paid when the parent IS the host (see session_id_host_parent), and only
+ * on the first startup of a session -- once the id is published the read hits
+ * immediately. Two seconds is far longer than the hook needs to reach its
+ * publish, which happens before it chooses a transport or contacts a server. */
+#define SESSION_ID_HOST_WAIT_MS 2000
+#define SESSION_ID_HOST_POLL_MS 25
+
+/* Is `pid` the agent host that runs a SessionStart hook? Same signal the hook's
+ * own ancestor walk uses, so the writer and the waiter agree on who to expect.
+ * Linux-only: elsewhere there is no /proc to ask and the proxy mints as before,
+ * which is the pre-existing behaviour rather than a regression. */
+static int session_id_host_parent(int pid)
+{
+#if defined(__linux__)
+   char path[64];
+   snprintf(path, sizeof(path), "/proc/%d/comm", pid);
+   FILE *fp = fopen(path, "r");
+   if (!fp)
+      return 0;
+   char buf[64] = "";
+   if (!fgets(buf, sizeof(buf), fp))
+   {
+      fclose(fp);
+      return 0;
+   }
+   fclose(fp);
+   buf[strcspn(buf, "\r\n")] = '\0';
+   return strcmp(buf, "claude") == 0;
+#else
+   (void)pid;
+   return 0;
+#endif
+}
+
 /* Mint this agent session's id and publish it at session-ppid-<ppid>, so every
  * process of the session (hook, this proxy, delegates) resolves the SAME id.
  * Mirrors config.c's session_id(), which the thin client does not link.
@@ -190,6 +227,32 @@ static int client_session_id_ensure(char *out, size_t cap)
    /* Already published by a sibling (or an earlier run of this session). */
    if (session_id_read_published(path, out, cap) == 0)
       return 0;
+
+   /* Nothing published YET is not the same as nothing coming.
+    *
+    * The host fires its SessionStart hook and starts this proxy at roughly the
+    * same moment, and only the hook knows the host's session id. Minting the
+    * instant the file is missing loses that race about as often as it wins it,
+    * and the loss is expensive: the proxy keys a SECOND worktree, so the
+    * session runs on two and everything behind the proxy -- delegates, `aimee
+    * git` -- operates on the empty one. Measured on a repro box, running the
+    * proxy before the hook produced exactly that: two worktrees, one keyed on a
+    * minted id and one on the host's.
+    *
+    * So wait briefly for the hook, but only when there is a hook to wait for:
+    * the wait is gated on the parent being the host process, which is the same
+    * signal client_session_id_publish walks to. Any other MCP host -- one with
+    * no aimee hook installed -- mints immediately as before and pays nothing. */
+   if (session_id_host_parent(ppid))
+   {
+      for (int waited_ms = 0; waited_ms < SESSION_ID_HOST_WAIT_MS;
+           waited_ms += SESSION_ID_HOST_POLL_MS)
+      {
+         usleep(SESSION_ID_HOST_POLL_MS * 1000);
+         if (session_id_read_published(path, out, cap) == 0)
+            return 0;
+      }
+   }
 
    unsigned char rnd[16];
    if (platform_random_bytes(rnd, sizeof(rnd)) != 0)

@@ -118,6 +118,16 @@ static const char *ast_grep_binary(void)
    return NULL;
 }
 
+/* Expose resolution so the tool surface can withhold ast_grep_search when no
+ * ast-grep exists. Advertising a search that cannot run is the same defect as
+ * advertising delegate tools with delegation off: the agent spends a call to
+ * learn the capability is absent, and before the resolver was fixed it did not
+ * even learn that -- it was told there were no matches. */
+int ast_grep_available(void)
+{
+   return ast_grep_binary() != NULL;
+}
+
 #define AST_GREP_MAX_OUTPUT (256 * 1024)
 
 cJSON *tool_ast_grep_search(cJSON *args)
@@ -140,10 +150,20 @@ cJSON *tool_ast_grep_search(cJSON *args)
       return text_content(
           "error: ast-grep is not installed (a `sg` on PATH that is util-linux's "
           "set-group-ID command does not count, and is why this used to answer 'No matches "
-          "found' instead). Install it with: curl -fsSL "
-          "https://github.com/ast-grep/ast-grep/releases/latest/download/"
-          "sg-x86_64-unknown-linux-musl.tar.gz | tar xz -C ~/.local/bin");
-   const char *argv[] = {sg, "--json", "--pattern", pattern, "--lang", lang, path, NULL};
+          "found' instead). Install the release asset for your platform from "
+          "https://github.com/ast-grep/ast-grep/releases/latest into ~/.local/bin "
+          "(x86_64 Linux: app-x86_64-unknown-linux-gnu.zip, which unzips to "
+          "ast-grep and sg)");
+   /* --json=stream, NOT bare --json. The parser below is line-oriented (it takes
+    * each line starting with '{' as one match), and bare --json emits a single
+    * PRETTY-PRINTED array: indented lines, none of which start with '{'. So a
+    * search that matched dozens of times parsed to zero and answered
+    * "No matches found." -- the same lie this tool told when the binary was
+    * missing entirely, and when the binary was util-linux's `sg`.
+    *
+    * Verified on ast-grep 0.45.1: `--json` gives "[\n  {\n    \"text\": ...",
+    * `--json=stream` gives one complete JSON object per line. */
+   const char *argv[] = {sg, "--json=stream", "--pattern", pattern, "--lang", lang, path, NULL};
 
    char *output = NULL;
    int rc = safe_exec_capture(argv, &output, AST_GREP_MAX_OUTPUT);
@@ -152,10 +172,10 @@ cJSON *tool_ast_grep_search(cJSON *args)
    if (rc == 127 || (!output && rc != 0))
    {
       free(output);
-      return text_content("error: ast-grep binary (sg) not found. "
-                          "Install it with: curl -fsSL "
-                          "https://github.com/ast-grep/ast-grep/releases/latest/download/"
-                          "sg-x86_64-unknown-linux-musl.tar.gz | tar xz -C ~/.local/bin");
+      return text_content("error: ast-grep failed to run. Install the release asset for "
+                          "your platform from "
+                          "https://github.com/ast-grep/ast-grep/releases/latest into "
+                          "~/.local/bin");
    }
 
    if (!output || !output[0])
@@ -222,7 +242,28 @@ cJSON *tool_ast_grep_search(cJSON *args)
       line = end + 1;
    }
 
+   int had_output = output && output[0] != '\0';
    free(output);
+
+   /* "No matches found" MUST mean the search ran and matched nothing -- never
+    * that we could not read the answer.
+    *
+    * This tool has now answered that sentence wrongly three separate times: when
+    * the resolved binary was util-linux's `sg`, when no ast-grep was installed at
+    * all, and when ast-grep's --json emitted a pretty-printed array the
+    * line-oriented parser below could not read. Each time it looked exactly like
+    * a clean negative result, and an agent asking "does this pattern repeat
+    * anywhere" was told no, authoritatively, on a search that never happened.
+    *
+    * ast-grep with --json=stream prints NOTHING when there are no matches. So
+    * non-empty output that parses to zero matches is not a negative result, it
+    * is a format we do not understand -- and saying so is the difference between
+    * a bug that gets fixed and a bug that gets believed. */
+   if (match_count == 0 && had_output)
+      return text_content(
+          "error: ast-grep produced output this tool could not parse -- expected one JSON "
+          "object per line (--json=stream). This is a format mismatch, NOT an empty result: "
+          "do not read it as 'no matches'.");
 
    if (match_count == 0)
       return text_content("No matches found.");

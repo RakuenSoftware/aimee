@@ -268,6 +268,22 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len);
  * remedy instead of a generic provider 401 (D6). Thread-local to the turn. */
 const char *agent_request_auth_error(void);
 int agent_has_resolvable_credentials(const agent_t *agent);
+
+/* Does the server vault hold any credential filed under this PROVIDER's name?
+ *
+ * The provider-level twin of agent_has_resolvable_credentials(). It exists
+ * because provider availability used to be decided solely by
+ * runtime_secret_has(env_var), and that table is loaded from one agent namespace
+ * ("environment") for a hardcoded list of AIMEE_* names — so a key stored the
+ * way an operator stores one, `aimee vault set minimax api_key ...`, was
+ * invisible and `provider list` reported [no key] over a populated vault.
+ *
+ * Matching is case-insensitive on the name: provider ids are lowercase literals
+ * in the catalogue while a vault entry carries whatever the operator typed.
+ * Returns 1 when a credential exists, 0 otherwise and on any vault error, so a
+ * failure to read reads as "not configured" rather than a false positive. */
+int vault_provider_has_credential(const char *provider_name);
+
 void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len);
 
 /* Per-turn Codex OAuth creds supplied by the thin client (its ~/.codex/auth.json

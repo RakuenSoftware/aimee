@@ -133,14 +133,42 @@ static int mirror_reconstruct_cwd(const char *cwd, const char *root, const char 
    if (out && out_cap)
       out[0] = '\0';
    if (!head || !head[0] || !out || !out_cap)
-      return 0; /* without a client head there is nothing to reconstruct */
+   {
+      /* Every `return 0` below means "this mirror could not be resolved", and
+       * each one used to be silent. The caller then left the client-side path
+       * in place, which does not exist server-side, and the request fell
+       * through to the workspace RUNNER — where it waited out WS_RUNNER_OP_MS
+       * (600s) and failed with "unavailable through the registered workspace
+       * runner".
+       *
+       * So the operator saw a ten-minute stall and an error naming a subsystem
+       * that was never the problem, with NOTHING in the log: no clone, no
+       * fetch, no warning, no trace of the decision that actually caused it.
+       * Diagnosing it took hours of black-box probing and produced three wrong
+       * theories (a server deadlock, a stale session, missing credentials)
+       * before the real shape appeared. A resolver that fails invisibly and
+       * blames its fallback is the defect; the log line is the fix. */
+      LOG_WARN("workspace", "mirror resolve: no client head for %s — nothing to reconstruct",
+               root ? root : "(null)");
+      return 0;
+   }
 
    char base[MAX_PATH_LEN], mirror_dir[MAX_PATH_LEN], work_dir[MAX_PATH_LEN];
    if (workspace_mirror_base(base, sizeof(base)) != 0)
-      return 0; /* durable workspaces dir (AIMEE_WORKSPACES_DIR / aimee_home) unresolvable */
+   {
+      LOG_WARN("workspace",
+               "mirror resolve: workspaces dir unresolvable (AIMEE_WORKSPACES_DIR / aimee_home) "
+               "for %s",
+               root);
+      return 0;
+   }
    if (workspace_mirror_paths(base, root, mirror_dir, sizeof(mirror_dir), work_dir,
                               sizeof(work_dir)) != 0)
+   {
+      LOG_WARN("workspace", "mirror resolve: cannot derive mirror/work paths under %s for %s", base,
+               root);
       return 0;
+   }
 
    /* mirror-sync publishes immutable, generation-qualified snapshots.  Prefer
     * that atomically-published metadata over the legacy mutable client.diff so
@@ -152,7 +180,11 @@ static int mirror_reconstruct_cwd(const char *cwd, const char *root, const char 
    char snapshot_meta[MAX_PATH_LEN], snapshot_diff[MAX_PATH_LEN];
    snapshot_diff[0] = '\0';
    if (workspace_mirror_snapshot_meta_path(base, root, snapshot_meta, sizeof(snapshot_meta)) != 0)
+   {
+      LOG_WARN("workspace", "mirror resolve: cannot derive the snapshot metadata path for %s",
+               root);
       return 0;
+   }
 
    /* Absence means this workspace predates snapshot publication and may use the
     * legacy head/diff pair. Once metadata exists it is authoritative: unreadable
@@ -161,11 +193,19 @@ static int mirror_reconstruct_cwd(const char *cwd, const char *root, const char 
       const workspace_provider_t *shared = workspace_provider_shared();
       ws_stat_t meta_stat;
       if (shared->stat(shared, snapshot_meta, &meta_stat) != 0)
+      {
+         LOG_WARN("workspace", "mirror resolve: cannot stat snapshot metadata %s for %s",
+                  snapshot_meta, root);
          return 0;
+      }
       if (meta_stat.exists)
       {
          if (meta_stat.is_dir)
+         {
+            LOG_WARN("workspace", "mirror resolve: snapshot metadata path %s is a directory",
+                     snapshot_meta);
             return 0;
+         }
          char *metadata = NULL;
          size_t metadata_len = 0;
          ws_mirror_snapshot_t snapshot;
@@ -299,10 +339,21 @@ int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap
          snprintf(root, sizeof(root), "%s", config_workspaces(i));
          snprintf(remote, sizeof(remote), "%s", config_workspace_vcs_remote(i));
          snprintf(head, sizeof(head), "%s", config_workspace_vcs_head(i));
-         return mirror_reconstruct_cwd(cwd, root, remote, head, out, out_cap, NULL, 0, &v);
+         int resolved = mirror_reconstruct_cwd(cwd, root, remote, head, out, out_cap, NULL, 0, &v);
+         if (!resolved)
+            LOG_WARN("workspace",
+                     "mirror resolve FAILED for registered workspace %s (cwd=%s); the caller will "
+                     "fall back to the runner path and report a runner error after its timeout",
+                     root, cwd);
+         return resolved;
       }
       return 0; /* matched, but not a mirror workspace */
    }
+   /* Not in any registered workspace. Worth saying: a session worktree is
+    * expected to be registered, and "not registered" and "registered but
+    * unresolvable" produce the SAME downstream error, which is what made this
+    * hard to tell apart from the outside. */
+   LOG_INFO("workspace", "mirror resolve: %s is not inside any registered workspace", cwd);
    return 0;
 }
 

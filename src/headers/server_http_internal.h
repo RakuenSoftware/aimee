@@ -132,6 +132,13 @@ typedef struct
 
 typedef int (*route_handler_fn)(const route_req_t *rq, char *resp, int cap);
 
+/* First slab for a request body. Bodies are overwhelmingly small, so this is the
+ * only allocation most requests ever make; http_body_reserve (server_http_body.c)
+ * doubles from here as bytes actually arrive, rather than trusting the declared
+ * Content-Length. */
+#define HTTP_BODY_INITIAL_ALLOC (64u * 1024u)
+char *http_read_body(int fd, const char *prefix, int prefix_len, int declared, int *out_len);
+
 /* Narrow request-scoped keepalive used by the P5 management challenge. */
 void server_http_keepalive_set(int enabled);
 int server_http_keepalive_peek(void);
