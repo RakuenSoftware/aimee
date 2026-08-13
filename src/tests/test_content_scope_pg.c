@@ -13,9 +13,12 @@
  *     principal set. Deny is the direction the whole design rests on, and a
  *     predicate that answered true here would open every content policy built on
  *     it at once.
- *  3. NOTHING is enforced yet: content is still readable. This slice must be
- *     landable ahead of the backfill, and a policy arriving early would take an
- *     existing deployment dark rather than merely fail a test.
+ *  3. The policies exist but are INERT: RLS is not enabled on either table, so
+ *     applying this schema changes what nobody can read. A policy that switched
+ *     itself on would turn an upgrade into an outage for every row not yet
+ *     attributed, so the off state is asserted rather than assumed.
+ *  4. Enabling REFUSES while content is unattributed, because turning it on
+ *     then hides those rows from everyone.
  *
  * WHAT IS NOT HERE: whether a member sees their own project and a stranger does
  * not. That needs the policies, which land with the backfill in slice 2. The
@@ -108,12 +111,67 @@ int main(void)
    expect("SELECT CASE WHEN kb_project_visible(-1) THEN 'allow' ELSE 'deny' END", "deny");
    printf("  PASS: an unknown project with no principal is denied\n");
 
-   /* 3. Nothing is enforced yet. If a policy lands before its backfill, this
-    *    fails here rather than in a deployment that has gone quiet. */
+   /* 3. The policies are DEFINED. They have to be, or enabling would be a
+    *     schema change at the worst possible moment. */
    expect("SELECT count(*) FROM pg_policies"
           " WHERE tablename IN ('kb_documents','kb_file_index')",
+          "2");
+   printf("  PASS: the content policies are defined\n");
+
+   /* 4. And INERT. A policy does nothing until RLS is enabled on its table, and
+    *    that is what keeps applying this schema from hiding rows nobody has
+    *    attributed yet. If this flips to enabled-on-apply, an upgrade becomes an
+    *    outage, so it is asserted rather than assumed.
+    *
+    *    relrowsecurity is the ENABLE flag, relforcerowsecurity the FORCE one;
+    *    both must be off, because FORCE without ENABLE is not a state worth
+    *    reasoning about later. */
+   expect("SELECT count(*) FROM pg_class"
+          " WHERE relname IN ('kb_documents','kb_file_index')"
+          "   AND (relrowsecurity OR relforcerowsecurity)",
           "0");
-   printf("  PASS: no content policy is enabled ahead of the backfill\n");
+   printf("  PASS: they are inert until an operator enables them\n");
+
+   /* 5. Enabling refuses while any content is unattributed. Turning it on over
+    *    unattributed rows does not give a weaker control, it hides those rows
+    *    from everyone, which reads as data loss. The refusal is the feature. */
+   {
+      char err[512] = "";
+      aimee_pg_stmt_t *st =
+          aimee_pg_prepare(db2_conn(), "SELECT kb_content_scope_enable()", err, sizeof(err));
+      int refused = 0;
+      if (st)
+      {
+         if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
+            refused = 1;
+         aimee_pg_finalize(st);
+      }
+      else
+      {
+         refused = 1;
+      }
+      /* The fixture database has no attributed content, so this must refuse.
+         A pass here with an empty kb_documents would prove nothing, so the
+         count is checked too. */
+      char docs[64] = "";
+      assert(scalar("SELECT count(*) FROM kb_documents", docs, sizeof(docs)) == 0);
+      if (strcmp(docs, "0") != 0)
+      {
+         if (!refused)
+            fprintf(stderr, "kb_content_scope_enable() accepted %s unattributed rows\n", docs);
+         assert(refused);
+         printf("  PASS: enabling refuses while content is unattributed\n");
+      }
+      else
+      {
+         printf("  SKIP: no content rows in this database to refuse over\n");
+      }
+      /* Whatever happened, leave the tables as they were found. */
+      expect("SELECT count(*) FROM pg_class"
+             " WHERE relname IN ('kb_documents','kb_file_index')"
+             "   AND (relrowsecurity OR relforcerowsecurity)",
+             "0");
+   }
 
    db2_shutdown();
    printf("All tests passed.\n");
