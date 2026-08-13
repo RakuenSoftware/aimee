@@ -26,6 +26,7 @@
 #include "kb_calibrate.h"
 #include "platform_process.h"
 #include <cJSON.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void open_db(void)
 {
@@ -251,7 +252,7 @@ static char g_cal_home[256];
 
 static void cal_isolate_home(void)
 {
-   snprintf(g_cal_home, sizeof(g_cal_home), "/tmp/aimee-test-calibration-XXXXXX");
+   snprintf(g_cal_home, sizeof(g_cal_home), "%s/aimee-test-calibration-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_cal_home) != NULL);
    assert(setenv("AIMEE_HOME", g_cal_home, 1) == 0);
    assert(setenv("AIMEE_NO_CACHE", "1", 1) == 0);

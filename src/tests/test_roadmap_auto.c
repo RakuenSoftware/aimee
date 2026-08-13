@@ -24,12 +24,13 @@
 #include "db1/roadmap_runtime.h"
 #include "roadmap_milestone.h"
 #include "roadmap_reassess.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char g_db_path[256];
 
 static void open_db(void)
 {
-   snprintf(g_db_path, sizeof(g_db_path), "/tmp/aimee-rdm-auto-XXXXXX");
+   snprintf(g_db_path, sizeof(g_db_path), "%s/aimee-rdm-auto-XXXXXX", platform_tmpdir());
    int fd = mkstemp(g_db_path);
    assert(fd >= 0);
    close(fd);

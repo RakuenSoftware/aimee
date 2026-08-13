@@ -195,7 +195,8 @@ int main(void)
    g_managed_identity = 0;
    printf("ok: managed identity is a fallback and never fills a partial explicit packet\n");
 
-   char path[] = "/tmp/aimee-write-tier-db1-XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee-write-tier-db1-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    close(fd);

@@ -25,6 +25,7 @@
 #include <aimee/audit/audit_ledger.h>
 #include "cJSON.h"
 #include "log.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define N 5000
 
@@ -50,7 +51,8 @@ int main(void)
 {
    printf("test_bus_audit_durability:\n");
 
-   char home[] = "/tmp/aimee-busaudit-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-busaudit-XXXXXX", platform_tmpdir());
    if (!mkdtemp(home))
    {
       fprintf(stderr, "FAIL: tmp home\n");

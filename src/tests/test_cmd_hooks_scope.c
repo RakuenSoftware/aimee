@@ -6,6 +6,7 @@
 #include <string.h>
 #include "headers/cmd_hooks_scope.h"
 #include "cJSON.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void test_hook_payload_session_id_prefers_payload(void)
 {
@@ -85,7 +86,8 @@ static void test_hook_payload_cwd_reads_nested_string(void)
 
 static void test_hook_scope_project_is_not_configured_workspace(void)
 {
-   char root[] = "/tmp/aimee-hook-scope-XXXXXX";
+   char root[256];
+   snprintf(root, sizeof root, "%s/aimee-hook-scope-XXXXXX", platform_tmpdir());
    assert(mkdtemp(root) != NULL);
 
    char config_dir[512];

@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 int main(void)
 {
@@ -71,7 +72,8 @@ int main(void)
    }
 
    /* --- live registry merged with a config override file --- */
-   char tmpl[] = "/tmp/hmem_scopes_XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/hmem_scopes_XXXXXX", platform_tmpdir());
    int fd = mkstemp(tmpl);
    assert(fd >= 0);
    const char *cfg = "# test scopes\n"

@@ -8,10 +8,14 @@
 
 #include "aimee_client.h"
 #include "cli_remote.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define PASS(name) printf("  PASS: %s\n", name)
 
-static char g_home[] = "/tmp/aimee_test_remote_XXXXXX";
+/* Filled in main() before mkdtemp: the template has to be built at RUNTIME now
+ * that it comes from platform_tmpdir(), and a file-scope initializer cannot
+ * call anything. */
+static char g_home[256];
 
 static void reset_state(void)
 {
@@ -160,6 +164,7 @@ static void test_https_set_restores_insecure_env(void)
 int main(void)
 {
    /* Isolate AIMEE_HOME so we never touch the real config. */
+   snprintf(g_home, sizeof g_home, "%s/aimee_test_remote_XXXXXX", platform_tmpdir());
    char *dir = mkdtemp(g_home);
    assert(dir != NULL);
    setenv("AIMEE_HOME", dir, 1);

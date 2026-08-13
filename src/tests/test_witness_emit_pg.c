@@ -29,6 +29,7 @@
 #include "db2/db_postgres.h"
 #include "modules/vault/vault_witness_offline.h"
 #include "modules/vault/vault_witness_signer.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* Captured emission stream. */
 static uint8_t g_stream[1 << 22];
@@ -69,7 +70,8 @@ int main(void)
       printf("witness_emit_pg: SKIP (AIMEE_TEST_PG_URL unset)\n");
       return 0;
    }
-   char home[] = "/tmp/aimee-witness-emit-home-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-witness-emit-home-XXXXXX", platform_tmpdir());
    if (!mkdtemp(home))
    {
       fprintf(stderr, "mkdtemp failed\n");

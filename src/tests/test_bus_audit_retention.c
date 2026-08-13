@@ -20,6 +20,7 @@
 
 #include <aimee/audit/obs_bus.h>
 #include "log.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define KEEP 16 /* must match AB_CAP_KEEP in obs_bus.c */
 
@@ -64,7 +65,8 @@ int main(void)
 {
    printf("test_bus_audit_retention:\n");
 
-   char home[] = "/tmp/aimee-busret-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-busret-XXXXXX", platform_tmpdir());
    if (!mkdtemp(home))
    {
       fprintf(stderr, "FAIL: tmp home\n");

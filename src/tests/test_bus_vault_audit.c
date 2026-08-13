@@ -25,6 +25,7 @@
 #include "vault_crypto.h" /* VAULT_ROOT_KEY_LEN */
 #include "vault_kek_cache.h"
 #include "vault_service.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static const long T0 = 100000;
 
@@ -68,7 +69,8 @@ int main(void)
 {
    printf("test_bus_vault_audit:\n");
 
-   char home[] = "/tmp/aimee-busvault-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-busvault-XXXXXX", platform_tmpdir());
    if (!mkdtemp(home))
    {
       fprintf(stderr, "FAIL: tmp home\n");

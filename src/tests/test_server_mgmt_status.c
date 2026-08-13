@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static server_tls_peer_cert_t peer(char c)
 {
@@ -32,7 +33,8 @@ static kb_mgmt_status_t issue(const server_tls_peer_cert_t *p, uint64_t now)
 
 int main(void)
 {
-   char path[] = "/tmp/aimee-mgmt-status-XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee-mgmt-status-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    close(fd);

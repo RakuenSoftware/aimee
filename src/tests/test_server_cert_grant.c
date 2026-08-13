@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* --- captured handler output ------------------------------------------- */
 
@@ -293,7 +294,8 @@ static void test_cn_required(void)
 
 int main(void)
 {
-   char tmpl[] = "/tmp/aimee-cert-grant-XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee-cert-grant-XXXXXX", platform_tmpdir());
    char *dir = mkdtemp(tmpl);
    assert(dir);
    char caps[512];

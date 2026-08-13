@@ -30,6 +30,7 @@
 
 #include "cJSON.h"
 #include "sandbox_learned.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* ---- the faked collaborators -------------------------------------------- */
 
@@ -115,7 +116,8 @@ static const char *field(const char *name)
 
 int main(void)
 {
-   char home[] = "/tmp/aimee-learned-observe-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-learned-observe-XXXXXX", platform_tmpdir());
    assert(mkdtemp(home) != NULL);
    assert(snprintf(repo, sizeof repo, "%s/repo", home) > 0);
    run("git init -q '%s'", repo);

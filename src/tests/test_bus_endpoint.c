@@ -8,10 +8,12 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 int main(void)
 {
-   char directory[] = "/tmp/aimee-bus-endpoint-XXXXXX";
+   char directory[256];
+   snprintf(directory, sizeof directory, "%s/aimee-bus-endpoint-XXXXXX", platform_tmpdir());
    assert(mkdtemp(directory) != NULL);
    char path[256];
    assert(snprintf(path, sizeof(path), "%s/attach.sock", directory) > 0);
