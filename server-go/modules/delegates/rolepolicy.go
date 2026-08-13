@@ -20,7 +20,7 @@ const (
 	rolePolicyRequestMagic  uint32 = 0x514c5244 /* "DRLQ" */
 	rolePolicyResponseMagic uint32 = 0x534c5244 /* "DRLS" */
 	rolePolicyRequestLen           = 16 + roleMax + 1
-	rolePolicyResponseLen          = 28
+	rolePolicyResponseLen          = 32
 )
 
 // canonicalRole folds an alias onto the role it names. Doing it here rather
@@ -79,6 +79,48 @@ func RoleResultCacheEnabled(role string) bool {
 		return true
 	}
 	return false
+}
+
+// TaskShape says what KIND of work a role does. It shapes how context is
+// assembled and which opening instruction the run gets. It is not a permission
+// and it grants nothing.
+//
+// The values match task_type_t in src/headers/agent_types.h.
+type TaskShape uint32
+
+const (
+	TaskGeneral TaskShape = iota
+	TaskBugFix
+	TaskRefactor
+	TaskFeature
+	TaskReview
+	TaskTest
+)
+
+// RoleTaskShape maps a role onto the shape of work it does.
+//
+// This replaces a keyword scan of the brief. That scan read the prose at every
+// context refresh, so a long review whose prompt said "must be fixed" was
+// reclassified as a bug fix mid-run and handed execution-agent instructions
+// partway through the job it was doing correctly. The role is stated once by
+// the caller and does not change while the run is in flight.
+//
+// A role nobody mapped is general, which is the same neutral weighting the
+// keyword scan fell back to when it recognised nothing.
+func RoleTaskShape(role string) TaskShape {
+	switch canonicalRole(role) {
+	case "review":
+		return TaskReview
+	case "diagnose":
+		return TaskBugFix
+	case "refactor":
+		return TaskRefactor
+	case "code":
+		return TaskFeature
+	case "validate", "test":
+		return TaskTest
+	}
+	return TaskGeneral
 }
 
 // RoleNeedsParentDiffEvidence reports whether a read-only inspection role should
@@ -159,5 +201,6 @@ func handleRolePolicy(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 	putBool(response[16:20], RoleAutoToolsForInvocation(role, maxTurns, explicitTools))
 	binary.LittleEndian.PutUint32(response[20:24], uint32(int32(RoleFinalAfterTurns(role))))
 	putBool(response[24:28], RoleNeedsParentDiffEvidence(role))
+	binary.LittleEndian.PutUint32(response[28:32], uint32(RoleTaskShape(role)))
 	return response, bus.ModuleStatusOK
 }

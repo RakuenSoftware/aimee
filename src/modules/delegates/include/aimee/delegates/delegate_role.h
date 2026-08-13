@@ -23,6 +23,7 @@ void delegate_role_register_canonicalizer(delegate_role_canonicalizer_fn canonic
 #define DELEGATE_ROLE_OP_AUTO_TOOLS   3
 #define DELEGATE_ROLE_OP_FINAL_TURNS  4
 #define DELEGATE_ROLE_OP_PARENT_DIFF  5
+#define DELEGATE_ROLE_OP_TASK_SHAPE   6
 
 typedef int (*delegate_role_policy_fn)(int op, const char *role, int a, int b, int *out);
 void delegate_register_role_policy_provider(delegate_role_policy_fn provider);
@@ -52,6 +53,13 @@ int delegate_role_auto_tools_for_invocation(const char *role, int max_turns, int
  * Fails to 0: with no provider the delegate simply runs without the extra
  * context, which is what it did before this evidence existed. */
 int delegate_role_needs_parent_diff(const char *role);
+
+/* What SHAPE of work this role does, as task_type_t (see agent_types.h). It
+ * shapes context assembly and the opening instruction; it grants nothing.
+ *
+ * Fails to 0 (general), which is the neutral weighting -- the same answer the
+ * keyword scan this replaced gave when it recognised nothing. */
+int delegate_role_task_shape(const char *role);
 
 
 /* Apply a one-shot CLI max-turn override to every configured delegate route.

@@ -1818,6 +1818,7 @@ $(TESTPREFIX)/unit-test-cli-provider: $(OBJDIR)/tests/test_cli_provider.o $(OBJD
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-context-assembly: $(OBJDIR)/tests/test_context_assembly.o \
+                                 $(OBJDIR)/tests/support/delegate_role_policy_stub.o \
                                  $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

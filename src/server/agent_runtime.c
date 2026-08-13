@@ -1359,68 +1359,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    return out->success ? 0 : -1;
 }
 
-/* --- Task type classification --- */
-
-typedef struct
-{
-   const char *word;
-   task_type_t type;
-} task_keyword_t;
-
-static const task_keyword_t task_keywords[] = {
-    {"fix", TASK_TYPE_BUG_FIX},         {"bug", TASK_TYPE_BUG_FIX},
-    {"error", TASK_TYPE_BUG_FIX},       {"crash", TASK_TYPE_BUG_FIX},
-    {"fail", TASK_TYPE_BUG_FIX},        {"broken", TASK_TYPE_BUG_FIX},
-    {"regression", TASK_TYPE_BUG_FIX},  {"refactor", TASK_TYPE_REFACTOR},
-    {"rename", TASK_TYPE_REFACTOR},     {"extract", TASK_TYPE_REFACTOR},
-    {"reorganize", TASK_TYPE_REFACTOR}, {"clean", TASK_TYPE_REFACTOR},
-    {"add", TASK_TYPE_FEATURE},         {"implement", TASK_TYPE_FEATURE},
-    {"create", TASK_TYPE_FEATURE},      {"new", TASK_TYPE_FEATURE},
-    {"build", TASK_TYPE_FEATURE},       {"support", TASK_TYPE_FEATURE},
-    {"review", TASK_TYPE_REVIEW},       {"check", TASK_TYPE_REVIEW},
-    {"audit", TASK_TYPE_REVIEW},        {"verify", TASK_TYPE_REVIEW},
-    {"validate", TASK_TYPE_REVIEW},     {"test", TASK_TYPE_TEST},
-    {"coverage", TASK_TYPE_TEST},       {"assert", TASK_TYPE_TEST},
-    {"spec", TASK_TYPE_TEST},           {NULL, TASK_TYPE_GENERAL}};
-
-task_type_t task_type_classify(const char *prompt)
-{
-   if (!prompt || !prompt[0])
-      return TASK_TYPE_GENERAL;
-
-   /* Lowercase copy for matching */
-   char lower[512];
-   size_t len = strlen(prompt);
-   if (len >= sizeof(lower))
-      len = sizeof(lower) - 1;
-   for (size_t i = 0; i < len; i++)
-      lower[i] = (char)((prompt[i] >= 'A' && prompt[i] <= 'Z') ? prompt[i] + 32 : prompt[i]);
-   lower[len] = '\0';
-
-   /* Scan for keyword matches (first match wins) */
-   for (int i = 0; task_keywords[i].word; i++)
-   {
-      const char *kw = task_keywords[i].word;
-      size_t kwlen = strlen(kw);
-      const char *p = lower;
-      while ((p = strstr(p, kw)) != NULL)
-      {
-         /* Check word boundary: must be at start or after non-alpha */
-         int at_start = (p == lower) || (*(p - 1) == ' ' || *(p - 1) == '\t' || *(p - 1) == '-' ||
-                                         *(p - 1) == '_' || *(p - 1) == '/');
-         /* Check end boundary: must be at end or before non-alpha */
-         char after = p[kwlen];
-         int at_end = (after == '\0' || after == ' ' || after == '\t' || after == '-' ||
-                       after == '_' || after == '/' || after == '.' || after == ',' ||
-                       after == 'e' || after == 'i' || after == 's');
-         if (at_start && at_end)
-            return task_keywords[i].type;
-         p += kwlen;
-      }
-   }
-
-   return TASK_TYPE_GENERAL;
-}
+/* --- Task type --- */
 
 const char *task_type_name(task_type_t type)
 {
@@ -1536,17 +1475,12 @@ static const char *agent_context_cwd(char *buf, size_t buf_len)
  * calling tools and is killed with "max turns exhausted without final
  * response". Tools stay available -- a reviewer may need evidence -- but
  * gathering it is optional and answering is mandatory. */
-task_type_t agent_task_type_for_role(const char *role, const char *prompt)
+task_type_t agent_task_type_for_role(const char *role)
 {
-   /* A caller that declares its role has told us the task; classifying the
-    * prose as well can only disagree with it. It did: the roundtable panel
-    * prompt says "must fail closed" and "must be fixed", and the keyword table
-    * is scanned in its own order with bug-fix terms ahead of "review", so every
-    * review classified as a bug fix and was handed execution-agent
-    * instructions. */
-   if (role && role[0] && strcmp(role, "review") == 0)
-      return TASK_TYPE_REVIEW;
-   return task_type_classify(prompt);
+   int shape = delegate_role_task_shape(role);
+   if (shape < 0 || shape >= TASK_TYPE_COUNT)
+      return TASK_TYPE_GENERAL;
+   return (task_type_t)shape;
 }
 
 const char *agent_exec_instructions(task_type_t task_type)
@@ -1583,7 +1517,7 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
                                         const char *role, const char *custom_prompt,
                                         int skip_kb_context)
 {
-   task_type_t task_type = agent_task_type_for_role(role, custom_prompt);
+   task_type_t task_type = agent_task_type_for_role(role);
    if (task_type != TASK_TYPE_GENERAL)
       aimee_log(LOG_DEBUG, "agent_context", "context assembly: task_type=%s",
                 task_type_name(task_type));

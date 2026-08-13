@@ -35,6 +35,27 @@ int delegate_role_needs_parent_diff(const char *role)
                    strcmp(role, "diagnose") == 0);
 }
 
+/* The shape of work a role does, as task_type_t. Mirrors the module's map for
+ * the same reason as the rest of this file; the map itself is pinned against
+ * the module in server-go/modules/delegates/rolepolicy_test.go. */
+int delegate_role_task_shape(const char *role)
+{
+   role = test_delegate_policy_role(role);
+   if (!role)
+      return 0; /* TASK_TYPE_GENERAL */
+   if (strcmp(role, "review") == 0)
+      return 4; /* TASK_TYPE_REVIEW */
+   if (strcmp(role, "diagnose") == 0)
+      return 1; /* TASK_TYPE_BUG_FIX */
+   if (strcmp(role, "refactor") == 0)
+      return 2; /* TASK_TYPE_REFACTOR */
+   if (strcmp(role, "code") == 0)
+      return 3; /* TASK_TYPE_FEATURE */
+   if (strcmp(role, "validate") == 0 || strcmp(role, "test") == 0)
+      return 5; /* TASK_TYPE_TEST */
+   return 0;
+}
+
 int delegate_role_auto_tools_for_invocation(const char *role, int max_turns, int explicit_tools)
 {
    if (explicit_tools)

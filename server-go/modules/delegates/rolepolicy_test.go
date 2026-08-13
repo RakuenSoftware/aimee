@@ -266,4 +266,3 @@ func TestAnAliasIsConfinedLikeTheRoleItResolvesTo(t *testing.T) {
 		t.Error("validate is not confined, so neither is its alias")
 	}
 }
-
