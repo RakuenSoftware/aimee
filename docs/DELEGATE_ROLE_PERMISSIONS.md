@@ -105,18 +105,21 @@ implies. The permission is checked whatever that map returns.
 Scope inherits the same limit, because a scope is only real where the
 enforcement point can see the object.
 
-- **`repo_write` narrowed to two repositories works.** The mount decides which
-  are read-write.
-- **`knowledge_write` narrowed to a namespace works.** The API sees what is being
-  written.
+- **`repo_write` narrowed to a list of repositories is enforced.** The object
+  matched is the repository the caller pointed the delegate at. Named one that is
+  not on the list, or none at all, and the delegate runs read-only.
+- **`knowledge_write` narrowed to a namespace is NOT enforced today.** The scope
+  is carried and nothing evaluates it, so the permission behaves as if unscoped.
+  Write it if you intend to, but do not rely on it yet.
 - **`shell` narrowed to a directory does not work at the tool layer.** A shell
   goes wherever the filesystem lets it. Written anyway, that scope is a statement
   about what gets mounted, and is enforced there or not at all.
 
 Scopes match exactly. A prefix rule would make `/srv/repo` grant
-`/srv/repo-secrets`, and nobody writing the first means the second. (A
+`/srv/repo-secrets`, and nobody writing the first means the second. A
 subdirectory is a different object too: `/srv/repo` does not cover
-`/srv/repo/sub`. List what you mean.)
+`/srv/repo/sub`, so a delegate pointed at the subdirectory runs read-only. List
+what you mean.
 
 ## Defining a role at runtime
 

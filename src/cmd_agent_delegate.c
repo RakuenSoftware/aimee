@@ -1191,8 +1191,17 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 
    /* Read, not resolved: delegate_perms was established before the tool default
       above, and this is the same answer. */
-   int delegate_allows_writes =
-       delegate_permissions_has(&delegate_perms, AIMEE_DELEGATES_PERM_REPO_WRITE);
+   int delegate_allows_writes = 0;
+   /* Scoped against the repository this delegate was pointed at. See the same
+      decision in server_compute.c for why that is the object and why the match
+      is exact. */
+   {
+      char here[MAX_PATH_LEN] = "";
+      if (!getcwd(here, sizeof(here)))
+         here[0] = '\0';
+      delegate_allows_writes =
+          delegate_permissions_allow(&delegate_perms, AIMEE_DELEGATES_PERM_REPO_WRITE, here);
+   }
    if (worktree_branch && worktree_branch[0] && !delegate_allows_writes)
       fatal("--worktree is only valid for write-capable delegates; read-only delegates must "
             "use the parent worktree");

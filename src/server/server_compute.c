@@ -1272,8 +1272,24 @@ void delegate_worker(void *arg)
     * narrow a write role to read-only, which meant the same delegate had
     * different powers depending on how its prompt was worded. The role decides;
     * a read-only run is a read-only role. */
+   /* Scoped against the repository the CALLER named. That is the object an
+    * operator means by `scopes: [/srv/repo-a]`, and it is the only one known
+    * this early -- the delegate's own worktree does not exist yet, and its path
+    * would not match a scope anyone wrote.
+    *
+    * Matching is exact, so a delegate pointed at a subdirectory of a scoped
+    * repository is read-only. That is the documented rule and the safe one: the
+    * alternative is a prefix match, where /srv/repo grants /srv/repo-secrets.
+    *
+    * No cwd and a scoped grant means read-only too. Nothing shows the target is
+    * in scope, and "probably fine" is not a permission. */
    int delegate_allows_writes =
-       delegate_permissions_has(&delegate_perms, AIMEE_DELEGATES_PERM_REPO_WRITE);
+       delegate_permissions_allow(&delegate_perms, AIMEE_DELEGATES_PERM_REPO_WRITE, cwd);
+   if (!delegate_allows_writes &&
+       delegate_permissions_has(&delegate_perms, AIMEE_DELEGATES_PERM_REPO_WRITE))
+      aimee_log(LOG_INFO, "delegate",
+                "delegate %s: role '%s' holds repo_write but not for '%s', so it runs read-only",
+                deleg_id, role, cwd[0] ? cwd : "(no workspace named)");
    if (branch && !delegate_allows_writes)
    {
       delegation_compute_error(cctx, "read-only delegates must use the parent worktree; branch "

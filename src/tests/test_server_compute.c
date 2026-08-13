@@ -2513,6 +2513,62 @@ static void test_a_defined_role_without_tools_is_not_given_them(void)
    printf("  PASS: test_a_defined_role_without_tools_is_not_given_them\n");
 }
 
+/* A scoped `repo_write` only covers what it lists.
+ *
+ * The delegate below names no workspace at all, so nothing shows its target is
+ * in scope and it runs read-only. It RUNS, which is the assertion: a
+ * write-capable delegate cannot get through this harness, so reaching "done" is
+ * how read-only shows up here.
+ *
+ * The object matched is the repository the CALLER named, because that is what an
+ * operator means by a path in `scopes:` and the only thing that exists when the
+ * decision is made. The recorded answer lives in delegate_permissions_stub.c. */
+static void test_a_scoped_repo_write_does_not_cover_an_unnamed_workspace(void)
+{
+   reset_last_response();
+   g_role_definition = "permissions:\n  - name: repo_write\n    scopes: [/srv/repo-a]\n";
+   g_agent_run_calls = g_agent_tool_run_calls = 0;
+
+   int fds[2];
+   assert(pipe(fds) == 0);
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   conn->fd = fds[1];
+   g_agent_response = "scoped role ran";
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "role", "code");
+   cJSON_AddStringToObject(req, "persona", "engineer");
+   cJSON_AddStringToObject(req, "prompt", "run the scoped repo_write test prompt");
+   /* No cwd, which is the other half of the rule: with a scoped grant and
+      nothing naming the target, there is no way to show it is in scope, so the
+      delegate is read-only. "Probably fine" is not a permission. */
+   assert(handle_delegate(ctx, conn, req) == 0);
+   assert(g_submitted_fn == delegate_worker && g_submitted_arg != NULL);
+   g_submitted_fn(g_submitted_arg);
+   g_submitted_arg = NULL;
+   close(fds[1]);
+   char buf[2048];
+   ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
+   assert(n >= 0);
+   close(fds[0]);
+
+   db1_agent_job_t job;
+   assert(delegate_current_job(&job) == 0);
+   /* It RAN. A write-capable delegate in this harness cannot: it refuses a
+      workspace with no checkout. Read-only is the whole assertion. */
+   assert(strcmp(job.status, "done") == 0);
+   db1_agent_job_free(&job);
+
+   g_role_definition = NULL;
+   run_cmd_set_cwd(NULL);
+   cJSON_Delete(req);
+   reset_last_response();
+   free(conn);
+   free(ctx);
+   printf("  PASS: test_a_scoped_repo_write_does_not_cover_an_unnamed_workspace\n");
+}
+
 static void test_direct_delegate_max_turns_override(void)
 {
    reset_last_response();
@@ -3884,6 +3940,7 @@ int main(void)
    test_direct_delegate_no_tools_forces_no_tools();
    test_direct_delegate_one_turn_diagnose_suppresses_default_tools();
    test_a_defined_role_without_tools_is_not_given_them();
+   test_a_scoped_repo_write_does_not_cover_an_unnamed_workspace();
    test_direct_delegate_max_turns_override();
    test_read_only_delegate_uses_parent_workspace();
    test_provided_review_target_suppresses_worktree_evidence();
