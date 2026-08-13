@@ -56,14 +56,44 @@ typedef struct cJSON cJSON;
  * only report as "could not reach the endpoint" — blaming a server that is up
  * and answering. The sibling LIMIT_* values below are already documented against
  * it. */
-#define SHTTP_MAX_BODY            (4 * 1024 * 1024)
-#define SHTTP_MAX_ROUNDTABLE_BODY (128 * 1024 * 1024)
+#define SHTTP_MAX_BODY (4 * 1024 * 1024)
+
+/* The roundtable review artifact is hard-limited where the CLI reads it --
+ * marshal_read_stdin_limited / marshal_read_file_limited in cli_v1_routes.c, all
+ * three call sites -- so a review body is that artifact plus a small envelope.
+ *
+ * THE ARTIFACT IS BOUNDED BY THE REVIEWING MODEL, NOT BY THE WIRE. It is the
+ * thing being read, so an artifact bigger than the context that has to hold it
+ * cannot be reviewed -- it is truncated or refused downstream, and accepting it
+ * here only moves the failure later. A 1M-token context holds roughly 3-4MB of
+ * code (code tokenizes at about 3-3.5 chars/token), so 8MB is already twice the
+ * largest artifact that can be read, leaving room for tokenizer variance and
+ * multi-byte UTF-8.
+ *
+ * For scale on this repo: the largest single source file is 0.25MB, and EVERY
+ * .c and .h in src/ concatenated is 32.8MB -- more than the 16MB artifact limit
+ * this replaces, so "review the whole tree at once" was never possible under
+ * the old number either.
+ *
+ * The transport cap is TWICE the artifact. Real review text and diffs escape at
+ * about 1.02x; the doubling covers the envelope and the realistic worst case
+ * where most bytes are quotes, backslashes or tabs (2 bytes escaped each).
+ *
+ * It was 128MB, from assuming a 6x blowup -- every byte a control character
+ * escaping to \u00XX -- rounded up to 2^27, which made this route accept 32x
+ * what the rest of /v1 does. An artifact dense enough to need that is not a
+ * review artifact, and it is refused with both numbers named rather than
+ * silently truncated. If one ever genuinely needs more room, raise
+ * ROUNDTABLE_MAX_ARTIFACT and let the cap follow; do not re-inflate the
+ * transport limit on its own. */
+#define ROUNDTABLE_MAX_ARTIFACT   (8 * 1024 * 1024)
+#define SHTTP_MAX_ROUNDTABLE_BODY (2 * ROUNDTABLE_MAX_ARTIFACT)
 
 /* Per-method payload size limits */
 #define LIMIT_MEMORY     (256 * 1024)        /* 256KB for memory operations */
 #define LIMIT_TOOL       (4 * 1024 * 1024)   /* 4MB for tool I/O */
 #define LIMIT_DELEGATE   (4 * 1024 * 1024)   /* 4MB: supports 2MB prompt-file + JSON overhead */
-#define LIMIT_ROUNDTABLE (128 * 1024 * 1024) /* 16MB artifact plus worst-case JSON escaping */
+#define LIMIT_ROUNDTABLE SHTTP_MAX_ROUNDTABLE_BODY /* artifact + JSON escaping; see above */
 #define LIMIT_CHAT       (512 * 1024)        /* 512KB for chat messages */
 #define LIMIT_INGEST     (1024 * 1024)       /* 1MB: client-pushed code files (kb req cap) */
 #define LIMIT_TRANSCRIPT                                                                           \
