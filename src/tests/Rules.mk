@@ -343,6 +343,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-cmd-delegate \
                $(TESTPREFIX)/unit-test-delegate-plan \
                $(TESTPREFIX)/unit-test-delegate-role \
+               $(TESTPREFIX)/unit-test-delegate-permissions \
                $(TESTPREFIX)/unit-test-sse-parser \
                $(TESTPREFIX)/unit-test-anthropic-ingress \
                $(TESTPREFIX)/unit-test-anthropic-http \
@@ -4083,6 +4084,13 @@ $(TESTPREFIX)/unit-test-delegate-plan: $(OBJDIR)/tests/test_delegate_plan.o \
 
 $(TESTPREFIX)/unit-test-delegate-role: $(OBJDIR)/tests/test_delegate_role.o \
                              $(OBJDIR)/modules/delegates/delegate_role.o $(OBJDIR)/role_templates.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+# The C side of the resolved permission set: reading the module's answer into a
+# fixed-size held set. Minimal by design — the seam and the wire, nothing else.
+$(TESTPREFIX)/unit-test-delegate-permissions: $(OBJDIR)/tests/test_delegate_permissions.o \
+                             $(OBJDIR)/modules/delegates/delegate_launch_args.o \
+                             $(OBJDIR)/log.o $(OBJDIR)/aimee_home.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 # Core panel-provider boundary (#1845). Part of the roundtable-profiles CI gate's
