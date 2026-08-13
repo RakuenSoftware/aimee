@@ -814,8 +814,7 @@ static void test_search_json_structured(void)
    /* MEMORY_EMBED_TEST_FIXTURE deliberately embeds distinct text differently.
     * A dense-only weak query must use the same RRF score space as the strong
     * lexical+dense hit above, not retain a raw cosine that can look larger. */
-   char *weak = kb_search_json("test_jsearch", "authenticatio",
-                               MEMORY_EMBED_TEST_FIXTURE, 3);
+   char *weak = kb_search_json("test_jsearch", "authenticatio", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(weak != NULL);
    cJSON *weak_root = cJSON_Parse(weak);
    assert(weak_root != NULL);
