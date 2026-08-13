@@ -1014,6 +1014,19 @@ static int delegate_drift(const uint8_t *request, size_t request_len, unsigned *
                                                 message_cap);
 }
 
+/* What a delegate may do. A passthrough: the caller encodes, because the caller
+ * holds the role and the definition that came with it. */
+static int delegate_permissions(const uint8_t *request, size_t request_len, uint8_t *response,
+                                size_t response_cap, size_t *response_len)
+{
+   uint32_t got = 0;
+   if (call_module(AIMEE_DELEGATES_EVENT_PERMS, AIMEE_DELEGATES_STAGE_PERMS, request,
+                   (uint32_t)request_len, response, (uint32_t)response_cap, &got) != 0)
+      return -1;
+   *response_len = got;
+   return 0;
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -1240,6 +1253,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_launch_plan_provider(delegate_launch_plan);
    delegate_register_review_evidence_provider(delegate_review_evidence);
    delegate_register_drift_provider(delegate_drift);
+   delegate_register_permissions_provider(delegate_permissions);
    agent_tools_register_classifier(tool_classify);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path

@@ -1340,4 +1340,88 @@ static inline int aimee_delegates_drift_response_decode(const uint8_t *in, size_
    return r.bad ? -1 : 0;
 }
 
+/* --- Delegate permissions (stage 22): what a delegate may do.
+ *
+ * Resolved ONCE, when the delegate is created, and carried for the life of the
+ * run. Nothing downstream works the answer out again: the mount reads it, the
+ * tool allowlist reads it, the API reads it. A permission derived twice can
+ * disagree with itself, which this codebase has done twice.
+ *
+ * The caller sends the role, and the role definition when an operator wrote one.
+ * What comes back is the resolved set: each permission, where it is enforced,
+ * what it is scoped to, and the list of permissions nothing is enforcing.
+ *
+ * See docs/DELEGATE_ROLE_PERMISSIONS.md. */
+
+#define AIMEE_DELEGATES_EVENT_PERMS          6678u
+#define AIMEE_DELEGATES_STAGE_PERMS          22u
+#define AIMEE_DELEGATES_PERMS_REQUEST_MAGIC  0x51524550u /* "PERQ" */
+#define AIMEE_DELEGATES_PERMS_RESPONSE_MAGIC 0x53524550u /* "PERS" */
+
+/* A role definition follows. Absent, the built-in table answers, and the two
+ * differ: a definition granting nothing is a deliberate powerless role, while no
+ * definition at all falls back to what ships. */
+#define AIMEE_DELEGATES_PERMS_DEFINED (1u << 0)
+
+/* The permissions this build guarantees, and where each is enforced. Names are
+ * the contract with whoever writes a role definition. */
+#define AIMEE_DELEGATES_PERM_TOOLS           "tools"
+#define AIMEE_DELEGATES_PERM_SHELL           "shell"
+#define AIMEE_DELEGATES_PERM_REPO_WRITE      "repo_write"
+#define AIMEE_DELEGATES_PERM_KNOWLEDGE_WRITE "knowledge_write"
+
+static inline void aimee_delegates_perms_request_begin(aimee_delegates_wire_t *w, uint8_t *buf,
+                                                       size_t cap, unsigned flags, const char *role)
+{
+   aimee_delegates_wire_init(w, buf, cap);
+   aimee_delegates_wire_u32(w, AIMEE_DELEGATES_PERMS_REQUEST_MAGIC);
+   aimee_delegates_wire_u32(w, (uint32_t)AIMEE_DELEGATES_WIRE_VERSION);
+   aimee_delegates_wire_u32(w, flags);
+   aimee_delegates_wire_str(w, role);
+}
+
+/* Append one declared grant. `enforced_at` may be "" to take the built-in
+ * default; `scopes` may be NULL when the grant is unrestricted. */
+static inline void aimee_delegates_perms_request_grant(aimee_delegates_wire_t *w, const char *name,
+                                                       const char *enforced_at,
+                                                       const char *const *scopes, int scope_count)
+{
+   aimee_delegates_wire_str(w, name);
+   aimee_delegates_wire_str(w, enforced_at ? enforced_at : "");
+   aimee_delegates_wire_u32(w, (uint32_t)(scope_count > 0 ? scope_count : 0));
+   for (int i = 0; i < scope_count; i++)
+      aimee_delegates_wire_str(w, scopes[i]);
+}
+
+/* Reads the response header and leaves `r` positioned at the first grant.
+ * Returns the grant count, or -1 on a malformed response. */
+static inline int aimee_delegates_perms_response_begin(aimee_delegates_rd_t *r, const uint8_t *in,
+                                                       size_t len)
+{
+   r->buf = in;
+   r->len = len;
+   r->at = 0;
+   r->bad = 0;
+   if (!in || aimee_delegates_rd_u32(r) != AIMEE_DELEGATES_PERMS_RESPONSE_MAGIC)
+      return -1;
+   uint32_t count = aimee_delegates_rd_u32(r);
+   return r->bad ? -1 : (int)count;
+}
+
+/* Reads one grant: its name, where it is enforced, and how many scopes follow.
+ * The scopes themselves are read with aimee_delegates_rd_str. */
+static inline int aimee_delegates_perms_response_grant(aimee_delegates_rd_t *r, char *name,
+                                                       size_t name_cap, char *enforced_at,
+                                                       size_t enforced_cap, int *scope_count)
+{
+   aimee_delegates_rd_str(r, name, name_cap);
+   aimee_delegates_rd_str(r, enforced_at, enforced_cap);
+   uint32_t count = aimee_delegates_rd_u32(r);
+   if (r->bad)
+      return -1;
+   if (scope_count)
+      *scope_count = (int)count;
+   return 0;
+}
+
 #endif

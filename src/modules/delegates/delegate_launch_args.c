@@ -201,6 +201,7 @@ static delegate_noop_write_fn g_noop_write;
 static delegate_launch_plan_fn g_launch_plan;
 static delegate_review_evidence_fn g_review_evidence;
 static delegate_drift_fn g_drift;
+static delegate_permissions_fn g_permissions;
 
 void delegate_register_noop_write_provider(delegate_noop_write_fn provider)
 {
@@ -289,4 +290,25 @@ int delegate_drift_judge(const uint8_t *request, size_t request_len, unsigned *s
       return -1;
    }
    return g_drift(request, request_len, severity, message, message_cap);
+}
+
+void delegate_register_permissions_provider(delegate_permissions_fn provider)
+{
+   g_permissions = provider;
+}
+
+int delegate_permissions_resolve(const uint8_t *request, size_t request_len, uint8_t *response,
+                                 size_t response_cap, size_t *response_len)
+{
+   if (response_len)
+      *response_len = 0;
+   if (!g_permissions)
+   {
+      LOG_ERROR("delegates",
+                "no permissions provider registered; the delegate holds nothing and may only read");
+      return -1;
+   }
+   if (!request || !response || !response_len)
+      return -1;
+   return g_permissions(request, request_len, response, response_cap, response_len);
 }

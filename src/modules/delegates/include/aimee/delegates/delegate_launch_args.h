@@ -198,4 +198,24 @@ void delegate_register_drift_provider(delegate_drift_fn provider);
 int delegate_drift_judge(const uint8_t *request, size_t request_len, unsigned *severity,
                          char *message, size_t message_cap);
 
+/* Stage 22: what a delegate may do.
+ *
+ * Bytes rather than a struct, like the other seams that carry a set: the caller
+ * holds the role and whatever definition an operator wrote, and the answer is a
+ * list whose length nobody knows in advance.
+ *
+ * Fails CLOSED, which here means NO PERMISSIONS. A delegate whose powers cannot
+ * be established gets none: it reads, and it changes nothing. That is the safe
+ * direction for every permission in the set, which is not true of most seams in
+ * this file and is why it is stated here. */
+typedef int (*delegate_permissions_fn)(const uint8_t *request, size_t request_len,
+                                       uint8_t *response, size_t response_cap,
+                                       size_t *response_len);
+
+void delegate_register_permissions_provider(delegate_permissions_fn provider);
+
+/* Returns 0 and fills `response` on success, -1 on any failure (logged). */
+int delegate_permissions_resolve(const uint8_t *request, size_t request_len, uint8_t *response,
+                                 size_t response_cap, size_t *response_len);
+
 #endif
