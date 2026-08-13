@@ -6,6 +6,7 @@
 #include "db1/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
 #include <aimee/delegates/delegate_role.h>
 #include <aimee/delegates/delegate_launch_args.h>
+#include "role_templates.h"
 #include "provider_catalog.h"
 #include "db2/agent_hints.h"
 #include "db2/agent_outcomes.h"
@@ -656,7 +657,9 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
    if (role && role[0])
    {
       delegate_permissions_t perms;
-      (void)delegate_permissions_for_role(role, &perms);
+      char *definition = role_template_frontmatter(NULL, role);
+      (void)delegate_permissions_for_role(role, definition, &perms);
+      free(definition);
       agent_tools_knowledge_write_set(delegate_permissions_has(&perms, "knowledge_write"));
       ag->write_capable = enforce_writes && delegate_permissions_has(&perms, "repo_write") ? 1 : 0;
    }

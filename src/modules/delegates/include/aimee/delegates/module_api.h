@@ -1380,17 +1380,18 @@ static inline void aimee_delegates_perms_request_begin(aimee_delegates_wire_t *w
    aimee_delegates_wire_str(w, role);
 }
 
-/* Append one declared grant. `enforced_at` may be "" to take the built-in
- * default; `scopes` may be NULL when the grant is unrestricted. */
-static inline void aimee_delegates_perms_request_grant(aimee_delegates_wire_t *w, const char *name,
-                                                       const char *enforced_at,
-                                                       const char *const *scopes, int scope_count)
+/* Append the role template frontmatter an operator wrote, verbatim.
+ *
+ * Only when AIMEE_DELEGATES_PERMS_DEFINED is set. The module parses it: what a
+ * permission block MEANS is a rule, and this side's job is to hand over the
+ * bytes it found on disk. A block the module cannot read fails the whole
+ * request rather than falling back to the built-in table -- falling back would
+ * hand a delegate the powers its role ships with while the operator believes it
+ * holds the ones they wrote. */
+static inline void aimee_delegates_perms_request_definition(aimee_delegates_wire_t *w,
+                                                            const char *frontmatter)
 {
-   aimee_delegates_wire_str(w, name);
-   aimee_delegates_wire_str(w, enforced_at ? enforced_at : "");
-   aimee_delegates_wire_u32(w, (uint32_t)(scope_count > 0 ? scope_count : 0));
-   for (int i = 0; i < scope_count; i++)
-      aimee_delegates_wire_str(w, scopes[i]);
+   aimee_delegates_wire_str(w, frontmatter ? frontmatter : "");
 }
 
 /* Reads the response header and leaves `r` positioned at the first grant.

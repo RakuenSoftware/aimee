@@ -354,6 +354,42 @@ static void test_write_read_delete(void)
    assert(role_template_delete("triage") == 0);
 }
 
+/* The frontmatter is handed over whole and unparsed.
+ *
+ * What a `permissions:` block MEANS is the delegates module's rule, and this
+ * test exists to prove the bytes travel, not to restate the rule: the parse is
+ * proved in server-go/modules/delegates/roledefinition_test.go. */
+static void test_role_frontmatter_is_handed_over_whole(void)
+{
+   char dir[512];
+   snprintf(dir, sizeof(dir), "%s/role_templates", config_default_dir());
+   char mkcmd[600];
+   snprintf(mkcmd, sizeof(mkcmd), "mkdir -p '%s'", dir);
+   assert(system(mkcmd) == 0);
+
+   char path[600];
+   snprintf(path, sizeof(path), "%s/deployer.md", dir);
+   write_file(path, "---\nmax_turns: 40\npermissions:\n  - tools\n  - name: deploy\n"
+                    "    enforced_at: deploy-gate\n---\n\nYou deploy things. {{TASK}}\n");
+
+   char *frontmatter = role_template_frontmatter(NULL, "deployer");
+   assert(frontmatter != NULL);
+   assert(strstr(frontmatter, "permissions:") != NULL);
+   assert(strstr(frontmatter, "enforced_at: deploy-gate") != NULL);
+   assert(strstr(frontmatter, "max_turns: 40") != NULL);
+   /* The fences are not part of it, and neither is the body. */
+   assert(strstr(frontmatter, "---") == NULL);
+   assert(strstr(frontmatter, "You deploy things") == NULL);
+   free(frontmatter);
+
+   /* A template with no frontmatter defines nothing, which is not the same as
+      defining a role with no permissions. */
+   snprintf(path, sizeof(path), "%s/plainly.md", dir);
+   write_file(path, "You are a plain delegate. {{TASK}}\n");
+   assert(role_template_frontmatter(NULL, "plainly") == NULL);
+   assert(role_template_frontmatter(NULL, "no-such-role-at-all") == NULL);
+}
+
 static void test_role_max_turns_frontmatter(void)
 {
    char dir[512];
@@ -412,6 +448,7 @@ int main(void)
    test_install_defaults_null_dir();
    test_write_read_delete();
    test_role_max_turns_frontmatter();
+   test_role_frontmatter_is_handed_over_whole();
    printf("role_templates: all tests passed\n");
    return 0;
 }

@@ -22,15 +22,10 @@ func newPermReq(role string, defined bool) *permReq {
 	return r
 }
 
-func (r *permReq) grants(n int) *permReq {
-	r.w.u32(uint32(n))
-	return r
-}
-
-func (r *permReq) grant(name, enforcedAt string, scopes ...string) *permReq {
-	r.w.str(name)
-	r.w.str(enforcedAt)
-	r.w.strings(scopes)
+// definition appends role template frontmatter, which is what an operator wrote
+// and what the caller found on disk.
+func (r *permReq) definition(frontmatter string) *permReq {
+	r.w.str(frontmatter)
 	return r
 }
 
@@ -48,11 +43,11 @@ func decodePermissions(t *testing.T, b []byte) (map[string]decodedGrant, []strin
 		t.Fatalf("bad response magic")
 	}
 	out := map[string]decodedGrant{}
-	for n := r.count(permissionsMaxGrants); n > 0; n-- {
+	for n := r.count(roleDefinitionMaxGrants); n > 0; n-- {
 		name := r.str()
 		out[name] = decodedGrant{enforcedAt: r.str(), scopes: r.strings(permissionsMaxScopes)}
 	}
-	unenforced := r.strings(permissionsMaxGrants)
+	unenforced := r.strings(roleDefinitionMaxGrants)
 	if !r.done() {
 		t.Fatalf("response has unread bytes")
 	}
@@ -79,11 +74,15 @@ func TestPermissionsStageAnswersFromTheBuiltInTable(t *testing.T) {
 
 // Scopes and the operator's enforcement point survive the trip.
 func TestPermissionsStageCarriesScopesAndPoints(t *testing.T) {
-	request := newPermReq("custom", true).
-		grants(2).
-		grant(PermRepoWrite, "", "/srv/repo-a", "/srv/repo-b").
-		grant("deploy", "deploy-gate", "staging").
-		bytes()
+	request := newPermReq("custom", true).definition(`---
+permissions:
+  - name: repo_write
+    scopes: [/srv/repo-a, /srv/repo-b]
+  - name: deploy
+    scopes: [staging]
+    enforced_at: deploy-gate
+---
+`).bytes()
 
 	response, status := handlePermissions(bus.ModuleInvocation{}, request)
 	if status != bus.ModuleStatusOK {
@@ -110,11 +109,7 @@ func TestPermissionsStageCarriesScopesAndPoints(t *testing.T) {
 
 // The answer the caller must not have to ask twice for.
 func TestPermissionsStageReportsWhatNothingEnforces(t *testing.T) {
-	request := newPermReq("custom", true).
-		grants(2).
-		grant(PermTools, "").
-		grant("deploy", "").
-		bytes()
+	request := newPermReq("custom", true).definition("permissions:\n  - tools\n  - deploy\n").bytes()
 
 	response, status := handlePermissions(bus.ModuleInvocation{}, request)
 	if status != bus.ModuleStatusOK {
@@ -134,7 +129,7 @@ func TestPermissionsStageReportsWhatNothingEnforces(t *testing.T) {
 // the built-in. The wire has to keep those apart.
 func TestAnEmptyDefinitionIsNotTheSameAsNoDefinition(t *testing.T) {
 	empty, status := handlePermissions(bus.ModuleInvocation{},
-		newPermReq("code", true).grants(0).bytes())
+		newPermReq("code", true).definition("permissions:\n").bytes())
 	if status != bus.ModuleStatusOK {
 		t.Fatalf("status %v", status)
 	}
@@ -165,8 +160,11 @@ func TestPermissionsStageRejectsMalformedRequests(t *testing.T) {
 
 	trailing := append(append([]byte(nil), good...), 0)
 
-	hugeCount := newPermReq("review", true).bytes()
-	hugeCount = append(hugeCount, 0xff, 0xff, 0xff, 0xff)
+	truncatedDefinition := newPermReq("review", true).bytes()
+	truncatedDefinition = append(truncatedDefinition, 0xff, 0xff, 0xff, 0xff)
+
+	unreadable := newPermReq("review", true).
+		definition("permissions:\n  - name: repo_write\n    scoped_to: /srv\n").bytes()
 
 	for name, request := range map[string][]byte{
 		"bad magic":      badMagic,
@@ -175,7 +173,8 @@ func TestPermissionsStageRejectsMalformedRequests(t *testing.T) {
 		"unknown flag":   unknownFlag,
 		"trailing bytes": trailing,
 		"truncated":      good[:len(good)-1],
-		"count ceiling":  hugeCount,
+		"length ceiling": truncatedDefinition,
+		"unreadable":     unreadable,
 		"empty":          nil,
 	} {
 		if _, status := handlePermissions(bus.ModuleInvocation{}, request); status != bus.ModuleStatusInvalidRequest {

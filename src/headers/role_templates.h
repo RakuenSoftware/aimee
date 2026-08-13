@@ -39,6 +39,17 @@ int role_template_name_valid(const char *role);
  * tab. */
 int role_template_max_turns(const char *role);
 
+/* The role template's leading frontmatter block for `role`, without the `---`
+ * fences, or NULL when there is no template or it carries no frontmatter.
+ *
+ * This is the text a role definition is written in. It is returned unparsed on
+ * purpose: what a `permissions:` block MEANS is the delegates module's rule, and
+ * reading it here as well would be a second reading that could differ. Heap
+ * (caller frees).
+ *
+ * Resolution follows role_template_path: project, then user, then bundled. */
+char *role_template_frontmatter(const char *project_root, const char *role);
+
 /* Return the RAW template body for `role` (placeholders intact, not built):
  * project file -> user file -> built-in default. Heap (caller frees), or NULL
  * if no such role. */

@@ -395,6 +395,17 @@ char *role_template_build(const char *project_root, const char *role, const char
    return NULL;
 }
 
+/* No operator wrote a role here, so every role in these fixtures is the one that
+ * ships. What a definition DOES is proved where it is read: the parse in
+ * server-go/modules/delegates/roledefinition_test.go, the handover in
+ * unit-test-role-templates. */
+char *role_template_frontmatter(const char *project_root, const char *role)
+{
+   (void)project_root;
+   (void)role;
+   return NULL;
+}
+
 void agent_http_init(void)
 {
 }

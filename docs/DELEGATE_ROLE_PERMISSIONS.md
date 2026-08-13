@@ -115,23 +115,47 @@ subdirectory is a different object too: `/srv/repo` does not cover
 
 ## Defining a role at runtime
 
-A definition replaces the built-in rather than adding to it. "Composed of these
-permissions" has to mean the list is the whole answer, or reading a definition
-would not tell you what the role can do.
+A role is defined in its template's frontmatter, beside `max_turns`:
 
-```yaml
+```markdown
+---
+max_turns: 40
 permissions:
   - tools
   - shell
   - name: repo_write
     scopes: [/srv/repo-a, /srv/repo-b]
+---
+
+You are a delegate that ...
 ```
 
 That role runs commands anywhere it can reach, and writes only those two
 repositories, because only those two are mounted read-write.
 
-A definition granting nothing is a deliberate powerless role. It is not the same
-as having no definition, which falls back to the built-in.
+Templates resolve project first, then user, then bundled:
+
+| where | path |
+|---|---|
+| project | `.aimee/role_templates/<role>.md` |
+| user | `~/.config/aimee/role_templates/<role>.md` |
+
+**A definition replaces the built-in rather than adding to it.** "Composed of
+these permissions" has to mean the list is the whole answer, or reading a
+definition would not tell you what the role can do.
+
+**A definition granting nothing is a deliberate powerless role.** It is not the
+same as having no definition, which falls back to the built-in. A template with
+no `permissions:` key has no definition.
+
+**A block that cannot be read is refused, and the delegate does not run.** Not
+partly applied, and not quietly replaced by the built-in set: either of those
+would hand a delegate powers while you believe it holds the ones you wrote.
+Unknown fields, a permission with no name, block-style scope lists and unclosed
+brackets all fail this way.
+
+**Write scopes in the flow form, `[a, b]`, and never empty.** A permission scoped
+to nothing is a permission you did not grant. Leave it out instead.
 
 ## Your own permissions and enforcement points
 

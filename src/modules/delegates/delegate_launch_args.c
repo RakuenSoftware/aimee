@@ -270,7 +270,8 @@ int delegate_permissions_resolve(const uint8_t *request, size_t request_len, uin
  * malformed response cannot be believed rather than to bound real data. */
 #define DELEGATE_PERM_WIRE_CAP 8192u
 
-int delegate_permissions_for_role(const char *role, delegate_permissions_t *out)
+int delegate_permissions_for_role(const char *role, const char *definition,
+                                  delegate_permissions_t *out)
 {
    if (!out)
       return -1;
@@ -278,7 +279,10 @@ int delegate_permissions_for_role(const char *role, delegate_permissions_t *out)
 
    uint8_t request[DELEGATE_PERM_WIRE_CAP];
    aimee_delegates_wire_t w;
-   aimee_delegates_perms_request_begin(&w, request, sizeof(request), 0u, role ? role : "");
+   unsigned flags = (definition && definition[0]) ? AIMEE_DELEGATES_PERMS_DEFINED : 0u;
+   aimee_delegates_perms_request_begin(&w, request, sizeof(request), flags, role ? role : "");
+   if (flags)
+      aimee_delegates_perms_request_definition(&w, definition);
    if (w.overflow)
       return -1;
 

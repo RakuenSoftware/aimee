@@ -1245,7 +1245,10 @@ void delegate_worker(void *arg)
     * Failure holds nothing: a delegate whose permissions cannot be established
     * reads and changes nothing. */
    delegate_permissions_t delegate_perms;
-   if (delegate_permissions_for_role(role, &delegate_perms) != 0)
+   char *role_definition = role_template_frontmatter(cwd[0] ? cwd : NULL, role);
+   int perms_rc = delegate_permissions_for_role(role, role_definition, &delegate_perms);
+   free(role_definition);
+   if (perms_rc != 0)
       aimee_log(LOG_WARN, "delegate",
                 "delegate %s: permissions for role '%s' could not be resolved; it holds none",
                 deleg_id, role ? role : "");

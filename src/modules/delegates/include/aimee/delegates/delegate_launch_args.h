@@ -225,10 +225,19 @@ typedef struct
    int resolved;
 } delegate_permissions_t;
 
-/* Resolve what a role may do. Returns 0 on success; on failure `out` is zeroed,
- * which holds NOTHING: a delegate whose powers cannot be established reads and
- * changes nothing. */
-int delegate_permissions_for_role(const char *role, delegate_permissions_t *out);
+/* Resolve what a role may do.
+ *
+ * `definition` is the role template's frontmatter when the operator wrote one,
+ * or NULL for a role that ships as-is. Pass the TEXT, not a parse of it: the
+ * module reads it, so there is one reading.
+ *
+ * Returns 0 on success. On failure `out` is zeroed, which holds NOTHING: a
+ * delegate whose powers cannot be established reads and changes nothing. A
+ * definition the module refuses fails HERE rather than quietly resolving to the
+ * built-in set, which would hand the delegate the powers its role ships with
+ * while the operator believes it holds the ones they wrote. */
+int delegate_permissions_for_role(const char *role, const char *definition,
+                                  delegate_permissions_t *out);
 
 /* Whether the permission is held at all, ignoring any narrowing.
  *

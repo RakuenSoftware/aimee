@@ -395,6 +395,42 @@ int role_template_max_turns(const char *role)
    return -1;
 }
 
+char *role_template_frontmatter(const char *project_root, const char *role)
+{
+   if (!role || !role[0])
+      return NULL;
+   char path[ROLE_TEMPLATE_PATH_MAX];
+   if (role_template_path(project_root, role, path, sizeof(path)) != 0)
+      return NULL;
+   FILE *f = fopen(path, "r");
+   if (!f)
+      return NULL;
+   char buf[ROLE_TEMPLATE_MAX_SIZE];
+   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+   buf[n] = '\0';
+   fclose(f);
+
+   if (strncmp(buf, "---", 3) != 0)
+      return NULL;
+   const char *body = buf + 3;
+   while (*body == '\r')
+      body++;
+   if (*body != '\n')
+      return NULL;
+   body++;
+   const char *close = strstr(body, "\n---");
+   if (!close)
+      return NULL;
+
+   size_t len = (size_t)(close - body) + 1; /* keep the closing newline */
+   char *out = malloc(len + 1);
+   if (!out)
+      return NULL;
+   memcpy(out, body, len);
+   out[len] = '\0';
+   return out;
+}
+
 char *role_template_build(const char *project_root, const char *role, const char *task,
                           const char *context)
 {

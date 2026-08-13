@@ -1177,7 +1177,9 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    /* What this delegate may do, resolved once from its role (stage 15). Failure
     * holds nothing: it reads, and it changes nothing. */
    delegate_permissions_t delegate_perms;
-   (void)delegate_permissions_for_role(role, &delegate_perms);
+   char *role_definition = role_template_frontmatter(NULL, role);
+   (void)delegate_permissions_for_role(role, role_definition, &delegate_perms);
+   free(role_definition);
    int delegate_allows_writes = delegate_permissions_has(&delegate_perms, "repo_write");
    if (worktree_branch && worktree_branch[0] && !delegate_allows_writes)
       fatal("--worktree is only valid for write-capable delegates; read-only delegates must "
