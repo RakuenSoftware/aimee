@@ -131,7 +131,7 @@ session remains a separate host-execution path; it is not a delegate fallback.
 `delegate_sandbox_require_isolation` has the narrower job its name now documents: after a container
 starts, verify that the runtime actually honored network isolation and fail closed if that proof is
 missing or shows an attached network. It no longer decides whether a delegate may fall back to the
-host—there is no such path. Package access, when enabled, crosses only the audited package proxy;
+host; there is no such path. Package access, when enabled, crosses only the audited package proxy;
 credential stripping and workspace guards remain defense in depth inside the container boundary.
 
 Regression coverage lives in `test_server_compute` (container allocation is mandatory) and
