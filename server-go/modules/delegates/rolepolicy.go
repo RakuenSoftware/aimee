@@ -42,29 +42,6 @@ func RoleIsWrite(role string) bool {
 	return false
 }
 
-// RoleEnablesToolsByDefault reports whether a role needs tools even without an
-// explicit request.
-//
-// A write role cannot do its job without a filesystem, and left tools-off it
-// cannot fail visibly either: asked to implement, an agent with no file tools
-// returns a per-file diff summary of code it never wrote. Tools-on is the only
-// honest default; an explicit --no-tools still overrides it.
-//
-// This IS the `tools` permission, and it used to be a second list of the same
-// roles sitting beside it. The lists agreed when this was written; nothing made
-// them agree, and the drift that shipped elsewhere in this file is what that
-// costs.
-//
-// It reads the BUILT-IN table, not the resolved set, because the caller that
-// asks has only the role: force_tools is decided when the request arrives and
-// the permissions are resolved when the delegate is created. Until that set is
-// carried between the two, a role an operator defined with no `tools` still
-// gets the tools-on default here and is denied at dispatch. Denied is the safe
-// side of that gap, and it is a gap.
-func RoleEnablesToolsByDefault(role string) bool {
-	return RoleHasPermission(role, PermTools)
-}
-
 // RoleResultCacheEnabled reports whether a response may be reused keyed only by
 // (role, prompt).
 //
@@ -147,18 +124,24 @@ func RoleNeedsParentDiffEvidence(role string) bool {
 	return false
 }
 
-// RoleAutoToolsForInvocation applies the role default to one invocation.
+// AutoToolsForInvocation applies one invocation's conditions to the `tools`
+// permission the caller already resolved.
+//
+// It takes holdsTools rather than a role on purpose. The permission is resolved
+// once when the delegate is created, and a role an operator defined is only
+// visible in that resolved set -- asking about the role again here would answer
+// from the built-in table and hand tools to a role defined without them.
 //
 // A single-turn run is a final-answer smoke probe, so it gets no implicit
 // tools; asking for them explicitly still wins.
-func RoleAutoToolsForInvocation(role string, maxTurns int, explicitTools bool) bool {
+func AutoToolsForInvocation(holdsTools bool, maxTurns int, explicitTools bool) bool {
 	if explicitTools {
 		return true
 	}
 	if maxTurns == 1 {
 		return false
 	}
-	return RoleEnablesToolsByDefault(role)
+	return holdsTools
 }
 
 // RoleFinalAfterTurns is the turn at which an inspection role should stop using
@@ -178,10 +161,11 @@ func RoleFinalAfterTurns(role string) int {
 func handleRolePolicy(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	if len(request) != rolePolicyRequestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != rolePolicyRequestMagic ||
-		request[4] != wireVersion || request[5] > 1 {
+		request[4] != wireVersion || request[5] > 1 || request[6] > 1 {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	explicitTools := request[5] == 1
+	holdsTools := request[6] == 1
 	maxTurns := int(int32(binary.LittleEndian.Uint32(request[8:12])))
 	roleLen := int(binary.LittleEndian.Uint32(request[12:16]))
 	if roleLen > roleMax {
@@ -195,9 +179,11 @@ func handleRolePolicy(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 	response := make([]byte, rolePolicyResponseLen)
 	binary.LittleEndian.PutUint32(response[0:4], rolePolicyResponseMagic)
 	putBool(response[4:8], RoleIsWrite(role))
-	putBool(response[8:12], RoleEnablesToolsByDefault(role))
+	// [8:12] was the tools default. It IS the `tools` permission, which the
+	// caller resolves and sends back in as holdsTools, so this stage no longer
+	// answers it. The slot stays vacant rather than renumbering the rest.
 	putBool(response[12:16], RoleResultCacheEnabled(role))
-	putBool(response[16:20], RoleAutoToolsForInvocation(role, maxTurns, explicitTools))
+	putBool(response[16:20], AutoToolsForInvocation(holdsTools, maxTurns, explicitTools))
 	binary.LittleEndian.PutUint32(response[20:24], uint32(int32(RoleFinalAfterTurns(role))))
 	putBool(response[24:28], RoleNeedsParentDiffEvidence(role))
 	binary.LittleEndian.PutUint32(response[28:32], uint32(RoleTaskShape(role)))

@@ -498,9 +498,14 @@ static inline size_t aimee_delegates_patch_put_task(int id, int step_id, const c
 #define AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN    (16u + AIMEE_DELEGATES_ROLE_MAX + 1u)
 #define AIMEE_DELEGATES_ROLEPOL_RESPONSE_LEN   32u
 
+/* `holds_tools` is the delegate's resolved `tools` permission, and only the
+ * auto-tools answer reads it. It is passed rather than looked up from the role
+ * because a role an operator DEFINED is visible only in the resolved set: asking
+ * about the role inside the module would answer from the built-in table and hand
+ * tools to a role that was defined without them. */
 static inline int aimee_delegates_rolepol_request_encode(const char *role, int max_turns,
-                                                         int explicit_tools, uint8_t *out,
-                                                         size_t cap)
+                                                         int explicit_tools, int holds_tools,
+                                                         uint8_t *out, size_t cap)
 {
    size_t len = role ? strlen(role) : 0;
    if (!out || cap < AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN || len > AIMEE_DELEGATES_ROLE_MAX)
@@ -509,6 +514,7 @@ static inline int aimee_delegates_rolepol_request_encode(const char *role, int m
    aimee_delegates_put_u32(out, AIMEE_DELEGATES_ROLEPOL_REQUEST_MAGIC);
    out[4] = (uint8_t)AIMEE_DELEGATES_WIRE_VERSION;
    out[5] = explicit_tools ? 1u : 0u;
+   out[6] = holds_tools ? 1u : 0u;
    aimee_delegates_put_u32(out + 8, (uint32_t)max_turns);
    aimee_delegates_put_u32(out + 12, (uint32_t)len);
    if (len)

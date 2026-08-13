@@ -395,15 +395,20 @@ char *role_template_build(const char *project_root, const char *role, const char
    return NULL;
 }
 
-/* No operator wrote a role here, so every role in these fixtures is the one that
- * ships. What a definition DOES is proved where it is read: the parse in
- * server-go/modules/delegates/roledefinition_test.go, the handover in
- * unit-test-role-templates. */
+/* The role definition an operator wrote, if these fixtures set one. NULL is the
+ * usual case: no operator wrote a role, so every role is the one that ships.
+ *
+ * What a definition MEANS is proved where it is read (the parse, in
+ * server-go/modules/delegates/roledefinition_test.go) and where it is loaded
+ * (the handover, in unit-test-role-templates). What is proved HERE is that it
+ * reaches the delegate and changes what the delegate is given. */
+static const char *g_role_definition;
+
 char *role_template_frontmatter(const char *project_root, const char *role)
 {
    (void)project_root;
    (void)role;
-   return NULL;
+   return g_role_definition ? strdup(g_role_definition) : NULL;
 }
 
 void agent_http_init(void)
@@ -2457,6 +2462,57 @@ static void test_direct_delegate_one_turn_diagnose_suppresses_default_tools(void
    free(ctx);
 }
 
+/* A role an operator defined WITHOUT tools does not get them, even though the
+ * role it is named after ships with them.
+ *
+ * This is the case the permission has to be resolved early for. The tool default
+ * is decided when the request is handled and the mount is decided later; while
+ * those were answered from different places, the early one could only see the
+ * built-in table, so `code` was handed tools here and refused at dispatch. Both
+ * now read the set resolved once when the role was validated.
+ *
+ * The recorded answer for this definition lives in delegate_permissions_stub.c;
+ * nothing here decides what the block means. */
+static void test_a_defined_role_without_tools_is_not_given_them(void)
+{
+   reset_last_response();
+   g_role_definition = "permissions:\n  - knowledge_write\n";
+   g_agent_run_calls = g_agent_tool_run_calls = 0;
+
+   int fds[2];
+   assert(pipe(fds) == 0);
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   conn->fd = fds[1];
+   g_agent_response = "defined role ran";
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "role", "code");
+   cJSON_AddStringToObject(req, "persona", "engineer");
+   cJSON_AddStringToObject(req, "prompt", "run the defined role tools test prompt");
+   assert(handle_delegate(ctx, conn, req) == 0);
+   assert(g_submitted_fn == delegate_worker && g_submitted_arg != NULL);
+   g_submitted_fn(g_submitted_arg);
+   g_submitted_arg = NULL;
+   close(fds[1]);
+   char buf[2048];
+   ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
+   assert(n >= 0);
+   close(fds[0]);
+
+   /* The harness tells the two apart by which entry point ran: a delegate given
+      tools goes through agent_run_with_tools, one without through agent_run. */
+   assert(g_agent_tool_run_calls == 0);
+   assert(g_agent_run_calls == 1);
+
+   g_role_definition = NULL;
+   cJSON_Delete(req);
+   reset_last_response();
+   free(conn);
+   free(ctx);
+   printf("  PASS: test_a_defined_role_without_tools_is_not_given_them\n");
+}
+
 static void test_direct_delegate_max_turns_override(void)
 {
    reset_last_response();
@@ -3827,6 +3883,7 @@ int main(void)
    test_direct_delegate_tool_loop_cap_is_request_wide();
    test_direct_delegate_no_tools_forces_no_tools();
    test_direct_delegate_one_turn_diagnose_suppresses_default_tools();
+   test_a_defined_role_without_tools_is_not_given_them();
    test_direct_delegate_max_turns_override();
    test_read_only_delegate_uses_parent_workspace();
    test_provided_review_target_suppresses_worktree_evidence();

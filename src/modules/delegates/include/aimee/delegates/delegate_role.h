@@ -18,19 +18,17 @@ void delegate_role_register_canonicalizer(delegate_role_canonicalizer_fn canonic
  * op selects the question; `a` carries max_turns and `b` explicit_tools for the
  * auto-tools op, and both are unused otherwise. */
 #define DELEGATE_ROLE_OP_IS_WRITE     0
-#define DELEGATE_ROLE_OP_TOOLS        1
+/* 1 was the tools default. It is the `tools` permission now. */
 #define DELEGATE_ROLE_OP_CACHE        2
 #define DELEGATE_ROLE_OP_AUTO_TOOLS   3
 #define DELEGATE_ROLE_OP_FINAL_TURNS  4
 #define DELEGATE_ROLE_OP_PARENT_DIFF  5
 #define DELEGATE_ROLE_OP_TASK_SHAPE   6
 
-typedef int (*delegate_role_policy_fn)(int op, const char *role, int a, int b, int *out);
+typedef int (*delegate_role_policy_fn)(int op, const char *role, int a, int b, int c,
+                                      int *out);
 void delegate_register_role_policy_provider(delegate_role_policy_fn provider);
 
-/* Returns 1 when the role should have tool use enabled even without
- * an explicit --tools flag. */
-int delegate_role_enable_tools_by_default(const char *role);
 
 /* Returns 1 when it is safe to reuse an agent response keyed only by
  * (role, prompt). This is opt-in for pure text-transform roles; repository
@@ -41,7 +39,7 @@ int delegate_role_result_cache_enabled(const char *role);
 /* Returns 1 when implicit role-default tool use should be applied for this
  * invocation. A one-turn override is treated as a final-answer smoke probe
  * unless the caller explicitly requests tools. */
-int delegate_role_auto_tools_for_invocation(const char *role, int max_turns, int explicit_tools);
+int delegate_auto_tools_for_invocation(int holds_tools, int max_turns, int explicit_tools);
 
 /* Returns 1 when a read-only inspection role should be grounded in the PARENT
  * worktree's uncommitted diff.

@@ -701,7 +701,22 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
         strcmp(role, "diagnose") == 0))
       explicit_toolset = "review_indexed";
 
-   int force_tools = delegate_role_auto_tools_for_invocation(role, max_turns, explicit_tools);
+   /* What this delegate may do, resolved ONCE. The tool default below reads it,
+      and so does the write decision further down: one answer, two readers. */
+   delegate_permissions_t delegate_perms;
+   {
+      char *role_definition = role_template_frontmatter(NULL, role);
+      int perms_rc = delegate_permissions_for_role(role, role_definition, &delegate_perms);
+      free(role_definition);
+      if (perms_rc != 0)
+         fatal("permissions for role '%s' could not be resolved, so it holds none; check the "
+               "role template's `permissions:` block",
+               role);
+   }
+
+   int force_tools = delegate_auto_tools_for_invocation(
+       delegate_permissions_has(&delegate_perms, AIMEE_DELEGATES_PERM_TOOLS), max_turns,
+       explicit_tools);
    if (explicit_toolset && explicit_toolset[0])
    {
       char resolved[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX], toolset_err[TOOLSET_ERROR_MAX] = "";
@@ -1174,13 +1189,10 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       }
    }
 
-   /* What this delegate may do, resolved once from its role (stage 15). Failure
-    * holds nothing: it reads, and it changes nothing. */
-   delegate_permissions_t delegate_perms;
-   char *role_definition = role_template_frontmatter(NULL, role);
-   (void)delegate_permissions_for_role(role, role_definition, &delegate_perms);
-   free(role_definition);
-   int delegate_allows_writes = delegate_permissions_has(&delegate_perms, "repo_write");
+   /* Read, not resolved: delegate_perms was established before the tool default
+      above, and this is the same answer. */
+   int delegate_allows_writes =
+       delegate_permissions_has(&delegate_perms, AIMEE_DELEGATES_PERM_REPO_WRITE);
    if (worktree_branch && worktree_branch[0] && !delegate_allows_writes)
       fatal("--worktree is only valid for write-capable delegates; read-only delegates must "
             "use the parent worktree");

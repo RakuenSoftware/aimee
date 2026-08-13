@@ -15,14 +15,6 @@ static const char *test_delegate_policy_role(const char *role)
    return role;
 }
 
-int delegate_role_enable_tools_by_default(const char *role)
-{
-   role = test_delegate_policy_role(role);
-   return role && (strcmp(role, "review") == 0 || strcmp(role, "search") == 0 ||
-                   strcmp(role, "execute") == 0 || strcmp(role, "diagnose") == 0 ||
-                   strcmp(role, "validate") == 0);
-}
-
 /* Which roles want the parent worktree's diff. Like the rest of this harness
  * this MIRRORS the module's list rather than asking it, because these tests link
  * no bus; the list itself is pinned against the module in
@@ -56,13 +48,13 @@ int delegate_role_task_shape(const char *role)
    return 0;
 }
 
-int delegate_role_auto_tools_for_invocation(const char *role, int max_turns, int explicit_tools)
+int delegate_auto_tools_for_invocation(int holds_tools, int max_turns, int explicit_tools)
 {
    if (explicit_tools)
       return 1;
    if (max_turns == 1)
       return 0;
-   return delegate_role_enable_tools_by_default(role);
+   return holds_tools;
 }
 
 const char *delegate_role_canonicalize(const char *role)

@@ -757,13 +757,14 @@ static void delegate_patch_coord(const db1_coord_task_t *tasks, int task_count,
 /* What a role implies about how it is run. One call answers whichever question
  * the caller asked; the module resolves the alias itself, so every answer is
  * computed from the same canonical spelling. */
-static int delegate_role_policy(int op, const char *role, int a, int b, int *out)
+static int delegate_role_policy(int op, const char *role, int a, int b, int c, int *out)
 {
    uint8_t request[AIMEE_DELEGATES_ROLEPOL_REQUEST_LEN];
    uint8_t response[AIMEE_DELEGATES_ROLEPOL_RESPONSE_LEN];
    uint32_t response_len = 0;
 
-   if (!out || aimee_delegates_rolepol_request_encode(role, a, b, request, sizeof(request)) != 0 ||
+   if (!out ||
+       aimee_delegates_rolepol_request_encode(role, a, b, c, request, sizeof(request)) != 0 ||
        call_module(AIMEE_DELEGATES_EVENT_ROLEPOL, AIMEE_DELEGATES_STAGE_ROLEPOL, request,
                    sizeof(request), response, sizeof(response), &response_len) != 0 ||
        response_len != AIMEE_DELEGATES_ROLEPOL_RESPONSE_LEN ||
@@ -774,9 +775,6 @@ static int delegate_role_policy(int op, const char *role, int a, int b, int *out
    {
    case DELEGATE_ROLE_OP_IS_WRITE:
       *out = (int)aimee_delegates_get_u32(response + 4);
-      return 0;
-   case DELEGATE_ROLE_OP_TOOLS:
-      *out = (int)aimee_delegates_get_u32(response + 8);
       return 0;
    case DELEGATE_ROLE_OP_CACHE:
       *out = (int)aimee_delegates_get_u32(response + 12);

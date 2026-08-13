@@ -86,25 +86,34 @@ void delegate_register_role_policy_provider(delegate_role_policy_fn provider)
    g_role_policy = provider;
 }
 
-/* Fails closed to `fallback`: with no answer, claim nothing about the role. */
-static int role_policy_ask(int op, const char *role, int a, int b, int fallback)
+/* Fails closed to `fallback`: with no answer, claim nothing.
+ *
+ * `c` carries a fact the module cannot look up. Only the auto-tools op reads it
+ * today, and that op is the only one that does NOT require a role: it asks about
+ * a permission the caller already resolved, so an empty role is a legitimate
+ * question rather than a missing one. */
+static int role_policy_ask_ex(int op, const char *role, int a, int b, int c, int fallback)
 {
    int out = fallback;
-   if (!role || !role[0] || !g_role_policy)
+   if (!g_role_policy)
       return fallback;
-   if (g_role_policy(op, role, a, b, &out) != 0)
+   if (g_role_policy(op, role ? role : "", a, b, c, &out) != 0)
       return fallback;
    return out;
+}
+
+/* The role-keyed ops. No role is no answer: every one of these IS a fact about
+ * the role, so there is nothing to say about a delegate that has none. */
+static int role_policy_ask(int op, const char *role, int a, int b, int fallback)
+{
+   if (!role || !role[0])
+      return fallback;
+   return role_policy_ask_ex(op, role, a, b, 0, fallback);
 }
 
 int delegate_role_is_write(const char *role)
 {
    return role_policy_ask(DELEGATE_ROLE_OP_IS_WRITE, role, 0, 0, 0);
-}
-
-int delegate_role_enable_tools_by_default(const char *role)
-{
-   return role_policy_ask(DELEGATE_ROLE_OP_TOOLS, role, 0, 0, 0);
 }
 
 int delegate_role_result_cache_enabled(const char *role)
@@ -122,11 +131,14 @@ int delegate_role_task_shape(const char *role)
    return role_policy_ask(DELEGATE_ROLE_OP_TASK_SHAPE, role, 0, 0, 0);
 }
 
-int delegate_role_auto_tools_for_invocation(const char *role, int max_turns, int explicit_tools)
+int delegate_auto_tools_for_invocation(int holds_tools, int max_turns, int explicit_tools)
 {
    if (explicit_tools)
       return 1;
-   return role_policy_ask(DELEGATE_ROLE_OP_AUTO_TOOLS, role, max_turns, explicit_tools, 0);
+   /* The role is not consulted: the caller resolved the permission, and that
+      answer already accounts for a role an operator defined. */
+   return role_policy_ask_ex(DELEGATE_ROLE_OP_AUTO_TOOLS, "", max_turns, explicit_tools,
+                             holds_tools, 0);
 }
 
 int delegate_final_after_turns_for_role(const char *role)
