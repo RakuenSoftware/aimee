@@ -1211,7 +1211,19 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
    snprintf(runpath, sizeof(runpath), "/v1/runs/%s", idj->valuestring);
    cJSON_Delete(queued);
 
-   int waited = 0;
+   /* Bound the WALL CLOCK, not the sum of the sleeps.
+    *
+    * `waited += step_ms` counted only the 500ms pause while each poll below can
+    * itself block for its own timeout. A server that accepts the poll and then
+    * goes quiet cost 15.5s of real time per iteration and credited 0.5s of it,
+    * so a declared 300000ms budget could run for 600 iterations x 15.5s -- over
+    * two and a half HOURS. A timeout that overruns by two orders of magnitude
+    * is indistinguishable from a hang, and was read as one.
+    *
+    * Two parts, and both are needed: measure elapsed against a monotonic
+    * deadline, and give each poll only the time that is actually LEFT, so a
+    * single stalled request cannot overshoot the budget on its own. */
+   const long long deadline_ms = timeout_ms > 0 ? util_now_ms() + timeout_ms : 0;
    const int step_ms = 500;
    /* A long remote run (delegate ensembles, kb.build, index.scan, …) polls for many
     * minutes. A single transient poll failure — a TLS/connection blip while the run
@@ -1223,7 +1235,17 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
    const int max_consec_fail = 20;
    for (;;)
    {
-      cJSON *snap = cli_v1_send(remote, bearer, "GET", runpath, NULL, 15000, &status);
+      /* Never hand a single poll more time than the whole call has left. */
+      int poll_ms = 15000;
+      if (deadline_ms)
+      {
+         long long left = deadline_ms - util_now_ms();
+         if (left <= 0)
+            return NULL;
+         if (left < poll_ms)
+            poll_ms = (int)left;
+      }
+      cJSON *snap = cli_v1_send(remote, bearer, "GET", runpath, NULL, poll_ms, &status);
       if (!snap)
       {
          if (++consec_fail > max_consec_fail)
@@ -1258,10 +1280,9 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
          }
          cJSON_Delete(snap);
       }
-      if (timeout_ms > 0 && waited >= timeout_ms)
+      if (deadline_ms && util_now_ms() >= deadline_ms)
          return NULL;
       cli_v1_sleep_ms(step_ms);
-      waited += step_ms;
    }
 }
 

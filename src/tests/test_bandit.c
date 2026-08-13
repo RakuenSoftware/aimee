@@ -22,6 +22,7 @@
 #include "../db2/db_postgres.h"
 #include "config.h"
 #include "config_learning.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void open_db(void)
 {
@@ -64,7 +65,7 @@ static char *g_saved_home;
 static void pin_empty_config(void)
 {
    /* Fresh template per call: mkdtemp REWRITES the XXXXXX in place. */
-   snprintf(g_cfg_home, sizeof(g_cfg_home), "/tmp/aimee-test-bandit-XXXXXX");
+   snprintf(g_cfg_home, sizeof(g_cfg_home), "%s/aimee-test-bandit-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_cfg_home));
    g_saved_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
    setenv("HOME", g_cfg_home, 1);

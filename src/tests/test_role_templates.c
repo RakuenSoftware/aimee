@@ -7,7 +7,8 @@
 #include <unistd.h>
 
 #include "../headers/role_templates.h"
-#include "config.h" /* config_default_dir */
+#include "config.h"             /* config_default_dir */
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* --- Helpers --- */
 
@@ -22,7 +23,7 @@ static char *make_tmpdir(void)
 {
    char *tmp = malloc(64);
    assert(tmp);
-   snprintf(tmp, 64, "/tmp/test_role_templates_XXXXXX");
+   snprintf(tmp, 64, "%s/test_role_templates_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmp) != NULL);
    return tmp;
 }
@@ -425,7 +426,7 @@ int main(void)
    /* Isolate config_default_dir() so write/delete and user-dir scans do not
     * touch the developer's real ~/.config/aimee. */
    char home[256];
-   snprintf(home, sizeof(home), "/tmp/test_role_templates_home_XXXXXX");
+   snprintf(home, sizeof(home), "%s/test_role_templates_home_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home) != NULL);
    setenv("AIMEE_HOME", home, 1);
 

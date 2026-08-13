@@ -53,6 +53,7 @@ static int capabilities_via_module(const char *prompt, int tools_enabled, unsign
 #include "provider_cli_adapter.h"
 #include "cJSON.h"
 #include <aimee/delegates/delegate_launch_args.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* role_template_max_turns() (via delegate_role.o, reached by the max-turns policy)
  * reads the role_templates dir under config_default_dir() and parses `max_turns:`
@@ -74,7 +75,7 @@ static void write_role_template(const char *canonical, int max_turns)
 }
 static void setup_role_templates(void)
 {
-   snprintf(g_roles_dir, sizeof(g_roles_dir), "/tmp/aimee-test-cmddel-XXXXXX");
+   snprintf(g_roles_dir, sizeof(g_roles_dir), "%s/aimee-test-cmddel-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_roles_dir));
    char sub[512];
    snprintf(sub, sizeof(sub), "%s/role_templates", g_roles_dir);
@@ -473,7 +474,8 @@ static int test_review_evidence_provider(const char *role, const char *response,
 
 static void test_review_evidence_drift_detects_reversed_snippet(void)
 {
-   char root[] = "/tmp/aimee-review-drift-XXXXXX";
+   char root[256];
+   snprintf(root, sizeof root, "%s/aimee-review-drift-XXXXXX", platform_tmpdir());
    assert(mkdtemp(root) != NULL);
    char srcdir[512];
    snprintf(srcdir, sizeof(srcdir), "%s/src", root);
@@ -523,7 +525,8 @@ static void test_review_evidence_drift_detects_reversed_snippet(void)
 
 static void test_review_evidence_drift_ignores_historical_diff_snippet(void)
 {
-   char root[] = "/tmp/aimee-review-diff-drift-XXXXXX";
+   char root[256];
+   snprintf(root, sizeof root, "%s/aimee-review-diff-drift-XXXXXX", platform_tmpdir());
    assert(mkdtemp(root) != NULL);
    char srcdir[512];
    snprintf(srcdir, sizeof(srcdir), "%s/src", root);
@@ -564,7 +567,8 @@ static void test_review_evidence_drift_ignores_historical_diff_snippet(void)
 
 static void test_review_evidence_drift_ignores_inline_review_annotation(void)
 {
-   char root[] = "/tmp/aimee-review-annotation-drift-XXXXXX";
+   char root[256];
+   snprintf(root, sizeof root, "%s/aimee-review-annotation-drift-XXXXXX", platform_tmpdir());
    assert(mkdtemp(root) != NULL);
    char srcdir[512];
    snprintf(srcdir, sizeof(srcdir), "%s/src", root);

@@ -9,6 +9,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static int reject_commit(void *arg)
 {
@@ -57,7 +58,8 @@ static server_management_jti_t token(const char *jti, int64_t issued_at, int64_t
 
 int main(void)
 {
-   char path[] = "/tmp/aimee-management-jti-XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee-management-jti-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    close(fd);

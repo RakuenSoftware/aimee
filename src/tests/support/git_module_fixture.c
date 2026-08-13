@@ -7,10 +7,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "../platform_test_util.h"
 
 #include <aimee/audit/obs_bus.h>
 #include <aimee/git/module_api.h>
@@ -63,7 +66,8 @@ void git_module_fixture_start(void)
    if (!source || !source[0])
       die("AIMEE_TEST_MODULE_BIN is unset; the make rule must build and name the module binary");
 
-   snprintf(g_root, sizeof(g_root), "/tmp/aimee-git-module-fixture-%d", (int)getpid());
+   snprintf(g_root, sizeof(g_root), "%s/aimee-git-module-fixture-%d", platform_tmpdir(),
+            (int)getpid());
    char policy[320], socket_path[256], executable[320];
    snprintf(policy, sizeof(policy), "%s/policy", g_root);
    snprintf(socket_path, sizeof(socket_path), "%s/bus.sock", g_root);
@@ -93,11 +97,21 @@ void git_module_fixture_start(void)
    if (obs_bus_start() != 0)
       die("start the bus");
 
+   pid_t parent = getpid();
    pid_t child = fork();
    if (child < 0)
       die("fork the module");
    if (child == 0)
    {
+      /* atexit() below does not run when the test dies by a signal -- an
+       * assert(), a segfault, or the runner killing a hung job -- and the
+       * module then outlives it as an orphan, holding a socket in a directory
+       * that has already been deleted. Measured on the development box: four
+       * of these had been running for up to 3.9 DAYS. Ask the kernel to kill
+       * this child when its parent goes away, whatever the reason. */
+      prctl(PR_SET_PDEATHSIG, SIGKILL);
+      if (getppid() != parent)
+         _exit(0); /* parent died in the window before the prctl call */
       execl(executable, executable, socket_path, (char *)NULL);
       _exit(127);
    }

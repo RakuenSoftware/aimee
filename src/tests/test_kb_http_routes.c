@@ -63,7 +63,8 @@ extern int g_test_registry_heartbeat_allow;
 extern char g_test_registry_server_id[128], g_test_registry_issuer[601],
     g_test_registry_serial[129], g_test_registry_fingerprint[65];
 
-#include "db_postgres.h" /* aimee_pg_* types for the tenancy-route db2 stubs below */
+#include "db_postgres.h"        /* aimee_pg_* types for the tenancy-route db2 stubs below */
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* db2 accessor stubs: this test links the kb router but not the DB2 stack. The
  * tenancy routes hard-fail on the shim (aimee_pg_is_shim()=1) inside
@@ -2727,7 +2728,8 @@ static void test_enroll_route(void)
    /* Redirect the kb config dir (where the CA + token store live) to a temp dir
     * so the mint does not touch the real config. Must be set before the first
     * kb_default_config_dir() call — /v1/enroll is its only route-side caller. */
-   char tmp[] = "/tmp/aimee_enroll_route_XXXXXX";
+   char tmp[256];
+   snprintf(tmp, sizeof tmp, "%s/aimee_enroll_route_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmp) != NULL);
    setenv("AIMEE_HOME", tmp, 1);
 
@@ -2800,7 +2802,8 @@ static char *make_route_csr(void)
  * without the owner bearer. Mints via /v1/enroll, then redeems. */
 static void test_enroll_redeem_route(void)
 {
-   char tmp[] = "/tmp/aimee_redeem_route_XXXXXX";
+   char tmp[256];
+   snprintf(tmp, sizeof tmp, "%s/aimee_redeem_route_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmp) != NULL);
    setenv("AIMEE_HOME", tmp, 1);
    const char *cfg = kb_default_config_dir(); /* cached (this tmp, or an earlier test's) */

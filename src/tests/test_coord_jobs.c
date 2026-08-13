@@ -19,7 +19,7 @@ static char g_db_path[256];
 
 static sqlite3 *setup(void)
 {
-   snprintf(g_db_path, sizeof(g_db_path), "/tmp/aimee-coord-jobs-XXXXXX");
+   snprintf(g_db_path, sizeof(g_db_path), "%s/aimee-coord-jobs-XXXXXX", platform_tmpdir());
    int fd = mkstemp(g_db_path);
    assert(fd >= 0);
    close(fd);

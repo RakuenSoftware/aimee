@@ -33,7 +33,8 @@ static int column_exists(sqlite3 *db, const char *table, const char *column)
 int main(void)
 {
    printf("execution_trace: ");
-   char path[] = "/tmp/test_execution_trace_XXXXXX.db";
+   char path[256];
+   snprintf(path, sizeof path, "%s/test_execution_trace_XXXXXX.db", platform_tmpdir());
    int fd = mkstemps(path, 3);
    assert(fd >= 0);
    close(fd);

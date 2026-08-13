@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define TEST_KIND          4100U
 #define TEST_SERVER_KIND   4101U
@@ -42,7 +43,8 @@ int main(int argc, char **argv)
    if (argc == 3 && strcmp(argv[1], "--crash-client") == 0)
       return crash_client(argv[2]);
 
-   char directory[] = "/tmp/aimee-bus-runtime-XXXXXX";
+   char directory[256];
+   snprintf(directory, sizeof directory, "%s/aimee-bus-runtime-XXXXXX", platform_tmpdir());
    assert(mkdtemp(directory) != NULL);
    char socket_path[PATH_MAX], policy_path[PATH_MAX], grant_path[PATH_MAX], executable[PATH_MAX];
    assert(snprintf(socket_path, sizeof(socket_path), "%s/module.sock", directory) > 0);

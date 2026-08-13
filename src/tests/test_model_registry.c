@@ -7,6 +7,7 @@
 #include "aimee.h"
 #include "model_registry.h"
 #include "models_dev.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void test_alias_resolve(void)
 {
@@ -335,7 +336,8 @@ static void test_model_capability_helpers(void)
 
 static void test_model_capability_refresh_cache_and_overrides(void)
 {
-   char tmpdir[] = "/tmp/aimee-model-registry-XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee-model-registry-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cache_home[512];

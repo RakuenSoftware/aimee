@@ -51,6 +51,7 @@
 /* vault_server_kek / the signer seed derivation live behind the signer; the KEK
  * accessor is declared in vault_server_key.h. */
 #include "modules/vault/vault_server_key.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static uint8_t g_stream[1 << 20];
 static size_t g_len;
@@ -163,7 +164,8 @@ int main(void)
       printf("witness_canary_pg: SKIP (AIMEE_TEST_PG_URL unset)\n");
       return 0;
    }
-   char home[] = "/tmp/aimee-witness-canary-home-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-witness-canary-home-XXXXXX", platform_tmpdir());
    MUST(mkdtemp(home) != NULL, "mkdtemp failed");
    setenv("AIMEE_HOME", home, 1);
    MUST(db2_init(url) == 0, "db2_init failed for %s", url);

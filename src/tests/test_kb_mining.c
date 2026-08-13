@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void open_db(void)
 {
@@ -149,7 +150,8 @@ static void test_job_interval_is_respected(void)
 static void test_recurrence_routes_to_learning_when_enabled(void)
 {
    /* Enable the flag via an AIMEE_HOME-scoped config the real config_load reads. */
-   char home[] = "/tmp/kbmining_fl_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/kbmining_fl_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home));
    char yaml[256];
    snprintf(yaml, sizeof(yaml), "%s/aimee.yaml", home);

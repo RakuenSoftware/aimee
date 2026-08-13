@@ -851,7 +851,8 @@ static void test_codex_oauth_reads_vault_only(void)
    char saved_home[600] = "";
    if (old_home)
       snprintf(saved_home, sizeof(saved_home), "%s", old_home);
-   char dir[] = "/tmp/aimee-codex-home.XXXXXX";
+   char dir[256];
+   snprintf(dir, sizeof dir, "%s/aimee-codex-home.XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(dir) != NULL);
    char sub[512], authpath[600];
    snprintf(sub, sizeof(sub), "%s/.codex", dir);
@@ -1428,7 +1429,7 @@ static void test_tool_bash_delegate_unsandboxed_refused(void)
 static void test_detached_skips_worktree_rewrite(void)
 {
    char repo[256];
-   snprintf(repo, sizeof(repo), "/tmp/det_wt_test.XXXXXX");
+   snprintf(repo, sizeof(repo), "%s/det_wt_test.XXXXXX", platform_tmpdir());
    assert(mkdtemp(repo) != NULL);
    char shellcmd[512];
    snprintf(shellcmd, sizeof(shellcmd), "git init -q '%s' >/dev/null 2>&1", repo);
@@ -1484,7 +1485,7 @@ static void test_detached_skips_worktree_rewrite(void)
 static void test_shell_worktree_rewrite_is_applied_not_refused(void)
 {
    char repo[256];
-   snprintf(repo, sizeof(repo), "/tmp/shell_wt_rw.XXXXXX");
+   snprintf(repo, sizeof(repo), "%s/shell_wt_rw.XXXXXX", platform_tmpdir());
    assert(mkdtemp(repo) != NULL);
    char shellcmd[512];
    snprintf(shellcmd, sizeof(shellcmd), "git init -q '%s' >/dev/null 2>&1", repo);
@@ -2699,7 +2700,8 @@ static void test_dispatch_tool_call(void)
 
    /* execute_script is write-capable and therefore requires the managed
     * worktree context that a real delegate turn supplies. */
-   char script_root[] = "/tmp/aimee-script-dispatch.XXXXXX";
+   char script_root[256];
+   snprintf(script_root, sizeof script_root, "%s/aimee-script-dispatch.XXXXXX", platform_tmpdir());
    assert(mkdtemp(script_root) != NULL);
    char script_cwd[MAX_PATH_LEN];
    assert(snprintf(script_cwd, sizeof(script_cwd), "%s/.aimee/worktrees/unit-test-agent/main",

@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* server_http's dispatch paths consult the process singleton, but this listener
  * gate never dispatches one of those routes. */
@@ -177,7 +178,8 @@ int main(void)
       return 0;
    }
    signal(SIGPIPE, SIG_IGN);
-   char dir[] = "/tmp/aimee-mgmt-live-XXXXXX";
+   char dir[256];
+   snprintf(dir, sizeof dir, "%s/aimee-mgmt-live-XXXXXX", platform_tmpdir());
    assert(mkdtemp(dir));
    char ca[256], cakey[256], server[256], serverkey[256], client[256], clientkey[256], ext[256],
        serverext[256], uds[256], cmd[4096];
