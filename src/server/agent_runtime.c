@@ -656,13 +656,21 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
     * session of tools it has always had. */
    if (role && role[0])
    {
-      delegate_permissions_t perms;
+      /* Thread-local because the denied-tool list is BORROWED for the length of
+         the run: the tool filter and dispatch both read it, and a copy would be
+         a second answer to keep in step. One run per thread, so one set. */
+      static _Thread_local delegate_permissions_t perms;
+      static _Thread_local const char *denied[DELEGATE_PERM_TOOL_MAX];
+
       char *definition = role_template_frontmatter(NULL, role);
       (void)delegate_permissions_for_role(role, definition, &perms);
       free(definition);
       agent_tools_knowledge_write_set(
           delegate_permissions_has(&perms, AIMEE_DELEGATES_PERM_KNOWLEDGE_WRITE));
       agent_tools_shell_set(delegate_permissions_has(&perms, AIMEE_DELEGATES_PERM_SHELL));
+      for (int i = 0; i < perms.denied_tool_count; i++)
+         denied[i] = perms.denied_tools[i];
+      agent_tools_denied_set(denied, perms.denied_tool_count);
       ag->write_capable =
           enforce_writes && delegate_permissions_has(&perms, AIMEE_DELEGATES_PERM_REPO_WRITE) ? 1
                                                                                               : 0;
@@ -674,6 +682,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
          permission nobody withheld from IT. Every run sets its own posture. */
       agent_tools_knowledge_write_set(1);
       agent_tools_shell_set(1);
+      agent_tools_denied_set(NULL, 0);
       ag->write_capable = enforce_writes ? 1 : 0;
    }
 

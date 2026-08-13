@@ -28,6 +28,7 @@
 #include <ctype.h>
 #include <pthread.h>
 #include <aimee/delegates/delegate_role.h>
+#include "role_templates.h"
 
 /* --- Auto-snapshot turn context (thread-local, set by the agent runtime) ---
  *
@@ -478,6 +479,27 @@ int agent_tools_strip_delegate_respond(parsed_response_t *parsed)
  * was created with; every site below reads the same answer. */
 static int g_knowledge_write = 1;
 
+/* Borrowed, and the borrow is the point: the resolved set lives for the run, and
+   copying it here would be a second answer to keep in step. */
+static const char *const *g_denied;
+static int g_denied_count;
+
+void agent_tools_denied_set(const char *const *denied, int count)
+{
+   g_denied = (count > 0) ? denied : NULL;
+   g_denied_count = (count > 0) ? count : 0;
+}
+
+int agent_tools_tool_denied(const char *tool)
+{
+   if (!tool || !g_denied)
+      return 0;
+   for (int i = 0; i < g_denied_count; i++)
+      if (g_denied[i] && strcmp(g_denied[i], tool) == 0)
+         return 1;
+   return 0;
+}
+
 static int g_shell = 1;
 
 void agent_tools_shell_set(int allowed)
@@ -498,6 +520,36 @@ void agent_tools_knowledge_write_set(int allowed)
 int agent_tools_knowledge_write_allowed(void)
 {
    return g_knowledge_write;
+}
+
+/* Which toolset a delegate runs with.
+ *
+ * Three sources, in order:
+ *   1. the role template's `toolset:` frontmatter, when an operator named one;
+ *   2. the built-in map for the roles that ship;
+ *   3. `readonly`, for a role that matches neither.
+ *
+ * That third case is the one that mattered. A role defined at runtime matches no
+ * entry in the built-in map, and the filter used to take a NULL toolset as "do
+ * not filter" -- so a custom role was handed every tool aimee has, including
+ * write_file and the whole index surface, whatever its permissions said. A role
+ * nobody described gets the set that can do the least, and an operator who wants
+ * more says so in the template.
+ *
+ * This is the SELECTION, not the ceiling. Permissions clamp whatever it returns:
+ * see permission_denies_tool. */
+static const char *delegate_toolset_for_role(const char *role)
+{
+   if (!role || !role[0])
+      return NULL;
+   const char *canonical = delegate_role_canonicalize(role);
+
+   const char *named = role_template_toolset(NULL, canonical);
+   if (named && named[0])
+      return named;
+
+   const char *builtin = toolset_for_delegate_role(canonical);
+   return builtin ? builtin : "readonly";
 }
 
 /* The three read-only worktree tools review_indexed carries under slice 7. Kept as
@@ -532,7 +584,13 @@ int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
    if (!toolset_name || !toolset_name[0])
       toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
    if (!toolset_name || !toolset_name[0])
-      toolset_name = toolset_for_delegate_role(delegate_role_canonicalize(role));
+      toolset_name = delegate_toolset_for_role(role);
+   /* The permission is the ceiling, checked before the toolset is even resolved.
+      A toolset says what a role is for; it cannot grant what the role does not
+      hold, and a role whose toolset carries write_file used to get it anyway. */
+   if (agent_tools_tool_denied(tool_name))
+      return 0;
+
    if (toolset_name && toolset_name[0])
    {
       char tools[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
@@ -627,7 +685,10 @@ void agent_tools_filter_for_role(cJSON *tools, const char *role)
    char resolved[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
    int resolved_count = -1;
    if (!toolset_name || !toolset_name[0])
-      toolset_name = toolset_for_delegate_role(delegate_role_canonicalize(role));
+      toolset_name = delegate_toolset_for_role(role);
+   /* No toolset and nothing withheld means no role: an ordinary turn, which is
+      not a delegate and is not filtered. Every delegate role now resolves to a
+      toolset, so this is no longer the custom-role path it used to be. */
    if (!cJSON_IsArray(tools) || (!toolset_name && agent_tools_knowledge_write_allowed()))
       return;
    if (toolset_name)

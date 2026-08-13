@@ -282,6 +282,15 @@ int agent_tools_parent_write_guard_blocks(const char *path, const char *cwd);
  * DEFAULTS TO ALLOWED, like knowledge_write and for the same reason: an ordinary
  * turn that never had a delegate role behaves as it always did. Withholding is
  * what has to be declared. */
+/* The tools this delegate's permissions withhold, whatever toolset it resolved
+ * to. Set once per run from the resolved set; read by the filter that advertises
+ * tools AND by dispatch, so what is offered and what is allowed cannot disagree.
+ *
+ * `denied` is borrowed, not copied: it must outlive the run. Passing NULL (or a
+ * count of 0) withholds nothing, which is what an ordinary turn wants. */
+void agent_tools_denied_set(const char *const *denied, int count);
+int agent_tools_tool_denied(const char *tool);
+
 void agent_tools_shell_set(int allowed);
 int agent_tools_shell_allowed(void);
 

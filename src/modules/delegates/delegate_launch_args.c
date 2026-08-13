@@ -330,6 +330,15 @@ int delegate_permissions_for_role(const char *role, const char *definition,
          snprintf(out->unenforced[out->unenforced_count++], DELEGATE_PERM_NAME_MAX, "%s", name);
    }
 
+   uint32_t denied = aimee_delegates_rd_u32(&r);
+   for (uint32_t i = 0; i < denied && !r.bad; i++)
+   {
+      char name[DELEGATE_PERM_NAME_MAX];
+      aimee_delegates_rd_str(&r, name, sizeof(name));
+      if (out->denied_tool_count < DELEGATE_PERM_TOOL_MAX)
+         snprintf(out->denied_tools[out->denied_tool_count++], DELEGATE_PERM_NAME_MAX, "%s", name);
+   }
+
    if (r.bad)
    {
       memset(out, 0, sizeof(*out));
@@ -374,6 +383,16 @@ int delegate_permissions_allow(const delegate_permissions_t *p, const char *perm
       return 0;
    for (int i = 0; i < grant->scope_count; i++)
       if (strcmp(grant->scopes[i], object) == 0)
+         return 1;
+   return 0;
+}
+
+int delegate_permissions_denies_tool(const delegate_permissions_t *p, const char *tool)
+{
+   if (!p || !tool)
+      return 0;
+   for (int i = 0; i < p->denied_tool_count; i++)
+      if (strcmp(p->denied_tools[i], tool) == 0)
          return 1;
    return 0;
 }

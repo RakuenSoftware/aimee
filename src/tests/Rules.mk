@@ -1379,6 +1379,7 @@ $(TESTPREFIX)/unit-test-tasks: $(OBJDIR)/tests/test_tasks.o $(OBJDIR)/tasks.o $(
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test_agent_caps.o \
+                      $(OBJDIR)/tests/support/role_template_toolset_stub.o \
                       $(OBJDIR)/modules/execution-policy/execution_policy.o \
                       $(OBJDIR)/modules/workflows/tool_egress.o \
                       $(OBJDIR)/tests/test_agent_responses.o \
@@ -1422,6 +1423,7 @@ $(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
 # agents.json secret-serialization test split out of test_agent.c (2000-line
 # limit). Mirrors unit-test-agent's link line.
 $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/test_agent_apikey.o \
+                      $(OBJDIR)/tests/support/role_template_toolset_stub.o \
                       $(OBJDIR)/modules/execution-policy/execution_policy.o \
                       $(OBJDIR)/server/agent_cli_shell.o \
                       $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
@@ -4781,6 +4783,7 @@ $(TESTPREFIX)/unit-test-workspace-provider-container: \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-toolset-thread-scope: \
+                      $(OBJDIR)/tests/support/role_template_toolset_stub.o \
                                        $(OBJDIR)/tests/test_toolset_thread_scope.o \
                                        $(OBJDIR)/server/agent_tools.o \
                                        $(OBJDIR)/modules/delegates/delegate_role.o \
@@ -5674,6 +5677,7 @@ $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
 # dependencies). The provider itself is faked in the test: the point under test is
 # the routing, not any MCP handler.
 $(TESTPREFIX)/unit-test-mcp-native-dispatch: \
+                      $(OBJDIR)/tests/support/role_template_toolset_stub.o \
                                        $(OBJDIR)/tests/test_mcp_native_dispatch.o \
                                        $(OBJDIR)/modules/tools/agent_tools_dispatch.o \
                                        $(OBJDIR)/modules/tools/agent_tools_completion.o \

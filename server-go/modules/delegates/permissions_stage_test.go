@@ -37,6 +37,11 @@ type decodedGrant struct {
 }
 
 func decodePermissions(t *testing.T, b []byte) (map[string]decodedGrant, []string) {
+	grants, unenforced, _ := decodePermissionsFull(t, b)
+	return grants, unenforced
+}
+
+func decodePermissionsFull(t *testing.T, b []byte) (map[string]decodedGrant, []string, []string) {
 	t.Helper()
 	r := &wireReader{buf: b}
 	if r.u32() != permissionsResponseMagic {
@@ -48,10 +53,11 @@ func decodePermissions(t *testing.T, b []byte) (map[string]decodedGrant, []strin
 		out[name] = decodedGrant{enforcedAt: r.str(), scopes: r.strings(permissionsMaxScopes)}
 	}
 	unenforced := r.strings(roleDefinitionMaxGrants)
+	denied := r.strings(64)
 	if !r.done() {
 		t.Fatalf("response has unread bytes")
 	}
-	return out, unenforced
+	return out, unenforced, denied
 }
 
 func TestPermissionsStageAnswersFromTheBuiltInTable(t *testing.T) {

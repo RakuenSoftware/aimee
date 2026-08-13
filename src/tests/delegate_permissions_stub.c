@@ -58,6 +58,51 @@ static const char *stub_enforced_at(const char *permission)
    return "tools";
 }
 
+/* Which permission each tool needs, as the module answers it.
+ *
+ * Recorded for the same reason as stub_enforced_at above, and pinned against the
+ * module in server-go/modules/delegates/toolpermissions_test.go. A tool absent
+ * from this table needs nothing beyond `tools`, which is the module's rule too:
+ * reading is implicit. */
+static const struct
+{
+   const char *tool;
+   const char *permission;
+} k_tool_permissions[] = {
+    {"bash", "shell"},
+    {"execute_script", "shell"},
+    {"run_background_process", "shell"},
+    {"get_background_output", "shell"},
+    {"kill_background_process", "shell"},
+    {"list_background_processes", "shell"},
+    {"write_file", "repo_write"},
+    {"edit_file", "repo_write"},
+    {"git_commit", "repo_write"},
+    {"git_push", "repo_write"},
+    {"git_branch", "repo_write"},
+    {"git_pr", "repo_write"},
+    {"create_note", "knowledge_write"},
+    {"record_attempt", "knowledge_write"},
+};
+
+/* The tools a held set withholds. */
+static void stub_write_denied(aimee_delegates_wire_t *w, const char *const *permissions)
+{
+   const char *denied[sizeof(k_tool_permissions) / sizeof(k_tool_permissions[0])];
+   uint32_t count = 0;
+   for (size_t i = 0; i < sizeof(k_tool_permissions) / sizeof(k_tool_permissions[0]); i++)
+   {
+      int held = 0;
+      for (int j = 0; !held && j < 4 && permissions[j]; j++)
+         held = strcmp(permissions[j], k_tool_permissions[i].permission) == 0;
+      if (!held)
+         denied[count++] = k_tool_permissions[i].tool;
+   }
+   aimee_delegates_wire_u32(w, count);
+   for (uint32_t i = 0; i < count; i++)
+      aimee_delegates_wire_str(w, denied[i]);
+}
+
 /* Definitions these tests hand over, and what the module answers for each.
  *
  * Recorded the same way as the role table and for the same reason: a C test
@@ -107,6 +152,7 @@ static int stub_answer(uint8_t *response, size_t response_cap, size_t *response_
          aimee_delegates_wire_str(&w, scopes[j]);
    }
    aimee_delegates_wire_u32(&w, 0u); /* nothing recorded here is unenforced */
+   stub_write_denied(&w, permissions);
 
    if (w.overflow)
       return -1;

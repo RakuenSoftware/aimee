@@ -39,6 +39,17 @@ int role_template_name_valid(const char *role);
  * tab. */
 int role_template_max_turns(const char *role);
 
+/* The toolset named in a role template's `toolset:` frontmatter, or NULL when
+ * none is named.
+ *
+ * A role's PERMISSIONS say what it may do; its toolset says which tools it is
+ * given to do it with. They are different questions and this is the second one:
+ * an operator who defines a `deployer` role has to be able to say it works from
+ * the read-only set, because nothing else can infer that from a permission list.
+ *
+ * Returns a pointer to a static buffer, valid until the next call. */
+const char *role_template_toolset(const char *project_root, const char *role);
+
 /* The role template's leading frontmatter block for `role`, without the `---`
  * fences, or NULL when there is no template or it carries no frontmatter.
  *

@@ -108,12 +108,13 @@ enforcement point can see the object.
 - **`repo_write` narrowed to a list of repositories is enforced.** The object
   matched is the repository the caller pointed the delegate at. Named one that is
   not on the list, or none at all, and the delegate runs read-only.
-- **`knowledge_write` narrowed to a namespace is NOT enforced today.** The scope
-  is carried and nothing evaluates it, so the permission behaves as if unscoped.
-  Write it if you intend to, but do not rely on it yet.
-- **`shell` narrowed to a directory does not work at the tool layer.** A shell
-  goes wherever the filesystem lets it. Written anyway, that scope is a statement
-  about what gets mounted, and is enforced there or not at all.
+- **It is the only built-in that can be scoped, and the others are refused.**
+  Nothing evaluates a scope for `knowledge_write` or `tools`, and `shell` cannot
+  be scoped at the tool layer at all: a shell goes wherever the filesystem lets
+  it. Writing one is an error that names what can be scoped, rather than a
+  narrowing that silently does nothing.
+- **A permission you define yourself may be scoped however your point evaluates
+  it.** The scope is carried to you untouched; what it means is yours.
 
 Scopes match exactly. A prefix rule would make `/srv/repo` grant
 `/srv/repo-secrets`, and nobody writing the first means the second. A
@@ -164,6 +165,43 @@ brackets all fail this way.
 
 **Write scopes in the flow form, `[a, b]`, and never empty.** A permission scoped
 to nothing is a permission you did not grant. Leave it out instead.
+
+## Permissions are a ceiling, not a toolset
+
+A role's permissions say what it may do. Its **toolset** says which tools it is
+handed to do it with. They are different questions, and both are answered.
+
+A template names its toolset in the same frontmatter:
+
+```markdown
+---
+toolset: readonly
+permissions:
+  - tools
+---
+```
+
+Resolution runs template, then the built-in map for the roles that ship, then
+`readonly`. That last step matters: a role you define matches no built-in entry,
+and the filter used to read "no toolset" as "do not filter", so a custom role was
+handed every tool aimee has. **A role nobody described gets the set that can do
+the least.** Ask for more by naming a toolset.
+
+Whatever the toolset offers, the permissions clamp:
+
+| withheld | tools withheld with it |
+|---|---|
+| `shell` | `bash`, `execute_script`, and the background-process tools |
+| `repo_write` | `write_file`, `edit_file`, `git_commit`, `git_push`, `git_branch`, `git_pr` |
+| `knowledge_write` | `create_note`, `record_attempt` |
+
+So a role you define as `code` without `repo_write` does not keep `write_file`,
+even though the name resolves to a toolset that carries it. The same list drives
+what is advertised to the model and what dispatch will run, so a delegate is
+never offered a tool that would be refused.
+
+Tools not in that table need no permission beyond `tools`. Reading is implicit,
+and a tool nobody has classified is not treated as privileged.
 
 ## Your own permissions and enforcement points
 

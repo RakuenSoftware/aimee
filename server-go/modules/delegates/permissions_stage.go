@@ -77,9 +77,10 @@ func handlePermissions(invocation bus.ModuleInvocation, request []byte) ([]byte,
 
 	permissions := ResolveRolePermissions(role, defined)
 
-	// The unenforced list is sent whether or not it is empty. A caller that has
-	// to ask a second question to find out it was handed a permission nobody
-	// evaluates will eventually not ask.
+	// The unenforced list and the denied tools are sent whether or not either is
+	// empty. A caller that has to ask a second question to find out it was handed
+	// a permission nobody evaluates, or which tools its set withholds, will
+	// eventually not ask.
 	names := permissions.Names()
 	unenforced := permissions.Unenforced()
 
@@ -92,5 +93,6 @@ func handlePermissions(invocation bus.ModuleInvocation, request []byte) ([]byte,
 		w.strings(permissions.Scopes(name))
 	}
 	w.strings(unenforced)
+	w.strings(DeniedTools(permissions))
 	return w.buf, bus.ModuleStatusOK
 }

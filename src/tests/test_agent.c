@@ -666,6 +666,41 @@ static void test_knowledge_write_gates_the_tool_policy(void)
  * carrying bash. `code` is used here for exactly that reason: it is a role whose
  * toolset has bash, and the permission is what refuses it.
  */
+/* A permission the delegate does not hold withholds its tools, whatever toolset
+ * the role resolved to.
+ *
+ * `code` is the case that mattered: its toolset carries write_file, and a role
+ * an operator defined under that name without repo_write used to be handed it
+ * anyway. The advertised array and the dispatch check read the SAME list, so
+ * what is offered and what is allowed cannot disagree -- both are asserted.
+ *
+ * WHICH tool needs which permission is the module's list, pinned against the
+ * module in server-go/modules/delegates/toolpermissions_test.go. */
+static void test_permissions_clamp_the_toolset(void)
+{
+   static const char *const denied[] = {"write_file", "edit_file", "git_push"};
+   agent_tools_denied_set(denied, 3);
+
+   /* Offered: the tool is gone from the array a `code` delegate is handed. */
+   cJSON *tools = build_tools_array();
+   assert(tools_array_has_name(tools, "write_file"));
+   agent_tools_filter_for_role(tools, "code");
+   assert(!tools_array_has_name(tools, "write_file"));
+   assert(!tools_array_has_name(tools, "edit_file"));
+   /* And what the permission does NOT withhold survives the same filter. */
+   assert(tools_array_has_name(tools, "read_file"));
+   cJSON_Delete(tools);
+
+   /* Allowed: and the same answer at the gate that runs it. */
+   assert(agent_tools_tool_allowed_for_role("code", "write_file") == 0);
+   assert(agent_tools_tool_allowed_for_role("code", "read_file") == 1);
+
+   /* Withholding nothing restores it: the clamp is the list, not the role. */
+   agent_tools_denied_set(NULL, 0);
+   assert(agent_tools_tool_allowed_for_role("code", "write_file") == 1);
+   printf("  PASS: test_permissions_clamp_the_toolset\n");
+}
+
 static void test_a_delegate_without_shell_cannot_run_commands(void)
 {
    agent_tools_set_dispatch_role("code");
@@ -3608,6 +3643,7 @@ int main(void)
    test_knowledge_write_gates_the_tool_policy();
    test_withheld_knowledge_write_blocks_stale_context_tools();
    test_a_delegate_without_shell_cannot_run_commands();
+   test_permissions_clamp_the_toolset();
    test_provider_env_credentials_and_headers();
    test_codex_oauth_request_creds();
    test_codex_oauth_reads_vault_only();

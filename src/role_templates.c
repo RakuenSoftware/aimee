@@ -1,6 +1,7 @@
 /* role_templates.c: per-role system prompt templates for delegates */
 #include "aimee.h"
 #include "role_templates.h"
+#include "toolset.h"
 #include "config.h"
 #include "dstr.h"
 #include "platform_path.h"
@@ -393,6 +394,43 @@ int role_template_max_turns(const char *role)
          return atoi(p + 10);
    }
    return -1;
+}
+
+/* Read `toolset:` out of the leading frontmatter. Same shape as max_turns above:
+ * one scalar key, read where the template already lives. */
+const char *role_template_toolset(const char *project_root, const char *role)
+{
+   static _Thread_local char name[TOOLSET_NAME_MAX];
+   name[0] = '\0';
+
+   char *frontmatter = role_template_frontmatter(project_root, role);
+   if (!frontmatter)
+      return NULL;
+
+   const char *found = NULL;
+   for (const char *p = frontmatter; *p; p++)
+      if ((p == frontmatter || p[-1] == '\n') && strncmp(p, "toolset:", 8) == 0)
+      {
+         found = p + 8;
+         break;
+      }
+   if (!found)
+   {
+      free(frontmatter);
+      return NULL;
+   }
+
+   while (*found == ' ' || *found == '\t')
+      found++;
+   size_t n = 0;
+   while (found[n] && found[n] != '\n' && found[n] != '\r' && n + 1 < sizeof(name))
+      n++;
+   while (n > 0 && (found[n - 1] == ' ' || found[n - 1] == '\t'))
+      n--;
+   memcpy(name, found, n);
+   name[n] = '\0';
+   free(frontmatter);
+   return name[0] ? name : NULL;
 }
 
 char *role_template_frontmatter(const char *project_root, const char *role)

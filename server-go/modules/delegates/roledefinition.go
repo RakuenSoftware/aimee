@@ -105,6 +105,16 @@ func ParseRoleDefinition(text string) (*RoleDefinition, error) {
 		if grant.Name == "" {
 			return nil, fmt.Errorf("a permission has no name")
 		}
+		// A scope on a built-in that nothing narrows by object would read as a
+		// restriction the delegate does not actually have. Refuse it here, where
+		// the operator is looking, rather than carrying it to no effect.
+		if len(grant.Scopes) > 0 && DefaultEnforcementPoint(grant.Name) != EnforceNone &&
+			!scopeIsEvaluated(grant.Name) {
+			return nil, fmt.Errorf(
+				"%q cannot be scoped: nothing evaluates a scope for it, so the scope would "+
+					"narrow nothing. Of the built-in permissions only %v can be scoped",
+				grant.Name, ScopableBuiltins())
+		}
 	}
 	return definition, nil
 }
