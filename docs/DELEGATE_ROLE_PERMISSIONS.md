@@ -166,6 +166,13 @@ brackets all fail this way.
 **Write scopes in the flow form, `[a, b]`, and never empty.** A permission scoped
 to nothing is a permission you did not grant. Leave it out instead.
 
+**There are limits, and passing one is a refusal rather than a trim.** A role may
+hold up to **16** permissions with up to **8** scopes each, and a permission name
+may be up to **63** characters. A definition that exceeds any of them fails to
+resolve, and the delegate does not run: a set quietly shortened to fit would be a
+delegate holding something other than what you wrote. The log line names the
+limit and the value.
+
 ## Permissions are a ceiling, not a toolset
 
 A role's permissions say what it may do. Its **toolset** says which tools it is
