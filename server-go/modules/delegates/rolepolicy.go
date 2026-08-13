@@ -49,21 +49,20 @@ func RoleIsWrite(role string) bool {
 // cannot fail visibly either: asked to implement, an agent with no file tools
 // returns a per-file diff summary of code it never wrote. Tools-on is the only
 // honest default; an explicit --no-tools still overrides it.
+//
+// This IS the `tools` permission, and it used to be a second list of the same
+// roles sitting beside it. The lists agreed when this was written; nothing made
+// them agree, and the drift that shipped elsewhere in this file is what that
+// costs.
+//
+// It reads the BUILT-IN table, not the resolved set, because the caller that
+// asks has only the role: force_tools is decided when the request arrives and
+// the permissions are resolved when the delegate is created. Until that set is
+// carried between the two, a role an operator defined with no `tools` still
+// gets the tools-on default here and is denied at dispatch. Denied is the safe
+// side of that gap, and it is a gap.
 func RoleEnablesToolsByDefault(role string) bool {
-	if role == "" {
-		return false
-	}
-	canonical := canonicalRole(role)
-	if RoleIsWrite(canonical) {
-		return true
-	}
-	switch canonical {
-	case "review", "search", "execute", "diagnose", "validate",
-		// Novel-mode read-only checks inspect the world bible by default.
-		"continuity", "beat-check":
-		return true
-	}
-	return false
+	return RoleHasPermission(role, PermTools)
 }
 
 // RoleResultCacheEnabled reports whether a response may be reused keyed only by

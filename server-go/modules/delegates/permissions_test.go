@@ -20,12 +20,23 @@ func TestPermissionsReproduceTheOldWriteRule(t *testing.T) {
 	}
 }
 
-func TestPermissionsReproduceTheOldToolsRule(t *testing.T) {
+// RoleEnablesToolsByDefault now reads this permission rather than keeping its
+// own list of the same roles, so comparing the two proves nothing. This pins
+// the answers that list gave; the equivalence itself was proved role by role
+// while both existed.
+func TestPermissionsCarryTheOldToolsAnswers(t *testing.T) {
+	withTools := map[string]bool{
+		"code": true, "refactor": true, "execute": true, "validate": true,
+		"diagnose": true, "review": true, "search": true,
+		"continuity": true, "beat-check": true,
+	}
 	for _, role := range builtInRoles {
-		got, want := RoleHasPermission(role, PermTools), RoleEnablesToolsByDefault(role)
-		if got != want {
-			t.Errorf("%q: tools = %v, RoleEnablesToolsByDefault = %v", role, got, want)
+		if got := RoleHasPermission(role, PermTools); got != withTools[role] {
+			t.Errorf("%q: tools = %v, want %v", role, got, withTools[role])
 		}
+	}
+	if RoleEnablesToolsByDefault("") {
+		t.Error("no role is no tools default")
 	}
 }
 
