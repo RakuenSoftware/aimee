@@ -14,6 +14,7 @@
 #if !defined(_WIN32) && !defined(_WIN64)
 #include "aimee_home.h"
 #include <dirent.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -280,12 +281,21 @@ static int write_delegate_output_file(const char *path, const char *text)
  * (http_uds_client.c is not linked into the CLI). Returns the response body
  * (heap; caller frees) and sets *status_out to the HTTP status; NULL on
  * transport failure. Mirrors http_uds_client.c, which serves the same role for
- * the TUI. */
+ * the TUI.
+ *
+ * timeout_ms bounds the WAIT FOR A REPLY. It used not to take one at all: the
+ * caller's budget was honoured on the remote branch of cli_v1_send and silently
+ * dropped here, and the read loop below had no timeout of any kind. A
+ * co-located server that accepted the connection and then went quiet -- or died
+ * between accept and reply -- hung the CLI forever, with no way for the caller
+ * to bound it. That is the default transport for a co-located install. */
 static char *cli_v1_http_request(const char *verb, const char *path, const char *body,
-                                 int *status_out)
+                                 int timeout_ms, int *status_out)
 {
    if (status_out)
       *status_out = 0;
+   if (timeout_ms <= 0)
+      timeout_ms = CLIENT_DEFAULT_TIMEOUT_MS;
    const char *home = aimee_home();
    if (!home || !home[0])
       return NULL;
@@ -341,6 +351,7 @@ static char *cli_v1_http_request(const char *verb, const char *path, const char 
       off += n;
    }
 
+   const long long deadline_ms = util_now_ms() + timeout_ms;
    size_t cap = 8192, len = 0;
    char *resp = malloc(cap);
    if (!resp)
@@ -361,6 +372,24 @@ static char *cli_v1_http_request(const char *verb, const char *path, const char 
             return NULL;
          }
          resp = grown;
+      }
+      /* Wait for readability against the caller's deadline rather than
+       * blocking in read(). A server that accepts and never answers must cost
+       * the budget, not the session. */
+      long long left = deadline_ms - util_now_ms();
+      if (left <= 0)
+      {
+         free(resp);
+         close(fd);
+         return NULL;
+      }
+      struct pollfd readable = {.fd = fd, .events = POLLIN};
+      int pr = poll(&readable, 1, (int)left);
+      if (pr <= 0 || !(readable.revents & POLLIN))
+      {
+         free(resp);
+         close(fd);
+         return NULL;
       }
       int n = (int)read(fd, resp + len, 4096);
       if (n <= 0)
@@ -1048,7 +1077,7 @@ static cJSON *cli_v1_send(const char *remote, const char *bearer, const char *ve
    }
    else
    {
-      char *r = cli_v1_http_request(verb, path, body, &status);
+      char *r = cli_v1_http_request(verb, path, body, timeout_ms, &status);
       if (r)
       {
          resp = cJSON_Parse(r);
