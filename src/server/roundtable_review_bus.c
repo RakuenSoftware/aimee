@@ -119,7 +119,8 @@ int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *requ
           conn,
           obs_bus_module_available(AIMEE_ROUNDTABLE_EVENT_DELIBERATE)
               ? "roundtable module is attached but is not serving review: its process could not "
-                "convene a panel. Check AIMEE_HOME, the delegates module bus grant, and its log for "
+                "convene a panel. Check AIMEE_HOME, the delegates module bus grant, and its log "
+                "for "
                 "\"roundtable review stage unavailable\""
               : "roundtable module is not attached to the event bus (it is optional and off by "
                 "default; start the server with AIMEE_MODULE_ROUNDTABLE=1)",
