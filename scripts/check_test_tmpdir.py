@@ -20,7 +20,35 @@ prefixes account for only 27% of it.
 
 The baseline below is DEBT, not permission. It may only fall. Fix a test to
 build its path from TMPDIR (getenv("TMPDIR") or platform_tmpdir()), run
---update-baseline, commit. Done means the baseline is empty.
+--update-baseline, commit.
+
+BUT NOT EVERY LITERAL IS A LEAK, and "empty baseline" is the wrong target.
+A "/tmp/..." string only leaks if something CREATES it. Some are fixtures --
+data fed to code that only reasons about paths -- and converting one changes
+what the test asserts:
+
+  pre_tool_check(..., "/tmp/.aimee/worktrees/test/main", msg, sizeof(msg))
+      a path being JUDGED by the guardrail under test, created by nothing
+  attn_session_isolation_blocked(..., "/tmp/.aimee-xyz/src/x.c", ...)
+      likewise -- the string IS the input
+  "/tmp/aimee-missing-delegate-worktree"
+      must NOT exist; its absence is the whole point of the case
+
+Judge the SITE, never the file. The same file usually holds both: in
+test_guardrails.c the fixtures above sat a few hundred lines from
+`char tmpdir[] = "/tmp/test_wt_branch_XXXXXX"; mkdtemp(tmpdir);` -- 36 real
+leaks in the file, now fixed, with the fixtures left exactly as they were.
+
+So the floor is not zero, but it is much nearer zero than the raw count
+suggests. The sharpest signal is an "XXXXXX" template: it exists only to be
+handed to mkdtemp/mkstemp, so it is always created, and ~216 of the sites still
+recorded here carry one. Before you skip a site, look for
+mkdtemp/mkstemp/mkdir/fopen/system on that path; if something creates it, it is
+debt, not a fixture.
+
+Note also that ~64 of those template sites live in tests owned by a vendored
+module (see tests/baselines/refactor/module-test-registration.json). Fixing one
+re-pins that module's mirror, which is a deliberate act -- not hygiene.
 """
 from __future__ import annotations
 
@@ -102,7 +130,9 @@ def main() -> int:
         print(
             "A test that hardcodes /tmp escapes the runner's TMPDIR sandbox and leaks one\n"
             "entry per run; /tmp already holds ~40k of them. Build the path from TMPDIR\n"
-            'instead: getenv("TMPDIR") (falling back to "/tmp") or platform_tmpdir().',
+            'instead: getenv("TMPDIR") (falling back to "/tmp") or platform_tmpdir().\n'
+            "If nothing CREATES the path -- it is a fixture string fed to code that only\n"
+            "reasons about paths -- leave it as it is and record it with --update-baseline.",
             file=sys.stderr,
         )
         for line in regressions:

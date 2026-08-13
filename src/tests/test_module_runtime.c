@@ -29,6 +29,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/prctl.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -673,10 +674,16 @@ int main(int argc, char **argv)
    pid_t module_pid = -1;
    if (argc >= 2)
    {
+      pid_t parent = getpid();
       module_pid = fork();
       assert(module_pid >= 0);
       if (module_pid == 0)
       {
+         /* Outlive the test and this module runs forever: cleanup here is
+          * atexit-shaped and does not run when the test dies by a signal. */
+         prctl(PR_SET_PDEATHSIG, SIGKILL);
+         if (getppid() != parent)
+            _exit(0);
          execl(module_executable, module_executable, socket_path, (char *)NULL);
          _exit(127);
       }

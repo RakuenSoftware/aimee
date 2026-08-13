@@ -13,7 +13,7 @@
 static char g_home[512];
 static void fresh(void)
 {
-   snprintf(g_home, sizeof(g_home), "/tmp/aimee-setsec-XXXXXX");
+   snprintf(g_home, sizeof(g_home), "%s/aimee-setsec-XXXXXX", platform_tmpdir());
    char *d = platform_mkdtemp(g_home);
    assert(d);
    setenv("HOME", d, 1);

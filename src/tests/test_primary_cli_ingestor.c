@@ -13,6 +13,7 @@
 #include "primary_cli_ingestor.h"
 #include "wfe_binding.h"
 #include "wfe_engine.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* enforced managed workflow "mc" (valid manager shape w/ terminal gate.deliver). */
 static const char *WF_MC = "name: mc\n"
@@ -63,7 +64,8 @@ static const char *WF_MC = "name: mc\n"
 
 static void setup_home(void)
 {
-   char tmpl[] = "/tmp/pci_home_XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/pci_home_XXXXXX", platform_tmpdir());
    char *dir = mkdtemp(tmpl);
    assert(dir);
    char wf[512];

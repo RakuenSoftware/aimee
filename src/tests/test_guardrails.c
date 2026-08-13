@@ -75,7 +75,8 @@ static void vy_set_global_yaml(const char *project_dir, const char *yaml)
       {
          g_vy_home_was_set = 0;
       }
-      snprintf(g_vy_fake_home, sizeof(g_vy_fake_home), "/tmp/aimee-test-home-XXXXXX");
+      snprintf(g_vy_fake_home, sizeof(g_vy_fake_home), "%s/aimee-test-home-XXXXXX",
+               platform_tmpdir());
       assert(mkdtemp(g_vy_fake_home) != NULL);
       setenv("HOME", g_vy_fake_home, 1);
    }
@@ -164,7 +165,7 @@ static void write_file_text(const char *path, const char *content)
 
 static void with_temp_policy_path(char *path, size_t path_len)
 {
-   snprintf(path, path_len, "/tmp/test-guardrails-policy-XXXXXX.json");
+   snprintf(path, path_len, "%s/test-guardrails-policy-XXXXXX.json", platform_tmpdir());
    int fd = mkstemps(path, 5);
    assert(fd >= 0);
    close(fd);
@@ -223,7 +224,8 @@ static void test_is_write_command(void)
 static void test_policy_file_overrides_defaults(void)
 {
    char policy_path[256];
-   char deny_dir[] = "/tmp/test-guardrails-deny-XXXXXX";
+   char deny_dir[256];
+   snprintf(deny_dir, sizeof deny_dir, "%s/test-guardrails-deny-XXXXXX", platform_tmpdir());
    char denied_file[512];
    with_temp_policy_path(policy_path, sizeof(policy_path));
    assert(mkdtemp(deny_dir) != NULL);
@@ -491,7 +493,8 @@ static void test_worktree_detect_base_branch_active(void)
 {
    /* A new worktree must be rooted on the repository's DEFAULT branch
     * (origin/HEAD), NOT on whatever feature branch is currently checked out. */
-   char tmpdir[] = "/tmp/test_wt_branch_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_branch_XXXXXX", platform_tmpdir());
    if (mkdtemp(tmpdir) == NULL)
    {
       fprintf(stderr, "test_worktree_detect_base_branch_active: mkdtemp failed, skipping\n");
@@ -539,7 +542,8 @@ static void test_worktree_detect_base_branch_local_default(void)
     * fallback is REMOVED -- a stale or unrelated local branch is exactly how a session
     * inherited work it did not author. Default is now a hard failure, and the local
     * branch is reachable only by explicitly opting in. */
-   char tmpdir[] = "/tmp/test_wt_localdef_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_localdef_XXXXXX", platform_tmpdir());
    if (mkdtemp(tmpdir) == NULL)
    {
       fprintf(stderr, "test_worktree_detect_base_branch_local_default: mkdtemp failed, skipping\n");
@@ -619,7 +623,8 @@ static void test_worktree_detect_base_branch_master_fallback(void)
 {
    /* No remote default and no "main" -- the chain's last rung is "master". A repo
     * predating the main rename must still resolve rather than refuse. */
-   char tmpdir[] = "/tmp/test_wt_master_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_master_XXXXXX", platform_tmpdir());
    if (mkdtemp(tmpdir) == NULL)
    {
       fprintf(stderr, "test_worktree_detect_base_branch_master_fallback: mkdtemp failed, "
@@ -647,7 +652,8 @@ static void test_worktree_detect_base_branch_main_precedes_master(void)
 {
    /* Both main and master exist, no remote default. Order is main THEN master, so a
     * repo carrying a legacy master branch alongside main must still pick main. */
-   char tmpdir[] = "/tmp/test_wt_bothdef_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_bothdef_XXXXXX", platform_tmpdir());
    if (mkdtemp(tmpdir) == NULL)
    {
       fprintf(stderr, "test_worktree_detect_base_branch_main_precedes_master: mkdtemp failed, "
@@ -678,7 +684,8 @@ static void test_worktree_detect_base_branch_configured_beats_remote(void)
    /* The configured value is rung ONE: it must win even when a remote default exists.
     * The existing configured-value assertions run in a remote-less fixture, so they
     * cannot distinguish "configured won" from "fell through to the same name". */
-   char tmpdir[] = "/tmp/test_wt_cfgwins_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_cfgwins_XXXXXX", platform_tmpdir());
    if (mkdtemp(tmpdir) == NULL)
    {
       fprintf(stderr, "test_worktree_detect_base_branch_configured_beats_remote: mkdtemp failed, "
@@ -727,7 +734,8 @@ static void test_worktree_detect_base_branch_remote_preference_scope(void)
     * An operator's explicit ref is deliberately NOT rewritten: they named a ref, and if
     * they want the remote one they write "origin/main". This test pins both halves so
     * the asymmetry is a decision on record rather than an accident. */
-   char tmpdir[] = "/tmp/test_wt_remotepref_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_remotepref_XXXXXX", platform_tmpdir());
    if (mkdtemp(tmpdir) == NULL)
    {
       fprintf(stderr, "test_worktree_detect_base_branch_prefers_remote_ref: mkdtemp failed, "
@@ -775,7 +783,8 @@ static void test_worktree_detect_base_branch_remote_preference_scope(void)
 static void session_isolation_make_repo(char *tmpdir, size_t tmpdir_len)
 {
    /* mkdtemp template MUST live in caller's stack — strncpy so len is safe */
-   char tmpl[] = "/tmp/test_sess_iso_XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/test_sess_iso_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpl) != NULL);
    snprintf(tmpdir, tmpdir_len, "%s", tmpl);
 
@@ -929,7 +938,8 @@ static void test_session_isolation_creates_new_worktree_from_existing_worktree(v
 
 static void test_session_isolation_skips_when_not_a_git_repo(void)
 {
-   char tmpdir[] = "/tmp/test_sess_iso_nogit_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_sess_iso_nogit_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char target[MAX_PATH_LEN];
@@ -1744,7 +1754,7 @@ static void test_write_file_targeting_worktree_allows_stale_cwd(void)
 static void test_external_feature_checkout_allows_writes(void)
 {
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-external-feature-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-external-feature-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -1776,7 +1786,7 @@ static void test_external_feature_checkout_allows_writes(void)
 static void test_external_default_checkout_blocks_writes(void)
 {
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-external-main-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-external-main-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -1810,7 +1820,7 @@ static void test_external_default_checkout_blocks_writes(void)
 static void test_shell_in_main_checkout_forced_to_worktree(void)
 {
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-force-main-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-force-main-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -1870,7 +1880,7 @@ static void test_path_tool_redirect_is_cwd_independent(void)
     * path slipped through unrewritten and the write landed in the source
     * checkout, scattering edits across two trees. */
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-cwdindep-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-cwdindep-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -2830,7 +2840,7 @@ static void test_verify_gate_blocks_bash_git_push(void)
    /* Set up a temp git repo with global project.yaml enforce: true
     * and no .last-verify record.  Expect git push to be BLOCKED. */
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-vg-push-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-vg-push-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -2880,7 +2890,7 @@ static void test_verify_gate_blocks_bash_gh_pr_create(void)
 {
    /* Same setup, verify gate should also block gh pr create. */
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-vg-pr-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-vg-pr-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -2930,7 +2940,7 @@ static void test_verify_gate_pr_create_uses_head_commit_not_worktree(void)
     * the real failure, belongs to a stale/foreign worktree). Prior to the fix the
     * gate hashed the working tree and blocked. */
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-vg-prhead-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-vg-prhead-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -2995,7 +3005,7 @@ static void test_verify_gate_not_enforced_without_enforce_flag(void)
 {
    /* With enforce: false, git push must NOT be blocked by the verify gate. */
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-vg-noblock-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-vg-noblock-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -3048,8 +3058,8 @@ static void test_verify_gate_worktree_uses_own_last_verify(void)
     * file keyed by the main repo's basename). Verify state lives at
     * <main>/.aimee/.last-verify and is found from any worktree CWD. */
    char maindir[256], wtdir[256];
-   snprintf(maindir, sizeof(maindir), "/tmp/aimee-test-vg-wt-main-XXXXXX");
-   snprintf(wtdir, sizeof(wtdir), "/tmp/aimee-test-vg-wt-WT-XXXXXX");
+   snprintf(maindir, sizeof(maindir), "%s/aimee-test-vg-wt-main-XXXXXX", platform_tmpdir());
+   snprintf(wtdir, sizeof(wtdir), "%s/aimee-test-vg-wt-WT-XXXXXX", platform_tmpdir());
    assert(mkdtemp(maindir) != NULL);
    assert(mkdtemp(wtdir) != NULL);
 
@@ -3119,8 +3129,8 @@ static void test_verify_gate_uses_tool_workdir(void)
     * instead of the hook process cwd, otherwise a verified worktree push is
     * checked against the original checkout. */
    char maindir[256], wtdir[256];
-   snprintf(maindir, sizeof(maindir), "/tmp/aimee-test-vg-workdir-main-XXXXXX");
-   snprintf(wtdir, sizeof(wtdir), "/tmp/aimee-test-vg-workdir-WT-XXXXXX");
+   snprintf(maindir, sizeof(maindir), "%s/aimee-test-vg-workdir-main-XXXXXX", platform_tmpdir());
+   snprintf(wtdir, sizeof(wtdir), "%s/aimee-test-vg-workdir-WT-XXXXXX", platform_tmpdir());
    assert(mkdtemp(maindir) != NULL);
    assert(mkdtemp(wtdir) != NULL);
 
@@ -3200,8 +3210,8 @@ static void test_verify_gate_push_branch_uses_branch_worktree(void)
    /* Even if verify can resolve the branch's linked worktree, the session cwd
     * must itself be in a worktree before writes are allowed. */
    char maindir[256], wtdir[256];
-   snprintf(maindir, sizeof(maindir), "/tmp/aimee-test-vg-branch-main-XXXXXX");
-   snprintf(wtdir, sizeof(wtdir), "/tmp/aimee-test-vg-branch-WT-XXXXXX");
+   snprintf(maindir, sizeof(maindir), "%s/aimee-test-vg-branch-main-XXXXXX", platform_tmpdir());
+   snprintf(wtdir, sizeof(wtdir), "%s/aimee-test-vg-branch-WT-XXXXXX", platform_tmpdir());
    assert(mkdtemp(maindir) != NULL);
    assert(mkdtemp(wtdir) != NULL);
 
@@ -3261,8 +3271,8 @@ static void test_verify_gate_push_head_refspec_uses_destination_worktree(void)
    /* HEAD refspec routing resolves the destination branch worktree and forces
     * the command to run there. */
    char maindir[256], wtdir[256];
-   snprintf(maindir, sizeof(maindir), "/tmp/aimee-test-vg-headref-main-XXXXXX");
-   snprintf(wtdir, sizeof(wtdir), "/tmp/aimee-test-vg-headref-WT-XXXXXX");
+   snprintf(maindir, sizeof(maindir), "%s/aimee-test-vg-headref-main-XXXXXX", platform_tmpdir());
+   snprintf(wtdir, sizeof(wtdir), "%s/aimee-test-vg-headref-WT-XXXXXX", platform_tmpdir());
    assert(mkdtemp(maindir) != NULL);
    assert(mkdtemp(wtdir) != NULL);
 
@@ -3322,8 +3332,8 @@ static void test_verify_gate_push_registered_worktree_from_nonrepo_cwd(void)
    /* Registered worktrees resolve the verify target and force the command to run
     * in that checkout even when the hook cwd is unrelated. */
    char maindir[256], nonrepo[256];
-   snprintf(maindir, sizeof(maindir), "/tmp/aimee-test-vg-reg-main-XXXXXX");
-   snprintf(nonrepo, sizeof(nonrepo), "/tmp/aimee-test-vg-reg-cwd-XXXXXX");
+   snprintf(maindir, sizeof(maindir), "%s/aimee-test-vg-reg-main-XXXXXX", platform_tmpdir());
+   snprintf(nonrepo, sizeof(nonrepo), "%s/aimee-test-vg-reg-cwd-XXXXXX", platform_tmpdir());
    assert(mkdtemp(maindir) != NULL);
    assert(mkdtemp(nonrepo) != NULL);
 
@@ -3396,8 +3406,8 @@ static void test_verify_gate_pr_create_registered_worktree_from_nonrepo_cwd(void
    /* Registered worktrees resolve the PR target and force the command to run in
     * that checkout even when the hook cwd is an unrelated repo. */
    char maindir[256], nonrepo[256];
-   snprintf(maindir, sizeof(maindir), "/tmp/aimee-test-vg-prreg-main-XXXXXX");
-   snprintf(nonrepo, sizeof(nonrepo), "/tmp/aimee-test-vg-prreg-cwd-XXXXXX");
+   snprintf(maindir, sizeof(maindir), "%s/aimee-test-vg-prreg-main-XXXXXX", platform_tmpdir());
+   snprintf(nonrepo, sizeof(nonrepo), "%s/aimee-test-vg-prreg-cwd-XXXXXX", platform_tmpdir());
    assert(mkdtemp(maindir) != NULL);
    assert(mkdtemp(nonrepo) != NULL);
 
@@ -3475,9 +3485,9 @@ static void test_verify_gate_pr_create_registered_worktree_from_nonrepo_cwd(void
 static void test_git_push_delete_skips_merged_pr_gate(void)
 {
    char tmpdir[256], fake_bin[256], wtdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-push-delete-XXXXXX");
-   snprintf(fake_bin, sizeof(fake_bin), "/tmp/aimee-test-push-delete-bin-XXXXXX");
-   snprintf(wtdir, sizeof(wtdir), "/tmp/aimee-test-push-delete-WT-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-push-delete-XXXXXX", platform_tmpdir());
+   snprintf(fake_bin, sizeof(fake_bin), "%s/aimee-test-push-delete-bin-XXXXXX", platform_tmpdir());
+   snprintf(wtdir, sizeof(wtdir), "%s/aimee-test-push-delete-WT-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
    assert(mkdtemp(fake_bin) != NULL);
    assert(mkdtemp(wtdir) != NULL);
@@ -3542,7 +3552,7 @@ static void test_git_push_delete_skips_merged_pr_gate(void)
 static void test_git_push_delete_does_not_skip_later_push_gate(void)
 {
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-push-delete-chain-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-push-delete-chain-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -3578,7 +3588,7 @@ static void test_git_push_delete_does_not_skip_later_push_gate(void)
 static void test_bash_git_push_detection_ignores_quoted_text(void)
 {
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-push-quoted-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-push-quoted-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
