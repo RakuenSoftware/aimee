@@ -198,6 +198,35 @@ static void test_provenance(void)
    gw_provenance_clear(NULL);
 }
 
+/* gw_should_apply duplicates the reduced transcript as a structural probe. A cyclic
+ * ->next chain used to make that duplicate loop forever allocating, which took a live
+ * server to 7 GB in about ten seconds and got it OOM-killed. cJSON's CJSON_CIRCULAR_LIMIT
+ * bounded nesting only, never the sibling walk. Duplicate must REFUSE such a tree.
+ *
+ * If this regresses, the test hangs and burns memory rather than failing, so CI's
+ * timeout is the backstop -- that is the honest shape of this bug. */
+static void test_duplicate_refuses_cyclic_siblings(void)
+{
+   cJSON *arr = cJSON_CreateArray();
+   assert(arr);
+   cJSON *a = cJSON_CreateString("first");
+   cJSON *b = cJSON_CreateString("second");
+   assert(a && b);
+   cJSON_AddItemToArray(arr, a);
+   cJSON_AddItemToArray(arr, b);
+   /* Close the sibling ring: b->next points back at a. */
+   b->next = a;
+   a->prev = b;
+
+   cJSON *copy = cJSON_Duplicate(arr, 1);
+   assert(copy == NULL); /* bounded and refused, not walked forever */
+
+   /* Reopen the ring so the tree can be freed without cJSON_Delete looping. */
+   b->next = NULL;
+   a->prev = NULL;
+   cJSON_Delete(arr);
+}
+
 int main(void)
 {
    printf("gateway_mutate: ");
@@ -205,6 +234,7 @@ int main(void)
    test_snapshot_independence();
    test_replace();
    test_provenance();
+   test_duplicate_refuses_cyclic_siblings();
    printf("ok\n");
    return 0;
 }

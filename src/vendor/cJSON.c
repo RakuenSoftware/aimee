@@ -2888,12 +2888,21 @@ cJSON *cJSON_Duplicate_rec(const cJSON *item, size_t depth, cJSON_bool recurse)
    }
    /* Walk the ->next chain for the child. */
    child = item->child;
+   /* The depth guard below bounds NESTING only: `depth` does not change across this
+    * sibling walk, so a circular ->next chain at a single level never trips it and
+    * loops forever, allocating a node plus a strdup'd key and value every pass. That
+    * is not hypothetical -- it took an aimee-server to 7 GB in roughly ten seconds
+    * and an OOM kill, reached from the economizer's own structural probe, which
+    * duplicates a reduced transcript precisely to check it is well formed. A guard
+    * named "circular" has to actually bound the circular case. */
+   size_t siblings = 0;
    while (child != NULL)
    {
-      if (depth >= CJSON_CIRCULAR_LIMIT)
+      if (depth >= CJSON_CIRCULAR_LIMIT || siblings >= CJSON_CIRCULAR_LIMIT)
       {
          goto fail;
       }
+      siblings++;
       newchild = cJSON_Duplicate_rec(
           child, depth + 1, true); /* Duplicate (with recurse) each item in the ->next chain */
       if (!newchild)
