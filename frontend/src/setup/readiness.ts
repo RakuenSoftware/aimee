@@ -17,7 +17,7 @@
 
 import { FIELD_HELP } from '../pages/settingsHelp';
 
-export type StepId = 'account' | 'provider' | 'knowledge_base' | 'embedding' | 'db2' | 'connection' | 'project';
+export type StepId = 'account' | 'provider' | 'knowledge_base' | 'embedding' | 'db2' | 'git_identity' | 'connection' | 'project';
 
 /* The config keys readiness inspects. Exported so a test can assert each one is a
  * real, documented config field (a key rename in settingsHelp.ts that we miss
@@ -57,13 +57,14 @@ export interface ReadinessSignals {
   accountReady: boolean;
   projectCount: number;
   hostsConnected?: number;
+  gitIdentityReady?: boolean;
 }
 
 /** Classify the setup steps. Project readiness comes from the user's cloned
  * project inventory, not whichever chat tab happens to be active. */
 export function computeReadiness(
   cfg: Record<string, unknown>,
-  { accountReady, projectCount, hostsConnected = 0 }: ReadinessSignals,
+  { accountReady, projectCount, hostsConnected = 0, gitIdentityReady = false }: ReadinessSignals,
 ): Readiness {
   const provider = asStr(cfg, 'provider');
   const remote = asStr(cfg, 'kb_mode') === 'remote';
@@ -113,6 +114,10 @@ export function computeReadiness(
           ok: true,
           detail: db2 !== '' ? 'existing database' : 'bundled Postgres',
         },
+    git_identity: {
+      ok: gitIdentityReady,
+      detail: gitIdentityReady ? 'commit author stored in the Vault' : 'commits will be refused',
+    },
     connection: {
       ok: hostsConnected > 0,
       detail:
@@ -146,7 +151,7 @@ export function stepsRemaining(r: Readiness): number {
  * first run still walks every step. */
 export function completedSteps(
   cfg: Record<string, unknown>,
-  { accountReady, projectCount, hostsConnected = 0 }: ReadinessSignals,
+  { accountReady, projectCount, hostsConnected = 0, gitIdentityReady = false }: ReadinessSignals,
 ): Set<StepId> {
   const done = new Set<StepId>();
   if (accountReady) done.add('account');
@@ -172,6 +177,7 @@ export function completedSteps(
   if (asStr(cfg, 'db2_url') !== '' || embConfigured) done.add('db2');
 
   if (hostsConnected > 0) done.add('connection');
+  if (gitIdentityReady) done.add('git_identity');
   if (projectCount > 0) done.add('project');
   return done;
 }

@@ -3,7 +3,7 @@
 - **State:** DONE (2026-08-08) — the two limits are reconciled, and whichever one
   stops a delegate now names both of them and the elapsed time. Clause 3 shipped
   in an amended form; see [Amendment](#amendment-2026-08-08). Residual:
-  [`delegate-limit-diagnostics-residual.md`](../pending/delegate-limit-diagnostics-residual.md).
+  [`delegate-execution-into-the-module.md`](../pending/delegate-execution-into-the-module.md).
 
 ## Problem
 
@@ -96,7 +96,7 @@ Both quoted events are from run `wi_e51e37cf` and its predecessor
 
 Reconciled against `testing` on 2026-08-08 and **archived** here; its
 independently testable remainder returned to `pending/` as
-[`delegate-limit-diagnostics-residual.md`](../pending/delegate-limit-diagnostics-residual.md).
+[`delegate-execution-into-the-module.md`](../pending/delegate-execution-into-the-module.md).
 Two of the three clauses were already on `testing` when this was picked up; the
 proposal's own status line above was stale and is corrected here rather than
 rewritten.
@@ -173,4 +173,4 @@ unset-rendering test now asserts per field instead of one verbatim string.
 The stage-deadline annotation covers the single-delegate dispatch path, which is
 the implement path this proposal measured. The grouped/panel dispatch path and a
 live end-to-end proof of the partial-result behaviour are carried in
-[`delegate-limit-diagnostics-residual.md`](../pending/delegate-limit-diagnostics-residual.md).
+[`delegate-execution-into-the-module.md`](../pending/delegate-execution-into-the-module.md).
