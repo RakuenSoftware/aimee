@@ -228,8 +228,28 @@ What aimee owes you is the gap, stated:
 Declare `deploy` with nothing bound to evaluate it and that permission is listed
 as unenforced when the delegate is created. It is still carried. It is not
 silently treated as granted, nor silently as denied, because both are guesses.
-Call `Permissions.Unenforced()`, or read the operator warning it drives, when a
-permission you declared appears to be doing nothing.
+
+**`aimee roles show <role>` is where you read this.** It prints what the role
+came to, not what you wrote: each permission with the point it is bound to, the
+ones nothing enforces, and the tools the set withholds. The last two are
+invisible in the frontmatter and are the ones that change what a delegate can
+do.
+
+```
+Permissions:
+  tools            enforced at tools
+  deploy           enforced at deploy-gate
+
+Nothing enforces: deploy
+  These are carried and evaluated by no one, so they grant nothing and
+  deny nothing. Bind a point that consults them, or drop them.
+
+Tools withheld: bash write_file git_push
+  Refused whatever toolset this role runs with.
+```
+
+A role whose permissions cannot be resolved says so there too, and a delegate for
+it is refused rather than run holding nothing.
 
 Three things decide whether a custom point is worth having.
 

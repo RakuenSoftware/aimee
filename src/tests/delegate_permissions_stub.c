@@ -114,21 +114,35 @@ static void stub_write_denied(aimee_delegates_wire_t *w, const char *const *perm
 typedef struct
 {
    const char *definition;
+   /* Sorted, as the module returns them. */
    const char *permissions[4];
    /* Scopes for permissions[0], when the recorded answer has any. One is enough
       for what these fixtures ask; a second would want its own column. */
    const char *scopes[2];
+   /* Where each permission is enforced, when the answer is not the built-in
+      default -- an operator's own point, which is the case worth recording. NULL
+      falls back to stub_enforced_at. */
+   const char *points[4];
 } stub_definition_t;
 
 static const stub_definition_t k_definitions[] = {
-    {"permissions:\n  - knowledge_write\n", {"knowledge_write", NULL, NULL, NULL}, {NULL, NULL}},
+    {"permissions:\n  - knowledge_write\n",
+     {"knowledge_write", NULL, NULL, NULL},
+     {NULL, NULL},
+     {NULL, NULL, NULL, NULL}},
     {"permissions:\n  - name: repo_write\n    scopes: [/srv/repo-a]\n",
      {"repo_write", NULL, NULL, NULL},
-     {"/srv/repo-a", NULL}},
+     {"/srv/repo-a", NULL},
+     {NULL, NULL, NULL, NULL}},
+    {"permissions:\n  - tools\n  - name: deploy\n    enforced_at: deploy-gate\n",
+     {"deploy", "tools", NULL, NULL},
+     {NULL, NULL},
+     {"deploy-gate", NULL, NULL, NULL}},
 };
 
 static int stub_answer(uint8_t *response, size_t response_cap, size_t *response_len,
-                       const char *const *permissions, const char *const *scopes)
+                       const char *const *permissions, const char *const *scopes,
+                       const char *const *points)
 {
    uint32_t count = 0;
    while (count < 4 && permissions[count])
@@ -141,7 +155,8 @@ static int stub_answer(uint8_t *response, size_t response_cap, size_t *response_
    for (uint32_t i = 0; i < count; i++)
    {
       aimee_delegates_wire_str(&w, permissions[i]);
-      aimee_delegates_wire_str(&w, stub_enforced_at(permissions[i]));
+      aimee_delegates_wire_str(&w, (points && points[i]) ? points[i]
+                                                         : stub_enforced_at(permissions[i]));
 
       uint32_t scope_count = 0;
       if (i == 0 && scopes)
@@ -184,7 +199,8 @@ static int stub_permissions(const uint8_t *request, size_t request_len, uint8_t 
       for (size_t i = 0; i < sizeof(k_definitions) / sizeof(k_definitions[0]); i++)
          if (strcmp(k_definitions[i].definition, definition) == 0)
             return stub_answer(response, response_cap, response_len,
-                               k_definitions[i].permissions, k_definitions[i].scopes);
+                               k_definitions[i].permissions, k_definitions[i].scopes,
+                               k_definitions[i].points);
       fprintf(stderr,
               "delegate_permissions_stub: no recorded answer for the definition:\n%s"
               "Ask ResolveRolePermissions for it and add the row; do not guess.\n",
@@ -209,7 +225,7 @@ static int stub_permissions(const uint8_t *request, size_t request_len, uint8_t 
    }
 
    /* The built-ins ship unscoped. */
-   return stub_answer(response, response_cap, response_len, found->permissions, NULL);
+   return stub_answer(response, response_cap, response_len, found->permissions, NULL, NULL);
 }
 
 void delegate_permissions_stub_install(void)
