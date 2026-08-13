@@ -677,6 +677,47 @@ static void test_knowledge_write_gates_the_tool_policy(void)
  *
  * WHICH tool needs which permission is the module's list, pinned against the
  * module in server-go/modules/delegates/toolpermissions_test.go. */
+/* One delegate's permissions must not become another's.
+ *
+ * Delegate turns run on pooled worker threads and overlap by design, so these
+ * carriers are thread-local. They were not when they were written, which is the
+ * bug this pins: a confined delegate would be silently un-confined by whichever
+ * concurrent turn wrote last. The same defect was measured once for the active
+ * toolset -- three of four turns resolved the last writer's -- and the fix there
+ * is the reason this one is stated.
+ */
+static void *permission_posture_thread(void *unused)
+{
+   (void)unused;
+   /* A second turn, withholding everything. */
+   agent_tools_knowledge_write_set(0);
+   agent_tools_shell_set(0);
+   static const char *const denied[] = {"read_file"};
+   agent_tools_denied_set(denied, 1);
+
+   assert(agent_tools_knowledge_write_allowed() == 0);
+   assert(agent_tools_shell_allowed() == 0);
+   assert(agent_tools_tool_denied("read_file") == 1);
+   return NULL;
+}
+
+static void test_one_delegates_permissions_are_not_anothers(void)
+{
+   agent_tools_knowledge_write_set(1);
+   agent_tools_shell_set(1);
+   agent_tools_denied_set(NULL, 0);
+
+   pthread_t t;
+   assert(pthread_create(&t, NULL, permission_posture_thread, NULL) == 0);
+   assert(pthread_join(t, NULL) == 0);
+
+   /* This turn is untouched by the other one. */
+   assert(agent_tools_knowledge_write_allowed() == 1);
+   assert(agent_tools_shell_allowed() == 1);
+   assert(agent_tools_tool_denied("read_file") == 0);
+   printf("  PASS: test_one_delegates_permissions_are_not_anothers\n");
+}
+
 static void test_permissions_clamp_the_toolset(void)
 {
    static const char *const denied[] = {"write_file", "edit_file", "git_push"};
@@ -3648,6 +3689,7 @@ int main(void)
    test_withheld_knowledge_write_blocks_stale_context_tools();
    test_a_delegate_without_shell_cannot_run_commands();
    test_permissions_clamp_the_toolset();
+   test_one_delegates_permissions_are_not_anothers();
    test_provider_env_credentials_and_headers();
    test_codex_oauth_request_creds();
    test_codex_oauth_reads_vault_only();

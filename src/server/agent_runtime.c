@@ -663,8 +663,22 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
       static _Thread_local const char *denied[DELEGATE_PERM_TOOL_MAX];
 
       char *definition = role_template_frontmatter(NULL, role);
-      (void)delegate_permissions_for_role(role, definition, &perms);
+      int perms_rc = delegate_permissions_for_role(role, definition, &perms);
       free(definition);
+      if (perms_rc != 0)
+      {
+         /* Holding nothing is not the same as being confined. The carriers below
+            would withhold shell and knowledge writes, but the denied-tool list
+            arrives EMPTY on failure, so the tool filter would go on offering
+            write_file and the git-write tools: confined in two places and open in
+            the third. A run whose permissions cannot be established does not run,
+            which is what the delegate path does with the same failure. */
+         snprintf(out->error, sizeof(out->error),
+                  "refusing to run: the permissions for role '%s' could not be resolved, so it "
+                  "holds none. Check the role template's `permissions:` block.",
+                  role);
+         return -1;
+      }
       agent_tools_knowledge_write_set(
           delegate_permissions_has(&perms, AIMEE_DELEGATES_PERM_KNOWLEDGE_WRITE));
       agent_tools_shell_set(delegate_permissions_has(&perms, AIMEE_DELEGATES_PERM_SHELL));

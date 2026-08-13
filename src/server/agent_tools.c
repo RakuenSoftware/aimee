@@ -476,13 +476,21 @@ int agent_tools_strip_delegate_respond(parsed_response_t *parsed)
 /* Tool definition builders are in agent_tools_defs.c */
 
 /* Carried, not derived. Set once per run from the permission set the delegate
- * was created with; every site below reads the same answer. */
-static int g_knowledge_write = 1;
+ * was created with; every site below reads the same answer.
+ *
+ * THREAD-LOCAL for the same reason g_write_capable and g_active_toolset above
+ * are: delegate turns run on POOLED worker threads and overlap by design. A
+ * process-wide carrier would let one delegate's posture become another's, and
+ * for a permission that means a confined delegate silently un-confined by
+ * whichever turn happened to write last. */
+_Thread_local static int g_knowledge_write = 1;
 
 /* Borrowed, and the borrow is the point: the resolved set lives for the run, and
-   copying it here would be a second answer to keep in step. */
-static const char *const *g_denied;
-static int g_denied_count;
+   copying it here would be a second answer to keep in step. Thread-local for the
+   reason above, and the borrow is per-thread too: each turn points at its own
+   resolved set, so no turn can be reading a list another turn is replacing. */
+_Thread_local static const char *const *g_denied;
+_Thread_local static int g_denied_count;
 
 void agent_tools_denied_set(const char *const *denied, int count)
 {
@@ -500,7 +508,7 @@ int agent_tools_tool_denied(const char *tool)
    return 0;
 }
 
-static int g_shell = 1;
+_Thread_local static int g_shell = 1;
 
 void agent_tools_shell_set(int allowed)
 {
