@@ -2119,6 +2119,78 @@ LANGUAGE sql STABLE AS $$
                         WHERE identity_key = current_setting('aimee.principal', true))));
 $$;
 
+-- CONTENT SCOPE, part 2: the policies, DEFINED BUT NOT ENABLED.
+--
+-- A policy is inert until RLS is enabled on its table, so applying this file
+-- changes nothing about what anyone can read. That is the whole design: the
+-- migrate step re-runs this file on every deployment, and a policy that switched
+-- itself on here would hide every row that has not been attributed yet -- an
+-- outage delivered by an upgrade.
+--
+-- Enabling is therefore an ACT, not a migration: attribute the rows, check the
+-- counts, then call kb_content_scope_enable(). See the proposal for the two
+-- orderings and why this is the one without a window where the control is
+-- advertised and absent.
+DROP POLICY IF EXISTS p_documents_project ON kb_documents;
+CREATE POLICY p_documents_project ON kb_documents
+  FOR SELECT USING (EXISTS (SELECT 1 FROM projects p
+                            WHERE p.name = kb_documents.project
+                              AND kb_project_visible(p.kb_project)));
+
+DROP POLICY IF EXISTS p_file_index_project ON kb_file_index;
+CREATE POLICY p_file_index_project ON kb_file_index
+  FOR SELECT USING (EXISTS (SELECT 1 FROM projects p
+                            WHERE p.name = kb_file_index.project
+                              AND kb_project_visible(p.kb_project)));
+
+-- Turn content scoping on, once the rows carry a kb_project.
+--
+-- FORCE as well as ENABLE: without FORCE the table OWNER bypasses its own
+-- policies, and the owner is who the application connects as in a good many
+-- deployments, which would leave the control on paper only.
+--
+-- Refuses while any content is unattributed, and says how much. Enabling over
+-- unattributed rows is not a smaller version of the control: those rows become
+-- invisible to everyone, which is an outage that looks like data loss. The
+-- caller is told to finish the backfill instead.
+CREATE OR REPLACE FUNCTION kb_content_scope_enable() RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  orphan_docs BIGINT;
+  orphan_files BIGINT;
+BEGIN
+  SELECT count(*) INTO orphan_docs FROM kb_documents d
+    WHERE NOT EXISTS (SELECT 1 FROM projects p
+                      WHERE p.name = d.project AND p.kb_project IS NOT NULL);
+  SELECT count(*) INTO orphan_files FROM kb_file_index f
+    WHERE NOT EXISTS (SELECT 1 FROM projects p
+                      WHERE p.name = f.project AND p.kb_project IS NOT NULL);
+  IF orphan_docs > 0 OR orphan_files > 0 THEN
+    RAISE EXCEPTION 'refusing to enable content scope: % document rows and % file-index rows '
+                    'have no kb_project, and would become invisible to everyone. Attribute them '
+                    '(projects.kb_project) and call again.', orphan_docs, orphan_files;
+  END IF;
+  ALTER TABLE kb_documents ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE kb_documents FORCE ROW LEVEL SECURITY;
+  ALTER TABLE kb_file_index ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE kb_file_index FORCE ROW LEVEL SECURITY;
+  RETURN 'content scope enabled on kb_documents, kb_file_index';
+END;
+$$;
+
+-- The way back. An operator who enables this and finds a surface they had not
+-- accounted for needs a door that is not "restore from backup".
+CREATE OR REPLACE FUNCTION kb_content_scope_disable() RETURNS text
+LANGUAGE plpgsql AS $$
+BEGIN
+  ALTER TABLE kb_documents NO FORCE ROW LEVEL SECURITY;
+  ALTER TABLE kb_documents DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE kb_file_index NO FORCE ROW LEVEL SECURITY;
+  ALTER TABLE kb_file_index DISABLE ROW LEVEL SECURITY;
+  RETURN 'content scope disabled';
+END;
+$$;
+
 -- Admin-gated tenant WRITES (slice 4). Writes are permitted only when the current
 -- principal holds an active org-admin grant, OR is the bootstrap owner. The admin
 -- check keys on the principal's OWN grant row (own-rows policy on kb_admin_grant),
