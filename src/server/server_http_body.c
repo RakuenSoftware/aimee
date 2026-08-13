@@ -15,12 +15,31 @@
  *
  * This exists because Content-Length is a CLAIM, not data. The body buffer used
  * to be malloc'd at the declared length before a single body byte was read, so a
- * request that merely SAID it was large reserved that much memory for free --
- * and on /v1/roundtable/review the ceiling was 128MB, so a few concurrent
- * connections could pin gigabytes without ever sending a payload. Growing as
+ * request that merely SAID it was large reserved that much up front. Growing as
  * bytes actually arrive ties the allocation to real data; the declared length is
  * still the hard ceiling (checked against the route limit by the caller, and
  * passed in here as `hard`).
+ *
+ * WHAT THAT RESERVATION ACTUALLY COST, measured rather than assumed, because the
+ * first version of this comment overstated it. It was ADDRESS SPACE, not
+ * resident memory: a large malloc is served by mmap and untouched pages are
+ * never faulted in, so a connection that declared 128MB and sent nothing cost
+ * ~1.2MB RSS, not 128MB. Declaring 128MB and sending nothing:
+ *
+ *            resident peak    virtual peak
+ *   before      1.20 MB         130.50 MB
+ *   after       1.22 MB           2.50 MB
+ *
+ * So the win is the virtual reservation, which is what bites under strict
+ * overcommit (vm.overcommit_memory=2) or an RLIMIT_AS, where a reservation that
+ * is never touched still fails later allocations. On a default-overcommit box
+ * the old code was untidy rather than dangerous -- worth fixing, but do not
+ * repeat the claim that it pinned gigabytes of RAM.
+ *
+ * The cost side is negligible: a REAL 16MB body peaks at 17.36MB resident here
+ * versus 17.26MB before (+0.6%), with identical virtual peak, because glibc
+ * mremaps a large mmap'd chunk in place instead of copying it on each
+ * doubling.
  *
  * The doubling guard is `next < hard - next` rather than `next * 2 < hard`, so
  * the size never overflows on the way up; when doubling cannot reach `need`, the
