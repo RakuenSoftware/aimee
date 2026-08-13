@@ -23,21 +23,24 @@ build its path from TMPDIR (getenv("TMPDIR") or platform_tmpdir()), run
 --update-baseline, commit.
 
 BUT NOT EVERY LITERAL IS A LEAK, and "empty baseline" is the wrong target.
-A "/tmp/..." string only leaks if something CREATES it. Plenty of them are
-fixtures -- data fed to code that reasons about paths -- and converting those
-changes what the test asserts:
+A "/tmp/..." string only leaks if something CREATES it. Some are fixtures --
+data fed to code that only reasons about paths -- and converting one changes
+what the test asserts:
 
-  test_guardrails.c        "/tmp/file_a.c", "/tmp/.aimee/worktrees/test/main"
-                           are inputs to path-policy checks, created by nothing
-  test_attention_guard.c   attn_session_isolation_blocked(..., "/tmp/.aimee-xyz/
-                           src/x.c", ...) is a path being JUDGED, not made
-  test_cmd_delegate.c      "/tmp/aimee-missing-*-worktree" must NOT exist; that
-                           is the whole point of the case
+  pre_tool_check(..., "/tmp/.aimee/worktrees/test/main", msg, sizeof(msg))
+      a path being JUDGED by the guardrail under test, created by nothing
+  attn_session_isolation_blocked(..., "/tmp/.aimee-xyz/src/x.c", ...)
+      likewise -- the string IS the input
+  "/tmp/aimee-missing-delegate-worktree"
+      must NOT exist; its absence is the whole point of the case
 
-So the floor is not zero. Before converting a site, check that something
-actually creates it (mkdir/mkdtemp/mkstemp/fopen on that path). If it is a
-fixture, leave it and let the count stand -- a lower number is not worth a test
-that no longer tests what it says.
+Judge the SITE, never the file. The same file usually holds both: in
+test_guardrails.c the literals above sit a few hundred lines from
+`char tmpdir[] = "/tmp/test_wt_branch_XXXXXX"; mkdtemp(tmpdir);`, which is a
+real leak. So the floor is not zero, but it is much nearer zero than the raw
+count suggests -- roughly 290 of the 663 sites recorded here reach a creation
+call. Before you skip a site, check for mkdtemp/mkstemp/mkdir/fopen/system on
+that path; if something creates it, it is debt, not a fixture.
 """
 from __future__ import annotations
 
