@@ -3,6 +3,10 @@
 - **State:** PENDING — decided architecture, port not started.
 - **Date:** 2026-08-10.
 - **Charter roles:** Enforce / Constrain-Verify.
+- **Archived parent:**
+  [`delegate-budget-must-fit-its-stage-cap.md`](../done/delegate-budget-must-fit-its-stage-cap.md).
+- **Supersedes:**
+  [`delegate-limit-diagnostics-residual.md`](../rejected/delegate-limit-diagnostics-residual.md).
 - **Thesis:** delegate execution is logic, so it belongs in the delegates module and is
   reached over the event bus. The C daemon must not serve it, and the agent-service HTTP
   socket it is served on today is neither bus traffic nor part of aimee-server's external
