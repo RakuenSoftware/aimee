@@ -617,8 +617,28 @@ static void test_tool_surface_single_source(void)
    cJSON_Delete(resp);
 }
 
+/* A role-policy provider so the current-code question has an answer here.
+ *
+ * WHICH roles are confined is the module's list, pinned against the module
+ * (server-go/modules/delegates/rolepolicy_test.go). This harness mirrors it only
+ * so the tool-filtering assertions below have the same ground truth they always
+ * had; what is asserted HERE is that the answer reaches the tool policy. */
+static int agent_test_role_policy(int op, const char *role, int a, int b, int *out)
+{
+   (void)a;
+   (void)b;
+   if (op != DELEGATE_ROLE_OP_CURRENT_CODE || !out)
+      return -1;
+   *out = role && (strcmp(role, "review") == 0 || strcmp(role, "diagnose") == 0 ||
+                   strcmp(role, "inspect") == 0);
+   return 0;
+}
+
 static void test_current_code_only_role_tool_policy(void)
 {
+   delegate_register_role_policy_provider(agent_test_role_policy);
+
+   /* The seam carries the module's answer through to the tool policy. */
    assert(agent_tools_role_current_code_only("review") == 1 &&
           agent_tools_role_current_code_only("diagnose") == 1);
    assert(agent_tools_role_current_code_only("inspect") == 1 &&

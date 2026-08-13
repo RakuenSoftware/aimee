@@ -27,6 +27,7 @@
 #include "cJSON.h"
 #include <ctype.h>
 #include <pthread.h>
+#include <aimee/delegates/delegate_role.h>
 
 /* --- Auto-snapshot turn context (thread-local, set by the agent runtime) ---
  *
@@ -473,12 +474,12 @@ int agent_tools_strip_delegate_respond(parsed_response_t *parsed)
 
 /* Tool definition builders are in agent_tools_defs.c */
 
+/* WHICH roles are confined to the current checkout is the delegates module's
+ * (role policy). This stays as a named function because five call sites read
+ * better asking a question than repeating a seam call. */
 int agent_tools_role_current_code_only(const char *role)
 {
-   if (!role || !role[0])
-      return 0;
-   return strcmp(role, "review") == 0 || strcmp(role, "diagnose") == 0 ||
-          strcmp(role, "inspect") == 0;
+   return delegate_role_sees_current_code_only(role);
 }
 
 /* The three read-only worktree tools review_indexed carries under slice 7. Kept as
