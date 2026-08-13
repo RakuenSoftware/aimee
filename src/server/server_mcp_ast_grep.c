@@ -154,7 +154,16 @@ cJSON *tool_ast_grep_search(cJSON *args)
           "https://github.com/ast-grep/ast-grep/releases/latest into ~/.local/bin "
           "(x86_64 Linux: app-x86_64-unknown-linux-gnu.zip, which unzips to "
           "ast-grep and sg)");
-   const char *argv[] = {sg, "--json", "--pattern", pattern, "--lang", lang, path, NULL};
+   /* --json=stream, NOT bare --json. The parser below is line-oriented (it takes
+    * each line starting with '{' as one match), and bare --json emits a single
+    * PRETTY-PRINTED array: indented lines, none of which start with '{'. So a
+    * search that matched dozens of times parsed to zero and answered
+    * "No matches found." -- the same lie this tool told when the binary was
+    * missing entirely, and when the binary was util-linux's `sg`.
+    *
+    * Verified on ast-grep 0.45.1: `--json` gives "[\n  {\n    \"text\": ...",
+    * `--json=stream` gives one complete JSON object per line. */
+   const char *argv[] = {sg, "--json=stream", "--pattern", pattern, "--lang", lang, path, NULL};
 
    char *output = NULL;
    int rc = safe_exec_capture(argv, &output, AST_GREP_MAX_OUTPUT);
@@ -233,7 +242,28 @@ cJSON *tool_ast_grep_search(cJSON *args)
       line = end + 1;
    }
 
+   int had_output = output && output[0] != '\0';
    free(output);
+
+   /* "No matches found" MUST mean the search ran and matched nothing -- never
+    * that we could not read the answer.
+    *
+    * This tool has now answered that sentence wrongly three separate times: when
+    * the resolved binary was util-linux's `sg`, when no ast-grep was installed at
+    * all, and when ast-grep's --json emitted a pretty-printed array the
+    * line-oriented parser below could not read. Each time it looked exactly like
+    * a clean negative result, and an agent asking "does this pattern repeat
+    * anywhere" was told no, authoritatively, on a search that never happened.
+    *
+    * ast-grep with --json=stream prints NOTHING when there are no matches. So
+    * non-empty output that parses to zero matches is not a negative result, it
+    * is a format we do not understand -- and saying so is the difference between
+    * a bug that gets fixed and a bug that gets believed. */
+   if (match_count == 0 && had_output)
+      return text_content(
+          "error: ast-grep produced output this tool could not parse -- expected one JSON "
+          "object per line (--json=stream). This is a format mismatch, NOT an empty result: "
+          "do not read it as 'no matches'.");
 
    if (match_count == 0)
       return text_content("No matches found.");
