@@ -61,6 +61,21 @@ typedef struct cJSON cJSON;
 /* The roundtable review artifact is hard-limited where the CLI reads it --
  * marshal_read_stdin_limited / marshal_read_file_limited in cli_v1_routes.c, all
  * three call sites -- so a review body is that artifact plus a small envelope.
+ *
+ * THE ARTIFACT IS BOUNDED BY THE REVIEWING MODEL, NOT BY THE WIRE. It is the
+ * thing being read, so an artifact bigger than the context that has to hold it
+ * cannot be reviewed -- it is truncated or refused downstream, and accepting it
+ * here only moves the failure later. A 1M-token context holds roughly 3-4MB of
+ * code (code tokenizes at about 3-3.5 chars/token), so 8MB is already twice the
+ * largest artifact that can be read, with room for tokenizer variance and
+ * multi-byte UTF-8. 16MB was inherited from 842ff35656 ("preserve exact review
+ * artifacts"), a Go-side change that touched the C client limit in passing; it
+ * had no recorded rationale.
+ *
+ * For scale on this repo: the largest single source file is 0.25MB, and EVERY
+ * .c and .h in src/ concatenated is 32.8MB -- larger than even the 16MB limit
+ * this replaces, so "review the whole tree at once" never fit either way.
+ *
  * The transport cap is TWICE the artifact: real review text and diffs escape at
  * about 1.02x, and the doubling covers the envelope plus quote/backslash-dense
  * content with room to spare.
@@ -72,7 +87,7 @@ typedef struct cJSON cJSON;
  * If an escape-dense artifact ever genuinely needs more room, raise
  * ROUNDTABLE_MAX_ARTIFACT and let the cap follow; do not re-inflate the
  * transport limit on its own, because the listener allocates against it. */
-#define ROUNDTABLE_MAX_ARTIFACT   (16 * 1024 * 1024)
+#define ROUNDTABLE_MAX_ARTIFACT   (8 * 1024 * 1024)
 #define SHTTP_MAX_ROUNDTABLE_BODY (2 * ROUNDTABLE_MAX_ARTIFACT)
 
 /* Per-method payload size limits */
