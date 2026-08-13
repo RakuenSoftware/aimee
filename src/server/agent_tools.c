@@ -532,7 +532,7 @@ int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
    if (!toolset_name || !toolset_name[0])
       toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
    if (!toolset_name || !toolset_name[0])
-      toolset_name = toolset_for_delegate_role(role);
+      toolset_name = toolset_for_delegate_role(delegate_role_canonicalize(role));
    if (toolset_name && toolset_name[0])
    {
       char tools[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
@@ -627,7 +627,7 @@ void agent_tools_filter_for_role(cJSON *tools, const char *role)
    char resolved[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
    int resolved_count = -1;
    if (!toolset_name || !toolset_name[0])
-      toolset_name = toolset_for_delegate_role(role);
+      toolset_name = toolset_for_delegate_role(delegate_role_canonicalize(role));
    if (!cJSON_IsArray(tools) || (!toolset_name && agent_tools_knowledge_write_allowed()))
       return;
    if (toolset_name)
