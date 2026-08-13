@@ -232,6 +232,10 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.PrincipalRef = 27
 		config.Stages = []bus.ModuleStage{
 			{EventKind: economizer.EventReduce, StageID: economizer.StageReduce},
+			{EventKind: economizer.EventJSONCompact, StageID: economizer.StageJSONCompact},
+			{EventKind: economizer.EventToolRecall, StageID: economizer.StageToolRecall},
+			{EventKind: economizer.EventToolStats, StageID: economizer.StageToolStats},
+			{EventKind: economizer.EventRecordBuild, StageID: economizer.StageRecordBuild},
 		}
 		// Stateless: per-conversation reducer state travels with each request, so
 		// there is no store to open and no failure mode before serving.

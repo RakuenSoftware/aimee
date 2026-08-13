@@ -14,7 +14,7 @@ import (
 // at all — the exact bytes of every identifier in the folded region are carried
 // forward verbatim, so the model can still act on them.
 //
-// Ported from src/modules/economizer/coord_closet.c. Determinism is a hard
+// Ported from the now-retired C Coordinate Closet. Determinism is a hard
 // requirement, not a nicety: the folded prefix has to stay byte-identical across
 // turns for the prompt cache to keep hitting, so ordering comes from an explicit
 // total-order sort and never from map iteration.

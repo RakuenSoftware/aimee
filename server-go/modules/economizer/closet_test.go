@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Ported one-for-one from src/tests/test_coord_closet.c so the Go closet is
+// Ported one-for-one from the retired C Coordinate Closet suite so the Go owner is
 // pinned to the behaviour it replaces. Case names match the C test names.
 
 func agentProv() Provenance { return Provenance{LaneAgent, 4, 11, 0} }

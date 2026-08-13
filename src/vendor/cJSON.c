@@ -251,10 +251,65 @@ static cJSON *cJSON_New_Item(const internal_hooks *const hooks)
    return node;
 }
 
+/* Cut a cyclic ->next chain so the caller can walk it exactly once. Floyd's
+ * algorithm: read-only until it cuts, no allocation. Returns 1 if it severed one.
+ *
+ * THIS IS THE OTHER HALF OF THE CYCLE CONTAINMENT, and the half that only becomes
+ * reachable once cJSON_Duplicate stops hanging. Duplicate merely reads, so bounding
+ * its sibling walk was enough there. Delete FREES as it walks, so the same cyclic
+ * chain brings it back to a node it has already deallocated and it reads ->next out
+ * of freed memory.
+ *
+ * That use-after-free was previously unreachable only because the hang in Duplicate
+ * happened first and the process never got here. Bounding Duplicate on its own
+ * therefore does not finish the job -- it removes the thing that was hiding a worse
+ * failure, since the economizer's bypass path deletes exactly the malformed array it
+ * just refused (gw_should_apply -> cJSON_Delete(reduced)). Severing before the first
+ * deallocate closes that. Each level severs its own chain; a child level is severed
+ * by its own cJSON_Delete call below. */
+static int cjson_sever_next_cycle(cJSON *head)
+{
+   cJSON *slow = head;
+   cJSON *fast = head;
+   while ((fast != NULL) && (fast->next != NULL))
+   {
+      slow = slow->next;
+      fast = fast->next->next;
+      if (slow != fast)
+      {
+         continue;
+      }
+      /* Met inside the loop. Stepping one at a time from the head and from the
+       * meeting point converges on the node the cycle re-enters. */
+      slow = head;
+      while (slow != fast)
+      {
+         slow = slow->next;
+         fast = fast->next;
+      }
+      {
+         cJSON *tail = slow;
+         while (tail->next != slow)
+         {
+            tail = tail->next;
+         }
+         tail->next = NULL; /* cut the back edge */
+         if (slow->prev == tail)
+         {
+            slow->prev = NULL;
+         }
+      }
+      return 1;
+   }
+   return 0;
+}
+
 /* Delete a cJSON structure. */
 CJSON_PUBLIC(void) cJSON_Delete(cJSON *item)
 {
    cJSON *next = NULL;
+   /* Before the first deallocate, never during: see cjson_sever_next_cycle. */
+   (void)cjson_sever_next_cycle(item);
    while (item != NULL)
    {
       next = item->next;

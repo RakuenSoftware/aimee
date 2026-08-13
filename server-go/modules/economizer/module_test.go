@@ -1,7 +1,10 @@
 package economizer
 
 import (
+	"encoding/binary"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -150,13 +153,161 @@ func TestModuleRejectsBadRequests(t *testing.T) {
 	}
 }
 
+func TestModuleJSONCompactStagePreservesBytes(t *testing.T) {
+	h := NewHandler()
+	source := []byte(" \n { \"a\" : [ 1.2300e+02, \" x \\u0061 \" ] } \r\n")
+	out, status := h(bus.ModuleInvocation{StageID: StageJSONCompact}, source)
+	if status != bus.ModuleStatusOK || len(out) < auxHeaderLen {
+		t.Fatalf("status=%v response=%x", status, out)
+	}
+	if binary.LittleEndian.Uint32(out[0:4]) != compactMagic ||
+		binary.LittleEndian.Uint16(out[6:8]) != uint16(JSONOK) {
+		t.Fatalf("bad response header: %x", out[:auxHeaderLen])
+	}
+	payloadLen := int(binary.LittleEndian.Uint32(out[8:12]))
+	if payloadLen != len(out)-auxHeaderLen ||
+		string(out[auxHeaderLen:]) != `{"a":[1.2300e+02," x \u0061 "]}` {
+		t.Fatalf("compacted payload = %q", out[auxHeaderLen:])
+	}
+
+	invalidUTF8 := []byte{'[', ' ', '"', 0xc0, 0x80, '"', ' ', ']'}
+	out, status = h(bus.ModuleInvocation{StageID: StageJSONCompact}, invalidUTF8)
+	if status != bus.ModuleStatusOK ||
+		binary.LittleEndian.Uint16(out[6:8]) != uint16(JSONInvalidUTF8) {
+		t.Fatalf("invalid UTF-8 response=%x status=%v", out, status)
+	}
+}
+
+func TestModuleJSONCompactStageRefusals(t *testing.T) {
+	h := NewHandler()
+	cases := []struct {
+		name string
+		in   []byte
+		want JSONResult
+	}{
+		{"not shorter", []byte(`{"a":1}`), JSONNotShorter},
+		{"duplicate key", []byte(`{ "a": 1, "a": 2 }`), JSONDuplicateKey},
+		{"too deep", []byte(strings.Repeat("[", JSONMaxDepth+1) + strings.Repeat("]", JSONMaxDepth+1)), JSONTooDeep},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, status := h(bus.ModuleInvocation{StageID: StageJSONCompact}, tc.in)
+			if status != bus.ModuleStatusOK || len(out) < auxHeaderLen ||
+				JSONResult(binary.LittleEndian.Uint16(out[6:8])) != tc.want {
+				t.Fatalf("response=%x status=%v want=%v", out, status, tc.want)
+			}
+		})
+	}
+	oversize := make([]byte, JSONMaxInput+1)
+	out, status := h(bus.ModuleInvocation{StageID: StageJSONCompact}, oversize)
+	if status != bus.ModuleStatusOK || JSONResult(binary.LittleEndian.Uint16(out[6:8])) != JSONTooLarge {
+		t.Fatalf("oversize response=%x status=%v", out, status)
+	}
+}
+
+func recallRequest(dir, ref string) []byte {
+	out := make([]byte, recallRequestLen+len(dir)+len(ref))
+	binary.LittleEndian.PutUint32(out[0:4], recallMagic)
+	binary.LittleEndian.PutUint16(out[4:6], auxWireVersion)
+	binary.LittleEndian.PutUint32(out[8:12], uint32(len(dir)))
+	binary.LittleEndian.PutUint32(out[12:16], uint32(len(ref)))
+	copy(out[16:], dir)
+	copy(out[16+len(dir):], ref)
+	return out
+}
+
+func TestModuleToolRecallAndStatsStages(t *testing.T) {
+	h := NewHandler()
+	dir := t.TempDir()
+	ref := "tc-0123456789abcdef"
+	want := []byte{'r', 'a', 'w', 0xff, '\n'}
+	if err := os.WriteFile(filepath.Join(dir, ref+".out"), want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, status := h(bus.ModuleInvocation{StageID: StageToolRecall}, recallRequest(dir, ref))
+	if status != bus.ModuleStatusOK || len(out) < auxHeaderLen ||
+		binary.LittleEndian.Uint16(out[6:8]) != recallOK ||
+		string(out[auxHeaderLen:]) != string(want) {
+		t.Fatalf("recall response=%x status=%v", out, status)
+	}
+
+	out, status = h(bus.ModuleInvocation{StageID: StageToolRecall}, recallRequest(dir, "../bad"))
+	if status != bus.ModuleStatusOK || binary.LittleEndian.Uint16(out[6:8]) != recallInvalidRef {
+		t.Fatalf("invalid ref response=%x status=%v", out, status)
+	}
+
+	out, status = h(bus.ModuleInvocation{StageID: StageToolStats}, nil)
+	if status != bus.ModuleStatusOK || len(out) != statsResponseLen ||
+		binary.LittleEndian.Uint32(out[0:4]) != statsMagic {
+		t.Fatalf("stats response=%x status=%v", out, status)
+	}
+	if got := int64(binary.LittleEndian.Uint64(out[56:64])); got == 0 {
+		t.Fatal("successful recall was not reflected in recovered counter")
+	}
+}
+
+func TestModuleToolRecallRejectsMalformedFramesAndDirectories(t *testing.T) {
+	h := NewHandler()
+	ref := "tc-0123456789abcdef"
+	for _, req := range [][]byte{
+		[]byte("short"),
+		recallRequest("relative", ref),
+		recallRequest("/tmp/../etc", ref),
+		recallRequest("/tmp/\x00hidden", ref),
+	} {
+		if _, status := h(bus.ModuleInvocation{StageID: StageToolRecall}, req); status != bus.ModuleStatusInvalidRequest {
+			t.Errorf("request %q: status=%v", req, status)
+		}
+	}
+	badVersion := recallRequest(t.TempDir(), ref)
+	binary.LittleEndian.PutUint16(badVersion[4:6], auxWireVersion+1)
+	if _, status := h(bus.ModuleInvocation{StageID: StageToolRecall}, badVersion); status != bus.ModuleStatusInvalidRequest {
+		t.Errorf("bad version: status=%v", status)
+	}
+}
+
+func TestModuleRecordBuildStage(t *testing.T) {
+	h := NewHandler()
+	messages, _ := json.Marshal([]map[string]string{
+		{"role": "user", "content": "please inspect /untrusted/input.txt " + strings.Repeat("context ", 100)},
+		{"role": "assistant", "content": "[done] changed src/server/session_compact.c at port=3002"},
+		{"role": "assistant", "content": "[blocked] denied by policy"},
+	})
+	req := RecordBuildRequest{
+		Messages: messages,
+		Start:    0,
+		End:      3,
+	}
+	body, _ := json.Marshal(req)
+	out, status := h(bus.ModuleInvocation{StageID: StageRecordBuild}, body)
+	if status != bus.ModuleStatusOK {
+		t.Fatalf("status=%v body=%s", status, out)
+	}
+	var got recordBuildResponse
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Record.Decisions) != 1 || len(got.Record.Errors) != 1 ||
+		len(got.Record.Files) != 2 || !strings.Contains(got.Closet, "(untrusted)") ||
+		!strings.Contains(got.Closet, "3002 ⟦port⟧") {
+		t.Fatalf("record response=%+v", got)
+	}
+
+	req.End = 4
+	body, _ = json.Marshal(req)
+	if _, status = h(bus.ModuleInvocation{StageID: StageRecordBuild}, body); status != bus.ModuleStatusInvalidRequest {
+		t.Fatalf("bad range status=%v", status)
+	}
+}
+
 // The event kind is fixed by the process contract at 4096 + ordinal*256 + stage.
 func TestModuleEventKindMatchesContract(t *testing.T) {
 	const ordinal = 27
-	if want := uint32(4096 + ordinal*256 + 1); EventReduce != want {
-		t.Errorf("EventReduce = %d, want %d", EventReduce, want)
-	}
-	if StageReduce != 1 {
-		t.Errorf("StageReduce = %d, want 1", StageReduce)
+	events := []uint32{EventReduce, EventJSONCompact, EventToolRecall, EventToolStats, EventRecordBuild}
+	for index, event := range events {
+		stage := uint32(index + 1)
+		if want := uint32(4096 + ordinal*256 + stage); event != want {
+			t.Errorf("event %d = %d, want %d", stage, event, want)
+		}
 	}
 }
