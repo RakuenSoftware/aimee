@@ -15,8 +15,8 @@ import "github.com/JBailes/aimee/server-go/bus"
 // permissions than the caller asked about, and grant or deny the wrong things.
 
 const (
-	StagePermissions uint32 = 22
-	EventPermissions uint32 = 6678
+	StagePermissions uint32 = 15
+	EventPermissions uint32 = 6671
 
 	permissionsRequestMagic  uint32 = 0x51524550 /* "PERQ" */
 	permissionsResponseMagic uint32 = 0x53524550 /* "PERS" */

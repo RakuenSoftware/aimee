@@ -204,7 +204,7 @@
         },
         {
           "id": 15,
-          "name": "delegate-may-write",
+          "name": "delegate-permissions",
           "event_kind": 6671
         },
         {
@@ -236,11 +236,6 @@
           "id": 21,
           "name": "delegate-named-file-drift",
           "event_kind": 6677
-        },
-        {
-          "id": 22,
-          "name": "delegate-permissions",
-          "event_kind": 6678
         }
       ]
     },

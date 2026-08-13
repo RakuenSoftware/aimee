@@ -897,33 +897,6 @@ static int delegate_isolation(const char *report, int probe_failed, int require_
                                                     reason, reason_cap);
 }
 
-/* The role and the brief, composed by the module into one permission. */
-static int delegate_may_write_adapter(const char *role, const char *prompt, int *may_write,
-                                      int *by_role, int *by_prompt)
-{
-   size_t prompt_len = prompt ? strlen(prompt) : 0;
-   size_t cap = AIMEE_DELEGATES_MAYWRITE_HEADER_LEN + AIMEE_DELEGATES_ROLE_MAX + prompt_len + 8;
-   uint8_t *request = malloc(cap);
-   if (!request)
-      return -1;
-   size_t request_len = aimee_delegates_maywrite_request_encode(role, prompt, request, cap);
-   if (request_len == 0)
-   {
-      free(request);
-      return -1;
-   }
-
-   uint8_t response[AIMEE_DELEGATES_MAYWRITE_RESPONSE_LEN];
-   uint32_t response_len = 0;
-   int rc = call_module(AIMEE_DELEGATES_EVENT_MAYWRITE, AIMEE_DELEGATES_STAGE_MAYWRITE, request,
-                        (uint32_t)request_len, response, sizeof(response), &response_len);
-   free(request);
-   if (rc != 0)
-      return -1;
-   return aimee_delegates_maywrite_response_decode(response, response_len, may_write, by_role,
-                                                   by_prompt);
-}
-
 /* Which built sandbox images may be deleted. A wire: the inventory goes out and
  * the verdicts come back, and nothing here decides either. */
 static int delegate_image_gc(const uint8_t *request, size_t request_len, uint8_t *response,
@@ -1246,7 +1219,6 @@ void server_module_stage_adapters_configure(void)
    delegate_register_launch_args_provider(delegate_launch_args);
    delegate_register_image_spec_provider(delegate_image_spec);
    delegate_register_isolation_provider(delegate_isolation);
-   delegate_register_may_write_provider(delegate_may_write_adapter);
    delegate_register_image_gc_provider(delegate_image_gc);
    delegate_register_route_filter_provider(delegate_route_filter);
    delegate_register_noop_write_provider(delegate_noop_write);

@@ -68,9 +68,6 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	if invocation.StageID == StageIsolation {
 		return handleIsolation(invocation, request)
 	}
-	if invocation.StageID == StageMayWrite {
-		return handleMayWrite(invocation, request)
-	}
 	if invocation.StageID == StageImageGC {
 		return handleImageGC(invocation, request)
 	}

@@ -1,8 +1,10 @@
 /* delegate_launch_args.c: see delegate_launch_args.h */
 #include <aimee/delegates/delegate_launch_args.h>
+#include <aimee/delegates/module_api.h>
 
 #include "log.h"
 
+#include <stdio.h>
 #include <string.h>
 
 static delegate_launch_args_fn g_launch_args;
@@ -100,55 +102,6 @@ int delegate_isolation_judge(const char *report, int probe_failed, int require_i
    }
    return g_isolation(report, probe_failed, require_isolation, refuse, warn, is_error, reason,
                       reason_cap);
-}
-
-static delegate_may_write_fn g_may_write;
-
-void delegate_register_may_write_provider(delegate_may_write_fn provider)
-{
-   g_may_write = provider;
-}
-
-/* The brief's half alone. Same provider, same one answer: stage 15 returns the
- * two halves beside the composed verdict precisely so a caller that already
- * knows the role can ask for the other one without a second rule existing. */
-int delegate_prompt_asks_for_writes(const char *prompt)
-{
-   if (!g_may_write)
-   {
-      LOG_ERROR("delegates",
-                "no may-write provider registered; treating the brief as not asking for writes");
-      return 0;
-   }
-   int may = 0, by_role = 0, by_prompt = 0;
-   if (g_may_write("", prompt, &may, &by_role, &by_prompt) != 0)
-      return 0;
-   return by_prompt;
-}
-
-int delegate_may_write(const char *role, const char *prompt)
-{
-   if (!g_may_write)
-   {
-      LOG_ERROR("delegates",
-                "no may-write provider registered; treating the delegate as read-only");
-      return 0;
-   }
-   int may = 0, by_role = 0, by_prompt = 0;
-   if (g_may_write(role, prompt, &may, &by_role, &by_prompt) != 0)
-   {
-      LOG_ERROR("delegates",
-                "could not resolve write permission for role '%s'; "
-                "treating the delegate as read-only",
-                role ? role : "");
-      return 0;
-   }
-   if (!may)
-      LOG_INFO("delegates",
-               "delegate role '%s' is read-only for this turn (role permits=%d, "
-               "brief asks=%d)",
-               role ? role : "", by_role, by_prompt);
-   return may;
 }
 
 static delegate_image_gc_fn g_image_gc;
@@ -311,4 +264,112 @@ int delegate_permissions_resolve(const uint8_t *request, size_t request_len, uin
    if (!request || !response || !response_len)
       return -1;
    return g_permissions(request, request_len, response, response_cap, response_len);
+}
+
+/* Room for a role name and the answer. Both are small; the cap exists so a
+ * malformed response cannot be believed rather than to bound real data. */
+#define DELEGATE_PERM_WIRE_CAP 8192u
+
+int delegate_permissions_for_role(const char *role, delegate_permissions_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+
+   uint8_t request[DELEGATE_PERM_WIRE_CAP];
+   aimee_delegates_wire_t w;
+   aimee_delegates_perms_request_begin(&w, request, sizeof(request), 0u, role ? role : "");
+   if (w.overflow)
+      return -1;
+
+   uint8_t response[DELEGATE_PERM_WIRE_CAP];
+   size_t response_len = 0;
+   if (delegate_permissions_resolve(request, w.len, response, sizeof(response), &response_len) != 0)
+      return -1;
+
+   aimee_delegates_rd_t r;
+   int count = aimee_delegates_perms_response_begin(&r, response, response_len);
+   if (count < 0)
+      return -1;
+
+   for (int i = 0; i < count; i++)
+   {
+      char name[DELEGATE_PERM_NAME_MAX], enforced_at[DELEGATE_PERM_NAME_MAX];
+      int scope_count = 0;
+      if (aimee_delegates_perms_response_grant(&r, name, sizeof(name), enforced_at,
+                                               sizeof(enforced_at), &scope_count) != 0)
+         return -1;
+
+      delegate_grant_t *grant = NULL;
+      if (out->count < DELEGATE_PERM_MAX)
+      {
+         grant = &out->grants[out->count++];
+         snprintf(grant->name, sizeof(grant->name), "%s", name);
+         snprintf(grant->enforced_at, sizeof(grant->enforced_at), "%s", enforced_at);
+      }
+
+      for (int scope = 0; scope < scope_count; scope++)
+      {
+         char object[DELEGATE_PERM_OBJECT_MAX];
+         aimee_delegates_rd_str(&r, object, sizeof(object));
+         if (grant && grant->scope_count < DELEGATE_PERM_SCOPE_MAX)
+            snprintf(grant->scopes[grant->scope_count++], DELEGATE_PERM_OBJECT_MAX, "%s", object);
+      }
+   }
+
+   uint32_t unenforced = aimee_delegates_rd_u32(&r);
+   for (uint32_t i = 0; i < unenforced && !r.bad; i++)
+   {
+      char name[DELEGATE_PERM_NAME_MAX];
+      aimee_delegates_rd_str(&r, name, sizeof(name));
+      if (out->unenforced_count < DELEGATE_PERM_MAX)
+         snprintf(out->unenforced[out->unenforced_count++], DELEGATE_PERM_NAME_MAX, "%s", name);
+   }
+
+   if (r.bad)
+   {
+      memset(out, 0, sizeof(*out));
+      return -1;
+   }
+
+   for (int i = 0; i < out->unenforced_count; i++)
+      LOG_WARN("delegates",
+               "role '%s' declares permission '%s' and nothing enforces it; it grants and denies "
+               "nothing at runtime",
+               role ? role : "", out->unenforced[i]);
+
+   out->resolved = 1;
+   return 0;
+}
+
+static const delegate_grant_t *delegate_permissions_find(const delegate_permissions_t *p,
+                                                         const char *permission)
+{
+   if (!p || !permission)
+      return NULL;
+   for (int i = 0; i < p->count; i++)
+      if (strcmp(p->grants[i].name, permission) == 0)
+         return &p->grants[i];
+   return NULL;
+}
+
+int delegate_permissions_has(const delegate_permissions_t *p, const char *permission)
+{
+   return delegate_permissions_find(p, permission) != NULL;
+}
+
+int delegate_permissions_allow(const delegate_permissions_t *p, const char *permission,
+                               const char *object)
+{
+   const delegate_grant_t *grant = delegate_permissions_find(p, permission);
+   if (!grant)
+      return 0;
+   if (grant->scope_count == 0)
+      return 1;
+   if (!object)
+      return 0;
+   for (int i = 0; i < grant->scope_count; i++)
+      if (strcmp(grant->scopes[i], object) == 0)
+         return 1;
+   return 0;
 }

@@ -18,7 +18,7 @@ const (
 
 	driftMaxPaths             = 256
 	driftMaxIndexHits         = 64
-	driftFlagRoleWrite uint32 = 1 << 0
+	driftFlagWritesAllowed uint32 = 1 << 0
 	driftFlagPathExist uint32 = 1 << 0
 	driftFlagPathDiff  uint32 = 1 << 1
 )
@@ -30,7 +30,7 @@ func handleNamedFileDrift(invocation bus.ModuleInvocation, request []byte) ([]by
 	}
 
 	flags := r.u32()
-	if flags&^driftFlagRoleWrite != 0 {
+	if flags&^driftFlagWritesAllowed != 0 {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 
@@ -38,7 +38,7 @@ func handleNamedFileDrift(invocation bus.ModuleInvocation, request []byte) ([]by
 		Prompt:       r.str(),
 		Response:     r.str(),
 		WorktreePath: r.str(),
-		RoleIsWrite:  flags&driftFlagRoleWrite != 0,
+		WritesAllowed: flags&driftFlagWritesAllowed != 0,
 	}
 
 	count := r.count(driftMaxPaths)

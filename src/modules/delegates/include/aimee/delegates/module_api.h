@@ -1007,8 +1007,8 @@ static inline int aimee_delegates_routefilter_response_decode(const uint8_t *in,
 #define AIMEE_DELEGATES_NOOPWRITE_RESPONSE_MAGIC 0x53574e44u /* "DNWS" */
 #define AIMEE_DELEGATES_NOOPWRITE_REQUEST_LEN    16u
 
-#define AIMEE_DELEGATES_NOOP_IS_WRITE_ROLE  (1u << 0)
-#define AIMEE_DELEGATES_NOOP_ALLOWS_WRITES  (1u << 1)
+/* Bit 0 was IS_WRITE_ROLE, which said the same thing as WRITES_ALLOWED. */
+#define AIMEE_DELEGATES_NOOP_WRITES_ALLOWED (1u << 1)
 #define AIMEE_DELEGATES_NOOP_HANDOFF_JSON   (1u << 2)
 #define AIMEE_DELEGATES_NOOP_SUCCEEDED      (1u << 3)
 #define AIMEE_DELEGATES_NOOP_ANY_NAMED      (1u << 4)
@@ -1287,7 +1287,7 @@ static inline int aimee_delegates_reviewev_response_decode(const uint8_t *in, si
 #define AIMEE_DELEGATES_DRIFT_REQUEST_MAGIC  0x51465244u /* "DRFQ" */
 #define AIMEE_DELEGATES_DRIFT_RESPONSE_MAGIC 0x53465244u /* "DRFS" */
 
-#define AIMEE_DELEGATES_DRIFT_ROLE_IS_WRITE (1u << 0)
+#define AIMEE_DELEGATES_DRIFT_WRITES_ALLOWED (1u << 0)
 
 #define AIMEE_DELEGATES_DRIFT_PATH_EXISTS  (1u << 0)
 #define AIMEE_DELEGATES_DRIFT_PATH_IN_DIFF (1u << 1)
@@ -1340,7 +1340,7 @@ static inline int aimee_delegates_drift_response_decode(const uint8_t *in, size_
    return r.bad ? -1 : 0;
 }
 
-/* --- Delegate permissions (stage 22): what a delegate may do.
+/* --- Delegate permissions (stage 15): what a delegate may do.
  *
  * Resolved ONCE, when the delegate is created, and carried for the life of the
  * run. Nothing downstream works the answer out again: the mount reads it, the
@@ -1353,8 +1353,8 @@ static inline int aimee_delegates_drift_response_decode(const uint8_t *in, size_
  *
  * See docs/DELEGATE_ROLE_PERMISSIONS.md. */
 
-#define AIMEE_DELEGATES_EVENT_PERMS          6678u
-#define AIMEE_DELEGATES_STAGE_PERMS          22u
+#define AIMEE_DELEGATES_EVENT_PERMS          6671u
+#define AIMEE_DELEGATES_STAGE_PERMS          15u
 #define AIMEE_DELEGATES_PERMS_REQUEST_MAGIC  0x51524550u /* "PERQ" */
 #define AIMEE_DELEGATES_PERMS_RESPONSE_MAGIC 0x53524550u /* "PERS" */
 

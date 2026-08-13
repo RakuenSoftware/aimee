@@ -59,6 +59,20 @@ The built-in roles:
 Aliases resolve before permissions are read, so `reviewer` holds what `review`
 holds.
 
+## The brief does not change what a delegate may do
+
+A task that says "read-only, do not edit anything" no longer makes a `code`
+delegate read-only. It never really did. The wording changed one derivation and
+not the others, so the same delegate could be planned read-only and mounted
+writable, and which one you got depended on which code path asked.
+
+**Pick the role that matches the powers you want.** A read-only run is a
+`review`, `diagnose` or `explain` delegate. Wording a `code` brief carefully is
+not a permission boundary, and treating it as one hid that the mount had already
+been made writable.
+
+The brief still shapes the work. It no longer shapes the powers.
+
 A role that is neither built in nor defined at runtime holds nothing. An
 unrecognised role is a question nobody answered, and "it probably just reads" is
 still an answer nobody gave.
