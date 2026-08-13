@@ -270,6 +270,21 @@ int agent_tools_parent_write_guard_blocks(const char *path, const char *cwd);
  * DEFAULTS TO ALLOWED, and that is the honest default: an ordinary turn that
  * never had a delegate role behaves as it always did. The withholding is what
  * has to be declared. */
+/* May this delegate run commands? The `shell` permission, resolved once when the
+ * delegate was created and set here for the run.
+ *
+ * Withheld, `bash` and `execute_script` are refused at dispatch whatever toolset
+ * the delegate was given. That independence is the point: which toolset a role
+ * resolves to is a separate map with its own alias list, and a role an operator
+ * defined without `shell` still resolves to whatever toolset its NAME implies.
+ * The permission is what actually binds.
+ *
+ * DEFAULTS TO ALLOWED, like knowledge_write and for the same reason: an ordinary
+ * turn that never had a delegate role behaves as it always did. Withholding is
+ * what has to be declared. */
+void agent_tools_shell_set(int allowed);
+int agent_tools_shell_allowed(void);
+
 void agent_tools_knowledge_write_set(int allowed);
 int agent_tools_knowledge_write_allowed(void);
 

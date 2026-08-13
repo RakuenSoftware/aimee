@@ -660,11 +660,20 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
       char *definition = role_template_frontmatter(NULL, role);
       (void)delegate_permissions_for_role(role, definition, &perms);
       free(definition);
-      agent_tools_knowledge_write_set(delegate_permissions_has(&perms, "knowledge_write"));
-      ag->write_capable = enforce_writes && delegate_permissions_has(&perms, "repo_write") ? 1 : 0;
+      agent_tools_knowledge_write_set(
+          delegate_permissions_has(&perms, AIMEE_DELEGATES_PERM_KNOWLEDGE_WRITE));
+      agent_tools_shell_set(delegate_permissions_has(&perms, AIMEE_DELEGATES_PERM_SHELL));
+      ag->write_capable =
+          enforce_writes && delegate_permissions_has(&perms, AIMEE_DELEGATES_PERM_REPO_WRITE) ? 1
+                                                                                              : 0;
    }
    else
    {
+      /* Stated, not left over. These carriers outlive a run, so a turn that
+         inherits them from the delegate before it would be confined by a
+         permission nobody withheld from IT. Every run sets its own posture. */
+      agent_tools_knowledge_write_set(1);
+      agent_tools_shell_set(1);
       ag->write_capable = enforce_writes ? 1 : 0;
    }
 

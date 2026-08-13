@@ -97,6 +97,11 @@ same effects by running commands, so a tool-layer rule cannot bind it. This is
 why `repo_write` lives at the mount rather than removing `write_file` from a
 toolset: with a shell available, the absence of a tool stops nothing.
 
+`shell` itself is refused at dispatch, and deliberately not by choosing a toolset
+without `bash`. Which toolset a role gets is a map keyed on the role name, so a
+role you define without `shell` still resolves to whichever toolset its name
+implies. The permission is checked whatever that map returns.
+
 Scope inherits the same limit, because a scope is only real where the
 enforcement point can see the object.
 

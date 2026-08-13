@@ -658,6 +658,40 @@ static void test_knowledge_write_gates_the_tool_policy(void)
    cJSON_Delete(tools);
 }
 
+/* A delegate that does not hold `shell` cannot run commands, whatever toolset it
+ * was given.
+ *
+ * The independence is the point. A toolset comes from a map keyed on the role
+ * NAME, so a role an operator defined without `shell` still resolves to one
+ * carrying bash. `code` is used here for exactly that reason: it is a role whose
+ * toolset has bash, and the permission is what refuses it.
+ */
+static void test_a_delegate_without_shell_cannot_run_commands(void)
+{
+   agent_tools_set_dispatch_role("code");
+   agent_tools_shell_set(0);
+
+   char *result = dispatch_tool_call("bash", "{\"command\":\"ls\"}", 1000);
+   assert(result != NULL);
+   assert(strstr(result, "`shell` permission") != NULL);
+   free(result);
+
+   result = dispatch_tool_call("execute_script", "{\"body\":\"echo hi\"}", 1000);
+   assert(result != NULL);
+   assert(strstr(result, "`shell` permission") != NULL);
+   free(result);
+
+   /* Holding it, the refusal is gone: whatever bash does next, it is not this. */
+   agent_tools_shell_set(1);
+   result = dispatch_tool_call("bash", "{\"command\":\"true\"}", 1000);
+   assert(result != NULL);
+   assert(strstr(result, "`shell` permission") == NULL);
+   free(result);
+
+   agent_tools_set_dispatch_role(NULL);
+   printf("  PASS: test_a_delegate_without_shell_cannot_run_commands\n");
+}
+
 static void test_withheld_knowledge_write_blocks_stale_context_tools(void)
 {
    agent_tools_set_dispatch_role("diagnose");
@@ -3573,6 +3607,7 @@ int main(void)
    test_agent_route_with_caps_honors_context_override();
    test_knowledge_write_gates_the_tool_policy();
    test_withheld_knowledge_write_blocks_stale_context_tools();
+   test_a_delegate_without_shell_cannot_run_commands();
    test_provider_env_credentials_and_headers();
    test_codex_oauth_request_creds();
    test_codex_oauth_reads_vault_only();

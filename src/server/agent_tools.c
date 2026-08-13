@@ -478,6 +478,18 @@ int agent_tools_strip_delegate_respond(parsed_response_t *parsed)
  * was created with; every site below reads the same answer. */
 static int g_knowledge_write = 1;
 
+static int g_shell = 1;
+
+void agent_tools_shell_set(int allowed)
+{
+   g_shell = allowed ? 1 : 0;
+}
+
+int agent_tools_shell_allowed(void)
+{
+   return g_shell;
+}
+
 void agent_tools_knowledge_write_set(int allowed)
 {
    g_knowledge_write = allowed ? 1 : 0;
