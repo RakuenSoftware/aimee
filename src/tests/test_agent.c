@@ -629,8 +629,10 @@ static int agent_test_role_policy(int op, const char *role, int a, int b, int *o
    (void)b;
    if (op != DELEGATE_ROLE_OP_CURRENT_CODE || !out)
       return -1;
-   *out = role && (strcmp(role, "review") == 0 || strcmp(role, "diagnose") == 0 ||
-                   strcmp(role, "inspect") == 0);
+   /* "inspect" resolves to "diagnose" in the module, so both answer the same;
+    * spelled out here because this harness does not canonicalise. */
+   *out = role && (strcmp(role, "review") == 0 || strcmp(role, "reviewer") == 0 ||
+                   strcmp(role, "diagnose") == 0 || strcmp(role, "inspect") == 0);
    return 0;
 }
 

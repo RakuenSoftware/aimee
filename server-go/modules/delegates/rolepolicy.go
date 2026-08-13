@@ -90,16 +90,15 @@ func RoleResultCacheEnabled(role string) bool {
 // since changed -- so a review grounded in them can cite something that is no
 // longer there. Withholding those tools forces the answer to come from the tree.
 //
-// DELIBERATELY NOT CANONICALISED, unlike every other rule in this file. The C
-// this replaces compared the raw role, so "review" is confined and its alias
-// "reviewer" is not. Canonicalising here would silently narrow the tool surface
-// of any delegate invoked by an alias, which is a behaviour change to a security
-// boundary and not this migration's to make. The inconsistency is real and worth
-// fixing; it should be fixed deliberately, with its own test and its own
-// decision. See TestRoleSeesCurrentCodeOnlyMatchesTheRawRole.
+// The role is canonicalised first, so an alias is confined exactly as the name
+// it resolves to. The C this replaced compared the RAW role, which meant
+// `--role reviewer` kept the index and memory tools that `--role review` was
+// denied -- the same delegate, the same job, a different tool surface depending
+// on which spelling the caller typed. Nothing chose that; it was what a raw
+// strcmp does when aliases exist everywhere else.
 func RoleSeesCurrentCodeOnly(role string) bool {
-	switch role {
-	case "review", "diagnose", "inspect":
+	switch canonicalRole(role) {
+	case "review", "diagnose":
 		return true
 	}
 	return false
