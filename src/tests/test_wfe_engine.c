@@ -11,6 +11,7 @@
 #include "db1.h"
 #include "wfe_store.h"
 #include "wfe_engine.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* mini workflow: draft -> gate -> pr -> done(merge); gate loops to draft. */
 static const char *MINI = "name: mini\n"
@@ -72,7 +73,8 @@ static wfe_step_result_t exec_cost(wfe_ctx *c, const wfe_node_t *n)
 
 static void setup_home(void)
 {
-   char tmpl[] = "/tmp/wfe_home_XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/wfe_home_XXXXXX", platform_tmpdir());
    char *dir = wfe_test_mkdtemp(tmpl);
    assert(dir);
    char wf[512];

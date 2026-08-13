@@ -10,6 +10,7 @@
 #include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
 #include "agent_code_capabilities.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static const char *g_http_response;
 static int g_http_status = -1;
@@ -132,7 +133,7 @@ static const char *mock_server_path(void)
 
 static void make_package_manager_link(char *dir, size_t dir_len, char *path, size_t path_len)
 {
-   snprintf(dir, dir_len, "/tmp/aimee-mcp-registry-XXXXXX");
+   snprintf(dir, dir_len, "%s/aimee-mcp-registry-XXXXXX", platform_tmpdir());
    assert(mkdtemp(dir) != NULL);
    snprintf(path, path_len, "%s/npx", dir);
    char target[512];

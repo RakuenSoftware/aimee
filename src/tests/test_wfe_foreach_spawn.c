@@ -13,6 +13,7 @@
 #include "wfe_def.h"
 #include "wfe_live_foreach.h"
 #include "wfe_store.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* A minimal but valid "slice" workflow so wfe_work_item_resolve can pin its version
  * + start stage (the spawner needs those to create children). */
@@ -59,7 +60,8 @@ static void write_plan(const char *path, int n)
 int main(void)
 {
    printf("wfe-foreach-spawn: ");
-   char home[] = "/tmp/wfe_spawn_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/wfe_spawn_XXXXXX", platform_tmpdir());
    assert(wfe_test_mkdtemp(home));
    char wf[160];
    snprintf(wf, sizeof wf, "%s/workflows", home);

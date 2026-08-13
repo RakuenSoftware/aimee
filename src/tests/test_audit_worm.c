@@ -10,12 +10,13 @@
 
 #include <aimee/audit/audit_worm.h>
 #include "cJSON.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char g_dir[256];
 
 static void mk_tmpdir(void)
 {
-   snprintf(g_dir, sizeof g_dir, "/tmp/worm_test_XXXXXX");
+   snprintf(g_dir, sizeof g_dir, "%s/worm_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_dir) != NULL);
 }
 

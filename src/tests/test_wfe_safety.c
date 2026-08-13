@@ -13,6 +13,7 @@
 #include "wfe_def.h"
 #include "wfe_engine.h"
 #include "wfe_iface.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* configurable mock forge */
 static wfe_ci_status_t g_ci;
@@ -135,7 +136,8 @@ static int run_fresh(const char *path_suffix)
 int main(void)
 {
    printf("wfe-safety: ");
-   char home[] = "/tmp/wfe_sft_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/wfe_sft_XXXXXX", platform_tmpdir());
    assert(wfe_test_mkdtemp(home));
    char wf[128];
    snprintf(wf, sizeof wf, "%s/workflows", home);

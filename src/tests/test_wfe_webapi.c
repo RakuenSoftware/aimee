@@ -16,6 +16,7 @@
 #include "server/server_workflow_api.h"
 #include "wfe_def.h"
 #include "wfe_store.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* Stub the one identity accessor server_workflow_api references (rather than link
  * the full attestation stack). Test-controlled so we can drive both the non-owner
@@ -67,7 +68,8 @@ static cJSON *parse_resp(const char *buf)
 int main(void)
 {
    printf("wfe-webapi: ");
-   char home[] = "/tmp/wfe_web_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/wfe_web_XXXXXX", platform_tmpdir());
    assert(wfe_test_mkdtemp(home));
    char wfdir[128];
    snprintf(wfdir, sizeof wfdir, "%s/workflows", home);

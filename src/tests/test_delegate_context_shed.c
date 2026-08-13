@@ -10,6 +10,7 @@
 #include "cmd_agent_delegate_impl.h"
 #include <aimee/delegates/delegate_launch_args.h>
 #include <aimee/delegates/delegate_role.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* ---- helpers ---- */
 
@@ -17,7 +18,7 @@ static char g_tmpdir[256];
 
 static void setup_tmpdir(void)
 {
-   snprintf(g_tmpdir, sizeof(g_tmpdir), "/tmp/test_dcs_XXXXXX");
+   snprintf(g_tmpdir, sizeof(g_tmpdir), "%s/test_dcs_XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_tmpdir) != NULL);
 }
 

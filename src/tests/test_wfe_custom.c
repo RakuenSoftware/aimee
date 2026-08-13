@@ -14,8 +14,11 @@
 #include "wfe_def.h"
 #include "wfe_engine.h"
 #include "wfe_iface.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
-static char g_home[64];
+/* 256, not 64: the path now carries TMPDIR in front of the template, and a
+ * truncated mkdtemp template fails somewhere far less obvious. */
+static char g_home[256];
 
 static void write_file(const char *path, const char *body, mode_t mode)
 {
@@ -52,7 +55,7 @@ static const char *blocks_path(void)
 int main(void)
 {
    printf("wfe-custom: ");
-   strcpy(g_home, "/tmp/wfe_cust_XXXXXX");
+   snprintf(g_home, sizeof g_home, "%s/wfe_cust_XXXXXX", platform_tmpdir());
    assert(wfe_test_mkdtemp(g_home));
    char wf[128];
    snprintf(wf, sizeof wf, "%s/workflows", g_home);

@@ -21,6 +21,7 @@
 #include "wfe_iface.h"
 #include "wfe_blocks.h"
 #include "wfe_autonomy.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static const char *FE = "name: fe\n"
                         "start: u\n"
@@ -42,7 +43,8 @@ static const char *FE = "name: fe\n"
 
 static void setup_home(void)
 {
-   char d[] = "/tmp/wfe_fe_XXXXXX";
+   char d[256];
+   snprintf(d, sizeof d, "%s/wfe_fe_XXXXXX", platform_tmpdir());
    char *dir = wfe_test_mkdtemp(d);
    assert(dir);
    char wf[128];
