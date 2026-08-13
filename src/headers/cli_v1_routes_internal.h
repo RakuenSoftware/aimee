@@ -260,7 +260,14 @@ void rpc_parse(int argc, char **argv, const char **bool_flags, rpc_opts_t *out);
  * own dependency chain, which the CLI does not build against.
  * test_cli_v1_body_cap_matches_server pins these equal to SHTTP_MAX_BODY /
  * SHTTP_MAX_ROUNDTABLE_BODY. */
-#define CLI_V1_MAX_BODY            (4 * 1024 * 1024)
-#define CLI_V1_MAX_ROUNDTABLE_BODY (128 * 1024 * 1024)
+#define CLI_V1_MAX_BODY (4 * 1024 * 1024)
+
+/* Keep in step with ROUNDTABLE_MAX_ARTIFACT / SHTTP_MAX_ROUNDTABLE_BODY in
+ * headers/server.h (2x the artifact); test_cli_v1_body_cap_matches_server pins
+ * them equal. CLI_V1_MAX_ROUNDTABLE_ARTIFACT is what the three artifact reads in
+ * marshal_roundtable_review pass to marshal_read_*_limited -- it was written out
+ * as a bare 16MB literal at each of them. */
+#define CLI_V1_MAX_ROUNDTABLE_ARTIFACT (16 * 1024 * 1024)
+#define CLI_V1_MAX_ROUNDTABLE_BODY     (2 * CLI_V1_MAX_ROUNDTABLE_ARTIFACT)
 
 #endif
