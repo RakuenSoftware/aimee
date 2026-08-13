@@ -232,30 +232,37 @@ func TestRoleSeesCurrentCodeOnly(t *testing.T) {
 	}
 }
 
-// This rule compares the RAW role, unlike every other one in this file.
+// An alias is confined exactly as the name it resolves to.
 //
-// The C it replaces did the same, so "review" is confined and its alias
-// "reviewer" is not -- even though "reviewer" canonicalises to "review"
-// everywhere else. Canonicalising would silently narrow the tool surface of any
-// delegate invoked by an alias, which is a change to a security boundary and was
-// not this migration's to make.
+// This replaces a test that pinned the opposite. The C compared the raw role, so
+// `--role reviewer` kept the index, memory, docs, notes and remote MCP tools
+// that `--role review` was denied: the same delegate, doing the same job, with a
+// different tool surface depending on which spelling the caller typed. That was
+// not a decision anyone made -- it is what a raw strcmp does in a system where
+// aliases resolve everywhere else -- and it is now fixed.
 //
-// The asymmetry is pinned here so that fixing it has to be a decision: this test
-// fails the moment someone canonicalises, and its failure says why.
-func TestRoleSeesCurrentCodeOnlyMatchesTheRawRole(t *testing.T) {
-	if !RoleSeesCurrentCodeOnly("review") {
-		t.Fatal("review is confined")
+// "reviewer" is the only alias whose answer changes: it is now confined.
+// "inspect" already resolved to "diagnose", which was listed explicitly before
+// and is covered by canonicalisation now.
+func TestAnAliasIsConfinedLikeTheRoleItResolvesTo(t *testing.T) {
+	for _, pair := range [][2]string{
+		{"reviewer", "review"},
+		{"inspect", "diagnose"},
+		{"verifier", "validate"},
+		{"implement", "code"},
+	} {
+		alias, canonical := pair[0], pair[1]
+		if RoleSeesCurrentCodeOnly(alias) != RoleSeesCurrentCodeOnly(canonical) {
+			t.Errorf("%q and %q must agree: an alias is the same role", alias, canonical)
+		}
 	}
-	if RoleSeesCurrentCodeOnly("reviewer") {
-		t.Error("PORTED BEHAVIOUR: the alias is not confined, because the C compared " +
-			"the raw role. If this is now being fixed deliberately, change the rule AND " +
-			"this test together, and say so.")
+	// The change this test exists for.
+	if !RoleSeesCurrentCodeOnly("reviewer") {
+		t.Error("reviewer resolves to review, and review is confined")
 	}
-	// "inspect" canonicalises to "diagnose" and both are listed, so the raw
-	// comparison happens to agree there. Stated so the next reader does not
-	// conclude aliases work in general.
-	if !RoleSeesCurrentCodeOnly("inspect") || !RoleSeesCurrentCodeOnly("diagnose") {
-		t.Error("inspect and diagnose are both listed explicitly")
+	// And what did NOT change: validate and its aliases keep their tools.
+	if RoleSeesCurrentCodeOnly("verifier") || RoleSeesCurrentCodeOnly("validate") {
+		t.Error("validate is not confined, so neither is its alias")
 	}
 }
 
