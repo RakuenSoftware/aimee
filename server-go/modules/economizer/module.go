@@ -6,12 +6,10 @@ import (
 	"github.com/JBailes/aimee/server-go/bus"
 )
 
-// Bus surface for the economizer module.
-//
-// ONE stage, deliberately. coord_closet, fold_recall, context_fold and the
-// condensation primitives are internal to a reduction, not separately callable,
-// so exposing them would be surface with no caller. The reduction is the unit of
-// work the C side actually needs.
+// Bus surface for the economizer module. Reduction remains the primary stage.
+// The auxiliary stages are compatibility seams for the last C consumers of
+// algorithms that already live here: fresh-result JSON compaction, spill recall,
+// and the process-local condensation counters.
 //
 // The module is STATELESS: per-conversation reducer state travels in and out
 // with the request, because the caller already persists it (db1_economizer_state
@@ -22,8 +20,16 @@ import (
 // 4096 + ordinal*256 + stage. The economizer is inventory ordinal 27, so these
 // are not a free choice.
 const (
-	EventReduce uint32 = 11009
-	StageReduce uint32 = 1
+	EventReduce      uint32 = 11009
+	StageReduce      uint32 = 1
+	EventJSONCompact uint32 = 11010
+	StageJSONCompact uint32 = 2
+	EventToolRecall  uint32 = 11011
+	StageToolRecall  uint32 = 3
+	EventToolStats   uint32 = 11012
+	StageToolStats   uint32 = 4
+	EventRecordBuild uint32 = 11013
+	StageRecordBuild uint32 = 5
 )
 
 // ReduceRequest is the wire form of one reduction.
@@ -106,17 +112,27 @@ var reduceReasonNames = map[ReduceReason]string{
 // NewHandler serves the economizer's reduce stage.
 func NewHandler() bus.ModuleHandler {
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
-		if invocation.StageID != StageReduce {
-			return nil, bus.ModuleStatusInvalidRequest
-		}
-		var req ReduceRequest
-		if err := json.Unmarshal(request, &req); err != nil {
-			return nil, bus.ModuleStatusInvalidRequest
-		}
 		if invocation.Cancelled() {
 			return nil, bus.ModuleStatusCancelled
 		}
-		return handleReduce(&req)
+		switch invocation.StageID {
+		case StageReduce:
+			var req ReduceRequest
+			if err := json.Unmarshal(request, &req); err != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			return handleReduce(&req)
+		case StageJSONCompact:
+			return handleJSONCompact(invocation, request)
+		case StageToolRecall:
+			return handleToolRecall(invocation, request)
+		case StageToolStats:
+			return handleToolStats(invocation, request)
+		case StageRecordBuild:
+			return handleRecordBuild(invocation, request)
+		default:
+			return nil, bus.ModuleStatusInvalidRequest
+		}
 	}
 }
 

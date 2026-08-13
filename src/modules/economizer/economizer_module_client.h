@@ -1,9 +1,8 @@
 /* economizer_module_client.h: the C client for the Go economizer module.
  *
  * The reduction itself now lives in server-go/modules/economizer and is reached
- * over the event bus (stage economizer-reduce, kind 11009). This header is the
- * whole C-side surface: it builds the request, makes the call, and installs the
- * reduced view.
+ * over the event bus. This header is the whole C-side surface: it builds
+ * requests, makes calls, and installs module-owned results.
  *
  * FAIL-OPEN IS THE CONTRACT. An unreachable module, a timeout, a malformed reply
  * or an over-size body all leave `messages` untouched and report "no reduction",
@@ -14,6 +13,7 @@
 
 #include <cJSON.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -24,6 +24,17 @@ extern "C"
  * inventory ordinal 27, so these are not a free choice. */
 #define AIMEE_ECONOMIZER_EVENT_REDUCE 11009u
 #define AIMEE_ECONOMIZER_STAGE_REDUCE 1u
+#define AIMEE_ECONOMIZER_EVENT_JSON_COMPACT 11010u
+#define AIMEE_ECONOMIZER_STAGE_JSON_COMPACT 2u
+#define AIMEE_ECONOMIZER_EVENT_TOOL_RECALL  11011u
+#define AIMEE_ECONOMIZER_STAGE_TOOL_RECALL  3u
+#define AIMEE_ECONOMIZER_EVENT_TOOL_STATS   11012u
+#define AIMEE_ECONOMIZER_STAGE_TOOL_STATS   4u
+#define AIMEE_ECONOMIZER_EVENT_RECORD_BUILD 11013u
+#define AIMEE_ECONOMIZER_STAGE_RECORD_BUILD 5u
+
+#define ECON_MODULE_JSON_MAX_INPUT  (16u * 1024u * 1024u)
+#define ECON_MODULE_TOOL_OUTPUT_MAX (2u * 1024u * 1024u)
 
 /* A whole transcript crosses this boundary, so the cap is generous. Above it the
  * caller keeps its original context (fail-open) rather than truncating a request
@@ -134,6 +145,45 @@ extern "C"
                           econ_module_result_t *out);
 
    void econ_module_result_free(econ_module_result_t *out);
+
+   /* Compact one strict JSON value in Go without changing any non-whitespace
+    * source byte. Returns 0 with a newly allocated NUL-terminated buffer when
+    * the result is strictly shorter. Every failure, including an unavailable
+    * module and an already-compact value, returns non-zero and leaves `*output`
+    * NULL so the caller keeps its original bytes. */
+   int econ_module_json_compact(const void *input, size_t input_len, uint8_t **output,
+                                size_t *output_len);
+
+   /* Resolve a lossless tool-output spill through the Go module. `*output` is a
+    * newly allocated NUL-terminated byte string on success. */
+   int econ_module_tool_recall(const char *spill_dir, const char *ref, char **output, char *err,
+                               size_t err_len);
+
+   typedef struct
+   {
+      long long recognized;
+      long long applied;
+      long long applied_raw;
+      long long applied_final;
+      long long family_test;
+      long long family_diag;
+      long long recovered;
+      long long recovered_bytes;
+      long long saved_bytes;
+      long long net_saved_bytes;
+   } econ_module_tool_totals_t;
+
+   /* Read process-local condensation counters from the Go owner. */
+   int econ_module_tool_stats(econ_module_tool_totals_t *out);
+
+#define ECON_MODULE_CLOSET_EVICT_NONE 0
+#define ECON_MODULE_CLOSET_EVICT_FAIL 1
+
+   /* Build session-compaction record data in the Go owner. Returns a newly
+    * allocated cJSON object with files/errors/decisions, or NULL so the caller
+    * can use its legacy heuristic fallback. */
+   cJSON *econ_module_record_build(const cJSON *messages, int start_idx, int end_idx,
+                                   char **closet_out, int *closet_evict_out);
 
 #ifdef __cplusplus
 }

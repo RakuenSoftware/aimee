@@ -2,7 +2,7 @@ package economizer
 
 import "testing"
 
-// Ported one-for-one from src/tests/test_fold_register.c so the Go
+// Ported one-for-one from the retired C register suite so the Go
 // implementation is pinned to the behaviour it replaces.
 
 func TestRegisterGlyphs(t *testing.T) {

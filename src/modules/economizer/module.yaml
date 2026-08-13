@@ -12,13 +12,9 @@
   },
   "ownership_complete": true,
   "sources": [
-    "src/modules/economizer/coord_closet.c",
-    "src/modules/economizer/economizer_json.c",
     "src/modules/economizer/economizer_module_client.c",
-    "src/modules/economizer/fold_register.c",
     "src/modules/economizer/gateway_mutate.c",
-    "src/modules/economizer/gateway_mutate_wire.c",
-    "src/modules/economizer/tool_condense.c"
+    "src/modules/economizer/gateway_mutate_wire.c"
   ],
   "go_sources": [
     "server-go/modules/economizer/budget.go",
@@ -37,6 +33,8 @@
     "server-go/modules/economizer/json_compact.go",
     "server-go/modules/economizer/jsonval.go",
     "server-go/modules/economizer/module.go",
+    "server-go/modules/economizer/module_aux.go",
+    "server-go/modules/economizer/module_record.go",
     "server-go/modules/economizer/planner_anthropic.go",
     "server-go/modules/economizer/planner_openai.go",
     "server-go/modules/economizer/proof.go",
@@ -75,16 +73,14 @@
   ],
   "public_headers": [],
   "private_headers": [
-    "src/modules/economizer/coord_closet.h",
     "src/modules/economizer/economizer.h",
-    "src/modules/economizer/economizer_json.h",
     "src/modules/economizer/economizer_module_client.h",
-    "src/modules/economizer/fold_register.h",
     "src/modules/economizer/gateway_mutate.h",
-    "src/modules/economizer/gateway_mutate_wire.h",
-    "src/modules/economizer/tool_condense.h"
+    "src/modules/economizer/gateway_mutate_wire.h"
   ],
-  "tests": [],
+  "tests": [
+    "src/tests/test_economizer_module_client.c"
+  ],
   "docs": [
     "docs/modules/economizer.md"
   ]

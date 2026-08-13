@@ -720,15 +720,15 @@ static char *td_tool_output_get(cJSON *args, const char *name, const char *dispa
        snprintf(spill_dir, sizeof spill_dir, "%s/tool-spills", home) >= (int)sizeof spill_dir)
       return safe_strdup("error: spill store unavailable");
    char err[64];
-   char *full = tool_condense_recall(spill_dir, r->valuestring, err, sizeof err);
-   if (!full)
+   char *full = NULL;
+   if (econ_module_tool_recall(spill_dir, r->valuestring, &full, err, sizeof err) != 0 || !full)
    {
       char msg[128];
       snprintf(msg, sizeof msg, "error: %s", err[0] ? err : "not found");
       return safe_strdup(msg);
    }
-   /* recovery-cost telemetry (P4): each recall is a page-back — the counter is bumped inside
-    * tool_condense_recall; log the bytes so the net-of-recovery is greppable next to the
+   /* Recovery-cost telemetry is bumped by the Go economizer; log the bytes so
+    * the net-of-recovery is greppable next to the
     * "condensed X->Y" lines. */
    aimee_log(LOG_INFO, "tool_condense", "tool_output_get recovered %zu bytes (%s)", strlen(full),
              r->valuestring);
