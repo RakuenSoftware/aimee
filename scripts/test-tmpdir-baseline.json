@@ -141,6 +141,6 @@
     "src/tests/test_workspace_provider.c": 1,
     "src/tests/test_workspace_provider_detached.c": 2,
     "src/tests/test_workspace_scope.c": 1,
-    "src/tests/test_workspace_turn.c": 28
+    "src/tests/test_workspace_turn.c": 31
   }
 }
