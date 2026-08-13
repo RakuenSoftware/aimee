@@ -3,9 +3,9 @@
 #include "aimee.h"
 #include <aimee/ir/aimee_ir_metrics.h>
 #include "shadow_mirror.h"
-#include "gw_mutate_stats.h" /* gw_stat_to_json — gateway-mutation economizer counters */
-#include "tool_condense.h"   /* tool_condense_stats_snapshot — tool-output condense savings */
-#include "token_audit.h"     /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
+#include "gw_mutate_stats.h"          /* gw_stat_to_json — gateway-mutation economizer counters */
+#include "economizer_module_client.h" /* Go-owned tool-output condense savings */
+#include "token_audit.h"              /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
 #include "embedder_catalog.h"
 #include "server.h"
 #include "dashboard.h"
@@ -1515,8 +1515,9 @@ int handle_economizer_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *tc = cJSON_AddObjectToObject(resp, "tool_condense");
    if (tc)
    {
-      tool_condense_totals_t t;
-      tool_condense_stats_snapshot(&t);
+      econ_module_tool_totals_t t;
+      int tool_stats_available = econ_module_tool_stats(&t) == 0;
+      cJSON_AddBoolToObject(tc, "available", tool_stats_available);
       cJSON_AddNumberToObject(tc, "recognized", (double)t.recognized);
       cJSON_AddNumberToObject(tc, "applied", (double)t.applied);
       cJSON_AddNumberToObject(tc, "applied_raw_bytes", (double)t.applied_raw);

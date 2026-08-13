@@ -34,7 +34,7 @@ left column.**
 | Retrieval confidence scoring | `memory_retrieval_confidence` + `retrieval_confidence_t` (`memory_context.c`); continuous blended `score` | **Have it (internal, score-only).** |
 | Symbol-scoped reads (`file::symbol` → just the def span) | `marshal_preload_append_symbol` (`cli_v1_routes.c`) resolves via `aimee index find`, preloads a ±heuristic excerpt | **Have it (heuristic window).** Refine, don't rebuild. |
 | Pre-loading code into the agent prompt | `marshal_build_preload_context` + delegate `--files` / `--context-file` / `--context-dir` / `--context SYMS` (`cmd_agent_delegate.c`, `cli_v1_routes.c`) | **Have the plumbing.** Missing: auto-selection. |
-| Tool-output compaction + realized-savings telemetry | `tool_condense.c` | **Have it.** |
+| Tool-output compaction + realized-savings telemetry | Go `economizer` module | **Have it.** |
 | Episodic memory ("graph knows WHERE, episodes know HOW") | delegation episodes with confidence scores (project memory), `docs/KNOWLEDGE.md` | **Have it.** |
 | Graph-derived code auditor (dead exports, cycles, dupes…) | `cli_code_audit.c` | **Have it (partial).** Extend, don't rebuild. |
 | Learned ranking weights | pending `learning-to-rank-weight-fitting` proposal; `kb_ranker.c` | **Tracked already.** |
@@ -55,7 +55,7 @@ Grouped by what work they actually imply.
   near-identical independent implementation. No action.
 - **Episodic memory / "compounding" recall.** Aimee already captures delegation
   episodes with confidence. No action beyond what's tracked in `KNOWLEDGE.md`.
-- **Tool-output condensation with savings telemetry.** `tool_condense.c`. No action.
+- **Tool-output condensation with savings telemetry.** Go `economizer` module. No action.
 
 ### Tier B — refinements to surfaces that already exist (small, high-DRY)
 
@@ -72,7 +72,7 @@ Grouped by what work they actually imply.
    consumers — no new collection. **Rank-Fuse.**
 
 3. **Re-prime durable context after window compaction.** Aimee compacts context
-   (`tool_condense.c`, `memory_context.c` window compaction). Add a re-assert of
+   (Go `economizer` module, `memory_context.c` window compaction). Add a re-assert of
    the stable project pack immediately post-compaction so the project map survives.
    Mirrors a "PreCompact re-prime" hook. **Recall / Reflect.**
 
@@ -142,7 +142,7 @@ Confirmed against the tree, with signatures, so the plan reuses real surfaces:
 | `static char *marshal_build_preload_context(const rpc_opts_t *)` (`cli_v1_routes.c`) | builds the preload block from `--files/--context/...` | **reuse + extend** to append the contract block |
 | `static void marshal_preload_append_symbol(char *, size_t, size_t *, const char *)` (`cli_v1_routes.c`) | resolves a symbol via `aimee index find`, appends an excerpt (POSIX-only, `popen`) | **reuse**; exact-span is Tier-B #1 |
 | `static int attn_config_ingress_max_raw_scans(void)` + enforcement at the `ATTN_OP_RAW_SCAN` branch of `cli_attention_guard.c` (uses `attn_raw_scan_count(arr, now_ts)`) | a **static, session-wide** raw-scan cap read from `aimee.yaml`; on hit, **redirects** to `find_symbol`/`ast_grep_search`/`search_graph`/`get_context_block` (exit 2), does **not** hard-block edits | **reuse as the enforcement point + trust ceiling**; a per-task override source is **new control-plane machinery** (see §4) |
-| `tool_condense.c` realized-savings counters | per-turn token telemetry | **reuse** for §6 |
+| Go `economizer` realized-savings counters | per-turn token telemetry | **reuse** for §6 |
 
 **Honest scoping correction:** `ingress_max_raw_scans` is currently a static
 config scalar (`config_t.ingress_max_raw_scans`, default 0), counted **session-
@@ -256,7 +256,7 @@ Three independent guarantees, in priority order:
 
 ### §7 Observability & configuration
 
-- **Telemetry (nice-to-have #8):** per-turn structured event via `tool_condense.c`'s
+- **Telemetry (nice-to-have #8):** per-turn structured event via the Go economizer's
   existing realized-savings counters — `{intent, confidence_score, level, cap,
   scans_used, extra_files_read, cap_hit, decayed}`. Feeds #8's benchmark so token
   deltas attribute to contract adherence.

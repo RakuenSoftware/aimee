@@ -148,6 +148,12 @@
     {
       "ctest": false,
       "make": true,
+      "module": "economizer",
+      "test": "src/tests/test_economizer_module_client.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
       "module": "gateway",
       "test": "src/tests/test_gateway_p4_delegate.c"
     },

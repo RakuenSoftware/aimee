@@ -201,10 +201,6 @@
       "decls": 1,
       "loads": 1
     },
-    "src/tests/test_tool_condense.c": {
-      "decls": 2,
-      "loads": 0
-    },
     "src/tests/test_trigger.c": {
       "decls": 2,
       "loads": 1

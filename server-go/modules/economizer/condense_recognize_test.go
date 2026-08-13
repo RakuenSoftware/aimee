@@ -4,9 +4,9 @@ import "testing"
 
 // DIFFERENTIAL test against the real tc_recognize.
 //
-// Each row is the verbatim outcome/cmd/sub the C produced for that command line,
-// captured by compiling tool_condense.c against a throwaway harness. Outcome
-// codes are the C enum: 0 unrecognized, 1 opaque, 2 recognized.
+// Each row is the verbatim outcome/cmd/sub captured from the retired C
+// implementation before removal. Outcome codes retain the old C enum values:
+// 0 unrecognized, 1 opaque, 2 recognized.
 func TestTCRecognizeMatchesC(t *testing.T) {
 	cases := []struct {
 		line    string
