@@ -57,10 +57,18 @@ func (s *Store) ClaimFrozenCreates(ctx context.Context, parentID, workItemID str
 		return nil, fmt.Errorf("begin frozen-create claim: %w", err)
 	}
 	defer tx.Rollback()
-	var eligible int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_work_item
-WHERE work_item_id=? AND parent_id=? AND state='active'`, workItemID, parentID).Scan(&eligible); err != nil {
+	// Make the first statement a write so correctness does not depend on the
+	// connection's transaction-lock mode. This reserves SQLite's sole writer
+	// before the conflict read: two connections can never both observe an empty
+	// claim set and then race independent inserts whose primary keys differ.
+	result, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item SET updated_at=updated_at
+WHERE work_item_id=? AND parent_id=? AND state='active'`, workItemID, parentID)
+	if err != nil {
 		return nil, fmt.Errorf("validate frozen-create owner: %w", err)
+	}
+	eligible, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("count frozen-create owner: %w", err)
 	}
 	if eligible != 1 {
 		return nil, errors.New("frozen-create owner is not an active child of the parent")

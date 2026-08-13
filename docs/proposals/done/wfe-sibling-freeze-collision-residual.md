@@ -25,7 +25,9 @@ second freeze with the conflicting path, and leaves no `CONFLICTING` PR or retry
 ## Outcome
 
 The Go WFE now derives exact Git blob identities for every path newly introduced by a slice's frozen
-diff. DB1 publishes those claims in one immediate transaction, keyed by parent, path, and slice.
+diff. DB1 publishes those claims in one write-reserved transaction, keyed by parent, path, and slice;
+the transaction acquires SQLite's writer reservation before reading sibling claims, independent of
+connection lock-mode configuration.
 Identical sibling creations coexist, while a different blob at the same new path rejects the later
 slice at `freeze` and records the path plus both work-item IDs in its terminal event. Existing-file
 edits do not enter this claim set, so independently mergeable edits retain their normal path.
