@@ -199,7 +199,8 @@ static void test_assemble_disabled(const char *path)
 
    /* The feature is on by default since the rollout flip, so disable it
     * explicitly via config to exercise the disabled path. */
-   char tmpdir[] = "/tmp/aimee_vc_off_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_vc_off_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
    char cfgpath[256];
    snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", tmpdir);
@@ -305,7 +306,8 @@ static void test_integration_assemble_retrieval(const char *path)
    platform_test_remove_sqlite(path);
 
    /* Temp config dir enabling virtual_context */
-   char tmpdir[] = "/tmp/aimee_vc_test_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_vc_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
    char cfgpath[256];
    snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", tmpdir);
@@ -405,7 +407,8 @@ int main(void)
 {
    printf("conv_context: ");
 
-   char path[] = "/tmp/test_conv_context_XXXXXX.db";
+   char path[256];
+   snprintf(path, sizeof path, "%s/test_conv_context_XXXXXX.db", platform_tmpdir());
    int fd = mkstemps(path, 3);
    if (fd >= 0)
       close(fd);

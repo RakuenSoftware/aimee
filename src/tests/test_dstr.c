@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "dstr.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define PASS(name) printf("  PASS: %s\n", name)
 
@@ -161,7 +162,8 @@ static void test_read_file_large(void)
 {
    /* Write a file larger than any fixed buffer we previously used (>20K) and
     * confirm dstr_read_file returns the full contents. */
-   char tmp[] = "/tmp/dstr_test_XXXXXX";
+   char tmp[256];
+   snprintf(tmp, sizeof tmp, "%s/dstr_test_XXXXXX", platform_tmpdir());
    int fd = mkstemp(tmp);
    assert(fd >= 0);
    const size_t N = 40000;
@@ -203,7 +205,8 @@ static void test_read_file_missing(void)
 static void test_read_file_reset(void)
 {
    /* Existing contents should be cleared on successful read. */
-   char tmp[] = "/tmp/dstr_test_XXXXXX";
+   char tmp[256];
+   snprintf(tmp, sizeof tmp, "%s/dstr_test_XXXXXX", platform_tmpdir());
    int fd = mkstemp(tmp);
    assert(fd >= 0);
    ssize_t w = write(fd, "fresh", 5);

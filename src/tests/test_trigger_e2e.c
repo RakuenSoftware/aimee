@@ -72,6 +72,7 @@ int db1_trigger_status_set(const char *id, const char *status, const char *pipel
 }
 
 #include "pipelines.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 int db1_pipeline_create(const char *task, const char *request_classification,
                         const char *plan_depth, int *out_id)
 {
@@ -144,7 +145,8 @@ int main(void)
    printf("trigger-e2e: ");
 
    /* AIMEE_HOME with the workflow definition. */
-   char home[] = "/tmp/wfe_te_home_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/wfe_te_home_XXXXXX", platform_tmpdir());
    assert(wfe_test_mkdtemp(home));
    char path[512];
    snprintf(path, sizeof path, "%s/workflows", home);
@@ -159,7 +161,8 @@ int main(void)
    assert(db1_init(":memory:") == 0);
 
    /* A real git repo with a pending proposal committed on its default branch. */
-   char repo[] = "/tmp/wfe_te_repo_XXXXXX";
+   char repo[256];
+   snprintf(repo, sizeof repo, "%s/wfe_te_repo_XXXXXX", platform_tmpdir());
    assert(wfe_test_mkdtemp(repo));
    assert(sh("cd %s && git init -q && git config user.email t@t && git config user.name t && "
              "git config commit.gpgsign false && mkdir -p docs/proposals/pending && "
