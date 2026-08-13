@@ -58,8 +58,19 @@ P5B3C_LIVE_SERVER_OBJS = $(filter-out $(OBJDIR)/server/server_main.o,$(SERVER_OB
                            $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(PLATFORM_OBJS) \
                            $(MCP_GIT_OBJS) $(OBJDIR)/aimee_client.o
 
+# No log_stub.o here: this target links the real server objects, and those
+# already carry log.o. Having both put two definitions of aimee_log in one link
+# and the target had not built AT ALL -- it is absent from UNIT_TEST_TARGETS, so
+# nothing ran it and nothing reported it. The stub cannot replace log.o either;
+# it defines aimee_log and nothing else, while the server needs log_init,
+# log_set_level, audit_last_event and friends from the same object.
+# The two core libraries are prerequisites for the same reason they are on the
+# $(SERVER) rule: nothing else here builds them, so on a clean tree the link
+# failed with "cannot find build/obj/libaimee-core-connection.a". It only ever
+# appeared to work when a previous server build happened to leave them behind.
 $(TESTPREFIX)/unit-test-server-management-listener-live: \
-    $(OBJDIR)/tests/test_server_management_listener_live.o $(P5B3C_LIVE_SERVER_OBJS) $(OBJDIR)/tests/support/log_stub.o
+    $(OBJDIR)/tests/test_server_management_listener_live.o $(P5B3C_LIVE_SERVER_OBJS) \
+    $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB)
 	$(TESTLINK) -o $@ $^ $(L_SERVER)
 
 # Common object sets for tests
