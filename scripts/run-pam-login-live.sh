@@ -145,6 +145,9 @@ restart_kb
 step "Negatives: every bad credential gets the SAME 401, with no enumeration"
 assert_pam_rejected "$U1 wrong password  " "$U1" "not-$P1"
 assert_pam_rejected "$U1 with U2's password" "$U1" "$P2"
+# This assertion is about credential classification, not the peer budget spent
+# above. Start it from a known-empty throttle so it deterministically reaches PAM.
+restart_kb
 assert_pam_rejected "nonexistent account " "aimeepamnosuch$$" "$P1"
 # This group deliberately spends more than one budget, so it resets midway. That
 # it has to is the control working: six wrong passwords in a row from one peer IS

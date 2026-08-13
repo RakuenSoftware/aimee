@@ -120,25 +120,22 @@ docker inspect <aimee-delegate-...> --format '{{range .Mounts}}{{.Source}} -> {{
 A source equal to the destination on a sibling-daemon host means the translation did not apply, and
 that mount is an empty directory.
 
-## Non-sandbox security, unresolved
+## No host fallback for delegates
 
-This section is a marker, not a description of shipped behavior. Tracked in
-[issue #2190](https://github.com/RakuenSoftware/aimee/issues/2190).
+A delegate runs in its allocated container or it does not run. The former INERT path was removed
+by `89db96aebe`:
+an unavailable container backend now fails allocation, and a delegated shell that reaches a
+co-located path with `sandbox.mode=off` is refused before fork/exec. The trusted primary/operator
+session remains a separate host-execution path; it is not a delegate fallback.
 
-`delegate_sandbox` defaulting to on does not by itself deliver the posture above. Two gaps remain
-open:
+`delegate_sandbox_require_isolation` has the narrower job its name now documents: after a container
+starts, verify that the runtime actually honored network isolation and fail closed if that proof is
+missing or shows an attached network. It no longer decides whether a delegate may fall back to the
+host; there is no such path. Package access, when enabled, crosses only the audited package proxy;
+credential stripping and workspace guards remain defense in depth inside the container boundary.
 
-- **The INERT path contradicts "never silently fall back".** When the dial is on but no docker
-  daemon is reachable, `delegate_sandbox_log_posture()` logs `INERT` at boot and delegates then run
-  on the host. `delegate_sandbox_require_isolation` is the fail-closed guard, but it defaults to
-  off, so the default posture claims sandboxed and, on a box without docker, is not.
-- **The in-process boundary is undefined.** When there is no sandbox (no docker, a runtime that
-  ignores `--network none`, or a deliberate opt-out), what protects the host is an implicit union of
-  the shell-git gate, the credential strip, and the guardrails path policy. That union is not stated
-  as a guarantee anywhere and is not tested as one.
-
-Decide the intended non-sandbox boundary, then make the INERT path enforce exactly that instead of
-degrading to aimee-server's own filesystem and environment.
+Regression coverage lives in `test_server_compute` (container allocation is mandatory) and
+`test_agent` (an active delegate is refused when a shell would otherwise run with sandbox mode off).
 
 ## Lifecycle
 
