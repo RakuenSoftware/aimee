@@ -1379,6 +1379,7 @@ $(TESTPREFIX)/unit-test-tasks: $(OBJDIR)/tests/test_tasks.o $(OBJDIR)/tasks.o $(
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test_agent_caps.o \
+                      $(OBJDIR)/tests/support/delegate_role_seam_stub.o \
                       $(OBJDIR)/tests/support/role_template_toolset_stub.o \
                       $(OBJDIR)/modules/execution-policy/execution_policy.o \
                       $(OBJDIR)/modules/workflows/tool_egress.o \
@@ -1988,6 +1989,7 @@ $(TESTPREFIX)/unit-test-agent-list-handler: $(OBJDIR)/tests/test_agent_list_hand
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-jobs-aux: $(OBJDIR)/tests/test_server_jobs_aux.o \
+                               $(OBJDIR)/tests/support/delegate_role_seam_stub.o \
                                $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                $(OBJDIR)/db1/agent_jobs.o $(OBJDIR)/db1/execution_plans.o \
                                $(OBJDIR)/db1/coord_jobs.o $(OBJDIR)/modules/delegates/delegate_role.o \
@@ -4039,6 +4041,7 @@ $(TESTPREFIX)/unit-test-cmd-cancel: $(OBJDIR)/tests/test_cmd_cancel.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-delegate: $(OBJDIR)/tests/test_cmd_delegate.o \
+                      $(OBJDIR)/tests/support/delegate_role_seam_stub.o \
                              $(OBJDIR)/modules/delegates/delegate_depth.o $(OBJDIR)/modules/delegates/delegate_role.o \
                              $(OBJDIR)/role_templates.o \
                              $(OBJDIR)/modules/delegates/delegate_prompt.o $(OBJDIR)/modules/delegates/delegate_routing.o $(OBJDIR)/modules/delegates/delegate_launch_args.o \

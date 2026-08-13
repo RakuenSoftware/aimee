@@ -42,6 +42,19 @@ func RoleIsWrite(role string) bool {
 	return false
 }
 
+// RoleIsBuiltIn reports whether a role is one that ships.
+//
+// It reads the permission table, which IS the list of shipped roles: a role with
+// no entry there holds nothing, so treating it as known would mean dispatching a
+// delegate that can do nothing and saying nothing about why.
+//
+// C keeps the other half of the question -- whether a template file defines a
+// custom role -- because that is a filesystem lookup, not a rule.
+func RoleIsBuiltIn(role string) bool {
+	_, ok := builtinRolePermissions[canonicalRole(role)]
+	return ok
+}
+
 // RoleResultCacheEnabled reports whether a response may be reused keyed only by
 // (role, prompt).
 //
@@ -179,9 +192,7 @@ func handleRolePolicy(invocation bus.ModuleInvocation, request []byte) ([]byte, 
 	response := make([]byte, rolePolicyResponseLen)
 	binary.LittleEndian.PutUint32(response[0:4], rolePolicyResponseMagic)
 	putBool(response[4:8], RoleIsWrite(role))
-	// [8:12] was the tools default. It IS the `tools` permission, which the
-	// caller resolves and sends back in as holdsTools, so this stage no longer
-	// answers it. The slot stays vacant rather than renumbering the rest.
+	putBool(response[8:12], RoleIsBuiltIn(role))
 	putBool(response[12:16], RoleResultCacheEnabled(role))
 	putBool(response[16:20], AutoToolsForInvocation(holdsTools, maxTurns, explicitTools))
 	binary.LittleEndian.PutUint32(response[20:24], uint32(int32(RoleFinalAfterTurns(role))))

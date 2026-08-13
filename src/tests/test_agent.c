@@ -1,3 +1,4 @@
+#include "support/delegate_role_seam_stub.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -3606,6 +3607,7 @@ static void test_agent_save_config_does_not_cache_underived_agents(void)
 
 int main(void)
 {
+   delegate_role_seam_install();
    char tmp_home[512];
    snprintf(tmp_home, sizeof(tmp_home), "%s/aimee-test-agent-home-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(tmp_home) != NULL);

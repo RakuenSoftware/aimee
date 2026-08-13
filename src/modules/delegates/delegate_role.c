@@ -4,24 +4,6 @@
 
 #include <string.h>
 
-/* Known role aliases: map non-canonical names to the canonical role that
- * agents.json registers.  Extend this table as new planner roles appear. */
-static const struct
-{
-   const char *alias;
-   const char *canonical;
-} g_role_aliases[] = {
-    {"implement", "code"},        {"build", "code"},
-    {"reviewer", "review"},       {"verifier", "validate"},
-    {"test", "validate"},         {"check", "validate"},
-    {"evaluate", "validate"},     {"evaluate-optimize", "validate"},
-    {"inspect", "diagnose"},      {"research", "execute"},
-    {"enforce", "execute"},       {"recall", "search"},
-    {"synthesize", "summarize"},  {"rank-fuse", "reason"},
-    {"classify-score", "reason"}, {"planner", "plan"},
-    {"planning", "plan"},         {NULL, NULL},
-};
-
 static delegate_role_canonicalizer_fn g_canonicalizer;
 
 void delegate_role_register_canonicalizer(delegate_role_canonicalizer_fn canonicalizer)
@@ -62,22 +44,6 @@ const char *delegate_role_removed_reason(const char *role)
    }
    return NULL;
 }
-
-/* Roles with a built-in prompt template, plus `plan` (the planner alias target,
- * whose prompt is assembled by the planner rather than a template). This is the
- * identity of a role name, which is why it lives beside the alias table: the two
- * must agree, and test_delegate_role asserts every alias resolves to a member.
- *
- * Kept as a positive list because the removed-role blacklist above only rejects
- * six names. Any OTHER unknown name used to reach exactly the state that
- * blacklist exists to prevent — no template (so a generic prompt), no write
- * classification (so silently read-only), and no role eligibility an agent could
- * actually declare. An operator's custom role is still honoured: those are
- * template files, and delegate_role_known() accepts anything with one. */
-static const char *const g_known_roles[] = {"review",    "validate",   "diagnose",   "code",
-                                            "refactor",  "explain",    "draft",      "execute",
-                                            "summarize", "format",     "search",     "reason",
-                                            "plan",      "continuity", "beat-check", NULL};
 
 static delegate_role_policy_fn g_role_policy;
 
@@ -151,11 +117,18 @@ int delegate_role_known(const char *project_root, const char *role)
    if (!role || !role[0])
       return 0;
    const char *canonical = delegate_role_canonicalize(role);
-   for (int i = 0; g_known_roles[i]; i++)
-      if (strcmp(canonical, g_known_roles[i]) == 0)
-         return 1;
-   /* A project- or user-level template file defines a custom role. Check the
-    * name as given AND canonicalized so an alias to a custom role still works. */
+   if (!canonical || !canonical[0])
+      return 0; /* the module could not name it, so neither can we */
+
+   /* WHICH roles ship is the module's list, and that list is the permission
+      table: a role with no entry there holds nothing. This used to be a copy of
+      it living here, agreeing by nothing but coincidence. */
+   if (role_policy_ask(DELEGATE_ROLE_OP_BUILTIN, canonical, 0, 0, 0))
+      return 1;
+
+   /* The other half is a filesystem lookup, which IS ours: a project- or
+      user-level template file defines a custom role. Check the name as given and
+      canonicalized, so an alias to a custom role still works. */
    char path[ROLE_TEMPLATE_PATH_MAX];
    return role_template_path(project_root, canonical, path, sizeof(path)) == 0 ||
           role_template_path(project_root, role, path, sizeof(path)) == 0;
@@ -172,12 +145,11 @@ const char *delegate_role_canonicalize(const char *role)
          return canonical;
       return ""; /* required module failed: unknown role paths fail closed */
    }
-   for (int i = 0; g_role_aliases[i].alias; i++)
-   {
-      if (strcmp(role, g_role_aliases[i].alias) == 0)
-         return g_role_aliases[i].canonical;
-   }
-   return role;
+   /* No provider, no answer. This used to fall back to a copy of the module's
+      alias table, so the canonical spelling of a role depended on whether the
+      module happened to be registered: one question, two answers. Failing closed
+      makes an unregistered module a refusal rather than a quiet second opinion. */
+   return "";
 }
 
 void delegate_apply_max_turns_override(agent_config_t *cfg, int max_turns)

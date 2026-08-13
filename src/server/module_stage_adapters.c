@@ -776,6 +776,9 @@ static int delegate_role_policy(int op, const char *role, int a, int b, int c, i
    case DELEGATE_ROLE_OP_IS_WRITE:
       *out = (int)aimee_delegates_get_u32(response + 4);
       return 0;
+   case DELEGATE_ROLE_OP_BUILTIN:
+      *out = (int)aimee_delegates_get_u32(response + 8);
+      return 0;
    case DELEGATE_ROLE_OP_CACHE:
       *out = (int)aimee_delegates_get_u32(response + 12);
       return 0;

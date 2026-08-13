@@ -18,7 +18,7 @@ void delegate_role_register_canonicalizer(delegate_role_canonicalizer_fn canonic
  * op selects the question; `a` carries max_turns and `b` explicit_tools for the
  * auto-tools op, and both are unused otherwise. */
 #define DELEGATE_ROLE_OP_IS_WRITE     0
-/* 1 was the tools default. It is the `tools` permission now. */
+#define DELEGATE_ROLE_OP_BUILTIN      1
 #define DELEGATE_ROLE_OP_CACHE        2
 #define DELEGATE_ROLE_OP_AUTO_TOOLS   3
 #define DELEGATE_ROLE_OP_FINAL_TURNS  4
