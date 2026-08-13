@@ -8,11 +8,12 @@
 #include "aimee.h"
 #include "models_dev.h"
 #include "model_registry.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void test_cache_lookup_hit(void)
 {
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/test-models-dev-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/test-models-dev-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cache_parent[512], cache_dir[512], cache_path[512];
@@ -57,7 +58,7 @@ static void test_cache_lookup_hit(void)
 static void test_cache_lookup_nested_api_schema(void)
 {
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/test-models-dev-nested-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/test-models-dev-nested-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cache_parent[512], cache_dir[512], cache_path[512];
@@ -124,7 +125,7 @@ static void test_cache_lookup_nested_api_schema(void)
 static void test_price_band_capacity_and_duplicates(void)
 {
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/test-md-bands-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/test-md-bands-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
    char dir[512], path[600];
    snprintf(dir, sizeof(dir), "%s/.cache", tmpdir);
@@ -217,7 +218,7 @@ static void test_price_band_capacity_and_duplicates(void)
 static void test_price_band_exact_capacity_and_intmax(void)
 {
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/test-md-bands2-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/test-md-bands2-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
    char dir[512], path[600];
    snprintf(dir, sizeof(dir), "%s/.cache", tmpdir);

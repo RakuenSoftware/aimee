@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #ifdef AIMEE_MANAGEMENT_CERT_TESTING
 /* The real symbol is db2_lease_begin_at; db2_lease_begin is a macro in db2.h
@@ -832,7 +833,8 @@ static unsigned directory_file_count(int dir_fd)
 
 static void test_noncanonical_custodied_hex(void)
 {
-   char dir[] = "/tmp/aimee-p5b2c-hex.XXXXXX";
+   char dir[256];
+   snprintf(dir, sizeof dir, "%s/aimee-p5b2c-hex.XXXXXX", platform_tmpdir());
    assert(mkdtemp(dir));
    kb_pki_ca_t ca, loaded;
    assert(kb_pki_ca_generate(&ca) == 0 && kb_pki_ca_save_custodied(dir, &ca) == 0);
@@ -857,8 +859,10 @@ static void test_noncanonical_custodied_hex(void)
 
 static void test_lifecycle_orchestration(void)
 {
-   char ca_dir[] = "/tmp/aimee-p5b2c-ca.XXXXXX";
-   char bundle_dir[] = "/tmp/aimee-p5b2c-bundle.XXXXXX";
+   char ca_dir[256];
+   snprintf(ca_dir, sizeof ca_dir, "%s/aimee-p5b2c-ca.XXXXXX", platform_tmpdir());
+   char bundle_dir[256];
+   snprintf(bundle_dir, sizeof bundle_dir, "%s/aimee-p5b2c-bundle.XXXXXX", platform_tmpdir());
    assert(mkdtemp(ca_dir) && mkdtemp(bundle_dir));
    assert(chmod(ca_dir, 0700) == 0 && chmod(bundle_dir, 0700) == 0);
    kb_pki_ca_t ca;
@@ -1056,7 +1060,9 @@ static void test_lifecycle_orchestration(void)
    kb_management_cert_lifecycle_close(lifecycle);
    remove_tree_files(bundle_dir);
 
-   char initial_dir[] = "/tmp/aimee-p5b2c-initial-terminal.XXXXXX";
+   char initial_dir[256];
+   snprintf(initial_dir, sizeof initial_dir, "%s/aimee-p5b2c-initial-terminal.XXXXXX",
+            platform_tmpdir());
    assert(mkdtemp(initial_dir) && chmod(initial_dir, 0700) == 0);
    dir_fd = open(initial_dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
    assert(dir_fd >= 0);
@@ -1181,7 +1187,8 @@ static void test_management_leaf_profile(void)
 
 static void test_storage_rejects_oversize_and_fifo(void)
 {
-   char path[] = "/tmp/aimee-p5b2c-storage.XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee-p5b2c-storage.XXXXXX", platform_tmpdir());
    assert(mkdtemp(path));
    kb_management_cert_storage_t storage = {.dir_fd = open(path, O_RDONLY | O_DIRECTORY)};
    assert(storage.dir_fd >= 0);
@@ -1238,7 +1245,8 @@ static void test_storage_rejects_oversize_and_fifo(void)
 
 static void test_storage_open_and_protocol(void)
 {
-   char unsafe[] = "/tmp/aimee-p5b2c-open.XXXXXX";
+   char unsafe[256];
+   snprintf(unsafe, sizeof unsafe, "%s/aimee-p5b2c-open.XXXXXX", platform_tmpdir());
    assert(mkdtemp(unsafe));
    kb_management_cert_storage_t rejected;
    assert(kb_management_cert_storage_open(unsafe, &rejected) == KB_MANAGEMENT_STORAGE_INTEGRITY);

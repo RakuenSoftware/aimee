@@ -202,7 +202,8 @@ static void test_resolve_project_empty_string(void)
 
 static void test_build_empty_dir(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_empty_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_empty_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -226,7 +227,8 @@ static void test_build_empty_dir(void)
 
 static void test_build_single_file(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_single_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_single_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -265,7 +267,8 @@ static void test_build_single_file(void)
 
 static void test_build_sanitizes_malformed_utf8(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_utf8_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_utf8_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
    char fpath[512];
    snprintf(fpath, sizeof(fpath), "%s/legacy.md", tmpdir);
@@ -316,7 +319,8 @@ static void test_chunk_insert_sanitizes_replayed_malformed_utf8(void)
 
 static void test_build_incremental_update(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_incr_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_incr_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -356,7 +360,8 @@ static void test_build_incremental_update(void)
 
 static void test_bloom_dedupe_skips_duplicate_content(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_bloom_dup_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_bloom_dup_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -394,7 +399,8 @@ static void test_bloom_dedupe_skips_duplicate_content(void)
 
 static void test_minhash_shadow_signatures_persist(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_lsh_shadow_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_lsh_shadow_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -468,7 +474,8 @@ static void test_minhash_shadow_signatures_persist(void)
 
 static void test_async_embedding_queue_and_drain(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_async_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_async_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -554,7 +561,8 @@ static int kb_count_vector_ops(const char *collection, const char *status)
  * NULL-embedder build tests never exercise. */
 static void test_build_sync_embeddings_and_vectors(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_syncembed_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_syncembed_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
    char fpath[512];
@@ -588,7 +596,8 @@ static void test_build_sync_embeddings_and_vectors(void)
  * chunk must still be recorded exactly once (pins the batch-flush mutation). */
 static void test_build_vector_batch_flush(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_batch_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_batch_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
    char fpath[512];
@@ -622,7 +631,8 @@ static void test_build_vector_batch_flush(void)
  * no skips (pins files_scanned / files_indexed / files_skipped aggregation). */
 static void test_build_multi_file_counts(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_multi_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_multi_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
    char p[512];
@@ -667,7 +677,8 @@ static void test_search_empty_kb(void)
 
 static void test_search_finds_content(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_search_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_search_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -701,7 +712,8 @@ static void test_search_finds_content(void)
 
 static void test_search_requires_query_embedding(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_embedfail_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_embedfail_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -741,7 +753,8 @@ static void test_search_json_empty(void)
 
 static void test_search_json_structured(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_jsearch_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_jsearch_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -780,8 +793,10 @@ static void test_search_json_structured(void)
 
 static void test_search_json_scope_all_keeps_active_project_first(void)
 {
-   char local_dir[] = "/tmp/aimee_kb_local_first_a_XXXXXX";
-   char other_dir[] = "/tmp/aimee_kb_local_first_b_XXXXXX";
+   char local_dir[256];
+   snprintf(local_dir, sizeof local_dir, "%s/aimee_kb_local_first_a_XXXXXX", platform_tmpdir());
+   char other_dir[256];
+   snprintf(other_dir, sizeof other_dir, "%s/aimee_kb_local_first_b_XXXXXX", platform_tmpdir());
    assert(mkdtemp(local_dir) != NULL);
    assert(mkdtemp(other_dir) != NULL);
    char local_path[512], other_path[512];
@@ -822,7 +837,8 @@ static void test_search_max_cap_above_legacy_limit(void)
    /* Regression: prior to the configurable cap, kb_search silently clamped
     * max_results to 8.  Default cap is 50, so a request for 20 with 12 distinct
     * chunks must be honored. */
-   char tmpdir[] = "/tmp/aimee_kb_test_cap_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_cap_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -870,7 +886,8 @@ static void test_search_max_cap_above_legacy_limit(void)
 
 static void test_clear(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_clear_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_clear_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -904,13 +921,15 @@ static void test_clear(void)
 
 static void test_purge_fence_blocks_ingest(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_fence_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_fence_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
    char fpath[512];
    snprintf(fpath, sizeof(fpath), "%s/notes.md", tmpdir);
    write_file(fpath, "# Notes\n\nFenced project notes.\n");
-   char other_tmpdir[] = "/tmp/aimee_kb_test_other_XXXXXX";
+   char other_tmpdir[256];
+   snprintf(other_tmpdir, sizeof other_tmpdir, "%s/aimee_kb_test_other_XXXXXX", platform_tmpdir());
    assert(mkdtemp(other_tmpdir) != NULL);
    char other_fpath[512];
    snprintf(other_fpath, sizeof(other_fpath), "%s/notes.md", other_tmpdir);
@@ -1007,8 +1026,10 @@ static void test_purge_fence_blocks_ingest(void)
 
 static void test_project_isolation(void)
 {
-   char tmpdir1[] = "/tmp/aimee_kb_proj1_XXXXXX";
-   char tmpdir2[] = "/tmp/aimee_kb_proj2_XXXXXX";
+   char tmpdir1[256];
+   snprintf(tmpdir1, sizeof tmpdir1, "%s/aimee_kb_proj1_XXXXXX", platform_tmpdir());
+   char tmpdir2[256];
+   snprintf(tmpdir2, sizeof tmpdir2, "%s/aimee_kb_proj2_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir1) != NULL);
    assert(mkdtemp(tmpdir2) != NULL);
 
@@ -1056,7 +1077,8 @@ static void test_project_isolation(void)
 
 static void test_status_format(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_status_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_status_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char fpath[512];
@@ -1092,7 +1114,8 @@ static void test_status_format(void)
 
 static void test_excludes_node_modules(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_excl_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_excl_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    /* Create node_modules directory with a .md file (should be excluded) */

@@ -22,6 +22,7 @@
 #include "kb_ocr_sidecar.h"
 #include "kb_tsr_sidecar.h"
 #include "support/mock_agent_http.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define PASS(name) printf("  PASS: %s\n", (name))
 
@@ -490,7 +491,8 @@ static void write_vector_config(const char *home)
 
 static void test_pdf_vector_enqueue_and_answerability(void)
 {
-   char home[] = "/tmp/aimee_pdf_vec_test_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee_pdf_vec_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home));
    setenv("AIMEE_HOME", home, 1);
    setenv("AIMEE_NO_CACHE", "1", 1); /* bypass the config mtime cache so the yaml is re-read */
@@ -730,7 +732,8 @@ static void write_tsr_config(const char *home)
  * a restricted doc's cells are stored-but-withheld until confirm (no re-ingest needed). */
 static void test_pdf_tsr_ingest(void)
 {
-   char home[] = "/tmp/aimee_pdf_tsr_test_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee_pdf_tsr_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home));
    setenv("AIMEE_HOME", home, 1);
    setenv("AIMEE_NO_CACHE", "1", 1);
@@ -772,7 +775,8 @@ static void test_pdf_tsr_ingest(void)
 
 static void test_blob_store(void)
 {
-   char home[] = "/tmp/aimee_blob_test_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee_blob_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home));
    setenv("AIMEE_HOME", home, 1);
    setenv("AIMEE_NO_CACHE", "1", 1);
@@ -816,7 +820,8 @@ static int count_visit(const char *sha, long long bytes, long long mtime, void *
 
 static void test_pdf_assets_and_recon(void)
 {
-   char home[] = "/tmp/aimee_assets_test_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee_assets_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home));
    setenv("AIMEE_HOME", home, 1);
    setenv("AIMEE_NO_CACHE", "1", 1);
