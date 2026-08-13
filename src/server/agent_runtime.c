@@ -5,6 +5,7 @@
 #include "db1.h"
 #include "db1/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
 #include <aimee/delegates/delegate_role.h>
+#include <aimee/delegates/delegate_launch_args.h>
 #include "provider_catalog.h"
 #include "db2/agent_hints.h"
 #include "db2/agent_outcomes.h"
@@ -645,9 +646,26 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
    if (agent_apply_request_tool_loop_cap(cfg, ag, out) != 0)
       return -1;
    ag->ablation = cfg->ablation;
-   ag->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
+   /* What this run may do, resolved once here and read from here on: the write
+    * gate below, the tool allowlist, the dispatch guard and the system prompt
+    * all take THIS answer rather than asking about the role again.
+    *
+    * A run with no role is not a delegate and is not confined. Resolving an
+    * empty role would return an empty set and silently strip an operator's own
+    * session of tools it has always had. */
+   if (role && role[0])
+   {
+      delegate_permissions_t perms;
+      (void)delegate_permissions_for_role(role, &perms);
+      agent_tools_knowledge_write_set(delegate_permissions_has(&perms, "knowledge_write"));
+      ag->write_capable = enforce_writes && delegate_permissions_has(&perms, "repo_write") ? 1 : 0;
+   }
+   else
+   {
+      ag->write_capable = enforce_writes ? 1 : 0;
+   }
 
-   char *hint = (agent_tools_role_current_code_only(role) || agent_uses_mistral_delegate_path(ag))
+   char *hint = (!agent_tools_knowledge_write_allowed() || agent_uses_mistral_delegate_path(ag))
                     ? NULL
                     : kb_client_agent_hint_consume(role, user_prompt);
    const char *effective_prompt = user_prompt;

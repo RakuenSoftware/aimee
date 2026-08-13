@@ -10,8 +10,8 @@ import (
 // driving a real filesystem, and the same cases are proved here against the
 // rule that replaced it.
 
-func preflight(prompt string, roleIsWrite bool, paths ...NamedPath) DriftVerdict {
-	return JudgeNamedFileDrift(DriftFacts{Paths: paths, Prompt: prompt, RoleIsWrite: roleIsWrite})
+func preflight(prompt string, writesAllowed bool, paths ...NamedPath) DriftVerdict {
+	return JudgeNamedFileDrift(DriftFacts{Paths: paths, Prompt: prompt, WritesAllowed: writesAllowed})
 }
 
 // --- pre-flight -------------------------------------------------------------
@@ -37,10 +37,14 @@ func TestPreflightNonexistentWithCreateIntent(t *testing.T) {
 	}
 }
 
-// A read-only brief cannot be expected to create anything, so a missing path is
-// context rather than an unmet promise.
+// A delegate that cannot write cannot be expected to create anything, so a
+// missing path is context rather than an unmet promise.
+//
+// It is the PERMISSION that says so, not the wording of the brief. A brief that
+// says "do not edit" no longer makes a write-capable delegate read-only: that
+// was a rule the prompt could rewrite, and it disagreed with the mount.
 func TestPreflightReadonlyMissingFileAsContext(t *testing.T) {
-	v := preflight("Read-only review of src/newfile.c. Do not edit files.", true,
+	v := preflight("Read-only review of src/newfile.c. Do not edit files.", false,
 		NamedPath{Path: "src/newfile.c"})
 	if v.Severity != DriftNone {
 		t.Fatalf("want no drift, got %v (%q)", v.Severity, v.Message)
@@ -74,7 +78,7 @@ func TestPreflightRemoteScpPathSkipped(t *testing.T) {
 		Prompt: "Update aimee-server on the host. The server config lives at " +
 			"admin@192.168.1.254:/mnt/media/.plugins/aimee-server/server/home/aimee.yaml.",
 		WorktreePath: "/home/user/repo",
-		RoleIsWrite:  true,
+		WritesAllowed: true,
 	})
 	if v.Severity != DriftNone {
 		t.Fatalf("a remote path is referenced, not produced: %v (%q)", v.Severity, v.Message)
@@ -86,7 +90,7 @@ func TestPreflightAbsoluteOutsideWorktreeSkipped(t *testing.T) {
 		Paths:        []NamedPath{{Path: "/etc/aimee/other.c"}},
 		Prompt:       "Edit /etc/aimee/other.c to fix the bug.",
 		WorktreePath: "/home/user/repo",
-		RoleIsWrite:  true,
+		WritesAllowed: true,
 	})
 	if v.Severity != DriftNone {
 		t.Fatalf("outside the worktree is referenced: %v (%q)", v.Severity, v.Message)
@@ -99,7 +103,7 @@ func TestPreflightRelativeUnderWorktreeStillFails(t *testing.T) {
 		Paths:        []NamedPath{{Path: "/home/user/repo/src/missing.c"}},
 		Prompt:       "Edit src/missing.c to fix the bug.",
 		WorktreePath: "/home/user/repo",
-		RoleIsWrite:  true,
+		WritesAllowed: true,
 	})
 	if v.Severity != DriftHard {
 		t.Fatalf("a path under the worktree is a create target: %v (%q)", v.Severity, v.Message)
@@ -156,7 +160,7 @@ func postRunWithWorktree(roleIsWrite bool, paths ...NamedPath) DriftVerdict {
 		Prompt:       "implement the fix in the named file",
 		Response:     "done",
 		WorktreePath: "/repo",
-		RoleIsWrite:  roleIsWrite,
+		WritesAllowed: roleIsWrite,
 	})
 }
 
@@ -203,7 +207,7 @@ func postRunNoWorktree(response string, roleIsWrite bool, paths ...NamedPath) Dr
 		Paths:       paths,
 		Prompt:      "implement the fix in the named file",
 		Response:    response,
-		RoleIsWrite: roleIsWrite,
+		WritesAllowed: roleIsWrite,
 	})
 }
 

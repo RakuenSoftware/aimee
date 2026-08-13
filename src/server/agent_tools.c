@@ -474,12 +474,18 @@ int agent_tools_strip_delegate_respond(parsed_response_t *parsed)
 
 /* Tool definition builders are in agent_tools_defs.c */
 
-/* WHICH roles are confined to the current checkout is the delegates module's
- * (role policy). This stays as a named function because five call sites read
- * better asking a question than repeating a seam call. */
-int agent_tools_role_current_code_only(const char *role)
+/* Carried, not derived. Set once per run from the permission set the delegate
+ * was created with; every site below reads the same answer. */
+static int g_knowledge_write = 1;
+
+void agent_tools_knowledge_write_set(int allowed)
 {
-   return delegate_role_sees_current_code_only(role);
+   g_knowledge_write = allowed ? 1 : 0;
+}
+
+int agent_tools_knowledge_write_allowed(void)
+{
+   return g_knowledge_write;
 }
 
 /* The three read-only worktree tools review_indexed carries under slice 7. Kept as
@@ -546,7 +552,7 @@ int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
                err[0] ? err : "unknown error");
    }
 
-   if (!agent_tools_role_current_code_only(role))
+   if (agent_tools_knowledge_write_allowed())
       return 1;
    if (strchr(tool_name, ':') != NULL)
       return 0;
@@ -610,7 +616,7 @@ void agent_tools_filter_for_role(cJSON *tools, const char *role)
    int resolved_count = -1;
    if (!toolset_name || !toolset_name[0])
       toolset_name = toolset_for_delegate_role(role);
-   if (!cJSON_IsArray(tools) || (!toolset_name && !agent_tools_role_current_code_only(role)))
+   if (!cJSON_IsArray(tools) || (!toolset_name && agent_tools_knowledge_write_allowed()))
       return;
    if (toolset_name)
    {

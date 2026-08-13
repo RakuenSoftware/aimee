@@ -72,7 +72,6 @@ struct cJSON *build_tools_array_anthropic(void);
 struct cJSON *delegate_respond_spec(void);
 int agent_tools_append_delegate_respond_tool(struct cJSON *tools);
 int agent_tools_strip_delegate_respond(parsed_response_t *parsed);
-int agent_tools_role_current_code_only(const char *role);
 int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name);
 void agent_tools_filter_for_role(struct cJSON *tools, const char *role);
 
@@ -258,6 +257,21 @@ void agent_tools_parent_write_guard_clear(void);
 const char *agent_tools_parent_write_guard_root(void);
 const char *agent_tools_parent_write_guard_write_root(void);
 int agent_tools_parent_write_guard_blocks(const char *path, const char *cwd);
+
+/* May this delegate mutate what aimee knows: its memory, code index, notes and
+ * docs? The `knowledge_write` permission, resolved once when the delegate was
+ * created and set here for the run.
+ *
+ * Withheld, three things follow: aimee's own knowledge is kept out of the
+ * system prompt, the indexed and memory tools are refused, and an `aimee ...`
+ * shell command that would mutate that state is refused. The delegate still
+ * reads the checkout it was given.
+ *
+ * DEFAULTS TO ALLOWED, and that is the honest default: an ordinary turn that
+ * never had a delegate role behaves as it always did. The withholding is what
+ * has to be declared. */
+void agent_tools_knowledge_write_set(int allowed);
+int agent_tools_knowledge_write_allowed(void);
 
 /* Read-only-delegate gate (backend-agnostic write capability). A delegate that
  * is not write-capable (see the write_capable field, derived once at dispatch

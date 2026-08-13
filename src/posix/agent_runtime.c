@@ -493,7 +493,8 @@ native_provider_http:
       eff_network.tunnel_mgr = network->tunnel_mgr;
 
    /* Build context-rich system prompt */
-   int current_code_only = agent_tools_role_current_code_only(role);
+   /* Read, not derived: the permission was resolved when the run was configured. */
+   int current_code_only = !agent_tools_knowledge_write_allowed();
    char *assembled_sys = agent_build_exec_context_for_role(
        agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role, system_prompt,
        current_code_only);

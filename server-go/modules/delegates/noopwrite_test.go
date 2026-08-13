@@ -4,18 +4,17 @@ import "testing"
 
 func writeRun() NoopWriteEvidence {
 	return NoopWriteEvidence{
-		IsWriteRole: true, AllowsWrites: true, Succeeded: true,
+		WritesAllowed: true, Succeeded: true,
 		HeadSnapshotTaken: true,
 	}
 }
 
-// Only a write role that was allowed to write and reported success can be a
-// no-op. Everything else has its own explanation already.
+// Only a delegate that could write and reported success can be a no-op.
+// Everything else has its own explanation already.
 func TestOnlyASuccessfulWriteRunCanBeANoop(t *testing.T) {
 	cases := map[string]NoopWriteEvidence{
-		"read-only role":  {IsWriteRole: false, AllowsWrites: true, Succeeded: true},
-		"writes withheld": {IsWriteRole: true, AllowsWrites: false, Succeeded: true},
-		"already failed":  {IsWriteRole: true, AllowsWrites: true, Succeeded: false},
+		"cannot write":   {WritesAllowed: false, Succeeded: true},
+		"already failed": {WritesAllowed: true, Succeeded: false},
 	}
 	for name, e := range cases {
 		if got := JudgeNoopWrite(e); got.Noop {

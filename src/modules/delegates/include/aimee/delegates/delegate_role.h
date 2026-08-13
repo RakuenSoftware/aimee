@@ -23,7 +23,6 @@ void delegate_role_register_canonicalizer(delegate_role_canonicalizer_fn canonic
 #define DELEGATE_ROLE_OP_AUTO_TOOLS   3
 #define DELEGATE_ROLE_OP_FINAL_TURNS  4
 #define DELEGATE_ROLE_OP_PARENT_DIFF  5
-#define DELEGATE_ROLE_OP_CURRENT_CODE 6
 
 typedef int (*delegate_role_policy_fn)(int op, const char *role, int a, int b, int *out);
 void delegate_register_role_policy_provider(delegate_role_policy_fn provider);
@@ -54,16 +53,6 @@ int delegate_role_auto_tools_for_invocation(const char *role, int max_turns, int
  * context, which is what it did before this evidence existed. */
 int delegate_role_needs_parent_diff(const char *role);
 
-/* Returns 1 when a role is confined to reading the CURRENT checkout: indexed
- * search, memory, docs, notes and remote MCP tools are withheld from it.
- *
- * Fails to 0, which WIDENS the tool surface rather than narrowing it. That is
- * the uncomfortable direction, and it is chosen because the alternative is
- * worse: with no provider every role would lose its index and memory tools, and
- * a delegate silently stripped of the tools it was configured with fails in a
- * way nobody can diagnose from the outside. A missing module must not
- * reconfigure the fleet. */
-int delegate_role_sees_current_code_only(const char *role);
 
 /* Apply a one-shot CLI max-turn override to every configured delegate route.
  * max_turns < 0 means "no override"; 0 preserves the runtime's unlimited

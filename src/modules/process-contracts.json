@@ -204,7 +204,7 @@
         },
         {
           "id": 15,
-          "name": "delegate-may-write",
+          "name": "delegate-permissions",
           "event_kind": 6671
         },
         {

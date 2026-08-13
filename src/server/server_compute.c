@@ -1231,11 +1231,25 @@ void delegate_worker(void *arg)
       if (resolved_prompt)
          prompt = resolved_prompt;
    }
-   /* ONE answer, composed by the module from the role AND the brief. This is the
-    * boolean the worktree plan and the container spec both consume, and it is
-    * the one fact they must agree on -- composing it in two places is how a
-    * delegate ends up planned read-only and mounted writable, or the reverse. */
-   int delegate_allows_writes = delegate_may_write(role, prompt);
+   /* What this delegate may do, resolved ONCE and read from here on.
+    *
+    * The worktree plan and the container spec both consume this, and it is the
+    * one fact they must agree on: working it out in two places is how a delegate
+    * ends up planned read-only and mounted writable, or the reverse.
+    *
+    * The brief is no longer consulted. A phrase like "do not edit files" used to
+    * narrow a write role to read-only, which meant the same delegate had
+    * different powers depending on how its prompt was worded. The role decides;
+    * a read-only run is a read-only role.
+    *
+    * Failure holds nothing: a delegate whose permissions cannot be established
+    * reads and changes nothing. */
+   delegate_permissions_t delegate_perms;
+   if (delegate_permissions_for_role(role, &delegate_perms) != 0)
+      aimee_log(LOG_WARN, "delegate",
+                "delegate %s: permissions for role '%s' could not be resolved; it holds none",
+                deleg_id, role ? role : "");
+   int delegate_allows_writes = delegate_permissions_has(&delegate_perms, "repo_write");
    if (branch && !delegate_allows_writes)
    {
       delegation_compute_error(cctx, "read-only delegates must use the parent worktree; branch "
@@ -1379,8 +1393,7 @@ void delegate_worker(void *arg)
    /* Snapshot mtimes and HEAD to detect no-op write delegates. */
    delegate_file_snapshot_t pre_run_files[DELEGATE_DRIFT_MAX_PATHS];
    char pre_run_head_sha[64] = "";
-   int is_write_role = delegate_role_is_write(role);
-   if (is_write_role)
+   if (delegate_allows_writes)
    {
       const char *check_root =
           delegate_worktree_path[0] ? delegate_worktree_path : (cwd[0] ? cwd : ".");
@@ -1409,7 +1422,7 @@ void delegate_worker(void *arg)
           delegate_worktree_path[0] ? delegate_worktree_path : (cwd[0] ? cwd : NULL);
       int drift_rc =
           delegate_check_named_file_drift(path_ptrs, named_path_count, prompt, NULL, drift_root,
-                                          is_write_role, drift_err, sizeof(drift_err));
+                                          delegate_allows_writes, drift_err, sizeof(drift_err));
       if (drift_rc < 0)
       {
          aimee_log(LOG_WARN, "delegate", "named-file drift guard (pre-flight): %s", drift_err);
@@ -1770,7 +1783,7 @@ void delegate_worker(void *arg)
       int drift_rc =
           delegate_check_named_file_drift(path_ptrs, named_path_count, prompt, result.response,
                                           delegate_worktree_path[0] ? delegate_worktree_path : NULL,
-                                          is_write_role, drift_err, sizeof(drift_err));
+                                          delegate_allows_writes, drift_err, sizeof(drift_err));
       if (drift_rc < 0)
       {
          aimee_log(LOG_WARN, "delegate", "named-file drift (post-run): %s", drift_err);
@@ -1786,8 +1799,8 @@ void delegate_worker(void *arg)
    /* Flag a write delegate that reported success but changed nothing. */
    {
       char noop_err[256] = "";
-      if (delegate_detect_noop_write(is_write_role, delegate_allows_writes, handoff_json, rc,
-                                     named_paths, named_path_count, pre_run_files, pre_run_head_sha,
+      if (delegate_detect_noop_write(delegate_allows_writes, handoff_json, rc, named_paths,
+                                     named_path_count, pre_run_files, pre_run_head_sha,
                                      delegate_worktree_path, cwd, deleg_id, sid, role, noop_err,
                                      sizeof(noop_err)))
       {
@@ -1857,8 +1870,8 @@ void delegate_worker(void *arg)
    int delegate_applied_changes = -1;
    char delegate_apply_error[512] = "";
    char delegate_parent_root[MAX_PATH_LEN] = "";
-   if (rc == 0 && is_write_role && delegate_allows_writes && delegate_worktree_path[0] &&
-       delegate_git_root[0] && !delegate_shared_worktree)
+   if (rc == 0 && delegate_allows_writes && delegate_worktree_path[0] && delegate_git_root[0] &&
+       !delegate_shared_worktree)
    {
       /* The drift check guards against the PARENT worktree's HEAD moving during
        * the delegation, so its baseline must be the parent's HEAD at launch

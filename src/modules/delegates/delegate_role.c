@@ -117,11 +117,6 @@ int delegate_role_needs_parent_diff(const char *role)
    return role_policy_ask(DELEGATE_ROLE_OP_PARENT_DIFF, role, 0, 0, 0);
 }
 
-int delegate_role_sees_current_code_only(const char *role)
-{
-   return role_policy_ask(DELEGATE_ROLE_OP_CURRENT_CODE, role, 0, 0, 0);
-}
-
 int delegate_role_auto_tools_for_invocation(const char *role, int max_turns, int explicit_tools)
 {
    if (explicit_tools)

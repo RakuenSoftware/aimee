@@ -68,9 +68,6 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	if invocation.StageID == StageIsolation {
 		return handleIsolation(invocation, request)
 	}
-	if invocation.StageID == StageMayWrite {
-		return handleMayWrite(invocation, request)
-	}
 	if invocation.StageID == StageImageGC {
 		return handleImageGC(invocation, request)
 	}
@@ -88,6 +85,9 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	}
 	if invocation.StageID == StageNamedFileDrift {
 		return handleNamedFileDrift(invocation, request)
+	}
+	if invocation.StageID == StagePermissions {
+		return handlePermissions(invocation, request)
 	}
 	if invocation.StageID != StageInvoke || len(request) != messageLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic || request[4] != wireVersion ||

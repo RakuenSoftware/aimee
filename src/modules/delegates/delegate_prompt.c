@@ -235,7 +235,7 @@ static int drift_stat_named_path(const char *path, const char *base_path, struct
 #define DRIFT_WIRE_CAP (256u * 1024u)
 
 int delegate_check_named_file_drift(const char *const *paths, int path_count, const char *prompt,
-                                    const char *response, const char *wt_path, int role_is_write,
+                                    const char *response, const char *wt_path, int writes_allowed,
                                     char *errbuf, size_t errbuf_size)
 {
    if (!paths || path_count <= 0)
@@ -251,7 +251,7 @@ int delegate_check_named_file_drift(const char *const *paths, int path_count, co
    if (!request)
       return 0;
 
-   unsigned flags = role_is_write ? AIMEE_DELEGATES_DRIFT_ROLE_IS_WRITE : 0u;
+   unsigned flags = writes_allowed ? AIMEE_DELEGATES_DRIFT_WRITES_ALLOWED : 0u;
    aimee_delegates_wire_t w;
    aimee_delegates_drift_request_begin(&w, request, DRIFT_WIRE_CAP, flags, prompt ? prompt : "",
                                        response ? response : "", wt_path ? wt_path : "");

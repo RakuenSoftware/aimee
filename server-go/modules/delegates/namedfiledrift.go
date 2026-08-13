@@ -47,9 +47,9 @@ var createIntent = []string{
 
 // HasCreateIntent reports whether the brief asks for a file to be created.
 //
-// A sibling of PromptAllowsWrites, and deliberately a different list: that one
-// asks whether the brief wants CHANGES at all, this one whether it wants
-// something that does not exist yet to start existing.
+// This asks whether the brief wants something that does not exist yet to start
+// existing. It says nothing about whether the delegate MAY create it: that is
+// the repo_write permission, resolved once and passed in.
 func HasCreateIntent(prompt string) bool {
 	lower := strings.ToLower(prompt)
 	for _, kw := range createIntent {
@@ -127,9 +127,10 @@ type DriftFacts struct {
 	// lies outside it IS a rule -- see PathIsExternalToWorktree -- and having
 	// the caller answer it would put that rule back in C.
 	WorktreePath string
-	// RoleIsWrite is the authoritative write-intent signal. The brief can only
-	// narrow it, never grant it.
-	RoleIsWrite bool
+	// WritesAllowed is whether this delegate holds repo_write. It is passed,
+	// not worked out here: the permission was resolved once when the delegate
+	// was created, and every consumer reads that same answer.
+	WritesAllowed bool
 }
 
 // DriftVerdict is the answer for the whole set.
@@ -146,11 +147,10 @@ func JudgeNamedFileDrift(f DriftFacts) DriftVerdict {
 		return DriftVerdict{}
 	}
 
-	// The ROLE decides whether writing was ever on the table; the brief can
-	// only take it away. A read/analysis delegate produces its artifact from
-	// its reply, so a path scraped out of reference content threaded into its
-	// prompt must never fail it.
-	writesAllowed := f.RoleIsWrite && PromptAllowsWrites(f.Prompt)
+	// A delegate that cannot write produces its artifact from its reply, so a
+	// path scraped out of reference content threaded into its prompt must never
+	// fail it.
+	writesAllowed := f.WritesAllowed
 
 	v := DriftVerdict{}
 	// A hard verdict wins outright and stops. A soft one keeps the FIRST

@@ -1174,10 +1174,11 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       }
    }
 
-   /* The composed answer from the module (stage 15): the role's default AND
-    * what the brief asks for. Was a local prompt scan, which was a second copy
-    * of a rule the module owns. */
-   int delegate_allows_writes = delegate_may_write(role, prompt);
+   /* What this delegate may do, resolved once from its role (stage 15). Failure
+    * holds nothing: it reads, and it changes nothing. */
+   delegate_permissions_t delegate_perms;
+   (void)delegate_permissions_for_role(role, &delegate_perms);
+   int delegate_allows_writes = delegate_permissions_has(&delegate_perms, "repo_write");
    if (worktree_branch && worktree_branch[0] && !delegate_allows_writes)
       fatal("--worktree is only valid for write-capable delegates; read-only delegates must "
             "use the parent worktree");

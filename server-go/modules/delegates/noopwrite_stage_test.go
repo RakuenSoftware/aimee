@@ -33,7 +33,7 @@ func callNoopWrite(t *testing.T, flags uint32, namedCount int) NoopWriteVerdict 
 	}
 }
 
-const noopWriteRun = noopFlagIsWriteRole | noopFlagAllowsWrites | noopFlagSucceeded |
+const noopWriteRun = noopFlagWritesAllowed | noopFlagSucceeded |
 	noopFlagHeadSnapshot
 
 func TestNoopWriteStageCatchesTheEmptyRun(t *testing.T) {

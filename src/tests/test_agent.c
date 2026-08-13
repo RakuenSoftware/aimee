@@ -617,34 +617,12 @@ static void test_tool_surface_single_source(void)
    cJSON_Delete(resp);
 }
 
-/* A role-policy provider so the current-code question has an answer here.
- *
- * WHICH roles are confined is the module's list, pinned against the module
- * (server-go/modules/delegates/rolepolicy_test.go). This harness mirrors it only
- * so the tool-filtering assertions below have the same ground truth they always
- * had; what is asserted HERE is that the answer reaches the tool policy. */
-static int agent_test_role_policy(int op, const char *role, int a, int b, int *out)
+static void test_knowledge_write_gates_the_tool_policy(void)
 {
-   (void)a;
-   (void)b;
-   if (op != DELEGATE_ROLE_OP_CURRENT_CODE || !out)
-      return -1;
-   /* "inspect" resolves to "diagnose" in the module, so both answer the same;
-    * spelled out here because this harness does not canonicalise. */
-   *out = role && (strcmp(role, "review") == 0 || strcmp(role, "reviewer") == 0 ||
-                   strcmp(role, "diagnose") == 0 || strcmp(role, "inspect") == 0);
-   return 0;
-}
-
-static void test_current_code_only_role_tool_policy(void)
-{
-   delegate_register_role_policy_provider(agent_test_role_policy);
-
-   /* The seam carries the module's answer through to the tool policy. */
-   assert(agent_tools_role_current_code_only("review") == 1 &&
-          agent_tools_role_current_code_only("diagnose") == 1);
-   assert(agent_tools_role_current_code_only("inspect") == 1 &&
-          agent_tools_role_current_code_only("validate") == 0);
+   /* The carried permission, not the role, is what the tool policy reads. */
+   agent_tools_knowledge_write_set(0);
+   assert(agent_tools_tool_allowed_for_role("diagnose", "search_memory") == 0);
+   agent_tools_knowledge_write_set(1);
    assert(agent_tools_tool_allowed_for_role("validate", "bash") == 1);
    assert(agent_tools_tool_allowed_for_role("validate", "write_file") == 0);
    assert(agent_tools_tool_allowed_for_role("search", "bash") == 0);
@@ -680,9 +658,12 @@ static void test_current_code_only_role_tool_policy(void)
    cJSON_Delete(tools);
 }
 
-static void test_current_code_only_dispatch_blocks_stale_context_tools(void)
+static void test_withheld_knowledge_write_blocks_stale_context_tools(void)
 {
    agent_tools_set_dispatch_role("diagnose");
+   /* Withheld knowledge_write is what closes these doors, and it is carried
+    * into the run rather than worked out per call. */
+   agent_tools_knowledge_write_set(0);
 
    char *result = dispatch_tool_call("find_symbol", "{\"identifier\":\"main\"}", 1000);
    assert(result != NULL);
@@ -699,6 +680,7 @@ static void test_current_code_only_dispatch_blocks_stale_context_tools(void)
    assert(strstr(result, "mutating or broad aimee context commands are disabled") != NULL);
    free(result);
 
+   agent_tools_knowledge_write_set(1);
    agent_tools_set_dispatch_role(NULL);
 }
 
@@ -3589,8 +3571,8 @@ int main(void)
    test_agent_routing_block_reason();
    test_agent_route_with_caps_honors_tools_enabled();
    test_agent_route_with_caps_honors_context_override();
-   test_current_code_only_role_tool_policy();
-   test_current_code_only_dispatch_blocks_stale_context_tools();
+   test_knowledge_write_gates_the_tool_policy();
+   test_withheld_knowledge_write_blocks_stale_context_tools();
    test_provider_env_credentials_and_headers();
    test_codex_oauth_request_creds();
    test_codex_oauth_reads_vault_only();

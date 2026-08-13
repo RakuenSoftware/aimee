@@ -15,7 +15,7 @@ func newDriftReq(prompt, response, worktree string, roleIsWrite bool) *driftReq 
 	r.w.u32(uint32(wireVersion))
 	var flags uint32
 	if roleIsWrite {
-		flags |= driftFlagRoleWrite
+		flags |= driftFlagWritesAllowed
 	}
 	r.w.u32(flags)
 	r.w.str(prompt)
@@ -120,7 +120,7 @@ func TestDriftStageRejectsMalformedRequests(t *testing.T) {
 	reservedSet[5] = 1
 
 	unknownFlag := append([]byte(nil), good...)
-	binary.LittleEndian.PutUint32(unknownFlag[8:12], driftFlagRoleWrite|(1<<9))
+	binary.LittleEndian.PutUint32(unknownFlag[8:12], driftFlagWritesAllowed|(1<<9))
 
 	trailing := append(append([]byte(nil), good...), 0)
 
