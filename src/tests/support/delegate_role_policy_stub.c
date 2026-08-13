@@ -28,12 +28,10 @@ int delegate_role_enable_tools_by_default(const char *role)
  * no bus; the list itself is pinned against the module in
  * server-go/modules/delegates/rolepolicy_test.go. A test that cares about the
  * distinction registers its own provider instead. */
-/* Raw, not canonicalised -- see RoleSeesCurrentCodeOnly for why the module does
- * the same. */
 int delegate_role_sees_current_code_only(const char *role)
 {
-   return role && (strcmp(role, "review") == 0 || strcmp(role, "diagnose") == 0 ||
-                   strcmp(role, "inspect") == 0);
+   role = test_delegate_policy_role(role);
+   return role && (strcmp(role, "review") == 0 || strcmp(role, "diagnose") == 0);
 }
 
 int delegate_role_needs_parent_diff(const char *role)
