@@ -267,7 +267,7 @@ void rpc_parse(int argc, char **argv, const char **bool_flags, rpc_opts_t *out);
  * them equal. CLI_V1_MAX_ROUNDTABLE_ARTIFACT is what the three artifact reads in
  * marshal_roundtable_review pass to marshal_read_*_limited -- it was written out
  * as a bare 16MB literal at each of them. */
-#define CLI_V1_MAX_ROUNDTABLE_ARTIFACT (16 * 1024 * 1024)
+#define CLI_V1_MAX_ROUNDTABLE_ARTIFACT (8 * 1024 * 1024)
 #define CLI_V1_MAX_ROUNDTABLE_BODY     (2 * CLI_V1_MAX_ROUNDTABLE_ARTIFACT)
 
 #endif
