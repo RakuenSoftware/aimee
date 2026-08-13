@@ -1885,31 +1885,25 @@ void handle_conn(int fd, int is_tcp, int is_management)
          return;
       }
       body_len = (int)declared;
-      body = malloc((size_t)body_len + 1);
+      /* Allocate against bytes RECEIVED, not bytes claimed -- http_read_body
+       * grows as data arrives, with `body_len` (already validated against the
+       * route limit above) as the ceiling. */
+      const char *bs = strstr(buf, "\r\n\r\n");
+      int prefix_len = 0;
+      if (bs)
+      {
+         bs += 4;
+         prefix_len = (int)(buf + total - bs);
+         if (prefix_len < 0)
+            prefix_len = 0;
+         if (prefix_len > body_len)
+            prefix_len = body_len;
+      }
+      int already = 0;
+      body = http_read_body(fd, bs, prefix_len, body_len, &already);
       if (body)
       {
          int declared_body_len = body_len;
-         int already = 0;
-         const char *bs = strstr(buf, "\r\n\r\n");
-         if (bs)
-         {
-            bs += 4;
-            already = (int)(buf + total - bs);
-            if (already < 0)
-               already = 0;
-            if (already > body_len)
-               already = body_len;
-            if (already > 0)
-               memcpy(body, bs, (size_t)already);
-         }
-         while (already < body_len)
-         {
-            int n = server_conn_io_read(fd, body + already, (int)(body_len - already));
-            if (n <= 0)
-               break;
-            already += n;
-         }
-         body[already] = '\0';
          if (server_http_keepalive_peek() && already != declared_body_len)
          {
             server_http_keepalive_set(0);

@@ -56,14 +56,30 @@ typedef struct cJSON cJSON;
  * only report as "could not reach the endpoint" — blaming a server that is up
  * and answering. The sibling LIMIT_* values below are already documented against
  * it. */
-#define SHTTP_MAX_BODY            (4 * 1024 * 1024)
-#define SHTTP_MAX_ROUNDTABLE_BODY (128 * 1024 * 1024)
+#define SHTTP_MAX_BODY (4 * 1024 * 1024)
+
+/* The roundtable review artifact is hard-limited where the CLI reads it --
+ * marshal_read_stdin_limited / marshal_read_file_limited in cli_v1_routes.c, all
+ * three call sites -- so a review body is that artifact plus a small envelope.
+ * The transport cap is TWICE the artifact: real review text and diffs escape at
+ * about 1.02x, and the doubling covers the envelope plus quote/backslash-dense
+ * content with room to spare.
+ *
+ * It was 128MB. That assumed a 6x blowup -- every byte a control character
+ * escaping to \u00XX -- and rounded up to 2^27, which made this route accept 32x
+ * what the rest of /v1 does. The artifact reaches cJSON as a NUL-terminated
+ * string, so the all-control-bytes case it was sized for cannot arrive intact.
+ * If an escape-dense artifact ever genuinely needs more room, raise
+ * ROUNDTABLE_MAX_ARTIFACT and let the cap follow; do not re-inflate the
+ * transport limit on its own, because the listener allocates against it. */
+#define ROUNDTABLE_MAX_ARTIFACT   (16 * 1024 * 1024)
+#define SHTTP_MAX_ROUNDTABLE_BODY (2 * ROUNDTABLE_MAX_ARTIFACT)
 
 /* Per-method payload size limits */
 #define LIMIT_MEMORY     (256 * 1024)        /* 256KB for memory operations */
 #define LIMIT_TOOL       (4 * 1024 * 1024)   /* 4MB for tool I/O */
 #define LIMIT_DELEGATE   (4 * 1024 * 1024)   /* 4MB: supports 2MB prompt-file + JSON overhead */
-#define LIMIT_ROUNDTABLE (128 * 1024 * 1024) /* 16MB artifact plus worst-case JSON escaping */
+#define LIMIT_ROUNDTABLE SHTTP_MAX_ROUNDTABLE_BODY /* artifact + JSON escaping; see above */
 #define LIMIT_CHAT       (512 * 1024)        /* 512KB for chat messages */
 #define LIMIT_INGEST     (1024 * 1024)       /* 1MB: client-pushed code files (kb req cap) */
 #define LIMIT_TRANSCRIPT                                                                           \
