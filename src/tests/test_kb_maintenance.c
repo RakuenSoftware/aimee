@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define TOL 0.0001
 
@@ -102,7 +103,8 @@ static kb_maintenance_config_t test_cfg(void)
 
 static void test_config_defaults_are_disabled_but_complete(void)
 {
-   char tmpdir[] = "/tmp/aimee-kbm-home-XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee-kbm-home-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    const char *old_home = getenv("HOME");

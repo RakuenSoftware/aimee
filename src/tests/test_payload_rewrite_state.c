@@ -124,7 +124,8 @@ int main(void)
 {
    printf("payload_rewrite_state: ");
 
-   char path[] = "/tmp/test_payload_rewrite_XXXXXX.db";
+   char path[256];
+   snprintf(path, sizeof path, "%s/test_payload_rewrite_XXXXXX.db", platform_tmpdir());
    int fd = mkstemps(path, 3);
    if (fd >= 0)
       close(fd);

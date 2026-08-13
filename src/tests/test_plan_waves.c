@@ -19,7 +19,7 @@ extern sqlite3 *db1_conn(void);
 
 static void setup(void)
 {
-   snprintf(g_db_path, sizeof(g_db_path), "/tmp/aimee-plan-waves-XXXXXX");
+   snprintf(g_db_path, sizeof(g_db_path), "%s/aimee-plan-waves-XXXXXX", platform_tmpdir());
    int fd = mkstemp(g_db_path);
    assert(fd >= 0);
    close(fd);

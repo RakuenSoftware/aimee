@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "cli_attention_guard.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* Stubs/fakes for handle_attention_guard's deps. read_stdin + aimee_home are
  * driven by the functional test below via these globals. */
@@ -130,7 +131,7 @@ static void rm_path(const char *p)
 static void test_guard_enforcement(void)
 {
    /* Isolated, real temp home so config + the session log persist. */
-   snprintf(g_home, sizeof(g_home), "/tmp/aimee_ag_test_%d", (int)getpid());
+   snprintf(g_home, sizeof(g_home), "%s/aimee_ag_test_%d", platform_tmpdir(), (int)getpid());
    mkdir(g_home, 0700);
    char logpath[400], cfgpath[400];
    snprintf(logpath, sizeof(logpath), "%s/.cache/attention/agtest.json", g_home);
@@ -177,8 +178,8 @@ static void test_session_scratch_decision(const char *primary_cwd)
 {
    const char *sid = "21bc2e70-537c-4d1d-b970-7afc858a7769";
    char tmproot[256], outside[256], cmd[700];
-   snprintf(tmproot, sizeof(tmproot), "/tmp/aimee_scratch_test_%d", (int)getpid());
-   snprintf(outside, sizeof(outside), "/tmp/aimee_scratch_out_%d", (int)getpid());
+   snprintf(tmproot, sizeof(tmproot), "%s/aimee_scratch_test_%d", platform_tmpdir(), (int)getpid());
+   snprintf(outside, sizeof(outside), "%s/aimee_scratch_out_%d", platform_tmpdir(), (int)getpid());
    setenv("TMPDIR", tmproot, 1);
 
    char root[512], p[900];
@@ -348,7 +349,8 @@ static void test_session_isolation_decision(void)
     * a new subdirectory was refused with a branch-lineage error that had nothing to do
     * with the branch, for every session without a registry row. */
    {
-      char tmpl[] = "/tmp/aimee_attn_gitdir_XXXXXX";
+      char tmpl[256];
+      snprintf(tmpl, sizeof tmpl, "%s/aimee_attn_gitdir_XXXXXX", platform_tmpdir());
       const char *root = mkdtemp(tmpl);
       assert(root != NULL);
 
@@ -533,7 +535,7 @@ static void test_external_memory_decision(void)
  * opts out, no env-var bypass). */
 static void test_external_memory_enforcement(void)
 {
-   snprintf(g_home, sizeof(g_home), "/tmp/aimee_mem_test_%d", (int)getpid());
+   snprintf(g_home, sizeof(g_home), "%s/aimee_mem_test_%d", platform_tmpdir(), (int)getpid());
    mkdir(g_home, 0700);
    char cfgpath[400];
    snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", g_home);
@@ -591,7 +593,7 @@ static void test_external_memory_enforcement(void)
 static int capture_stderr(char *out, size_t outsz)
 {
    char tmp[256];
-   snprintf(tmp, sizeof(tmp), "/tmp/aimee_attn_stderr_%d", (int)getpid());
+   snprintf(tmp, sizeof(tmp), "%s/aimee_attn_stderr_%d", platform_tmpdir(), (int)getpid());
    int saved = dup(STDERR_FILENO);
    assert(saved >= 0);
    FILE *f = fopen(tmp, "w+");
@@ -614,7 +616,7 @@ static int capture_stderr(char *out, size_t outsz)
 
 static void test_isolation_enforcement(void)
 {
-   snprintf(g_home, sizeof(g_home), "/tmp/aimee_iso_test_%d", (int)getpid());
+   snprintf(g_home, sizeof(g_home), "%s/aimee_iso_test_%d", platform_tmpdir(), (int)getpid());
    mkdir(g_home, 0700);
    char cfgpath[400];
    snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", g_home);

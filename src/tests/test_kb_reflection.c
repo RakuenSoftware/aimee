@@ -33,6 +33,7 @@ void reflection_test_release_idle(void);
 
 /* The unit under test (pulls its own headers). */
 #include "../kb/kb_reflection.c"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 #undef db2_lease_release_idle
 
 void reflection_test_release_idle(void)
@@ -130,7 +131,7 @@ static void write_cfg(void)
 
 static void isolate_home(void)
 {
-   snprintf(g_home, sizeof(g_home), "/tmp/aimee-test-kb-reflection-XXXXXX");
+   snprintf(g_home, sizeof(g_home), "%s/aimee-test-kb-reflection-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_home) != NULL);
    /* AIMEE_HOME rather than HOME: it IS the config dir, where the default is
     * $HOME/.config/aimee -- two levels that would need creating. */

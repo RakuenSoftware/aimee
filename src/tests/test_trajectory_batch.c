@@ -50,7 +50,8 @@ static void write_text(const char *path, const char *text)
 
 static void test_batch_writes_one_trajectory_per_task(void)
 {
-   char db_path[] = "/tmp/test_trajectory_batch_XXXXXX.db";
+   char db_path[256];
+   snprintf(db_path, sizeof db_path, "%s/test_trajectory_batch_XXXXXX.db", platform_tmpdir());
    int fd = mkstemps(db_path, 3);
    if (fd >= 0)
       close(fd);
@@ -99,7 +100,9 @@ static void test_batch_writes_one_trajectory_per_task(void)
 
 static void test_batch_refuses_unresolved_secret_without_file(void)
 {
-   char db_path[] = "/tmp/test_trajectory_batch_secret_XXXXXX.db";
+   char db_path[256];
+   snprintf(db_path, sizeof db_path, "%s/test_trajectory_batch_secret_XXXXXX.db",
+            platform_tmpdir());
    int fd = mkstemps(db_path, 3);
    if (fd >= 0)
       close(fd);

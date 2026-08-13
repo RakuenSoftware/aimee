@@ -16,6 +16,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* Narrow link stubs: this test exercises only the dedicated context and exact
  * peer profile, never the generic config/roster path. */
@@ -183,7 +184,8 @@ int main(void)
    assert(g_server_cert_ensure_calls == 1);
    assert(g_client_ca_ensure_calls == 1);
 
-   char dir[] = "/tmp/aimee-mgmt-tls-XXXXXX";
+   char dir[256];
+   snprintf(dir, sizeof dir, "%s/aimee-mgmt-tls-XXXXXX", platform_tmpdir());
    assert(mkdtemp(dir));
    char ca[256], cakey[256], server[256], serverkey[256], client[256], clientkey[256], dual[256],
        dualkey[256], ca_server[256], ca_server_key[256], ca_client[256], ca_client_key[256],

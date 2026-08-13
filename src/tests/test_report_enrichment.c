@@ -9,6 +9,7 @@
 
 #include "cJSON.h"
 #include "report_enrichment.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define PASS(name) printf("  PASS: %s\n", name)
 
@@ -116,7 +117,8 @@ static void cleanup_temp_dir(const char *dir)
 
 static void test_project_root_subject_reads_origin(void)
 {
-   char templ[] = "/tmp/aimee-report-subject-XXXXXX";
+   char templ[256];
+   snprintf(templ, sizeof templ, "%s/aimee-report-subject-XXXXXX", platform_tmpdir());
    char *dir = mkdtemp(templ);
    assert(dir != NULL);
 

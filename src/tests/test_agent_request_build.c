@@ -20,6 +20,7 @@
 #include "model_registry.h"
 #include "agent_config.h"
 #include "cJSON.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 int model_max_output(const char *provider, const char *model_id)
 {
@@ -113,7 +114,8 @@ static char g_home[512];
 
 static void init_config_home(void)
 {
-   char tmpl[] = "/tmp/aut-xth.XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aut-xth.XXXXXX", platform_tmpdir());
    const char *d = mkdtemp(tmpl);
    assert(d && "could not create a temp HOME for the config fixture");
    snprintf(g_home, sizeof g_home, "%s", d);

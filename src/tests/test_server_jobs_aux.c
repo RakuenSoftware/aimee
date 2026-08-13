@@ -7,7 +7,8 @@
 #include "server.h"
 #include "cJSON.h"
 
-#include <sys/stat.h> /* mkdir */
+#include <sys/stat.h>           /* mkdir */
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 /* agent_job_to_json() serializes default_max_turns = delegate_default_max_turns_for_role
  * (role_template_max_turns), which reads the role_templates dir under
  * config_default_dir() (-1 when absent). The handler tests assert default_max_turns==20
@@ -19,7 +20,7 @@ const char *config_default_dir(void)
 }
 static void setup_role_templates(void)
 {
-   snprintf(g_roles_dir, sizeof(g_roles_dir), "/tmp/aimee-test-jobsaux-XXXXXX");
+   snprintf(g_roles_dir, sizeof(g_roles_dir), "%s/aimee-test-jobsaux-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_roles_dir));
    char sub[512];
    snprintf(sub, sizeof(sub), "%s/role_templates", g_roles_dir);

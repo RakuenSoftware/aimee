@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static server_identity_jti_t token(const char *jti, int64_t issued, int64_t expires,
                                    const char *tier)
@@ -43,7 +44,8 @@ static int64_t scalar(const char *sql)
 
 int main(void)
 {
-   char path[] = "/tmp/aimee-identity-jti-XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee-identity-jti-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    close(fd);

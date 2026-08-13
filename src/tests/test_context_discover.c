@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include "aimee.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void mkdirp(const char *path)
 {
@@ -44,7 +45,7 @@ static void write_file(const char *path, const char *content)
  * Returns 1 on success. */
 static int make_project(char *tmp_root, size_t root_len)
 {
-   snprintf(tmp_root, root_len, "/tmp/aimee_ctxdisc_XXXXXX");
+   snprintf(tmp_root, root_len, "%s/aimee_ctxdisc_XXXXXX", platform_tmpdir());
    if (!mkdtemp(tmp_root))
       return 0;
    char git_dir[MAX_PATH_LEN];

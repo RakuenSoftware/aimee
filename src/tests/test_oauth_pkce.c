@@ -248,7 +248,8 @@ static void test_build_auth_url_with_nonce(void)
 
 int main(void)
 {
-   char tmp_template[] = "/tmp/aimee-oauth-pkce-XXXXXX";
+   char tmp_template[256];
+   snprintf(tmp_template, sizeof tmp_template, "%s/aimee-oauth-pkce-XXXXXX", platform_tmpdir());
    char *tmp_home = mkdtemp(tmp_template);
    char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
    assert(tmp_home != NULL);

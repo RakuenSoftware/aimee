@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void write_file(const char *dir, const char *name, const char *content)
 {
@@ -46,7 +47,8 @@ int main(void)
 
    /* --- manuscript_scan over a fixture dir --- */
    {
-      char tmpl[] = "/tmp/aimee-manuscript-XXXXXX";
+      char tmpl[256];
+      snprintf(tmpl, sizeof tmpl, "%s/aimee-manuscript-XXXXXX", platform_tmpdir());
       char *dir = mkdtemp(tmpl);
       assert(dir);
 

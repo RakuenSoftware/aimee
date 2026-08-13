@@ -11,6 +11,7 @@
 
 #include "cJSON.h"
 #include "code_span.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define PASS(name) printf("  PASS: %s\n", (name))
 
@@ -19,7 +20,8 @@ static char g_root[4096];
 /* Build a fresh temp dir to act as the project root and return its realpath. */
 static void make_root(void)
 {
-   char tmpl[] = "/tmp/code_span_test_XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/code_span_test_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpl);
    assert(d);
    /* realpath so containment compares apples to apples (e.g. /tmp symlinks). */
