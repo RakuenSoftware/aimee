@@ -16,6 +16,7 @@
 #include "support/module_bus_stub.h"
 #include "wfe_iface.h"
 #include "wfe_roundtable.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* plain human gate — inviolable: autonomous mode parks at it, never auto-satisfies */
 static const char *AUTO = "name: auto\n"
@@ -128,7 +129,8 @@ static void write_wf(const char *dir, const char *name, const char *body)
 int main(void)
 {
    printf("wfe-autonomy: ");
-   char d[] = "/tmp/wfe_auto_XXXXXX";
+   char d[256];
+   snprintf(d, sizeof d, "%s/wfe_auto_XXXXXX", platform_tmpdir());
    char *dir = wfe_test_mkdtemp(d);
    assert(dir);
    char wf[128];

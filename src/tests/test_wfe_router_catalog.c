@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "wfe_router.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void writef(const char *path, const char *content)
 {
@@ -22,7 +23,8 @@ static void writef(const char *path, const char *content)
 int main(void)
 {
    printf("wfe-router-catalog: ");
-   char tmpl[] = "/tmp/wfe_cat_XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/wfe_cat_XXXXXX", platform_tmpdir());
    char *dir = wfe_test_mkdtemp(tmpl);
    assert(dir);
    char wf[512];

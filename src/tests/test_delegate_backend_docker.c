@@ -13,6 +13,7 @@
 #include "aimee_home.h"
 #include <aimee/delegates/delegate_backend_docker.h>
 #include <aimee/delegates/delegate_launch_args.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* The isolation verdict, faked.
  *
@@ -590,7 +591,8 @@ static void test_acquire_creates_and_starts_container(void)
     * Point aimee_home at a temp dir and plant a real UDS there. The fake inspect
     * then models aimee_home living in a named volume: Docker must receive the
     * daemon-side volume source, never the in-container path. */
-   char tmphome[] = "/tmp/aimee-deleg-sock-XXXXXX";
+   char tmphome[256];
+   snprintf(tmphome, sizeof tmphome, "%s/aimee-deleg-sock-XXXXXX", platform_tmpdir());
    char sockpath[512] = "";
    assert(mkdtemp(tmphome) != NULL);
    setenv("AIMEE_HOME", tmphome, 1);
@@ -667,7 +669,8 @@ static void test_release_hibernate_keeps_container(void)
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
-   char tmphome[] = "/tmp/aimee-deleg-hib-XXXXXX";
+   char tmphome[256];
+   snprintf(tmphome, sizeof tmphome, "%s/aimee-deleg-hib-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmphome) != NULL);
    setenv("AIMEE_HOME", tmphome, 1);
 

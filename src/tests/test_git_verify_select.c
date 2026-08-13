@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void run(const char *cmd)
 {
@@ -45,7 +46,8 @@ static void test_path_match(void)
 
 static void test_select_skips_unmatched_change(void)
 {
-   char tmpl[] = "/tmp/aimee-verify-select-XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee-verify-select-XXXXXX", platform_tmpdir());
    char *root = mkdtemp(tmpl);
    assert(root != NULL);
    char cmd[1024];
@@ -93,7 +95,8 @@ static void test_select_skips_unmatched_change(void)
  * worktree onto a shared projects/main config. */
 static void test_worktree_config_keys_on_repo_name(void)
 {
-   char tmpl[] = "/tmp/aimee-verify-projname-XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee-verify-projname-XXXXXX", platform_tmpdir());
    char *tmp = mkdtemp(tmpl);
    assert(tmp != NULL);
 
