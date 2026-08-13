@@ -154,7 +154,7 @@ TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(OBJDIR)/rel_types.o $(OBJDIR)/modules/memor
 # linking both would produce duplicate-symbol errors.
 TEST_DATA_OBJS_MOCK = $(TEST_DATA_OBJS) $(OBJDIR)/tests/support/mock_agent_http.o
 
-TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPREFIX)/unit-test-harness-memory $(TESTPREFIX)/unit-test-memory-redirect $(TESTPREFIX)/unit-test-harness-memory-scope $(TESTPREFIX)/unit-test-harness-memory-spill $(TESTPREFIX)/unit-test-harness-memory-audit $(TESTPREFIX)/unit-test-roundtable-brief $(TESTPREFIX)/unit-test-db2 $(TESTPREFIX)/unit-test-pg-prepare-classification $(TESTPREFIX)/unit-test-schema-subst $(TESTPREFIX)/unit-test-code-index-ops $(TESTPREFIX)/unit-test-code-project-lifecycle $(TESTPREFIX)/unit-test-curator-version $(TESTPREFIX)/unit-test-curator-invalidate $(TESTPREFIX)/unit-test-curator-notify $(TESTPREFIX)/unit-test-curator-queue $(TESTPREFIX)/unit-test-curator-pipeline-sched $(TESTPREFIX)/unit-test-curator-custom-stages $(TESTPREFIX)/unit-test-pgvec $(TESTPREFIX)/unit-test-pgvec-neardup $(TESTPREFIX)/unit-test-rules $(TESTPREFIX)/unit-test-delegate-sandbox-image $(TESTPREFIX)/unit-test-sandbox-pkg-proxy \
+TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPREFIX)/unit-test-harness-memory $(TESTPREFIX)/unit-test-memory-redirect $(TESTPREFIX)/unit-test-harness-memory-scope $(TESTPREFIX)/unit-test-harness-memory-spill $(TESTPREFIX)/unit-test-harness-memory-audit $(TESTPREFIX)/unit-test-roundtable-brief $(TESTPREFIX)/unit-test-db2 $(TESTPREFIX)/unit-test-pg-prepare-classification $(TESTPREFIX)/unit-test-schema-subst $(TESTPREFIX)/unit-test-code-index-ops $(TESTPREFIX)/unit-test-code-project-lifecycle $(TESTPREFIX)/unit-test-curator-version $(TESTPREFIX)/unit-test-curator-invalidate $(TESTPREFIX)/unit-test-curator-notify $(TESTPREFIX)/unit-test-curator-queue $(TESTPREFIX)/unit-test-curator-pipeline-sched $(TESTPREFIX)/unit-test-curator-custom-stages $(TESTPREFIX)/unit-test-pgvec $(TESTPREFIX)/unit-test-pgvec-neardup $(TESTPREFIX)/unit-test-rules $(TESTPREFIX)/unit-test-delegate-sandbox-image \
                $(TESTPREFIX)/unit-test-guardrails $(TESTPREFIX)/unit-test-session-degraded-notice $(TESTPREFIX)/unit-test-kb-http-json $(TESTPREFIX)/unit-test-memory $(TESTPREFIX)/unit-test-tasks \
                $(TESTPREFIX)/unit-test-cmd-hooks-scope \
                $(TESTPREFIX)/unit-test-agent $(TESTPREFIX)/unit-test-agent-repair $(TESTPREFIX)/unit-test-agent-apikey $(TESTPREFIX)/unit-test-script-runner $(TESTPREFIX)/unit-test-provider-cli-adapter $(TESTPREFIX)/unit-test-cli-acp $(TESTPREFIX)/unit-test-acp-server $(TESTPREFIX)/unit-test-toolset-thread-scope $(TESTPREFIX)/unit-test-workspace-provider-container $(TESTPREFIX)/unit-test-mcp-native-surface $(TESTPREFIX)/unit-test-mcp-native-dispatch $(TESTPREFIX)/unit-test-extractors \
@@ -279,6 +279,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-module-runtime \
                $(TESTPREFIX)/unit-test-module-json-call \
                $(TESTPREFIX)/unit-test-economizer-module-client \
+               $(TESTPREFIX)/unit-test-sandbox-pkg-proxy-adapter \
                $(TESTPREFIX)/unit-test-sandbox-learned-observe \
                $(TESTPREFIX)/unit-test-routing-module \
                $(TESTPREFIX)/unit-test-bus-capture \
@@ -1597,9 +1598,6 @@ $(TESTPREFIX)/unit-test-server-memory-benchmark: \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-config: $(OBJDIR)/tests/test_config.o $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-sandbox-pkg-proxy: $(OBJDIR)/tests/test_sandbox_pkg_proxy.o $(OBJDIR)/modules/sandbox/sandbox_pkg_proxy_core.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-sandbox-image: $(OBJDIR)/tests/test_delegate_sandbox_image.o \
@@ -3159,6 +3157,7 @@ $(TESTPREFIX)/unit-test-module-runtime: $(OBJDIR)/tests/test_module_runtime.o \
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
 $(OBJDIR)/tests/test_sandbox_learned_observe.o: C_FLAGS += -Icore/event_bus/include -Imodules/sandbox/include
+$(OBJDIR)/tests/test_sandbox_pkg_proxy_adapter.o: C_FLAGS += -Icore/event_bus/include -Imodules/sandbox/include
 $(OBJDIR)/tests/test_module_json_call.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-module-json-call: $(OBJDIR)/tests/test_module_json_call.o \
                                         $(OBJDIR)/module_json_call.o \
@@ -3166,6 +3165,16 @@ $(TESTPREFIX)/unit-test-module-json-call: $(OBJDIR)/tests/test_module_json_call.
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
 unit-test-module-json-call: $(TESTPREFIX)/unit-test-module-json-call
+	$<
+
+$(TESTPREFIX)/unit-test-sandbox-pkg-proxy-adapter: \
+                                        $(OBJDIR)/tests/test_sandbox_pkg_proxy_adapter.o \
+                                        $(OBJDIR)/modules/sandbox/sandbox_pkg_proxy.o \
+                                        $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+.PHONY: unit-test-sandbox-pkg-proxy-adapter
+unit-test-sandbox-pkg-proxy-adapter: $(TESTPREFIX)/unit-test-sandbox-pkg-proxy-adapter
 	$<
 
 $(OBJDIR)/tests/test_economizer_module_client.o: C_FLAGS += -Icore/event_bus/include

@@ -30,7 +30,7 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		{"runtime-web", 23, []uint32{9985}},
 		{"control-web", 24, []uint32{10241}},
 		{"benchmarks", 25, []uint32{10497, 10498}},
-		{"sandbox", 26, []uint32{10753, 10754}},
+		{"sandbox", 26, []uint32{10753, 10754, 10755, 10756}},
 		{"economizer", 27, []uint32{11009, 11010, 11011, 11012, 11013}},
 	}
 	for _, test := range tests {

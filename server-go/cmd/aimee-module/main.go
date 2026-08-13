@@ -216,6 +216,8 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.Stages = []bus.ModuleStage{
 			{EventKind: sandbox.EventObserve, StageID: sandbox.StageObserve},
 			{EventKind: sandbox.EventLoad, StageID: sandbox.StageLoad},
+			{EventKind: sandbox.EventProxyRequest, StageID: sandbox.StageProxyRequest},
+			{EventKind: sandbox.EventProxyAddress, StageID: sandbox.StageProxyAddress},
 		}
 		// The learned store lives under AIMEE_HOME. Unlike roundtable's review
 		// stage -- which needs a resource plane that may genuinely be absent --
