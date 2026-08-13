@@ -40,9 +40,29 @@ rather than inventing a second one.
    (`kb_project_visible(project_ref)`) and have every content policy call it. A second copy of a
    visibility rule is the defect this codebase has repeatedly shipped; the delegate permission work
    removed five copies of one role rule for the same reason.
-2. **The text `project` column gets a referent.** `kb_documents.project` and friends hold a project
-   NAME, not a key into `kb_project`. Either map name to `kb_project.id` or carry the id. Until that
-   link exists there is nothing for a policy to test.
+2. **One table gains the referent, not every content table.** `kb_documents.project` holds
+   `projects.name`, the CODE-INDEX project, bound at ingest (`kb_payload.c` looks up
+   `projects WHERE name=?1`). `projects.name` is globally `UNIQUE`, so it identifies exactly one row.
+   `kb_project.name` is `UNIQUE(parent, name)` and therefore identifies nothing on its own: two teams
+   may each own a project called `aimee`. **A policy that resolved content to tenancy by NAME would
+   either fail or match the wrong team's project, which is a cross-tenant leak introduced by the fix
+   itself.**
+
+   So the link belongs on `projects`, once:
+
+   ```sql
+   ALTER TABLE projects ADD COLUMN IF NOT EXISTS kb_project BIGINT REFERENCES kb_project(id);
+   ```
+
+   and every content table reaches tenancy through the name it already carries:
+
+   ```sql
+   EXISTS (SELECT 1 FROM projects p
+           WHERE p.name = kb_documents.project AND kb_project_visible(p.kb_project))
+   ```
+
+   Migrations here are `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in `src/db2/schema.sql`, applied by
+   the owner migrate step, so this is one line plus a backfill.
 3. **Deny is the default and the fallback.** An unattributed row is invisible. This matches
    `kb_identity_combine`, which already treats a failed lookup as an empty team set rather than a
    wider one.
@@ -87,13 +107,15 @@ Prefer the first. The second is only worth it if a deployment cannot tolerate a 
 
 ## Bounded slices
 
-1. `kb_project_visible()` plus policies on `kb_documents` and `kb_file_index` (the search surfaces a
-   user notices first). Backfill and enable together.
-2. `kb_embeddings`, `kb_pdf_embeddings`, `kb_doc_regions` (the last inherits through `chunk_id`).
-3. The code index: `files` through `projects`, including what `projects.workspace` means for
+1. `projects.kb_project` plus `kb_project_visible()`, additive and enforcing nothing. Safe to land
+   before the backfill is proved, because no policy reads them yet.
+2. Policies on `kb_documents` and `kb_file_index` (the search surfaces a user notices first),
+   enabled with the backfill in the same change.
+3. `kb_embeddings`, `kb_pdf_embeddings`, `kb_doc_regions` (the last inherits through `chunk_id`).
+4. The code index: `files` through `projects`, including what `projects.workspace` means for
    attribution.
-4. `ws_scope_project_path` membership check, so the filesystem and the database agree.
-5. `memories`, once the question above is answered.
+5. `ws_scope_project_path` membership check, so the filesystem and the database agree.
+6. `memories`, once the question above is answered.
 
 ## Acceptance checks
 
@@ -108,6 +130,8 @@ Prefer the first. The second is only worth it if a deployment cannot tolerate a 
 
 ## Status
 
-Pending. Evidence gathered on the merged state of #2632 (all counts and column facts above are read
+Pending. Amended after reading the ingest path: the content-to-tenancy link is one column on
+`projects`, not a change to each content table, and resolving it by project NAME is unsafe because
+`kb_project` names are unique only within a team. Evidence gathered on the merged state of #2632 (all counts and column facts above are read
 from `src/db2/schema.sql` at that commit). Slice 5 blocked on the memory-scope decision; slices 1 to
 4 blocked only on choosing a migration option.
