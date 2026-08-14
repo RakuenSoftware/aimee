@@ -5,11 +5,11 @@ is about the request-context half that has to exist before any of it can be enab
 
 ## Problem
 
-`kb_content_scope_enable()` still refuses today, and the refusal is correct until the rollout is
-complete. Authenticated content ingress now opens `db2_tenant_scope_begin`, and background content
-work now has a separate named project scope. What remains is operational attribution of every code
-project to its exact tenancy `kb_project`, followed by live RLS coverage and the readiness marker.
-Enabling before those checks are complete can still make existing content disappear.
+Authenticated content ingress opens `db2_tenant_scope_begin`, background content work has a separate
+named project scope, and live RLS coverage proves ordinary searches for two users on two teams. The
+release therefore records reader readiness. `kb_content_scope_enable()` still refuses until the
+operator attributes every content-bearing code project to its exact tenancy `kb_project`; enabling
+before that backfill is complete would make existing content disappear.
 
 This is an authorization-context gap, not a missing authentication system.
 
@@ -128,8 +128,9 @@ operator enables it.
 
 ## Status
 
-Implementation in progress. The connection/caller-context path, explicit admin-only project
-attribution, and project-bound background worker scope are wired while content RLS remains disabled.
-An operator backfill, live two-project RLS coverage, and the slice-6 readiness marker remain;
-`kb_content_scope_enable()` therefore still refuses by construction. The companion identity map
-records why no additional proof mechanism is required.
+Implemented cumulatively through slice 6. #2656 supplied pair-specific mTLS enforcement, UDS/web/
+thinclient/MCP identity convergence, and caller-scoped reads; #2658 and #2661 supplied exact-project
+background maintenance; the final slice adds live two-user/two-team ordinary-search RLS coverage.
+Schema application records `content_scope_reader_ready = '1'` but does not enable content RLS. The
+operator must finish attribution and call `kb_content_scope_enable()`; incomplete attribution still
+fails closed. The companion identity map records why no additional proof mechanism is required.

@@ -79,9 +79,10 @@ MCP authentication remain owned by those ingress layers.
   by aimee-server.
 - **Web is not a new KB proof problem.** Standard web/PAM/OIDC authentication terminates before the
   server opens the KB request.
-- **Background work remains separate.** Ingest, re-embed, curator and code-indexer authorization is
-  still the open question from #2646. It must be answered before content scope is enabled, but it is
-  not evidence that CLI, web or MCP needs another authentication layer.
+- **Background work remains separate from caller identity.** #2646 was resolved by #2658, with the
+  post-embed scope correction in #2661: closed-name, exact-project maintenance scopes cover ingest,
+  re-embed, curator and code-indexer work. That in-process scope is not evidence that CLI, web or MCP
+  needs another authentication layer.
 
 ## Bounded slices
 
@@ -125,6 +126,8 @@ observable when an operator subsequently enables content scope.
 
 ## Status
 
-Pending. Supersedes the earlier proposal's proof-per-surface framing. The remaining work is identity
-context propagation and tenant scoping over the existing authenticated service boundary, not a new
-authentication mechanism.
+Implemented cumulatively through slice 6: #2656 supplied pair-specific mTLS enforcement, ingress
+identity convergence, and caller-scoped reads; #2658 and #2661 supplied exact-project maintenance;
+the final slice records reader readiness after live RLS isolation coverage. Schema application still
+leaves content RLS disabled. An operator must explicitly attribute every content-bearing code project
+and call `kb_content_scope_enable()`; the function refuses an incomplete backfill.
