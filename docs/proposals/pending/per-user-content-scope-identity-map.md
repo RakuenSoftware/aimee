@@ -1,104 +1,130 @@
-# Every surface needs an identity, and two of them have nothing to forward
+# The KB boundary already has an identity; preserve it for content scope
 
-Amends `per-user-content-scope-reader-identity.md`, which said "forward the token". That is right for
-one surface and impossible for two others. This is what it takes to cover MCP, CLI and browser.
+Amends `per-user-content-scope-reader-identity.md`. The earlier framing treated every ingress surface
+as if it connected to aimee-kb and therefore needed to carry independently verifiable proof to it.
+That is the wrong boundary: CLI, web and MCP terminate at aimee-server. Only aimee-server connects to
+aimee-kb.
 
-No backwards compatibility is required: the next release moves a full version, so a caller with no
-identity is refused rather than accommodated.
+No backwards compatibility is required: the next release moves a full version, so a service
+connection or request context that does not satisfy the existing identity contract is refused rather
+than accommodated.
 
-## What each surface is authenticated by today
+## One KB service boundary, with the standard triple layer on every network hop
 
-aimee-server already attests every caller. It has never had to tell the KB.
+| ingress surface | authenticated at | KB connection |
+|---|---|---|
+| local CLI over UDS | aimee-server, using the local OS/peer credential | none; the CLI calls aimee-server |
+| remote CLI / thinclient | aimee-server, using mTLS + rotating bearer + PAM/OIDC | none; the thinclient calls aimee-server |
+| browser / webchat | aimee-server, using the configured standard web/PAM/OIDC flow | none; the web tier calls aimee-server |
+| remote MCP | aimee-server, using standard MCP over mTLS + rotating bearer + PAM/OIDC | none; MCP calls aimee-server |
 
-| surface | attested by | KB principal kind | identity_key |
-|---|---|---|---|
-| browser / webchat | root-UDS-gated `webuser:<name>` assertion, PAM behind it | `KB_PRIN_HOST` | bare username |
-| local CLI over UDS | `SO_PEERCRED` peer uid | `KB_PRIN_HOST` | bare username |
-| thin client over TCP | mTLS client certificate | `KB_PRIN_CERT` | `cert:<issuer>:<serial>` |
-| browser via OIDC | OIDC login, kb-signed data-plane token | `KB_PRIN_OIDC` | `oidc:<iss>:<sub>` |
-| MCP | rides the `/v1` surfaces above | whichever applies | as above |
+Those protocols keep their own authentication responsibilities. Content scope must not manufacture a
+second CLI, web or MCP proof protocol at the KB boundary.
 
-The KB's identity vocabulary already admits all four forms, `KB_PRIN_HOST` included, and
-`kb_identity_key()` derives the canonical key for each. Nothing new needs inventing at the KB.
+Every networked Aimee-to-Aimee hop uses that same triple layer. In particular, a thinclient has full
+mutual TLS, rotating token bearing and PAM/OIDC identity to aimee-server; aimee-server then uses the
+same three-layer rule to aimee-kb. Each mTLS relationship has unique, role-constrained certificate
+material and rotates independently. The certificate identity aimee-server presents as a client to
+aimee-kb is not the server certificate it presents to a thinclient, and neither is accepted in the
+other role or on another peer relationship. The local UDS is not a weaker network fallback: it is the
+host-local boundary, authenticated by the OS, and physical host compromise is outside its threat
+model.
 
-## The part the earlier proposal got wrong
+## The server-to-KB connection is already the KB proof boundary
 
-Only the OIDC surface carries a **kb-signed token**. The webchat and UDS identities are attested by
-the operating system and by PAM, on the machine aimee-server is running on. There is no signed
-artefact to forward, and the KB cannot independently verify a peer uid it never observed.
+Every aimee-server-to-aimee-kb connection is required to satisfy all three existing layers:
 
-So "the KB verifies, it does not trust" cannot hold uniformly. Pretending otherwise would mean
-either dropping the two surfaces most people use, or inventing a proof the KB has no way to check.
+1. **Mutually verified TLS.** Each side verifies the other using unique pair/role certificate
+   identities. Certificates are independently revocable and rotated; material is never reused for a
+   different peer or for both client and server roles.
+2. **A rotating bearer.** Every request is token-bearing; expiry, rotation and revocation remain part
+   of the existing credential lifecycle.
+3. **An enrolled service identity.** When OIDC is configured, aimee-server uses an OIDC identity that
+   aimee-kb verifies through the federated issuer. Without OIDC, it uses a PAM identity that exists on
+   aimee-kb. Failure to resolve that identity fails closed.
 
-## Decision: verify what carries proof, trust what cannot, and say which is which
+An external caller therefore does not become a KB principal by learning a username, reaching one
+ingress protocol or compromising one side of a connection. The peer independently authenticates the
+other enrolled system, and the request still needs the rotating token and PAM/OIDC identity. An
+Aimee-specific compromise of the communication presupposes that both systems, and therefore the
+boundary itself, are already compromised. Adding a fourth credential allowed to “speak for host
+subjects” does not improve that state and creates another authority to enroll, rotate and audit.
 
-Two paths, chosen by what the caller actually presented:
+## Connection identity and caller context are different things
 
-**Carries its own proof, so verify it.** An OIDC data-plane token is forwarded verbatim and the KB
-checks the signature against the key it minted with, plus `typ` and audience so a management JWT can
-never arrive here wearing the wrong hat. aimee-server is not trusted for this at all.
+The three layers above authenticate the **service connection**. The user who caused a request is
+**caller context** on that connection:
 
-**Attested locally, so trust an authorized service, explicitly.** For host-account subjects,
-aimee-server asserts the attested username over its scoped service credential, and the KB accepts it
-only from a credential enrolled to speak for host subjects. The trust is real; the point is that it
-is stated, narrow, revocable per credential, and enforced at one choke point rather than implied on
-every read.
+- aimee-server validates the caller at its ingress boundary;
+- it carries the resulting principal on the already-authenticated KB request;
+- aimee-kb resolves that principal's teams and projects from its own membership data;
+- no caller-supplied team or widened membership is accepted.
 
-Write it down as the compromise it is: a compromised aimee-server can name any host account. It
-cannot forge an OIDC subject, and it cannot widen a subject's teams, because membership is still the
-KB's to resolve.
+OIDC caller context can retain its existing KB-verifiable token. Local CLI, web/PAM and MCP context is
+carried by the authenticated aimee-server service rather than being forced through a new proof type.
+This is delegation across an authenticated service boundary, not anonymous trust.
 
-### Why not mint a token per local identity instead
+A token-mint round trip based on the same already-authenticated context adds ceremony without changing
+the authority. This proposal does not add a new protocol for a threat that requires both Aimee
+endpoints to have already been lost. Likewise, an attacker who has obtained physical access
+sufficient to impersonate a local UDS caller is outside the local-CLI threat model. Standard web and
+MCP authentication remain owned by those ingress layers.
 
-The KB holds the signing key, so aimee-server would have to ask for one, and at mint time the KB is
-trusting exactly the same assertion. It buys an audit record and costs a round trip on every new
-subject. Worth revisiting if the audit record turns out to matter more than the latency; it does not
-change who is trusted.
+## Consequences
 
-## Non-goals
-
-- Changing the identity vocabulary. All four kinds exist.
-- Backwards compatibility for callers with no identity. The version moves; they are refused.
-- Per-user memory. `memories` is out of scope by decision: global is global, and per-user memory is
-  DB1's concern.
-
-## The surfaces that are nobody
-
-Two callers legitimately have no user, and both must be answered before content scope is enabled:
-
-- **UDS local operator.** OS-attested and, today, structurally exempt from the write tier because the
-  local operator "keeps full capability". Under content scope, a caller with no principal sees
-  nothing, which would take the local CLI dark. It maps to a host account, so the fix is to give it
-  one rather than to exempt it.
-- **Background work.** Ingest, re-embed, curator and the code indexer act on nobody's behalf. Named
-  maintenance scope, per-project iteration, or leaving the job tables out. Still open.
+- **The local CLI does not go dark.** It has an OS-attested caller at aimee-server, and its KB request
+  uses the same authenticated service channel as every other surface. It needs caller-context wiring,
+  not a KB exemption or a new credential.
+- **MCP is not a new KB principal kind.** It inherits the authenticated `/v1` request context selected
+  by aimee-server.
+- **Web is not a new KB proof problem.** Standard web/PAM/OIDC authentication terminates before the
+  server opens the KB request.
+- **Background work remains separate.** Ingest, re-embed, curator and code-indexer authorization is
+  still the open question from #2646. It must be answered before content scope is enabled, but it is
+  not evidence that CLI, web or MCP needs another authentication layer.
 
 ## Bounded slices
 
-1. **KB accepts a forwarded data-plane token** as an actor source: verify against its own authority
-   key, check `typ`/audience, build the actor. No verifier exists KB-side today; `kb_identity_token.h`
-   is a builder only.
-2. **KB accepts an asserted host subject** from a service credential enrolled for it, and refuses it
-   from any other credential.
-3. **aimee-server forwards** whichever it has, on data-plane calls. With RLS off this changes no
-   result, which is what makes it safe to land and watch.
-4. **Content reads open a tenant scope** from the actor.
-5. **The local operator and background work** get their answer.
+Slices 1–5 land while content RLS remains disabled, so propagating and resolving context cannot
+change an observable content result. Slice 6 only declares the readers ready; scoping becomes
+observable when an operator subsequently enables content scope.
+
+1. **Pin the existing connection invariant in integration tests:** every network hop in a content
+   call, including thinclient-to-server and server-to-KB, requires verified mTLS with unique rotating
+   pair/role certificates, a valid rotating bearer and a resolved OIDC-or-PAM identity.
+2. **Carry the existing caller context** from aimee-server on content reads. Do not add a new principal
+   kind, host-subject credential or token-mint hop.
+3. **Resolve service and caller context together** through the existing KB identity/team resolver,
+   rejecting conflicts and caller-named membership that the KB does not contain.
+4. **Open content tenant scope** from that resolved context and clear it on every pooled-connection
+   exit.
+5. **Exercise every server ingress:** web, local CLI, remote CLI/thinclient, and MCP. None may create a
+   direct or weaker KB authentication path. Land the separately reviewed #2646 background-work
+   decision before readiness is declared.
 6. Only then set `kb_meta.content_scope_reader_ready = '1'`.
 
 ## Acceptance checks
 
-- **Per surface, end to end.** Webchat, local CLI, thin client and MCP each reach a KB content read
-  with the right `identity_key` in `aimee.principal`. A surface that silently arrives as nobody is
-  the failure this whole map exists to prevent, so each is asserted by name rather than in aggregate.
-- **Assertion is not universal.** A service credential NOT enrolled for host subjects is refused when
-  it asserts one, and the read returns nothing rather than everything.
-- **No proof, no identity.** An expired, wrong-audience or wrong-`typ` token yields no actor at all,
-  never a fallback.
-- **No inheritance.** A service call with no user does not pick up the previous request's principal
-  on a pooled connection. Pinned already by the tenant-scope leak test.
+- **Three layers, fail closed on every network hop.** Missing or invalid mTLS, bearer, or PAM/OIDC
+  identity prevents thinclient-to-server and server-to-KB content requests. Rotation and revocation
+  are exercised on pooled connections.
+- **Pairwise certificate identity.** The thinclient-to-server and server-to-KB relationships use
+  different certificate material, rotate independently, and reject cross-peer or cross-role reuse.
+- **Federation modes.** With OIDC configured, aimee-kb verifies aimee-server's federated identity.
+  Without OIDC, it resolves the configured aimee-server PAM identity that exists on the KB host.
+- **One KB caller, every ingress preserved.** Web, local CLI, remote CLI/thinclient, and MCP all reach
+  content through aimee-server; none introduces a direct KB credential or route, and each is tested
+  by name to prove its expected caller context reaches the KB read rather than silently becoming
+  nobody.
+- **No widening.** The KB, not aimee-server or the ingress caller, remains authoritative for team and
+  project membership.
+- **No inheritance.** A request with no caller context cannot inherit the previous request's principal
+  on a pooled connection.
+- **Background decision remains explicit.** The separately selected #2646 policy is implemented and
+  tested before the readiness marker is set; this proposal does not preselect it.
 
 ## Status
 
-Pending. Supersedes the "forward the token" decision in
-`per-user-content-scope-reader-identity.md` for the host-account surfaces, and keeps it for OIDC.
+Pending. Supersedes the earlier proposal's proof-per-surface framing. The remaining work is identity
+context propagation and tenant scoping over the existing authenticated service boundary, not a new
+authentication mechanism.
