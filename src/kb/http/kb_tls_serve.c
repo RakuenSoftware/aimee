@@ -38,6 +38,7 @@
 #include "util.h"
 #include <aimee/core/connection/auth.h>
 
+#include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
@@ -88,6 +89,23 @@ static int header_value_has_token(const char *start, const char *end, const char
       start = item_end < end ? item_end + 1 : end;
    }
    return 0;
+}
+
+static int positive_int64_header(const char *start, const char *end, int64_t *out)
+{
+   if (!start || !end || start >= end || !out || (size_t)(end - start) > 19)
+      return 0;
+   char raw[20];
+   size_t n = (size_t)(end - start);
+   memcpy(raw, start, n);
+   raw[n] = '\0';
+   char *tail = NULL;
+   errno = 0;
+   long long value = strtoll(raw, &tail, 10);
+   if (errno || !tail || *tail || value <= 0)
+      return 0;
+   *out = (int64_t)value;
+   return 1;
 }
 
 /* All three connection layers must name the same enrolled identity. The
@@ -195,16 +213,19 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
                                size_t *body_out, int *close_out, char *authorization_out,
                                size_t authorization_cap, char *service_authorization_out,
                                size_t service_authorization_cap, char *caller_subject_out,
-                               size_t caller_subject_cap)
+                               size_t caller_subject_cap, int64_t *named_team_out)
 {
    size_t total = 0, header_len = 0, content_len = 0;
-   int have_cl = 0, have_authorization = 0, have_service_authorization = 0, have_caller_subject = 0;
+   int have_cl = 0, have_authorization = 0, have_service_authorization = 0, have_caller_subject = 0,
+       have_named_team = 0;
    if (!authorization_out || authorization_cap == 0 || !service_authorization_out ||
-       service_authorization_cap == 0 || !caller_subject_out || caller_subject_cap == 0)
+       service_authorization_cap == 0 || !caller_subject_out || caller_subject_cap == 0 ||
+       !named_team_out)
       return 400;
    authorization_out[0] = '\0';
    service_authorization_out[0] = '\0';
    caller_subject_out[0] = '\0';
+   *named_team_out = 0;
    while (total + 1 < cap && total < KB_TLS_HEADER_MAX)
    {
       int n = SSL_read(ssl, buf + total, (int)(KB_TLS_HEADER_MAX - total));
@@ -349,6 +370,21 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
             return 400;
          memcpy(caller_subject_out, v, vlen);
          caller_subject_out[vlen] = '\0';
+      }
+      if (name_len == sizeof("X-Aimee-Team-ID") - 1 &&
+          !strncasecmp(p, "X-Aimee-Team-ID", name_len))
+      {
+         if (have_named_team)
+            return 400;
+         have_named_team = 1;
+         char *v = colon + 1;
+         while (v < e && (*v == ' ' || *v == '\t'))
+            v++;
+         char *ve = e;
+         while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t'))
+            ve--;
+         if (!positive_int64_header(v, ve, named_team_out))
+            return 400;
       }
       if (name_len == 10 && !strncasecmp(p, "Connection", 10) &&
           header_value_has_token(colon + 1, e, "close"))
@@ -586,10 +622,11 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       char presented_authorization[KB_TLS_AUTH_MAX] = "";
       char service_authorization[KB_TLS_AUTH_MAX] = "";
       char caller_subject[KB_TLS_CALLER_MAX + 1] = "";
+      int64_t named_team = 0;
       int read_status = strict_request_read(
           ssl, buf, KB_TLS_REQ_MAX, &total, &header_len, &declared_body, &close_after_response,
           presented_authorization, sizeof(presented_authorization), service_authorization,
-          sizeof(service_authorization), caller_subject, sizeof(caller_subject));
+          sizeof(service_authorization), caller_subject, sizeof(caller_subject), &named_team);
       io_timeout.tv_sec = 30;
       setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
       if (read_status < 0)
@@ -864,9 +901,60 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       }
       else
       {
-         status = kb_http_route_ex_with_actor(
-             method, cpath, qs, presented_authorization, expected_bearer, body, body_len,
-             caller_authority == 1 ? &caller_identity : NULL, resp, KB_TLS_RESP_MAX);
+         int tenant_scope_open = 0;
+         kb_request_context_t resolved;
+         memset(&resolved, 0, sizeof(resolved));
+         if (caller_authority == 1 && kb_http_is_content_read(method, cpath))
+         {
+            /* The OIDC/PAM identity is the enrolled SERVICE side of this
+             * intersection. mTLS has already independently authenticated and
+             * authorized the transport above; certificate identity is not a
+             * substitute for the service's third-layer identity. */
+            kb_resolve_status_t rr = kb_identity_resolve(&application_identity, &caller_identity,
+                                                          named_team, &resolved);
+            if (rr == KB_RESOLVE_CONFLICT)
+            {
+               snprintf(resp, KB_TLS_RESP_MAX,
+                        "{\"error\":\"service and caller have no shared KB team\"}");
+               status = 403;
+               goto content_done;
+            }
+            if (rr == KB_RESOLVE_AMBIGUOUS_DEFAULT)
+            {
+               snprintf(resp, KB_TLS_RESP_MAX,
+                        "{\"error\":\"service and caller have no unambiguous default team\"}");
+               status = 409;
+               goto content_done;
+            }
+            if (rr != KB_RESOLVE_OK || resolved.billing_team <= 0)
+            {
+               snprintf(resp, KB_TLS_RESP_MAX,
+                        "{\"error\":\"content caller could not be resolved\"}");
+               status = 403;
+               goto content_done;
+            }
+            int scope_rc = db2_tenant_scope_begin(&resolved.actor, resolved.billing_team);
+            if (scope_rc != 0)
+            {
+               snprintf(resp, KB_TLS_RESP_MAX,
+                        "{\"error\":\"content tenant scope unavailable\"}");
+               status = scope_rc == DB2_ERR_TENANT_DENIED ? 403 : 503;
+               goto content_done;
+            }
+            tenant_scope_open = 1;
+         }
+         if (tenant_scope_open)
+            status = kb_http_route_ex_with_context(method, cpath, qs, presented_authorization,
+                                                    expected_bearer, body, body_len, &resolved, resp,
+                                                    KB_TLS_RESP_MAX);
+         else
+            status = kb_http_route_ex_with_actor(
+                method, cpath, qs, presented_authorization, expected_bearer, body, body_len,
+                caller_authority == 1 ? &caller_identity : NULL, resp, KB_TLS_RESP_MAX);
+      content_done:
+         if (tenant_scope_open)
+            db2_tenant_scope_rollback();
+         memset(&resolved, 0, sizeof(resolved));
       }
       kb_reqctx_clear(); /* drop the request's actor before the next request on this conn */
       db2_lease_end();

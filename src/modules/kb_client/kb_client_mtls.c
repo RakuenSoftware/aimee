@@ -115,6 +115,15 @@ static int service_request_headers(char *out, size_t cap)
    }
    else
       n = -1;
+   char managed_server[128] = "";
+   long long managed_team = 0;
+   if (n > 0 && (size_t)n < cap &&
+       kb_client_mtls_managed_metadata(managed_server, sizeof(managed_server), &managed_team) &&
+       managed_team > 0)
+   {
+      int added = snprintf(out + n, cap - (size_t)n, "X-Aimee-Team-ID: %lld\r\n", managed_team);
+      n = added > 0 && (size_t)added < cap - (size_t)n ? n + added : -1;
+   }
    const char *caller = request_context_caller_subject ? request_context_caller_subject() : "";
    if (n > 0 && (size_t)n < cap && caller && caller[0])
    {
@@ -123,6 +132,7 @@ static int service_request_headers(char *out, size_t cap)
                       : -1;
       n = added > 0 && (size_t)added < cap - (size_t)n ? n + added : -1;
    }
+   runtime_secret_wipe(managed_server, sizeof(managed_server));
    runtime_secret_wipe(pam_b64, sizeof(pam_b64));
    runtime_secret_wipe(pam_pair, sizeof(pam_pair));
    runtime_secret_wipe(pam_pass, sizeof(pam_pass));

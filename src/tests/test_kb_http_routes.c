@@ -25,6 +25,7 @@
 #include "kb_service_backend.h"
 #include "kb_enroll.h"
 #include "kb_identity.h"
+#include "kb_reqctx.h"
 #include "kb_paths.h"
 #include "kb_pki.h"
 #include "kb_tls.h"
@@ -3031,10 +3032,13 @@ static int test_kb_client_renew(const char *host, int port, const char *ca_cert_
    (void)ca_cert_pem;
    (void)cur_cert_pem;
    (void)cur_key_pem;
+   const char *base = "Authorization: Bearer token-two\r\n"
+                      "X-Aimee-Service-Authorization: Basic "
+                      "YWltZWUtc2VydmVyOnNlcnZlci1wYXNzd29yZA==\r\n";
+   char managed[512];
+   snprintf(managed, sizeof(managed), "%sX-Aimee-Team-ID: 42\r\n", base);
    assert(authorization &&
-          strcmp(authorization, "Authorization: Bearer token-two\r\n"
-                                "X-Aimee-Service-Authorization: Basic "
-                                "YWltZWUtc2VydmVyOnNlcnZlci1wYXNzd29yZA==\r\n") == 0);
+          (strcmp(authorization, base) == 0 || strcmp(authorization, managed) == 0));
    return g_rotation_test_ca
               ? kb_pki_issue_client_cert(g_rotation_test_ca, KB_SERVER_CLIENT_SCOPE,
                                          60L * 60 * 24 * 90, cert_out, cert_cap, key_out, key_cap)
@@ -3130,6 +3134,16 @@ static void test_mtls_serve(void)
                     "X-Aimee-Caller-Subject: uid:1000\r\nConnection: close\r\n\r\n",
                     resp, sizeof(resp));
    assert(strstr(resp, "400 Bad Request") && strstr(resp, "invalid caller subject"));
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "X-Aimee-Team-ID: not-a-team\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "X-Aimee-Team-ID: 1\r\nX-Aimee-Team-ID: 2\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
    mtls_request_raw(sctx, cctx,
                     "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
                     "Authorization: Bearer token-one\r\n"
@@ -6975,6 +6989,40 @@ static void test_maintenance_repair_queues_too(void)
    assert(g_ingest_priority == DB2_KB_INGEST_PRIO_INTERACTIVE);
 }
 
+static void test_content_read_identity_boundary(void)
+{
+   assert(kb_http_is_content_read("POST", "/v1/search"));
+   assert(kb_http_is_content_read("GET", "/v1/artifacts/a"));
+   assert(kb_http_is_content_read("GET", "/v1/code/context"));
+   assert(kb_http_is_content_read("GET", "/v1/pdf/page"));
+   assert(kb_http_is_content_read("POST", "/v1/entities/search"));
+   assert(kb_http_is_content_read("GET", "/v1/docs/a"));
+   assert(!kb_http_is_content_read("GET", "/v1/health"));
+   assert(!kb_http_is_content_read("POST", "/v1/ingest"));
+   assert(!kb_http_is_content_read("GET", "/v1/code/scan"));
+   assert(!kb_http_is_content_read("POST", "/v1/code/build"));
+   assert(!kb_http_is_content_read("POST", "/v1/docs/manifest"));
+
+   kb_request_context_t resolved;
+   memset(&resolved, 0, sizeof(resolved));
+   assert(kb_principal_from_host_account("aimee-server", &resolved.transport) == 0);
+   assert(kb_principal_from_host_account("alice", &resolved.actor) == 0);
+   resolved.has_transport = 1;
+   resolved.has_actor = 1;
+   resolved.teams[0] = 7;
+   resolved.n_teams = 1;
+   resolved.billing_team = 7;
+   char buf[256];
+   int status = kb_http_route_ex_with_context(
+       "POST", "/v1/search", NULL, "Bearer scope:service:aimee-server:secret",
+       "scope:service:aimee-server:secret", "{}", 2, &resolved, buf, sizeof(buf));
+   assert(status == 400); /* identity is installed before request validation */
+   const kb_request_context_t *active = kb_reqctx_resolved();
+   assert(active && active->billing_team == 7 && active->has_transport && active->has_actor);
+   kb_reqctx_clear();
+   assert(kb_reqctx_resolved() == NULL);
+}
+
 int main(void)
 {
    /* Match kb_main's process contract. TLS readiness probes deliberately open
@@ -7013,6 +7061,7 @@ int main(void)
    test_bearer_auth_wrong();
    test_head_method();
    test_method_not_allowed();
+   test_content_read_identity_boundary();
 
    test_curator_routes();
    test_invalidations_route();

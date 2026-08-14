@@ -19,6 +19,8 @@ typedef struct
 
 static pthread_key_t g_scope_key;
 static pthread_once_t g_scope_once = PTHREAD_ONCE_INIT;
+static pthread_key_t g_resolved_key;
+static pthread_once_t g_resolved_once = PTHREAD_ONCE_INIT;
 
 static void free_actor(void *p)
 {
@@ -32,6 +34,11 @@ static void key_init(void)
 static void scope_key_init(void)
 {
    pthread_key_create(&g_scope_key, free);
+}
+
+static void resolved_key_init(void)
+{
+   pthread_key_create(&g_resolved_key, free);
 }
 
 void kb_reqctx_set_actor(const kb_principal_t *actor)
@@ -61,6 +68,11 @@ void kb_reqctx_clear(void)
    kb_reqctx_scope_t *scope = (kb_reqctx_scope_t *)pthread_getspecific(g_scope_key);
    if (scope)
       memset(scope, 0, sizeof(*scope));
+   pthread_once(&g_resolved_once, resolved_key_init);
+   kb_request_context_t *resolved =
+       (kb_request_context_t *)pthread_getspecific(g_resolved_key);
+   if (resolved)
+      memset(resolved, 0, sizeof(*resolved));
 }
 
 const kb_principal_t *kb_reqctx_actor(void)
@@ -70,6 +82,32 @@ const kb_principal_t *kb_reqctx_actor(void)
    if (slot && slot->authenticated)
       return slot;
    return NULL;
+}
+
+void kb_reqctx_set_resolved(const kb_request_context_t *resolved)
+{
+   pthread_once(&g_resolved_once, resolved_key_init);
+   kb_request_context_t *slot =
+       (kb_request_context_t *)pthread_getspecific(g_resolved_key);
+   if (!slot)
+   {
+      slot = (kb_request_context_t *)calloc(1, sizeof(*slot));
+      if (!slot)
+         return;
+      pthread_setspecific(g_resolved_key, slot);
+   }
+   if (resolved)
+      *slot = *resolved;
+   else
+      memset(slot, 0, sizeof(*slot));
+}
+
+const kb_request_context_t *kb_reqctx_resolved(void)
+{
+   pthread_once(&g_resolved_once, resolved_key_init);
+   const kb_request_context_t *slot =
+       (const kb_request_context_t *)pthread_getspecific(g_resolved_key);
+   return slot && (slot->has_transport || slot->has_actor) ? slot : NULL;
 }
 
 void kb_reqctx_set_verified_scope(const char *kind, const char *id)

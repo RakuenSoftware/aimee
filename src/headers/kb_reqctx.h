@@ -23,6 +23,11 @@ extern "C"
    /* The current actor, or NULL if none set / unauthenticated. */
    const kb_principal_t *kb_reqctx_actor(void);
 
+   /* The KB-resolved service+caller context for a content read. This is copied
+    * in only after authoritative membership intersection succeeds. */
+   void kb_reqctx_set_resolved(const kb_request_context_t *resolved);
+   const kb_request_context_t *kb_reqctx_resolved(void);
+
    /* Verified credential scope for the current request.  Unlike actor identity,
     * scoped service credentials deliberately have no actor principal, but code
     * reads still need their authenticated project scope to resolve an omitted

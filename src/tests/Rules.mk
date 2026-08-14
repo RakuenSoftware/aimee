@@ -6465,6 +6465,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o $(
                      $(OBJDIR)/posix/td_search_render.o $(OBJDIR)/dstr.o \
                      $(OBJDIR)/kb/http/kb_http_team.o $(OBJDIR)/kb/http/kb_ingress.o \
                      $(OBJDIR)/kb/kb_reqctx.o $(OBJDIR)/kb/kb_identity.o \
+                     $(OBJDIR)/kb/kb_identity_resolve.o \
                      $(OBJDIR)/kb/auth_oidc.o \
                      $(OBJDIR)/db2/db2_tenant.o $(OBJDIR)/db2/team.o \
                      $(OBJDIR)/db2/project.o $(OBJDIR)/db2/membership.o \

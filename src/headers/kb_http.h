@@ -46,3 +46,14 @@ int kb_http_route_ex_with_actor(const char *method, const char *path, const char
                                 const char *auth_header, const char *bearer_token, const char *body,
                                 int body_len, const kb_principal_t *asserted_actor, char *out_buf,
                                 int out_cap);
+
+/* Route a content request with its already KB-resolved service+caller context. */
+int kb_http_route_ex_with_context(const char *method, const char *path, const char *query_string,
+                                  const char *auth_header, const char *bearer_token,
+                                  const char *body, int body_len,
+                                  const kb_request_context_t *resolved, char *out_buf, int out_cap);
+
+/* True only for routes that read tenant-owned KB content. The mTLS ingress uses
+ * this boundary to resolve service+caller membership and open a tenant scope;
+ * management, health, ingest, and maintenance routes remain outside it. */
+int kb_http_is_content_read(const char *method, const char *path);

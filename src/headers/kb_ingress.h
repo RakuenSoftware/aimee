@@ -13,11 +13,11 @@ extern "C"
     * such a request fail-closed. Pure — unit-testable without a socket. */
    int kb_ingress_identity_header_present(const char *raw_request);
 
-   /* The triple-authenticated aimee-server mTLS boundary may carry exactly one
-    * X-Aimee-Caller-Subject assertion, which its connection handler consumes.
-    * Every other ingress keeps rejecting it with the spoofable identity set. */
+   /* The triple-authenticated aimee-server mTLS boundary may carry its caller
+    * subject and enrolled team selection, which its connection handler consumes
+    * and verifies against KB membership. Every other ingress rejects both. */
    int kb_ingress_identity_header_present_ex(const char *raw_request,
-                                             int allow_service_caller_subject);
+                                             int allow_service_context);
 
 #ifdef __cplusplus
 }

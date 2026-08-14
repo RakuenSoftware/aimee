@@ -21,6 +21,7 @@ static const char *const IDENTITY_HEADERS[] = {
     "x-aimee-session-key",
     "x-aimee-user",
     "x-aimee-caller-subject",
+    "x-aimee-team-id",
     NULL,
 };
 
@@ -38,7 +39,7 @@ static int header_line_is(const char *line, const char *name)
    return line[i] == ':';
 }
 
-int kb_ingress_identity_header_present_ex(const char *raw_request, int allow_service_caller_subject)
+int kb_ingress_identity_header_present_ex(const char *raw_request, int allow_service_context)
 {
    if (!raw_request)
       return 0;
@@ -52,8 +53,9 @@ int kb_ingress_identity_header_present_ex(const char *raw_request, int allow_ser
          break;
       for (int i = 0; IDENTITY_HEADERS[i]; ++i)
       {
-         if (allow_service_caller_subject &&
-             strcmp(IDENTITY_HEADERS[i], "x-aimee-caller-subject") == 0)
+         if (allow_service_context &&
+             (strcmp(IDENTITY_HEADERS[i], "x-aimee-caller-subject") == 0 ||
+              strcmp(IDENTITY_HEADERS[i], "x-aimee-team-id") == 0))
             continue;
          if (header_line_is(p, IDENTITY_HEADERS[i]))
             return 1;

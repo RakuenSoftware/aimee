@@ -92,8 +92,10 @@ extern "C"
    int kb_cert_serial_normalize(const char *serial, char *out, size_t cap);
 
    /* ---- Composite identity resolution (slice 2, I7) ---------------------------
-    * A request carries up to two authenticated principals: the mTLS transport
-    * (cert:CN) and the actor (OIDC/owner). Resolution combines them FAIL-CLOSED:
+    * A request carries up to two authenticated principals: its enrolled service
+    * identity (historically named `transport` here) and its actor. The mTLS peer
+    * is verified independently before this resolver is called. Resolution
+    * combines them FAIL-CLOSED:
     * the billing team must be valid for EVERY principal present (the intersection
     * of their team sets), a named team must lie in that set, and a composite
     * default is auto-selected only when both principals' defaults agree. */

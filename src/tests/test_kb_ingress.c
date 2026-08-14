@@ -29,6 +29,11 @@ int main(void)
          "caller assertion rejected on ordinary ingress");
    CHECK(kb_ingress_identity_header_present_ex(caller, 1) == 0,
          "authenticated service boundary may consume caller assertion");
+   const char *team = "GET / HTTP/1.1\r\nX-Aimee-Team-ID: 7\r\n\r\n";
+   CHECK(kb_ingress_identity_header_present(team) == 1,
+         "team selection rejected on ordinary ingress");
+   CHECK(kb_ingress_identity_header_present_ex(team, 1) == 0,
+         "authenticated service boundary may consume team selection");
    CHECK(kb_ingress_identity_header_present_ex(
              "GET / HTTP/1.1\r\nX-Aimee-Caller-Subject: aimee\r\nX-Aimee-Principal: evil\r\n\r\n",
              1) == 1,
