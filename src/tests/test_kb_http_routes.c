@@ -3458,10 +3458,15 @@ static void test_mtls_listener(void)
       assert(kb_enroll_conn_string_build("localhost", port, fp, token2, conn2, sizeof(conn2)) > 0);
 
       char identity_file[160];
+      char server_identity_file[160];
       snprintf(identity_file, sizeof(identity_file), "/tmp/aimee-kb-client-identity-%ld.json",
                (long)getpid());
+      snprintf(server_identity_file, sizeof(server_identity_file),
+               "/tmp/aimee-thinclient-server-identity-%ld.pem", (long)getpid());
       unlink(identity_file);
+      unlink(server_identity_file);
       kb_client_mtls_set_identity_path_for_test(identity_file);
+      kb_client_mtls_set_server_identity_path_for_test(server_identity_file);
       assert(runtime_secret_store("AIMEE_KB_CONN", conn2) == 0);
       setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
@@ -3482,6 +3487,30 @@ static void test_mtls_listener(void)
       identity_json[identity_n] = '\0';
       assert(strstr(identity_json, "\"version\":1") && strstr(identity_json, "PRIVATE KEY"));
       assert(strstr(identity_json, token2) == NULL); /* never persist the one-time credential */
+
+      /* The thinclient-facing server cert and the KB-facing client cert are
+       * separate bundles. Reusing the enrolled client key across them is
+       * rejected even though each path validates its own certificate. */
+      cJSON *saved_identity = cJSON_Parse(identity_json);
+      cJSON *saved_client_cert =
+          saved_identity ? cJSON_GetObjectItemCaseSensitive(saved_identity, "cert") : NULL;
+      assert(cJSON_IsString(saved_client_cert));
+      FILE *server_identity_stream = fopen(server_identity_file, "w");
+      assert(server_identity_stream &&
+             fputs(saved_client_cert->valuestring, server_identity_stream) >= 0 &&
+             fclose(server_identity_stream) == 0);
+      cJSON_Delete(saved_identity);
+      kb_client_mtls_reset_for_test();
+      int collision_status = -1;
+      char *collision = kb_client_mtls_request("GET", "/v1/health", NULL, &collision_status);
+      assert(collision == NULL && collision_status == -1);
+      char thinclient_cert[KB_PKI_CERT_PEM_MAX], thinclient_key[KB_PKI_KEY_PEM_MAX];
+      assert(kb_pki_issue_server_cert(&ca, "server.local", 3600, thinclient_cert,
+                                      sizeof(thinclient_cert), thinclient_key,
+                                      sizeof(thinclient_key)) == 0);
+      server_identity_stream = fopen(server_identity_file, "w");
+      assert(server_identity_stream && fputs(thinclient_cert, server_identity_stream) >= 0 &&
+             fclose(server_identity_stream) == 0);
 
       /* A REFUSAL MUST ARRIVE WITH ITS REASON. The transport used to return NULL for
        * any non-2xx, which made kb_client_v1_post_json_keep_error a no-op on this
@@ -3602,8 +3631,10 @@ static void test_mtls_listener(void)
       free(r);
 
       kb_client_mtls_set_identity_path_for_test(NULL);
+      kb_client_mtls_set_server_identity_path_for_test(NULL);
       assert(kb_client_mtls_configured() == 0);
       unlink(identity_file);
+      unlink(server_identity_file);
       remove(store2);
    }
 

@@ -41,6 +41,7 @@ unit-test-server-management-tls: $(TESTPREFIX)/unit-test-server-management-tls
 
 $(TESTPREFIX)/unit-test-server-management-tls: $(OBJDIR)/tests/test_server_management_tls.o \
                                                 $(OBJDIR)/server/server_tls.o \
+                                                $(OBJDIR)/cJSON.o \
                                                 $(CORE_CONNECTION_LIB)
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lssl -lcrypto -lpthread
 

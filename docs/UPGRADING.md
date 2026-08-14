@@ -139,6 +139,12 @@ ready. Successful enrollment atomically saves the mTLS certificate and private k
 token, and it validates the stored identity against the connection string's CA pin on every restart.
 Startup logs name the missing input when a deployment remains read-only.
 
+Each Aimee mTLS identity must now carry exactly one extended-key-usage role: `serverAuth` for a
+listener or `clientAuth` for an outbound peer. Certificates with no EKU, `anyExtendedKeyUsage`, or
+both roles are rejected. Reissue any older broad-purpose certificate before upgrading. Keep every
+connection pair on distinct key material and rotate each pair independently; in particular,
+aimee-server's thinclient-facing server certificate must not be reused as its KB client identity.
+
 Grants are keyed by server, team, and exact authenticated subject:
 
 | Subject | Form |

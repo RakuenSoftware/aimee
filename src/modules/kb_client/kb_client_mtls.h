@@ -61,5 +61,6 @@ void kb_client_mtls_tls_stats(unsigned long *handshakes_total_out,
  * retaining the durable identity file, simulating a server process restart. */
 void kb_client_mtls_reset_for_test(void);
 void kb_client_mtls_set_identity_path_for_test(const char *absolute_path);
+void kb_client_mtls_set_server_identity_path_for_test(const char *absolute_path);
 
 #endif /* DEC_KB_CLIENT_MTLS_H */

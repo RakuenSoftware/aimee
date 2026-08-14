@@ -23,6 +23,7 @@
 #include <fcntl.h>
 #include <math.h>
 #include <openssl/crypto.h>
+#include <openssl/pem.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -40,6 +41,7 @@ static char g_ca[8192];
 static char g_cert[8192];
 static char g_key[8192];
 static char g_identity_path_override[1024];
+static char g_server_identity_path_override[1024];
 
 #define KB_CLIENT_IDENTITY_MAX 32768
 
@@ -52,10 +54,46 @@ static int identity_path(char *out, size_t cap)
    return n > 0 && (size_t)n < cap && out[0] == '/' ? 0 : -1;
 }
 
+/* The server-to-KB client identity and the thinclient-facing server identity
+ * are different mTLS pairs. If the latter exists, reject key reuse across the
+ * two bundles even when each certificate has the right EKU for its own role. */
+static int identity_distinct_from_server(const char *client_cert_pem)
+{
+   char path[1024];
+   const char *base = config_default_dir();
+   int n = g_server_identity_path_override[0]
+               ? snprintf(path, sizeof(path), "%s", g_server_identity_path_override)
+               : snprintf(path, sizeof(path), "%s/tls/server.crt", base ? base : "");
+   if (n <= 0 || (size_t)n >= sizeof(path) || path[0] != '/')
+      return 0;
+
+   int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+   if (fd < 0)
+      return errno == ENOENT;
+   struct stat st;
+   int valid_file = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_nlink == 1 &&
+                    st.st_size > 0 && st.st_size < KB_PKI_CERT_PEM_MAX;
+   BIO *server_bio = valid_file ? BIO_new_fd(fd, BIO_NOCLOSE) : NULL;
+   X509 *server_cert = server_bio ? PEM_read_bio_X509(server_bio, NULL, NULL, NULL) : NULL;
+   BIO *client_bio = client_cert_pem ? BIO_new_mem_buf(client_cert_pem, -1) : NULL;
+   X509 *client_cert = client_bio ? PEM_read_bio_X509(client_bio, NULL, NULL, NULL) : NULL;
+   EVP_PKEY *server_key = server_cert ? X509_get_pubkey(server_cert) : NULL;
+   EVP_PKEY *client_key = client_cert ? X509_get_pubkey(client_cert) : NULL;
+   int distinct = server_key && client_key && EVP_PKEY_eq(server_key, client_key) == 0;
+   EVP_PKEY_free(server_key);
+   EVP_PKEY_free(client_key);
+   X509_free(server_cert);
+   X509_free(client_cert);
+   BIO_free(server_bio);
+   BIO_free(client_bio);
+   close(fd);
+   return distinct;
+}
+
 static int identity_material_valid(const char *ca, const char *cert, const char *key)
 {
    if (!ca || !cert || !key || !ca[0] || !cert[0] || !key[0] ||
-       kb_pki_verify_client_cert(ca, cert) != 1)
+       kb_pki_verify_client_cert(ca, cert) != 1 || !identity_distinct_from_server(cert))
       return 0;
    SSL_CTX *ctx = kb_tls_client_ctx(ca, cert, key);
    if (!ctx)
@@ -283,6 +321,14 @@ void kb_client_mtls_set_identity_path_for_test(const char *absolute_path)
 {
    pthread_mutex_lock(&g_lock);
    snprintf(g_identity_path_override, sizeof(g_identity_path_override), "%s",
+            absolute_path ? absolute_path : "");
+   pthread_mutex_unlock(&g_lock);
+}
+
+void kb_client_mtls_set_server_identity_path_for_test(const char *absolute_path)
+{
+   pthread_mutex_lock(&g_lock);
+   snprintf(g_server_identity_path_override, sizeof(g_server_identity_path_override), "%s",
             absolute_path ? absolute_path : "");
    pthread_mutex_unlock(&g_lock);
 }
