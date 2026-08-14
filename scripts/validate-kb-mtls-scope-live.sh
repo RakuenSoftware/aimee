@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # validate-kb-mtls-scope-live.sh — the PRODUCTION credential path, end to end.
 #
-# WHY THIS EXISTS. Every other check of the scoped-service work drives a BEARER
-# token. Production does not use one: aimee-server presents a client CERTIFICATE,
-# and kb_tls_serve.c synthesises a credential from that certificate's CN
+# WHY THIS EXISTS. Production uses both a rotating BEARER and a client
+# CERTIFICATE. kb_tls_serve.c synthesises a credential from that certificate's CN
 # ("<kind>:<id>" -> scope:<kind>:<id>:m, a bare word -> mtls-owner). Nothing
 # exercised that translation. The neighbouring test-synthesis-mtls-hop.sh exists
 # because a hop stayed broken through 41 lint checks, a unit test and two image
@@ -128,7 +127,8 @@ except Exception: print("")' 2>/dev/null)
 mreq() {
   curl -s -o /dev/null -w '%{http_code}' -m 20 -k \
     --cert "$2/cert.pem" --key "$2/key.pem" \
-    -X POST -H 'Content-Type: application/json' --data "$3" "$MBASE$1" 2>/dev/null
+    -X POST -H "Authorization: Bearer $AIMEE_KB_API_BEARER_TOKEN" \
+    -H 'Content-Type: application/json' --data "$3" "$MBASE$1" 2>/dev/null
 }
 
 MAINT='/v1/maintenance/purge-project'

@@ -69,8 +69,7 @@ void kb_reqctx_clear(void)
    if (scope)
       memset(scope, 0, sizeof(*scope));
    pthread_once(&g_resolved_once, resolved_key_init);
-   kb_request_context_t *resolved =
-       (kb_request_context_t *)pthread_getspecific(g_resolved_key);
+   kb_request_context_t *resolved = (kb_request_context_t *)pthread_getspecific(g_resolved_key);
    if (resolved)
       memset(resolved, 0, sizeof(*resolved));
 }
@@ -87,8 +86,7 @@ const kb_principal_t *kb_reqctx_actor(void)
 void kb_reqctx_set_resolved(const kb_request_context_t *resolved)
 {
    pthread_once(&g_resolved_once, resolved_key_init);
-   kb_request_context_t *slot =
-       (kb_request_context_t *)pthread_getspecific(g_resolved_key);
+   kb_request_context_t *slot = (kb_request_context_t *)pthread_getspecific(g_resolved_key);
    if (!slot)
    {
       slot = (kb_request_context_t *)calloc(1, sizeof(*slot));
@@ -108,6 +106,26 @@ const kb_request_context_t *kb_reqctx_resolved(void)
    const kb_request_context_t *slot =
        (const kb_request_context_t *)pthread_getspecific(g_resolved_key);
    return slot && (slot->has_transport || slot->has_actor) ? slot : NULL;
+}
+
+int kb_reqctx_apply_asserted(const kb_principal_t *actor, const kb_request_context_t *resolved)
+{
+   if (!actor || !actor->authenticated)
+      return 0;
+   const kb_principal_t *credential_actor = kb_reqctx_actor();
+   if (credential_actor)
+   {
+      char credential_key[600] = "";
+      char asserted_key[600] = "";
+      if (kb_identity_key(credential_actor, credential_key, sizeof(credential_key)) != 0 ||
+          kb_identity_key(actor, asserted_key, sizeof(asserted_key)) != 0 ||
+          strcmp(credential_key, asserted_key) != 0)
+         return -1;
+   }
+   kb_reqctx_set_actor(actor);
+   if (resolved)
+      kb_reqctx_set_resolved(resolved);
+   return 0;
 }
 
 void kb_reqctx_set_verified_scope(const char *kind, const char *id)

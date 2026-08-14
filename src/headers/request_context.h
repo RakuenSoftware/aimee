@@ -41,8 +41,8 @@ typedef struct
    char principal[128];       /* account/tenant boundary; empty = anonymous */
    char caller_subject[577];  /* canonical KB caller context; distinct from vault principal */
    char caller_authorization[KB_IDENTITY_TOKEN_WIRE_MAX + 1]; /* verified caller JWT */
-   char source[64];           /* turn-origin tag for token_audit, empty = default */
-   long peer_uid;             /* UDS peer uid (SO_PEERCRED), -1 if unknown */
+   char source[64]; /* turn-origin tag for token_audit, empty = default */
+   long peer_uid;   /* UDS peer uid (SO_PEERCRED), -1 if unknown */
    req_transport_t transport;
    unsigned int capabilities; /* route capability/scope bits for this connection */
    int trusted;               /* 1 = principal/source headers may be honoured */

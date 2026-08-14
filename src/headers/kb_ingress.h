@@ -16,8 +16,7 @@ extern "C"
    /* The triple-authenticated aimee-server mTLS boundary may carry its host
     * subject or caller JWT plus the enrolled server/team selection. Its handler
     * consumes and verifies these; every other ingress rejects them. */
-   int kb_ingress_identity_header_present_ex(const char *raw_request,
-                                             int allow_service_context);
+   int kb_ingress_identity_header_present_ex(const char *raw_request, int allow_service_context);
 
 #ifdef __cplusplus
 }

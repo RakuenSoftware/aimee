@@ -154,8 +154,8 @@ int db2_server_registry_client_match(const char *id, int64_t team, const char *i
    if (!c)
       return -1;
    char e[256];
-   aimee_pg_stmt_t *s = aimee_pg_prepare(
-       c, "SELECT kb_server_registry_client_match(?1,?2,?3,?4,?5)", e, sizeof(e));
+   aimee_pg_stmt_t *s =
+       aimee_pg_prepare(c, "SELECT kb_server_registry_client_match(?1,?2,?3,?4,?5)", e, sizeof(e));
    if (!s)
       return -1;
    aimee_pg_bind_text(s, "?1", id);

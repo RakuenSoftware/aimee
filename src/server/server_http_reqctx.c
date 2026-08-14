@@ -8,10 +8,13 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http.h"
+#include "aimee/core/connection/auth.h"
+#include "kb_identity_token.h"
 #include "request_context.h"
 #include "config.h"
 #include "runtime_secret.h"
 #include <netinet/in.h> /* INADDR_ANY / INADDR_LOOPBACK */
+#include <openssl/crypto.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,6 +79,41 @@ int server_http_host_subject_for_uid(long uid, char *out, size_t cap)
       out[0] = '\0';
       return -1;
    }
+   return 0;
+}
+
+int server_http_apply_caller_context(int is_tcp, const char *request,
+                                     const char *first_user_principal, int identity_present,
+                                     const char *identity_subject)
+{
+   const request_context_t *ctx = request_context_get();
+   if (!is_tcp && (!ctx || ctx->peer_uid < 0 || !request_context_caller_subject()[0]))
+      return -1;
+   if (first_user_principal && first_user_principal[0])
+   {
+      request_context_override_principal(first_user_principal);
+      request_context_override_caller_subject(!strncmp(first_user_principal, "webuser:", 8)
+                                                  ? first_user_principal + 8
+                                                  : first_user_principal);
+   }
+   if (!identity_present || !identity_subject || !identity_subject[0])
+      return 0;
+   if (strncmp(identity_subject, "oidc:", 5) != 0)
+   {
+      request_context_override_caller_subject(identity_subject);
+      return 0;
+   }
+
+   /* Preserve the original KB-signed identity token. The server verifies it for
+    * its own gates; the KB verifies it again before accepting an OIDC caller. */
+   char authorization[KB_IDENTITY_TOKEN_WIRE_MAX + 1] = "";
+   if (http_header(request, "Authorization", authorization, sizeof(authorization)))
+   {
+      const char *jwt = aimee_core_bearer_token(authorization);
+      if (jwt)
+         request_context_override_caller_authorization(jwt);
+   }
+   OPENSSL_cleanse(authorization, sizeof(authorization));
    return 0;
 }
 

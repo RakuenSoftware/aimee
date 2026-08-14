@@ -2,10 +2,10 @@
 
 #include <string.h>
 
-server_identity_token_result_t
-kb_caller_token_verify(const char *jwt, size_t jwt_len, const char *jwks_json,
-                       const char *server_id, int64_t named_team, int64_t now,
-                       server_identity_token_claims_t *out)
+server_identity_token_result_t kb_caller_token_verify(const char *jwt, size_t jwt_len,
+                                                      const char *jwks_json, const char *server_id,
+                                                      int64_t named_team, int64_t now,
+                                                      server_identity_token_claims_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));

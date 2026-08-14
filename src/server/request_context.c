@@ -68,8 +68,7 @@ void request_context_override_caller_subject(const char *subject)
 
 void request_context_override_caller_authorization(const char *jwt)
 {
-   if (!g_req_ctx_set || !jwt || !jwt[0] ||
-       strlen(jwt) >= sizeof(g_req_ctx.caller_authorization))
+   if (!g_req_ctx_set || !jwt || !jwt[0] || strlen(jwt) >= sizeof(g_req_ctx.caller_authorization))
       return;
    memset(g_req_ctx.caller_subject, 0, sizeof(g_req_ctx.caller_subject));
    snprintf(g_req_ctx.caller_authorization, sizeof(g_req_ctx.caller_authorization), "%s", jwt);

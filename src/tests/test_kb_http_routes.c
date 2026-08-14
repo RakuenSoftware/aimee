@@ -2216,7 +2216,7 @@ int db2_console_oidc_put(const db2_console_oidc_t *in)
  * under config_default_dir(); stub it to a temp dir for the test. */
 const char *config_default_dir(void)
 {
-   return "/tmp";
+   return platform_tmpdir();
 }
 
 /* ── db2 governance stubs (decision_log + audit read) for kb_http_governance.o ─
@@ -3654,10 +3654,10 @@ static void test_mtls_listener(void)
 
       char identity_file[160];
       char server_identity_file[160];
-      snprintf(identity_file, sizeof(identity_file), "/tmp/aimee-kb-client-identity-%ld.json",
-               (long)getpid());
+      snprintf(identity_file, sizeof(identity_file), "%s/aimee-kb-client-identity-%ld.json",
+               platform_tmpdir(), (long)getpid());
       snprintf(server_identity_file, sizeof(server_identity_file),
-               "/tmp/aimee-thinclient-server-identity-%ld.pem", (long)getpid());
+               "%s/aimee-thinclient-server-identity-%ld.pem", platform_tmpdir(), (long)getpid());
       unlink(identity_file);
       unlink(server_identity_file);
       kb_client_mtls_set_identity_path_for_test(identity_file);
@@ -3700,8 +3700,7 @@ static void test_mtls_listener(void)
       assert(unlink(server_identity_file) == 0);
       kb_client_mtls_reset_for_test();
       int missing_pair_status = -1;
-      char *missing_pair = kb_client_mtls_request("GET", "/v1/health", NULL,
-                                                  &missing_pair_status);
+      char *missing_pair = kb_client_mtls_request("GET", "/v1/health", NULL, &missing_pair_status);
       assert(missing_pair == NULL && missing_pair_status == -1);
       server_identity_stream = fopen(server_identity_file, "w");
       assert(server_identity_stream && fputs(thinclient_cert, server_identity_stream) >= 0 &&
@@ -3858,8 +3857,8 @@ static void test_mtls_listener(void)
       size_t long_token_len = KB_TLS_BEARER_TOKEN_MAX - strlen(bearer_scope);
       memset(long_token, 'x', long_token_len);
       long_token[long_token_len] = '\0';
-      assert(snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token),
-                      "%s%s", bearer_scope, long_token) == KB_TLS_BEARER_TOKEN_MAX);
+      assert(snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token), "%s%s",
+                      bearer_scope, long_token) == KB_TLS_BEARER_TOKEN_MAX);
       assert(runtime_secret_store("AIMEE_KB_CLIENT_BEARER_TOKEN", long_token) == 0);
       assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", g_stub_kb_api_bearer_token) == 0);
       r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);

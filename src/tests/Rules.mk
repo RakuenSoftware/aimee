@@ -2347,7 +2347,7 @@ $(TESTPREFIX)/unit-test-server-mgmt-status: $(OBJDIR)/tests/test_server_mgmt_sta
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-mgmt-token: $(OBJDIR)/tests/test_server_mgmt_token.o \
-                                           $(OBJDIR)/server/server_mgmt_token.o \
+                                           $(OBJDIR)/shared/auth_token_verify.o \
                                            $(OBJDIR)/util.o \
                                         $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -2385,7 +2385,7 @@ $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client: \
 
 $(TESTPREFIX)/unit-test-kb-mgmt-token: $(OBJDIR)/tests/test_kb_mgmt_token.o \
                                        $(OBJDIR)/kb/kb_mgmt_token.o \
-                                       $(OBJDIR)/server/server_mgmt_token.o \
+                                       $(OBJDIR)/shared/auth_token_verify.o \
                                        $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -2412,7 +2412,7 @@ $(TESTPREFIX)/unit-test-kb-identity-token: $(OBJDIR)/tests/test_kb_identity_toke
 
 $(TESTPREFIX)/unit-test-server-write-tier: $(OBJDIR)/tests/test_server_write_tier.o \
                                            $(OBJDIR)/server/server_write_tier.o \
-                                           $(OBJDIR)/server/server_mgmt_token.o \
+                                           $(OBJDIR)/shared/auth_token_verify.o \
                                            $(OBJDIR)/kb/kb_identity_token.o \
                                            $(OBJDIR)/server/oauth_pkce.o \
                                            $(OBJDIR)/util.o \
@@ -2420,7 +2420,7 @@ $(TESTPREFIX)/unit-test-server-write-tier: $(OBJDIR)/tests/test_server_write_tie
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-identity-token: $(OBJDIR)/tests/test_server_identity_token.o \
-                                               $(OBJDIR)/server/server_mgmt_token.o \
+                                               $(OBJDIR)/shared/auth_token_verify.o \
                                                $(OBJDIR)/kb/kb_caller_token.o \
                                                $(OBJDIR)/kb/kb_identity_token.o \
                                                $(OBJDIR)/server/oauth_pkce.o \
@@ -2522,7 +2522,7 @@ $(TESTPREFIX)/unit-test-kb-identity-token-authority: \
     $(OBJDIR)/tests/test_kb_identity_token_authority.o \
     $(OBJDIR)/kb/kb_mgmt_token_authority.o $(OBJDIR)/kb/kb_mgmt_token.o \
     $(OBJDIR)/kb/kb_identity_token.o $(OBJDIR)/kb/kb_mgmt_token_public.o \
-    $(OBJDIR)/server/server_mgmt_token.o $(OBJDIR)/server/oauth_pkce.o \
+    $(OBJDIR)/shared/auth_token_verify.o $(OBJDIR)/server/oauth_pkce.o \
     $(OBJDIR)/modules/vault/vault_crypto.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -5624,7 +5624,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/workspace_register_args.o $(OBJDIR)/server/workflow_control_bus.o \
                      $(OBJDIR)/server/server_runtime_identity.o \
                      $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
-                           $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/shared/management_read.o $(OBJDIR)/server/server_mgmt_read_endpoint.o $(OBJDIR)/server/server_mgmt_read_source.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/server/server_mgmt_token.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \
+                           $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/shared/management_read.o $(OBJDIR)/server/server_mgmt_read_endpoint.o $(OBJDIR)/server/server_mgmt_read_source.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/shared/auth_token_verify.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \
                            $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
                            $(OBJDIR)/modules/workspace/workspace_runner_registry.o $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
                            $(OBJDIR)/modules/git/forge_credentials.o \
@@ -6105,7 +6105,7 @@ $(TESTPREFIX)/unit-test-kb-http-identity-login: \
 # Both C copies of the subject grammar, against tests/subject_corpus.h. Links the
 # server's token unit for its predicate; the db2 one is header-only inline.
 $(TESTPREFIX)/unit-test-subject-grammar: $(OBJDIR)/tests/test_subject_grammar.o \
-                     $(OBJDIR)/server/server_mgmt_token.o \
+                     $(OBJDIR)/shared/auth_token_verify.o \
                      $(OBJDIR)/kb/kb_mgmt_token_authority.o \
                      $(OBJDIR)/kb/kb_mgmt_token_public.o \
                      $(OBJDIR)/kb/kb_identity_token.o \
@@ -6429,6 +6429,8 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o $(
                      $(OBJDIR)/kb/kb_identity_token.o \
                      $(OBJDIR)/tests/support/kb_http_route_stubs.o \
                      $(OBJDIR)/kb/http/kb_http.o \
+                     $(OBJDIR)/kb/http/kb_http_content_policy.o \
+                     $(OBJDIR)/kb/http/kb_http_entry.o \
                      $(OBJDIR)/kb/http/kb_http_listener.o \
                      $(OBJDIR)/kb/http/kb_http_conn.o \
                      $(OBJDIR)/tests/support/kb_ws_stub.o \
@@ -6445,7 +6447,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o $(
                      $(OBJDIR)/kb/pki.o \
                      $(OBJDIR)/kb/http/kb_tls.o \
                      $(OBJDIR)/kb/http/kb_tls_serve.o \
-                     $(OBJDIR)/server/server_mgmt_token.o \
+                     $(OBJDIR)/shared/auth_token_verify.o \
                      $(OBJDIR)/kb/kb_caller_token.o \
                      $(OBJDIR)/db2/management_jwks_runtime.o \
                      $(OBJDIR)/modules/kb_client/kb_client_mtls.o \

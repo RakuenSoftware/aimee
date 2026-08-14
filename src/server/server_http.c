@@ -1496,9 +1496,8 @@ void handle_conn(int fd, int is_tcp, int is_management)
       return;
    }
 
-   /* A verified mTLS leaf is the transport layer, not a bearer substitute.
-    * Re-check its durable roster row here; the independently rotating request
-    * bearer is still required by the later authorization gate. */
+   /* mTLS is the transport layer, not a bearer substitute. Re-check its durable
+    * roster row; the independently rotating request bearer remains required. */
    int mtls_authenticated = 0;
    int management_authenticated = 0;
    int mtls_mode = server_tls_mtls_mode();
@@ -1620,55 +1619,21 @@ void handle_conn(int fd, int is_tcp, int is_management)
    effective_caps =
        server_http_enrollment_caps(effective_caps, is_tcp, mtls_authenticated,
                                    server_conn_io_has_ssl(fd), request_bearer, method, path);
-   /* Establish the per-request context (#3) only after authenticating the
-    * durable certificate, so downstream dispatch sees the same effective caps
-    * as the outer route gate. */
+   /* Capture context only after the certificate and effective caps are known. */
    server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path, effective_caps);
-   const request_context_t *populated_context = request_context_get();
-   if (!is_tcp &&
-       (!populated_context || populated_context->peer_uid < 0 ||
-        !request_context_caller_subject()[0]))
+   if (server_http_apply_caller_context(is_tcp, buf, first_user_principal, identity_present,
+                                        identity_claims.subject) != 0)
    {
       send_response(fd, 403,
                     "{\"error\":{\"message\":\"local peer uid does not resolve to a host "
                     "account\",\"type\":\"authentication_error\"}}",
                     request_id);
-      LOG_INFO("server.http", "%s %s -> 403 (unresolved UDS host account) req_id=%s", method,
-               path, request_id);
+      LOG_INFO("server.http", "%s %s -> 403 (unresolved UDS host account) req_id=%s", method, path,
+               request_id);
       return;
    }
-   if (first_user_principal[0])
-   {
-      request_context_override_principal(first_user_principal);
-      request_context_override_caller_subject(!strncmp(first_user_principal, "webuser:", 8)
-                                                  ? first_user_principal + 8
-                                                  : first_user_principal);
-   }
-   if (identity_present && identity_claims.subject[0])
-   {
-      if (!strncmp(identity_claims.subject, "oidc:", 5))
-      {
-         /* Preserve the original KB-signed identity token, not merely its
-          * parsed subject. aimee-server verifies it for its own gates;
-          * aimee-kb verifies it again before accepting an OIDC caller. */
-         char identity_authorization[KB_IDENTITY_TOKEN_WIRE_MAX + 1] = "";
-         if (http_header(buf, "Authorization", identity_authorization,
-                         sizeof(identity_authorization)))
-         {
-            const char *identity_jwt = aimee_core_bearer_token(identity_authorization);
-            if (identity_jwt)
-               request_context_override_caller_authorization(identity_jwt);
-         }
-         OPENSSL_cleanse(identity_authorization, sizeof(identity_authorization));
-      }
-      else
-         request_context_override_caller_subject(identity_claims.subject);
-   }
-   /* Authorize before reading the body. Every ordinary TCP request still needs
-    * the independently rotating bearer even after its client certificate was
-    * verified. When Authorization carries the caller's KB-signed PAM/OIDC JWT,
-    * x-api-key carries this separate connection bearer. The management lane has
-    * its own certificate/status/token proof and never enters ordinary routing. */
+   /* Every ordinary TCP request needs a rotating bearer after mTLS. If
+    * Authorization carries caller proof, x-api-key carries that bearer. */
    {
       char auth[KB_IDENTITY_TOKEN_WIRE_MAX + 8] = "";
       char api_key[512] = "";
@@ -2187,11 +2152,7 @@ static void *listener_thread(void *arg)
          int fd = server_conn_accept(pfds[uds_idx].fd);
          if (fd >= 0 && !conn_offload(fd, 0, 0, 0))
          {
-            request_context_clear();
-            server_http_identity_clear();
-            handle_conn(fd, 0, 0);
-            request_context_clear();
-            server_http_identity_clear();
+            handle_conn_inline(fd, 0);
             close(fd);
          }
       }
@@ -2200,11 +2161,7 @@ static void *listener_thread(void *arg)
          int fd = server_conn_accept(pfds[tcp_idx].fd);
          if (fd >= 0 && !conn_offload(fd, 1, 0, 0))
          {
-            request_context_clear();
-            server_http_identity_clear();
-            handle_conn(fd, 1, 0);
-            request_context_clear();
-            server_http_identity_clear();
+            handle_conn_inline(fd, 1);
             close(fd);
          }
       }

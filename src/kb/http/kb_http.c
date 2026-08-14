@@ -619,71 +619,11 @@ static void purge_fence_current(const char *project, char *out, size_t out_cap)
 }
 /* ── Phase 5 extended routing ────────────────────────────────────────────── */
 
-typedef enum
-{
-   KB_CONTENT_EXACT,
-   KB_CONTENT_PREFIX,
-} kb_content_match_t;
-
-typedef struct
-{
-   const char *method;
-   const char *path;
-   kb_content_match_t match;
-   int content;
-} kb_content_route_t;
-
-/* TLS content authorization and tenant-scope setup both consume this table.
- * Denials precede broad prefixes so lifecycle/admin endpoints cannot acquire
- * read semantics through a misleading GET. Every content family belongs here,
- * not in a second ingress-specific allowlist. */
-static const kb_content_route_t g_kb_content_routes[] = {
-    {"GET", "/v1/code/build", KB_CONTENT_EXACT, 0},
-    {"GET", "/v1/code/update", KB_CONTENT_EXACT, 0},
-    {"GET", "/v1/code/scan", KB_CONTENT_EXACT, 0},
-    {"GET", "/v1/code/project/detach", KB_CONTENT_EXACT, 0},
-    {"GET", "/v1/code/project/purge", KB_CONTENT_EXACT, 0},
-    {"GET", "/v1/code/project/gc", KB_CONTENT_EXACT, 0},
-    {"GET", "/v1/code/lessons/observe", KB_CONTENT_EXACT, 0},
-    {"GET", "/v1/code/repo-trust", KB_CONTENT_EXACT, 0},
-    {"GET", "/v1/docs/manifest", KB_CONTENT_EXACT, 0},
-    {"POST", "/v1/search", KB_CONTENT_EXACT, 1},
-    {"POST", "/v1/implements", KB_CONTENT_EXACT, 1},
-    {"POST", "/v1/synthesize", KB_CONTENT_EXACT, 1},
-    {"POST", "/v1/contradictions", KB_CONTENT_EXACT, 1},
-    {"POST", "/v1/entities/search", KB_CONTENT_EXACT, 1},
-    {"GET", "/v1/review", KB_CONTENT_EXACT, 1},
-    {"GET", "/v1/releases/active", KB_CONTENT_EXACT, 1},
-    {"GET", "/v1/artifacts/", KB_CONTENT_PREFIX, 1},
-    {"GET", "/v1/entities/", KB_CONTENT_PREFIX, 1},
-    {"GET", "/v1/pdf/", KB_CONTENT_PREFIX, 1},
-    {"GET", "/v1/code/", KB_CONTENT_PREFIX, 1},
-    {"GET", "/v1/docs/", KB_CONTENT_PREFIX, 1},
-    {NULL, NULL, KB_CONTENT_EXACT, 0},
-};
-
-int kb_http_is_content_read(const char *method, const char *path)
-{
-   if (!method || !path)
-      return 0;
-   for (const kb_content_route_t *route = g_kb_content_routes; route->method; ++route)
-   {
-      if (strcmp(method, route->method) != 0)
-         continue;
-      int matches = route->match == KB_CONTENT_EXACT
-                        ? strcmp(path, route->path) == 0
-                        : strncmp(path, route->path, strlen(route->path)) == 0;
-      if (matches)
-         return route->content;
-   }
-   return 0;
-}
-
-static int kb_http_route_ex_context(const char *method, const char *path, const char *query_string,
-                                    const char *auth_header, const char *bearer_token,
-                                    const char *body, int body_len,
-                                    const kb_principal_t *asserted_actor,
-                                    const kb_request_context_t *resolved, char *out_buf, int out_cap)
+int kb_http_route_ex_context_impl(const char *method, const char *path, const char *query_string,
+                                  const char *auth_header, const char *bearer_token,
+                                  const char *body, int body_len,
+                                  const kb_principal_t *asserted_actor,
+                                  const kb_request_context_t *resolved, char *out_buf, int out_cap)
 {
    /* Credential bootstrap, both pre-auth: the login surface is how a caller with
     * no credential gets one (§3), and the enrollment token IS the credential.
@@ -799,23 +739,9 @@ static int kb_http_route_ex_context(const char *method, const char *path, const 
                                    "forbidden: console-admin credential not permitted");
       }
    }
-   if (asserted_actor && asserted_actor->authenticated)
-   {
-      const kb_principal_t *credential_actor = kb_reqctx_actor();
-      if (credential_actor)
-      {
-         char credential_key[600] = "";
-         char asserted_key[600] = "";
-         if (kb_identity_key(credential_actor, credential_key, sizeof(credential_key)) != 0 ||
-             kb_identity_key(asserted_actor, asserted_key, sizeof(asserted_key)) != 0 ||
-             strcmp(credential_key, asserted_key) != 0)
-            return json_body_error(out_buf, out_cap, 403,
-                                   "caller context conflicts with credential identity");
-      }
-      kb_reqctx_set_actor(asserted_actor);
-      if (resolved)
-         kb_reqctx_set_resolved(resolved);
-   }
+   if (kb_reqctx_apply_asserted(asserted_actor, resolved) != 0)
+      return json_body_error(out_buf, out_cap, 403,
+                             "caller context conflicts with credential identity");
    /* Tenancy routes (P1 slice 4): /v1/team*, /v1/project*. Reachable for any
     * authenticated caller; the org-admin capability for writes is enforced at the
     * DB layer (RLS write policies), and reads are RLS-scoped to the caller's teams.
@@ -2569,31 +2495,4 @@ static int kb_http_route_ex_context(const char *method, const char *path, const 
 
    /* Fallthrough to Phase 1 handler */
    return kb_http_route(method, path, auth_header, bearer_token, out_buf, out_cap);
-}
-
-int kb_http_route_ex(const char *method, const char *path, const char *query_string,
-                     const char *auth_header, const char *bearer_token, const char *body,
-                     int body_len, char *out_buf, int out_cap)
-{
-   return kb_http_route_ex_context(method, path, query_string, auth_header, bearer_token, body,
-                                   body_len, NULL, NULL, out_buf, out_cap);
-}
-
-int kb_http_route_ex_with_actor(const char *method, const char *path, const char *query_string,
-                                const char *auth_header, const char *bearer_token, const char *body,
-                                int body_len, const kb_principal_t *asserted_actor, char *out_buf,
-                                int out_cap)
-{
-   return kb_http_route_ex_context(method, path, query_string, auth_header, bearer_token, body,
-                                   body_len, asserted_actor, NULL, out_buf, out_cap);
-}
-
-int kb_http_route_ex_with_context(const char *method, const char *path, const char *query_string,
-                                  const char *auth_header, const char *bearer_token,
-                                  const char *body, int body_len,
-                                  const kb_request_context_t *resolved, char *out_buf, int out_cap)
-{
-   const kb_principal_t *actor = resolved && resolved->has_actor ? &resolved->actor : NULL;
-   return kb_http_route_ex_context(method, path, query_string, auth_header, bearer_token, body,
-                                   body_len, actor, resolved, out_buf, out_cap);
 }

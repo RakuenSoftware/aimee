@@ -28,6 +28,10 @@ extern "C"
    void kb_reqctx_set_resolved(const kb_request_context_t *resolved);
    const kb_request_context_t *kb_reqctx_resolved(void);
 
+   /* Install service-asserted caller context without allowing it to conflict
+    * with an actor already proved by the request credential. */
+   int kb_reqctx_apply_asserted(const kb_principal_t *actor, const kb_request_context_t *resolved);
+
    /* Verified credential scope for the current request.  Unlike actor identity,
     * scoped service credentials deliberately have no actor principal, but code
     * reads still need their authenticated project scope to resolve an omitted

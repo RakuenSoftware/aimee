@@ -231,9 +231,8 @@ static int caller_jwks(const db2_management_jwks_runtime_record_t *record, long 
    cJSON *root = cJSON_ParseWithLength(record->envelope, record->envelope_len);
    const cJSON *payload = root ? json_member_once(root, "payload") : NULL;
    const cJSON *keys = payload ? json_member_once(payload, "keys") : NULL;
-   char *keys_json = cJSON_IsArray(keys) && cJSON_GetArraySize(keys) == 1
-                         ? cJSON_PrintUnformatted(keys)
-                         : NULL;
+   char *keys_json =
+       cJSON_IsArray(keys) && cJSON_GetArraySize(keys) == 1 ? cJSON_PrintUnformatted(keys) : NULL;
    int n = keys_json ? snprintf(out, cap, "{\"keys\":%s}", keys_json) : -1;
    unsigned char digest[32];
    unsigned int digest_len = 0;
@@ -504,8 +503,7 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
          memcpy(server_id_out, v, vlen);
          server_id_out[vlen] = '\0';
       }
-      if (name_len == sizeof("X-Aimee-Team-ID") - 1 &&
-          !strncasecmp(p, "X-Aimee-Team-ID", name_len))
+      if (name_len == sizeof("X-Aimee-Team-ID") - 1 && !strncasecmp(p, "X-Aimee-Team-ID", name_len))
       {
          if (have_named_team)
             return 400;
@@ -881,16 +879,15 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
           service_identity_authenticate(service_authorization, &application_identity);
       int content_read = kb_http_is_content_read(method, cpath);
       int server_binding = server_id[0] && named_team > 0
-                               ? db2_server_registry_client_match(server_id, named_team,
-                                                                  transport.issuer,
-                                                                  transport.subject, fp)
+                               ? db2_server_registry_client_match(
+                                     server_id, named_team, transport.issuer, transport.subject, fp)
                                : 0;
       kb_principal_t caller_identity = {0};
       int caller_authority = 0;
       if (caller_authorization[0])
-         caller_authority = caller_token_identity(caller_authorization, server_id, named_team,
-                                                  server_binding, transport.issuer,
-                                                  transport.subject, fp, &caller_identity);
+         caller_authority =
+             caller_token_identity(caller_authorization, server_id, named_team, server_binding,
+                                   transport.issuer, transport.subject, fp, &caller_identity);
       else if (caller_subject[0])
       {
          caller_authority = kb_principal_from_identity_key(caller_subject, &caller_identity) == 0 &&
@@ -1008,8 +1005,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       }
       else if (have_cert && !is_bootstrap && content_read && server_binding < 0)
       {
-         snprintf(resp, KB_TLS_RESP_MAX,
-                  "{\"error\":\"server identity authority unavailable\"}");
+         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"server identity authority unavailable\"}");
          status = 503;
       }
       else if (have_cert && !is_bootstrap && content_read && server_binding != 1)
@@ -1094,8 +1090,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
              * intersection. mTLS has already independently authenticated and
              * authorized the transport above; certificate identity is not a
              * substitute for the service's third-layer identity. */
-            kb_resolve_status_t rr = kb_identity_resolve(&application_identity, &caller_identity,
-                                                          named_team, &resolved);
+            kb_resolve_status_t rr =
+                kb_identity_resolve(&application_identity, &caller_identity, named_team, &resolved);
             if (rr == KB_RESOLVE_CONFLICT)
             {
                snprintf(resp, KB_TLS_RESP_MAX,
@@ -1120,8 +1116,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
             int scope_rc = db2_tenant_scope_begin(&resolved.actor, resolved.billing_team);
             if (scope_rc != 0)
             {
-               snprintf(resp, KB_TLS_RESP_MAX,
-                        "{\"error\":\"content tenant scope unavailable\"}");
+               snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"content tenant scope unavailable\"}");
                status = scope_rc == DB2_ERR_TENANT_DENIED ? 403 : 503;
                goto content_done;
             }
@@ -1129,8 +1124,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
          }
          if (tenant_scope_open)
             status = kb_http_route_ex_with_context(method, cpath, qs, presented_authorization,
-                                                    expected_bearer, body, body_len, &resolved, resp,
-                                                    KB_TLS_RESP_MAX);
+                                                   expected_bearer, body, body_len, &resolved, resp,
+                                                   KB_TLS_RESP_MAX);
          else
             status = kb_http_route_ex_with_actor(
                 method, cpath, qs, presented_authorization, expected_bearer, body, body_len,
@@ -1293,8 +1288,7 @@ static void *mtls_listener_thread(void *arg)
 int kb_mtls_start(int port, const char *data_dir, const char *host)
 {
    char bearer_probe[KB_TLS_BEARER_TOKEN_MAX + 1] = "";
-   if (!runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", bearer_probe,
-                           sizeof(bearer_probe)))
+   if (!runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", bearer_probe, sizeof(bearer_probe)))
       snprintf(bearer_probe, sizeof(bearer_probe), "%s", config_kb_api_bearer_token());
    if (!bearer_probe[0])
    {

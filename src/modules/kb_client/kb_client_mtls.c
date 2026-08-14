@@ -135,22 +135,21 @@ static int service_request_headers(char *out, size_t cap)
        kb_client_mtls_managed_metadata(managed_server, sizeof(managed_server), &managed_team) &&
        managed_server[0] && managed_team > 0)
    {
-      int added = snprintf(out + n, cap - (size_t)n,
-                           "X-Aimee-Server-ID: %s\r\nX-Aimee-Team-ID: %lld\r\n",
-                           managed_server, managed_team);
+      int added =
+          snprintf(out + n, cap - (size_t)n, "X-Aimee-Server-ID: %s\r\nX-Aimee-Team-ID: %lld\r\n",
+                   managed_server, managed_team);
       n = added > 0 && (size_t)added < cap - (size_t)n ? n + added : -1;
    }
-   const char *caller_authorization = request_context_caller_authorization
-                                          ? request_context_caller_authorization()
-                                          : "";
+   const char *caller_authorization =
+       request_context_caller_authorization ? request_context_caller_authorization() : "";
    const char *caller = request_context_caller_subject ? request_context_caller_subject() : "";
    if (n > 0 && (size_t)n < cap && caller_authorization && caller_authorization[0])
    {
-      int added = caller_authorization_valid(caller_authorization)
-                      ? snprintf(out + n, cap - (size_t)n,
-                                 "X-Aimee-Caller-Authorization: Bearer %s\r\n",
-                                 caller_authorization)
-                      : -1;
+      int added =
+          caller_authorization_valid(caller_authorization)
+              ? snprintf(out + n, cap - (size_t)n, "X-Aimee-Caller-Authorization: Bearer %s\r\n",
+                         caller_authorization)
+              : -1;
       n = added > 0 && (size_t)added < cap - (size_t)n ? n + added : -1;
    }
    else if (n > 0 && (size_t)n < cap && caller && caller[0])
