@@ -24,16 +24,17 @@
  *     GUCs live on a POOLED connection, so a leak there is one tenant reading another's rows
  *     rather than merely a stale value.
  *
- * WHAT IS NOT HERE: the full worker wiring or whether a member sees their own
- * project and a stranger does not. Those are end-to-end checks rather than this
- * DB boundary check.
+ * WHAT IS NOT HERE: whether a member sees their own project and a stranger does
+ * not. That is an end-to-end reader check rather than this DB boundary check.
  */
 #include "db2.h"
 #include "db2/db2_internal.h"
 #include "db2/db_postgres.h"
 #include "db2/db2_tenant.h"
 #include "db2/project.h"
+#include "kb.h"
 #include "kb_identity.h"
+#include "memory.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -381,6 +382,28 @@ int main(void)
       assert(db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, "scope-maintenance-a") == 0);
       assert(db2_maintenance_scope_begin_current() == 0);
       db2_maintenance_job_leave();
+
+      /* Seed one unembedded chunk while the policies are still inert. The
+       * backfill discovers it under one maintenance transaction, drops the DB
+       * lease for the embedder round-trip, then must open a fresh scope to
+       * rebuild its payload from kb_documents and write kb_embeddings. */
+      assert(exec_sql("DELETE FROM kb_embeddings WHERE point_id IN ("
+                      "SELECT id FROM kb_documents"
+                      " WHERE project='scope-maintenance-a'"
+                      " AND file_path='scope-maintenance-reembed.md')") == 0);
+      assert(exec_sql("DELETE FROM kb_documents"
+                      " WHERE project='scope-maintenance-a'"
+                      " AND file_path='scope-maintenance-reembed.md'") == 0);
+      char reembed_doc[64] = "";
+      assert(scalar("INSERT INTO kb_documents"
+                    " (project,generation,file_path,file_hash,chunk_index,heading_path,"
+                    "  line_start,line_end,content,token_count)"
+                    " SELECT name,current_generation,'scope-maintenance-reembed.md',"
+                    "  'scope-hash',0,'Background scope',1,1,"
+                    "  'project scoped re-embedding proof',5"
+                    " FROM projects WHERE name='scope-maintenance-a' RETURNING id",
+                    reembed_doc, sizeof(reembed_doc)) == 0);
+
       assert(exec_sql("ALTER TABLE kb_documents ENABLE ROW LEVEL SECURITY") == 0);
       assert(exec_sql("ALTER TABLE kb_documents FORCE ROW LEVEL SECURITY") == 0);
       assert(exec_sql("ALTER TABLE kb_file_index ENABLE ROW LEVEL SECURITY") == 0);
@@ -390,6 +413,17 @@ int main(void)
       expect("SELECT current_setting('aimee.maintenance_project',true)", "scope-maintenance-a");
       assert(db2_maintenance_scope_commit() == 0);
       db2_maintenance_job_leave();
+
+      assert(db2_maintenance_job_enter(DB2_MAINTENANCE_REEMBED, "scope-maintenance-a") == 0);
+      assert(kb_doc_embed_backfill("scope-maintenance-a", MEMORY_EMBED_TEST_FIXTURE, 1) == 1);
+      db2_maintenance_job_leave();
+      snprintf(sql, sizeof(sql),
+               "SELECT count(*) FROM kb_embeddings"
+               " WHERE point_id=%s AND project='scope-maintenance-a'",
+               reembed_doc);
+      expect(sql, "1");
+      printf("  PASS: re-embed reapplies exact-project scope after the embedder round-trip\n");
+
       assert(exec_sql("ALTER TABLE kb_documents NO FORCE ROW LEVEL SECURITY") == 0);
       assert(exec_sql("ALTER TABLE kb_documents DISABLE ROW LEVEL SECURITY") == 0);
       assert(exec_sql("ALTER TABLE kb_file_index NO FORCE ROW LEVEL SECURITY") == 0);
