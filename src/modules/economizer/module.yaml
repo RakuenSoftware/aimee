@@ -43,6 +43,7 @@
     "server-go/modules/economizer/recall.go",
     "server-go/modules/economizer/reduce.go",
     "server-go/modules/economizer/register.go",
+    "server-go/modules/economizer/repair.go",
     "server-go/modules/economizer/state.go"
   ],
   "go_tests": [
