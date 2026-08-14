@@ -99,6 +99,15 @@ extern "C"
    {
       int mutated; /* 1 when `messages` was replaced */
       char reason[24];
+      /* The gateway seam's apply verdict, decided by the module because the
+       * structural check it rests on needs the reduced array. "none" means
+       * apply; any other value is a hard bypass and names the reason, using the
+       * same labels as gw_bypass_reason_str so it goes straight to telemetry.
+       *
+       * EMPTY on the delegate seam, which has no such decision, and empty when
+       * the module was not reached — neither is a verdict, and neither may be
+       * read as one. */
+      char bypass[32];
 
       int baseline_tokens;
       int reduced_tokens;

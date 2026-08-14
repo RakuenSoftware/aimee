@@ -122,6 +122,27 @@ static void test_should_apply(void)
    assert(strcmp(gw_bypass_reason_str(GW_BYPASS_REPLACE_FAILED), "replace_failed") == 0);
 }
 
+/* The verdict now comes from the module, so what C still owns is refusing to
+ * read silence as consent. Every path that is not a module saying "none" must
+ * bypass, because the alternative is dispatching a payload nothing verified. */
+static void test_module_bypass(void)
+{
+   /* A reached module that cleared the payload is the ONLY way to apply. */
+   assert(strcmp(gw_module_bypass(0, "none"), "none") == 0);
+
+   /* Its verdicts pass through verbatim, so telemetry keeps naming the reason. */
+   assert(strcmp(gw_module_bypass(0, "structural_violation"), "structural_violation") == 0);
+   assert(strcmp(gw_module_bypass(0, "no_op"), "no_op") == 0);
+
+   /* Unreachable: rc says the call failed, so there is no verdict to trust. */
+   assert(strcmp(gw_module_bypass(1, "none"), "reduce_internal_assertion") == 0);
+
+   /* Reached but silent — an empty or absent verdict is not approval. This is
+    * the delegate-seam shape too, which never sets the field at all. */
+   assert(strcmp(gw_module_bypass(0, ""), "reduce_internal_assertion") == 0);
+   assert(strcmp(gw_module_bypass(0, NULL), "reduce_internal_assertion") == 0);
+}
+
 static void test_snapshot_independence(void)
 {
    cJSON *orig = clean_messages();
@@ -202,6 +223,7 @@ int main(void)
 {
    printf("gateway_mutate: ");
    test_should_apply();
+   test_module_bypass();
    test_snapshot_independence();
    test_replace();
    test_provenance();

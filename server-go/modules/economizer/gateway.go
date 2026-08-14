@@ -77,12 +77,16 @@ func reduceErrorToBypass(e ReduceError) GWBypassReason {
 
 // StructuralCheck reports how many repairs a messages array NEEDED.
 //
-// INJECTED rather than ported. The C calls message_history_repair from
-// src/server/agent_bridge.c, which is a shared MESSAGE-PIPELINE utility (format
-// detection plus per-provider orphan repair), not economizer code. Porting it
-// here would put a shared function in two languages — the failure the migration
-// notes record as already having cost a review cycle. The caller supplies it, so
-// exactly one implementation exists.
+// INJECTED rather than assumed, so the decision stays testable against a check
+// that is made to fail. MessageHistoryRepair in repair.go is the production
+// implementation and is what the reduce stage passes.
+//
+// The C still has its own message_history_repair in src/server/agent_bridge.c,
+// where it is a shared MESSAGE-PIPELINE utility (format detection plus
+// per-provider orphan repair) used well beyond this seam. Two implementations
+// therefore exist for as long as the cutover runs; that is deliberate and
+// temporary, and the Go port is pinned against the C's cases so they cannot
+// drift apart silently.
 //
 // Any NON-ZERO result means the reduced view was not structurally clean.
 type StructuralCheck func(messages *JSONValue) int
