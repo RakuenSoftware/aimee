@@ -55,6 +55,30 @@ static long reqctx_peer_uid(int fd, int is_tcp)
    return -1;
 }
 
+int server_http_host_subject_for_uid(long uid, char *out, size_t cap)
+{
+   if (out && cap)
+      out[0] = '\0';
+   if (uid < 0 || !out || cap == 0)
+      return -1;
+   struct passwd pwd;
+   struct passwd *resolved = NULL;
+   char scratch[16384];
+   if (getpwuid_r((uid_t)uid, &pwd, scratch, sizeof(scratch), &resolved) != 0 || !resolved ||
+       !resolved->pw_name || !resolved->pw_name[0])
+   {
+      out[0] = '\0';
+      return -1;
+   }
+   int n = snprintf(out, cap, "%s", resolved->pw_name);
+   if (n <= 0 || (size_t)n >= cap)
+   {
+      out[0] = '\0';
+      return -1;
+   }
+   return 0;
+}
+
 static void reqctx_caller_from_principal(request_context_t *ctx, const char *principal)
 {
    if (!ctx || !principal || !principal[0])
@@ -111,12 +135,8 @@ void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
    if (ctx.peer_uid >= 0)
    {
       snprintf(ctx.principal, sizeof(ctx.principal), "uid:%ld", ctx.peer_uid);
-      struct passwd pwd;
-      struct passwd *resolved = NULL;
-      char scratch[16384];
-      if (getpwuid_r((uid_t)ctx.peer_uid, &pwd, scratch, sizeof(scratch), &resolved) == 0 &&
-          resolved && resolved->pw_name && resolved->pw_name[0])
-         snprintf(ctx.caller_subject, sizeof(ctx.caller_subject), "%s", resolved->pw_name);
+      (void)server_http_host_subject_for_uid(ctx.peer_uid, ctx.caller_subject,
+                                             sizeof(ctx.caller_subject));
    }
 
    /* The root-owned webchat proxy is kernel-attested over the Unix socket. Root

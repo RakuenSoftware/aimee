@@ -26,8 +26,10 @@
 #include "kb_ingress.h" /* B5 identity-header ingress guard */
 #include "kb_auth_oidc.h"
 #include "kb_identity.h"
+#include "kb_caller_token.h"
 #include "kb_reqctx.h"
 #include "kb_verifier.h"
+#include "server_identity_token.h"
 #include "pam_auth.h"
 #include "config.h"
 #include "log.h"             /* LOG_WARN */
@@ -55,8 +57,10 @@
 #define KB_TLS_HEADER_COUNT_MAX 64
 #define KB_TLS_RESP_MAX         262144
 #define KB_TLS_AUTH_MAX         8192
-#define KB_TLS_BEARER_MAX       4096
 #define KB_TLS_CALLER_MAX       576
+#define KB_TLS_CALLER_AUTH_MAX  (KB_IDENTITY_TOKEN_WIRE_MAX + 8)
+#define KB_TLS_SERVER_ID_MAX    127
+#define KB_TLS_CALLER_JWKS_MAX  1024
 
 static int (*g_pam_check_override)(const char *, const char *);
 
@@ -199,6 +203,88 @@ static int application_identity_matches_certificate(const char *cn, const kb_pri
    return strcmp(cn + sizeof(prefix) - 1, identity->subject) == 0;
 }
 
+static const cJSON *json_member_once(const cJSON *object, const char *name)
+{
+   const cJSON *found = NULL;
+   if (!cJSON_IsObject(object) || !name)
+      return NULL;
+   for (const cJSON *p = object->child; p; p = p->next)
+   {
+      if (p->string && strcmp(p->string, name) == 0)
+      {
+         if (found)
+            return NULL;
+         found = p;
+      }
+   }
+   return found;
+}
+
+/* The cert-bound runtime fetch returns only a FINAL, integrity-checked
+ * publication envelope. Reconstruct its JWKS and bind it to the stored digest
+ * before using it to verify a caller token. */
+static int caller_jwks(const db2_management_jwks_runtime_record_t *record, long now, char *out,
+                       size_t cap)
+{
+   if (!record || !out || cap == 0 || now < record->valid_from || now >= record->valid_until)
+      return -1;
+   cJSON *root = cJSON_ParseWithLength(record->envelope, record->envelope_len);
+   const cJSON *payload = root ? json_member_once(root, "payload") : NULL;
+   const cJSON *keys = payload ? json_member_once(payload, "keys") : NULL;
+   char *keys_json = cJSON_IsArray(keys) && cJSON_GetArraySize(keys) == 1
+                         ? cJSON_PrintUnformatted(keys)
+                         : NULL;
+   int n = keys_json ? snprintf(out, cap, "{\"keys\":%s}", keys_json) : -1;
+   unsigned char digest[32];
+   unsigned int digest_len = 0;
+   int ok = n > 0 && (size_t)n < cap &&
+            EVP_Digest(out, (size_t)n, digest, &digest_len, EVP_sha256(), NULL) == 1 &&
+            digest_len == sizeof(digest) &&
+            CRYPTO_memcmp(digest, record->jwks_sha256, sizeof(digest)) == 0;
+   OPENSSL_cleanse(digest, sizeof(digest));
+   free(keys_json);
+   cJSON_Delete(root);
+   if (!ok)
+      memset(out, 0, cap);
+   return ok ? 0 : -1;
+}
+
+/* 1 verified OIDC caller, 0 invalid/denied, -1 authority unavailable. The
+ * token is KB-signed typ=aimee-id+jwt and is re-verified here with issuer and
+ * server audience pinned; a subject asserted by aimee-server is never enough. */
+static int caller_token_identity(const char *authorization, const char *server_id,
+                                 int64_t named_team, int server_binding, const char *cert_issuer,
+                                 const char *cert_serial, const char *cert_fingerprint,
+                                 kb_principal_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   const char *jwt = aimee_core_bearer_token(authorization);
+   if (!jwt || !server_id || !server_id[0] || named_team <= 0 || !out)
+      return 0;
+   if (server_binding <= 0)
+      return server_binding;
+   db2_management_jwks_runtime_record_t record;
+   db2_management_jwks_runtime_result_t fetched =
+       db2_management_jwks_runtime_fetch(cert_issuer, cert_serial, cert_fingerprint, &record);
+   if (fetched == DB2_MANAGEMENT_JWKS_RUNTIME_DENIED)
+      return 0;
+   if (fetched != DB2_MANAGEMENT_JWKS_RUNTIME_OK)
+      return -1;
+   char jwks[KB_TLS_CALLER_JWKS_MAX] = "";
+   server_identity_token_claims_t claims;
+   memset(&claims, 0, sizeof(claims));
+   long now = (long)time(NULL);
+   int verified = caller_jwks(&record, now, jwks, sizeof(jwks)) == 0 &&
+                  kb_caller_token_verify(jwt, strlen(jwt), jwks, server_id, named_team, now,
+                                         &claims) == SERVER_IDENTITY_TOKEN_OK &&
+                  kb_principal_from_identity_key(claims.subject, out) == 0;
+   OPENSSL_cleanse(&claims, sizeof(claims));
+   OPENSSL_cleanse(jwks, sizeof(jwks));
+   OPENSSL_cleanse(&record, sizeof(record));
+   return verified ? 1 : 0;
+}
+
 static void set_recv_timeout(SSL *ssl, int seconds)
 {
    int fd = SSL_get_fd(ssl);
@@ -213,18 +299,23 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
                                size_t *body_out, int *close_out, char *authorization_out,
                                size_t authorization_cap, char *service_authorization_out,
                                size_t service_authorization_cap, char *caller_subject_out,
-                               size_t caller_subject_cap, int64_t *named_team_out)
+                               size_t caller_subject_cap, char *caller_authorization_out,
+                               size_t caller_authorization_cap, char *server_id_out,
+                               size_t server_id_cap, int64_t *named_team_out)
 {
    size_t total = 0, header_len = 0, content_len = 0;
    int have_cl = 0, have_authorization = 0, have_service_authorization = 0, have_caller_subject = 0,
-       have_named_team = 0;
+       have_caller_authorization = 0, have_server_id = 0, have_named_team = 0;
    if (!authorization_out || authorization_cap == 0 || !service_authorization_out ||
        service_authorization_cap == 0 || !caller_subject_out || caller_subject_cap == 0 ||
-       !named_team_out)
+       !caller_authorization_out || caller_authorization_cap == 0 || !server_id_out ||
+       server_id_cap == 0 || !named_team_out)
       return 400;
    authorization_out[0] = '\0';
    service_authorization_out[0] = '\0';
    caller_subject_out[0] = '\0';
+   caller_authorization_out[0] = '\0';
+   server_id_out[0] = '\0';
    *named_team_out = 0;
    while (total + 1 < cap && total < KB_TLS_HEADER_MAX)
    {
@@ -371,6 +462,48 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
          memcpy(caller_subject_out, v, vlen);
          caller_subject_out[vlen] = '\0';
       }
+      if (name_len == sizeof("X-Aimee-Caller-Authorization") - 1 &&
+          !strncasecmp(p, "X-Aimee-Caller-Authorization", name_len))
+      {
+         if (have_caller_authorization)
+            return 400;
+         have_caller_authorization = 1;
+         char *v = colon + 1;
+         while (v < e && (*v == ' ' || *v == '\t'))
+            v++;
+         char *ve = e;
+         while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t'))
+            ve--;
+         size_t vlen = (size_t)(ve - v);
+         if (!vlen || vlen >= caller_authorization_cap)
+            return 400;
+         memcpy(caller_authorization_out, v, vlen);
+         caller_authorization_out[vlen] = '\0';
+      }
+      if (name_len == sizeof("X-Aimee-Server-ID") - 1 &&
+          !strncasecmp(p, "X-Aimee-Server-ID", name_len))
+      {
+         if (have_server_id)
+            return 400;
+         have_server_id = 1;
+         char *v = colon + 1;
+         while (v < e && (*v == ' ' || *v == '\t'))
+            v++;
+         char *ve = e;
+         while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t'))
+            ve--;
+         size_t vlen = (size_t)(ve - v);
+         if (!vlen || vlen >= server_id_cap)
+            return 400;
+         for (char *q = v; q < ve; ++q)
+            if (!(q == v ? ((*q >= 'A' && *q <= 'Z') || (*q >= 'a' && *q <= 'z') ||
+                            (*q >= '0' && *q <= '9'))
+                         : ((*q >= 'A' && *q <= 'Z') || (*q >= 'a' && *q <= 'z') ||
+                            (*q >= '0' && *q <= '9') || *q == '.' || *q == '_' || *q == '-')))
+               return 400;
+         memcpy(server_id_out, v, vlen);
+         server_id_out[vlen] = '\0';
+      }
       if (name_len == sizeof("X-Aimee-Team-ID") - 1 &&
           !strncasecmp(p, "X-Aimee-Team-ID", name_len))
       {
@@ -391,6 +524,8 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
          *close_out = 1;
       p = e + 2;
    }
+   if (have_caller_subject && have_caller_authorization)
+      return 400;
    int bodyless = !strcmp(method, "GET") || !strcmp(method, "HEAD");
    if ((bodyless && have_cl) || (!bodyless && !have_cl))
       return 400;
@@ -622,11 +757,15 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       char presented_authorization[KB_TLS_AUTH_MAX] = "";
       char service_authorization[KB_TLS_AUTH_MAX] = "";
       char caller_subject[KB_TLS_CALLER_MAX + 1] = "";
+      char caller_authorization[KB_TLS_CALLER_AUTH_MAX] = "";
+      char server_id[KB_TLS_SERVER_ID_MAX + 1] = "";
       int64_t named_team = 0;
       int read_status = strict_request_read(
           ssl, buf, KB_TLS_REQ_MAX, &total, &header_len, &declared_body, &close_after_response,
           presented_authorization, sizeof(presented_authorization), service_authorization,
-          sizeof(service_authorization), caller_subject, sizeof(caller_subject), &named_team);
+          sizeof(service_authorization), caller_subject, sizeof(caller_subject),
+          caller_authorization, sizeof(caller_authorization), server_id, sizeof(server_id),
+          &named_team);
       io_timeout.tv_sec = 30;
       setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
       if (read_status < 0)
@@ -726,7 +865,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
        * every request so a pooled connection observes rotation/revocation at
        * request N+1. OIDC, when configured, runs through this same verifier
        * registry with its issuer/audience/signature policy pinned. */
-      char expected_bearer[KB_TLS_BEARER_MAX + 1] = "";
+      char expected_bearer[KB_TLS_BEARER_TOKEN_MAX + 1] = "";
       if (!runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", expected_bearer,
                               sizeof(expected_bearer)))
          snprintf(expected_bearer, sizeof(expected_bearer), "%s", config_kb_api_bearer_token());
@@ -740,12 +879,27 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       kb_principal_t application_identity;
       int application_authority =
           service_identity_authenticate(service_authorization, &application_identity);
+      int content_read = kb_http_is_content_read(method, cpath);
+      int server_binding = server_id[0] && named_team > 0
+                               ? db2_server_registry_client_match(server_id, named_team,
+                                                                  transport.issuer,
+                                                                  transport.subject, fp)
+                               : 0;
       kb_principal_t caller_identity = {0};
-      int caller_authority =
-          caller_subject[0]
-              ? kb_principal_from_identity_key(caller_subject, &caller_identity) == 0 ? 1 : -1
-              : 0;
-
+      int caller_authority = 0;
+      if (caller_authorization[0])
+         caller_authority = caller_token_identity(caller_authorization, server_id, named_team,
+                                                  server_binding, transport.issuer,
+                                                  transport.subject, fp, &caller_identity);
+      else if (caller_subject[0])
+      {
+         caller_authority = kb_principal_from_identity_key(caller_subject, &caller_identity) == 0 &&
+                                    caller_identity.kind == KB_PRIN_HOST &&
+                                    strncmp(cn, "service:", 8) == 0 &&
+                                    strcmp(caller_identity.subject, cn + 8) != 0
+                                ? 1
+                                : -2;
+      }
       int status;
       /* B5: kb never honors a client-supplied identity header; reject fail-closed
        * before any route runs. */
@@ -757,7 +911,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
          snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"identity header not permitted\"}");
          status = 400;
       }
-      else if (caller_subject[0] && is_bootstrap)
+      else if ((caller_subject[0] || caller_authorization[0]) && is_bootstrap)
       {
          snprintf(resp, KB_TLS_RESP_MAX,
                   "{\"error\":\"caller subject is not permitted on bootstrap routes\"}");
@@ -837,10 +991,40 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
                   "{\"error\":\"service identity does not match client certificate\"}");
          status = 403;
       }
-      else if (have_cert && !is_bootstrap && caller_authority < 0)
+      else if (have_cert && !is_bootstrap && caller_authority == -1)
       {
-         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"invalid caller subject\"}");
+         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"caller token authority unavailable\"}");
+         status = 503;
+      }
+      else if (have_cert && !is_bootstrap && caller_authority == -2)
+      {
+         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"invalid caller identity\"}");
          status = 400;
+      }
+      else if (have_cert && !is_bootstrap && caller_authorization[0] && caller_authority == 0)
+      {
+         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"caller identity token rejected\"}");
+         status = 401;
+      }
+      else if (have_cert && !is_bootstrap && content_read && server_binding < 0)
+      {
+         snprintf(resp, KB_TLS_RESP_MAX,
+                  "{\"error\":\"server identity authority unavailable\"}");
+         status = 503;
+      }
+      else if (have_cert && !is_bootstrap && content_read && server_binding != 1)
+      {
+         snprintf(resp, KB_TLS_RESP_MAX,
+                  "{\"error\":\"server identity is not bound to this certificate\"}");
+         status = 403;
+      }
+      else if (have_cert && !is_bootstrap && content_read && caller_authority != 1)
+      {
+         /* Background work has no implicit reader authority. Ingest, re-embed,
+          * curator, and code-indexer policy remains separately unresolved. */
+         snprintf(resp, KB_TLS_RESP_MAX,
+                  "{\"error\":\"an authenticated content caller is required\"}");
+         status = 403;
       }
       /* GET /v1/enroll/ca: return the CA cert so a bootstrapping client can pin it
        * by fingerprint (the value in its connection string). */
@@ -904,7 +1088,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
          int tenant_scope_open = 0;
          kb_request_context_t resolved;
          memset(&resolved, 0, sizeof(resolved));
-         if (caller_authority == 1 && kb_http_is_content_read(method, cpath))
+         if (content_read)
          {
             /* The OIDC/PAM identity is the enrolled SERVICE side of this
              * intersection. mTLS has already independently authenticated and
@@ -965,6 +1149,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       OPENSSL_cleanse(presented_authorization, sizeof(presented_authorization));
       OPENSSL_cleanse(service_authorization, sizeof(service_authorization));
       OPENSSL_cleanse(caller_subject, sizeof(caller_subject));
+      OPENSSL_cleanse(caller_authorization, sizeof(caller_authorization));
+      OPENSSL_cleanse(server_id, sizeof(server_id));
 
       char head[256];
       int hn = snprintf(head, sizeof(head),
@@ -1106,6 +1292,18 @@ static void *mtls_listener_thread(void *arg)
 
 int kb_mtls_start(int port, const char *data_dir, const char *host)
 {
+   char bearer_probe[KB_TLS_BEARER_TOKEN_MAX + 1] = "";
+   if (!runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", bearer_probe,
+                           sizeof(bearer_probe)))
+      snprintf(bearer_probe, sizeof(bearer_probe), "%s", config_kb_api_bearer_token());
+   if (!bearer_probe[0])
+   {
+      LOG_ERROR("kb_mtls",
+                "mTLS listener requires AIMEE_KB_API_BEARER_TOKEN authority before startup");
+      runtime_secret_wipe(bearer_probe, sizeof(bearer_probe));
+      return -1;
+   }
+   runtime_secret_wipe(bearer_probe, sizeof(bearer_probe));
    if (port < 0 || !data_dir || !data_dir[0] || !host || !host[0])
       return -1;
 

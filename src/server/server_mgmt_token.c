@@ -273,7 +273,7 @@ static int control_free(const char *s, size_t min, size_t max)
 {
    if (!s)
       return 0;
-   size_t n = strnlen(s, max + 1);
+   size_t n = strlen(s);
    if (n < min || n > max)
       return 0;
    for (size_t i = 0; i < n; ++i)

@@ -41,6 +41,34 @@ static int cert_keys_equal(const char *a_pem, const char *b_pem)
    return equal;
 }
 
+static void without_eku(const char *cert_pem, const char *key_pem, char *out, size_t cap)
+{
+   BIO *in = BIO_new_mem_buf(cert_pem, -1);
+   X509 *cert = in ? PEM_read_bio_X509(in, NULL, NULL, NULL) : NULL;
+   BIO_free(in);
+   assert(cert);
+   int pos = X509_get_ext_by_NID(cert, NID_ext_key_usage, -1);
+   assert(pos >= 0);
+   X509_EXTENSION *removed = X509_delete_ext(cert, pos);
+   assert(removed);
+   X509_EXTENSION_free(removed);
+   BIO *key_wire = BIO_new_mem_buf(key_pem, -1);
+   EVP_PKEY *key = key_wire ? PEM_read_bio_PrivateKey(key_wire, NULL, NULL, NULL) : NULL;
+   BIO_free(key_wire);
+   /* Re-sign to invalidate OpenSSL's cached DER after deleting the extension.
+    * Chain validity is irrelevant to the exact-role predicate exercised here. */
+   assert(key && X509_sign(cert, key, EVP_sha256()) > 0);
+   EVP_PKEY_free(key);
+   BIO *wire = BIO_new(BIO_s_mem());
+   BUF_MEM *memory = NULL;
+   assert(wire && PEM_write_bio_X509(wire, cert) == 1 && BIO_get_mem_ptr(wire, &memory) > 0 &&
+          memory && memory->length + 1 <= cap);
+   memcpy(out, memory->data, memory->length);
+   out[memory->length] = '\0';
+   BIO_free(wire);
+   X509_free(cert);
+}
+
 static void *server_thread(void *a)
 {
    srv_arg_t *s = (srv_arg_t *)a;
@@ -109,6 +137,18 @@ int main(void)
     * client identity, and a clientAuth leaf cannot be loaded as its server. */
    assert(kb_tls_server_ctx(ca.cert_pem, ccert, ckey) == NULL);
    assert(kb_tls_client_ctx(ca.cert_pem, scert, skey) == NULL);
+   assert(kb_tls_cert_has_exact_role(scert, 1));
+   assert(kb_tls_cert_has_exact_role(ccert, 0));
+
+   /* Legacy/broad leaves with no EKU are not accepted as either role. Test the
+    * production role predicate directly, then the two context builders. */
+   char no_server_eku[KB_PKI_CERT_PEM_MAX], no_client_eku[KB_PKI_CERT_PEM_MAX];
+   without_eku(scert, skey, no_server_eku, sizeof(no_server_eku));
+   without_eku(ccert, ckey, no_client_eku, sizeof(no_client_eku));
+   assert(!kb_tls_cert_has_exact_role(no_server_eku, 1));
+   assert(!kb_tls_cert_has_exact_role(no_client_eku, 0));
+   assert(kb_tls_server_ctx(ca.cert_pem, no_server_eku, skey) == NULL);
+   assert(kb_tls_client_ctx(ca.cert_pem, no_client_eku, ckey) == NULL);
 
    SSL_CTX *server_ctx = kb_tls_server_ctx(ca.cert_pem, scert, skey);
    SSL_CTX *client_ctx = kb_tls_client_ctx(ca.cert_pem, ccert, ckey);

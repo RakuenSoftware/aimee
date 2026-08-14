@@ -145,6 +145,34 @@ int db2_server_registry_heartbeat(const char *id, const char *issuer, const char
    return rc;
 }
 
+int db2_server_registry_client_match(const char *id, int64_t team, const char *issuer,
+                                     const char *serial, const char *fingerprint)
+{
+   if (db2_tenant_require_pg() != 0 || !id || team <= 0 || !issuer || !serial || !fingerprint)
+      return -1;
+   void *c = db2_conn();
+   if (!c)
+      return -1;
+   char e[256];
+   aimee_pg_stmt_t *s = aimee_pg_prepare(
+       c, "SELECT kb_server_registry_client_match(?1,?2,?3,?4,?5)", e, sizeof(e));
+   if (!s)
+      return -1;
+   aimee_pg_bind_text(s, "?1", id);
+   aimee_pg_bind_int64(s, "?2", team);
+   aimee_pg_bind_text(s, "?3", issuer);
+   aimee_pg_bind_text(s, "?4", serial);
+   aimee_pg_bind_text(s, "?5", fingerprint);
+   int rc = -1;
+   if (aimee_pg_step(s, e, sizeof(e)) == AIMEE_PG_ROW)
+   {
+      const char *allowed = aimee_pg_column_text(s, 0);
+      rc = allowed && (allowed[0] == 't' || allowed[0] == '1') ? 1 : 0;
+   }
+   aimee_pg_finalize(s);
+   return rc;
+}
+
 int db2_server_registry_get(int64_t team, const char *id, db2_server_row_t *r)
 {
    if (db2_tenant_require_pg() != 0 || !id || !r)

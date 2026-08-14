@@ -16,11 +16,17 @@
 
 #define KB_TLS_PEER_ISSUER_MAX KB_PKI_ISSUER_MAX
 #define KB_TLS_PEER_SERIAL_MAX KB_PKI_SERIAL_MAX
+/* Maximum token text stored in the 4096-byte process-secret slot. */
+#define KB_TLS_BEARER_TOKEN_MAX 4095
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
+
+   /* True only when the PEM leaf carries exactly one EKU and it is the
+    * requested role (serverAuth when server_role=1, clientAuth otherwise). */
+   int kb_tls_cert_has_exact_role(const char *cert_pem, int server_role);
 
    /* Build an mTLS SERVER context: presents (server_cert_pem, server_key_pem),
     * trusts ca_cert_pem to verify CLIENT certs, and REQUIRES a valid client cert

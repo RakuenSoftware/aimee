@@ -145,6 +145,38 @@ both roles are rejected. Reissue any older broad-purpose certificate before upgr
 connection pair on distinct key material and rotate each pair independently; in particular,
 aimee-server's thinclient-facing server certificate must not be reused as its KB client identity.
 
+Stage this upgrade by issuing both role-specific identities before switching the new binaries over.
+Keep the previous certificate/key bundles intact until both new handshakes and one authenticated
+request have succeeded. A rollback restores each old certificate and its matching private key as a
+pair; do not move either new identity into the other role to make a rollback connect. The new release
+fails closed when the counterpart identity is absent, so partial certificate installation is a
+startup/configuration error rather than a bearer-only fallback.
+
+Every networked Aimee hop now applies three independent checks on ordinary requests: the verified
+pair-specific mTLS identity, the current rotating connection bearer, and the enrolled PAM or OIDC
+application identity. On server-to-KB traffic these are configured with
+`AIMEE_KB_CLIENT_BEARER_TOKEN` plus either `AIMEE_KB_CLIENT_OIDC_TOKEN` or the
+`AIMEE_KB_CLIENT_PAM_USERNAME`/`AIMEE_KB_CLIENT_PAM_PASSWORD` pair. OIDC mode does not fall back to
+PAM when its federation is unavailable. On thinclient-to-server content traffic, a caller identity
+JWT occupies `Authorization` while the independent rotating connection bearer is carried in
+`x-api-key`; a verified client certificate no longer bypasses that bearer check.
+
+Caller context is distinct from those service-connection checks. A KB-signed OIDC caller token is
+forwarded unchanged and cryptographically verified again by aimee-kb with token type, issuer,
+server audience, team and certificate-bound JWKS pinned. A host/PAM caller is asserted by the
+triple-authenticated aimee-server channel. This is the explicit compromise: a compromised server can
+name a host account, but it cannot forge an OIDC caller, and it cannot grant either caller a team or
+project because membership remains KB-owned and is intersected with the enrolled server scope. A new
+per-request mint would ask the KB to trust the same host assertion at mint time, so it would add a
+round trip and audit artefact without changing that authority.
+
+The local CLI remains on the OS-authenticated Unix-socket boundary and is resolved to its host
+account before any KB content request; an unresolved uid is refused. Physical host takeover is not a
+separate Aimee protocol threat. Browser and MCP identity continue to terminate at aimee-server and
+use the same server-to-KB path. Caller-less ingest, re-embed, curator and code-index work is denied
+content-reader authority until the separate background-work policy is selected; content-scope
+readiness remains disabled in the meantime.
+
 Grants are keyed by server, team, and exact authenticated subject:
 
 | Subject | Form |

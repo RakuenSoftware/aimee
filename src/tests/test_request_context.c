@@ -16,6 +16,7 @@ static void test_unset_defaults(void)
    assert(request_context_principal() != NULL);
    assert(request_context_principal()[0] == '\0');
    assert(request_context_caller_subject()[0] == '\0');
+   assert(request_context_caller_authorization()[0] == '\0');
    PASS("context: unset -> empty, never NULL");
 }
 
@@ -54,6 +55,12 @@ static void test_set_get_roundtrip(void)
    assert(strcmp(request_context_caller_subject(), "aimee") == 0);
    request_context_override_caller_subject("oidc:https%3A//idp:user-7");
    assert(strcmp(request_context_caller_subject(), "oidc:https%3A//idp:user-7") == 0);
+   request_context_override_caller_authorization("header.payload.signature");
+   assert(strcmp(request_context_caller_authorization(), "header.payload.signature") == 0);
+   assert(request_context_caller_subject()[0] == '\0');
+   request_context_override_caller_subject("alice");
+   assert(strcmp(request_context_caller_subject(), "alice") == 0);
+   assert(request_context_caller_authorization()[0] == '\0');
    PASS("context: set/get roundtrip + accessors");
 }
 

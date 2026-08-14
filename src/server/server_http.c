@@ -1496,10 +1496,9 @@ void handle_conn(int fd, int is_tcp, int is_management)
       return;
    }
 
-   /* A verified mTLS leaf is a first-class TCP authenticator. Re-check its
-    * durable roster row before the bearer gate so required-mode clients do not
-    * still depend on the shared bearer. This remains authentication only: the
-    * normal route/capability gates below still deny remote-write surfaces. */
+   /* A verified mTLS leaf is the transport layer, not a bearer substitute.
+    * Re-check its durable roster row here; the independently rotating request
+    * bearer is still required by the later authorization gate. */
    int mtls_authenticated = 0;
    int management_authenticated = 0;
    int mtls_mode = server_tls_mtls_mode();
@@ -1625,6 +1624,19 @@ void handle_conn(int fd, int is_tcp, int is_management)
     * durable certificate, so downstream dispatch sees the same effective caps
     * as the outer route gate. */
    server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path, effective_caps);
+   const request_context_t *populated_context = request_context_get();
+   if (!is_tcp &&
+       (!populated_context || populated_context->peer_uid < 0 ||
+        !request_context_caller_subject()[0]))
+   {
+      send_response(fd, 403,
+                    "{\"error\":{\"message\":\"local peer uid does not resolve to a host "
+                    "account\",\"type\":\"authentication_error\"}}",
+                    request_id);
+      LOG_INFO("server.http", "%s %s -> 403 (unresolved UDS host account) req_id=%s", method,
+               path, request_id);
+      return;
+   }
    if (first_user_principal[0])
    {
       request_context_override_principal(first_user_principal);
@@ -1633,11 +1645,32 @@ void handle_conn(int fd, int is_tcp, int is_management)
                                                   : first_user_principal);
    }
    if (identity_present && identity_claims.subject[0])
-      request_context_override_caller_subject(identity_claims.subject);
-   /* Authorize before reading the body: TCP requires either the durably valid
-    * client certificate above or a valid bearer; UDS relies on permissions. */
    {
-      char auth[512] = "";
+      if (!strncmp(identity_claims.subject, "oidc:", 5))
+      {
+         /* Preserve the original KB-signed identity token, not merely its
+          * parsed subject. aimee-server verifies it for its own gates;
+          * aimee-kb verifies it again before accepting an OIDC caller. */
+         char identity_authorization[KB_IDENTITY_TOKEN_WIRE_MAX + 1] = "";
+         if (http_header(buf, "Authorization", identity_authorization,
+                         sizeof(identity_authorization)))
+         {
+            const char *identity_jwt = aimee_core_bearer_token(identity_authorization);
+            if (identity_jwt)
+               request_context_override_caller_authorization(identity_jwt);
+         }
+         OPENSSL_cleanse(identity_authorization, sizeof(identity_authorization));
+      }
+      else
+         request_context_override_caller_subject(identity_claims.subject);
+   }
+   /* Authorize before reading the body. Every ordinary TCP request still needs
+    * the independently rotating bearer even after its client certificate was
+    * verified. When Authorization carries the caller's KB-signed PAM/OIDC JWT,
+    * x-api-key carries this separate connection bearer. The management lane has
+    * its own certificate/status/token proof and never enters ordinary routing. */
+   {
+      char auth[KB_IDENTITY_TOKEN_WIRE_MAX + 8] = "";
       char api_key[512] = "";
       char skey[256] = "";
       int has_auth = http_header(buf, "Authorization", auth, sizeof(auth));
@@ -1655,7 +1688,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
        * fresh one below when evidence emission is on. */
       ingress_preinject_set_turn_id("");
       anthropic_http_capture_request_headers(buf); /* parity: per-request anthropic-* hdrs */
-      int az = transport_authenticated
+      int az = management_authenticated
                    ? 0
                    : server_http_authorize_enrolled(is_tcp, g_bearer, has_auth ? auth : NULL,
                                                     has_api_key ? api_key : NULL, has_skey);

@@ -585,6 +585,7 @@ KB_SRCS += kb/kb_mgmt_token_authority_ipc.c
 # helper because the accept loop in kb/http/kb_http.c also calls it, to record the
 # peer address before the request is served.
 KB_SRCS += kb/kb_login_throttle.c
+KB_SRCS += server/server_mgmt_token.c kb/kb_caller_token.c
 KB_SRCS += kb/kb_vault_operator_status.c kb/kb_vault_protected_secret.c \
            kb/kb_vault_activation_latch.c kb/kb_vault_operator_mutation.c \
            kb/kb_vault_operator_runtime.c \

@@ -619,38 +619,64 @@ static void purge_fence_current(const char *project, char *out, size_t out_cap)
 }
 /* ── Phase 5 extended routing ────────────────────────────────────────────── */
 
+typedef enum
+{
+   KB_CONTENT_EXACT,
+   KB_CONTENT_PREFIX,
+} kb_content_match_t;
+
+typedef struct
+{
+   const char *method;
+   const char *path;
+   kb_content_match_t match;
+   int content;
+} kb_content_route_t;
+
+/* TLS content authorization and tenant-scope setup both consume this table.
+ * Denials precede broad prefixes so lifecycle/admin endpoints cannot acquire
+ * read semantics through a misleading GET. Every content family belongs here,
+ * not in a second ingress-specific allowlist. */
+static const kb_content_route_t g_kb_content_routes[] = {
+    {"GET", "/v1/code/build", KB_CONTENT_EXACT, 0},
+    {"GET", "/v1/code/update", KB_CONTENT_EXACT, 0},
+    {"GET", "/v1/code/scan", KB_CONTENT_EXACT, 0},
+    {"GET", "/v1/code/project/detach", KB_CONTENT_EXACT, 0},
+    {"GET", "/v1/code/project/purge", KB_CONTENT_EXACT, 0},
+    {"GET", "/v1/code/project/gc", KB_CONTENT_EXACT, 0},
+    {"GET", "/v1/code/lessons/observe", KB_CONTENT_EXACT, 0},
+    {"GET", "/v1/code/repo-trust", KB_CONTENT_EXACT, 0},
+    {"GET", "/v1/docs/manifest", KB_CONTENT_EXACT, 0},
+    {"POST", "/v1/search", KB_CONTENT_EXACT, 1},
+    {"POST", "/v1/implements", KB_CONTENT_EXACT, 1},
+    {"POST", "/v1/synthesize", KB_CONTENT_EXACT, 1},
+    {"POST", "/v1/contradictions", KB_CONTENT_EXACT, 1},
+    {"POST", "/v1/entities/search", KB_CONTENT_EXACT, 1},
+    {"GET", "/v1/review", KB_CONTENT_EXACT, 1},
+    {"GET", "/v1/releases/active", KB_CONTENT_EXACT, 1},
+    {"GET", "/v1/artifacts/", KB_CONTENT_PREFIX, 1},
+    {"GET", "/v1/entities/", KB_CONTENT_PREFIX, 1},
+    {"GET", "/v1/pdf/", KB_CONTENT_PREFIX, 1},
+    {"GET", "/v1/code/", KB_CONTENT_PREFIX, 1},
+    {"GET", "/v1/docs/", KB_CONTENT_PREFIX, 1},
+    {NULL, NULL, KB_CONTENT_EXACT, 0},
+};
+
 int kb_http_is_content_read(const char *method, const char *path)
 {
    if (!method || !path)
       return 0;
-   if (strcmp(method, "POST") == 0 &&
-       (!strcmp(path, "/v1/search") || !strcmp(path, "/v1/implements") ||
-        !strcmp(path, "/v1/synthesize") || !strcmp(path, "/v1/contradictions") ||
-        !strcmp(path, "/v1/entities/search")))
-      return 1;
-   if (strcmp(method, "GET") != 0)
-      return 0;
-   if (!strncmp(path, "/v1/artifacts/", sizeof("/v1/artifacts/") - 1) ||
-       !strncmp(path, "/v1/entities/", sizeof("/v1/entities/") - 1) ||
-       !strncmp(path, "/v1/pdf/", sizeof("/v1/pdf/") - 1))
-      return 1;
-   if (!strncmp(path, "/v1/code/", sizeof("/v1/code/") - 1))
+   for (const kb_content_route_t *route = g_kb_content_routes; route->method; ++route)
    {
-      /* These are lifecycle/admin routes even if a caller sends the wrong
-       * method. They must never acquire read semantics by method confusion. */
-      static const char *const non_reads[] = {
-          "/v1/code/build",          "/v1/code/update",       "/v1/code/scan",
-          "/v1/code/project/detach", "/v1/code/project/purge", "/v1/code/project/gc",
-          "/v1/code/lessons/observe", "/v1/code/repo-trust",    NULL,
-      };
-      for (int i = 0; non_reads[i]; ++i)
-         if (!strcmp(path, non_reads[i]))
-            return 0;
-      return 1;
+      if (strcmp(method, route->method) != 0)
+         continue;
+      int matches = route->match == KB_CONTENT_EXACT
+                        ? strcmp(path, route->path) == 0
+                        : strncmp(path, route->path, strlen(route->path)) == 0;
+      if (matches)
+         return route->content;
    }
-   return !strcmp(path, "/v1/review") || !strcmp(path, "/v1/releases/active") ||
-          (!strncmp(path, "/v1/docs/", sizeof("/v1/docs/") - 1) &&
-           strcmp(path, "/v1/docs/manifest") != 0);
+   return 0;
 }
 
 static int kb_http_route_ex_context(const char *method, const char *path, const char *query_string,

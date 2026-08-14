@@ -233,8 +233,12 @@ extern "C"
     * session). `caps` is the connection's effective capability set. Lives in
     * server_http_reqctx.c. */
    void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
-                                             const char *request_id, const char *method,
-                                             const char *path, uint32_t caps);
+                                              const char *request_id, const char *method,
+                                              const char *path, uint32_t caps);
+
+   /* Resolve a kernel peer uid to the PAM/host subject forwarded to the KB.
+    * Returns 0 only for a non-empty local account name. */
+   int server_http_host_subject_for_uid(long uid, char *out, size_t cap);
    int server_http_route_allowed(int is_tcp, const char *bearer, const char *method,
                                  const char *path, int remote_writes);
    /* Whether a route is reachable ONLY over the local UDS listener — never over TCP,

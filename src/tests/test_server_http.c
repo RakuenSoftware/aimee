@@ -22,6 +22,7 @@
 #include "util.h"
 #include <netinet/in.h> /* INADDR_ANY / INADDR_LOOPBACK for the bind-policy test */
 #include <assert.h>
+#include <limits.h>
 #include <pthread.h>
 #include <pwd.h>
 #include <stdio.h>
@@ -1099,6 +1100,13 @@ int main(void)
       assert(server_http_authorize(1, "secret", "Bearer secret", NULL, 0) == 0);
       assert(server_http_authorize(1, "secret", NULL, "secret", 0) == 0);
       assert(server_http_authorize(1, "secret", "Bearer nope", "secret", 0) == 0);
+      /* The caller identity JWT may occupy Authorization while the independent
+       * rotating connection bearer occupies x-api-key. A valid identity-shaped
+       * Authorization value does not replace the connection bearer. */
+      assert(server_http_authorize(1, "secret", "Bearer header.payload.signature", "secret", 0) ==
+             0);
+      assert(server_http_authorize(1, "secret", "Bearer header.payload.signature", NULL, 0) ==
+             401);
       assert(server_http_authorize(1, "secret", NULL, "nope", 0) == 401);
       assert(server_http_authorize(1, "secret", NULL, NULL, 0) == 401);
       assert(server_http_authorize(1, "secret", "secret", NULL, 0) == 401);
@@ -2241,6 +2249,10 @@ int main(void)
       struct passwd *pw = getpwuid(getuid());
       assert(pw && pw->pw_name && pw->pw_name[0]);
       assert(strcmp(request_context_caller_subject(), pw->pw_name) == 0); /* local CLI */
+      char missing_subject[64];
+      assert(server_http_host_subject_for_uid(LONG_MAX, missing_subject,
+                                              sizeof(missing_subject)) == -1);
+      assert(missing_subject[0] == '\0');
       request_context_clear();
       close(pair[0]);
       close(pair[1]);
@@ -2276,9 +2288,10 @@ int main(void)
        * handle_conn installs those verified claims after base context capture. */
       server_http_populate_request_context(-1, 1, "GET /v1/search HTTP/1.1\r\n\r\n",
                                            "ctx-oidc", "GET", "/v1/search", CAPS_ALL);
-      request_context_override_caller_subject("oidc:https%3A//idp.example:alice");
-      assert(strcmp(request_context_caller_subject(),
-                    "oidc:https%3A//idp.example:alice") == 0);
+      request_context_override_caller_authorization("header.payload.signature");
+      assert(strcmp(request_context_caller_authorization(),
+                    "header.payload.signature") == 0);
+      assert(request_context_caller_subject()[0] == '\0');
       request_context_clear();
    }
 

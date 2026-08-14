@@ -12,6 +12,7 @@
  * HTTP-URL and Unix-socket transports. */
 #include "kb_client_mtls.h"
 #include "kb_enroll.h" /* connection-string parse (for host/port) */
+#include "kb_identity_token.h"
 #include "kb_pki.h"
 #include "kb_tls.h" /* kb_tls_enroll / kb_tls_client_request */
 #include "config.h"
@@ -46,7 +47,6 @@ static char g_identity_path_override[1024];
 static char g_server_identity_path_override[1024];
 
 #define KB_CLIENT_IDENTITY_MAX 32768
-#define KB_CLIENT_BEARER_MAX   4096
 #define KB_CLIENT_HEADERS_MAX  16384
 #define KB_CLIENT_PAM_USER_MAX 63
 #define KB_CLIENT_PAM_PASS_MAX 1023
@@ -55,6 +55,7 @@ static char g_server_identity_path_override[1024];
 /* Only aimee-server links the request-context module. Other binaries reuse the
  * transport for service/background work and therefore have no caller context. */
 extern const char *request_context_caller_subject(void) __attribute__((weak));
+extern const char *request_context_caller_authorization(void) __attribute__((weak));
 
 static int caller_subject_valid(const char *subject)
 {
@@ -69,15 +70,28 @@ static int caller_subject_valid(const char *subject)
    return 1;
 }
 
+static int caller_authorization_valid(const char *jwt)
+{
+   if (!jwt || !jwt[0])
+      return 0;
+   size_t n = strnlen(jwt, KB_IDENTITY_TOKEN_WIRE_MAX + 1);
+   if (!n || n > KB_IDENTITY_TOKEN_WIRE_MAX)
+      return 0;
+   for (size_t i = 0; i < n; ++i)
+      if ((unsigned char)jwt[i] <= 0x20 || (unsigned char)jwt[i] == 0x7f)
+         return 0;
+   return 1;
+}
+
 /* Read both independent application credentials for every request. Neither is
  * cached with the mTLS identity: bearer/OIDC/PAM rotation must take effect on
  * request N+1 even while the HTTP/TLS connection remains pooled. */
 static int service_request_headers(char *out, size_t cap)
 {
-   char token[KB_CLIENT_BEARER_MAX + 1] = "";
-   char value[KB_CLIENT_BEARER_MAX + 8] = "";
-   char oidc[KB_CLIENT_BEARER_MAX + 1] = "";
-   char oidc_value[KB_CLIENT_BEARER_MAX + 8] = "";
+   char token[KB_TLS_BEARER_TOKEN_MAX + 1] = "";
+   char value[KB_TLS_BEARER_TOKEN_MAX + 8] = "";
+   char oidc[KB_TLS_BEARER_TOKEN_MAX + 1] = "";
+   char oidc_value[KB_TLS_BEARER_TOKEN_MAX + 8] = "";
    char pam_user[KB_CLIENT_PAM_USER_MAX + 1] = "";
    char pam_pass[KB_CLIENT_PAM_PASS_MAX + 1] = "";
    char pam_pair[KB_CLIENT_PAM_USER_MAX + KB_CLIENT_PAM_PASS_MAX + 2] = "";
@@ -119,13 +133,27 @@ static int service_request_headers(char *out, size_t cap)
    long long managed_team = 0;
    if (n > 0 && (size_t)n < cap &&
        kb_client_mtls_managed_metadata(managed_server, sizeof(managed_server), &managed_team) &&
-       managed_team > 0)
+       managed_server[0] && managed_team > 0)
    {
-      int added = snprintf(out + n, cap - (size_t)n, "X-Aimee-Team-ID: %lld\r\n", managed_team);
+      int added = snprintf(out + n, cap - (size_t)n,
+                           "X-Aimee-Server-ID: %s\r\nX-Aimee-Team-ID: %lld\r\n",
+                           managed_server, managed_team);
       n = added > 0 && (size_t)added < cap - (size_t)n ? n + added : -1;
    }
+   const char *caller_authorization = request_context_caller_authorization
+                                          ? request_context_caller_authorization()
+                                          : "";
    const char *caller = request_context_caller_subject ? request_context_caller_subject() : "";
-   if (n > 0 && (size_t)n < cap && caller && caller[0])
+   if (n > 0 && (size_t)n < cap && caller_authorization && caller_authorization[0])
+   {
+      int added = caller_authorization_valid(caller_authorization)
+                      ? snprintf(out + n, cap - (size_t)n,
+                                 "X-Aimee-Caller-Authorization: Bearer %s\r\n",
+                                 caller_authorization)
+                      : -1;
+      n = added > 0 && (size_t)added < cap - (size_t)n ? n + added : -1;
+   }
+   else if (n > 0 && (size_t)n < cap && caller && caller[0])
    {
       int added = caller_subject_valid(caller)
                       ? snprintf(out + n, cap - (size_t)n, "X-Aimee-Caller-Subject: %s\r\n", caller)
@@ -159,8 +187,8 @@ static int identity_path(char *out, size_t cap)
 }
 
 /* The server-to-KB client identity and the thinclient-facing server identity
- * are different mTLS pairs. If the latter exists, reject key reuse across the
- * two bundles even when each certificate has the right EKU for its own role. */
+ * are different mTLS pairs. Server-to-KB use requires the listener identity to
+ * exist and rejects key reuse even when both leaves have the right role EKU. */
 static int identity_distinct_from_server(const char *client_cert_pem)
 {
    char path[1024];
@@ -173,7 +201,7 @@ static int identity_distinct_from_server(const char *client_cert_pem)
 
    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
    if (fd < 0)
-      return errno == ENOENT;
+      return 0; /* configured server->KB use requires the other pair to exist */
    struct stat st;
    int valid_file = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_nlink == 1 &&
                     st.st_size > 0 && st.st_size < KB_PKI_CERT_PEM_MAX;

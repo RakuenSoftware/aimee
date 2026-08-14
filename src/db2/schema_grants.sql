@@ -108,6 +108,7 @@ BEGIN
   GRANT EXECUTE ON FUNCTION kb_server_registry_pending(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_server_registry_finalize(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_server_registry_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_server_registry_client_match(TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_server_registry_list(BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_server_registry_snapshot(BIGINT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;

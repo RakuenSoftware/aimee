@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "kb_identity_token.h"
+#include "kb_caller_token.h"
 #include "oauth_pkce.h" /* oauth_pkce_base64url_encode */
 #include "server_identity_token.h"
 
@@ -110,6 +111,17 @@ int main(void)
    assert(strcmp(out.kid, "kid-2026-a") == 0);
    assert(out.issued_at == 1000 && out.expires_at == 1300);
 
+   /* The KB ingress calls this exact wrapper: signature, typ, issuer, server
+    * audience, team, and OIDC subject are all pinned before caller context is
+    * accepted. */
+   assert(kb_caller_token_verify(jwt, jl, jwks, "server-abc", 7, NOW, &out) ==
+          SERVER_IDENTITY_TOKEN_OK);
+   assert(strcmp(out.subject, "oidc:idp-example:user-42") == 0);
+   assert(kb_caller_token_verify(jwt, jl, jwks, "server-other", 7, NOW, &out) ==
+          SERVER_IDENTITY_TOKEN_INVALID);
+   assert(kb_caller_token_verify(jwt, jl, jwks, "server-abc", 8, NOW, &out) ==
+          SERVER_IDENTITY_TOKEN_INVALID);
+
    /* 2) Every tier round-trips. */
    kb_identity_tier_t tiers[] = {KB_IDENTITY_TIER_OFF, KB_IDENTITY_TIER_DATA,
                                  KB_IDENTITY_TIER_FULL};
@@ -185,6 +197,8 @@ int main(void)
       assert(server_identity_token_verify(jwt, jl, jwks, "kb", "server-abc", NOW, &out) ==
              SERVER_IDENTITY_TOKEN_OK);
       assert(strcmp(out.subject, "alice") == 0);
+      assert(kb_caller_token_verify(jwt, jl, jwks, "server-abc", 7, NOW, &out) ==
+             SERVER_IDENTITY_TOKEN_INVALID);
 
       c = base_claims();
       snprintf(c.subject, sizeof(c.subject), "svc_user-1.2");

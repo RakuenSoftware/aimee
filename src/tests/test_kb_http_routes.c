@@ -3035,10 +3035,10 @@ static int test_kb_client_renew(const char *host, int port, const char *ca_cert_
    const char *base = "Authorization: Bearer token-two\r\n"
                       "X-Aimee-Service-Authorization: Basic "
                       "YWltZWUtc2VydmVyOnNlcnZlci1wYXNzd29yZA==\r\n";
-   char managed[512];
-   snprintf(managed, sizeof(managed), "%sX-Aimee-Team-ID: 42\r\n", base);
-   assert(authorization &&
-          (strcmp(authorization, base) == 0 || strcmp(authorization, managed) == 0));
+   assert(authorization && strncmp(authorization, base, strlen(base)) == 0);
+   if (strcmp(authorization, base) != 0)
+      assert(strstr(authorization, "X-Aimee-Server-ID: managed-") &&
+             strstr(authorization, "X-Aimee-Team-ID: 42\r\n"));
    return g_rotation_test_ca
               ? kb_pki_issue_client_cert(g_rotation_test_ca, KB_SERVER_CLIENT_SCOPE,
                                          60L * 60 * 24 * 90, cert_out, cert_cap, key_out, key_cap)
@@ -3133,7 +3133,32 @@ static void test_mtls_serve(void)
                     "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
                     "X-Aimee-Caller-Subject: uid:1000\r\nConnection: close\r\n\r\n",
                     resp, sizeof(resp));
-   assert(strstr(resp, "400 Bad Request") && strstr(resp, "invalid caller subject"));
+   assert(strstr(resp, "400 Bad Request") && strstr(resp, "invalid caller identity"));
+   /* aimee-server may assert only a distinct PAM/host account. It cannot turn
+    * an asserted string into OIDC proof, nor name its own service account as
+    * the caller. OIDC must arrive as the original signed caller token. */
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "X-Aimee-Caller-Subject: oidc:idp:user\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request") && strstr(resp, "invalid caller identity"));
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "X-Aimee-Caller-Subject: aimee-server\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request") && strstr(resp, "invalid caller identity"));
+
+   /* Content reads have no service-only/background bypass. Until the separate
+    * background-reader policy is decided, a fully authenticated service with
+    * an exact server/team binding but no caller still fails closed. */
+   mtls_request_raw(sctx, cctx,
+                    "POST /v1/search HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "X-Aimee-Server-ID: srv-a\r\nX-Aimee-Team-ID: 1\r\n"
+                    "Content-Length: 2\r\nConnection: close\r\n\r\n{}",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "403 Forbidden") &&
+          strstr(resp, "an authenticated content caller is required"));
+   assert(!strstr(resp, "results"));
    mtls_request_raw(sctx, cctx,
                     "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
                     "X-Aimee-Team-ID: not-a-team\r\nConnection: close\r\n\r\n",
@@ -3431,6 +3456,11 @@ static void test_mtls_listener(void)
    snprintf(cp, sizeof(cp), "%s/kb-ca", cfg);
    rmdir(cp);
 
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   g_stub_kb_api_bearer_token[0] = '\0';
+   assert(kb_mtls_start(0, cfg, "localhost") == -1);
+   snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token),
+            "scope:service:aimee-server:token-one");
    setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "0", 1);
    assert(kb_mtls_start(0, cfg, "localhost") == -1);
    setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "8", 1);
@@ -3632,6 +3662,13 @@ static void test_mtls_listener(void)
       unlink(server_identity_file);
       kb_client_mtls_set_identity_path_for_test(identity_file);
       kb_client_mtls_set_server_identity_path_for_test(server_identity_file);
+      char thinclient_cert[KB_PKI_CERT_PEM_MAX], thinclient_key[KB_PKI_KEY_PEM_MAX];
+      assert(kb_pki_issue_server_cert(&ca, "server.local", 3600, thinclient_cert,
+                                      sizeof(thinclient_cert), thinclient_key,
+                                      sizeof(thinclient_key)) == 0);
+      FILE *server_identity_stream = fopen(server_identity_file, "w");
+      assert(server_identity_stream && fputs(thinclient_cert, server_identity_stream) >= 0 &&
+             fclose(server_identity_stream) == 0);
       assert(runtime_secret_store("AIMEE_KB_CONN", conn2) == 0);
       assert(runtime_secret_store("AIMEE_KB_CLIENT_BEARER_TOKEN", "token-one") == 0);
       assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN",
@@ -3658,6 +3695,18 @@ static void test_mtls_listener(void)
       assert(strstr(identity_json, "\"version\":1") && strstr(identity_json, "PRIVATE KEY"));
       assert(strstr(identity_json, token2) == NULL); /* never persist the one-time credential */
 
+      /* Absence is not evidence of separation. Once server->KB is configured,
+       * the thinclient-facing counterpart must remain installed and readable. */
+      assert(unlink(server_identity_file) == 0);
+      kb_client_mtls_reset_for_test();
+      int missing_pair_status = -1;
+      char *missing_pair = kb_client_mtls_request("GET", "/v1/health", NULL,
+                                                  &missing_pair_status);
+      assert(missing_pair == NULL && missing_pair_status == -1);
+      server_identity_stream = fopen(server_identity_file, "w");
+      assert(server_identity_stream && fputs(thinclient_cert, server_identity_stream) >= 0 &&
+             fclose(server_identity_stream) == 0);
+
       /* The thinclient-facing server cert and the KB-facing client cert are
        * separate bundles. Reusing the enrolled client key across them is
        * rejected even though each path validates its own certificate. */
@@ -3665,7 +3714,7 @@ static void test_mtls_listener(void)
       cJSON *saved_client_cert =
           saved_identity ? cJSON_GetObjectItemCaseSensitive(saved_identity, "cert") : NULL;
       assert(cJSON_IsString(saved_client_cert));
-      FILE *server_identity_stream = fopen(server_identity_file, "w");
+      server_identity_stream = fopen(server_identity_file, "w");
       assert(server_identity_stream &&
              fputs(saved_client_cert->valuestring, server_identity_stream) >= 0 &&
              fclose(server_identity_stream) == 0);
@@ -3674,7 +3723,6 @@ static void test_mtls_listener(void)
       int collision_status = -1;
       char *collision = kb_client_mtls_request("GET", "/v1/health", NULL, &collision_status);
       assert(collision == NULL && collision_status == -1);
-      char thinclient_cert[KB_PKI_CERT_PEM_MAX], thinclient_key[KB_PKI_KEY_PEM_MAX];
       assert(kb_pki_issue_server_cert(&ca, "server.local", 3600, thinclient_cert,
                                       sizeof(thinclient_cert), thinclient_key,
                                       sizeof(thinclient_key)) == 0);
@@ -3802,13 +3850,16 @@ static void test_mtls_listener(void)
       snprintf(g_test_pam_password, sizeof(g_test_pam_password), "%s", "server-password");
       assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_PASSWORD", "server-password") == 0);
 
-      /* Bearers are bounded independently from ordinary short test secrets;
-       * exercise a token long enough to catch a mismatched server-side buffer. */
-      char long_token[513];
-      memset(long_token, 'x', sizeof(long_token) - 1);
-      long_token[sizeof(long_token) - 1] = '\0';
+      /* Exercise the exact shared 4096-byte secret slot (4095 token bytes plus
+       * NUL), including the verified scope prefix, so client and server cannot
+       * silently disagree at the boundary. */
+      static const char bearer_scope[] = "scope:service:aimee-server:";
+      char long_token[KB_TLS_BEARER_TOKEN_MAX + 1];
+      size_t long_token_len = KB_TLS_BEARER_TOKEN_MAX - strlen(bearer_scope);
+      memset(long_token, 'x', long_token_len);
+      long_token[long_token_len] = '\0';
       assert(snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token),
-                      "scope:service:aimee-server:%s", long_token) > 0);
+                      "%s%s", bearer_scope, long_token) == KB_TLS_BEARER_TOKEN_MAX);
       assert(runtime_secret_store("AIMEE_KB_CLIENT_BEARER_TOKEN", long_token) == 0);
       assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", g_stub_kb_api_bearer_token) == 0);
       r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
@@ -3940,6 +3991,9 @@ static void test_mtls_listener(void)
       assert(kb_client_mtls_managed_metadata(managed_server, sizeof(managed_server),
                                              &managed_team) == 1);
       assert(strcmp(managed_server, "managed-server-test") == 0 && managed_team == 42);
+      r = kb_client_mtls_request("POST", "/v1/search", "{}", &st2);
+      assert(st2 == 403 && r && strstr(r, "an authenticated content caller is required"));
+      free(r);
       g_rotation_test_ca = &ca;
       kb_client_mtls_set_renew_for_test(test_kb_client_renew);
       r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
@@ -6996,12 +7050,24 @@ static void test_content_read_identity_boundary(void)
    assert(kb_http_is_content_read("GET", "/v1/code/context"));
    assert(kb_http_is_content_read("GET", "/v1/pdf/page"));
    assert(kb_http_is_content_read("POST", "/v1/entities/search"));
+   assert(kb_http_is_content_read("POST", "/v1/implements"));
+   assert(kb_http_is_content_read("POST", "/v1/synthesize"));
+   assert(kb_http_is_content_read("POST", "/v1/contradictions"));
    assert(kb_http_is_content_read("GET", "/v1/docs/a"));
+   assert(kb_http_is_content_read("GET", "/v1/review"));
+   assert(kb_http_is_content_read("GET", "/v1/releases/active"));
    assert(!kb_http_is_content_read("GET", "/v1/health"));
+   assert(!kb_http_is_content_read("GET", "/v1/search"));
+   assert(!kb_http_is_content_read("POST", "/v1/code/context"));
    assert(!kb_http_is_content_read("POST", "/v1/ingest"));
    assert(!kb_http_is_content_read("GET", "/v1/code/scan"));
+   assert(!kb_http_is_content_read("GET", "/v1/code/project/purge"));
+   assert(!kb_http_is_content_read("GET", "/v1/code/repo-trust"));
    assert(!kb_http_is_content_read("POST", "/v1/code/build"));
    assert(!kb_http_is_content_read("POST", "/v1/docs/manifest"));
+   assert(!kb_http_is_content_read("GET", "/v1/docs/manifest"));
+   assert(!kb_http_is_content_read("GET", "/v1/docs"));
+   assert(!kb_http_is_content_read("GET", "/v1/code"));
 
    kb_request_context_t resolved;
    memset(&resolved, 0, sizeof(resolved));

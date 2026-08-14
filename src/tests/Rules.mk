@@ -2421,6 +2421,7 @@ $(TESTPREFIX)/unit-test-server-write-tier: $(OBJDIR)/tests/test_server_write_tie
 
 $(TESTPREFIX)/unit-test-server-identity-token: $(OBJDIR)/tests/test_server_identity_token.o \
                                                $(OBJDIR)/server/server_mgmt_token.o \
+                                               $(OBJDIR)/kb/kb_caller_token.o \
                                                $(OBJDIR)/kb/kb_identity_token.o \
                                                $(OBJDIR)/server/oauth_pkce.o \
                                                $(OBJDIR)/util.o \
@@ -6444,6 +6445,8 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o $(
                      $(OBJDIR)/kb/pki.o \
                      $(OBJDIR)/kb/http/kb_tls.o \
                      $(OBJDIR)/kb/http/kb_tls_serve.o \
+                     $(OBJDIR)/server/server_mgmt_token.o \
+                     $(OBJDIR)/kb/kb_caller_token.o \
                      $(OBJDIR)/db2/management_jwks_runtime.o \
                      $(OBJDIR)/modules/kb_client/kb_client_mtls.o \
                      $(OBJDIR)/modules/vault/runtime_secret.o \

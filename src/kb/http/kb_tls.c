@@ -35,12 +35,12 @@ static int exact_cert_eku(X509 *cert, int required_nid)
    return ok;
 }
 
-static int pem_has_exact_eku(const char *cert_pem, int required_nid)
+int kb_tls_cert_has_exact_role(const char *cert_pem, int server_role)
 {
    BIO *bio = cert_pem ? BIO_new_mem_buf(cert_pem, -1) : NULL;
    X509 *cert = bio ? PEM_read_bio_X509(bio, NULL, NULL, NULL) : NULL;
    BIO_free(bio);
-   int ok = exact_cert_eku(cert, required_nid);
+   int ok = exact_cert_eku(cert, server_role ? NID_server_auth : NID_client_auth);
    X509_free(cert);
    return ok;
 }
@@ -75,7 +75,7 @@ static int ctx_load_identity(SSL_CTX *ctx, const char *cert_pem, const char *key
    if (!!cert_pem != !!key_pem)
       return -1;
    int want_identity = (cert_pem && key_pem);
-   if (want_identity && (!pem_has_exact_eku(cert_pem, identity_eku) ||
+   if (want_identity && (!kb_tls_cert_has_exact_role(cert_pem, identity_eku == NID_server_auth) ||
                          aimee_core_tls_use_identity_pem(ctx, cert_pem, key_pem) != 0))
       return -1;
    return aimee_core_tls_trust_pem(ctx, ca_pem);

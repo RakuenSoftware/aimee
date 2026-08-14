@@ -1,10 +1,9 @@
 /* kb_ingress.c: deny-by-default identity-header ingress guard (P1 B5).
  *
  * Ordinary kb clients must NEVER be able to assert identity via a request header.
- * The sole exception is X-Aimee-Caller-Subject on the dedicated mTLS listener,
- * where it is accepted only after the peer certificate, rotating bearer, and
- * service OIDC/PAM identity have all verified. All other identity headers remain
- * fail-closed at the single ingress choke before routing. */
+ * The sole exceptions are the bounded service-context headers on the dedicated
+ * mTLS listener, where they are consumed only after the peer certificate,
+ * rotating bearer, and service OIDC/PAM identity have all verified. */
 
 #include "kb_ingress.h"
 
@@ -21,6 +20,8 @@ static const char *const IDENTITY_HEADERS[] = {
     "x-aimee-session-key",
     "x-aimee-user",
     "x-aimee-caller-subject",
+    "x-aimee-caller-authorization",
+    "x-aimee-server-id",
     "x-aimee-team-id",
     NULL,
 };
@@ -55,6 +56,8 @@ int kb_ingress_identity_header_present_ex(const char *raw_request, int allow_ser
       {
          if (allow_service_context &&
              (strcmp(IDENTITY_HEADERS[i], "x-aimee-caller-subject") == 0 ||
+              strcmp(IDENTITY_HEADERS[i], "x-aimee-caller-authorization") == 0 ||
+              strcmp(IDENTITY_HEADERS[i], "x-aimee-server-id") == 0 ||
               strcmp(IDENTITY_HEADERS[i], "x-aimee-team-id") == 0))
             continue;
          if (header_line_is(p, IDENTITY_HEADERS[i]))
