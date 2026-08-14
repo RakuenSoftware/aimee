@@ -960,7 +960,11 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
       float vec[EMBED_MAX_DIM];
       int dim =
           memory_embed_text(embed_text, effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
-      if (dim > 0 && sync_vector_embedding(rows[i].id, vec, dim) == 0)
+      /* Payload reconstruction reads kb_documents, so it needs a fresh short
+       * project scope after the embedder round-trip. The fenced helper opens
+       * that transaction, reapplies the current maintenance context, and keeps
+       * the purge generation check atomic with the vector write. */
+      if (dim > 0 && kb_sync_vector_embedding_fenced(project, rows[i].id, vec, dim) == 0)
          embedded++;
       free(rows[i].content);
    }
