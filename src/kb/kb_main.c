@@ -30,6 +30,7 @@
 #include "kb_sidecar_identity.h"
 #include "kb_paths.h"
 #include "kb_service.h"
+#include "kb_tenancy_cli.h"
 #include "log.h"
 #include "lifecycle.h"
 #include "embedder_probe.h"
@@ -1471,30 +1472,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
       rc_http = (n < 0) ? 1 : 0;
    }
    else if (strcmp(group, "project") == 0 && strcmp(sub, "attribute") == 0 && argc == 5)
-   {
-      unsigned long long project_id = 0;
-      if (kb_parse_unsigned(argv[4], INT64_MAX, &project_id) == 0 && project_id > 0 &&
-          db2_project_attribute_code(argv[3], (int64_t)project_id) == 0)
-      {
-         cJSON *result = cJSON_CreateObject();
-         if (result)
-         {
-            cJSON_AddStringToObject(result, "code_project", argv[3]);
-            cJSON_AddNumberToObject(result, "kb_project", (double)project_id);
-            char *json = cJSON_PrintUnformatted(result);
-            cJSON_Delete(result);
-            if (json)
-            {
-               printf("%s\n", json);
-               free(json);
-               rc_http = 0;
-            }
-         }
-      }
-      else
-         fprintf(stderr,
-                 "project attribute failed (org-admin required; both exact projects must exist)\n");
-   }
+      rc_http = kb_tenancy_cli_project_attribute(argv[3], argv[4]);
    else if (strcmp(group, "models") == 0 && strcmp(sub, "list") == 0)
    {
       db2_model_catalog_row_t rows[512];

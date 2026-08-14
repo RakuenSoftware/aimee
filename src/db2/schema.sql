@@ -2157,7 +2157,7 @@ LANGUAGE sql STABLE AS $$
             OR k.parent = current_setting('aimee.team', true)::bigint)
        AND (k.access_mode = 'team-open'
             OR k.id IN (SELECT project FROM kb_project_membership
-            WHERE identity_key = current_setting('aimee.principal', true))));
+            WHERE identity_key = current_setting('aimee.principal', true)))));
 $$;
 
 -- Maintenance writes are allowed only when the row's project is the exact
