@@ -1972,6 +1972,9 @@ BEGIN
   IF p_principal IS NULL OR p_principal = '' THEN
     RAISE EXCEPTION 'set_tenant_context: empty principal' USING ERRCODE = '42501';
   END IF;
+  PERFORM set_config('aimee.maintenance_worker', '', true);
+  PERFORM set_config('aimee.maintenance_project', '', true);
+  PERFORM set_config('aimee.maintenance_kb_project', '', true);
   PERFORM set_config('aimee.principal', p_principal, true);  -- transaction-local
   IF p_team IS NOT NULL AND p_team > 0 THEN
     IF NOT EXISTS (SELECT 1 FROM kb_team_membership
@@ -1983,6 +1986,40 @@ BEGIN
   ELSE
     PERFORM set_config('aimee.team', '', true);
   END IF;
+END
+$$;
+
+-- Background workers act for a durable job, not for an end user. Give those
+-- jobs one explicit scope rather than inventing another identity kind or letting
+-- the runtime role read every project. The worker name is a closed allowlist and
+-- the project must already be attributed to exactly one kb_project. All values
+-- are transaction-local and the C boundary resets them before returning a pooled
+-- connection.
+CREATE OR REPLACE FUNCTION set_maintenance_context(p_worker TEXT, p_project TEXT)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  project_ref BIGINT;
+BEGIN
+  IF p_worker IS NULL OR p_worker NOT IN ('ingest','reembed','curator','code-indexer') THEN
+    RAISE EXCEPTION 'set_maintenance_context: unknown worker' USING ERRCODE = '42501';
+  END IF;
+  IF p_project IS NULL OR p_project = '' THEN
+    RAISE EXCEPTION 'set_maintenance_context: empty project' USING ERRCODE = '42501';
+  END IF;
+  SELECT kb_project INTO project_ref FROM projects WHERE name = p_project;
+  IF project_ref IS NULL THEN
+    RAISE EXCEPTION 'set_maintenance_context: project % is not attributed', p_project
+      USING ERRCODE = '42501';
+  END IF;
+  PERFORM set_config('aimee.principal', '', true);
+  PERFORM set_config('aimee.team', '', true);
+  PERFORM set_config('aimee.maintenance_worker', p_worker, true);
+  PERFORM set_config('aimee.maintenance_project', p_project, true);
+  PERFORM set_config('aimee.maintenance_kb_project', project_ref::text, true);
 END
 $$;
 
@@ -2106,7 +2143,11 @@ CREATE INDEX IF NOT EXISTS idx_projects_kb_project ON projects(kb_project);
 -- own RLS denies.
 CREATE OR REPLACE FUNCTION kb_project_visible(p BIGINT) RETURNS boolean
 LANGUAGE sql STABLE AS $$
-  SELECT p IS NOT NULL AND EXISTS (
+  SELECT (p IS NOT NULL
+          AND current_setting('aimee.maintenance_worker', true)
+                IN ('ingest','reembed','curator','code-indexer')
+          AND current_setting('aimee.maintenance_kb_project', true) = p::text)
+      OR (p IS NOT NULL AND EXISTS (
     SELECT 1 FROM kb_project k
      WHERE k.id = p
        AND k.parent IN (SELECT team FROM kb_team_membership
@@ -2116,7 +2157,23 @@ LANGUAGE sql STABLE AS $$
             OR k.parent = current_setting('aimee.team', true)::bigint)
        AND (k.access_mode = 'team-open'
             OR k.id IN (SELECT project FROM kb_project_membership
-                        WHERE identity_key = current_setting('aimee.principal', true))));
+            WHERE identity_key = current_setting('aimee.principal', true)))));
+$$;
+
+-- Maintenance writes are allowed only when the row's project is the exact
+-- attributed project selected by set_maintenance_context(). Interactive writes
+-- continue to enter through their existing write-tier routes and durable queues;
+-- this policy does not turn a user content read scope into direct table DML.
+CREATE OR REPLACE FUNCTION kb_maintenance_content_project(p_project TEXT) RETURNS boolean
+LANGUAGE sql STABLE AS $$
+  SELECT p_project IS NOT NULL
+     AND p_project = current_setting('aimee.maintenance_project', true)
+     AND current_setting('aimee.maintenance_worker', true)
+           IN ('ingest','reembed','curator','code-indexer')
+     AND EXISTS (SELECT 1 FROM projects p
+                  WHERE p.name = p_project
+                    AND p.kb_project::text =
+                        current_setting('aimee.maintenance_kb_project', true));
 $$;
 
 -- CONTENT SCOPE, part 2: the policies, DEFINED BUT NOT ENABLED.
@@ -2142,6 +2199,18 @@ CREATE POLICY p_file_index_project ON kb_file_index
   FOR SELECT USING (EXISTS (SELECT 1 FROM projects p
                             WHERE p.name = kb_file_index.project
                               AND kb_project_visible(p.kb_project)));
+
+DROP POLICY IF EXISTS p_documents_maintenance_write ON kb_documents;
+CREATE POLICY p_documents_maintenance_write ON kb_documents
+  FOR ALL
+  USING (kb_maintenance_content_project(project))
+  WITH CHECK (kb_maintenance_content_project(project));
+
+DROP POLICY IF EXISTS p_file_index_maintenance_write ON kb_file_index;
+CREATE POLICY p_file_index_maintenance_write ON kb_file_index
+  FOR ALL
+  USING (kb_maintenance_content_project(project))
+  WITH CHECK (kb_maintenance_content_project(project));
 
 -- Turn content scoping on, once the rows carry a kb_project.
 --
@@ -2229,6 +2298,41 @@ LANGUAGE sql STABLE AS $$
                  WHERE identity_key = current_setting('aimee.principal', true)
                    AND revoked_at = '');
 $$;
+
+-- A code-index project name and a tenancy project name are different namespaces:
+-- projects.name is globally unique, while kb_project.name is unique only inside
+-- one team. Attribution is therefore an explicit admin operation by numeric id,
+-- never a name join or an ingest-side guess. This is the only application API for
+-- changing projects.kb_project.
+CREATE OR REPLACE FUNCTION kb_content_project_attribute(
+  p_code_project TEXT, p_kb_project BIGINT) RETURNS BIGINT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE code_id BIGINT;
+BEGIN
+  IF NOT public.kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'kb_content_project_attribute: org-admin required'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_code_project IS NULL OR p_code_project = '' OR char_length(p_code_project) > 255
+     OR p_kb_project IS NULL OR p_kb_project <= 0 THEN
+    RAISE EXCEPTION 'kb_content_project_attribute: invalid project'
+      USING ERRCODE = '22023';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.kb_project WHERE id = p_kb_project) THEN
+    RAISE EXCEPTION 'kb_content_project_attribute: tenancy project % does not exist', p_kb_project
+      USING ERRCODE = '22023';
+  END IF;
+  UPDATE public.projects SET kb_project = p_kb_project
+   WHERE name = p_code_project
+   RETURNING id INTO code_id;
+  IF code_id IS NULL THEN
+    RAISE EXCEPTION 'kb_content_project_attribute: code project % does not exist', p_code_project
+      USING ERRCODE = '22023';
+  END IF;
+  RETURN code_id;
+END;
+$$;
+REVOKE ALL ON FUNCTION kb_content_project_attribute(TEXT, BIGINT) FROM PUBLIC;
 
 DROP POLICY IF EXISTS p_team_admin_write ON kb_team;
 CREATE POLICY p_team_admin_write ON kb_team FOR INSERT WITH CHECK (kb_principal_is_admin());
