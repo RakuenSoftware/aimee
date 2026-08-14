@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+
+	"golang.org/x/sys/unix"
 )
 
 // Spill store and the top-level condensation entry.
@@ -187,9 +189,14 @@ func tcSpillWrite(dir, ref, content string) error {
 	path := filepath.Join(dir, ref+".out")
 	tmp := filepath.Join(dir, fmt.Sprintf("%s.%d.tmp", ref, os.Getpid()))
 
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	fd, err := unix.Open(tmp, unix.O_WRONLY|unix.O_CREAT|unix.O_TRUNC|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return err
+	}
+	f := os.NewFile(uintptr(fd), "economizer-spill-temp")
+	if f == nil {
+		_ = unix.Close(fd)
+		return errors.New("spill temp unavailable")
 	}
 	if _, err := f.WriteString(content); err != nil {
 		f.Close()
@@ -347,16 +354,24 @@ func TCRecall(spillDir, ref string) (string, error) {
 	if spillDir == "" || !TCRefValid(ref) {
 		return "", errors.New("invalid ref")
 	}
-	f, err := os.Open(filepath.Join(spillDir, ref+".out"))
+	// Match the retired C reader's O_NOFOLLOW boundary. A spill directory can be
+	// writable by the server user; following a planted symlink would turn the
+	// recall handle into an arbitrary-file reader despite the strict ref grammar.
+	fd, err := unix.Open(filepath.Join(spillDir, ref+".out"), unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
+		return "", errors.New("spill expired")
+	}
+	f := os.NewFile(uintptr(fd), "economizer-spill")
+	if f == nil {
+		_ = unix.Close(fd)
 		return "", errors.New("spill expired")
 	}
 	defer f.Close()
 
-	// Bounded read: never pull more than the ceiling into memory, however large
-	// the spill file is.
-	data, err := io.ReadAll(io.LimitReader(f, TCCeiling))
-	if err != nil {
+	// Bounded read with one sentinel byte. Refuse an oversized legacy spill
+	// rather than returning a successful but silently truncated recovery.
+	data, err := io.ReadAll(io.LimitReader(f, TCCeiling+1))
+	if err != nil || len(data) > TCCeiling {
 		return "", errors.New("spill expired")
 	}
 	out := string(data)

@@ -90,7 +90,7 @@ int main(void)
    }
 
    /* --- prompt_turn_registers_text: gate and wording ---
-    * The register grammar has always been PARSED (fold_register_parse, and
+    * The register grammar is parsed by the Go economizer, and
     * session_compact's record path reads it for Key Decisions) while nothing ever ASKED
     * an agent to emit one — so real transcripts carry no tags and that extraction is
     * empty in practice. This is the request half, and it must stay off by default. */

@@ -68,8 +68,7 @@
   ],
   "go_sources": [
     "server-go/modules/delegates/delegates.go",
-    "server-go/modules/delegates/plane/client.go",
-    "server-go/modules/delegates/plane/helpers.go",
+    "server-go/modules/delegates/executor.go",
     "server-go/modules/delegates/capabilities.go",
     "server-go/modules/delegates/chain.go",
     "server-go/modules/delegates/paths.go",
@@ -115,7 +114,7 @@
   ],
   "go_tests": [
     "server-go/modules/delegates/delegates_test.go",
-    "server-go/modules/delegates/plane/client_test.go",
+    "server-go/modules/delegates/executor_test.go",
     "server-go/modules/delegates/capabilities_test.go",
     "server-go/modules/delegates/chain_test.go",
     "server-go/modules/delegates/paths_test.go",

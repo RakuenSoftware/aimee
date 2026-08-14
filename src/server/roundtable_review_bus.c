@@ -105,8 +105,8 @@ int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *requ
     *
     * The module declares deliberate and chunk-plan unconditionally, but declares
     * REVIEW only when its process can actually convene a panel -- it needs
-    * AIMEE_HOME for the saved roundtables and an agent resource plane
-    * (AIMEE_AGENT_SERVICE_SOCKET or AIMEE_AGENT_SERVICE_URL) to seat them. When it
+    * AIMEE_HOME for the saved roundtables and a requester attachment to the
+    * delegates module on the event bus. When it
     * cannot, it deliberately leaves the kind undeclared and logs why to its own
     * stdout, so the daemon reports the module as not serving review, which is
     * true. Saying "not attached to the event bus" then names a cause that is
@@ -119,8 +119,8 @@ int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *requ
           conn,
           obs_bus_module_available(AIMEE_ROUNDTABLE_EVENT_DELIBERATE)
               ? "roundtable module is attached but is not serving review: its process could not "
-                "convene a panel. Check AIMEE_HOME and AIMEE_AGENT_SERVICE_SOCKET / "
-                "AIMEE_AGENT_SERVICE_URL on the module process, and its log for "
+                "convene a panel. Check AIMEE_HOME, the delegates module bus grant, and its log "
+                "for "
                 "\"roundtable review stage unavailable\""
               : "roundtable module is not attached to the event bus (it is optional and off by "
                 "default; start the server with AIMEE_MODULE_ROUNDTABLE=1)",

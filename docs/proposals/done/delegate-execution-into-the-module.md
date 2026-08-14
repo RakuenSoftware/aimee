@@ -1,6 +1,6 @@
 # Proposal: Move delegate execution into the delegates module
 
-- **State:** PENDING — decided architecture, port not started.
+- **State:** DONE — Go producer and bus cutover landed.
 - **Date:** 2026-08-10.
 - **Charter roles:** Enforce / Constrain-Verify.
 - **Archived parent:**
@@ -104,3 +104,42 @@ client should canonicalize roles at all.
 That last one is the point of the whole exercise: today the rule is a sentence, and the one
 violation of it was live in the shipping module process. When the check exists with nothing
 in it, the rule stops depending on anyone remembering.
+
+## 6. Outcome
+
+The supervised delegates process now owns the production execution path in Go. Its version-2
+bus request contains only delegate-owned input and a bounded execution timeout; workflow replay,
+work-item, retry, participant and durable-slot state never crosses the wire. Configured CLI agents
+are filtered by their declared roles and personas, then run as direct argv (never through a shell),
+in a process group killed on cancellation. A dedicated re-exec watchdog monitors a producer-held
+pipe, kills the whole group when the module dies, and acts as a subreaper so grandchildren cannot
+survive as orphans. Tool-disabled calls fail closed for adapters that cannot guarantee the
+restriction. Positive turn caps are enforced from the CLIs' streaming JSON events, conservatively
+counting Codex tool continuations when several tools could share one model turn. Because those CLIs
+do not expose a trustworthy live dollar meter, a request carrying a monetary ceiling fails before
+dispatch rather than pretending the ceiling is enforced; roundtable reports that refusal as
+`cost_limit_unsupported` rather than a generic seat failure.
+
+Configured `max_parallel` is enforced at the producer, including grouped roundtable calls. Bus
+admission and local-send failures remain pre-dispatch errors; malformed or lost replies after a
+request reaches the producer carry the dispatched/unknown-cost boundary for caller-side recovery.
+The new CLI producer has no `partial` terminal state and injects no automatic worktree-diff evidence,
+so the caller's `AcceptPartial` and `ProvidedTarget` policy markers remain local and have nothing to
+alter on this wire. The caller's tool-loop cap becomes the producer execution deadline rather than a
+workflow field.
+
+The native Go WFE and roundtable module now attach to event 6657 directly. The old Go HTTP plane,
+its polling lifecycle, and the `AIMEE_AGENT_SERVICE_SOCKET` / `AIMEE_AGENT_SERVICE_URL` wiring are
+removed. Replay identity remains caller-owned as designed: replay-only calls never dispatch, return
+the prior-dispatch billing boundary, and let the workflow engine's durable reservation recovery
+decide whether a new independent call is safe.
+
+`scripts/check_go_module_boundary.py` enforces the module-import rule with an empty allowlist. The
+repository exporter also carries the shared delegate wire contract into isolated Go module builds,
+and the independently exported delegates runtime constructs the same Go executor instead of falling
+back to the legacy role-canonicalization handler.
+
+The C daemon is not removed by this proposal: it still hosts the event bus, mTLS/MCP, the external
+HTTP API, audit tap and credentialed forge adapter. Those are the daemon responsibilities named in
+section 2. What is removed is its role as producer for the native Go WFE and module-to-module
+delegate path; neither path calls a C delegate HTTP endpoint.
