@@ -100,7 +100,8 @@ const (
 type RunResult struct {
 	// Status is StatusApproved, StatusChanges or StatusPending.
 	Status string `json:"status"`
-	// PauseReason names why a pending review stopped: panel_unreachable,
+	// PauseReason names why a pending review stopped: panel_capacity,
+	// panel_capacity_deadline, panel_deadline, panel_unreachable,
 	// roundtable_discussion, roundtable_chairman, request_unimplementable.
 	PauseReason string `json:"pause_reason,omitempty"`
 	Detail      string `json:"detail,omitempty"`

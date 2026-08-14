@@ -1,12 +1,13 @@
 # Proposal: the WFE rt_gate panel cannot seat under the engine's own load
 
-- **State:** DONE — saturation-aware routing delivered and archived 2026-08-04; residual extracted.
+- **State:** DONE — saturation-aware routing archived 2026-08-04; capacity/deadline residual
+  completed in Go 2026-08-14.
 
-> **Archived after partial delivery.** Candidate occupancy now influences group routing and
-> capacity rejections selected by the router are retried as backpressure. Deterministic idle-agent,
-> all-saturated, unreported-occupancy, and retry-race coverage landed. The stronger deadline,
-> backend-health, and repeated-live-run evidence remains in
-> [`wfe-panel-capacity-residual.md`](../pending/wfe-panel-capacity-residual.md).
+> **Completion notice.** Candidate occupancy influences group routing and route-selected admission
+> races retry as backpressure. The completed
+> [`wfe-panel-capacity-residual.md`](wfe-panel-capacity-residual.md) adds typed capacity,
+> capacity-deadline, and execution-deadline states; scheduler retry; authoritative backend-health
+> filtering coverage; and a repeated overlapping-roundtable campaign.
 
 ## Symptom
 
