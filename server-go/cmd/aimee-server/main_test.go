@@ -8,6 +8,19 @@ import (
 	"testing"
 )
 
+func TestConfiguredForgeHandlesURLAndSocketIndependently(t *testing.T) {
+	if forge, err := configuredForge("", "/tmp/aimee-forge.sock"); err != nil || forge == nil {
+		t.Fatalf("socket-only forge = %T, %v", forge, err)
+	}
+	if forge, err := configuredForge("https://forge.invalid", ""); err == nil || forge != nil ||
+		!strings.Contains(err.Error(), "requires a Unix socket") {
+		t.Fatalf("URL-only forge = %T, %v", forge, err)
+	}
+	if forge, err := configuredForge("", ""); err != nil || forge != nil {
+		t.Fatalf("unconfigured forge = %T, %v", forge, err)
+	}
+}
+
 // The WFE is an internal control plane behind an owner-only Unix socket. Keep
 // credential material out of its long-lived argv/environment and do not grow a
 // second TCP authentication surface here.

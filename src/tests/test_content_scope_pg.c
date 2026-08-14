@@ -155,6 +155,23 @@ int main(void)
       {
          refused = 1;
       }
+      /* Two independent reasons to refuse, and the reader one comes first: the
+         content read paths set no aimee.principal today, so enabling would
+         return nothing to everyone rather than hiding unattributed rows. That
+         one holds even on an empty database, which is why it is checked
+         separately from the attribution refusal below. */
+      char marker[64] = "";
+      assert(scalar("SELECT coalesce((SELECT value FROM kb_meta"
+                    "  WHERE key='content_scope_reader_ready'),'0')",
+                    marker, sizeof(marker)) == 0);
+      if (strcmp(marker, "1") != 0)
+      {
+         if (!refused)
+            fprintf(stderr, "kb_content_scope_enable() accepted while readers set no principal\n");
+         assert(refused);
+         printf("  PASS: enabling refuses while the read paths carry no principal\n");
+      }
+
       /* The fixture database has no attributed content, so this must refuse.
          A pass here with an empty kb_documents would prove nothing, so the
          count is checked too. */

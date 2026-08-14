@@ -236,6 +236,11 @@
           "id": 21,
           "name": "delegate-named-file-drift",
           "event_kind": 6677
+        },
+        {
+          "id": 22,
+          "name": "delegate-group-plan",
+          "event_kind": 6678
         }
       ]
     },
@@ -594,7 +599,21 @@
         "server"
       ],
       "request": [
+        6657,
+        6678,
         9474
+      ]
+    },
+    {
+      "id": "roundtable-delegates",
+      "principal_ref": 65,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-roundtable",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        6657,
+        6678
       ]
     }
   ]

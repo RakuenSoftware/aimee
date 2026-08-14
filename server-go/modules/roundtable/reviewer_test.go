@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/modules/delegates/plane"
+	"github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
@@ -45,13 +45,7 @@ func testPresets(t *testing.T, seats int) *panel.Store {
 
 func testReviewer(t *testing.T, seats int) *PanelReviewer {
 	t.Helper()
-	// A client pointed at a loopback address it will never reach: these cases
-	// are decided before any seat is convened.
-	client, err := plane.NewHTTPAgentClient(plane.AgentHTTPConfig{BaseURL: "http://127.0.0.1:1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reviewer, err := NewPanelReviewer(testPresets(t, seats), NewPlaneDelegates(client))
+	reviewer, err := NewPanelReviewer(testPresets(t, seats), &scriptedSeats{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,16 +149,17 @@ func TestSeatFailureCategoriesNameTheTransportCause(t *testing.T) {
 		err  error
 		want string
 	}{
-		{err: plane.ErrDelegateReplayUnavailable, want: "replay_unavailable"},
-		{err: plane.ErrDelegateUnassignedExpired, want: "unassigned_expired"},
-		{err: plane.ErrDelegateTerminal, want: "delegate_terminal"},
+		{err: delegate.ErrDelegateReplayUnavailable, want: "replay_unavailable"},
+		{err: delegate.ErrDelegateCostLimitUnsupported, want: "cost_limit_unsupported"},
+		{err: delegate.ErrDelegateUnassignedExpired, want: "unassigned_expired"},
+		{err: delegate.ErrDelegateTerminal, want: "delegate_terminal"},
 		{err: context.DeadlineExceeded, want: "deadline"},
 	} {
 		if got := seatFailureCategory(tc.err); got != tc.want {
 			t.Fatalf("seatFailureCategory(%v) = %q, want %q", tc.err, got, tc.want)
 		}
 	}
-	result := seatResult("", "", 0, false, plane.ErrDelegateReplayUnavailable)
+	result := seatResult("", "", 0, false, delegate.ErrDelegateReplayUnavailable)
 	if !result.ReplayLost {
 		t.Fatal("a lost replay was not marked, so the caller would park instead of recovering")
 	}

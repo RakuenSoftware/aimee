@@ -19,6 +19,12 @@ manifest, with `delegate-execution-into-the-module.md` as its live residual path
 carried forward unchanged from the prior exhaustive audit; proposals drafted after that snapshot
 remain valid unlisted additions under the manifest checker's dated-snapshot contract.
 
+## Subsequent completion
+
+PR #2645 moved delegate execution, budget exhaustion, and partial-result production into the Go
+delegates module. The successor is now archived in `done/`, so the parent manifest row is complete
+and no longer carries a pending residual.
+
 ## Validation
 
 - `python3 scripts/check-proposal-links.py`
