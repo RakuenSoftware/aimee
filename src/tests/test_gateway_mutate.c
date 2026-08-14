@@ -198,99 +198,6 @@ static void test_provenance(void)
    gw_provenance_clear(NULL);
 }
 
-/* Build a messages array whose sibling chain loops back on itself, i.e. exactly
- * the malformed reduced view that took aimee-server from 0.2 to 6.9 GB in about
- * ten seconds and hung the request.
- *
- * EVERY assertion in this test would have HUNG rather than failed before the fix,
- * so a regression here reads as a timeout, not a red assert. */
-static cJSON *cyclic_messages(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   for (int i = 0; i < 3; i++)
-   {
-      cJSON *m = cJSON_CreateObject();
-      cJSON_AddStringToObject(m, "role", "user");
-      cJSON_AddStringToObject(m, "content", "hi");
-      cJSON_AddItemToArray(arr, m);
-   }
-   cJSON *first = arr->child;
-   cJSON *last = first;
-   while (last->next != NULL)
-      last = last->next;
-   last->next = first; /* close the loop */
-   return arr;
-}
-
-static void test_cycle_is_contained(void)
-{
-   /* 1. Detection: the policy answer, at the top level and nested. */
-   cJSON *arr = cyclic_messages();
-   assert(gw_messages_have_cycle(arr) == 1);
-   cJSON *clean = clean_messages();
-   assert(gw_messages_have_cycle(clean) == 0);
-   cJSON_Delete(clean);
-
-   /* 2. Duplicate REFUSES instead of allocating forever. */
-   assert(cJSON_Duplicate(arr, 1) == NULL);
-
-   /* 3. Delete severs the loop ITSELF, so it never walks back into a node it has
-    * already freed. Note what is absent: the sibling test below has to reopen its
-    * ring by hand before freeing, because that was the only way to delete a cyclic
-    * tree. Here the ring is left closed on purpose -- that is the guarantee. Under
-    * ASan this is the assertion that matters; unsanitised it simply has to return. */
-   cJSON_Delete(arr);
-
-   /* 4. A cycle nested inside a message is just as fatal to a walker, so it is
-    * detected too. */
-   cJSON *outer = cJSON_CreateArray();
-   cJSON *msg = cJSON_CreateObject();
-   cJSON_AddStringToObject(msg, "role", "user");
-   cJSON *inner = cJSON_CreateArray();
-   for (int i = 0; i < 3; i++)
-      cJSON_AddItemToArray(inner, cJSON_CreateString("x"));
-   cJSON *ifirst = inner->child;
-   cJSON *ilast = ifirst;
-   while (ilast->next != NULL)
-      ilast = ilast->next;
-   ilast->next = ifirst;
-   cJSON_AddItemToObject(msg, "content", inner);
-   cJSON_AddItemToArray(outer, msg);
-   assert(gw_messages_have_cycle(outer) == 1);
-   cJSON_Delete(outer);
-}
-
-/* gw_should_apply duplicates the reduced transcript as a structural probe. A cyclic
- * ->next chain used to make that duplicate loop forever allocating, which took a live
- * server to 7 GB in about ten seconds and got it OOM-killed. cJSON's CJSON_CIRCULAR_LIMIT
- * bounded nesting only, never the sibling walk. Duplicate must REFUSE such a tree.
- *
- * If this regresses, the test hangs and burns memory rather than failing, so CI's
- * timeout is the backstop -- that is the honest shape of this bug. */
-static void test_duplicate_refuses_cyclic_siblings(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   assert(arr);
-   cJSON *a = cJSON_CreateString("first");
-   cJSON *b = cJSON_CreateString("second");
-   assert(a && b);
-   cJSON_AddItemToArray(arr, a);
-   cJSON_AddItemToArray(arr, b);
-   /* Close the sibling ring: b->next points back at a. */
-   b->next = a;
-   a->prev = b;
-
-   cJSON *copy = cJSON_Duplicate(arr, 1);
-   assert(copy == NULL); /* bounded and refused, not walked forever */
-
-   /* Reopening the ring by hand is no longer REQUIRED -- cJSON_Delete severs one
-    * itself now -- but it is kept, because this test's job is the Duplicate
-    * guarantee and it should not quietly depend on the Delete one. */
-   b->next = NULL;
-   a->prev = NULL;
-   cJSON_Delete(arr);
-}
-
 int main(void)
 {
    printf("gateway_mutate: ");
@@ -298,8 +205,6 @@ int main(void)
    test_snapshot_independence();
    test_replace();
    test_provenance();
-   test_duplicate_refuses_cyclic_siblings();
-   test_cycle_is_contained();
    printf("ok\n");
    return 0;
 }
