@@ -43,6 +43,7 @@
     "server-go/modules/economizer/recall.go",
     "server-go/modules/economizer/reduce.go",
     "server-go/modules/economizer/register.go",
+    "server-go/modules/economizer/repair.go",
     "server-go/modules/economizer/state.go"
   ],
   "go_tests": [
@@ -57,6 +58,7 @@
     "server-go/modules/economizer/episode_test.go",
     "server-go/modules/economizer/fold_test.go",
     "server-go/modules/economizer/gateway_anthropic_test.go",
+    "server-go/modules/economizer/gateway_decision_test.go",
     "server-go/modules/economizer/gateway_test.go",
     "server-go/modules/economizer/gateway_wire_test.go",
     "server-go/modules/economizer/json_compact_test.go",
@@ -69,6 +71,7 @@
     "server-go/modules/economizer/recall_test.go",
     "server-go/modules/economizer/reduce_test.go",
     "server-go/modules/economizer/register_test.go",
+    "server-go/modules/economizer/repair_test.go",
     "server-go/modules/economizer/state_test.go"
   ],
   "public_headers": [],

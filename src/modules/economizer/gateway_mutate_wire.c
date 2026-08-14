@@ -303,21 +303,19 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
                 mres.reduced_tokens, mres.removed_tokens, mres.folded_msgs, mres.retained_msgs,
                 mres.reused_boundary);
 
-   /* Reuse the pure decision helper by handing it the module's ledger. An
-    * unreachable module is a no-op, not an internal error: the request is
-    * pristine and forwarding it is correct. */
-   gw_reduce_report_t res;
-   memset(&res, 0, sizeof(res));
-   res.messages = reduced;
-   res.mutated = mres.mutated;
-   res.reason = mres.mutated ? GW_REDUCE_REASON_REDUCED : GW_REDUCE_REASON_NONE;
-   res.baseline_tokens = mres.baseline_tokens;
-   res.reduced_tokens = mres.reduced_tokens;
-
-   gw_bypass_reason_t bypass = gw_should_apply(rrc == 0 ? 0 : 1, &res);
-   if (bypass != GW_BYPASS_NONE)
+   /* The verdict is the module's: it holds the reduced array in-process, so it
+    * is the only place the structural check can run without shipping that array
+    * back across the bus to ask about it. The labels are the same ones
+    * gw_bypass_reason_str emits, so the string goes straight to telemetry.
+    *
+    * A module that was not reached returns no verdict, and an absent verdict is
+    * never read as consent: that is the reduce_internal_assertion path, exactly
+    * what gw_should_apply returned for a non-zero rc before. The request is
+    * pristine either way, so forwarding it is correct. */
+   const char *bypass = gw_module_bypass(rrc, mres.bypass);
+   if (strcmp(bypass, gw_bypass_reason_str(GW_BYPASS_NONE)) != 0)
    {
-      gw_stat_inc_reason("hard_bypass", gw_bypass_reason_str(bypass));
+      gw_stat_inc_reason("hard_bypass", bypass);
       gw_provenance_clear(&ctx->st);
       cJSON_Delete(reduced);
       econ_module_result_free(&mres);

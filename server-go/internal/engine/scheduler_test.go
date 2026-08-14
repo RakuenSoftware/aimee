@@ -299,7 +299,7 @@ func waitStarted(t *testing.T, started <-chan string) string {
 	}
 }
 
-func TestSchedulerRecoversRoundtablePhasePausesWithNewExecutionVersion(t *testing.T) {
+func TestSchedulerRecoversRoundtableTransientPausesWithNewExecutionVersion(t *testing.T) {
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, "workflows")
 	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
@@ -323,8 +323,11 @@ func TestSchedulerRecoversRoundtablePhasePausesWithNewExecutionVersion(t *testin
 		t.Fatal(err)
 	}
 	reasons := map[string]string{
-		"wi_discussion": "roundtable_discussion",
-		"wi_chairman":   "roundtable_chairman",
+		"wi_discussion":         "roundtable_discussion",
+		"wi_chairman":           "roundtable_chairman",
+		"wi_capacity":           "panel_capacity",
+		"wi_capacity_deadline":  "panel_capacity_deadline",
+		"wi_execution_deadline": "panel_deadline",
 	}
 	for id := range reasons {
 		if err := artifacts.PutProposal(id, []byte("proposal")); err != nil {
@@ -342,11 +345,15 @@ func TestSchedulerRecoversRoundtablePhasePausesWithNewExecutionVersion(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler := NewScheduler(store, workflowEngine, 2, nil)
+	scheduler := NewScheduler(store, workflowEngine, len(reasons), nil)
+	scheduler.perWorkflow = len(reasons)
 	scheduler.pollEvery = 10 * time.Millisecond
 	scheduler.transientPauses = []transientPause{
 		{reason: "roundtable_discussion", backoff: time.Second},
 		{reason: "roundtable_chairman", backoff: time.Second},
+		{reason: "panel_capacity", backoff: time.Second},
+		{reason: "panel_capacity_deadline", backoff: time.Second},
+		{reason: "panel_deadline", backoff: time.Second},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

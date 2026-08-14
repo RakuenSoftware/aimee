@@ -250,8 +250,8 @@ owner's separate approval; Slice 1 cannot absorb them.
   filesystem, credential, and network boundaries. **Consumed shape here:** none.
 - [Local-first memory and trust patterns](local-first-memory-and-trust-patterns.md) owns
   non-owner trust defaults and semantic retry deduplication. **Consumed shape here:** none.
-- [Config field descriptors](config-field-descriptor-save-residual.md) owns new scalar config
-  plumbing. **Consumed shape here:** none; no field is added.
+- [Config field descriptors](../rejected/config-field-descriptor-save-residual.md) records why new
+  scalar config plumbing remains C-owned. **Consumed shape here:** none; no field is added.
 
 ## 6. Sequencing
 

@@ -1,7 +1,7 @@
 # Pending proposal audit update — 2026-08-13
 
 This incremental reconciliation carries forward the exhaustive 2026-08-04 manifest and records the
-delegate residual changed since that snapshot by this work.
+delegate and WFE panel residuals changed since that snapshot by subsequent work.
 
 ## Closed residual
 
@@ -13,6 +13,17 @@ terminal status. The producer remains in `src/server/server_compute.c` and
 while a new C executor test would deepen the ownership violation under active removal. The
 requirement is preserved on `delegate-execution-into-the-module.md`, where the producer can be
 implemented and proved in Go.
+
+## Subsequent WFE panel completion — 2026-08-14
+
+`wfe-panel-capacity-residual.md` moved from `pending/` to `done/`. The Go delegate module,
+roundtable module, and WFE scheduler now preserve capacity wait, capacity-wait deadline, and delegate
+execution deadline as distinct retryable states. Deterministic coverage includes saturated pools,
+admission races, health invariance, unavailable-local-backend filtering, and ten repeated runs of ten
+overlapping roundtables without generic `panel_unreachable`.
+
+The parent `wfe-panel-cannot-seat-under-self-load.md` is therefore `complete` in the dated manifest
+with no remaining residual path.
 
 The parent `delegate-budget-must-fit-its-stage-cap.md` remains `partial_archived` in the dated
 manifest, with `delegate-execution-into-the-module.md` as its live residual path. All other rows are
