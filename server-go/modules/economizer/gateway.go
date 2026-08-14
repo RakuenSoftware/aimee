@@ -23,6 +23,7 @@ const (
 	GWBypassReduceFormatUnsupported
 	// Gateway-side outcomes.
 	GWBypassNoOp                // nothing changed / not a net shrink / not REDUCED
+	GWBypassSessionDisabled     // the breaker is open for this session
 	GWBypassStructuralViolation // an orphaned tool pair was found
 	GWBypassSnapshotOOM         // a required deep copy failed
 	GWBypassReplaceFailed       // installing the reduced array failed
@@ -36,6 +37,7 @@ var gwBypassNames = map[GWBypassReason]string{
 	GWBypassReduceInternalAssertion: "reduce_internal_assertion",
 	GWBypassReduceFormatUnsupported: "reduce_format_unsupported",
 	GWBypassNoOp:                    "no_op",
+	GWBypassSessionDisabled:         "session_disabled",
 	GWBypassStructuralViolation:     "structural_violation",
 	GWBypassSnapshotOOM:             "snapshot_oom",
 	GWBypassReplaceFailed:           "replace_failed",
@@ -144,6 +146,67 @@ func GWShouldApply(reduceOK bool, res *ReduceResult, err ReduceError, repair Str
 		}
 	}
 	return GWBypassNone
+}
+
+// GWPostDecision is what a caller must do once the upstream status is known.
+//
+// It carries no payload and touches no store, so the same decision serves an
+// in-process caller that owns the request body and a bus caller that only has
+// the status. Restoring the pristine array, tripping the breaker and resending
+// are the CALLER's to perform — this only says which of them are owed.
+type GWPostDecision struct {
+	Action  PostAction
+	Restore bool   // put the pristine array back before doing anything else
+	Disable bool   // trip the session breaker
+	Reason  string // breaker reason, and the label telemetry records
+	Counter string // the counter to increment, "" when there is nothing to record
+}
+
+// GWPostStatus decides what a buffered turn owes after its upstream status.
+//
+// 4xx: the provider rejected the payload we built, so the reduction is the prime
+// suspect — restore the pristine original, trip the breaker and resend ONCE.
+//
+// 5xx: provider state is uncertain, since the request may have been partially
+// processed, so trip the breaker but do NOT resend. Resending after an ambiguous
+// server error risks duplicating work the provider already did.
+//
+// A turn that was never mutated owes nothing: there is no reduction to blame and
+// nothing to restore, so an unrelated provider error must not disable the lever.
+func GWPostStatus(httpStatus int, mutated bool) GWPostDecision {
+	if !mutated {
+		return GWPostDecision{}
+	}
+	switch httpStatus / 100 {
+	case 4:
+		return GWPostDecision{
+			Action: PostResend, Restore: true, Disable: true,
+			Reason: "4xx", Counter: Stat4xxRestoreResend,
+		}
+	case 5:
+		return GWPostDecision{
+			Disable: true, Reason: "5xx", Counter: Stat5xxDisable,
+		}
+	}
+	return GWPostDecision{}
+}
+
+// GWStreamDisable decides what a STREAMING turn owes when it fails after
+// dispatch. Nothing can be restored or resent once bytes have gone to the
+// client, so the breaker is all that is left.
+//
+// Without a session key there is no breaker to trip, and disabling is skipped
+// rather than applied to some other identity's session.
+func GWStreamDisable(mutated, haveKey bool, reason string) GWPostDecision {
+	if !mutated || !haveKey {
+		return GWPostDecision{}
+	}
+	if reason == "" {
+		reason = "stream"
+	}
+	return GWPostDecision{
+		Disable: true, Reason: reason, Counter: StatStreamErrorDisable,
+	}
 }
 
 // GWReplaceMessages installs the reduced array under key.

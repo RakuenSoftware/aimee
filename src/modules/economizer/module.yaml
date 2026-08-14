@@ -17,6 +17,7 @@
     "src/modules/economizer/gateway_mutate_wire.c"
   ],
   "go_sources": [
+    "server-go/modules/economizer/breaker.go",
     "server-go/modules/economizer/budget.go",
     "server-go/modules/economizer/cjson.go",
     "server-go/modules/economizer/closet.go",
@@ -47,6 +48,7 @@
     "server-go/modules/economizer/state.go"
   ],
   "go_tests": [
+    "server-go/modules/economizer/breaker_test.go",
     "server-go/modules/economizer/budget_test.go",
     "server-go/modules/economizer/cjson_test.go",
     "server-go/modules/economizer/closet_test.go",
