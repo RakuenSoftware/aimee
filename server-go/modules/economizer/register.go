@@ -2,9 +2,8 @@
 // assembled prompt before it goes to a provider, and the accounting that says
 // what that saved.
 //
-// Ported from src/modules/economizer. The C implementation is the behavioural
-// reference; every test here is carried over one-for-one from the C suite so the
-// port is pinned to the behaviour it replaces.
+// Ported from the retired C implementation. Its tests were carried over
+// one-for-one so the Go owner stays pinned to the behaviour it replaced.
 package economizer
 
 import "strings"

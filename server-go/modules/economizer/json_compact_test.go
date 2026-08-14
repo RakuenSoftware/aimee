@@ -7,8 +7,8 @@ import (
 
 // DIFFERENTIAL test against econ_json_compact.
 //
-// Each row is the verbatim result/output the C produced, captured by compiling
-// economizer_json.c against a throwaway harness. The REFUSALS matter as much as
+// Each row is the verbatim result/output captured from the retired C
+// economizer_json implementation before its removal. The REFUSALS matter as much as
 // the successes: this compactor runs over authenticated tool output, so its
 // acceptance set is a security surface, not a convenience.
 func TestJSONCompactMatchesC(t *testing.T) {

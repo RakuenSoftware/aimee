@@ -103,7 +103,7 @@ static int agent_delegation_stopped(char *buf, size_t bufsz)
 }
 
 /* Apply the SAFE contract at the authenticated local-tool completion boundary.
- * The result has not crossed a provider boundary yet. econ_json_compact removes
+ * The result has not crossed a provider boundary yet. The Go economizer removes
  * only RFC 8259 whitespace outside strings and succeeds only when strictly
  * shorter; malformed/non-JSON output remains byte-identical. */
 static char *agent_economize_fresh_tool_result(char *result)
@@ -117,7 +117,7 @@ static char *agent_economize_fresh_tool_result(char *result)
 
    uint8_t *compacted = NULL;
    size_t compacted_len = 0;
-   if (econ_json_compact(result, strlen(result), &compacted, &compacted_len) != ECON_JSON_OK)
+   if (econ_module_json_compact(result, strlen(result), &compacted, &compacted_len) != 0)
       return result;
    (void)compacted_len; /* output is NUL-terminated for the existing tool-result surface */
    free(result);

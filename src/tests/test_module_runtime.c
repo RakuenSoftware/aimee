@@ -23,6 +23,7 @@
 #include <aimee/skills/module_api.h>
 #include <aimee/tools/module_api.h>
 #include <aimee/workspace/module_api.h>
+#include "economizer_module_client.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -202,6 +203,18 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       served[0] = AIMEE_SANDBOX_EVENT_OBSERVE;
       served[1] = AIMEE_SANDBOX_EVENT_LOAD;
       *serve_count = 2;
+      return 0;
+   }
+   else if (strcmp(name, "economizer") == 0)
+   {
+      *kind = AIMEE_ECONOMIZER_EVENT_JSON_COMPACT;
+      *principal_ref = 27;
+      served[0] = AIMEE_ECONOMIZER_EVENT_REDUCE;
+      served[1] = AIMEE_ECONOMIZER_EVENT_JSON_COMPACT;
+      served[2] = AIMEE_ECONOMIZER_EVENT_TOOL_RECALL;
+      served[3] = AIMEE_ECONOMIZER_EVENT_TOOL_STATS;
+      served[4] = AIMEE_ECONOMIZER_EVENT_RECORD_BUILD;
+      *serve_count = 5;
       return 0;
    }
    else
@@ -576,6 +589,34 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(response_len > 0 && response_len < sizeof(response));
       response[response_len] = '\0';
       assert(strstr((const char *)response, "tree") != NULL);
+   }
+   else if (strcmp(name, "economizer") == 0)
+   {
+      static const uint8_t expected[] = {'J', 'C', 'M', 'P', 1, 0, 0, 0, 2, 0, 0, 0, '{', '}'};
+      const char input[] = " { } ";
+      assert(aimee_module_client_call(client, kind, AIMEE_ECONOMIZER_STAGE_JSON_COMPACT, 2019, 0,
+                                      input, sizeof(input) - 1, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len == sizeof(expected) && memcmp(response, expected, sizeof(expected)) == 0);
+
+      assert(aimee_module_client_call(client, AIMEE_ECONOMIZER_EVENT_TOOL_STATS,
+                                      AIMEE_ECONOMIZER_STAGE_TOOL_STATS, 2020, 0, NULL, 0, response,
+                                      sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len == 72 && memcmp(response, "TSTA\1\0\0\0", 8) == 0);
+
+      const char record_request[] =
+          "{\"messages\":[{\"role\":\"assistant\",\"content\":\"[done] changed "
+          "src/server/session_compact.c\"}],\"start\":0,\"end\":1}";
+      assert(aimee_module_client_call(client, AIMEE_ECONOMIZER_EVENT_RECORD_BUILD,
+                                      AIMEE_ECONOMIZER_STAGE_RECORD_BUILD, 2021, 0, record_request,
+                                      sizeof(record_request) - 1, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len > 0 && response_len < sizeof(response));
+      response[response_len] = '\0';
+      assert(strstr((const char *)response, "src/server/session_compact.c") != NULL);
+      assert(strstr((const char *)response, "decisions_made") != NULL);
+      assert(strstr((const char *)response, "[done] changed") != NULL);
    }
    else
    {
