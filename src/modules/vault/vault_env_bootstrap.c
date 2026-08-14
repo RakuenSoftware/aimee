@@ -21,6 +21,9 @@
 #define ENV_OVERWRITE_CONTROL "AIMEE_VAULT_ENV_OVERWRITE"
 #define WEBCHAT_SECRET_MAX    (64 * 1024)
 #define WEBCHAT_AGENT         "webchat-login"
+/* Mirrors GIT_FORGE_VAULT_AGENT. Spelled out rather than included so this
+ * first-boot module keeps no link dependency on the git modules. */
+#define GIT_FORGE_AGENT       "git"
 
 static int span_has_suffix(const char *name, size_t name_len, const char *suffix)
 {
@@ -339,6 +342,38 @@ int vault_env_seal_webchat_record(const char *record_name)
    {
       value[len] = '\0';
       rc = vault_service_set_server(WEBCHAT_AGENT, record_name, value) == VAULT_OK ? 0 : -1;
+   }
+   OPENSSL_cleanse(value, WEBCHAT_SECRET_MAX + 1);
+   free(value);
+   return rc;
+}
+
+int vault_env_seal_forge_credential(const char *cred_name)
+{
+   /* Closed allowlist, like the webchat seal. These are exactly the two
+    * credentials git_forge_vault.c reads back out of the server principal. */
+   if (!cred_name ||
+       (strcmp(cred_name, "forge_token") != 0 && strcmp(cred_name, "ssh_key") != 0))
+      return -1;
+
+   char *value = calloc(1, WEBCHAT_SECRET_MAX + 1);
+   if (!value)
+      return -1;
+   size_t len = fread(value, 1, WEBCHAT_SECRET_MAX + 1, stdin);
+   int rc = -1;
+   if (len > 0 && len <= WEBCHAT_SECRET_MAX && feof(stdin))
+   {
+      value[len] = '\0';
+      /* A token is a single line, and `echo $TOK |` appends a newline that would
+       * otherwise be sealed verbatim and corrupt every Authorization header
+       * built from it. Trailing whitespace is never part of a forge token, so
+       * strip it here rather than making every caller remember -n. An SSH key
+       * keeps its interior newlines; only the trailing ones go. */
+      while (len > 0 && (value[len - 1] == '\n' || value[len - 1] == '\r' ||
+                         value[len - 1] == ' ' || value[len - 1] == '\t'))
+         value[--len] = '\0';
+      if (len > 0)
+         rc = vault_service_set_server(GIT_FORGE_AGENT, cred_name, value) == VAULT_OK ? 0 : -1;
    }
    OPENSSL_cleanse(value, WEBCHAT_SECRET_MAX + 1);
    free(value);
