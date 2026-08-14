@@ -3,6 +3,7 @@ package roundtable
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -153,6 +154,7 @@ func TestSeatFailureCategoriesNameTheTransportCause(t *testing.T) {
 		{err: delegate.ErrDelegateCostLimitUnsupported, want: "cost_limit_unsupported"},
 		{err: delegate.ErrDelegateUnassignedExpired, want: "unassigned_expired"},
 		{err: delegate.ErrDelegateTerminal, want: "delegate_terminal"},
+		{err: errors.Join(delegate.ErrDelegateCapacityDeadline, context.DeadlineExceeded), want: "capacity_deadline"},
 		{err: context.DeadlineExceeded, want: "deadline"},
 	} {
 		if got := seatFailureCategory(tc.err); got != tc.want {

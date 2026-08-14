@@ -65,6 +65,6 @@ user-selectable-fusion-surface-residual.md	pending_accurate	docs/proposals/pendi
 v1-stability-and-distributed-validation.md	pending_accurate	docs/proposals/pending/v1-stability-and-distributed-validation.md	-	no	PENDING_AUDIT_2026-08-04.md	user-directed-audit-2026-08-04
 web-search-fanout-resilience-accounting.md	pending_accurate	docs/proposals/pending/web-search-fanout-resilience-accounting.md	-	yes	PENDING_AUDIT_2026-08-04.md	user-directed-audit-2026-08-04
 webchat-project-lifecycle.md	pending_accurate	docs/proposals/pending/webchat-project-lifecycle.md	-	no	PENDING_AUDIT_2026-08-04.md	user-directed-audit-2026-08-04
-wfe-panel-cannot-seat-under-self-load.md	partial_archived	docs/proposals/done/wfe-panel-cannot-seat-under-self-load.md	docs/proposals/pending/wfe-panel-capacity-residual.md	archive_notice	PENDING_AUDIT_2026-08-04.md	user-directed-audit-2026-08-04
+wfe-panel-cannot-seat-under-self-load.md	complete	docs/proposals/done/wfe-panel-cannot-seat-under-self-load.md	-	archive_notice	PENDING_AUDIT_2026-08-04.md	wfe-panel-capacity-go-2026-08-14
 wfe-slices-conflict-on-shared-file.md	complete	docs/proposals/done/wfe-slices-conflict-on-shared-file.md	-	archive_notice	PENDING_AUDIT_2026-08-04.md	wfe-sibling-freeze-pr-2648
 wizard-first-user-bootstrap.md	complete	docs/proposals/done/wizard-first-user-bootstrap.md	-	archive_notice	PENDING_AUDIT_2026-08-04.md	user-directed-audit-2026-08-04

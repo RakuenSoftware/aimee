@@ -70,7 +70,20 @@ func NewHandler(executor Executor) bus.ModuleHandler {
 			ctx, cancel := cancelledContext(invocation.Cancelled)
 			defer cancel()
 			models, err := planner.PlanGroup(ctx, decoded.Seats)
-			if err != nil || len(models) != len(decoded.Seats) {
+			if err != nil {
+				if !delegatecontract.IsCapacityBackpressure(err) && !delegatecontract.IsCapacityDeadline(err) {
+					return nil, bus.ModuleStatusInternal
+				}
+				response, marshalErr := json.Marshal(delegatecontract.GroupPlanResult{
+					Version: delegatecontract.WireVersion,
+					Error:   delegatecontract.SafeDiagnostic(err.Error()),
+				})
+				if marshalErr != nil {
+					return nil, bus.ModuleStatusInternal
+				}
+				return response, bus.ModuleStatusOK
+			}
+			if len(models) != len(decoded.Seats) {
 				return nil, bus.ModuleStatusInternal
 			}
 			for _, model := range models {

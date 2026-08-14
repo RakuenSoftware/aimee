@@ -21,6 +21,7 @@ var (
 	ErrDelegateCancelUnacknowledged = delegate.ErrDelegateCancelUnacknowledged
 	ErrDelegateTerminal             = delegate.ErrDelegateTerminal
 	ErrDelegateReplayUnavailable    = delegate.ErrDelegateReplayUnavailable
+	ErrDelegateCapacityDeadline     = delegate.ErrDelegateCapacityDeadline
 
 	safeDiagnostic         = delegate.SafeDiagnostic
 	isCapacityBackpressure = delegate.IsCapacityBackpressure
