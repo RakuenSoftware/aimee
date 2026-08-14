@@ -23,6 +23,8 @@
  *  5. Tenant and maintenance scopes do not outlive their transactions. Their
  *     GUCs live on a POOLED connection, so a leak there is one tenant reading another's rows
  *     rather than merely a stale value.
+ *  6. The re-embed worker completes its post-embed payload read and vector write
+ *     under a fresh exact-project scope, without crossing into a sibling project.
  *
  * WHAT IS NOT HERE: whether a member sees their own project and a stranger does
  * not. That is an end-to-end reader check rather than this DB boundary check.
@@ -383,7 +385,7 @@ int main(void)
       assert(db2_maintenance_scope_begin_current() == 0);
       db2_maintenance_job_leave();
 
-      /* Seed one unembedded chunk while the policies are still inert. The
+      /* Seed selected and sibling unembedded chunks while the policies are inert. The
        * backfill discovers it under one maintenance transaction, drops the DB
        * lease for the embedder round-trip, then must open a fresh scope to
        * rebuild its payload from kb_documents and write kb_embeddings. */
@@ -394,6 +396,13 @@ int main(void)
       assert(exec_sql("DELETE FROM kb_documents"
                       " WHERE project='scope-maintenance-a'"
                       " AND file_path='scope-maintenance-reembed.md'") == 0);
+      assert(exec_sql("DELETE FROM kb_embeddings WHERE point_id IN ("
+                      "SELECT id FROM kb_documents"
+                      " WHERE project='scope-maintenance-b'"
+                      " AND file_path='scope-maintenance-sibling.md')") == 0);
+      assert(exec_sql("DELETE FROM kb_documents"
+                      " WHERE project='scope-maintenance-b'"
+                      " AND file_path='scope-maintenance-sibling.md'") == 0);
       char reembed_doc[64] = "";
       assert(scalar("INSERT INTO kb_documents"
                     " (project,generation,file_path,file_hash,chunk_index,heading_path,"
@@ -403,6 +412,15 @@ int main(void)
                     "  'project scoped re-embedding proof',5"
                     " FROM projects WHERE name='scope-maintenance-a' RETURNING id",
                     reembed_doc, sizeof(reembed_doc)) == 0);
+      char sibling_doc[64] = "";
+      assert(scalar("INSERT INTO kb_documents"
+                    " (project,generation,file_path,file_hash,chunk_index,heading_path,"
+                    "  line_start,line_end,content,token_count)"
+                    " SELECT name,current_generation,'scope-maintenance-sibling.md',"
+                    "  'sibling-hash',0,'Sibling scope',1,1,"
+                    "  'must remain outside the selected project',6"
+                    " FROM projects WHERE name='scope-maintenance-b' RETURNING id",
+                    sibling_doc, sizeof(sibling_doc)) == 0);
 
       assert(exec_sql("ALTER TABLE kb_documents ENABLE ROW LEVEL SECURITY") == 0);
       assert(exec_sql("ALTER TABLE kb_documents FORCE ROW LEVEL SECURITY") == 0);
@@ -416,13 +434,21 @@ int main(void)
 
       assert(db2_maintenance_job_enter(DB2_MAINTENANCE_REEMBED, "scope-maintenance-a") == 0);
       assert(kb_doc_embed_backfill("scope-maintenance-a", MEMORY_EMBED_TEST_FIXTURE, 1) == 1);
-      db2_maintenance_job_leave();
+      assert(db2_maintenance_scope_begin_current() == 1);
       snprintf(sql, sizeof(sql),
-               "SELECT count(*) FROM kb_embeddings"
-               " WHERE point_id=%s AND project='scope-maintenance-a'",
-               reembed_doc);
-      expect(sql, "1");
+               "SELECT CASE WHEN e.project='scope-maintenance-a' AND p.kb_project=%s"
+               " THEN 'bound' ELSE 'wrong' END"
+               " FROM kb_embeddings e JOIN kb_documents d ON d.id=e.point_id"
+               " JOIN projects p ON p.name=d.project WHERE e.point_id=%s",
+               project_a, reembed_doc);
+      expect(sql, "bound");
+      assert(db2_maintenance_scope_commit() == 0);
+      snprintf(sql, sizeof(sql), "SELECT count(*) FROM kb_embeddings WHERE point_id=%s",
+               sibling_doc);
+      expect(sql, "0");
+      db2_maintenance_job_leave();
       printf("  PASS: re-embed reapplies exact-project scope after the embedder round-trip\n");
+      printf("  PASS: re-embed cannot cross into an unselected sibling chunk\n");
 
       assert(exec_sql("ALTER TABLE kb_documents NO FORCE ROW LEVEL SECURITY") == 0);
       assert(exec_sql("ALTER TABLE kb_documents DISABLE ROW LEVEL SECURITY") == 0);
