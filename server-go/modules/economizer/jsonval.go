@@ -63,6 +63,52 @@ func (v *JSONValue) Append(item *JSONValue) {
 	v.Items = append(v.Items, item)
 }
 
+// Insert places item at index i of an array, shifting the rest right. An i at or
+// past the end appends; a negative i prepends.
+//
+// This is the slice equivalent of the pointer splice the C repair did by hand
+// (tool_msg->next/prev rewiring around an insertion point). That splice is where
+// a malformed ->next chain could be introduced by a single missed assignment;
+// here the invariant is the slice's own.
+func (v *JSONValue) Insert(i int, item *JSONValue) {
+	if v == nil || v.Kind != JSONArray {
+		return
+	}
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(v.Items) {
+		v.Items = append(v.Items, item)
+		return
+	}
+	v.Items = append(v.Items, nil)
+	copy(v.Items[i+1:], v.Items[i:])
+	v.Items[i] = item
+}
+
+// RemoveAt drops array element i. Out-of-range is a no-op.
+func (v *JSONValue) RemoveAt(i int) {
+	if v == nil || v.Kind != JSONArray || i < 0 || i >= len(v.Items) {
+		return
+	}
+	v.Items = append(v.Items[:i], v.Items[i+1:]...)
+}
+
+// Delete removes key from an object, preserving the order of the rest. Mirrors
+// cJSON_DeleteItemFromObjectCaseSensitive.
+func (v *JSONValue) Delete(key string) {
+	if v == nil || v.Kind != JSONObject {
+		return
+	}
+	for i, k := range v.Keys {
+		if k == key {
+			v.Keys = append(v.Keys[:i], v.Keys[i+1:]...)
+			v.Vals = append(v.Vals[:i], v.Vals[i+1:]...)
+			return
+		}
+	}
+}
+
 // Len is the element count for an array, or the key count for an object.
 func (v *JSONValue) Len() int {
 	if v == nil {
