@@ -1485,7 +1485,11 @@ func normalizeRoundtableStage(raw string) (string, bool) {
 }
 
 func panelFailureCategory(err error, transport bool) string {
+	// Typed deadlines intentionally unwrap to context.DeadlineExceeded, so their
+	// specific sentinels must stay ahead of the generic deadline branch.
 	switch {
+	case errors.Is(err, ErrDelegateCapacityDeadline):
+		return "capacity_deadline"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "deadline"
 	case errors.Is(err, ErrDelegateReplayUnavailable):

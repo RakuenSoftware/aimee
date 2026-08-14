@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PROPOSALS = ROOT / "docs/proposals"
 MANIFEST_RE = re.compile(r"^PENDING_AUDIT_\d{4}-\d{2}-\d{2}\.tsv$")
-ALLOWED = {"complete", "partial_archived", "pending_accurate", "pending_regressed"}
+ALLOWED = {"complete", "partial_archived", "rejected", "pending_accurate", "pending_regressed"}
 
 
 def fail(message: str) -> None:
@@ -65,6 +65,9 @@ def main() -> int:
                 or "archiv" not in text.lower()
             ):
                 fail(f"{name}: archived proposal lacks done state/archive notice")
+        elif disposition == "rejected":
+            if final.parent.name != "rejected" or "**state:** rejected" not in text.lower():
+                fail(f"{name}: rejected proposal lacks rejected state/folder")
         else:
             if final.parent.name != "pending":
                 fail(f"{name}: live proposal is not in pending")

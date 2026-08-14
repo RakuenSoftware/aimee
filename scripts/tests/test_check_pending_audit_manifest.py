@@ -24,6 +24,7 @@ class PendingAuditManifestTests(unittest.TestCase):
         self.proposals = self.root / "docs/proposals"
         (self.proposals / "pending").mkdir(parents=True)
         (self.proposals / "done").mkdir()
+        (self.proposals / "rejected").mkdir()
         self.old_root = checker.ROOT
         self.old_proposals = checker.PROPOSALS
         checker.ROOT = self.root
@@ -89,6 +90,23 @@ class PendingAuditManifestTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "final path does not exist"):
             checker.main()
+
+    def test_rejected_proposal_is_a_terminal_audit_disposition(self) -> None:
+        anchor = "PENDING_AUDIT_2026-08-04.md"
+        (self.proposals / anchor).write_text("# evidence\n", encoding="utf-8")
+        (self.proposals / "rejected/current.md").write_text(
+            "# Current\n\n- **State:** REJECTED — archived.\n", encoding="utf-8"
+        )
+        manifest = (
+            "original\tdisposition\tfinal_path\tresidual_path\tstale_updated\t"
+            "evidence_anchor\treview_record\n"
+            f"current.md\trejected\tdocs/proposals/rejected/current.md\t-\tarchive_notice\t"
+            f"{anchor}\treview-rejected\n"
+        )
+        (self.proposals / "PENDING_AUDIT_2026-08-04.tsv").write_text(
+            manifest, encoding="utf-8"
+        )
+        self.assertEqual(checker.main(), 0)
 
     # Same defect, reached the other way: the row's own final_path still resolves,
     # but a DIFFERENT row's residual is gone from pending/.

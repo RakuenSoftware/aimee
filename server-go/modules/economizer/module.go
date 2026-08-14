@@ -80,6 +80,15 @@ type ReduceResponse struct {
 	Mutated  bool            `json:"mutated"`
 	Reason   string          `json:"reason"`
 
+	// Bypass is the gateway seam's apply/bypass verdict, set ONLY for
+	// seam=gateway. Empty on the delegate seam, which has no such decision.
+	//
+	// The decision is made here rather than by the caller because the structural
+	// check it depends on needs the reduced array, and this is the only place
+	// that array exists without being serialized across the bus a second time.
+	// "none" means apply; anything else is a hard bypass and names the reason.
+	Bypass string `json:"bypass,omitempty"`
+
 	BaselineTokens int `json:"baseline_tokens"`
 	ReducedTokens  int `json:"reduced_tokens"`
 	RemovedTokens  int `json:"removed_tokens"`
@@ -214,6 +223,13 @@ func handleReduce(req *ReduceRequest) ([]byte, bus.ModuleStatus) {
 		ClosetEvicted:  out.ClosetEvict == EvictFail,
 		RecallHint:     out.RecallHint,
 		RecallSurfaced: out.RecallSurfaced,
+	}
+	if seam == SeamGateway {
+		// MessageHistoryRepair is passed explicitly: GWShouldApply SKIPS the
+		// structural check when the port is nil, and skipping it is how an
+		// orphaned tool pair reaches a provider. The reduction itself succeeded
+		// to reach this point, so the error argument is ReduceErrNone.
+		resp.Bypass = GWShouldApply(true, &out, ReduceErrNone, MessageHistoryRepair).String()
 	}
 	if out.Mutated && out.Messages != nil {
 		// Emitted with the cJSON-compatible printer, so the bytes the caller

@@ -47,9 +47,11 @@
     "server-go/modules/roundtable/roundtable.go"
   ],
   "go_tests": [
+    "server-go/modules/roundtable/capacity_integration_test.go",
     "server-go/modules/roundtable/chunk_test.go",
     "server-go/modules/roundtable/panel/analysis_test.go",
     "server-go/modules/roundtable/panel/artifact_test.go",
+    "server-go/modules/roundtable/panel/capacity_test.go",
     "server-go/modules/roundtable/panel/chairman_test.go",
     "server-go/modules/roundtable/panel/convene_request_test.go",
     "server-go/modules/roundtable/panel/discussion_test.go",
