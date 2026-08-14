@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/internal/api"
 	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
@@ -24,6 +25,20 @@ import (
 	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
 	"github.com/JBailes/aimee/server-go/modules/workflows"
 )
+
+func configuredForge(url, socket string) (engine.Forge, error) {
+	if url == "" && socket == "" {
+		return nil, nil
+	}
+	// Forge credentials remain behind the owner-only Unix resource plane. A URL
+	// without its socket is invalid configuration, not a reason to silently run
+	// the native workflow engine without forge support.
+	forge, err := engine.NewHTTPForge(engine.HTTPForgeConfig{BaseURL: url, UnixSocket: socket})
+	if err != nil {
+		return nil, err
+	}
+	return forge, nil
+}
 
 func main() {
 	homeDefault := os.Getenv("AIMEE_HOME")
@@ -41,10 +56,10 @@ func main() {
 		"typed WFE runner endpoint; empty keeps execution disabled")
 	runnerSocket := flag.String("runner-socket", os.Getenv("AIMEE_WFE_RUNNER_SOCKET"),
 		"optional Unix socket for the typed WFE runner")
-	agentURL := flag.String("agent-service-url", os.Getenv("AIMEE_AGENT_SERVICE_URL"),
-		"agent resource-plane base URL used by the native Go WFE runner")
-	agentSocket := flag.String("agent-service-socket", os.Getenv("AIMEE_AGENT_SERVICE_SOCKET"),
-		"agent resource-plane Unix socket used by the native Go WFE runner")
+	forgeURL := flag.String("forge-service-url", os.Getenv("AIMEE_FORGE_SERVICE_URL"),
+		"legacy forge resource-plane base URL")
+	forgeSocket := flag.String("forge-service-socket", os.Getenv("AIMEE_FORGE_SERVICE_SOCKET"),
+		"legacy forge resource-plane Unix socket")
 	workflowDir := flag.String("workflow-dir", "", "workflow definition directory")
 	moduleBusSocket := flag.String("module-bus-socket", os.Getenv("AIMEE_MODULE_BUS_SOCKET"),
 		"daemon module bus socket; reviews are requested over it")
@@ -93,7 +108,6 @@ func main() {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
 	var runner engine.Runner
-	var agentClient *engine.HTTPAgentClient
 	var worktreeManager *engine.WorktreeManager
 	if *runnerURL != "" {
 		runner, err = engine.NewHTTPRunner(engine.HTTPRunnerConfig{
@@ -102,17 +116,21 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-	} else if *agentURL != "" || *agentSocket != "" {
-		agents, clientErr := engine.NewHTTPAgentClient(engine.AgentHTTPConfig{
-			BaseURL: *agentURL, UnixSocket: *agentSocket,
-			PendingTimeoutSource: func() time.Duration {
-				return time.Duration(configStore.Int("autonomy.delegate_pending_secs", 120)) * time.Second
-			},
-		})
+	} else if *moduleBusSocket != "" {
+		attached, clientErr := bus.ConnectClient(rootCtx, *moduleBusSocket,
+			engine.BusPrincipalClass, engine.WFEBusPrincipalRef)
 		if clientErr != nil {
 			log.Fatal(clientErr)
 		}
-		agentClient = agents
+		defer attached.Detach()
+		caller, clientErr := bus.NewConcurrentModuleCaller(rootCtx, attached)
+		if clientErr != nil {
+			log.Fatal(clientErr)
+		}
+		agents, clientErr := delegatecontract.NewBusClient(caller, 0)
+		if clientErr != nil {
+			log.Fatal(clientErr)
+		}
 		worktrees, worktreeErr := engine.NewWorktreeManager(store, filepath.Join(*home, "wfe-worktrees"))
 		if worktreeErr != nil {
 			log.Fatal(worktreeErr)
@@ -122,9 +140,7 @@ func main() {
 		if registryErr != nil {
 			log.Fatal(registryErr)
 		}
-		forge, forgeErr := engine.NewHTTPForge(engine.HTTPForgeConfig{
-			BaseURL: *agentURL, UnixSocket: *agentSocket,
-		})
+		forge, forgeErr := configuredForge(*forgeURL, *forgeSocket)
 		if forgeErr != nil {
 			log.Fatal(forgeErr)
 		}
@@ -175,12 +191,6 @@ func main() {
 			log.Fatal(err)
 		}
 		scheduler := engine.NewScheduler(store, workflowEngine, *concurrency, nil)
-		if agentClient != nil {
-			// The plane client holds no database handle, so the terminal sweep --
-			// which reads the Go-owned lifecycle tables -- composes it with the store
-			// here instead of the client carrying one.
-			scheduler.SetTerminalCancellation(engine.NewTerminalJobCanceller(store, agentClient).CancelTerminalJobs)
-		}
 		var liveMu sync.Mutex
 		lastConcurrency := *concurrency
 		lastPolicy := engine.RunPolicy{MaxTurns: 300, MaxWall: 1800 * time.Second, AutoResumeWall: true, MaxResumes: 50}
