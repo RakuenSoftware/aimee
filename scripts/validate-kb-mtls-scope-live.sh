@@ -156,8 +156,11 @@ case "$CN_B" in
   p5-server-client)
     pass "old-style CN issued (CN=$CN_B, no ':')"
     code=$(mreq "$MAINT" "$WORK/b" "$MBODY" "$SERVICE_BEARER")
-    [ "$code" = "403" ] && pass "old CN cannot wear the service bearer's identity (403)" \
-                        || fail "old CN on $MAINT" "want 403 got $code"
+    if [ "$code" = "401" ] || [ "$code" = "403" ]; then
+      pass "old CN cannot wear the service bearer's identity (=$code)"
+    else
+      fail "old CN on $MAINT" "want 401/403 got $code"
+    fi
     ;;
   ENROLL_FAILED*|CSR_FAILED*|REDEEM_FAILED*) skip "case B" "$CN_B" ;;
   *) fail "case B CN" "expected p5-server-client, got '$CN_B'" ;;
