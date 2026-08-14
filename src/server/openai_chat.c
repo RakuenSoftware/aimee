@@ -1231,6 +1231,17 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    int http_status = http_retry_post_context_bytes(url, auth_header, wire_body.data, wire_body.len,
                                                    &response_body, agent->timeout_ms, extra_headers,
                                                    ra, rb, rm, agent->provider, agent->model, NULL);
+   /* The gateway safety net, before mbox is released: it holds the array the
+    * restore writes back into. The module decides and trips its breaker, so a
+    * reduction the provider rejects stops repeating on later turns. The single
+    * resend of THIS turn is not wired here either -- same reason as the Anthropic
+    * buffered path: the wire body is built once above. */
+   if (gw_buffered_after_status(mbox, "input", http_status, &gwmc) == GW_POST_RESEND)
+      aimee_log(LOG_INFO, "economizer.gateway",
+                "seam=gateway upstream=%d restored to pristine and breaker tripped; the "
+                "single resend of this turn is not wired yet",
+                http_status);
+
    free(body);
    wire_fence_destroy(wire_snapshot);
 

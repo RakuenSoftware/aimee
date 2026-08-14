@@ -203,6 +203,8 @@ int econ_module_reduce(const cJSON *messages, const char *system_prompt, econ_mo
       cJSON_AddStringToObject(payload, "closet_denylist", req->closet_denylist);
 
    add_int(payload, "turn", req->turn);
+   if (req->session_key && req->session_key[0])
+      cJSON_AddStringToObject(payload, "session_key", req->session_key);
    if (req->state && req->state[0])
       cJSON_AddStringToObject(payload, "state", req->state);
 
@@ -458,4 +460,49 @@ cJSON *econ_module_record_build(const cJSON *messages, int start_idx, int end_id
    record = cJSON_DetachItemFromObjectCaseSensitive(reply, "record");
    cJSON_Delete(reply);
    return record;
+}
+
+int econ_module_post_status(const char *session_key, int http_status, int mutated, int have_key,
+                            int ttl_ms, const char *stream_reason,
+                            econ_module_post_status_t *out)
+{
+   if (!out)
+      return 1;
+   memset(out, 0, sizeof(*out));
+
+   cJSON *payload = cJSON_CreateObject();
+   if (!payload)
+      return 1;
+   cJSON_AddStringToObject(payload, "session_key", session_key ? session_key : "");
+   cJSON_AddNumberToObject(payload, "http_status", http_status);
+   cJSON_AddBoolToObject(payload, "mutated", mutated ? 1 : 0);
+   cJSON_AddBoolToObject(payload, "have_key", have_key ? 1 : 0);
+   cJSON_AddNumberToObject(payload, "ttl_ms", ttl_ms);
+   if (stream_reason && stream_reason[0])
+      cJSON_AddStringToObject(payload, "stream_reason", stream_reason);
+
+   cJSON *reply = aimee_module_json_call(AIMEE_ECONOMIZER_EVENT_POST_STATUS,
+                                         AIMEE_ECONOMIZER_STAGE_POST_STATUS, payload,
+                                         ECON_MODULE_CALL_MAX_BODY, ECON_MODULE_CALL_TIMEOUT_MS,
+                                         NULL);
+   /* The JSON-call helper has deleted payload. */
+   if (!reply)
+      return 1; /* out stays zeroed: nothing owed, nothing claimed */
+
+   const cJSON *v = cJSON_GetObjectItemCaseSensitive(reply, "action");
+   /* Only the module's explicit "resend" earns a resend. An absent or unexpected
+    * action is not consent to send the request a second time. */
+   if (cJSON_IsString(v) && v->valuestring && strcmp(v->valuestring, "resend") == 0)
+      out->resend = 1;
+   if ((v = cJSON_GetObjectItemCaseSensitive(reply, "restore")) && cJSON_IsBool(v))
+      out->restore = cJSON_IsTrue(v) ? 1 : 0;
+   if ((v = cJSON_GetObjectItemCaseSensitive(reply, "disabled")) && cJSON_IsBool(v))
+      out->disabled = cJSON_IsTrue(v) ? 1 : 0;
+   if ((v = cJSON_GetObjectItemCaseSensitive(reply, "reason")) && cJSON_IsString(v))
+      snprintf(out->reason, sizeof(out->reason), "%s", v->valuestring);
+   if ((v = cJSON_GetObjectItemCaseSensitive(reply, "counter")) && cJSON_IsString(v))
+      snprintf(out->counter, sizeof(out->counter), "%s", v->valuestring);
+
+   cJSON_Delete(reply);
+   return 0;
 }
