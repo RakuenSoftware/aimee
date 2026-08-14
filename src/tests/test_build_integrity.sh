@@ -432,11 +432,22 @@ else
     fail "verify-local can race lint against a partial shipping build"
 fi
 
-if sed -n '/^verify-local:/,/^[^[:space:]#].*:/p' Makefile |
-   grep -qF 'python3 -I scripts/check_c_repository_lock.py'; then
-    pass "verify-local rejects stale extracted-repository source pins"
+# The extracted-repository pins record which published core/module repository
+# commit each vendored mirror was cut from, which is a fact about a RELEASE. They
+# bind on `main` alone: every other branch is meant to carry vendored source
+# ahead of the lock, so running the check there only demands a lock refresh after
+# each edit under src/core|modules/**. Guard the placement in both directions --
+# absent from the every-branch gates, present in the workflow under a main-only
+# condition -- so neither half can drift back on its own.
+if ! sed -n '/^verify-local:/,/^[^[:space:]#].*:/p' Makefile |
+     grep -qF 'python3 -I scripts/check_c_repository_lock.py' &&
+   ! grep '^LINT_CHECKS = ' Makefile | grep -qF 'repository-lock-check' &&
+   grep -B2 -F 'run: python3 -I scripts/check_c_repository_lock.py' \
+        ../.github/workflows/c-repositories.yml |
+     grep -qF "if: github.ref == 'refs/heads/main' || github.base_ref == 'main'"; then
+    pass "extracted-repository source pins are enforced for main alone"
 else
-    fail "verify-local can pass with stale extracted-repository source pins"
+    fail "extracted-repository source pins are enforced off main, or not on it"
 fi
 
 # Verification runs inside the server image, whose deployment posture is
