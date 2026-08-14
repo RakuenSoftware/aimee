@@ -162,7 +162,7 @@ static int mtls_verify_cb(int preverify_ok, X509_STORE_CTX *ctx)
    if (!preverify_ok)
       return 0; /* chain/time/CA failure -> reject */
    if (X509_STORE_CTX_get_error_depth(ctx) != 0)
-      return 1; /* only the leaf carries the client serial */
+      return 1; /* EKU and revocation are leaf-only; CA/intermediate EKU is irrelevant */
    X509 *cert = X509_STORE_CTX_get_current_cert(ctx);
    if (!cert)
       return 1;
