@@ -70,6 +70,7 @@
     "server-go/modules/economizer/recall_test.go",
     "server-go/modules/economizer/reduce_test.go",
     "server-go/modules/economizer/register_test.go",
+    "server-go/modules/economizer/repair_test.go",
     "server-go/modules/economizer/state_test.go"
   ],
   "public_headers": [],
