@@ -629,7 +629,7 @@
       "ctest": false,
       "make": true,
       "module": "sandbox",
-      "test": "src/tests/test_sandbox_pkg_proxy.c"
+      "test": "src/tests/test_sandbox_pkg_proxy_adapter.c"
     },
     {
       "ctest": false,

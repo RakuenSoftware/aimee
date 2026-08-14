@@ -13,10 +13,10 @@ import (
 	"syscall"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
 	controlweb "github.com/JBailes/aimee/server-go/modules/control-web"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
-	"github.com/JBailes/aimee/server-go/modules/delegates/plane"
 	"github.com/JBailes/aimee/server-go/modules/economizer"
 	modulegit "github.com/JBailes/aimee/server-go/modules/git"
 	"github.com/JBailes/aimee/server-go/modules/governance"
@@ -37,28 +37,38 @@ import (
 var errUsage = errors.New("usage: aimee-module-NAME DAEMON_MODULE_BUS_SOCKET")
 
 // roundtableReviewer assembles the review capability from this process's own
-// environment: the saved roundtables on disk, and the delegate resource plane
-// it seats them over. Both are required -- a review with no configured panel,
+// environment: the saved roundtables on disk, and the delegate bus stage it
+// seats them over. Both are required -- a review with no configured panel,
 // or with no way to reach an agent, is not a degraded review but no review.
-func roundtableReviewer() (*roundtable.PanelReviewer, error) {
+const roundtableDelegatePrincipalRef uint32 = 65
+
+func roundtableReviewer(ctx context.Context, moduleBusSocket string) (*roundtable.PanelReviewer, error) {
 	home := os.Getenv("AIMEE_HOME")
 	if home == "" {
 		return nil, errors.New("AIMEE_HOME is unset")
 	}
-	socket := os.Getenv("AIMEE_AGENT_SERVICE_SOCKET")
-	url := os.Getenv("AIMEE_AGENT_SERVICE_URL")
-	if socket == "" && url == "" {
-		return nil, errors.New("no agent resource plane is configured")
+	if ctx == nil || moduleBusSocket == "" {
+		return nil, errors.New("no module bus is configured")
 	}
 	presets, err := panel.NewStore(filepath.Join(home, "roundtables"))
 	if err != nil {
 		return nil, err
 	}
-	client, err := plane.NewHTTPAgentClient(plane.AgentHTTPConfig{BaseURL: url, UnixSocket: socket})
+	busClient, err := bus.ConnectClient(ctx, moduleBusSocket, 1, roundtableDelegatePrincipalRef)
 	if err != nil {
 		return nil, err
 	}
-	return roundtable.NewPanelReviewer(presets, roundtable.NewPlaneDelegates(client))
+	caller, err := bus.NewConcurrentModuleCaller(ctx, busClient)
+	if err != nil {
+		busClient.Detach()
+		return nil, err
+	}
+	client, err := delegatecontract.NewBusClient(caller, 0)
+	if err != nil {
+		busClient.Detach()
+		return nil, err
+	}
+	return roundtable.NewPanelReviewer(presets, roundtable.NewBusDelegates(client))
 }
 
 // sandboxHome resolves the learned store's root the same way the WFE resolves
@@ -75,6 +85,10 @@ func sandboxHome() string {
 }
 
 func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
+	return moduleConfigRuntime(nil, executable, "")
+}
+
+func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string) (bus.ModuleProcessConfig, bool) {
 	name := strings.TrimPrefix(filepath.Base(executable), "aimee-module-")
 	config := bus.ModuleProcessConfig{PrincipalClass: 1}
 	switch name {
@@ -125,8 +139,16 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 			{EventKind: delegates.EventLaunchPlan, StageID: delegates.StageLaunchPlan},
 			{EventKind: delegates.EventReviewEvidence, StageID: delegates.StageReviewEvidence},
 			{EventKind: delegates.EventNamedFileDrift, StageID: delegates.StageNamedFileDrift},
+			{EventKind: delegates.EventGroupPlan, StageID: delegates.StageGroupPlan},
 		}
-		config.Handler = delegates.Handle
+		var executor delegates.Executor
+		registryExecutor, err := delegates.NewRegistryExecutor(os.Getenv("AIMEE_HOME"))
+		if err != nil {
+			log.Printf("delegate execution unavailable: %v", err)
+		} else {
+			executor = registryExecutor
+		}
+		config.Handler = delegates.NewHandler(executor)
 	case "tools":
 		config.ModuleName = name
 		config.PrincipalRef = 11
@@ -184,11 +206,11 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.Handler = roundtable.Handle
 		// Deliberate is a pure rubric and always available. Review convenes real
 		// agents, so it is served only when this process can actually reach the
-		// delegate plane and the saved roundtables. Declaring the stage anyway
+		// delegates module and the saved roundtables. Declaring the stage anyway
 		// would make an unreachable review look like a failing one; leaving it
 		// undeclared makes the daemon report the module as not serving that kind,
 		// which is what is true.
-		if reviewer, err := roundtableReviewer(); err != nil {
+		if reviewer, err := roundtableReviewer(ctx, moduleBusSocket); err != nil {
 			log.Printf("roundtable review stage unavailable: %v", err)
 		} else {
 			config.Stages = append(config.Stages,
@@ -216,6 +238,8 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 		config.Stages = []bus.ModuleStage{
 			{EventKind: sandbox.EventObserve, StageID: sandbox.StageObserve},
 			{EventKind: sandbox.EventLoad, StageID: sandbox.StageLoad},
+			{EventKind: sandbox.EventProxyRequest, StageID: sandbox.StageProxyRequest},
+			{EventKind: sandbox.EventProxyAddress, StageID: sandbox.StageProxyAddress},
 		}
 		// The learned store lives under AIMEE_HOME. Unlike roundtable's review
 		// stage -- which needs a resource plane that may genuinely be absent --
@@ -258,7 +282,7 @@ func run(ctx context.Context, args []string) error {
 	if len(args) != 2 {
 		return errUsage
 	}
-	config, ok := moduleConfig(args[0])
+	config, ok := moduleConfigRuntime(ctx, args[0], args[1])
 	if !ok {
 		return fmt.Errorf("unknown Go module executable %q", filepath.Base(args[0]))
 	}
@@ -267,6 +291,9 @@ func run(ctx context.Context, args []string) error {
 }
 
 func main() {
+	if handled, code := delegates.RunWatchdog(os.Args); handled {
+		os.Exit(code)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args); err != nil {

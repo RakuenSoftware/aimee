@@ -266,6 +266,11 @@ def go_module_main(module_id: str, principal_ref: int,
         f"\t\t{{EventKind: {stage['event_kind']}, StageID: {stage['id']}}},"
         for stage in stages
     )
+    handler = "handler.NewDefaultHandler()" if module_id == "delegates" else "handler.Handle"
+    watchdog = """\tif handled, code := handler.RunWatchdog(os.Args); handled {
+\t\tos.Exit(code)
+\t}
+""" if module_id == "delegates" else ""
     return f"""package main
 
 import (
@@ -280,6 +285,7 @@ import (
 )
 
 func main() {{
+{watchdog}\
 \tif len(os.Args) != 2 {{
 \t\tfmt.Fprintf(os.Stderr, "usage: %s DAEMON_MODULE_BUS_SOCKET\\n", os.Args[0])
 \t\tos.Exit(2)
@@ -292,7 +298,7 @@ func main() {{
 \t\tStages: []bus.ModuleStage{{
 {entries}
 \t\t}},
-\t\tHandler: handler.Handle,
+\t\tHandler: {handler},
 \t}}
 \tif err := bus.RunModuleProcess(ctx, config); err != nil {{
 \t\tfmt.Fprintf(os.Stderr, "aimee-module-{module_id}: %v\\n", err)
@@ -302,11 +308,28 @@ func main() {{
 """
 
 
-def go_bus_sources() -> list[str]:
+def go_bus_sources(module_id: str | None = None) -> list[str]:
     """Return the canonical, non-test Go bus implementation shared by exports."""
     return sorted(
         path.relative_to(ROOT).as_posix()
         for path in (ROOT / "server-go/bus").glob("*.go")
+        if not path.name.endswith("_test.go") and
+        (path.name != "concurrent_module_caller.go" or module_id in {"delegates", "roundtable"})
+    )
+
+
+def go_process_shared_sources(module_id: str) -> list[str]:
+    """Return shared caller contracts needed by independently built Go modules.
+
+    ``server-go/delegate`` is intentionally outside any implementation module:
+    every module that calls delegates may import it. Add such module IDs here in
+    lockstep with their process contract and runtime-bundle coverage.
+    """
+    if module_id not in {"delegates", "roundtable"}:
+        return []
+    return sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "server-go/delegate").glob("*.go")
         if not path.name.endswith("_test.go")
     )
 
@@ -422,10 +445,13 @@ jobs:
             go_sources = descriptor.get("go_sources", [])
             if not isinstance(go_sources, list) or not go_sources:
                 raise ExportError(f"{module_id}: Go process has no go_sources")
-            bus_sources = go_bus_sources()
+            bus_sources = go_bus_sources(module_id)
             if not bus_sources:
                 raise ExportError("canonical Go bus has no production sources")
+            shared_sources = go_process_shared_sources(module_id)
             for relative in bus_sources:
+                copy_file(relative, repository)
+            for relative in shared_sources:
                 copy_file(relative, repository)
             shutil.copy2(ROOT / "server-go/go.sum", repository / "go.sum")
             write_text(
@@ -443,7 +469,7 @@ require golang.org/x/sys {go_xsys_version()}
             )
             cmake_dependencies = "\n".join(
                 f"        ${{CMAKE_CURRENT_SOURCE_DIR}}/{relative}"
-                for relative in ["runtime/main.go", *go_sources, *bus_sources,
+                for relative in ["runtime/main.go", *go_sources, *bus_sources, *shared_sources,
                                  "go.mod", "go.sum"]
             )
             write_text(

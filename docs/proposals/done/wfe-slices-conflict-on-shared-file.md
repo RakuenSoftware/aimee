@@ -1,11 +1,11 @@
 # Proposal: slices that each create the same file cannot merge after the first one lands
 
-- **State:** DONE — stale-tip and terminal-conflict fixes archived 2026-08-04; residual extracted.
+- **State:** DONE — stale-tip, terminal-conflict, and sibling-freeze collision fixes delivered.
 
-> **Archived after partial delivery.** New slices now branch from and integrate the fetched remote
+> **Archived after delivery.** New slices now branch from and integrate the fetched remote
 > feature tip, and content merge conflicts terminate rather than retry forever. The proposal's
-> separately recommended atomic sibling-freeze collision check is not implemented; it is now
-> [`wfe-sibling-freeze-collision-residual.md`](../pending/wfe-sibling-freeze-collision-residual.md).
+> separately recommended atomic sibling-freeze collision check was subsequently delivered in
+> [`wfe-sibling-freeze-collision-residual.md`](wfe-sibling-freeze-collision-residual.md).
 
 ## Symptom
 

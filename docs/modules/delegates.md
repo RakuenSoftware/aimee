@@ -9,12 +9,16 @@ not an optional extension and does not own roundtable policy, tools, vault, or w
 
 ### Go process stage
 
-The supervised `delegate-invocation` stage now runs in the shared pure-Go module
-runtime. Its Go handler validates the existing DROL request, normalizes role
-aliases, and emits the unchanged DCAN response contract. The C adapter remains a
-wire-parity fixture. Delegate backends, checkout, credentials, orchestration, and
-the other deeper implementation units remain C relocation work; this stage move
-does not claim that the complete delegates engine has been rewritten.
+The supervised `delegate-invocation` stage runs in the shared pure-Go module
+runtime. Its handler preserves the fixed DROL/DCAN role-normalization contract
+for old bus callers and adds a version-2 execution contract for the native WFE
+and roundtable. The latter selects a configured CLI agent and owns its bounded
+subprocess lifecycle entirely in Go; no agent-service HTTP call returns to the C
+daemon. Workflow lifecycle fields stay caller-side and never enter this wire.
+
+The C adapter remains a wire-parity fixture. The C daemon still hosts the event
+bus and external control surfaces, but it is not the producer used by Go
+workflows or module-to-module delegation.
 
 ## Public contracts
 

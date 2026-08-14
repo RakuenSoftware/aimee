@@ -6,20 +6,27 @@ import (
 	"github.com/JBailes/aimee/server-go/bus"
 )
 
-// NewHandler serves the sandbox module's two stages.
+// NewHandler serves the sandbox module's learned-toolchain and proxy-policy stages.
 //
-// Both carry JSON: a command and a git root are variable-length, so the fixed
-// binary framing the pure-decision stages use does not fit.
+// All carry JSON because commands, git roots, HTTP heads, allowlists, and
+// addresses are variable-length.
 func NewHandler(store *Store) bus.ModuleHandler {
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
-		if store == nil {
-			return nil, bus.ModuleStatusInternal
-		}
 		switch invocation.StageID {
 		case StageObserve:
+			if store == nil {
+				return nil, bus.ModuleStatusInternal
+			}
 			return handleObserve(store, invocation, request)
 		case StageLoad:
+			if store == nil {
+				return nil, bus.ModuleStatusInternal
+			}
 			return handleLoad(store, invocation, request)
+		case StageProxyRequest:
+			return handleProxyRequest(invocation, request)
+		case StageProxyAddress:
+			return handleProxyAddress(invocation, request)
 		default:
 			return nil, bus.ModuleStatusInvalidRequest
 		}

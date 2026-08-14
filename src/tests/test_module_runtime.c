@@ -202,7 +202,9 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       *kind = AIMEE_SANDBOX_EVENT_OBSERVE, *principal_ref = 26;
       served[0] = AIMEE_SANDBOX_EVENT_OBSERVE;
       served[1] = AIMEE_SANDBOX_EVENT_LOAD;
-      *serve_count = 2;
+      served[2] = AIMEE_SANDBOX_EVENT_PROXY_REQUEST;
+      served[3] = AIMEE_SANDBOX_EVENT_PROXY_ADDRESS;
+      *serve_count = 4;
       return 0;
    }
    else if (strcmp(name, "economizer") == 0)
@@ -589,6 +591,32 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(response_len > 0 && response_len < sizeof(response));
       response[response_len] = '\0';
       assert(strstr((const char *)response, "tree") != NULL);
+
+      /* The package proxy keeps sockets and DNS in C, but all request and
+       * address decisions live in this process. Exercise both policy stages
+       * over the real C-host/Go-module boundary. */
+      const char *proxy = "{\"line\":\"CONNECT registry.npmjs.org:443 HTTP/1.1\"}";
+      request_len = (uint32_t)strlen(proxy);
+      memcpy(request, proxy, request_len);
+      assert(aimee_module_client_call(client, AIMEE_SANDBOX_EVENT_PROXY_REQUEST,
+                                      AIMEE_SANDBOX_STAGE_PROXY_REQUEST, 2022, 0, request,
+                                      request_len, response, sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len > 0 && response_len < sizeof(response));
+      response[response_len] = '\0';
+      assert(strstr((const char *)response, "\"kind\":2") != NULL);
+      assert(strstr((const char *)response, "\"allowed\":true") != NULL);
+
+      const char *address = "{\"ip\":\"169.254.169.254\"}";
+      request_len = (uint32_t)strlen(address);
+      memcpy(request, address, request_len);
+      assert(aimee_module_client_call(client, AIMEE_SANDBOX_EVENT_PROXY_ADDRESS,
+                                      AIMEE_SANDBOX_STAGE_PROXY_ADDRESS, 2023, 0, request,
+                                      request_len, response, sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len > 0 && response_len < sizeof(response));
+      response[response_len] = '\0';
+      assert(strstr((const char *)response, "\"blocked\":true") != NULL);
    }
    else if (strcmp(name, "economizer") == 0)
    {

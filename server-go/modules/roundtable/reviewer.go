@@ -7,14 +7,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/modules/delegates/plane"
+	"github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
-// PanelReviewer convenes a saved roundtable over the delegate resource plane.
+// PanelReviewer convenes a saved roundtable through the delegates bus stage.
 //
 // It is the whole of what the module process needs: a preset store to resolve
-// the named panel, and a plane client to seat it. There is no database handle
+// the named panel, and a delegate client to seat it. There is no database handle
 // and no workflow state here -- a review is a bounded question about one
 // artifact, and everything durable about it belongs to the side that owns
 // agent_jobs.
@@ -25,7 +25,7 @@ type PanelReviewer struct {
 
 // NewPanelReviewer takes the seat contract rather than a transport, so what
 // convenes a panel is substitutable and this stays testable without a live
-// resource plane.
+// module bus.
 func NewPanelReviewer(presets *panel.Store, seats panel.Delegates) (*PanelReviewer, error) {
 	if presets == nil || seats == nil {
 		return nil, errors.New("roundtable review needs a preset store and a way to seat delegates")
@@ -33,9 +33,9 @@ func NewPanelReviewer(presets *panel.Store, seats panel.Delegates) (*PanelReview
 	return &PanelReviewer{presets: presets, seats: seats}, nil
 }
 
-// NewPlaneDelegates seats a panel over the delegate resource plane.
-func NewPlaneDelegates(client *plane.HTTPAgentClient) panel.Delegates {
-	return seatPlane{client: client}
+// NewBusDelegates seats a panel through the delegates module's bus stage.
+func NewBusDelegates(client *delegate.BusClient) panel.Delegates {
+	return seatBus{client: client}
 }
 
 // Review runs one roundtable and returns its verdict.
@@ -118,15 +118,15 @@ func (r *PanelReviewer) Review(ctx context.Context, request panel.ReviewRequest)
 	return result, nil
 }
 
-// seatPlane adapts the delegate plane client to the panel's seat contract.
+// seatBus adapts the delegate bus client to the panel's seat contract.
 //
 // Classifying and redacting a seat failure happens here because this is the
 // side that knows the transport's error taxonomy; the panel reports what it is
 // told and never parses an error itself.
-type seatPlane struct{ client *plane.HTTPAgentClient }
+type seatBus struct{ client *delegate.BusClient }
 
-func (s seatPlane) request(run panel.Run, seat panel.SeatRequest) plane.DelegateRequest {
-	return plane.DelegateRequest{
+func (s seatBus) request(run panel.Run, seat panel.SeatRequest) delegate.DelegateRequest {
+	return delegate.DelegateRequest{
 		Role:        seat.Role,
 		Persona:     seat.Persona,
 		Delegate:    seat.Selector,
@@ -155,9 +155,9 @@ func seatResult(participant, response string, cost float64, costUnknown bool, er
 	if err == nil {
 		return out
 	}
-	out.ReplayLost = errors.Is(err, plane.ErrDelegateReplayUnavailable)
+	out.ReplayLost = errors.Is(err, delegate.ErrDelegateReplayUnavailable)
 	out.FailureCategory = seatFailureCategory(err)
-	out.FailureDetail = plane.SafeDiagnostic(err.Error())
+	out.FailureDetail = delegate.SafeDiagnostic(err.Error())
 	return out
 }
 
@@ -167,25 +167,27 @@ func seatFailureCategory(err error) string {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		return "deadline"
-	case errors.Is(err, plane.ErrDelegateReplayUnavailable):
+	case errors.Is(err, delegate.ErrDelegateReplayUnavailable):
 		return "replay_unavailable"
-	case errors.Is(err, plane.ErrDelegateUnassignedExpired):
+	case errors.Is(err, delegate.ErrDelegateCostLimitUnsupported):
+		return "cost_limit_unsupported"
+	case errors.Is(err, delegate.ErrDelegateUnassignedExpired):
 		return "unassigned_expired"
-	case plane.IsCapacityBackpressure(err):
+	case delegate.IsCapacityBackpressure(err):
 		return "capacity_backpressure"
-	case errors.Is(err, plane.ErrDelegateTerminal):
+	case errors.Is(err, delegate.ErrDelegateTerminal):
 		return "delegate_terminal"
 	default:
 		return "delegate_error"
 	}
 }
 
-func (s seatPlane) Group(ctx context.Context, run panel.Run, seats []panel.SeatRequest) []panel.SeatResult {
+func (s seatBus) Group(ctx context.Context, run panel.Run, seats []panel.SeatRequest) []panel.SeatResult {
 	out := make([]panel.SeatResult, len(seats))
 	if len(seats) == 0 {
 		return out
 	}
-	requests := make([]plane.DelegateRequest, len(seats))
+	requests := make([]delegate.DelegateRequest, len(seats))
 	for i, seat := range seats {
 		requests[i] = s.request(run, seat)
 		if run.CostLimitUSD > 0 {
@@ -200,7 +202,7 @@ func (s seatPlane) Group(ctx context.Context, run panel.Run, seats []panel.SeatR
 	return out
 }
 
-func (s seatPlane) One(ctx context.Context, run panel.Run, seat panel.SeatRequest) panel.SeatResult {
+func (s seatBus) One(ctx context.Context, run panel.Run, seat panel.SeatRequest) panel.SeatResult {
 	request := s.request(run, seat)
 	request.MaxCostUSD = run.CostLimitUSD
 	result, err := s.client.Delegate(ctx, request)
