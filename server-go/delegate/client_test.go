@@ -23,6 +23,7 @@ type recordingCaller struct {
 type groupRoutingCaller struct {
 	mu            sync.Mutex
 	plannedModels []string
+	planError     string
 	invokedModels []string
 	plan          GroupPlan
 }
@@ -35,7 +36,7 @@ func (c *groupRoutingCaller) Call(_ context.Context, _, stage uint32, _ uint64,
 		if err := json.Unmarshal(request, &c.plan); err != nil {
 			return nil, err
 		}
-		return json.Marshal(GroupPlanResult{Version: WireVersion, Models: c.plannedModels})
+		return json.Marshal(GroupPlanResult{Version: WireVersion, Models: c.plannedModels, Error: c.planError})
 	}
 	var invocation Invocation
 	if err := json.Unmarshal(request, &invocation); err != nil {
@@ -176,6 +177,27 @@ func TestDelegateGroupPlansDiversityAndKeepsParticipantContinuityLocal(t *testin
 	slices.Sort(caller.invokedModels)
 	if !slices.Equal(caller.invokedModels, []string{"review-a", "review-b"}) {
 		t.Fatalf("invoked models = %v", caller.invokedModels)
+	}
+}
+
+func TestDelegateGroupPreservesCapacityFromTheModuleBoundary(t *testing.T) {
+	caller := &groupRoutingCaller{planError: "group saturated: " + ErrDelegateCapacity.Error()}
+	client := &BusClient{caller: caller, deadline: time.Second}
+	results := client.DelegateGroup(t.Context(), []DelegateRequest{{Role: "review", Persona: "qa", Prompt: "review"}})
+	if len(results) != 1 || !errors.Is(results[0].Err, ErrDelegateCapacity) ||
+		!IsCapacityBackpressure(results[0].Err) || errors.Is(results[0].Err, ErrDelegateTerminal) {
+		t.Fatalf("group capacity lost its load classification: %+v", results)
+	}
+}
+
+func TestDelegateResultPreservesCapacityWaitDeadline(t *testing.T) {
+	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed",
+		Error: ErrDelegateCapacityDeadline.Error()}}
+	client := &BusClient{caller: caller, deadline: time.Second}
+	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+	if !errors.Is(err, ErrDelegateCapacityDeadline) || !errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, ErrDelegateTerminal) {
+		t.Fatalf("capacity wait deadline was collapsed into execution failure: %v", err)
 	}
 }
 

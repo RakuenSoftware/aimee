@@ -197,7 +197,7 @@ func (l *agentLimiter) acquire(ctx context.Context) (func(), error) {
 		l.mu.Unlock()
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, errors.Join(delegatecontract.ErrDelegateCapacityDeadline, ctx.Err())
 		case <-changed:
 		}
 	}
@@ -271,7 +271,8 @@ func (r *RegistryExecutor) PlanGroup(ctx context.Context,
 	providerUses, modelUses, agentUses := map[string]int{}, map[string]int{}, map[string]int{}
 	assign := func(index int, candidate groupCandidate) error {
 		if candidate.max > 0 && candidate.active+agentUses[candidate.agent.Name] >= candidate.max {
-			return fmt.Errorf("delegate group exceeds %s max_parallel=%d", candidate.agent.Name, candidate.max)
+			return fmt.Errorf("%w: delegate group exceeds %s max_parallel=%d",
+				delegatecontract.ErrDelegateCapacity, candidate.agent.Name, candidate.max)
 		}
 		models[index] = candidate.agent.Name
 		providerUses[candidate.provider]++
@@ -313,8 +314,8 @@ func (r *RegistryExecutor) PlanGroup(ctx context.Context,
 			}
 		}
 		if best < 0 {
-			return nil, fmt.Errorf("delegate group cannot fill seat %d (%s/%s) within enabled capacity",
-				i+1, seat.Role, seat.Persona)
+			return nil, fmt.Errorf("%w: delegate group cannot fill seat %d (%s/%s) within enabled capacity",
+				delegatecontract.ErrDelegateCapacity, i+1, seat.Role, seat.Persona)
 		}
 		if err := assign(i, candidates[best]); err != nil {
 			return nil, err

@@ -165,6 +165,8 @@ func seatResult(participant, response string, cost float64, costUnknown bool, er
 // a panel that cannot review is distinguishable from a reviewer that would not.
 func seatFailureCategory(err error) string {
 	switch {
+	case errors.Is(err, delegate.ErrDelegateCapacityDeadline):
+		return "capacity_deadline"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "deadline"
 	case errors.Is(err, delegate.ErrDelegateReplayUnavailable):

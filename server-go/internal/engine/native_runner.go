@@ -1486,6 +1486,8 @@ func normalizeRoundtableStage(raw string) (string, bool) {
 
 func panelFailureCategory(err error, transport bool) string {
 	switch {
+	case errors.Is(err, ErrDelegateCapacityDeadline):
+		return "capacity_deadline"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "deadline"
 	case errors.Is(err, ErrDelegateReplayUnavailable):

@@ -93,8 +93,8 @@ func Convene(ctx context.Context, delegates Delegates, run Run, panel Panel, foc
 				fmt.Errorf("roundtable panel could not be replayed: %s: %w", analysis.Unreachable, ErrReplayUnavailable)
 		}
 		rt := roundtableResult(&analysis.Feedback, false, false, analysis, len(seats), analysis.CostUSD)
-		rt.DeadlineHit = deadlineHit || errors.Is(roundtableCtx.Err(), context.DeadlineExceeded)
-		rt.Status, rt.PauseReason, rt.Detail = StatusPending, "panel_unreachable", analysis.Unreachable
+		rt.PauseReason, rt.Detail, rt.DeadlineHit = panelUnavailableState(analysis, deadlineHit)
+		rt.Status = StatusPending
 		rt.CostUnknown = analysis.CostUnknown
 		return *rt, nil
 	}
@@ -215,4 +215,36 @@ func Convene(ctx context.Context, delegates Delegates, run Run, panel Panel, foc
 	rt.CostUnknown = totalCostUnknown
 	rt.Feedback = &feedback
 	return *rt, nil
+}
+
+// panelUnavailableState preserves the cause that prevented quorum. Capacity is
+// retryable load, not provider failure; a deadline reached after observing that
+// load is different again from a delegate that ran until its execution budget
+// expired. ParticipantFailures keeps mixed-pool detail while the pause reason
+// gives the scheduler one stable recovery class.
+func panelUnavailableState(analysis Analysis, panelDeadline bool) (reason, detail string, deadlineHit bool) {
+	hasCapacity := false
+	hasCapacityDeadline := false
+	hasDeadline := panelDeadline
+	for _, failure := range analysis.Failures {
+		switch failure.Category {
+		case "capacity_backpressure":
+			hasCapacity = true
+		case "capacity_deadline":
+			hasCapacityDeadline = true
+			hasDeadline = true
+		case "deadline":
+			hasDeadline = true
+		}
+	}
+	switch {
+	case hasCapacityDeadline || (hasCapacity && hasDeadline):
+		return "panel_capacity_deadline", "deadline expired while waiting for eligible delegate capacity: " + analysis.Unreachable, true
+	case hasCapacity:
+		return "panel_capacity", "eligible delegate capacity is saturated; retry after capacity clears: " + analysis.Unreachable, false
+	case hasDeadline:
+		return "panel_deadline", "delegate execution deadline expired before the panel reached quorum: " + analysis.Unreachable, true
+	default:
+		return "panel_unreachable", analysis.Unreachable, false
+	}
 }

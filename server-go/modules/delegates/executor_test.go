@@ -35,6 +35,7 @@ type blockingExecutor struct{}
 type planningExecutor struct {
 	seats  []delegatecontract.GroupPlanSeat
 	models []string
+	err    error
 }
 
 func (e *planningExecutor) Execute(_ context.Context,
@@ -45,7 +46,7 @@ func (e *planningExecutor) Execute(_ context.Context,
 func (e *planningExecutor) PlanGroup(_ context.Context,
 	seats []delegatecontract.GroupPlanSeat) ([]string, error) {
 	e.seats = append([]delegatecontract.GroupPlanSeat(nil), seats...)
-	return append([]string(nil), e.models...), nil
+	return append([]string(nil), e.models...), e.err
 }
 
 func (blockingExecutor) Execute(ctx context.Context, _ delegatecontract.Invocation) delegatecontract.InvocationResult {
@@ -110,6 +111,18 @@ func TestGroupPlanStageCanonicalizesAndReturnsAssignments(t *testing.T) {
 	}
 }
 
+func TestGroupPlanStagePreservesTypedCapacityFailure(t *testing.T) {
+	executor := &planningExecutor{err: fmt.Errorf("%w: saturated", delegatecontract.ErrDelegateCapacity)}
+	request, _ := json.Marshal(delegatecontract.GroupPlan{Version: delegatecontract.WireVersion,
+		Seats: []delegatecontract.GroupPlanSeat{{Role: "review", Persona: "qa"}}})
+	reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageGroupPlan}, request)
+	var result delegatecontract.GroupPlanResult
+	if status != bus.ModuleStatusOK || json.Unmarshal(reply, &result) != nil ||
+		!delegatecontract.IsCapacityBackpressure(errors.New(result.Error)) || len(result.Models) != 0 {
+		t.Fatalf("capacity failure did not cross the module boundary: status=%d reply=%q", status, reply)
+	}
+}
+
 func TestRegistryExecutorRunsArgvWithoutShell(t *testing.T) {
 	home := t.TempDir()
 	script := filepath.Join(home, "delegate-helper")
@@ -139,7 +152,7 @@ func TestRegistryExecutorRunsArgvWithoutShell(t *testing.T) {
 	}
 }
 
-func TestRegistryExecutorEnforcesConfiguredMaxParallel(t *testing.T) {
+func TestRegistryExecutorEnforcesMaxParallelWithoutPoisoningAgentHealth(t *testing.T) {
 	home := t.TempDir()
 	workdir := filepath.Join(home, "worktree")
 	if err := os.MkdirAll(filepath.Join(workdir, ".git"), 0o700); err != nil {
@@ -186,6 +199,11 @@ func TestRegistryExecutorEnforcesConfiguredMaxParallel(t *testing.T) {
 	if matches, _ := filepath.Glob(filepath.Join(home, "started.*")); len(matches) != 1 {
 		t.Fatalf("started %d delegates before the slot released", len(matches))
 	}
+	if _, err := executor.PlanGroup(t.Context(), []delegatecontract.GroupPlanSeat{
+		{Role: "code", Persona: "engineer"},
+	}); !errors.Is(err, delegatecontract.ErrDelegateCapacity) || errors.Is(err, delegatecontract.ErrDelegateTerminal) {
+		t.Fatalf("occupied agent was not classified as retryable capacity: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(home, "release"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -194,6 +212,12 @@ func TestRegistryExecutorEnforcesConfiguredMaxParallel(t *testing.T) {
 		if result.Status != "done" {
 			t.Fatalf("delegate result = %+v", result)
 		}
+	}
+	models, err := executor.PlanGroup(t.Context(), []delegatecontract.GroupPlanSeat{
+		{Role: "code", Persona: "engineer"},
+	})
+	if err != nil || !slices.Equal(models, []string{"helper"}) {
+		t.Fatalf("capacity response poisoned subsequent agent health: models=%v err=%v", models, err)
 	}
 }
 
@@ -231,8 +255,52 @@ func TestPlanGroupPreservesDiversityEligibilityAndCapacity(t *testing.T) {
 	if _, err := executor.PlanGroup(t.Context(), []delegatecontract.GroupPlanSeat{
 		{Role: "review", Persona: "qa", Model: "c"},
 		{Role: "review", Persona: "qa", Model: "c"},
-	}); err == nil || !strings.Contains(err.Error(), "max_parallel") {
+	}); err == nil || !errors.Is(err, delegatecontract.ErrDelegateCapacity) ||
+		!strings.Contains(err.Error(), "max_parallel") || errors.Is(err, delegatecontract.ErrDelegateTerminal) {
 		t.Fatalf("over-capacity pinned plan error = %v", err)
+	}
+}
+
+func TestPlanGroupExcludesUnavailableLocalBackendAndKeepsHealthyFallback(t *testing.T) {
+	home := t.TempDir()
+	registry := map[string]any{"agents": []map[string]any{
+		{"name": "local-gemma4", "provider": "local", "model": "aimee-synth", "cli_kind": "generic",
+			"cli_cmd": "local-helper", "enabled": true, "delegate_available": false,
+			"roles": []string{"review"}, "personas": []string{"all"}, "max_parallel": 2},
+		{"name": "healthy-remote", "provider": "remote", "model": "reviewer", "cli_kind": "codex",
+			"cli_cmd": "codex", "enabled": true, "delegate_available": true,
+			"roles": []string{"review"}, "personas": []string{"all"}, "max_parallel": 2},
+	}}
+	body, _ := json.Marshal(registry)
+	if err := os.WriteFile(filepath.Join(home, "models.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executor, err := NewRegistryExecutor(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, err := executor.PlanGroup(t.Context(), []delegatecontract.GroupPlanSeat{{Role: "review", Persona: "qa"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(models, []string{"healthy-remote"}) {
+		t.Fatalf("authoritative health did not retain only the healthy fallback: %v", models)
+	}
+}
+
+func TestAgentLimiterTypesDeadlineReachedWhileWaitingForCapacity(t *testing.T) {
+	limiter := &agentLimiter{max: 1, changed: make(chan struct{})}
+	release, err := limiter.acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer cancel()
+	_, err = limiter.acquire(ctx)
+	if !errors.Is(err, delegatecontract.ErrDelegateCapacityDeadline) ||
+		!errors.Is(err, context.DeadlineExceeded) || errors.Is(err, delegatecontract.ErrDelegateTerminal) {
+		t.Fatalf("capacity wait deadline lost its identity: %v", err)
 	}
 }
 

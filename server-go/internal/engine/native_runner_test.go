@@ -887,7 +887,7 @@ func TestConfiguredRoundtableReportsEveryPhaseDeadline(t *testing.T) {
 			name:      "analysis",
 			preset:    `{"name":"default","seats":[{"model":"codex","persona":"security"},{"model":"minimax","persona":"qa"}],"min_successful":2,"discussion":true,"deadline_ms":90}`,
 			agents:    deadlineSeatAgents{},
-			wantPause: "panel_unreachable",
+			wantPause: "panel_deadline",
 		},
 		{
 			name:      "discussion",
@@ -997,6 +997,7 @@ func TestPanelFailureCategoryPreservesActionableCause(t *testing.T) {
 		want      string
 	}{
 		{name: "deadline", err: context.DeadlineExceeded, transport: true, want: "deadline"},
+		{name: "capacity deadline", err: errors.Join(ErrDelegateCapacityDeadline, context.DeadlineExceeded), transport: true, want: "capacity_deadline"},
 		{name: "capacity", err: errors.New("[aimee_err=concurrency_limit]"), transport: true, want: "capacity_backpressure"},
 		{name: "terminal", err: fmt.Errorf("%w: failed", ErrDelegateTerminal), transport: true, want: "delegate_terminal"},
 		{name: "malformed", err: errors.New("invalid character"), want: "malformed_after_repair"},
