@@ -2158,7 +2158,32 @@ LANGUAGE plpgsql AS $$
 DECLARE
   orphan_docs BIGINT;
   orphan_files BIGINT;
+  reader_ready TEXT;
 BEGIN
+  -- THE READER SIDE MUST EXIST FIRST, and today it does not.
+  --
+  -- aimee.principal is transaction-scoped and reset on pooled connections
+  -- (db2_tenant.c), and it is set only inside db2_tenant_scope_begin. Every one
+  -- of that function's callers is a governance, management or vault path: the
+  -- content readers -- kb_payload.c, memory_query.c, kb_service_backend.c --
+  -- open NO tenant scope at all. The service also connects as a non-owner with
+  -- NOBYPASSRLS, by design, so nothing rescues it.
+  --
+  -- So enabling before the read paths carry a principal does not hide
+  -- unattributed rows. It returns NOTHING to EVERY content read, for everyone,
+  -- which is a total outage wearing the costume of a security control.
+  --
+  -- The marker is written by the change that threads the principal through
+  -- those reads. Until then this refuses, because a comment in a proposal is not
+  -- a safeguard and this is exactly the mistake an operator cannot un-make in a
+  -- hurry.
+  SELECT value INTO reader_ready FROM kb_meta WHERE key = 'content_scope_reader_ready';
+  IF reader_ready IS DISTINCT FROM '1' THEN
+    RAISE EXCEPTION 'refusing to enable content scope: the content read paths do not set '
+                    'aimee.principal yet, so every content read would return nothing for '
+                    'everyone. The change that threads the principal through those reads sets '
+                    'kb_meta.content_scope_reader_ready=1; enable after it ships.';
+  END IF;
   SELECT count(*) INTO orphan_docs FROM kb_documents d
     WHERE NOT EXISTS (SELECT 1 FROM projects p
                       WHERE p.name = d.project AND p.kb_project IS NOT NULL);

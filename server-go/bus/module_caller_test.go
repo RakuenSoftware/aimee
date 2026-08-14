@@ -144,6 +144,97 @@ func TestModuleCallerRoundTripsAFragmentedBody(t *testing.T) {
 	}
 }
 
+func TestConcurrentModuleCallerDemultiplexesOverOnePrincipal(t *testing.T) {
+	fake := echoingBus(128)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	caller := newConcurrentModuleCaller(ctx, fake)
+	const calls = 12
+	results := make(chan string, calls)
+	for i := 0; i < calls; i++ {
+		go func(i int) {
+			body := strings.Repeat(string(rune('a'+i)), 400)
+			got, err := caller.Call(ctx, 6657, 1, uint64(i+1), time.Second, []byte(body))
+			if err != nil {
+				results <- "error:" + err.Error()
+				return
+			}
+			results <- string(got)
+		}(i)
+	}
+	seen := map[byte]bool{}
+	for i := 0; i < calls; i++ {
+		got := <-results
+		if strings.HasPrefix(got, "error:") || len(got) != 400 {
+			t.Fatalf("call = %q", got)
+		}
+		seen[got[0]] = true
+	}
+	if len(seen) != calls {
+		t.Fatalf("demultiplexed %d/%d distinct calls", len(seen), calls)
+	}
+}
+
+func TestConcurrentModuleCallerIgnoresAnotherEventKind(t *testing.T) {
+	fake := &fakeCallerBus{budget: 128,
+		replyTo: func(f *fakeCallerBus, kind uint32, correlation uint64, body []byte) {
+			f.queueResult(kind+1, correlation, ModuleStatusOK, []byte("another kind"), 1)
+			f.queueResult(kind, correlation, ModuleStatusOK, []byte("mine"), 1)
+		}}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	got, err := newConcurrentModuleCaller(ctx, fake).Call(ctx, 6657, 1, 1, time.Second,
+		[]byte("ask"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "mine" {
+		t.Fatalf("caller accepted another event kind: %q", got)
+	}
+}
+
+func TestConcurrentModuleCallerRejectsCallsAfterShutdownWithoutRetainingThem(t *testing.T) {
+	fake := echoingBus(128)
+	ctx, cancel := context.WithCancel(t.Context())
+	caller := newConcurrentModuleCaller(ctx, fake)
+	cancel()
+	<-caller.closed
+	if _, err := caller.Call(context.Background(), 6657, 1, 1, time.Second, []byte("ask")); !errors.Is(err, ErrModuleRuntime) {
+		t.Fatalf("closed caller error = %v", err)
+	}
+	caller.mu.Lock()
+	defer caller.mu.Unlock()
+	if len(caller.pending) != 0 || len(caller.assemblies) != 0 {
+		t.Fatalf("closed caller retained pending=%d assemblies=%d", len(caller.pending), len(caller.assemblies))
+	}
+}
+
+func TestConcurrentModuleCallerDiscardsPartialAssemblyOnDeadline(t *testing.T) {
+	fake := &fakeCallerBus{budget: 128,
+		replyTo: func(f *fakeCallerBus, kind uint32, correlation uint64, _ []byte) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			payload := make([]byte, ModuleMessageHeaderLen+7)
+			message := ModuleMessage{Operation: ModuleOpResult, Status: ModuleStatusOK,
+				StageID: 1, BodyLen: 7}
+			_, _ = message.Encode(payload)
+			copy(payload[ModuleMessageHeaderLen:], "partial")
+			f.pending = append(f.pending, Event{Frame: Frame{HdrFlags: FReply | FMore,
+				EventKind: kind, CorrelationID: correlation}, Payload: payload})
+		}}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	caller := newConcurrentModuleCaller(ctx, fake)
+	if _, err := caller.Call(ctx, 6657, 1, 1, 30*time.Millisecond, []byte("ask")); !errors.Is(err, ErrModuleCallDeadline) {
+		t.Fatalf("partial call error = %v", err)
+	}
+	caller.mu.Lock()
+	defer caller.mu.Unlock()
+	if len(caller.pending) != 0 || len(caller.assemblies) != 0 {
+		t.Fatalf("deadline retained pending=%d assemblies=%d", len(caller.pending), len(caller.assemblies))
+	}
+}
+
 // The reply is correlated, so anything else on the client belongs to another
 // call and must not be mistaken for this one's result.
 func TestModuleCallerIgnoresOtherCorrelationsAndKinds(t *testing.T) {

@@ -54,7 +54,6 @@ def main() -> int:
             repositories.mkdir()
             version = exporter.CORE_VERSION_FILE.read_text(encoding="utf-8").strip()
             timestamp = exporter.source_timestamp()
-            canonical_bus = exporter.go_bus_sources()
             for module_id in expected_go:
                 exporter.export_module(repositories, module_id, "required",
                                        contracts[module_id], timestamp, version)
@@ -63,7 +62,9 @@ def main() -> int:
                         (repository / "runtime/main.c").exists():
                     return fail(f"{module_id}: isolated repository is not Go-only at runtime")
                 descriptor = exporter.load_json(ROOT / f"src/modules/{module_id}/module.yaml")
-                for relative in [*canonical_bus, *descriptor.get("go_sources", [])]:
+                canonical_bus = exporter.go_bus_sources(module_id)
+                shared_sources = exporter.go_process_shared_sources(module_id)
+                for relative in [*canonical_bus, *shared_sources, *descriptor.get("go_sources", [])]:
                     if (repository / relative).read_bytes() != (ROOT / relative).read_bytes():
                         return fail(f"{module_id}: isolated repository changed {relative}")
                 repository_manifest = exporter.load_json(repository / "SOURCE_MANIFEST.json")

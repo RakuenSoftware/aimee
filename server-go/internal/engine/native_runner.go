@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1221,10 +1222,29 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 		// review, PR, or merge, so complete the slice as an accepted no-op.
 		return StepResult{Status: StepAccepted, Detail: "no-op: empty diff vs base"}, nil
 	}
+	if item.ParentID != "" {
+		base, err := frozenWorktreeBase(ctx, item, workdir)
+		if err != nil {
+			return StepResult{}, err
+		}
+		creates, err := frozenWorktreeCreates(ctx, workdir, base)
+		if err != nil {
+			return StepResult{}, err
+		}
+		conflict, err := r.db.ClaimFrozenCreates(ctx, item.ParentID, item.ID, creates)
+		if err != nil {
+			return StepResult{}, err
+		}
+		if conflict != nil {
+			return StepResult{Status: StepFailed, Detail: fmt.Sprintf(
+				"sibling frozen-diff collision: path %q was divergently created by slices %s and %s",
+				conflict.Path, conflict.ExistingWorkItem, conflict.ConflictingWorkItem)}, nil
+		}
+	}
 	return StepResult{Status: StepAdvanced, ArtifactType: "frozen_diff", Artifact: diff, ContentHash: wfe.Hash([]byte(diff))}, nil
 }
 
-func frozenWorktreeDiff(ctx context.Context, item db1.WorkItem, workdir string) (string, error) {
+func frozenWorktreeBase(ctx context.Context, item db1.WorkItem, workdir string) (string, error) {
 	base := ""
 	if item.ParentID != "" {
 		// Slice PRs merge through the forge, which advances the remote feature
@@ -1243,11 +1263,42 @@ func frozenWorktreeDiff(ctx context.Context, item db1.WorkItem, workdir string) 
 		}
 		base = "origin/" + trunk
 	}
-	diff, err := gitText(ctx, workdir, "--no-pager", "diff", base+"...HEAD")
+	return base, nil
+}
+
+func frozenWorktreeDiff(ctx context.Context, item db1.WorkItem, workdir string) (string, error) {
+	base, err := frozenWorktreeBase(ctx, item, workdir)
+	if err != nil {
+		return "", err
+	}
+	diff, err := gitText(ctx, workdir, "--no-pager", "diff", "--full-index", base+"...HEAD")
 	if err != nil {
 		return "", err
 	}
 	return diff, nil
+}
+
+func frozenWorktreeCreates(ctx context.Context, workdir, base string) ([]db1.FrozenCreate, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", workdir, "diff", "--name-only", "--diff-filter=A",
+		"--no-renames", "-z", base+"...HEAD")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("list frozen created paths: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	parts := bytes.Split(output, []byte{0})
+	creates := make([]db1.FrozenCreate, 0, len(parts))
+	for _, raw := range parts {
+		if len(raw) == 0 {
+			continue
+		}
+		path := string(raw)
+		hash, err := gitText(ctx, workdir, "rev-parse", "HEAD:"+path)
+		if err != nil {
+			return nil, fmt.Errorf("resolve frozen created path %q: %w", path, err)
+		}
+		creates = append(creates, db1.FrozenCreate{Path: path, ContentHash: hash})
+	}
+	return creates, nil
 }
 
 type panelFinding struct {

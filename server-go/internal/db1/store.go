@@ -107,6 +107,16 @@ CREATE TABLE IF NOT EXISTS wfe_convergence (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (work_item_id, gate)
 );
+CREATE TABLE IF NOT EXISTS wfe_frozen_create (
+  parent_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  work_item_id TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (parent_id, path, work_item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_wfe_frozen_create_item ON wfe_frozen_create(work_item_id);
 CREATE TABLE IF NOT EXISTS lifecycle_delegate_job (
   execution_key TEXT PRIMARY KEY,
   job_id INTEGER NOT NULL,
@@ -1384,6 +1394,11 @@ WHERE state='active' AND work_item_id IN (SELECT id FROM tree)`, workItemID)
 	if err != nil || changed != int64(len(items)) {
 		return nil, errors.New("workflow tree changed concurrently")
 	}
+	if _, err := tx.ExecContext(ctx, `WITH RECURSIVE tree(id) AS (
+  SELECT ? UNION ALL SELECT child.work_item_id FROM lifecycle_work_item child JOIN tree parent ON child.parent_id=parent.id
+) DELETE FROM wfe_frozen_create WHERE work_item_id IN tree`, workItemID); err != nil {
+		return nil, fmt.Errorf("release stopped frozen-create claims: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -1470,6 +1485,11 @@ WHERE state='active' AND work_item_id IN (SELECT id FROM orphan)`)
 	if err != nil || changed != int64(len(items)) {
 		return nil, errors.New("orphaned workflow descendants changed concurrently")
 	}
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM wfe_frozen_create WHERE work_item_id=?`, item.id); err != nil {
+			return nil, fmt.Errorf("release orphan frozen-create claim: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -1495,6 +1515,7 @@ func (s *Store) Delete(ctx context.Context, workItemID string) error {
 		return errors.New("workflow tree contains active items that must be stopped before deletion")
 	}
 	for _, query := range []string{
+		`WITH RECURSIVE tree(id) AS (SELECT ? UNION ALL SELECT w.work_item_id FROM lifecycle_work_item w JOIN tree t ON w.parent_id=t.id) DELETE FROM wfe_frozen_create WHERE work_item_id IN tree OR parent_id IN tree`,
 		`WITH RECURSIVE tree(id) AS (SELECT ? UNION ALL SELECT w.work_item_id FROM lifecycle_work_item w JOIN tree t ON w.parent_id=t.id) DELETE FROM wfe_convergence WHERE work_item_id IN tree`,
 		`WITH RECURSIVE tree(id) AS (SELECT ? UNION ALL SELECT w.work_item_id FROM lifecycle_work_item w JOIN tree t ON w.parent_id=t.id) DELETE FROM lifecycle_stage_attempt WHERE work_item_id IN tree`,
 		`WITH RECURSIVE tree(id) AS (SELECT ? UNION ALL SELECT w.work_item_id FROM lifecycle_work_item w JOIN tree t ON w.parent_id=t.id) DELETE FROM lifecycle_event WHERE work_item_id IN tree`,
@@ -1586,6 +1607,11 @@ INSERT INTO lifecycle_event (work_item_id, stage, kind, actor, detail, content_h
 VALUES (?, ?, 'terminal', 'go-wfe', ?, ?, ?)`, workItemID, stage, detail, contentHash,
 		costUSD); err != nil {
 		return fmt.Errorf("record terminal transition: %w", err)
+	}
+	if state != "accepted" {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM wfe_frozen_create WHERE work_item_id=?`, workItemID); err != nil {
+			return fmt.Errorf("release terminal frozen-create claim: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit terminal transition: %w", err)
