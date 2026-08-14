@@ -9,6 +9,11 @@
 
 #define KB_CLIENT_ERR_POOL_EXHAUSTED (-2)
 
+typedef int (*kb_client_mtls_renew_fn)(const char *host, int port, const char *ca_cert_pem,
+                                       const char *cur_cert_pem, const char *cur_key_pem,
+                                       char *cert_out, size_t cert_cap, char *key_out,
+                                       size_t key_cap);
+
 /* 1 when Vault holds an AIMEE_KB_CONN aimee:// connection string (a remote kb), else 0.
  * The string supplies the stable endpoint + CA pin after its one-time token has
  * established an owner-only identity under AIMEE_HOME. */
@@ -62,5 +67,7 @@ void kb_client_mtls_tls_stats(unsigned long *handshakes_total_out,
 void kb_client_mtls_reset_for_test(void);
 void kb_client_mtls_set_identity_path_for_test(const char *absolute_path);
 void kb_client_mtls_set_server_identity_path_for_test(const char *absolute_path);
+void kb_client_mtls_set_renew_window_for_test(long seconds);
+void kb_client_mtls_set_renew_for_test(kb_client_mtls_renew_fn renew);
 
 #endif /* DEC_KB_CLIENT_MTLS_H */

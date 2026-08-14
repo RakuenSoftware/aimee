@@ -2967,6 +2967,23 @@ typedef struct
    int ok;
 } mtls_pool_request_arg_t;
 
+static const kb_pki_ca_t *g_rotation_test_ca;
+
+static int test_kb_client_renew(const char *host, int port, const char *ca_cert_pem,
+                                const char *cur_cert_pem, const char *cur_key_pem, char *cert_out,
+                                size_t cert_cap, char *key_out, size_t key_cap)
+{
+   (void)host;
+   (void)port;
+   (void)ca_cert_pem;
+   (void)cur_cert_pem;
+   (void)cur_key_pem;
+   return g_rotation_test_ca
+              ? kb_pki_issue_client_cert(g_rotation_test_ca, "project:delta", 60L * 60 * 24 * 90,
+                                         cert_out, cert_cap, key_out, key_cap)
+              : -1;
+}
+
 static void *mtls_pool_request_thread(void *opaque)
 {
    mtls_pool_request_arg_t *arg = opaque;
@@ -3586,6 +3603,83 @@ static void test_mtls_listener(void)
       unsigned long pool_handshakes = 0, pool_resumed = 0;
       kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
       assert(pool_handshakes >= 1 && pool_resumed <= pool_handshakes);
+
+      /* Rotate only the server-to-KB pair while an old pooled connection and
+       * resumable session exist. Renewal must persist a fresh keypair, drain
+       * the old generation, open a full new handshake, and leave the separate
+       * thinclient-facing server identity untouched. */
+      identity_stream = fopen(identity_file, "r");
+      assert(identity_stream);
+      identity_n = fread(identity_json, 1, sizeof(identity_json) - 1, identity_stream);
+      assert(!ferror(identity_stream) && feof(identity_stream));
+      fclose(identity_stream);
+      identity_json[identity_n] = '\0';
+      cJSON *before_rotation = cJSON_Parse(identity_json);
+      cJSON *before_cert =
+          before_rotation ? cJSON_GetObjectItemCaseSensitive(before_rotation, "cert") : NULL;
+      cJSON *before_key =
+          before_rotation ? cJSON_GetObjectItemCaseSensitive(before_rotation, "key") : NULL;
+      assert(cJSON_IsString(before_cert) && cJSON_IsString(before_key));
+      char *old_cert = strdup(before_cert->valuestring);
+      char *old_key = strdup(before_key->valuestring);
+      assert(old_cert && old_key);
+      cJSON_Delete(before_rotation);
+      char thinclient_before[KB_PKI_CERT_PEM_MAX], thinclient_after[KB_PKI_CERT_PEM_MAX];
+      server_identity_stream = fopen(server_identity_file, "r");
+      assert(server_identity_stream);
+      size_t thinclient_n =
+          fread(thinclient_before, 1, sizeof(thinclient_before) - 1, server_identity_stream);
+      assert(!ferror(server_identity_stream) && feof(server_identity_stream));
+      fclose(server_identity_stream);
+      thinclient_before[thinclient_n] = '\0';
+
+      unsigned long handshakes_before_rotation = pool_handshakes;
+      unsigned long resumed_before_rotation = pool_resumed;
+      g_rotation_test_ca = &ca;
+      kb_client_mtls_set_renew_for_test(test_kb_client_renew);
+      kb_client_mtls_set_renew_window_for_test(60L * 60 * 24 * 180);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      kb_client_mtls_set_renew_window_for_test(-1);
+      kb_client_mtls_set_renew_for_test(NULL);
+      g_rotation_test_ca = NULL;
+      assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+
+      identity_stream = fopen(identity_file, "r");
+      assert(identity_stream);
+      identity_n = fread(identity_json, 1, sizeof(identity_json) - 1, identity_stream);
+      assert(!ferror(identity_stream) && feof(identity_stream));
+      fclose(identity_stream);
+      identity_json[identity_n] = '\0';
+      cJSON *after_rotation = cJSON_Parse(identity_json);
+      cJSON *after_cert =
+          after_rotation ? cJSON_GetObjectItemCaseSensitive(after_rotation, "cert") : NULL;
+      cJSON *after_key =
+          after_rotation ? cJSON_GetObjectItemCaseSensitive(after_rotation, "key") : NULL;
+      assert(cJSON_IsString(after_cert) && cJSON_IsString(after_key));
+      assert(strcmp(old_cert, after_cert->valuestring) != 0);
+      assert(strcmp(old_key, after_key->valuestring) != 0);
+      cJSON_Delete(after_rotation);
+      OPENSSL_cleanse(old_key, strlen(old_key));
+      free(old_key);
+      free(old_cert);
+
+      server_identity_stream = fopen(server_identity_file, "r");
+      assert(server_identity_stream);
+      thinclient_n =
+          fread(thinclient_after, 1, sizeof(thinclient_after) - 1, server_identity_stream);
+      assert(!ferror(server_identity_stream) && feof(server_identity_stream));
+      fclose(server_identity_stream);
+      thinclient_after[thinclient_n] = '\0';
+      assert(strcmp(thinclient_before, thinclient_after) == 0);
+
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
+      assert(pool_total == 1 && pool_idle == 1 && pool_busy == 0 && pool_waiters == 0);
+      assert(pool_handshakes == handshakes_before_rotation + 1);
+      assert(pool_resumed == resumed_before_rotation);
+
       /* Disabling live restores one-shot requests and drains every idle socket. */
       setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
@@ -3608,6 +3702,7 @@ static void test_mtls_listener(void)
       cJSON_AddNumberToObject(managed, "port", port);
       cJSON_AddStringToObject(managed, "server_id", "managed-server-test");
       cJSON_AddNumberToObject(managed, "team_id", 42);
+      cJSON_AddStringToObject(managed, "management_marker", "preserve-across-renewal");
       cJSON_AddStringToObject(managed, "ca", ca.cert_pem);
       cJSON_AddStringToObject(managed, "cert", ccert);
       cJSON_AddStringToObject(managed, "key", ckey);
@@ -3626,9 +3721,39 @@ static void test_mtls_listener(void)
       assert(kb_client_mtls_managed_metadata(managed_server, sizeof(managed_server),
                                              &managed_team) == 1);
       assert(strcmp(managed_server, "managed-server-test") == 0 && managed_team == 42);
+      g_rotation_test_ca = &ca;
+      kb_client_mtls_set_renew_for_test(test_kb_client_renew);
       r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      kb_client_mtls_set_renew_for_test(NULL);
+      g_rotation_test_ca = NULL;
       assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
       free(r);
+      identity_stream = fopen(identity_file, "r");
+      assert(identity_stream);
+      identity_n = fread(identity_json, 1, sizeof(identity_json) - 1, identity_stream);
+      assert(!ferror(identity_stream) && feof(identity_stream));
+      fclose(identity_stream);
+      identity_json[identity_n] = '\0';
+      cJSON *rotated_managed = cJSON_Parse(identity_json);
+      cJSON *rotated_version =
+          rotated_managed ? cJSON_GetObjectItemCaseSensitive(rotated_managed, "version") : NULL;
+      cJSON *rotated_state =
+          rotated_managed ? cJSON_GetObjectItemCaseSensitive(rotated_managed, "state") : NULL;
+      cJSON *rotated_server =
+          rotated_managed ? cJSON_GetObjectItemCaseSensitive(rotated_managed, "server_id") : NULL;
+      cJSON *rotated_team =
+          rotated_managed ? cJSON_GetObjectItemCaseSensitive(rotated_managed, "team_id") : NULL;
+      cJSON *rotated_marker =
+          rotated_managed ? cJSON_GetObjectItemCaseSensitive(rotated_managed, "management_marker")
+                          : NULL;
+      assert(cJSON_IsNumber(rotated_version) && rotated_version->valuedouble == 2);
+      assert(cJSON_IsString(rotated_state) && strcmp(rotated_state->valuestring, "ready") == 0);
+      assert(cJSON_IsString(rotated_server) &&
+             strcmp(rotated_server->valuestring, "managed-server-test") == 0);
+      assert(cJSON_IsNumber(rotated_team) && rotated_team->valuedouble == 42);
+      assert(cJSON_IsString(rotated_marker) &&
+             strcmp(rotated_marker->valuestring, "preserve-across-renewal") == 0);
+      cJSON_Delete(rotated_managed);
 
       kb_client_mtls_set_identity_path_for_test(NULL);
       kb_client_mtls_set_server_identity_path_for_test(NULL);

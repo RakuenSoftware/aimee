@@ -118,14 +118,11 @@ typedef struct
    long long team_id;
 } identity_metadata_t;
 
-static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca_cap, char *cert,
-                         size_t cert_cap, char *key, size_t key_cap, identity_metadata_t *metadata)
+static identity_metadata_t g_identity_metadata;
+static kb_client_mtls_renew_fn g_renew_for_test;
+
+static cJSON *identity_document_load(const char *path)
 {
-   if (metadata)
-      memset(metadata, 0, sizeof(*metadata));
-   char path[1024];
-   if (identity_path(path, sizeof(path)) != 0)
-      return -1;
    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
    struct stat st;
    if (fd < 0 || fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != geteuid() ||
@@ -134,7 +131,7 @@ static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca
    {
       if (fd >= 0)
          close(fd);
-      return -1;
+      return NULL;
    }
    char *raw = calloc(1, (size_t)st.st_size + 1);
    size_t used = 0;
@@ -155,13 +152,32 @@ static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca
          OPENSSL_cleanse(raw, (size_t)st.st_size + 1);
          free(raw);
       }
-      return -1;
+      return NULL;
    }
    const char *parse_end = NULL;
    cJSON *j = cJSON_ParseWithLengthOpts(raw, used + 1, &parse_end, 1);
    int parsed_all = parse_end == raw + used;
    OPENSSL_cleanse(raw, (size_t)st.st_size + 1);
    free(raw);
+   if (!parsed_all)
+   {
+      cJSON_Delete(j);
+      return NULL;
+   }
+   return j;
+}
+
+static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca_cap, char *cert,
+                         size_t cert_cap, char *key, size_t key_cap, identity_metadata_t *metadata)
+{
+   if (metadata)
+      memset(metadata, 0, sizeof(*metadata));
+   char path[1024];
+   if (identity_path(path, sizeof(path)) != 0)
+      return -1;
+   cJSON *j = identity_document_load(path);
+   if (!j)
+      return -1;
    cJSON *version = j ? cJSON_GetObjectItemCaseSensitive(j, "version") : NULL;
    cJSON *jca = j ? cJSON_GetObjectItemCaseSensitive(j, "ca") : NULL;
    cJSON *jcert = j ? cJSON_GetObjectItemCaseSensitive(j, "cert") : NULL;
@@ -186,8 +202,8 @@ static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca
    int endpoint_ok = is_v1 ? connection != NULL
                            : (!connection || (strcmp(connection->host, host->valuestring) == 0 &&
                                               connection->port == (int)port->valuedouble));
-   int ok = parsed_all && (is_v1 || is_v2) && endpoint_ok && cJSON_IsString(jca) &&
-            cJSON_IsString(jcert) && cJSON_IsString(jkey) && strlen(jca->valuestring) < ca_cap &&
+   int ok = (is_v1 || is_v2) && endpoint_ok && cJSON_IsString(jca) && cJSON_IsString(jcert) &&
+            cJSON_IsString(jkey) && strlen(jca->valuestring) < ca_cap &&
             strlen(jcert->valuestring) < cert_cap && strlen(jkey->valuestring) < key_cap &&
             (!connection || identity_matches_connection(connection, jca->valuestring)) &&
             identity_material_valid(jca->valuestring, jcert->valuestring, jkey->valuestring);
@@ -215,7 +231,10 @@ static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca
    return ok ? 0 : -1;
 }
 
-static int identity_save(const char *ca, const char *cert, const char *key)
+static int json_replace_string(cJSON *object, const char *name, const char *value);
+
+static int identity_save(const char *ca, const char *cert, const char *key,
+                         const identity_metadata_t *metadata)
 {
    char path[1024], temporary[1080];
    if (identity_path(path, sizeof(path)) != 0)
@@ -223,9 +242,29 @@ static int identity_save(const char *ca, const char *cert, const char *key)
    int tn = snprintf(temporary, sizeof(temporary), "%s.tmp.%ld", path, (long)getpid());
    if (tn <= 0 || (size_t)tn >= sizeof(temporary))
       return -1;
-   cJSON *j = cJSON_CreateObject();
-   if (!j || !cJSON_AddNumberToObject(j, "version", 1) || !cJSON_AddStringToObject(j, "ca", ca) ||
-       !cJSON_AddStringToObject(j, "cert", cert) || !cJSON_AddStringToObject(j, "key", key))
+   int is_v2 = metadata && metadata->version == 2;
+   cJSON *j = is_v2 ? identity_document_load(path) : cJSON_CreateObject();
+   cJSON *version = j ? cJSON_GetObjectItemCaseSensitive(j, "version") : NULL;
+   cJSON *state = j ? cJSON_GetObjectItemCaseSensitive(j, "state") : NULL;
+   cJSON *host = j ? cJSON_GetObjectItemCaseSensitive(j, "host") : NULL;
+   cJSON *port = j ? cJSON_GetObjectItemCaseSensitive(j, "port") : NULL;
+   cJSON *server_id = j ? cJSON_GetObjectItemCaseSensitive(j, "server_id") : NULL;
+   cJSON *team_id = j ? cJSON_GetObjectItemCaseSensitive(j, "team_id") : NULL;
+   int v2_matches =
+       !is_v2 || (cJSON_IsNumber(version) && version->valuedouble == 2 && cJSON_IsString(state) &&
+                  !strcmp(state->valuestring, "ready") && cJSON_IsString(host) &&
+                  !strcmp(host->valuestring, metadata->host) && cJSON_IsNumber(port) &&
+                  port->valuedouble == metadata->port && cJSON_IsString(server_id) &&
+                  !strcmp(server_id->valuestring, metadata->server_id) && cJSON_IsNumber(team_id) &&
+                  team_id->valuedouble == metadata->team_id);
+   int updated =
+       j && v2_matches && (is_v2 || cJSON_AddNumberToObject(j, "version", 1)) &&
+       (is_v2 ? json_replace_string(j, "ca", ca) : cJSON_AddStringToObject(j, "ca", ca) != NULL) &&
+       (is_v2 ? json_replace_string(j, "cert", cert)
+              : cJSON_AddStringToObject(j, "cert", cert) != NULL) &&
+       (is_v2 ? json_replace_string(j, "key", key)
+              : cJSON_AddStringToObject(j, "key", key) != NULL);
+   if (!updated)
    {
       cJSON_Delete(j);
       return -1;
@@ -265,6 +304,19 @@ static int identity_save(const char *ca, const char *cert, const char *key)
    return 0;
 }
 
+static int json_replace_string(cJSON *object, const char *name, const char *value)
+{
+   cJSON *replacement = cJSON_CreateString(value);
+   if (!replacement)
+      return 0;
+   if (!cJSON_ReplaceItemInObjectCaseSensitive(object, name, replacement))
+   {
+      cJSON_Delete(replacement);
+      return 0;
+   }
+   return 1;
+}
+
 #define KB_POOL_TOTAL_MAX   8
 #define KB_POOL_IDLE_MAX    2
 #define KB_POOL_WAITERS_MAX 64
@@ -293,6 +345,7 @@ static SSL_SESSION *g_pool_session = NULL;
 static unsigned long g_pool_handshakes_total = 0;
 static unsigned long g_pool_resumed_total = 0;
 static int g_pool_enabled_last = -1;
+static long g_renew_window_for_test = -1;
 
 static void pool_close_entry_locked(kb_pool_entry_t *entry);
 
@@ -312,6 +365,9 @@ void kb_client_mtls_reset_for_test(void)
    g_port = 0;
    g_ca[0] = '\0';
    g_cert[0] = '\0';
+   memset(&g_identity_metadata, 0, sizeof(g_identity_metadata));
+   g_renew_for_test = NULL;
+   g_renew_window_for_test = -1;
    OPENSSL_cleanse(g_key, sizeof(g_key));
    pthread_cond_broadcast(&g_pool_cv);
    pthread_mutex_unlock(&g_lock);
@@ -330,6 +386,20 @@ void kb_client_mtls_set_server_identity_path_for_test(const char *absolute_path)
    pthread_mutex_lock(&g_lock);
    snprintf(g_server_identity_path_override, sizeof(g_server_identity_path_override), "%s",
             absolute_path ? absolute_path : "");
+   pthread_mutex_unlock(&g_lock);
+}
+
+void kb_client_mtls_set_renew_window_for_test(long seconds)
+{
+   pthread_mutex_lock(&g_lock);
+   g_renew_window_for_test = seconds;
+   pthread_mutex_unlock(&g_lock);
+}
+
+void kb_client_mtls_set_renew_for_test(kb_client_mtls_renew_fn renew)
+{
+   pthread_mutex_lock(&g_lock);
+   g_renew_for_test = renew;
    pthread_mutex_unlock(&g_lock);
 }
 
@@ -590,14 +660,19 @@ static int ensure_enrolled(void)
    kb_enroll_conn_t pc;
    if (conn && conn[0] && kb_enroll_conn_string_parse(conn, &pc) == 0)
    {
-      if (identity_load(&pc, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key),
-                        NULL) == 0 ||
-          (kb_tls_enroll(conn, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key, sizeof(g_key)) ==
-               0 &&
-           identity_save(g_ca, g_cert, g_key) == 0))
+      identity_metadata_t metadata;
+      int loaded = identity_load(&pc, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key,
+                                 sizeof(g_key), &metadata) == 0;
+      if (loaded || (kb_tls_enroll(conn, g_ca, sizeof(g_ca), g_cert, sizeof(g_cert), g_key,
+                                   sizeof(g_key)) == 0 &&
+                     identity_save(g_ca, g_cert, g_key, NULL) == 0))
       {
          snprintf(g_host, sizeof(g_host), "%s", pc.host);
          g_port = pc.port;
+         if (loaded)
+            g_identity_metadata = metadata;
+         else
+            g_identity_metadata.version = 1;
          g_enrolled = 1;
          rc = 0;
       }
@@ -611,6 +686,7 @@ static int ensure_enrolled(void)
       {
          snprintf(g_host, sizeof(g_host), "%s", metadata.host);
          g_port = metadata.port;
+         g_identity_metadata = metadata;
          g_enrolled = 1;
          rc = 0;
       }
@@ -620,6 +696,7 @@ static int ensure_enrolled(void)
       OPENSSL_cleanse(g_key, sizeof(g_key));
       g_ca[0] = '\0';
       g_cert[0] = '\0';
+      memset(&g_identity_metadata, 0, sizeof(g_identity_metadata));
    }
    OPENSSL_cleanse(connection, sizeof(connection));
    pthread_mutex_unlock(&g_lock);
@@ -633,15 +710,18 @@ static int ensure_enrolled(void)
 static void maybe_renew(void)
 {
    pthread_mutex_lock(&g_lock);
-   if (g_enrolled && kb_tls_cert_expires_within(g_cert, KB_CLIENT_MTLS_RENEW_WINDOW) == 1)
+   long renew_window =
+       g_renew_window_for_test >= 0 ? g_renew_window_for_test : KB_CLIENT_MTLS_RENEW_WINDOW;
+   if (g_enrolled && kb_tls_cert_expires_within(g_cert, renew_window) == 1)
    {
       char nc[sizeof(g_cert)], nk[sizeof(g_key)];
-      if (kb_tls_renew(g_host, g_port, g_ca, g_cert, g_key, nc, sizeof(nc), nk, sizeof(nk)) == 0)
+      kb_client_mtls_renew_fn renew = g_renew_for_test ? g_renew_for_test : kb_tls_renew;
+      if (renew(g_host, g_port, g_ca, g_cert, g_key, nc, sizeof(nc), nk, sizeof(nk)) == 0)
       {
          /* Never switch the live process to an identity a restart would lose.
           * The old cert remains usable through its existing validity window if
           * storage is temporarily unavailable. */
-         if (identity_save(g_ca, nc, nk) == 0)
+         if (identity_save(g_ca, nc, nk, &g_identity_metadata) == 0)
          {
             snprintf(g_cert, sizeof(g_cert), "%s", nc);
             snprintf(g_key, sizeof(g_key), "%s", nk);
