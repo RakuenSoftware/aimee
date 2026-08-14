@@ -8500,6 +8500,27 @@ BEGIN
   RETURN n=1;
 END $$;
 
+CREATE OR REPLACE FUNCTION kb_server_registry_client_match(
+  p_server_id TEXT,p_team BIGINT,p_issuer TEXT,p_serial TEXT,p_fingerprint TEXT
+) RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF p_server_id !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$' OR p_team < 1
+     OR char_length(p_issuer) NOT BETWEEN 1 AND 600
+     OR p_serial !~ '^[0-9a-f]{1,128}$' OR p_fingerprint !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'invalid server client identity' USING ERRCODE='22023';
+  END IF;
+  RETURN EXISTS (
+    SELECT 1 FROM kb_server_registry r
+    JOIN kb_enrollments e ON e.scope='service:aimee-server'
+      AND e.cert_issuer=r.client_issuer AND e.cert_serial_norm=r.client_serial_norm
+      AND e.fingerprint=r.client_fingerprint AND e.state='active' AND e.revoked_at=''
+    WHERE r.server_id=p_server_id AND r.team_id=p_team AND r.status='active'
+      AND r.client_issuer=p_issuer AND r.client_serial_norm=p_serial
+      AND r.client_fingerprint=p_fingerprint
+  );
+END $$;
+
 CREATE OR REPLACE FUNCTION kb_server_registry_list(p_team BIGINT)
 RETURNS SETOF kb_server_registry LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
 BEGIN
@@ -10234,6 +10255,7 @@ REVOKE ALL ON FUNCTION kb_management_jwks_publication_guard(),
 REVOKE ALL ON FUNCTION kb_server_registry_pending(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_finalize(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_server_registry_client_match(TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_list(BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_snapshot(BIGINT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;

@@ -362,6 +362,65 @@ static void test_iat_ceiling(EVP_PKEY *key, const char *jwks)
    printf("  iat_ceiling: ok\n");
 }
 
+/* The service-connection profile is narrower than ordinary OIDC. It requires
+ * a complete issuer+audience policy, a subject, and typ=at+jwt in the signed
+ * protected header so a management JWT cannot be replayed as an access token. */
+static void test_service_profile(EVP_PKEY *key, const char *jwks)
+{
+   kb_oidc_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   snprintf(cfg.issuer, sizeof(cfg.issuer), "https://idp.example.com");
+   snprintf(cfg.audience, sizeof(cfg.audience), "aimee-kb");
+   snprintf(cfg.jwks_json, sizeof(cfg.jwks_json), "%s", jwks);
+   assert(kb_oidc_verifier_register(&cfg) == 0);
+   assert(kb_oidc_service_mode() == 1);
+
+   char payload[512];
+   sprintf(payload,
+           "{\"iss\":\"https://idp.example.com\",\"aud\":\"aimee-kb\","
+           "\"sub\":\"aimee-server\",\"iat\":%ld,\"exp\":%ld}",
+           NOW, NOW + 3600);
+   kb_verify_result_t result;
+   char *jwt =
+       make_jwt(key, "{\"alg\":\"RS256\",\"typ\":\"at+jwt\",\"kid\":\"test-key\"}", payload);
+   assert(kb_oidc_verify_service_token(jwt, NOW, &result) == 1);
+   assert(strcmp(result.subject, "aimee-server") == 0);
+   free(jwt);
+
+   const char *bad_headers[] = {
+       "{\"alg\":\"RS256\",\"kid\":\"test-key\"}",
+       "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"kid\":\"test-key\"}",
+       "{\"alg\":\"RS256\",\"typ\":\"at+jwt\",\"typ\":\"at+jwt\",\"kid\":\"test-key\"}",
+   };
+   for (size_t i = 0; i < sizeof(bad_headers) / sizeof(bad_headers[0]); ++i)
+   {
+      jwt = make_jwt(key, bad_headers[i], payload);
+      assert(kb_oidc_verify_service_token(jwt, NOW, &result) == 0);
+      free(jwt);
+   }
+
+   sprintf(payload,
+           "{\"iss\":\"https://idp.example.com\",\"aud\":\"wrong\","
+           "\"sub\":\"aimee-server\",\"iat\":%ld,\"exp\":%ld}",
+           NOW, NOW + 3600);
+   jwt = make_jwt(key, "{\"alg\":\"RS256\",\"typ\":\"at+jwt\",\"kid\":\"test-key\"}", payload);
+   assert(kb_oidc_verify_service_token(jwt, NOW, &result) == 0);
+   free(jwt);
+
+   sprintf(payload,
+           "{\"iss\":\"https://idp.example.com\",\"aud\":\"aimee-kb\","
+           "\"iat\":%ld,\"exp\":%ld}",
+           NOW, NOW + 3600);
+   jwt = make_jwt(key, "{\"alg\":\"RS256\",\"typ\":\"at+jwt\",\"kid\":\"test-key\"}", payload);
+   assert(kb_oidc_verify_service_token(jwt, NOW, &result) == 0);
+   free(jwt);
+
+   cfg.audience[0] = '\0';
+   assert(kb_oidc_verifier_register(&cfg) == 0);
+   assert(kb_oidc_service_mode() == -1);
+   printf("  service_profile: ok\n");
+}
+
 int main(void)
 {
    printf("kb_auth_oidc:\n");
@@ -373,6 +432,7 @@ int main(void)
    test_reject_paths(key, jwks);
    test_iat_ceiling(key, jwks);
    test_seam_registration(key, jwks);
+   test_service_profile(key, jwks);
    test_register_from_file(key, jwks);
 
    free(jwks);

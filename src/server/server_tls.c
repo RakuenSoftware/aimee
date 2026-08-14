@@ -6,6 +6,7 @@
 #include "aimee.h"          /* MAX_PATH_LEN */
 #include "pki.h"            /* pki_ca_ensure, pki_is_revoked */
 #include "log.h"
+#include "cJSON.h"
 #include <aimee/core/connection/tls_openssl.h>
 
 #include <openssl/bn.h>
@@ -46,6 +47,8 @@ static pthread_mutex_t g_management_ctx_mu = PTHREAD_MUTEX_INITIALIZER;
 static unsigned char g_management_cert_hash[32];
 static unsigned char g_management_key_hash[32];
 static unsigned char g_management_ca_hash[32];
+
+static int exact_cert_eku(X509 *cert, int required_nid);
 
 #define MANAGEMENT_PEM_MAX (1024U * 1024U)
 
@@ -159,10 +162,15 @@ static int mtls_verify_cb(int preverify_ok, X509_STORE_CTX *ctx)
    if (!preverify_ok)
       return 0; /* chain/time/CA failure -> reject */
    if (X509_STORE_CTX_get_error_depth(ctx) != 0)
-      return 1; /* only the leaf carries the client serial */
+      return 1; /* EKU and revocation are leaf-only; CA/intermediate EKU is irrelevant */
    X509 *cert = X509_STORE_CTX_get_current_cert(ctx);
    if (!cert)
       return 1;
+   if (!exact_cert_eku(cert, NID_client_auth))
+   {
+      X509_STORE_CTX_set_error(ctx, X509_V_ERR_INVALID_PURPOSE);
+      return 0;
+   }
    ASN1_INTEGER *sn = X509_get_serialNumber(cert);
    BIGNUM *bn = sn ? ASN1_INTEGER_to_BN(sn, NULL) : NULL;
    char *hex = bn ? BN_bn2hex(bn) : NULL;
@@ -222,6 +230,68 @@ static int ctx_use_private_key_pem(SSL_CTX *ctx, const char *pem)
    return ok ? 0 : -1;
 }
 
+static int exact_cert_eku(X509 *cert, int required_nid)
+{
+   int pos = cert ? X509_get_ext_by_NID(cert, NID_ext_key_usage, -1) : -1;
+   if (pos < 0 || X509_get_ext_by_NID(cert, NID_ext_key_usage, pos) >= 0)
+      return 0;
+   EXTENDED_KEY_USAGE *eku = X509_get_ext_d2i(cert, NID_ext_key_usage, NULL, NULL);
+   int ok = eku && sk_ASN1_OBJECT_num(eku) == 1 &&
+            OBJ_obj2nid(sk_ASN1_OBJECT_value(eku, 0)) == required_nid;
+   EXTENDED_KEY_USAGE_free(eku);
+   return ok;
+}
+
+/* Enforce the reciprocal half of pair separation. kb_client_mtls rejects a KB
+ * client identity that collides with an already-installed listener identity;
+ * this rejects a listener identity installed or rotated after the KB identity. */
+static int distinct_from_kb_client_identity(X509 *server_cert)
+{
+   char path[MAX_PATH_LEN];
+   int n = snprintf(path, sizeof(path), "%s/kb-client-identity.json", config_default_dir());
+   if (n <= 0 || (size_t)n >= sizeof(path))
+      return 0;
+   int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+   if (fd < 0)
+      return errno == ENOENT;
+   struct stat st;
+   int valid_file = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_uid == geteuid() &&
+                    st.st_nlink == 1 && !(st.st_mode & (S_IRWXG | S_IRWXO)) && st.st_size > 0 &&
+                    st.st_size < 32768;
+   char *raw = valid_file ? calloc(1, (size_t)st.st_size + 1) : NULL;
+   size_t used = 0;
+   while (raw && used < (size_t)st.st_size)
+   {
+      ssize_t got = read(fd, raw + used, (size_t)st.st_size - used);
+      if (got < 0 && errno == EINTR)
+         continue;
+      if (got <= 0)
+         break;
+      used += (size_t)got;
+   }
+   close(fd);
+   cJSON *root = raw && used == (size_t)st.st_size ? cJSON_ParseWithLength(raw, used) : NULL;
+   cJSON *cert_item = root ? cJSON_GetObjectItemCaseSensitive(root, "cert") : NULL;
+   BIO *client_bio = cJSON_IsString(cert_item) && cert_item->valuestring[0]
+                         ? BIO_new_mem_buf(cert_item->valuestring, -1)
+                         : NULL;
+   X509 *client_cert = client_bio ? PEM_read_bio_X509(client_bio, NULL, NULL, NULL) : NULL;
+   EVP_PKEY *server_key = server_cert ? X509_get_pubkey(server_cert) : NULL;
+   EVP_PKEY *client_key = client_cert ? X509_get_pubkey(client_cert) : NULL;
+   int distinct = server_key && client_key && EVP_PKEY_eq(server_key, client_key) == 0;
+   EVP_PKEY_free(server_key);
+   EVP_PKEY_free(client_key);
+   X509_free(client_cert);
+   BIO_free(client_bio);
+   cJSON_Delete(root);
+   if (raw)
+   {
+      OPENSSL_cleanse(raw, (size_t)st.st_size + 1);
+      free(raw);
+   }
+   return distinct;
+}
+
 /* Build a fresh SSL_CTX from the given cert/key/mtls settings, WITHOUT touching g_ctx.
  * Returns the ctx (caller owns) or NULL on any load failure — so both init and a live reload
  * validate-or-keep: a bad cert never disturbs the running listener. */
@@ -267,6 +337,20 @@ static SSL_CTX *tls_build_ctx(const char *cert_path, const char *key_path, int m
    {
       aimee_log(LOG_WARN, "server.tls", "failed to load TLS cert/Vault key (%s): %s", cert_path,
                 ERR_error_string(ERR_get_error(), NULL));
+      SSL_CTX_free(ctx);
+      return NULL;
+   }
+   if (!exact_cert_eku(SSL_CTX_get0_certificate(ctx), NID_server_auth))
+   {
+      aimee_log(LOG_WARN, "server.tls", "TLS certificate must have only the serverAuth EKU: %s",
+                cert_path);
+      SSL_CTX_free(ctx);
+      return NULL;
+   }
+   if (!distinct_from_kb_client_identity(SSL_CTX_get0_certificate(ctx)))
+   {
+      aimee_log(LOG_WARN, "server.tls", "TLS certificate reuses the KB client identity key: %s",
+                cert_path);
       SSL_CTX_free(ctx);
       return NULL;
    }
@@ -378,18 +462,6 @@ static int ctx_use_captured_ca(SSL_CTX *ctx, const captured_pem_t *pem)
    }
    sk_X509_INFO_pop_free(info, X509_INFO_free);
    return ok && certs > 0 ? 0 : -1;
-}
-
-static int exact_cert_eku(X509 *cert, int required_nid)
-{
-   int pos = cert ? X509_get_ext_by_NID(cert, NID_ext_key_usage, -1) : -1;
-   if (pos < 0 || X509_get_ext_by_NID(cert, NID_ext_key_usage, pos) >= 0)
-      return 0;
-   EXTENDED_KEY_USAGE *eku = X509_get_ext_d2i(cert, NID_ext_key_usage, NULL, NULL);
-   int ok = eku && sk_ASN1_OBJECT_num(eku) == 1 &&
-            OBJ_obj2nid(sk_ASN1_OBJECT_value(eku, 0)) == required_nid;
-   EXTENDED_KEY_USAGE_free(eku);
-   return ok;
 }
 
 static int end_entity_key_usage(X509 *cert, int exact_digital_signature)
