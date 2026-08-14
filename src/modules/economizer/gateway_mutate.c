@@ -36,6 +36,15 @@ const char *gw_bypass_reason_str(gw_bypass_reason_t reason)
    return "unknown";
 }
 
+const char *gw_module_bypass(int reduce_rc, const char *bypass)
+{
+   /* Fail closed: an unreachable module and a module that reported nothing are
+    * indistinguishable from here, and neither said "apply". */
+   if (reduce_rc != 0 || !bypass || bypass[0] == '\0')
+      return gw_bypass_reason_str(GW_BYPASS_REDUCE_INTERNAL_ASSERTION);
+   return bypass;
+}
+
 cJSON *gw_snapshot_messages(const cJSON *messages)
 {
    if (!messages)

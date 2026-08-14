@@ -69,6 +69,19 @@ extern "C"
 
    const char *gw_bypass_reason_str(gw_bypass_reason_t reason);
 
+   /* Read the module's apply verdict off a reduce result.
+    *
+    * `reduce_rc` is econ_module_reduce's return and `bypass` is the verdict it
+    * reported, which is EMPTY when the module was not reached. Neither a failed
+    * call nor an absent verdict is consent: both yield reduce_internal_assertion,
+    * so the only way to get "none" is for a module that ran to have said so.
+    * That asymmetry is the point — a silent module must never read as approval.
+    *
+    * The decision itself is the module's (see the gateway seam in
+    * server-go/modules/economizer); this only marshals it. Returns a static
+    * string owned by gw_bypass_reason_str, never NULL. */
+   const char *gw_module_bypass(int reduce_rc, const char *bypass);
+
    /* Deep copy of a messages array (every message + string independently allocated),
     * so restoring the pristine original is independent of any retained references.
     * Returns NULL on allocation failure (cJSON_Duplicate frees its own partial work);

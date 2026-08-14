@@ -228,6 +228,10 @@ int econ_module_reduce(const cJSON *messages, const char *system_prompt, econ_mo
       const cJSON *v;
       if ((v = cJSON_GetObjectItemCaseSensitive(reply, "reason")) && cJSON_IsString(v))
          snprintf(out->reason, sizeof(out->reason), "%s", v->valuestring);
+      /* Absent on the delegate seam, so a missing key leaves bypass empty rather
+       * than defaulting to a verdict. */
+      if ((v = cJSON_GetObjectItemCaseSensitive(reply, "bypass")) && cJSON_IsString(v))
+         snprintf(out->bypass, sizeof(out->bypass), "%s", v->valuestring);
 #define NUM(field, key)                                                                            \
    if ((v = cJSON_GetObjectItemCaseSensitive(reply, key)) && cJSON_IsNumber(v))                    \
    out->field = (int)v->valuedouble
