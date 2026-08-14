@@ -136,6 +136,19 @@ int db2_server_registry_heartbeat(const char *server_id, const char *issuer, con
    return g_test_registry_heartbeat_allow ? 0 : -1;
 }
 
+int g_test_registry_client_match = 1;
+
+int db2_server_registry_client_match(const char *server_id, int64_t team, const char *issuer,
+                                     const char *serial, const char *fingerprint)
+{
+   snprintf(g_test_registry_server_id, sizeof(g_test_registry_server_id), "%s", server_id);
+   snprintf(g_test_registry_issuer, sizeof(g_test_registry_issuer), "%s", issuer);
+   snprintf(g_test_registry_serial, sizeof(g_test_registry_serial), "%s", serial);
+   snprintf(g_test_registry_fingerprint, sizeof(g_test_registry_fingerprint), "%s", fingerprint);
+   (void)team;
+   return g_test_registry_client_match;
+}
+
 /* The OIDC login callback's two outward dependencies. This test's focus is
  * routing, and it never drives a login to completion, so a stub that REFUSES is
  * both sufficient and the safer default: if the callback is ever reached from
