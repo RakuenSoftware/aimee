@@ -931,10 +931,14 @@ go-unit-tests:
 # forwarder and resolver because they have no dynamic-link policy to inspect.
 # Keep the phases explicit and ordered: build the authoritative `all` set, check
 # dynamic-link boundaries, inspect every shipping artifact, then run the suite.
+#
+# The repository lock is not verified here: it pins a release, binds only on
+# `main`, and verify-local runs on branches whose whole job is to move the
+# vendored source ahead of it. `make repository-lock-check` still runs it on
+# demand, and the c-repository-pins workflow runs it for `main`.
 verify-local: all
 	@$(MAKE) check-linking
 	@$(MAKE) lint
-	@cd .. && python3 -I scripts/check_c_repository_lock.py
 	@$(MAKE) TEST_RUN_JOBS=$(AIMEE_VERIFY_TEST_JOBS) unit-tests
 	@$(MAKE) go-unit-tests
 	@echo "verify-local: ok"
@@ -1869,7 +1873,14 @@ lint: BUS_BLAST_RADIUS_FLAGS := --allow-unbuilt
 # target-specific variable on `lint`, and target-specific variables do NOT cross
 # a recursive make, so bus-blast-radius-check would otherwise lose
 # --allow-unbuilt and start demanding the whole shipping set.
-LINT_CHECKS = subject-corpus-check native-tool-parity-check guidance-tool-parity-check optional-tool-ownership-check module-source-ownership-check module-bus-boundary-check cleanup-ledger-check repository-lock-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check model-fallback-shadow-check p1-tenant-guard-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check config-encapsulation-check deployed-image-check
+#
+# repository-lock-check is deliberately NOT here. It verifies release pins (which
+# external repository commit each vendored mirror was cut from), which only bind
+# on `main`; on every other branch the vendored source is meant to run ahead of
+# the lock, so running it in lint just demands a lock refresh after each edit
+# under src/core|modules/**. The c-repository-pins workflow runs it for `main`
+# and for PRs into `main`.
+LINT_CHECKS = subject-corpus-check native-tool-parity-check guidance-tool-parity-check optional-tool-ownership-check module-source-ownership-check module-bus-boundary-check cleanup-ledger-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check model-fallback-shadow-check p1-tenant-guard-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check config-encapsulation-check deployed-image-check
 
 lint:
 	@fail=""; n=0; \
