@@ -79,6 +79,24 @@ add_test(NAME test_git_oauth_device COMMAND test_git_oauth_device)
 set_tests_properties(test_git_oauth_device PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# test_git_oauth_github: completing a sign-in requires the token to be STORED.
+# Walks start -> poll against scripted HTTP/vault stubs, so the store failure is
+# reachable without a network. Not linked against aimee-core: the stubs here
+# deliberately replace externals that aimee-core also defines.
+add_executable(test_git_oauth_github test_git_oauth_github.c
+  ../modules/git/git_oauth_github.c ../vendor/cJSON.c)
+target_include_directories(test_git_oauth_github PRIVATE
+  ${AIMEE_PROJECT_INCLUDE_DIRS}
+  ${AIMEE_SRC_DIR}/db1
+  ${AIMEE_SRC_DIR}/db2
+  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/git
+  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+target_link_libraries(test_git_oauth_github PRIVATE Threads::Threads)
+aimee_enable_test_asserts(test_git_oauth_github)
+add_test(NAME test_git_oauth_github COMMAND test_git_oauth_github)
+set_tests_properties(test_git_oauth_github PROPERTIES
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # test_git_oauth_gh: PTY-output scrubbing + one-time-code extraction for the
 # gh-CLI GitHub sign-in fallback. Exec/vault externals stubbed in the test
 # (never invoked by the pure functions under test). POSIX-only (<pty.h>).
