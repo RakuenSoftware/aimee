@@ -76,6 +76,8 @@ sufficient to impersonate a local UDS caller is likewise outside the local-CLI t
 
 ## Background and maintenance work
 
+This is the adopted resolution of #2646's background-work question.
+
 Ingest, re-embed, curator passes and the code indexer act on nobody's behalf. Their authorization
 is a named, project-bound maintenance scope. Queue tables remain outside content RLS so a worker can
 claim a durable job and learn its project without seeing content. The worker then opens a

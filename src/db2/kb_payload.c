@@ -1174,6 +1174,10 @@ int db2_kb_async_count_kind(const char *kind)
 
 int db2_kb_pdf_reembed_project(const char *project)
 {
+   /* Preserve the capability gate from the former all-project helper: a
+    * dimension reset must not create jobs when no PDF-vector consumer exists. */
+   if (!config_kb_pdf_vector_enabled())
+      return 0;
    void *conn = db2_conn();
    if (!conn || !project || !project[0])
       return 0;

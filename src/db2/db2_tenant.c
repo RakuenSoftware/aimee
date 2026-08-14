@@ -121,12 +121,22 @@ static int apply_maintenance_context(db2_maintenance_worker_t worker, const char
    aimee_pg_stmt_t *st =
        aimee_pg_prepare(conn, "SELECT set_maintenance_context(?1, ?2)", err, sizeof(err));
    if (!st)
+   {
+      LOG_WARN("db2.tenant", "maintenance context prepare failed for worker '%s': %s", name,
+               err[0] ? err : "unknown database error");
       return DB2_ERR_TENANT_BEGIN;
+   }
    aimee_pg_bind_text(st, "?1", name);
    aimee_pg_bind_text(st, "?2", project);
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
-   return step == AIMEE_PG_ERR ? DB2_ERR_MAINTENANCE_INVALID : 0;
+   if (step != AIMEE_PG_ROW)
+   {
+      LOG_WARN("db2.tenant", "maintenance context rejected for worker '%s' project '%s': %s", name,
+               project, err[0] ? err : "unexpected database result");
+      return DB2_ERR_MAINTENANCE_INVALID;
+   }
+   return 0;
 }
 
 int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
