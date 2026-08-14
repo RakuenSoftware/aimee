@@ -17,6 +17,7 @@
 #include "config.h"
 #include "cJSON.h"
 #include "runtime_secret.h"
+#include "util.h"
 #include <aimee/core/connection/auth.h>
 
 #include <pthread.h>
@@ -46,14 +47,23 @@ static char g_server_identity_path_override[1024];
 
 #define KB_CLIENT_IDENTITY_MAX 32768
 #define KB_CLIENT_BEARER_MAX   4096
+#define KB_CLIENT_HEADERS_MAX  16384
+#define KB_CLIENT_PAM_USER_MAX 63
+#define KB_CLIENT_PAM_PASS_MAX 1023
 
-/* Read the outbound service bearer for every request. It is deliberately not
- * cached with the mTLS identity: bearer rotation must take effect on the next
- * request even when the HTTP/TLS connection remains pooled. */
-static int service_authorization(char *out, size_t cap)
+/* Read both independent application credentials for every request. Neither is
+ * cached with the mTLS identity: bearer/OIDC/PAM rotation must take effect on
+ * request N+1 even while the HTTP/TLS connection remains pooled. */
+static int service_request_headers(char *out, size_t cap)
 {
    char token[KB_CLIENT_BEARER_MAX + 1] = "";
    char value[KB_CLIENT_BEARER_MAX + 8] = "";
+   char oidc[KB_CLIENT_BEARER_MAX + 1] = "";
+   char oidc_value[KB_CLIENT_BEARER_MAX + 8] = "";
+   char pam_user[KB_CLIENT_PAM_USER_MAX + 1] = "";
+   char pam_pass[KB_CLIENT_PAM_PASS_MAX + 1] = "";
+   char pam_pair[KB_CLIENT_PAM_USER_MAX + KB_CLIENT_PAM_PASS_MAX + 2] = "";
+   char pam_b64[2048] = "";
    if (!out || cap == 0)
       return -1;
    out[0] = '\0';
@@ -63,12 +73,41 @@ static int service_authorization(char *out, size_t cap)
    int n = have && aimee_core_bearer_value(value, sizeof(value), token) == 0
                ? snprintf(out, cap, "Authorization: %s\r\n", value)
                : -1;
+   if (n > 0 && (size_t)n < cap &&
+       runtime_secret_get("AIMEE_KB_CLIENT_OIDC_TOKEN", oidc, sizeof(oidc)) &&
+       aimee_core_bearer_value(oidc_value, sizeof(oidc_value), oidc) == 0)
+   {
+      int added =
+          snprintf(out + n, cap - (size_t)n, "X-Aimee-Service-Authorization: %s\r\n", oidc_value);
+      n = added > 0 && (size_t)added < cap - (size_t)n ? n + added : -1;
+   }
+   else if (n > 0 && (size_t)n < cap &&
+            runtime_secret_get("AIMEE_KB_CLIENT_PAM_USERNAME", pam_user, sizeof(pam_user)) &&
+            runtime_secret_get("AIMEE_KB_CLIENT_PAM_PASSWORD", pam_pass, sizeof(pam_pass)))
+   {
+      int pair_len = snprintf(pam_pair, sizeof(pam_pair), "%s:%s", pam_user, pam_pass);
+      size_t encoded = pair_len > 0 && (size_t)pair_len < sizeof(pam_pair)
+                           ? aimee_base64_encode((const unsigned char *)pam_pair, (size_t)pair_len,
+                                                 pam_b64, sizeof(pam_b64))
+                           : 0;
+      int added = encoded > 0 ? snprintf(out + n, cap - (size_t)n,
+                                         "X-Aimee-Service-Authorization: Basic %s\r\n", pam_b64)
+                              : -1;
+      n = added > 0 && (size_t)added < cap - (size_t)n ? n + added : -1;
+   }
+   else
+      n = -1;
+   runtime_secret_wipe(pam_b64, sizeof(pam_b64));
+   runtime_secret_wipe(pam_pair, sizeof(pam_pair));
+   runtime_secret_wipe(pam_pass, sizeof(pam_pass));
+   runtime_secret_wipe(pam_user, sizeof(pam_user));
+   runtime_secret_wipe(oidc_value, sizeof(oidc_value));
+   runtime_secret_wipe(oidc, sizeof(oidc));
    runtime_secret_wipe(value, sizeof(value));
    runtime_secret_wipe(token, sizeof(token));
    if (n <= 0 || (size_t)n >= cap)
    {
-      if (cap)
-         out[0] = '\0';
+      runtime_secret_wipe(out, cap);
       return -1;
    }
    return 0;
@@ -780,8 +819,8 @@ char *kb_client_mtls_request_timeout_with_type(const char *method, const char *p
       return NULL;
    if (timeout_ms <= 0)
       timeout_ms = KB_CLIENT_MTLS_DEFAULT_TIMEOUT_MS;
-   char authorization[KB_CLIENT_BEARER_MAX + 32];
-   if (service_authorization(authorization, sizeof(authorization)) != 0)
+   char authorization[KB_CLIENT_HEADERS_MAX];
+   if (service_request_headers(authorization, sizeof(authorization)) != 0)
    {
       if (status_out)
          *status_out = KB_CLIENT_ERR_AUTH_REQUIRED;

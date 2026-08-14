@@ -59,6 +59,10 @@ extern "C"
     * full mTLS request path over a socketpair. */
    void kb_tls_serve_conn(int fd, SSL_CTX *ctx);
 
+   /* Test-only seam for the host PAM verifier used by the service-identity
+    * layer. Passing NULL restores the production pam_check_credentials path. */
+   void kb_tls_set_pam_check_for_test(int (*check)(const char *, const char *));
+
    /* --- the kb mTLS listener (distributed mode) --- */
 
    /* Start the mTLS listener on `port` (0 = OS-assigned; see kb_mtls_bound_port).

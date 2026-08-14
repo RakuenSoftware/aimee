@@ -715,6 +715,13 @@ static const config_field_t g_stub_secret_field = {
 static int g_stub_secret_configured;
 static int g_stub_secret_store_calls;
 static char g_stub_kb_api_bearer_token[4097] = "scope:service:aimee-server:token-one";
+static char g_test_pam_password[64] = "server-password";
+static int test_pam_check_credentials(const char *user, const char *password)
+{
+   return user && password &&
+          (strcmp(user, "aimee-server") == 0 || strcmp(user, "other-service") == 0) &&
+          strcmp(password, g_test_pam_password) == 0;
+}
 const char *config_kb_api_bearer_token(void)
 {
    return g_stub_kb_api_bearer_token;
@@ -2928,7 +2935,10 @@ static void mtls_request_raw(SSL_CTX *server_ctx, SSL_CTX *client_ctx, const cha
    close(sv[1]);
 }
 
-#define TEST_KB_AUTH_HEADER "Authorization: Bearer token-one\r\n"
+#define TEST_KB_AUTH_HEADER                                                                        \
+   "Authorization: Bearer token-one\r\n"                                                           \
+   "X-Aimee-Service-Authorization: Basic "                                                         \
+   "YWltZWUtc2VydmVyOnNlcnZlci1wYXNzd29yZA==\r\n"
 
 /* Ordinary test requests carry the enrolled service bearer. Tests of missing
  * and invalid bearing call mtls_request_raw directly. */
@@ -3007,7 +3017,10 @@ static int test_kb_client_renew(const char *host, int port, const char *ca_cert_
    (void)ca_cert_pem;
    (void)cur_cert_pem;
    (void)cur_key_pem;
-   assert(authorization && strcmp(authorization, "Authorization: Bearer token-two\r\n") == 0);
+   assert(authorization &&
+          strcmp(authorization, "Authorization: Bearer token-two\r\n"
+                                "X-Aimee-Service-Authorization: Basic "
+                                "YWltZWUtc2VydmVyOnNlcnZlci1wYXNzd29yZA==\r\n") == 0);
    return g_rotation_test_ca
               ? kb_pki_issue_client_cert(g_rotation_test_ca, KB_SERVER_CLIENT_SCOPE,
                                          60L * 60 * 24 * 90, cert_out, cert_cap, key_out, key_cap)
@@ -3032,6 +3045,7 @@ static void *mtls_pool_request_thread(void *opaque)
 
 static void test_mtls_serve(void)
 {
+   kb_tls_set_pam_check_for_test(test_pam_check_credentials);
    extern void test_kb_enrollment_authority_set(int status);
    kb_pki_ca_t ca;
    assert(kb_pki_ca_generate(&ca) == 0);
@@ -3079,6 +3093,31 @@ static void test_mtls_serve(void)
                     resp, sizeof(resp));
    assert(strstr(resp, "401 Unauthorized") && strstr(resp, "service bearer required"));
    assert(!strstr(resp, "\"status\":\"ok\""));
+
+   /* mTLS plus the rotating bearer is still only two layers. A missing or bad
+    * OIDC/PAM service identity fails before routing. */
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
+                    "Authorization: Bearer token-one\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "401 Unauthorized") && strstr(resp, "OIDC or PAM service identity"));
+
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
+                    "Authorization: Bearer token-one\r\n"
+                    "X-Aimee-Service-Authorization: Basic "
+                    "b3RoZXItc2VydmljZTpzZXJ2ZXItcGFzc3dvcmQ=\r\n"
+                    "Connection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "403 Forbidden") &&
+          strstr(resp, "service identity does not match client certificate"));
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
+                    "Authorization: Bearer token-one\r\n"
+                    "X-Aimee-Service-Authorization: Basic d3Jvbmc6Y3JlZGVudGlhbA==\r\n"
+                    "Connection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "401 Unauthorized") && strstr(resp, "OIDC or PAM service identity"));
 
    /* Matching scoped transport and bearer identities remain data-plane only;
     * neither can acquire an owner actor from the other. */
@@ -3289,6 +3328,7 @@ static void test_mtls_serve(void)
 
    SSL_CTX_free(sctx);
    SSL_CTX_free(cctx);
+   kb_tls_set_pam_check_for_test(NULL);
 }
 
 /* connect to 127.0.0.1:port, do an mTLS request, return the response. */
@@ -3329,6 +3369,7 @@ static void mtls_tcp_request(int port, SSL_CTX *client_ctx, const char *req, cha
  * and serves /v1 with the scope taken from the client cert. */
 static void test_mtls_listener(void)
 {
+   kb_tls_set_pam_check_for_test(test_pam_check_credentials);
    extern void test_kb_enrollment_authority_set(int status);
    /* Production passes kb_default_config_dir() as the listener data_dir, and the
     * bootstrap endpoints (/v1/enroll/ca, /renew) read the CA from there — so use
@@ -3549,6 +3590,8 @@ static void test_mtls_listener(void)
       assert(runtime_secret_store("AIMEE_KB_CLIENT_BEARER_TOKEN", "token-one") == 0);
       assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN",
                                   "scope:service:aimee-server:token-one") == 0);
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_USERNAME", "aimee-server") == 0);
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_PASSWORD", "server-password") == 0);
       setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
       int st2 = -1;
@@ -3684,6 +3727,19 @@ static void test_mtls_listener(void)
       kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
       assert(pool_handshakes == handshakes_before_bearer_rotation);
       assert(pool_resumed == resumed_before_bearer_rotation);
+
+      /* The PAM credential is also fetched on every request. Rotate it under
+       * the same pooled TLS connection, then restore it for the renewal probe. */
+      snprintf(g_test_pam_password, sizeof(g_test_pam_password), "%s", "rotated-password");
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_PASSWORD", "rotated-password") == 0);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+      kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
+      assert(pool_handshakes == handshakes_before_bearer_rotation);
+      assert(pool_resumed == resumed_before_bearer_rotation);
+      snprintf(g_test_pam_password, sizeof(g_test_pam_password), "%s", "server-password");
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_PASSWORD", "server-password") == 0);
 
       /* Bearers are bounded independently from ordinary short test secrets;
        * exercise a token long enough to catch a mismatched server-side buffer. */
@@ -3866,6 +3922,8 @@ static void test_mtls_listener(void)
       int missing_bearer_status = -1;
       r = kb_client_mtls_request("GET", "/v1/health", NULL, &missing_bearer_status);
       assert(r == NULL && missing_bearer_status == KB_CLIENT_ERR_AUTH_REQUIRED);
+      runtime_secret_remove("AIMEE_KB_CLIENT_PAM_USERNAME");
+      runtime_secret_remove("AIMEE_KB_CLIENT_PAM_PASSWORD");
       assert(kb_client_mtls_configured() == 0);
       unlink(identity_file);
       unlink(server_identity_file);
@@ -3903,6 +3961,7 @@ static void test_mtls_listener(void)
    remove(cp);
    snprintf(cp, sizeof(cp), "%s/kb-ca", cfg);
    rmdir(cp);
+   kb_tls_set_pam_check_for_test(NULL);
 }
 
 static void test_head_method(void)

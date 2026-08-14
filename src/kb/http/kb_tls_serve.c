@@ -24,14 +24,18 @@
 #include "../../db2/db2_tenant.h"
 #include "db2/db2.h"    /* request-scoped DB2 lease */
 #include "kb_ingress.h" /* B5 identity-header ingress guard */
+#include "kb_auth_oidc.h"
+#include "kb_identity.h"
 #include "kb_reqctx.h"
 #include "kb_verifier.h"
+#include "pam_auth.h"
 #include "config.h"
 #include "log.h"             /* LOG_WARN */
 #include "db2/enrollments.h" /* revocation source of truth + last-seen */
 #include "kb_paths.h"        /* kb_default_config_dir */
 #include "kb_pki.h"          /* CA load + CSR signing for renew */
 #include "runtime_secret.h"
+#include "util.h"
 #include <aimee/core/connection/auth.h>
 
 #include <fcntl.h>
@@ -40,6 +44,7 @@
 #include <strings.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <time.h>
 
 #define KB_TLS_HEADER_MAX       (64 * 1024)
 #define KB_TLS_BODY_MAX         (1024 * 1024)
@@ -50,6 +55,13 @@
 #define KB_TLS_RESP_MAX         262144
 #define KB_TLS_AUTH_MAX         8192
 #define KB_TLS_BEARER_MAX       4096
+
+static int (*g_pam_check_override)(const char *, const char *);
+
+void kb_tls_set_pam_check_for_test(int (*check)(const char *, const char *))
+{
+   g_pam_check_override = check;
+}
 
 static int header_name_char(unsigned char c)
 {
@@ -89,6 +101,85 @@ static int bearer_identity_matches_certificate(const char *cn, const kb_verify_r
    return n > 0 && (size_t)n < sizeof(scope) && strcmp(scope, cn) == 0;
 }
 
+/* Decode one canonical HTTP Basic value and authenticate it through the same
+ * PAM service used by the KB login/dashboard. The decoded password never
+ * escapes this stack frame and every copy is wiped before return. */
+static int pam_service_identity(const char *authorization, kb_principal_t *out)
+{
+   unsigned char decoded[1100] = {0};
+   char canonical[1600] = "";
+   int ok = 0;
+   if (!authorization || strncasecmp(authorization, "Basic ", 6) != 0)
+      goto done;
+   const char *encoded = authorization + 6;
+   size_t encoded_len = strlen(encoded);
+   if (!encoded_len || encoded_len % 4 != 0 || encoded_len >= sizeof(canonical))
+      goto done;
+   for (size_t i = 0; i < encoded_len; ++i)
+      if (!((encoded[i] >= 'A' && encoded[i] <= 'Z') || (encoded[i] >= 'a' && encoded[i] <= 'z') ||
+            (encoded[i] >= '0' && encoded[i] <= '9') || encoded[i] == '+' || encoded[i] == '/' ||
+            (encoded[i] == '=' && i >= encoded_len - 2)))
+         goto done;
+   size_t decoded_len = aimee_base64_decode(encoded, decoded, sizeof(decoded) - 1);
+   if (decoded_len == (size_t)-1 || !decoded_len || memchr(decoded, '\0', decoded_len))
+      goto done;
+   decoded[decoded_len] = '\0';
+   if (aimee_base64_encode(decoded, decoded_len, canonical, sizeof(canonical)) == 0 ||
+       !aimee_core_credential_equal(encoded, canonical))
+      goto done;
+   char *colon = strchr((char *)decoded, ':');
+   if (!colon || colon == (char *)decoded || !colon[1])
+      goto done;
+   *colon = '\0';
+   int authenticated = g_pam_check_override ? g_pam_check_override((char *)decoded, colon + 1)
+                                            : pam_check_credentials((char *)decoded, colon + 1);
+   if (authenticated && kb_principal_from_host_account((char *)decoded, out) == 0)
+      ok = 1;
+done:
+   OPENSSL_cleanse(canonical, sizeof(canonical));
+   OPENSSL_cleanse(decoded, sizeof(decoded));
+   return ok;
+}
+
+/* Returns 1 for a verified third-layer service identity, 0 for bad/missing
+ * credentials, and -1 when an OIDC policy was requested but cannot safely be
+ * enforced. OIDC never falls back to PAM. */
+static int service_identity_authenticate(const char *authorization, kb_principal_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   int mode = kb_oidc_service_mode();
+   if (mode < 0)
+      return -1;
+   if (mode == 0)
+      return pam_service_identity(authorization, out);
+
+   const char *jwt = aimee_core_bearer_token(authorization);
+   kb_verify_result_t verified;
+   memset(&verified, 0, sizeof(verified));
+   char issuer[256] = "";
+   int ok = jwt && kb_oidc_verify_service_token(jwt, (long)time(NULL), &verified) &&
+            kb_oidc_configured_issuer(issuer, sizeof(issuer)) == 0 && issuer[0] &&
+            kb_principal_from_verify(&verified, issuer, out) == 0;
+   OPENSSL_cleanse(&verified, sizeof(verified));
+   return ok ? 1 : 0;
+}
+
+/* All application identities on this listener are service identities and are
+ * bound to the independently enrolled mTLS role. For service:<name>, both PAM
+ * and OIDC must authenticate exactly <name>; an unrelated valid account is not
+ * enough to complete the third layer. */
+static int application_identity_matches_certificate(const char *cn, const kb_principal_t *identity)
+{
+   static const char prefix[] = "service:";
+   if (!cn || !identity || !identity->authenticated ||
+       strncmp(cn, prefix, sizeof(prefix) - 1) != 0 || !cn[sizeof(prefix) - 1])
+      return 0;
+   if (identity->kind != KB_PRIN_HOST && identity->kind != KB_PRIN_OIDC)
+      return 0;
+   return strcmp(cn + sizeof(prefix) - 1, identity->subject) == 0;
+}
+
 static void set_recv_timeout(SSL *ssl, int seconds)
 {
    int fd = SSL_get_fd(ssl);
@@ -101,13 +192,16 @@ static void set_recv_timeout(SSL *ssl, int seconds)
  * success, or -1 when an idle/cleanly closed peer supplied no request bytes. */
 static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, int *header_out,
                                size_t *body_out, int *close_out, char *authorization_out,
-                               size_t authorization_cap)
+                               size_t authorization_cap, char *service_authorization_out,
+                               size_t service_authorization_cap)
 {
    size_t total = 0, header_len = 0, content_len = 0;
-   int have_cl = 0, have_authorization = 0;
-   if (!authorization_out || authorization_cap == 0)
+   int have_cl = 0, have_authorization = 0, have_service_authorization = 0;
+   if (!authorization_out || authorization_cap == 0 || !service_authorization_out ||
+       service_authorization_cap == 0)
       return 400;
    authorization_out[0] = '\0';
+   service_authorization_out[0] = '\0';
    while (total + 1 < cap && total < KB_TLS_HEADER_MAX)
    {
       int n = SSL_read(ssl, buf + total, (int)(KB_TLS_HEADER_MAX - total));
@@ -216,6 +310,24 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
             return 400;
          memcpy(authorization_out, v, vlen);
          authorization_out[vlen] = '\0';
+      }
+      if (name_len == sizeof("X-Aimee-Service-Authorization") - 1 &&
+          !strncasecmp(p, "X-Aimee-Service-Authorization", name_len))
+      {
+         if (have_service_authorization)
+            return 400;
+         have_service_authorization = 1;
+         char *v = colon + 1;
+         while (v < e && (*v == ' ' || *v == '\t'))
+            v++;
+         char *ve = e;
+         while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t'))
+            ve--;
+         size_t vlen = (size_t)(ve - v);
+         if (!vlen || vlen >= service_authorization_cap)
+            return 400;
+         memcpy(service_authorization_out, v, vlen);
+         service_authorization_out[vlen] = '\0';
       }
       if (name_len == 10 && !strncasecmp(p, "Connection", 10) &&
           header_value_has_token(colon + 1, e, "close"))
@@ -451,9 +563,11 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       size_t declared_body = 0;
       int close_after_response = 0;
       char presented_authorization[KB_TLS_AUTH_MAX] = "";
+      char service_authorization[KB_TLS_AUTH_MAX] = "";
       int read_status = strict_request_read(
           ssl, buf, KB_TLS_REQ_MAX, &total, &header_len, &declared_body, &close_after_response,
-          presented_authorization, sizeof(presented_authorization));
+          presented_authorization, sizeof(presented_authorization), service_authorization,
+          sizeof(service_authorization));
       io_timeout.tv_sec = 30;
       setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
       if (read_status < 0)
@@ -564,6 +678,9 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
           kb_verifier_authenticate(presented_bearer, expected_bearer, &service_identity, NULL, 0);
       int identity_matches =
           bearer_authority && bearer_identity_matches_certificate(cn, &service_identity);
+      kb_principal_t application_identity;
+      int application_authority =
+          service_identity_authenticate(service_authorization, &application_identity);
 
       int status;
       /* B5: kb never honors a client-supplied identity header; reject fail-closed
@@ -623,6 +740,27 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
          }
       }
       else if (have_cert && !is_bootstrap && !identity_matches)
+      {
+         close_after_response = 1;
+         snprintf(resp, KB_TLS_RESP_MAX,
+                  "{\"error\":\"service identity does not match client certificate\"}");
+         status = 403;
+      }
+      else if (have_cert && !is_bootstrap && application_authority < 0)
+      {
+         close_after_response = 1;
+         snprintf(resp, KB_TLS_RESP_MAX,
+                  "{\"error\":\"service OIDC authority is not safely configured\"}");
+         status = 503;
+      }
+      else if (have_cert && !is_bootstrap && application_authority != 1)
+      {
+         close_after_response = 1;
+         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"OIDC or PAM service identity required\"}");
+         status = 401;
+      }
+      else if (have_cert && !is_bootstrap &&
+               !application_identity_matches_certificate(cn, &application_identity))
       {
          close_after_response = 1;
          snprintf(resp, KB_TLS_RESP_MAX,
@@ -694,8 +832,10 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       kb_reqctx_clear(); /* drop the request's actor before the next request on this conn */
       db2_lease_end();
       OPENSSL_cleanse(&service_identity, sizeof(service_identity));
+      OPENSSL_cleanse(&application_identity, sizeof(application_identity));
       runtime_secret_wipe(expected_bearer, sizeof(expected_bearer));
       OPENSSL_cleanse(presented_authorization, sizeof(presented_authorization));
+      OPENSSL_cleanse(service_authorization, sizeof(service_authorization));
 
       char head[256];
       int hn = snprintf(head, sizeof(head),

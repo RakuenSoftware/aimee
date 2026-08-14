@@ -158,6 +158,12 @@ static kb_principal_t owner(void)
    return p;
 }
 
+static int test_pam_check_credentials(const char *user, const char *password)
+{
+   return user && password && strcmp(user, "p2b-live") == 0 &&
+          strcmp(password, "p2b-live-password") == 0;
+}
+
 static int egress_request(int port, const char *ca, const char *cert, const char *key,
                           const char *request_id, int64_t team, char *response, size_t response_cap)
 {
@@ -172,8 +178,11 @@ static int egress_request(int port, const char *ca, const char *cert, const char
    assert(n > 0 && (size_t)n < sizeof(body));
    int status = 0;
    assert(kb_tls_client_request_auth("localhost", port, ca, cert, key, "POST", "/v1/llm/egress",
-                                     body, "Authorization: Bearer p2b-live-token\r\n", response,
-                                     response_cap, &status) == 0);
+                                     body,
+                                     "Authorization: Bearer p2b-live-token\r\n"
+                                     "X-Aimee-Service-Authorization: Basic "
+                                     "cDJiLWxpdmU6cDJiLWxpdmUtcGFzc3dvcmQ=\r\n",
+                                     response, response_cap, &status) == 0);
    return status;
 }
 
@@ -244,6 +253,7 @@ int main(void)
    assert(aimee_home && *aimee_home);
    assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN",
                                "scope:service:p2b-live:p2b-live-token") == 0);
+   kb_tls_set_pam_check_for_test(test_pam_check_credentials);
    assert(kb_mtls_start(0, aimee_home, "localhost") == 0);
    int mtls_port = kb_mtls_bound_port();
    assert(mtls_port > 0);
@@ -369,6 +379,7 @@ int main(void)
    OPENSSL_cleanse(client_key, sizeof(client_key));
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    kb_mtls_stop();
+   kb_tls_set_pam_check_for_test(NULL);
    db2_shutdown();
    puts("PASS: enrolled mTLS -> admission -> vault-sign -> TLS dispatch -> IR settlement");
    return 0;
