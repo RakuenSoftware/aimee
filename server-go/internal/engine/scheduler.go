@@ -45,6 +45,11 @@ var schedulerTransientPauses = []transientPause{
 	// Provider throttles advertise retry-after windows in the tens of seconds;
 	// re-dispatching on the runner_unavailable backoff just re-trips the limit.
 	{reason: "capacity_backpressure", backoff: 30 * time.Second},
+	// Panel capacity is the same self-clearing resource pressure, but remains a
+	// distinct workflow state so it cannot be confused with provider reachability.
+	{reason: "panel_capacity", backoff: 30 * time.Second},
+	{reason: "panel_capacity_deadline", backoff: 30 * time.Second},
+	{reason: "panel_deadline", backoff: 60 * time.Second},
 	{reason: "ci_pending", backoff: 15 * time.Second},
 	{reason: "merge_pending", backoff: 15 * time.Second},
 	{reason: "panel_unreachable", backoff: 60 * time.Second},

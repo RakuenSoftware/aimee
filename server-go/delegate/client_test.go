@@ -23,6 +23,7 @@ type recordingCaller struct {
 type groupRoutingCaller struct {
 	mu            sync.Mutex
 	plannedModels []string
+	planError     string
 	invokedModels []string
 	plan          GroupPlan
 }
@@ -35,7 +36,7 @@ func (c *groupRoutingCaller) Call(_ context.Context, _, stage uint32, _ uint64,
 		if err := json.Unmarshal(request, &c.plan); err != nil {
 			return nil, err
 		}
-		return json.Marshal(GroupPlanResult{Version: WireVersion, Models: c.plannedModels})
+		return json.Marshal(GroupPlanResult{Version: WireVersion, Models: c.plannedModels, Error: c.planError})
 	}
 	var invocation Invocation
 	if err := json.Unmarshal(request, &invocation); err != nil {
@@ -179,6 +180,48 @@ func TestDelegateGroupPlansDiversityAndKeepsParticipantContinuityLocal(t *testin
 	}
 }
 
+func TestDelegateGroupPreservesCapacityFromTheModuleBoundary(t *testing.T) {
+	caller := &groupRoutingCaller{planError: "group saturated: " + ErrDelegateCapacity.Error()}
+	client := &BusClient{caller: caller, deadline: time.Second}
+	results := client.DelegateGroup(t.Context(), []DelegateRequest{{Role: "review", Persona: "qa", Prompt: "review"}})
+	if len(results) != 1 || !errors.Is(results[0].Err, ErrDelegateCapacity) ||
+		!IsCapacityBackpressure(results[0].Err) || errors.Is(results[0].Err, ErrDelegateTerminal) {
+		t.Fatalf("group capacity lost its load classification: %+v", results)
+	}
+}
+
+func TestDelegateResultPreservesCapacityWaitDeadline(t *testing.T) {
+	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed",
+		Error: ErrDelegateCapacityDeadline.Error()}}
+	client := &BusClient{caller: caller, deadline: time.Second}
+	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+	if !errors.Is(err, ErrDelegateCapacityDeadline) || !errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, ErrDelegateTerminal) {
+		t.Fatalf("capacity wait deadline was collapsed into execution failure: %v", err)
+	}
+}
+
+func TestDelegateResultPreservesExecutionDeadline(t *testing.T) {
+	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed",
+		Error: ErrDelegateExecutionDeadline.Error()}}
+	client := &BusClient{caller: caller, deadline: time.Second}
+	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+	if !errors.Is(err, ErrDelegateExecutionDeadline) || !errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, ErrDelegateCapacityDeadline) || errors.Is(err, ErrDelegateTerminal) {
+		t.Fatalf("execution deadline was collapsed into another failure: %v", err)
+	}
+}
+
+func TestDelegateCallerCancellationIsNotRetypedAsDeadline(t *testing.T) {
+	caller := &recordingCaller{err: context.Canceled}
+	client := &BusClient{caller: caller, deadline: time.Second}
+	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+	if !errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		IsCapacityDeadline(err) || IsExecutionDeadline(err) {
+		t.Fatalf("caller cancellation was retyped at the module/client boundary: %v", err)
+	}
+}
+
 func TestSafeDiagnosticRedactsCredentialForms(t *testing.T) {
 	tests := map[string]string{
 		"authorization": "Authorization: Bearer header-secret",
@@ -202,5 +245,13 @@ func TestSafeDiagnosticRedactsCredentialForms(t *testing.T) {
 				t.Fatalf("redaction marker missing: %q", output)
 			}
 		})
+	}
+}
+
+func TestSafeDiagnosticPreservesWireClassificationSlugs(t *testing.T) {
+	for _, err := range []error{ErrDelegateCapacity, ErrDelegateCapacityDeadline, ErrDelegateExecutionDeadline} {
+		if got := SafeDiagnostic(err.Error()); got != err.Error() {
+			t.Fatalf("wire classification slug changed: got %q want %q", got, err)
+		}
 	}
 }
