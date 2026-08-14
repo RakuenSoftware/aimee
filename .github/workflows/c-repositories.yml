@@ -47,5 +47,17 @@ jobs:
       - run: python3 -I -S scripts/validate_module_process_contracts.py
       - run: python3 -I scripts/check_go_module_runtime_bundle.py
       - run: cd server-go && CGO_ENABLED=0 go test ./bus ./modules/... ./cmd/aimee-module
-      - run: python3 -I scripts/check_c_repository_lock.py
+      # The exact commit/digest pins in dependencies/aimee-repositories.lock.json
+      # describe a RELEASE: which external core/module repository commit each
+      # vendored mirror was cut from. `testing` is the integration tip, where the
+      # vendored source is meant to run ahead of any published repository commit,
+      # so enforcing the lock there only demands a lock refresh after every edit
+      # under src/core|modules/** — noise that says nothing about the change.
+      # `main` (and every PR into it) is where the pins must hold, because that is
+      # what ships and what the main deployments run. Refresh with
+      # `export_c_repositories.py --refresh-lock-root` when a release is cut; see
+      # docs/core/repository-extraction.md.
+      - name: Repository pins (main only)
+        if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
+        run: python3 -I scripts/check_c_repository_lock.py
       - run: sh src/tests/test_module_supervisor.sh

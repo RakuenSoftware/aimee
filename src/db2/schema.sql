@@ -2229,29 +2229,17 @@ DECLARE
   orphan_files BIGINT;
   reader_ready TEXT;
 BEGIN
-  -- THE READER SIDE MUST EXIST FIRST, and today it does not.
-  --
-  -- aimee.principal is transaction-scoped and reset on pooled connections
-  -- (db2_tenant.c), and it is set only inside db2_tenant_scope_begin. Every one
-  -- of that function's callers is a governance, management or vault path: the
-  -- content readers -- kb_payload.c, memory_query.c, kb_service_backend.c --
-  -- open NO tenant scope at all. The service also connects as a non-owner with
-  -- NOBYPASSRLS, by design, so nothing rescues it.
-  --
-  -- So enabling before the read paths carry a principal does not hide
-  -- unattributed rows. It returns NOTHING to EVERY content read, for everyone,
-  -- which is a total outage wearing the costume of a security control.
-  --
-  -- The marker is written by the change that threads the principal through
-  -- those reads. Until then this refuses, because a comment in a proposal is not
-  -- a safeguard and this is exactly the mistake an operator cannot un-make in a
-  -- hurry.
+  -- THE READER SIDE MUST EXIST FIRST. The marker is a release capability fact,
+  -- written only after the authenticated caller path, transaction-local tenant
+  -- scope, every ingress, and project-bound maintenance work have live coverage.
+  -- It does not enable RLS: attribution and the operator act below remain
+  -- separate so applying a migration cannot turn an incomplete backfill into an
+  -- outage.
   SELECT value INTO reader_ready FROM kb_meta WHERE key = 'content_scope_reader_ready';
   IF reader_ready IS DISTINCT FROM '1' THEN
-    RAISE EXCEPTION 'refusing to enable content scope: the content read paths do not set '
-                    'aimee.principal yet, so every content read would return nothing for '
-                    'everyone. The change that threads the principal through those reads sets '
-                    'kb_meta.content_scope_reader_ready=1; enable after it ships.';
+    RAISE EXCEPTION 'refusing to enable content scope: this schema has not declared the '
+                    'authenticated caller path and transaction-local content reader scope ready. '
+                    'Upgrade before enabling.';
   END IF;
   SELECT count(*) INTO orphan_docs FROM kb_documents d
     WHERE NOT EXISTS (SELECT 1 FROM projects p
@@ -14046,6 +14034,12 @@ REVOKE ALL ON FUNCTION kb_management_token_key_use_worm_guard(),
 -- dim); on a one-shot migrate this is simply the recorded build dim.
 INSERT INTO kb_meta (key, value) VALUES ('schema_embedding_dim', '__EMBED_DIM__')
   ON CONFLICT (key) DO NOTHING;
+-- Reader readiness is a SOFTWARE capability, not the operator's enable switch.
+-- Recording it here makes upgrades declare the completed six-slice reader path
+-- while leaving both content tables' RLS flags unchanged. kb_content_scope_enable()
+-- still refuses until every content row has an exact projects.kb_project.
+INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
