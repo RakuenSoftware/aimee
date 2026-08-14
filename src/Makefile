@@ -1469,7 +1469,7 @@ write-tier-enforce-live: ../write-tier-enforce-live
 # repaired they could not open their scratch store at all: db2_eval_open_temp_store
 # applies the schema into a private shadow schema, while schema.sql addresses
 # ~950 objects as public.<name>. The two designs are mutually exclusive.
-# See docs/proposals/pending/eval-temp-store-schema-relocation.md.
+# See docs/proposals/rejected/eval-temp-store-schema-relocation.md (Go-or-rejected policy).
 #
 # mem_eval_open_temp_db / db2_eval_open_temp_store are KEPT: they still back
 # src/tests/test_memory_retrieval_eval.c and mem_eval_load_corpus.
