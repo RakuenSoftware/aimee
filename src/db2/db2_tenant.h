@@ -77,6 +77,23 @@ extern "C"
    int db2_maintenance_scope_commit(void);
    void db2_maintenance_scope_rollback(void);
 
+   /* Bind one durable background job to the current worker thread. This stores
+    * no database state; it lets short DB transactions re-apply the same named
+    * project scope on either side of an external call. enter() rejects nesting
+    * and leave() clears the thread-local copy. */
+   int db2_maintenance_job_enter(db2_maintenance_worker_t worker, const char *project);
+   void db2_maintenance_job_leave(void);
+   int db2_maintenance_job_active(void);
+
+   /* Worker-facing helpers. They are no-ops while content RLS is disabled, so
+    * wiring can land before the final readiness marker without changing legacy
+    * behavior. With content RLS enabled, begin_current opens a fresh scoped
+    * transaction (1 = opened), while apply_current stamps an existing open
+    * transaction (1 = applied). Zero means no scope was needed; negative is a
+    * fail-closed error. */
+   int db2_maintenance_scope_begin_current(void);
+   int db2_maintenance_context_apply_current(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -5,10 +5,11 @@ is about the request-context half that has to exist before any of it can be enab
 
 ## Problem
 
-`kb_content_scope_enable()` refuses today, and the refusal is correct: **no content read path sets
-`aimee.principal`.** It is set only inside `db2_tenant_scope_begin`; `kb_payload.c`, `memory_query.c`
-and `kb_service_backend.c` do not open that scope. Enabling before this is fixed returns nothing to
-every content read.
+`kb_content_scope_enable()` still refuses today, and the refusal is correct until the rollout is
+complete. Authenticated content ingress now opens `db2_tenant_scope_begin`, and background content
+work now has a separate named project scope. What remains is operational attribution of every code
+project to its exact tenancy `kb_project`, followed by live RLS coverage and the readiness marker.
+Enabling before those checks are complete can still make existing content disappear.
 
 This is an authorization-context gap, not a missing authentication system.
 
@@ -84,8 +85,9 @@ for that project. The context is cleared before the pooled connection is returne
 across an embedder, sidecar, or other external call.
 
 This is an in-process database scope, not a fourth connection credential and not a synthetic user.
-It does not change the rejected demand for another CLI, web or MCP proof mechanism. Job rows retain
-the worker name, project, claim owner, and lifecycle as the audit trail for why maintenance ran.
+It does not change the rejected demand for another CLI, web or MCP proof mechanism. Durable queue
+rows retain the project, claim owner, and lifecycle; the closed worker name is recorded by the
+worker boundary and logs as the audit trail for why maintenance ran.
 
 ## Bounded slices
 
@@ -116,12 +118,16 @@ operator enables it.
   path, and each is tested by name to prove its caller context reaches the KB read.
 - **Integration.** Two users, two teams, RLS enabled in a scratch database: each sees only their own
   project's documents through the ordinary search path.
-- **Service work.** Background jobs follow the separately selected #2646 policy; this proposal does
-  not preselect a maintenance identity or bypass.
+- **Service work.** Ingest, re-embed, curator, and code-index jobs use the closed worker names above,
+  open content transactions for only the exact attributed project, and hold no such transaction
+  across an embedder, model, or sidecar call.
 - **Negative.** Caller context cannot widen the service principal's KB-resolved membership, and a
   request with no context cannot inherit the previous pooled request's principal.
 
 ## Status
 
-Pending, and blocking `kb_content_scope_enable()` by construction: the marker it checks is set by
-slice 6 above. The companion identity map records why no additional proof mechanism is required.
+Implementation in progress. The connection/caller-context path and project-bound background worker
+scope are wired while content RLS remains disabled. Project-attribution operations, live two-project
+RLS coverage, and the slice-6 readiness marker remain; `kb_content_scope_enable()` therefore still
+refuses by construction. The companion identity map records why no additional proof mechanism is
+required.

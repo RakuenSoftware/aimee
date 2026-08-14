@@ -1172,37 +1172,38 @@ int db2_kb_async_count_kind(const char *kind)
    return n;
 }
 
-int db2_kb_pdf_reembed_all(void)
+int db2_kb_pdf_reembed_project(const char *project)
 {
-   /* Re-enqueue an embed_pdf job for every retrievable (non-pending) PDF chunk.
-    * Used by the dim-change reset, which truncates kb_pdf_embeddings: unlike
-    * kb_embeddings (auto-backfilled by the doc-embed drain), PDF vectors are only
-    * (re)derived from these jobs. No-op when the PDF-vector capability is off, so a
-    * reset never leaves embed_pdf jobs draining with nowhere to land. */
-   if (!config_kb_pdf_vector_enabled())
-      return 0;
    void *conn = db2_conn();
-   if (!conn)
+   if (!conn || !project || !project[0])
       return 0;
    char err[KBP_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "SELECT d.id,d.project FROM kb_documents d JOIN projects p ON p.name=d.project"
-       " WHERE d.doc_kind='pdf' AND d.quarantine_state='' AND p.lifecycle_state='current'"
-       " AND d.generation=p.current_generation",
-       err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT count(*) FROM kb_documents d JOIN projects p ON p.name=d.project"
+                        " WHERE d.project=?1 AND d.doc_kind='pdf' AND d.quarantine_state=''"
+                        " AND p.lifecycle_state='current'"
+                        " AND d.generation=p.current_generation",
+                        err, sizeof(err));
    if (!st)
       return 0;
-   int n = 0;
-   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      int64_t id = aimee_pg_column_int64(st, 0);
-      const char *proj = aimee_pg_column_text(st, 1);
-      if (db2_kb_async_enqueue("embed_pdf", id, proj ? proj : "") == 0)
-         n++;
-      else
-         LOG_WARN("kb_pdf", "reembed: embed_pdf enqueue failed for chunk %lld", (long long)id);
-   }
+   aimee_pg_bind_text(st, "?1", project);
+   int n = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW ? aimee_pg_column_int(st, 0) : 0;
+   aimee_pg_finalize(st);
+
+   st = aimee_pg_prepare(conn,
+                         "INSERT INTO kb_async_jobs(kind,document_id,project,status,updated_at)"
+                         " SELECT 'embed_pdf',d.id,d.project,'pending',pg_now_text()"
+                         " FROM kb_documents d JOIN projects p ON p.name=d.project"
+                         " WHERE d.project=?1 AND d.doc_kind='pdf' AND d.quarantine_state=''"
+                         " AND p.lifecycle_state='current' AND d.generation=p.current_generation"
+                         " ON CONFLICT(kind,document_id) DO NOTHING",
+                         err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", project);
+   if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_DONE)
+      n = 0;
    aimee_pg_finalize(st);
    return n;
 }

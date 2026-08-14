@@ -180,11 +180,12 @@ round trip and audit artefact without changing that authority.
 The local CLI remains on the OS-authenticated Unix-socket boundary and is resolved to its host
 account before any KB content request; an unresolved uid is refused. Physical host takeover is not a
 separate Aimee protocol threat. Browser and MCP identity continue to terminate at aimee-server and
-use the same server-to-KB path. Caller-less ingest, re-embed, curator and code-index work is denied
-content-reader authority until each durable job is wired through its selected named, project-bound
-maintenance scope. That scope is transaction-local, admits only the job's attributed project, and
-does not impersonate a user or add a network credential. Content-scope readiness remains disabled
-until that worker wiring and its live RLS coverage land.
+use the same server-to-KB path. Caller-less ingest, re-embed, curator and code-index work uses a
+closed-name, project-bound maintenance scope. Durable queues are read only far enough to claim work
+and learn its project; content transactions then admit only that project's attributed rows and end
+before any embedder, model, or sidecar call. The scope does not impersonate a user or add a network
+credential. Content-scope readiness remains disabled until operators can explicitly attribute every
+code project to its tenancy project and the enabled policies pass live two-project coverage.
 
 Grants are keyed by server, team, and exact authenticated subject:
 

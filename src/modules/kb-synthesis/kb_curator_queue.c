@@ -16,6 +16,7 @@
 #include "log.h"
 #include "db2/kb_payload.h"
 #include "db2/db2_internal.h"
+#include "db2/db2_tenant.h"
 #include "db2/db_postgres.h"
 
 #include <stdint.h>
@@ -31,9 +32,16 @@ int kb_curator_queue_docs_for_project(const char *project)
    if (!config_kb_curator_extract_docs_enabled())
       return 0;
 
+   int read_scope = db2_maintenance_scope_begin_current();
+   if (read_scope < 0)
+      return -1;
    void *conn = db2_conn();
    if (!conn)
+   {
+      if (read_scope == 1)
+         db2_maintenance_scope_rollback();
       return -1;
+   }
 
    /* structured-PDF safety: PDF chunks (doc_kind='pdf') are NEVER curated. Curator
     * extraction turns chunk content into searchable derived artifacts (claims/narrative)
@@ -59,6 +67,8 @@ int kb_curator_queue_docs_for_project(const char *project)
    {
       aimee_log(LOG_WARN, "kb.curator.queue", "failed to query kb_documents for project '%s': %s",
                 project, err);
+      if (read_scope == 1)
+         db2_maintenance_scope_rollback();
       return -1;
    }
    aimee_pg_bind_text(st, "?1", project);
@@ -72,6 +82,8 @@ int kb_curator_queue_docs_for_project(const char *project)
          enqueued++;
    }
    aimee_pg_finalize(st);
+   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+      return -1;
 
    if (enqueued > 0)
       aimee_log(LOG_INFO, "kb.curator.queue", "queued %d extract_doc job(s) for project '%s'",
@@ -275,11 +287,10 @@ void kb_curator_queue_counts(kb_curator_queue_counts_t *out)
                                 " COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END),0),"
                                 " COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0)"
                                 " FROM kb_async_jobs j"
-                                " JOIN kb_documents d ON d.id=j.document_id"
-                                " JOIN projects p ON p.name=d.project"
+                                " JOIN projects p ON p.name=j.project"
                                 " WHERE j.kind='extract_doc'"
                                 " AND p.lifecycle_state='current'"
-                                " AND d.generation=p.current_generation";
+                                " AND j.project<>''";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql_doc, err, sizeof(err));
    if (st)
    {
@@ -321,10 +332,9 @@ void kb_curator_queue_counts(kb_curator_queue_counts_t *out)
    static const char *sql_last_error =
        "SELECT last_error FROM ("
        " SELECT j.last_error,j.updated_at,j.id,0 AS source_order FROM kb_async_jobs j"
-       " JOIN kb_documents d ON d.id=j.document_id"
-       " JOIN projects p ON p.name=d.project"
+       " JOIN projects p ON p.name=j.project"
        " WHERE j.kind='extract_doc' AND j.status='failed' AND j.last_error<>''"
-       " AND p.lifecycle_state='current' AND d.generation=p.current_generation"
+       " AND p.lifecycle_state='current' AND j.project<>''"
        " UNION ALL"
        " SELECT j.last_error,j.updated_at,j.id,1 AS source_order FROM kb_code_unit_jobs j"
        " JOIN projects p ON p.name=j.project"
@@ -358,5 +368,10 @@ void kb_curator_queue_docs_all_projects(int extract_docs_enabled)
    project_info_t projects[512];
    int np = index_list_projects(projects, (int)(sizeof(projects) / sizeof(projects[0])));
    for (int i = 0; i < np; i++)
+   {
+      if (db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, projects[i].name) != 0)
+         continue;
       (void)kb_curator_queue_docs_for_project(projects[i].name);
+      db2_maintenance_job_leave();
+   }
 }

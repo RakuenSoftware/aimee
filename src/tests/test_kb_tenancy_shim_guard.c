@@ -119,6 +119,26 @@ int main(void)
    int64_t teams[4];
 
    REQUIRES_PG(db2_tenant_require_pg(), "db2_tenant_require_pg");
+   REQUIRES_PG(db2_maintenance_scope_begin(DB2_MAINTENANCE_INGEST, "p"),
+               "db2_maintenance_scope_begin");
+
+   /* Worker wiring is deliberately inert on the SQLite backend: there is no
+    * content RLS to satisfy, so the thread-local job survives only long enough
+    * to tell begin_current that no transaction is needed. */
+   if (db2_maintenance_job_enter(DB2_MAINTENANCE_INGEST, "p") != 0 ||
+       !db2_maintenance_job_active() || db2_maintenance_scope_begin_current() != 0 ||
+       db2_maintenance_context_apply_current() != 0 ||
+       db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, "p") != DB2_ERR_MAINTENANCE_INVALID)
+   {
+      printf("FAIL: maintenance job context is not inert and non-nestable on shim\n");
+      fails++;
+   }
+   db2_maintenance_job_leave();
+   if (db2_maintenance_job_active())
+   {
+      printf("FAIL: maintenance job context survived leave\n");
+      fails++;
+   }
 
    /* Every tenant-scoped entry across all five modules must hard-fail. */
    REQUIRES_PG(db2_team_create("t", "op", &id), "db2_team_create");

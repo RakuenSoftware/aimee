@@ -42,6 +42,15 @@
 /* Single-value scalar query. Returns 0 and fills out on success. */
 static int scalar(const char *sql, char *out, size_t cap);
 
+static int exec_sql(const char *sql)
+{
+   char err[256] = "";
+   int rc = aimee_pg_exec(db2_conn(), sql, err, sizeof(err));
+   if (rc != 0)
+      fprintf(stderr, "exec failed: %s\n  sql: %s\n", err, sql);
+   return rc;
+}
+
 /* assert that `sql` returns `want`, and say what came back when it does not. */
 static void expect(const char *sql, const char *want)
 {
@@ -334,6 +343,26 @@ int main(void)
       assert(
           db2_maintenance_scope_begin(DB2_MAINTENANCE_CURATOR, "scope-maintenance-unattributed") ==
           DB2_ERR_MAINTENANCE_INVALID);
+
+      /* Worker wiring is inert before the operator enables content RLS, then
+       * begins a fresh short transaction for every content phase. This lets the
+       * wiring land without changing behavior before the final slice. */
+      assert(db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, "scope-maintenance-a") == 0);
+      assert(db2_maintenance_scope_begin_current() == 0);
+      db2_maintenance_job_leave();
+      assert(exec_sql("ALTER TABLE kb_documents ENABLE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_documents FORCE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_file_index ENABLE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_file_index FORCE ROW LEVEL SECURITY") == 0);
+      assert(db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, "scope-maintenance-a") == 0);
+      assert(db2_maintenance_scope_begin_current() == 1);
+      expect("SELECT current_setting('aimee.maintenance_project',true)", "scope-maintenance-a");
+      assert(db2_maintenance_scope_commit() == 0);
+      db2_maintenance_job_leave();
+      assert(exec_sql("ALTER TABLE kb_documents NO FORCE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_documents DISABLE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_file_index NO FORCE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_file_index DISABLE ROW LEVEL SECURITY") == 0);
       printf("  PASS: maintenance authority is named, project-bound, and transaction-local\n");
    }
 

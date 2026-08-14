@@ -8,6 +8,14 @@
 
 #include <string.h>
 
+typedef struct
+{
+   db2_maintenance_worker_t worker;
+   char project[256];
+} maintenance_job_t;
+
+static _Thread_local maintenance_job_t g_maintenance_job;
+
 int db2_tenant_require_pg(void)
 {
    /* RLS is a Postgres control; the SQLite test shim cannot enforce it, so a
@@ -47,6 +55,78 @@ static const char *maintenance_worker_name(db2_maintenance_worker_t worker)
       return "code-indexer";
    }
    return NULL;
+}
+
+int db2_maintenance_job_enter(db2_maintenance_worker_t worker, const char *project)
+{
+   if (g_maintenance_job.worker != 0 || !maintenance_worker_name(worker) || !project ||
+       !project[0] || strlen(project) >= sizeof(g_maintenance_job.project))
+      return DB2_ERR_MAINTENANCE_INVALID;
+   g_maintenance_job.worker = worker;
+   memcpy(g_maintenance_job.project, project, strlen(project) + 1);
+   return 0;
+}
+
+void db2_maintenance_job_leave(void)
+{
+   memset(&g_maintenance_job, 0, sizeof(g_maintenance_job));
+}
+
+int db2_maintenance_job_active(void)
+{
+   return g_maintenance_job.worker != 0;
+}
+
+static int content_scope_enforced(void)
+{
+   db2_lease_begin();
+   void *conn = db2_conn();
+   if (!conn || aimee_pg_is_shim())
+   {
+      db2_lease_end();
+      return 0;
+   }
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT count(*) FROM pg_class"
+                        " WHERE oid IN (to_regclass('kb_documents'),to_regclass('kb_file_index'))"
+                        " AND relrowsecurity AND relforcerowsecurity",
+                        err, sizeof(err));
+   if (!st)
+   {
+      db2_lease_end();
+      return -1;
+   }
+   int enabled = -1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      int count = aimee_pg_column_int(st, 0);
+      enabled = count == 0 ? 0 : (count == 2 ? 1 : -1);
+   }
+   aimee_pg_finalize(st);
+   db2_lease_end();
+   return enabled;
+}
+
+static int apply_maintenance_context(db2_maintenance_worker_t worker, const char *project)
+{
+   const char *name = maintenance_worker_name(worker);
+   if (!name || !project || !project[0])
+      return DB2_ERR_MAINTENANCE_INVALID;
+   void *conn = db2_conn();
+   if (!conn)
+      return DB2_ERR_TENANT_NO_CONN;
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT set_maintenance_context(?1, ?2)", err, sizeof(err));
+   if (!st)
+      return DB2_ERR_TENANT_BEGIN;
+   aimee_pg_bind_text(st, "?1", name);
+   aimee_pg_bind_text(st, "?2", project);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return step == AIMEE_PG_ERR ? DB2_ERR_MAINTENANCE_INVALID : 0;
 }
 
 int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
@@ -109,8 +189,7 @@ int db2_maintenance_scope_begin(db2_maintenance_worker_t worker, const char *pro
    int g = db2_tenant_require_pg();
    if (g)
       return g;
-   const char *name = maintenance_worker_name(worker);
-   if (!name || !project || !project[0])
+   if (!maintenance_worker_name(worker) || !project || !project[0])
       return DB2_ERR_MAINTENANCE_INVALID;
 
    db2_lease_begin();
@@ -129,27 +208,37 @@ int db2_maintenance_scope_begin(db2_maintenance_worker_t worker, const char *pro
       return DB2_ERR_TENANT_BEGIN;
    }
 
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn, "SELECT set_maintenance_context(?1, ?2)", err, sizeof(err));
-   if (!st)
+   int applied = apply_maintenance_context(worker, project);
+   if (applied != 0)
    {
       (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       tenant_reset_gucs(conn);
       db2_lease_end();
-      return DB2_ERR_TENANT_BEGIN;
-   }
-   aimee_pg_bind_text(st, "?1", name);
-   aimee_pg_bind_text(st, "?2", project);
-   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
-   aimee_pg_finalize(st);
-   if (step == AIMEE_PG_ERR)
-   {
-      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
-      tenant_reset_gucs(conn);
-      db2_lease_end();
-      return DB2_ERR_MAINTENANCE_INVALID;
+      return applied;
    }
    return 0;
+}
+
+int db2_maintenance_scope_begin_current(void)
+{
+   if (!db2_maintenance_job_active())
+      return 0;
+   int enabled = content_scope_enforced();
+   if (enabled <= 0)
+      return enabled;
+   int rc = db2_maintenance_scope_begin(g_maintenance_job.worker, g_maintenance_job.project);
+   return rc == 0 ? 1 : rc;
+}
+
+int db2_maintenance_context_apply_current(void)
+{
+   if (!db2_maintenance_job_active())
+      return 0;
+   int enabled = content_scope_enforced();
+   if (enabled <= 0)
+      return enabled;
+   int rc = apply_maintenance_context(g_maintenance_job.worker, g_maintenance_job.project);
+   return rc == 0 ? 1 : rc;
 }
 
 int db2_tenant_scope_commit(void)
