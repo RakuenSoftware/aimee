@@ -12,17 +12,12 @@
 # POSTed to /v1/enroll/redeem, then a genuine mTLS request with the issued
 # certificate.
 #
-# The two cases are deliberately red/green against each OTHER, on the real path:
+# The two cases exercise the composed layers on the real path:
 #
-#   service:aimee-server  (what aimee-server presents now) -> refused on owner
-#                         routes, allowed on the data plane
-#   p5-server-client      (what it presented BEFORE) -> no ':' in the CN, so the
-#                         seam mints mtls-owner and the SAME request succeeds
-#
-# The second case is the red: it reproduces, on the production path, the
-# authority the change removes. If it ever starts failing, either the old CN
-# stopped granting owner (fine, but this file's claim is stale) or the seam
-# changed shape.
+#   service:aimee-server  + its scoped bearer -> reaches the third-layer gate
+#                         and is refused until PAM/OIDC identity is supplied
+#   p5-server-client      + that service bearer -> refused because the bearer
+#                         identity does not match the legacy certificate
 set -uo pipefail
 
 SRC="${AIMEE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -125,14 +120,16 @@ except Exception: print("")' 2>/dev/null)
 
 # mreq PATH DIR BODY -> HTTP status over mTLS with that identity
 mreq() {
+  local bearer="${4:-$AIMEE_KB_API_BEARER_TOKEN}"
   curl -s -o /dev/null -w '%{http_code}' -m 20 -k \
     --cert "$2/cert.pem" --key "$2/key.pem" \
-    -X POST -H "Authorization: Bearer $AIMEE_KB_API_BEARER_TOKEN" \
+    -X POST -H "Authorization: Bearer $bearer" \
     -H 'Content-Type: application/json' --data "$3" "$MBASE$1" 2>/dev/null
 }
 
 MAINT='/v1/maintenance/purge-project'
 MBODY='{"project":"proj-alpha","path":"/tmp/kb","generation":"g1","purge_id":"p1"}'
+SERVICE_BEARER="scope:service:aimee-server:$AIMEE_KB_API_BEARER_TOKEN"
 
 echo ""
 echo "### A. service:aimee-server — what aimee-server presents NOW"
@@ -140,12 +137,13 @@ CN_A=$(issue_cert "service:aimee-server" "$WORK/a")
 case "$CN_A" in
   service:aimee-server)
     pass "CSR's chosen CN was overridden with the token scope (CN=$CN_A)"
-    code=$(mreq "$MAINT" "$WORK/a" "$MBODY")
-    [ "$code" = "403" ] && pass "service cert REFUSED on $MAINT (403)" \
-                        || fail "service cert on $MAINT" "want 403 got $code"
-    code=$(mreq "/v1/code/build" "$WORK/a" '{"path":"/tmp/kb","project":"proj-beta"}')
-    [ "$code" != "403" ] && pass "service cert still reaches the data plane (=$code)" \
-                         || fail "service cert data plane" "403 — the server cannot do its job"
+    code=$(mreq "$MAINT" "$WORK/a" "$MBODY" "$SERVICE_BEARER")
+    [ "$code" = "401" ] && pass "service cert + bearer reaches the PAM/OIDC gate on $MAINT" \
+                        || fail "service cert + bearer on $MAINT" "want 401 got $code"
+    code=$(mreq "/v1/code/build" "$WORK/a" '{"path":"/tmp/kb","project":"proj-beta"}' \
+                "$SERVICE_BEARER")
+    [ "$code" = "401" ] && pass "data plane also requires PAM/OIDC after cert + bearer" \
+                        || fail "service cert + bearer data plane" "want 401 got $code"
     ;;
   ENROLL_FAILED*|CSR_FAILED*|REDEEM_FAILED*) skip "case A" "$CN_A" ;;
   *) fail "case A CN" "expected service:aimee-server, got '$CN_A'" ;;
@@ -157,13 +155,9 @@ CN_B=$(issue_cert "p5-server-client" "$WORK/b")
 case "$CN_B" in
   p5-server-client)
     pass "old-style CN issued (CN=$CN_B, no ':')"
-    code=$(mreq "$MAINT" "$WORK/b" "$MBODY")
-    if [ "$code" != "403" ]; then
-      pass "old CN reaches $MAINT (=$code) — reproduces the authority now removed"
-    else
-      fail "old CN on $MAINT" "got 403; expected it to SUCCEED. Either the old CN no
-     longer grants owner (this file's premise is stale) or the mTLS seam changed."
-    fi
+    code=$(mreq "$MAINT" "$WORK/b" "$MBODY" "$SERVICE_BEARER")
+    [ "$code" = "403" ] && pass "old CN cannot wear the service bearer's identity (403)" \
+                        || fail "old CN on $MAINT" "want 403 got $code"
     ;;
   ENROLL_FAILED*|CSR_FAILED*|REDEEM_FAILED*) skip "case B" "$CN_B" ;;
   *) fail "case B CN" "expected p5-server-client, got '$CN_B'" ;;
