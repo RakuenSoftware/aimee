@@ -1,9 +1,25 @@
 # Proposal: restore a dataset benchmark track (LoCoMo / LongMemEval)
 
-- **State:** PENDING — tech debt. The direct track was deleted rather than
-  repaired; this records what it did, why it went, and what restoring it costs.
-  Not urgent: the per-PR regression gate that exercises these datasets is
-  unaffected and still runs.
+- **State:** REJECTED — archived 2026-08-14 under the Go-or-rejected policy.
+
+## Decision
+
+This proposal is rejected under the current implementation policy: pending proposal work must be
+implemented in Go or moved to `rejected/`. The recorded restoration path is a C benchmark-module
+entry point in `aimee-kb`, backed by C DB2/pgvector code and the rejected C/SQL scratch-store
+design. The synchronous `memory.benchmark` service explicitly returns an async-only envelope for
+LoCoMo and LongMemEval rather than hosting those suites.
+
+Porting the benchmark engine and its scratch-store ownership to Go would be a new architecture, not
+completion of this direct-track proposal. It would also duplicate the existing benchmark and DB2
+owners. This rejection does not remove working coverage: the per-PR LLM regression track, live
+retrieval suites, and poison gate remain unaffected as recorded below.
+
+## Archived technical record
+
+The direct track was deleted rather than repaired; this records what it did, why it went, and what
+restoring it costs. It was not urgent because the per-PR regression gate that exercises these
+datasets remained unaffected.
 
 ## Why this exists
 

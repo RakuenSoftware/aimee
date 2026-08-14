@@ -11,8 +11,8 @@ scratch-store APIs and callers. Reimplementing that internal DB2/benchmark bound
 create a second storage owner rather than complete this proposal.
 
 This is a scope and ownership rejection, not a claim that the shadow-schema conflict is fixed. The
-[dataset-driven direct benchmark](../pending/dataset-benchmark-direct-track.md) remains blocked
-unless it adopts a new Go-owned design that avoids the C scratch store. The live
+related [dataset-driven direct benchmark](dataset-benchmark-direct-track.md) was also rejected;
+reviving it would require a new Go-owned design that avoids the C scratch store. The live
 `memory.benchmark` path and shipping benchmark gates remain unaffected, as recorded below.
 
 ## Archived technical record
