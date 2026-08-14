@@ -28,6 +28,25 @@ static void tenant_reset_gucs(void *conn)
    char err[256] = "";
    (void)aimee_pg_exec(conn, "RESET aimee.team", err, sizeof(err));
    (void)aimee_pg_exec(conn, "RESET aimee.principal", err, sizeof(err));
+   (void)aimee_pg_exec(conn, "RESET aimee.maintenance_worker", err, sizeof(err));
+   (void)aimee_pg_exec(conn, "RESET aimee.maintenance_project", err, sizeof(err));
+   (void)aimee_pg_exec(conn, "RESET aimee.maintenance_kb_project", err, sizeof(err));
+}
+
+static const char *maintenance_worker_name(db2_maintenance_worker_t worker)
+{
+   switch (worker)
+   {
+   case DB2_MAINTENANCE_INGEST:
+      return "ingest";
+   case DB2_MAINTENANCE_REEMBED:
+      return "reembed";
+   case DB2_MAINTENANCE_CURATOR:
+      return "curator";
+   case DB2_MAINTENANCE_CODE_INDEXER:
+      return "code-indexer";
+   }
+   return NULL;
 }
 
 int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
@@ -85,6 +104,54 @@ int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
    return 0; /* transaction open, context set, connection held by the lease */
 }
 
+int db2_maintenance_scope_begin(db2_maintenance_worker_t worker, const char *project)
+{
+   int g = db2_tenant_require_pg();
+   if (g)
+      return g;
+   const char *name = maintenance_worker_name(worker);
+   if (!name || !project || !project[0])
+      return DB2_ERR_MAINTENANCE_INVALID;
+
+   db2_lease_begin();
+   void *conn = db2_conn();
+   if (!conn)
+   {
+      db2_lease_end();
+      return DB2_ERR_TENANT_NO_CONN;
+   }
+
+   char err[256] = "";
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+   {
+      tenant_reset_gucs(conn);
+      db2_lease_end();
+      return DB2_ERR_TENANT_BEGIN;
+   }
+
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT set_maintenance_context(?1, ?2)", err, sizeof(err));
+   if (!st)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      tenant_reset_gucs(conn);
+      db2_lease_end();
+      return DB2_ERR_TENANT_BEGIN;
+   }
+   aimee_pg_bind_text(st, "?1", name);
+   aimee_pg_bind_text(st, "?2", project);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   if (step == AIMEE_PG_ERR)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      tenant_reset_gucs(conn);
+      db2_lease_end();
+      return DB2_ERR_MAINTENANCE_INVALID;
+   }
+   return 0;
+}
+
 int db2_tenant_scope_commit(void)
 {
    void *conn = db2_conn();
@@ -113,4 +180,14 @@ void db2_tenant_scope_rollback(void)
       tenant_reset_gucs(conn);
    }
    db2_lease_end();
+}
+
+int db2_maintenance_scope_commit(void)
+{
+   return db2_tenant_scope_commit();
+}
+
+void db2_maintenance_scope_rollback(void)
+{
+   db2_tenant_scope_rollback();
 }

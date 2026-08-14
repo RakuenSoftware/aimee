@@ -76,11 +76,16 @@ sufficient to impersonate a local UDS caller is likewise outside the local-CLI t
 ## Background and maintenance work
 
 Ingest, re-embed, curator passes and the code indexer act on nobody's behalf. Their authorization
-remains the open question from #2646. The options remain a named maintenance scope, per-project
-iteration, or leaving job/queue tables out of content scope with a stated reason.
+is a named, project-bound maintenance scope. Queue tables remain outside content RLS so a worker can
+claim a durable job and learn its project without seeing content. The worker then opens a
+transaction-local maintenance context for its own closed-name role (`ingest`, `reembed`, `curator`,
+or `code-indexer`) and the exact attributed project from that job. Content policies admit only rows
+for that project. The context is cleared before the pooled connection is returned and is never held
+across an embedder, sidecar, or other external call.
 
-That decision must land before content scope is enabled, but it is separate from the rejected demand
-for another CLI, web or MCP proof mechanism.
+This is an in-process database scope, not a fourth connection credential and not a synthetic user.
+It does not change the rejected demand for another CLI, web or MCP proof mechanism. Job rows retain
+the worker name, project, claim owner, and lifecycle as the audit trail for why maintenance ran.
 
 ## Bounded slices
 
@@ -96,8 +101,8 @@ operator enables it.
 3. Resolve the service principal and optional caller together through the existing identity/team
    resolver; reject conflicts and ungranted project selection.
 4. Open and clear the content tenant scope from the resolved request context.
-5. Cover web, local CLI, remote CLI/thinclient, and MCP end to end, and land the separately reviewed
-   #2646 background-work decision.
+5. Cover web, local CLI, remote CLI/thinclient, and MCP end to end, and wire the named project-bound
+   maintenance scope selected for #2646.
 6. Set `kb_meta.content_scope_reader_ready = '1'`, then allow an operator to call
    `kb_content_scope_enable()`.
 

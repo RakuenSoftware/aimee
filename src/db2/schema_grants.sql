@@ -101,6 +101,8 @@ BEGIN
   -- the runtime role only, never PUBLIC (N4).
   REVOKE ALL ON FUNCTION set_tenant_context(TEXT, BIGINT) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION set_tenant_context(TEXT, BIGINT) TO aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION set_maintenance_context(TEXT, TEXT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION set_maintenance_context(TEXT, TEXT) TO aimee_kb_runtime;
 
   -- P5-A authoritative registry: runtime reaches state only through audited,
   -- bounded definer APIs; direct reads and writes are unavailable.

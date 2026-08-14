@@ -31,9 +31,21 @@ extern "C"
       DB2_ERR_TENANT_REQUIRES_PG = -100,     /* tenant op attempted on the SQLite shim */
       DB2_ERR_TENANT_UNAUTHENTICATED = -101, /* principal not verifier-produced */
       DB2_ERR_TENANT_NO_CONN = -102,
-      DB2_ERR_TENANT_BEGIN = -103,  /* BEGIN / set_tenant_context failed */
-      DB2_ERR_TENANT_DENIED = -104, /* team not in principal memberships */
+      DB2_ERR_TENANT_BEGIN = -103,        /* BEGIN / set_tenant_context failed */
+      DB2_ERR_TENANT_DENIED = -104,       /* team not in principal memberships */
+      DB2_ERR_MAINTENANCE_INVALID = -105, /* unknown worker or unattributed project */
    };
+
+   /* Background content work is not an end-user principal. These are the only
+    * named actors permitted to open the project-bound maintenance scope. Keep
+    * this enum and set_maintenance_context()'s SQL allowlist in lockstep. */
+   typedef enum
+   {
+      DB2_MAINTENANCE_INGEST = 1,
+      DB2_MAINTENANCE_REEMBED,
+      DB2_MAINTENANCE_CURATOR,
+      DB2_MAINTENANCE_CODE_INDEXER,
+   } db2_maintenance_worker_t;
 
    /* Fail-closed guard: 0 when the live backend is Postgres (RLS-enforcing),
     * DB2_ERR_TENANT_REQUIRES_PG when it is the SQLite shim or DB2 is down. Called
@@ -55,6 +67,15 @@ extern "C"
     * call rollback on an already-aborted transaction. */
    int db2_tenant_scope_commit(void);
    void db2_tenant_scope_rollback(void);
+
+   /* Open a transaction-local, project-bound content scope for one named
+    * background worker. This does not construct or impersonate a user principal:
+    * set_maintenance_context() resolves `project` to its attributed kb_project
+    * and RLS admits only content carrying that exact project. The scope holds one
+    * pooled connection and must never span an external/model call. */
+   int db2_maintenance_scope_begin(db2_maintenance_worker_t worker, const char *project);
+   int db2_maintenance_scope_commit(void);
+   void db2_maintenance_scope_rollback(void);
 
 #ifdef __cplusplus
 }
