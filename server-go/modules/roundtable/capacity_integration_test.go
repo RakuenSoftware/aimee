@@ -24,25 +24,34 @@ type moduleStageBridge struct {
 	planCount int
 	planned   int
 	plansDone chan struct{}
+	doneOnce  sync.Once
 	mu        sync.Mutex
+}
+
+func (b *moduleStageBridge) releasePlans() {
+	b.doneOnce.Do(func() { close(b.plansDone) })
 }
 
 func (b *moduleStageBridge) Call(ctx context.Context, _ uint32, stage uint32, _ uint64,
 	_ time.Duration, request []byte) ([]byte, error) {
 	reply, status := b.handler(bus.ModuleInvocation{StageID: stage}, request)
 	if status != bus.ModuleStatusOK {
+		if stage == delegate.StageGroupPlan {
+			b.releasePlans()
+		}
 		return nil, &bus.ModuleCallStatusError{Status: status}
 	}
 	if stage == delegate.StageGroupPlan {
 		b.mu.Lock()
 		b.planned++
 		if b.planned == b.planCount {
-			close(b.plansDone)
+			b.releasePlans()
 		}
 		b.mu.Unlock()
 		select {
 		case <-b.plansDone:
 		case <-ctx.Done():
+			b.releasePlans()
 			return nil, ctx.Err()
 		}
 	}

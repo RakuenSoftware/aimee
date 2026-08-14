@@ -31,14 +31,14 @@ backpressure.
 - A deterministic panel campaign starts ten roundtables at one barrier and proves every saturated
   result is `panel_capacity`, never generic `panel_unreachable`. A separate live producer campaign
   crosses `RegistryExecutor`, its `max_parallel` limiter, the delegate module JSON stage, and
-  roundtable classification; five repeated runs covered 50 overlapping panels without a generic
+  roundtable classification; ten repeated runs covered 100 overlapping panels without a generic
   `panel_unreachable`.
 
 ## Acceptance evidence
 
 - `go test ./delegate ./modules/delegates ./modules/roundtable/... ./internal/engine`
 - `go test ./modules/roundtable/panel -run TestTenOverlappingCapacityCampaignsNeverReportPanelUnreachable -count=10`
-- `go test ./modules/roundtable -run TestTenOverlappingPanelsCrossGoProducerAdmissionWithoutUnreachable -count=5 -v`
+- `go test ./modules/roundtable -run TestTenOverlappingPanelsCrossGoProducerAdmissionWithoutUnreachable -count=10 -v`
 - `go test ./...`
 - `go test -race ./delegate ./modules/delegates ./modules/roundtable/... ./internal/engine`
 - `cd ../src && make -s lint`
