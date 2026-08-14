@@ -574,6 +574,7 @@ KB_SRCS += kb/http/kb_http_content_policy.c
 KB_SRCS += kb/http/kb_http_entry.c
 KB_SRCS += kb/http/kb_http_code_context.c
 KB_SRCS += kb/http/kb_http_code_lifecycle.c
+KB_SRCS += kb/kb_tenancy_cli.c
 KB_SRCS += kb/kb_bedrock_egress.c kb/kb_egress_admission.c kb/kb_vault_key_use.c kb/kb_vault_protected_use.c kb/kb_vault_rewrap.c kb/kb_vault_rotation.c kb/kb_vault_rotation_ops.c kb/kb_mgmt_endpoint.c kb/kb_mgmt_client.c kb/kb_mgmt_token.c kb/kb_identity_token.c kb/kb_mgmt_status.c kb/http/kb_http_servers.c kb/http/kb_http_egress.c db2/org_token_audit.c
 KB_SRCS += kb/kb_workload_provider.c kb/kb_workload_helper_posix.c kb/kb_workload_wire.c \
            kb/kb_workload_proof.c kb/kb_workload_jwt.c
@@ -1469,7 +1470,7 @@ write-tier-enforce-live: ../write-tier-enforce-live
 # repaired they could not open their scratch store at all: db2_eval_open_temp_store
 # applies the schema into a private shadow schema, while schema.sql addresses
 # ~950 objects as public.<name>. The two designs are mutually exclusive.
-# See docs/proposals/pending/eval-temp-store-schema-relocation.md.
+# See docs/proposals/rejected/eval-temp-store-schema-relocation.md (Go-or-rejected policy).
 #
 # mem_eval_open_temp_db / db2_eval_open_temp_store are KEPT: they still back
 # src/tests/test_memory_retrieval_eval.c and mem_eval_load_corpus.

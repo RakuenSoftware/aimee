@@ -6,6 +6,7 @@
 #include "db2/kb_payload.h"
 #include "db2/code_index.h"
 #include "db2/db_postgres.h"
+#include "db2/db2_tenant.h"
 #include "db2/kb_service_backend.h"
 #include "db2/memory_query.h"
 #include "db2/vector_index_ops.h"
@@ -626,6 +627,13 @@ int kb_purge_fenced_txn_begin(const char *project)
 {
    if (db2_kb_txn_begin() != 0)
       return -1;
+   int maintenance = db2_maintenance_context_apply_current();
+   if (maintenance < 0)
+   {
+      db2_kb_txn_rollback();
+      LOG_WARN("kb_build", "maintenance scope refused for project '%s'", project ? project : "");
+      return -1;
+   }
    if (project && project[0] &&
        (db2_kb_purge_txn_guard(project) != 0 || db2_kb_purge_fence_active(project)))
    {
@@ -938,6 +946,13 @@ static int kb_path_wants_dense_vector(const char *rel_path)
 
 static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
 {
+   int read_scope = db2_maintenance_scope_begin_current();
+   if (read_scope < 0)
+   {
+      LOG_WARN("kb_build", "maintenance read scope refused for project '%s'",
+               c->project ? c->project : "");
+      return;
+   }
    if (fi > 0 && fi % c->kb_progress_every == 0)
       LOG_INFO("kb_build", "project=%s: %d/%d files processed (indexed=%d, skipped=%d, chunks=%d)",
                c->project ? c->project : "?", fi, c->n_files, c->stats->files_indexed,
@@ -960,11 +975,16 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
          time_t ingested_t = parse_utc_ts(findex_ingested);
          if (ingested_t > 0 && fst.st_mtime < ingested_t)
          {
+            if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+               return;
             c->stats->files_skipped++;
             return;
          }
       }
    }
+   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+      return;
+   read_scope = 0;
 
    char hash[32];
    file_hash(c->files[fi].path, hash, sizeof(hash));
@@ -973,12 +993,22 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    /* Check if file needs re-indexing */
    if (!c->force_rebuild)
    {
+      read_scope = db2_maintenance_scope_begin_current();
+      if (read_scope < 0)
+      {
+         LOG_WARN("kb_build", "maintenance hash scope refused for project '%s'",
+                  c->project ? c->project : "");
+         return;
+      }
       char stored[32];
       if (db2_kb_documents_get_stored_hash(c->project, c->files[fi].rel_path, stored,
                                            sizeof(stored)) == 0)
       {
          if (strcmp(stored, hash) == 0)
          {
+            if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+               return;
+            read_scope = 0;
             kb_file_index_upsert_fenced(c->project, c->files[fi].rel_path, hash, NULL);
             c->stats->files_skipped++;
             return;
@@ -992,6 +1022,9 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       int dup_exists = db2_kb_documents_hash_exists(c->project, hash, dup_path, sizeof(dup_path));
       if (dup_exists == 1)
       {
+         if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+            return;
+         read_scope = 0;
          if (delete_file_chunks(c->project, c->files[fi].rel_path) != 0)
             return; /* purge fence: drop this file */
          db2_sketch_minhash_row_t dup_sig;
@@ -1009,6 +1042,9 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
          LOG_WARN("kb_build", "project=%s path=%s: bloom cross-check failed; indexing normally",
                   c->project ? c->project : "?", c->files[fi].rel_path);
    }
+
+   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+      return;
 
    /* Remove old chunks for this file */
    if (delete_file_chunks(c->project, c->files[fi].rel_path) != 0)
@@ -1251,8 +1287,15 @@ static int kb_build_or_update(const char *root_path, const char *project, const 
       LOG_INFO("kb_build", "force rebuild: clearing project '%s' from DB2", project);
       /* Vectors must be selected while their current document rows still exist. */
       pgvec_kb_vector_delete_current_project(project);
-      db2_kb_service_clear_current_project(project);
-      db2_sketch_minhash_signature_delete_project(project);
+      int maintenance_scope = db2_maintenance_scope_begin_current();
+      if (maintenance_scope < 0)
+         return -1;
+      int clear_rc = db2_kb_service_clear_current_project(project);
+      int sketch_rc = db2_sketch_minhash_signature_delete_project(project);
+      if (maintenance_scope == 1 && db2_maintenance_scope_commit() != 0)
+         return -1;
+      if (clear_rc < 0 || sketch_rc < 0)
+         return -1;
    }
 
    /* Resolve include/exclude patterns */

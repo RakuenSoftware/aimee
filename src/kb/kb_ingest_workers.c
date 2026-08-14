@@ -27,6 +27,7 @@
 #include "modules/workspace/workspace_scope.h"
 
 #include "db2/db2.h" /* db2_lease_release_idle */
+#include "db2/db2_tenant.h"
 #include "db2/canonical_index.h"
 #include "db2/kb_runtime_state.h"
 #include "db2/kb_service_backend.h"
@@ -147,6 +148,12 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
    aimee_log(LOG_INFO, "kb.ingest.worker", "picked up project='%s' (force=%d)", job->project,
              job->force);
    kb_background_set("ingest", "project=%s phase=build", job->project);
+   if (db2_maintenance_job_enter(DB2_MAINTENANCE_INGEST, job->project) != 0)
+   {
+      db2_kb_ingest_queue_fail(job->id, "could not establish ingest maintenance identity");
+      kb_background_clear("ingest");
+      return;
+   }
 
    /* The kb_embeddings vector column dimension comes from the schema (sized to
     * the deployment's configured embedding_dim); pgvec_ensure_index infers the
@@ -157,6 +164,7 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
                 job->project);
       db2_kb_ingest_queue_fail(job->id, "vector store unavailable");
       kb_background_clear("ingest");
+      db2_maintenance_job_leave();
       return;
    }
    const char *embed_cmd = config_embedder_command_current(NULL);
@@ -169,6 +177,7 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
       aimee_log(LOG_WARN, "kb.ingest.worker", "kb_build failed for project='%s'", job->project);
       db2_kb_ingest_queue_fail(job->id, "kb_build failed");
       kb_background_clear("ingest");
+      db2_maintenance_job_leave();
       return;
    }
 
@@ -185,6 +194,7 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
                 job->project);
       db2_kb_ingest_queue_fail(job->id, "canonical index scan failed");
       kb_background_clear("ingest");
+      db2_maintenance_job_leave();
       return;
    }
 
@@ -238,6 +248,7 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
                                 stats.embeddings_added);
    db2_kb_runtime_state_set_now("last_ingest_at");
    kb_background_clear("ingest");
+   db2_maintenance_job_leave();
 
    aimee_log(LOG_INFO, "kb.ingest.worker",
              "done: project='%s' files=%d chunks=%d embeddings=%d code_vectors=%lld", job->project,
@@ -664,10 +675,19 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
    char hash[KB_DOC_HASH_HEX_LEN + 1];
    kb_doc_content_hash_for_path(source_path, content, (int)len, hash);
 
+   int read_scope = db2_maintenance_scope_begin_current();
+   if (read_scope < 0)
+      return -1;
    char stored[KB_DOC_HASH_HEX_LEN + 1] = "";
    if (db2_kb_documents_get_stored_hash(project, source_path, stored, sizeof(stored)) == 1 &&
        strcmp(stored, hash) == 0)
+   {
+      if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+         return -1;
       return 0; /* unchanged — already ingested */
+   }
+   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+      return -1;
 
    if (delete_file_chunks(project, source_path) != 0)
       return -1; /* purge fence: drop this document */
@@ -762,9 +782,16 @@ int kb_doc_refresh(const char *project, const char *embedding_cmd, int max_docs)
 {
    if (!project || !project[0] || !db2_is_initialized())
       return -1;
+   int read_scope = db2_maintenance_scope_begin_current();
+   if (read_scope < 0)
+      return -1;
    void *conn = db2_conn();
    if (!conn)
+   {
+      if (read_scope == 1)
+         db2_maintenance_scope_rollback();
       return -1;
+   }
    if (max_docs <= 0)
       max_docs = 200;
 
@@ -787,7 +814,11 @@ int kb_doc_refresh(const char *project, const char *embedding_cmd, int max_docs)
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
+   {
+      if (read_scope == 1)
+         db2_maintenance_scope_rollback();
       return -1;
+   }
    aimee_pg_bind_text(st, "?1", project);
    aimee_pg_bind_int(st, "?2", max_docs);
 
@@ -815,6 +846,13 @@ int kb_doc_refresh(const char *project, const char *embedding_cmd, int max_docs)
       }
    }
    aimee_pg_finalize(st);
+   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+   {
+      for (int i = 0; i < n; i++)
+         free(rows[i].content);
+      free(rows);
+      return -1;
+   }
 
    int embedded = 0;
    for (int i = 0; i < n; i++)
@@ -843,9 +881,16 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
    const char *effective_cmd = kb_effective_embedding_cmd(embedding_cmd);
    if (!effective_cmd[0])
       return 0; /* no embedder configured — nothing to do */
+   int read_scope = db2_maintenance_scope_begin_current();
+   if (read_scope < 0)
+      return -1;
    void *conn = db2_conn();
    if (!conn)
+   {
+      if (read_scope == 1)
+         db2_maintenance_scope_rollback();
       return -1;
+   }
    if (max_chunks <= 0)
       max_chunks = 200;
 
@@ -860,7 +905,11 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
+   {
+      if (read_scope == 1)
+         db2_maintenance_scope_rollback();
       return -1;
+   }
    aimee_pg_bind_text(st, "?1", project);
    aimee_pg_bind_int(st, "?2", max_chunks);
 
@@ -891,6 +940,13 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
       }
    }
    aimee_pg_finalize(st);
+   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+   {
+      for (int i = 0; i < n; i++)
+         free(rows[i].content);
+      free(rows);
+      return -1;
+   }
 
    int embedded = 0;
    for (int i = 0; i < n; i++)
@@ -904,7 +960,11 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
       float vec[EMBED_MAX_DIM];
       int dim =
           memory_embed_text(embed_text, effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
-      if (dim > 0 && sync_vector_embedding(rows[i].id, vec, dim) == 0)
+      /* Payload reconstruction reads kb_documents, so it needs a fresh short
+       * project scope after the embedder round-trip. The fenced helper opens
+       * that transaction, reapplies the current maintenance context, and keeps
+       * the purge generation check atomic with the vector write. */
+      if (dim > 0 && kb_sync_vector_embedding_fenced(project, rows[i].id, vec, dim) == 0)
          embedded++;
       free(rows[i].content);
    }
