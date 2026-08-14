@@ -22,8 +22,8 @@ extern "C"
 
 /* Fixed by the process contract at 4096 + ordinal*256 + stage; economizer is
  * inventory ordinal 27, so these are not a free choice. */
-#define AIMEE_ECONOMIZER_EVENT_REDUCE 11009u
-#define AIMEE_ECONOMIZER_STAGE_REDUCE 1u
+#define AIMEE_ECONOMIZER_EVENT_REDUCE       11009u
+#define AIMEE_ECONOMIZER_STAGE_REDUCE       1u
 #define AIMEE_ECONOMIZER_EVENT_JSON_COMPACT 11010u
 #define AIMEE_ECONOMIZER_STAGE_JSON_COMPACT 2u
 #define AIMEE_ECONOMIZER_EVENT_TOOL_RECALL  11011u

@@ -463,8 +463,7 @@ cJSON *econ_module_record_build(const cJSON *messages, int start_idx, int end_id
 }
 
 int econ_module_post_status(const char *session_key, int http_status, int mutated, int have_key,
-                            int ttl_ms, const char *stream_reason,
-                            econ_module_post_status_t *out)
+                            int ttl_ms, const char *stream_reason, econ_module_post_status_t *out)
 {
    if (!out)
       return 1;
@@ -481,10 +480,9 @@ int econ_module_post_status(const char *session_key, int http_status, int mutate
    if (stream_reason && stream_reason[0])
       cJSON_AddStringToObject(payload, "stream_reason", stream_reason);
 
-   cJSON *reply = aimee_module_json_call(AIMEE_ECONOMIZER_EVENT_POST_STATUS,
-                                         AIMEE_ECONOMIZER_STAGE_POST_STATUS, payload,
-                                         ECON_MODULE_CALL_MAX_BODY, ECON_MODULE_CALL_TIMEOUT_MS,
-                                         NULL);
+   cJSON *reply = aimee_module_json_call(
+       AIMEE_ECONOMIZER_EVENT_POST_STATUS, AIMEE_ECONOMIZER_STAGE_POST_STATUS, payload,
+       ECON_MODULE_CALL_MAX_BODY, ECON_MODULE_CALL_TIMEOUT_MS, NULL);
    /* The JSON-call helper has deleted payload. */
    if (!reply)
       return 1; /* out stays zeroed: nothing owed, nothing claimed */
