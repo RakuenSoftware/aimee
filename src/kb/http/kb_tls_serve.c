@@ -203,6 +203,25 @@ static int application_identity_matches_certificate(const char *cn, const kb_pri
    return strcmp(cn + sizeof(prefix) - 1, identity->subject) == 0;
 }
 
+typedef enum
+{
+   HOST_ASSERTION_NONE,
+   HOST_ASSERTION_OK,
+   HOST_ASSERTION_INVALID,
+   HOST_ASSERTION_SELF,
+} host_assertion_result_t;
+
+static host_assertion_result_t asserted_host_identity(const char *identity_key, const char *cn,
+                                                      kb_principal_t *out)
+{
+   if (!identity_key || !identity_key[0])
+      return HOST_ASSERTION_NONE;
+   if (kb_principal_from_identity_key(identity_key, out) != 0 || out->kind != KB_PRIN_HOST || !cn ||
+       strncmp(cn, "service:", 8) != 0 || !cn[8])
+      return HOST_ASSERTION_INVALID;
+   return strcmp(out->subject, cn + 8) == 0 ? HOST_ASSERTION_SELF : HOST_ASSERTION_OK;
+}
+
 static const cJSON *json_member_once(const cJSON *object, const char *name)
 {
    const cJSON *found = NULL;
@@ -884,18 +903,15 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
                                : 0;
       kb_principal_t caller_identity = {0};
       int caller_authority = 0;
+      host_assertion_result_t host_assertion = HOST_ASSERTION_NONE;
       if (caller_authorization[0])
          caller_authority =
              caller_token_identity(caller_authorization, server_id, named_team, server_binding,
                                    transport.issuer, transport.subject, fp, &caller_identity);
       else if (caller_subject[0])
       {
-         caller_authority = kb_principal_from_identity_key(caller_subject, &caller_identity) == 0 &&
-                                    caller_identity.kind == KB_PRIN_HOST &&
-                                    strncmp(cn, "service:", 8) == 0 &&
-                                    strcmp(caller_identity.subject, cn + 8) != 0
-                                ? 1
-                                : -2;
+         host_assertion = asserted_host_identity(caller_subject, cn, &caller_identity);
+         caller_authority = host_assertion == HOST_ASSERTION_OK;
       }
       int status;
       /* B5: kb never honors a client-supplied identity header; reject fail-closed
@@ -993,7 +1009,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
          snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"caller token authority unavailable\"}");
          status = 503;
       }
-      else if (have_cert && !is_bootstrap && caller_authority == -2)
+      else if (have_cert && !is_bootstrap &&
+               (host_assertion == HOST_ASSERTION_INVALID || host_assertion == HOST_ASSERTION_SELF))
       {
          snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"invalid caller identity\"}");
          status = 400;

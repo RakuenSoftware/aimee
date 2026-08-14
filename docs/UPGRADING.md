@@ -161,6 +161,13 @@ PAM when its federation is unavailable. On thinclient-to-server content traffic,
 JWT occupies `Authorization` while the independent rotating connection bearer is carried in
 `x-api-key`; a verified client certificate no longer bypasses that bearer check.
 
+Those four server-to-KB values are first-boot inputs: bootstrap seals them into Vault, removes them
+from the process environment, and the client reads the current Vault values for every request so
+bearer, OIDC-token, and PAM-password rotation takes effect on an existing pooled TLS connection.
+Changing `AIMEE_KB_CLIENT_PAM_USERNAME` is an identity migration, not password rotation: provision
+that PAM account on the KB and rotate the matching `service:<name>` certificate enrollment in the
+same staged change.
+
 Caller context is distinct from those service-connection checks. A KB-signed OIDC caller token is
 forwarded unchanged and cryptographically verified again by aimee-kb with token type, issuer,
 server audience, team and certificate-bound JWKS pinned. A host/PAM caller is asserted by the

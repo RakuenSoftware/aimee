@@ -17,6 +17,7 @@
 #include "kb_tls.h" /* kb_tls_enroll / kb_tls_client_request */
 #include "config.h"
 #include "cJSON.h"
+#include "log.h"
 #include "runtime_secret.h"
 #include "util.h"
 #include <aimee/core/connection/auth.h>
@@ -102,20 +103,24 @@ static int service_request_headers(char *out, size_t cap)
    int have = runtime_secret_get("AIMEE_KB_CLIENT_BEARER_TOKEN", token, sizeof(token));
    if (!have)
       have = runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", token, sizeof(token));
+   if (!have)
+      LOG_ERROR("kb_client", "server-to-KB request missing rotating bearer credential");
    int n = have && aimee_core_bearer_value(value, sizeof(value), token) == 0
                ? snprintf(out, cap, "Authorization: %s\r\n", value)
                : -1;
-   if (n > 0 && (size_t)n < cap &&
-       runtime_secret_get("AIMEE_KB_CLIENT_OIDC_TOKEN", oidc, sizeof(oidc)) &&
+   int have_oidc = runtime_secret_get("AIMEE_KB_CLIENT_OIDC_TOKEN", oidc, sizeof(oidc));
+   int have_pam_user =
+       runtime_secret_get("AIMEE_KB_CLIENT_PAM_USERNAME", pam_user, sizeof(pam_user));
+   int have_pam_pass =
+       runtime_secret_get("AIMEE_KB_CLIENT_PAM_PASSWORD", pam_pass, sizeof(pam_pass));
+   if (n > 0 && (size_t)n < cap && have_oidc &&
        aimee_core_bearer_value(oidc_value, sizeof(oidc_value), oidc) == 0)
    {
       int added =
           snprintf(out + n, cap - (size_t)n, "X-Aimee-Service-Authorization: %s\r\n", oidc_value);
       n = added > 0 && (size_t)added < cap - (size_t)n ? n + added : -1;
    }
-   else if (n > 0 && (size_t)n < cap &&
-            runtime_secret_get("AIMEE_KB_CLIENT_PAM_USERNAME", pam_user, sizeof(pam_user)) &&
-            runtime_secret_get("AIMEE_KB_CLIENT_PAM_PASSWORD", pam_pass, sizeof(pam_pass)))
+   else if (n > 0 && (size_t)n < cap && have_pam_user && have_pam_pass)
    {
       int pair_len = snprintf(pam_pair, sizeof(pam_pair), "%s:%s", pam_user, pam_pass);
       size_t encoded = pair_len > 0 && (size_t)pair_len < sizeof(pam_pair)
@@ -128,7 +133,13 @@ static int service_request_headers(char *out, size_t cap)
       n = added > 0 && (size_t)added < cap - (size_t)n ? n + added : -1;
    }
    else
+   {
+      if (n > 0 && (size_t)n < cap)
+         LOG_ERROR("kb_client",
+                   "server-to-KB request missing third-layer identity (OIDC token or complete PAM "
+                   "username/password pair)");
       n = -1;
+   }
    char managed_server[128] = "";
    long long managed_team = 0;
    if (n > 0 && (size_t)n < cap &&
