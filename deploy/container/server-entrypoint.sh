@@ -560,12 +560,6 @@ log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
 runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
 server_pid=$!
-# The roundtable module seats its review panel over the agent resource plane,
-# so it needs the same socket the WFE is given. A module that cannot reach the
-# plane declines to serve the review stage rather than failing reviews one at a
-# time, so without this the stage is simply never offered.
-export AIMEE_AGENT_SERVICE_SOCKET="${AIMEE_AGENT_SERVICE_SOCKET:-$AIMEE_HOME/aimee-http.sock}"
-
 # The shipped manifest is decided when the image is built and cannot know what
 # this operator wants running, so apply the operator's AIMEE_MODULE_<ID> choices
 # over it. This replaces a hard-coded roundtable-only branch that could enable a
@@ -578,7 +572,6 @@ export AIMEE_AGENT_SERVICE_SOCKET="${AIMEE_AGENT_SERVICE_SOCKET:-$AIMEE_HOME/aim
 # operator configured the feature.
 MODULE_MANIFEST="$(apply_optional_modules server "$MODULE_MANIFEST" "$AIMEE_HOME")"
 runuser -u aimee -- env AIMEE_HOME="$AIMEE_HOME" \
-    AIMEE_AGENT_SERVICE_SOCKET="$AIMEE_AGENT_SERVICE_SOCKET" \
     module-supervisor.sh server "$AIMEE_MODULE_BUS_SOCKET" "$MODULE_MANIFEST" &
 module_pid=$!
 
@@ -588,8 +581,10 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
         shutdown
         exit 1
     fi
-    # The C process is a temporary stateless agent resource plane. Wait for its
-    # HTTP socket, then put all WFE state/admission/execution on the Go socket.
+    # The C daemon remains the host for the module bus, mTLS/MCP and external
+    # HTTP API. This particular Unix resource-plane socket is passed to the Go
+    # WFE only for credentialed forge operations; delegate execution uses the
+    # Go delegates process over the module bus.
     _wait=0
     while [ ! -S "$AIMEE_HOME/aimee-http.sock" ] && [ "$_wait" -lt "$WFE_SOCKET_WAIT_TENTHS" ]; do
         kill -0 "$server_pid" 2>/dev/null || break
@@ -618,7 +613,7 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
     # not spawn a workflows process (the contract marks it hosted_by=wfe), because
     # the bus denies a live duplicate of a principal. Pass the bus socket
     # explicitly rather than relying on runuser's environment handling.
-    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; export AIMEE_MODULE_BUS_SOCKET="$6"; exec aimee-wfe --home "$1" --socket "$2" --config "$3" --workflow-dir "$4" --agent-service-socket "$5"' sh \
+    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; export AIMEE_MODULE_BUS_SOCKET="$6"; exec aimee-wfe --home "$1" --socket "$2" --config "$3" --workflow-dir "$4" --forge-service-socket "$5"' sh \
         "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/aimee.yaml" \
         "$AIMEE_HOME/workflows" "$AIMEE_HOME/aimee-http.sock" \
         "$AIMEE_MODULE_BUS_SOCKET" &
