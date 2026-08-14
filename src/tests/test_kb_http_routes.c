@@ -714,6 +714,11 @@ static const config_field_t g_stub_secret_field = {
     "AIMEE_KB_API_BEARER_TOKEN"};
 static int g_stub_secret_configured;
 static int g_stub_secret_store_calls;
+static char g_stub_kb_api_bearer_token[4097] = "scope:service:aimee-server:token-one";
+const char *config_kb_api_bearer_token(void)
+{
+   return g_stub_kb_api_bearer_token;
+}
 const config_field_t *config_field_lookup(const char *key)
 {
    /* Only the keys the pipeline route may touch resolve; anything else is
@@ -2891,8 +2896,8 @@ static void *mtls_serve_thread(void *a)
 }
 
 /* client connects with client_ctx, sends `req`, returns the response. */
-static void mtls_request(SSL_CTX *server_ctx, SSL_CTX *client_ctx, const char *req, char *resp,
-                         size_t cap)
+static void mtls_request_raw(SSL_CTX *server_ctx, SSL_CTX *client_ctx, const char *req, char *resp,
+                             size_t cap)
 {
    int sv[2];
    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
@@ -2921,6 +2926,29 @@ static void mtls_request(SSL_CTX *server_ctx, SSL_CTX *client_ctx, const char *r
    pthread_join(th, NULL);
    close(sv[0]);
    close(sv[1]);
+}
+
+#define TEST_KB_AUTH_HEADER "Authorization: Bearer token-one\r\n"
+
+/* Ordinary test requests carry the enrolled service bearer. Tests of missing
+ * and invalid bearing call mtls_request_raw directly. */
+static void mtls_request(SSL_CTX *server_ctx, SSL_CTX *client_ctx, const char *req, char *resp,
+                         size_t cap)
+{
+   const char *line_end = strstr(req, "\r\n");
+   if (!line_end)
+   {
+      mtls_request_raw(server_ctx, client_ctx, req, resp, cap);
+      return;
+   }
+   size_t prefix = (size_t)(line_end + 2 - req);
+   size_t total = strlen(req) + strlen(TEST_KB_AUTH_HEADER) + 1;
+   char *authorized = malloc(total);
+   assert(authorized);
+   memcpy(authorized, req, prefix);
+   snprintf(authorized + prefix, total - prefix, "%s%s", TEST_KB_AUTH_HEADER, line_end + 2);
+   mtls_request_raw(server_ctx, client_ctx, authorized, resp, cap);
+   free(authorized);
 }
 
 /* Read one Content-Length-framed response without waiting for connection close. */
@@ -2970,17 +2998,19 @@ typedef struct
 static const kb_pki_ca_t *g_rotation_test_ca;
 
 static int test_kb_client_renew(const char *host, int port, const char *ca_cert_pem,
-                                const char *cur_cert_pem, const char *cur_key_pem, char *cert_out,
-                                size_t cert_cap, char *key_out, size_t key_cap)
+                                const char *cur_cert_pem, const char *cur_key_pem,
+                                const char *authorization, char *cert_out, size_t cert_cap,
+                                char *key_out, size_t key_cap)
 {
    (void)host;
    (void)port;
    (void)ca_cert_pem;
    (void)cur_cert_pem;
    (void)cur_key_pem;
+   assert(authorization && strcmp(authorization, "Authorization: Bearer token-two\r\n") == 0);
    return g_rotation_test_ca
-              ? kb_pki_issue_client_cert(g_rotation_test_ca, "project:delta", 60L * 60 * 24 * 90,
-                                         cert_out, cert_cap, key_out, key_cap)
+              ? kb_pki_issue_client_cert(g_rotation_test_ca, KB_SERVER_CLIENT_SCOPE,
+                                         60L * 60 * 24 * 90, cert_out, cert_cap, key_out, key_cap)
               : -1;
 }
 
@@ -3009,7 +3039,7 @@ static void test_mtls_serve(void)
    assert(kb_pki_issue_server_cert(&ca, "kb.local", 3600, scert, sizeof(scert), skey,
                                    sizeof(skey)) == 0);
    char ccert[KB_PKI_CERT_PEM_MAX], ckey[KB_PKI_KEY_PEM_MAX];
-   assert(kb_pki_issue_client_cert(&ca, "project:alpha", 3600, ccert, sizeof(ccert), ckey,
+   assert(kb_pki_issue_client_cert(&ca, KB_SERVER_CLIENT_SCOPE, 3600, ccert, sizeof(ccert), ckey,
                                    sizeof(ckey)) == 0);
    SSL_CTX *sctx = kb_tls_server_ctx(ca.cert_pem, scert, skey);
    SSL_CTX *cctx = kb_tls_client_ctx(ca.cert_pem, ccert, ckey);
@@ -3024,9 +3054,34 @@ static void test_mtls_serve(void)
    assert(strstr(resp, "\"status\":\"ok\""));
    assert(strstr(resp, "Connection: close"));
 
-   /* Scoped mTLS credentials must not acquire an owner actor merely because
-    * their certificate is valid. The grant handler therefore refuses this
-    * project certificate before it reaches the Postgres-only tenant gate. */
+   /* A valid client certificate is not a bearer substitute. Missing and wrong
+    * service bearers both fail before the health route runs. */
+   mtls_request_raw(sctx, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "401 Unauthorized") && strstr(resp, "service bearer required"));
+   assert(!strstr(resp, "\"status\":\"ok\""));
+
+   /* A missing KB-side bearer authority is a retryable configuration failure,
+    * never an open-auth downgrade. */
+   g_stub_kb_api_bearer_token[0] = '\0';
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "Connection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "503 Service Unavailable") &&
+          strstr(resp, "service bearer authority is not configured"));
+   assert(!strstr(resp, "\"status\":\"ok\""));
+   snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token),
+            "scope:service:aimee-server:token-one");
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
+                    "Authorization: Bearer wrong-token\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "401 Unauthorized") && strstr(resp, "service bearer required"));
+   assert(!strstr(resp, "\"status\":\"ok\""));
+
+   /* Matching scoped transport and bearer identities remain data-plane only;
+    * neither can acquire an owner actor from the other. */
    {
       const char *grant = "{\"server_id\":\"srv-a\",\"team_id\":1,\"subject\":\"owner\","
                           "\"tier\":\"full\",\"granted_by\":\"owner\"}";
@@ -3040,11 +3095,9 @@ static void test_mtls_serve(void)
       assert(strstr(resp, "authentication required"));
    }
 
-   /* The wizard-managed server certificate is intentionally unscoped. It is
-    * the authenticated owner hop behind the server's UDS-only grant command,
-    * so it must reach the tenant gate as owner rather than arrive actor-less.
-    * This shim-backed test then returns 503 at the expected Postgres gate; 401
-    * would prove the mTLS-to-owner bridge regressed again. */
+   /* A bare-CN client certificate cannot widen the independently verified
+    * service bearer into an owner. Certificate identity authenticates the
+    * transport; route authority comes from the bearer verifier. */
    {
       char owner_cert[KB_PKI_CERT_PEM_MAX], owner_key[KB_PKI_KEY_PEM_MAX];
       assert(kb_pki_issue_client_cert(&ca, "p5-server-client", 3600, owner_cert, sizeof(owner_cert),
@@ -3059,8 +3112,8 @@ static void test_mtls_serve(void)
                "Connection: close\r\n\r\n%s",
                strlen(grant), grant);
       mtls_request(sctx, owner_ctx, req, resp, sizeof(resp));
-      assert(strstr(resp, "503 Service Unavailable"));
-      assert(!strstr(resp, "authentication required"));
+      assert(strstr(resp, "403 Forbidden"));
+      assert(strstr(resp, "service identity does not match client certificate"));
       SSL_CTX_free(owner_ctx);
    }
 
@@ -3076,13 +3129,13 @@ static void test_mtls_serve(void)
       assert(c);
       SSL_set_fd(c, sv[1]);
       assert(SSL_connect(c) == 1);
-      const char *first = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n\r\n";
+      const char *first = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER "\r\n";
       assert(SSL_write(c, first, (int)strlen(first)) == (int)strlen(first));
       assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
       assert(strstr(resp, "200 OK") && strstr(resp, "Connection: keep-alive"));
 
       test_kb_enrollment_authority_set(0);
-      const char *second = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n\r\n";
+      const char *second = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER "\r\n";
       assert(SSL_write(c, second, (int)strlen(second)) == (int)strlen(second));
       assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
       assert(strstr(resp, "403 Forbidden") && strstr(resp, "Connection: close"));
@@ -3156,15 +3209,15 @@ static void test_mtls_serve(void)
       assert(strstr(resp, "403 Forbidden"));
    }
 
-   /* a CROSS-scope request (project=otherproj) is denied 403 — the scope came
-    * from the client certificate (project:alpha), not the request. */
+   /* The certificate CN is transport identity, not route authorization. It no
+    * longer manufactures a project-scoped bearer for the router. Content
+    * project selection is resolved from caller context in the next slice. */
    mtls_request(sctx, cctx,
                 "GET /v1/health?status=1&project=otherproj HTTP/1.1\r\nConnection: close\r\n\r\n",
                 resp, sizeof(resp));
-   assert(strstr(resp, "403"));
-   assert(strstr(resp, "forbidden"));
+   assert(strstr(resp, "200 OK"));
 
-   /* same-scope (project=alpha) is allowed. */
+   /* A matching name is likewise irrelevant to this non-content health route. */
    mtls_request(sctx, cctx,
                 "GET /v1/health?status=1&project=alpha HTTP/1.1\r\nConnection: close\r\n\r\n", resp,
                 sizeof(resp));
@@ -3322,13 +3375,15 @@ static void test_mtls_listener(void)
 
    /* a client cert issued by the (now pinned) CA. */
    char ccert[KB_PKI_CERT_PEM_MAX], ckey[KB_PKI_KEY_PEM_MAX];
-   assert(kb_pki_issue_client_cert(&ca, "project:beta", 3600, ccert, sizeof(ccert), ckey,
+   assert(kb_pki_issue_client_cert(&ca, KB_SERVER_CLIENT_SCOPE, 3600, ccert, sizeof(ccert), ckey,
                                    sizeof(ckey)) == 0);
    SSL_CTX *cctx = kb_tls_client_ctx(ca.cert_pem, ccert, ckey);
    assert(cctx);
 
    char resp[8192];
-   mtls_tcp_request(port, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+   mtls_tcp_request(port, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "Connection: close\r\n\r\n",
                     resp, sizeof(resp));
    assert(strstr(resp, "200 OK"));
    assert(strstr(resp, "\"status\":\"ok\""));
@@ -3336,8 +3391,9 @@ static void test_mtls_listener(void)
    /* the high-level client dialer reaches the same listener with its cert. */
    int st = -1;
    char rbody[4096];
-   assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "GET", "/v1/health",
-                                NULL, rbody, sizeof(rbody), &st) == 0);
+   assert(kb_tls_client_request_auth("localhost", port, ca.cert_pem, ccert, ckey, "GET",
+                                     "/v1/health", NULL, TEST_KB_AUTH_HEADER, rbody, sizeof(rbody),
+                                     &st) == 0);
    if (st != 200)
       fprintf(stderr, "high-level mTLS health status=%d body=%s\n", st, rbody);
    assert(st == 200);
@@ -3360,8 +3416,9 @@ static void test_mtls_listener(void)
       memcpy(body + prefix + padding_len, "\"}", 3);
       assert(strlen(body) > 64 * 1024 && strlen(body) < 1024 * 1024);
       g_test_registry_heartbeat_allow = 1;
-      assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "POST",
-                                   "/v1/server/heartbeat", body, rbody, sizeof(rbody), &st) == 0);
+      assert(kb_tls_client_request_auth("localhost", port, ca.cert_pem, ccert, ckey, "POST",
+                                        "/v1/server/heartbeat", body, TEST_KB_AUTH_HEADER, rbody,
+                                        sizeof(rbody), &st) == 0);
       assert(st == 200 && strstr(rbody, "\"ok\":true"));
       g_test_registry_heartbeat_allow = 0;
       free(body);
@@ -3374,11 +3431,11 @@ static void test_mtls_listener(void)
        kb_tls_client_conn_open("localhost", port, ca.cert_pem, ccert, ckey);
    assert(persistent);
    int reusable = 0;
-   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, NULL, 0, rbody,
-                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, TEST_KB_AUTH_HEADER, 0,
+                                     rbody, sizeof(rbody), &st, &reusable) == 0);
    assert(st == 200 && reusable == 1 && strstr(rbody, "\"status\":\"ok\""));
-   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, NULL, 1, rbody,
-                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, TEST_KB_AUTH_HEADER, 1,
+                                     rbody, sizeof(rbody), &st, &reusable) == 0);
    assert(st == 200 && reusable == 0 && strstr(rbody, "\"status\":\"ok\""));
    kb_tls_client_conn_close(persistent);
 
@@ -3386,8 +3443,8 @@ static void test_mtls_listener(void)
        kb_tls_client_conn_open("localhost", port, ca.cert_pem, ccert, ckey);
    assert(bounded);
    char tiny_response[4];
-   assert(kb_tls_client_conn_request(bounded, "GET", "/v1/health", NULL, NULL, 1, tiny_response,
-                                     sizeof(tiny_response), &st, &reusable) == -1);
+   assert(kb_tls_client_conn_request(bounded, "GET", "/v1/health", NULL, TEST_KB_AUTH_HEADER, 1,
+                                     tiny_response, sizeof(tiny_response), &st, &reusable) == -1);
    assert(reusable == 0);
    kb_tls_client_conn_close(bounded);
 
@@ -3401,8 +3458,8 @@ static void test_mtls_listener(void)
    assert(kb_tls_client_conn_set_timeout(NULL, 600000) == -1);
    assert(kb_tls_client_conn_set_timeout(session_one, 0) == -1);
    assert(kb_tls_client_conn_set_timeout(session_one, 600000) == 0);
-   assert(kb_tls_client_conn_request(session_one, "GET", "/v1/health", NULL, NULL, 0, rbody,
-                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(kb_tls_client_conn_request(session_one, "GET", "/v1/health", NULL, TEST_KB_AUTH_HEADER, 0,
+                                     rbody, sizeof(rbody), &st, &reusable) == 0);
    assert(reusable == 1);
    SSL_SESSION *saved_session = kb_tls_client_conn_get1_session(session_one);
    assert(saved_session);
@@ -3411,8 +3468,8 @@ static void test_mtls_listener(void)
        kb_tls_client_conn_open_session("localhost", port, shared_client_ctx, saved_session);
    assert(session_two);
    assert(kb_tls_client_conn_session_reused(session_two) == 1);
-   assert(kb_tls_client_conn_request(session_two, "GET", "/v1/health", NULL, NULL, 1, rbody,
-                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(kb_tls_client_conn_request(session_two, "GET", "/v1/health", NULL, TEST_KB_AUTH_HEADER, 1,
+                                     rbody, sizeof(rbody), &st, &reusable) == 0);
    kb_tls_client_conn_close(session_two);
    SSL_SESSION_free(saved_session);
    SSL_CTX_free(shared_client_ctx);
@@ -3420,22 +3477,26 @@ static void test_mtls_listener(void)
    /* Primary authority is consulted before dispatch. Unknown/revoked peers are
     * forbidden and an authority outage is retryable but never fail-open. */
    test_kb_enrollment_authority_set(0);
-   mtls_tcp_request(port, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+   mtls_tcp_request(port, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "Connection: close\r\n\r\n",
                     resp, sizeof(resp));
    assert(strstr(resp, "403 Forbidden"));
    assert(!strstr(resp, "\"status\":\"ok\""));
    test_kb_enrollment_authority_set(-1);
-   mtls_tcp_request(port, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+   mtls_tcp_request(port, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "Connection: close\r\n\r\n",
                     resp, sizeof(resp));
    assert(strstr(resp, "503 Service Unavailable"));
    assert(!strstr(resp, "\"status\":\"ok\""));
    test_kb_enrollment_authority_set(1);
-   /* the dialer's request carries the client cert's scope (project:beta): a
-    * cross-scope request is denied. */
-   assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "GET",
-                                "/v1/health?status=1&project=otherproj", NULL, rbody, sizeof(rbody),
-                                &st) == 0);
-   assert(st == 403);
+   /* Certificate CN does not manufacture route scope; the service bearer is
+    * the independently verified route credential. */
+   assert(kb_tls_client_request_auth("localhost", port, ca.cert_pem, ccert, ckey, "GET",
+                                     "/v1/health?status=1&project=otherproj", NULL,
+                                     TEST_KB_AUTH_HEADER, rbody, sizeof(rbody), &st) == 0);
+   assert(st == 200);
 
    /* FULL CLIENT ENROLLMENT: mint a token into the listener's store, build the
     * connection string, and run kb_tls_enroll — TOFU CA pin + CSR + redeem in
@@ -3444,7 +3505,7 @@ static void test_mtls_listener(void)
       char store[400];
       snprintf(store, sizeof(store), "%s/kb-enroll-tokens", cfg);
       char token[KB_ENROLL_TOKEN_MAX];
-      assert(kb_enroll_store_issue(store, "project:gamma", token, sizeof(token)) == 0);
+      assert(kb_enroll_store_issue(store, KB_SERVER_CLIENT_SCOPE, token, sizeof(token)) == 0);
       char conn[600];
       assert(kb_enroll_conn_string_build("localhost", port, fp, token, conn, sizeof(conn)) > 0);
 
@@ -3453,14 +3514,14 @@ static void test_mtls_listener(void)
       assert(strcmp(eca, ca.cert_pem) == 0);                      /* pinned the right CA */
       assert(kb_pki_verify_client_cert(ca.cert_pem, ecert) == 1); /* issued cert chains */
 
-      /* the freshly-enrolled identity dials the kb with its scope (project:gamma). */
-      assert(kb_tls_client_request("localhost", port, eca, ecert, ekey, "GET", "/v1/health", NULL,
-                                   rbody, sizeof(rbody), &st) == 0);
+      /* The freshly enrolled transport identity still needs the service bearer. */
+      assert(kb_tls_client_request_auth("localhost", port, eca, ecert, ekey, "GET", "/v1/health",
+                                        NULL, TEST_KB_AUTH_HEADER, rbody, sizeof(rbody), &st) == 0);
       assert(st == 200);
-      assert(kb_tls_client_request("localhost", port, eca, ecert, ekey, "GET",
-                                   "/v1/health?status=1&project=elsewhere", NULL, rbody,
-                                   sizeof(rbody), &st) == 0);
-      assert(st == 403); /* scope from the enrolled cert is enforced */
+      assert(kb_tls_client_request_auth("localhost", port, eca, ecert, ekey, "GET",
+                                        "/v1/health?status=1&project=elsewhere", NULL,
+                                        TEST_KB_AUTH_HEADER, rbody, sizeof(rbody), &st) == 0);
+      assert(st == 200);
       remove(store);
    }
 
@@ -3470,7 +3531,7 @@ static void test_mtls_listener(void)
       char store2[400];
       snprintf(store2, sizeof(store2), "%s/kb-enroll-tokens", cfg);
       char token2[KB_ENROLL_TOKEN_MAX];
-      assert(kb_enroll_store_issue(store2, "project:delta", token2, sizeof(token2)) == 0);
+      assert(kb_enroll_store_issue(store2, KB_SERVER_CLIENT_SCOPE, token2, sizeof(token2)) == 0);
       char conn2[600];
       assert(kb_enroll_conn_string_build("localhost", port, fp, token2, conn2, sizeof(conn2)) > 0);
 
@@ -3485,6 +3546,9 @@ static void test_mtls_listener(void)
       kb_client_mtls_set_identity_path_for_test(identity_file);
       kb_client_mtls_set_server_identity_path_for_test(server_identity_file);
       assert(runtime_secret_store("AIMEE_KB_CONN", conn2) == 0);
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_BEARER_TOKEN", "token-one") == 0);
+      assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN",
+                                  "scope:service:aimee-server:token-one") == 0);
       setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
       int st2 = -1;
@@ -3603,6 +3667,44 @@ static void test_mtls_listener(void)
       unsigned long pool_handshakes = 0, pool_resumed = 0;
       kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
       assert(pool_handshakes >= 1 && pool_resumed <= pool_handshakes);
+
+      /* Rotate the independently configured service bearer while the mTLS
+       * connection remains pooled. The next request must read and present the
+       * new token without opening another TLS connection. */
+      unsigned long handshakes_before_bearer_rotation = pool_handshakes;
+      unsigned long resumed_before_bearer_rotation = pool_resumed;
+      snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token),
+               "scope:service:aimee-server:token-two");
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_BEARER_TOKEN", "token-two") == 0);
+      assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN",
+                                  "scope:service:aimee-server:token-two") == 0);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+      kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
+      assert(pool_handshakes == handshakes_before_bearer_rotation);
+      assert(pool_resumed == resumed_before_bearer_rotation);
+
+      /* Bearers are bounded independently from ordinary short test secrets;
+       * exercise a token long enough to catch a mismatched server-side buffer. */
+      char long_token[513];
+      memset(long_token, 'x', sizeof(long_token) - 1);
+      long_token[sizeof(long_token) - 1] = '\0';
+      assert(snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token),
+                      "scope:service:aimee-server:%s", long_token) > 0);
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_BEARER_TOKEN", long_token) == 0);
+      assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", g_stub_kb_api_bearer_token) == 0);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+      kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
+      assert(pool_handshakes == handshakes_before_bearer_rotation);
+      assert(pool_resumed == resumed_before_bearer_rotation);
+      snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token),
+               "scope:service:aimee-server:token-two");
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_BEARER_TOKEN", "token-two") == 0);
+      assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN",
+                                  "scope:service:aimee-server:token-two") == 0);
 
       /* Rotate only the server-to-KB pair while an old pooled connection and
        * resumable session exist. Renewal must persist a fresh keypair, drain
@@ -3757,6 +3859,13 @@ static void test_mtls_listener(void)
 
       kb_client_mtls_set_identity_path_for_test(NULL);
       kb_client_mtls_set_server_identity_path_for_test(NULL);
+      runtime_secret_remove("AIMEE_KB_CLIENT_BEARER_TOKEN");
+      runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+      snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token),
+               "scope:service:aimee-server:token-one");
+      int missing_bearer_status = -1;
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &missing_bearer_status);
+      assert(r == NULL && missing_bearer_status == KB_CLIENT_ERR_AUTH_REQUIRED);
       assert(kb_client_mtls_configured() == 0);
       unlink(identity_file);
       unlink(server_identity_file);
@@ -3768,8 +3877,8 @@ static void test_mtls_listener(void)
       /* a 1-hour cert expires within 2 hours, not within 1 second; the 10y CA
        * is not near expiry. */
       char sc[KB_PKI_CERT_PEM_MAX], sk[KB_PKI_KEY_PEM_MAX];
-      assert(kb_pki_issue_client_cert(&ca, "project:beta", 3600, sc, sizeof(sc), sk, sizeof(sk)) ==
-             0);
+      assert(kb_pki_issue_client_cert(&ca, KB_SERVER_CLIENT_SCOPE, 3600, sc, sizeof(sc), sk,
+                                      sizeof(sk)) == 0);
       assert(kb_tls_cert_expires_within(sc, 7200) == 1);
       assert(kb_tls_cert_expires_within(sc, 1) == 0);
       assert(kb_tls_cert_expires_within(ca.cert_pem, 60L * 60 * 24 * 14) == 0);
@@ -3777,8 +3886,8 @@ static void test_mtls_listener(void)
       /* With no authoritative enrollment DB in this unit fixture, renewal is
        * refused before a new certificate can escape. */
       char nc[KB_PKI_CERT_PEM_MAX], nk[KB_PKI_KEY_PEM_MAX];
-      assert(kb_tls_renew("localhost", port, ca.cert_pem, ccert, ckey, nc, sizeof(nc), nk,
-                          sizeof(nk)) != 0);
+      assert(kb_tls_renew("localhost", port, ca.cert_pem, ccert, ckey, TEST_KB_AUTH_HEADER, nc,
+                          sizeof(nc), nk, sizeof(nk)) != 0);
    }
 
    SSL_CTX_free(cctx);

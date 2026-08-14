@@ -17,6 +17,8 @@
 
 /* --- built-in kb-token verifier --- */
 
+#define KB_VERIFIER_TOKEN_MAX 4096
+
 int kb_verifier_kbtoken(const char *presented, const char *configured, kb_verify_result_t *out,
                         void *ctx)
 {
@@ -26,7 +28,7 @@ int kb_verifier_kbtoken(const char *presented, const char *configured, kb_verify
    if (!presented)
       presented = "";
 
-   char tkind[32] = "", tid[128] = "", tsecret[256] = "";
+   char tkind[32] = "", tid[128] = "", tsecret[KB_VERIFIER_TOKEN_MAX + 1] = "";
    kb_scope_token_parse(configured, tkind, sizeof(tkind), tid, sizeof(tid), tsecret,
                         sizeof(tsecret));
 

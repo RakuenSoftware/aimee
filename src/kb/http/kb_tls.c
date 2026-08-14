@@ -772,10 +772,11 @@ int kb_tls_cert_expires_within(const char *cert_pem, long seconds)
 }
 
 int kb_tls_renew(const char *host, int port, const char *ca_cert_pem, const char *cur_cert_pem,
-                 const char *cur_key_pem, char *cert_out, size_t cert_cap, char *key_out,
-                 size_t key_cap)
+                 const char *cur_key_pem, const char *authorization, char *cert_out,
+                 size_t cert_cap, char *key_out, size_t key_cap)
 {
-   if (!host || !ca_cert_pem || !cur_cert_pem || !cur_key_pem || !cert_out || !key_out)
+   if (!host || !ca_cert_pem || !cur_cert_pem || !cur_key_pem || !authorization ||
+       !authorization[0] || !cert_out || !key_out)
       return -1;
 
    /* Fresh keypair + CSR (the new private key stays here). */
@@ -793,8 +794,9 @@ int kb_tls_renew(const char *host, int port, const char *ca_cert_pem, const char
    /* POST /v1/enroll/renew authenticated by the CURRENT cert (mTLS). */
    char *resp = malloc(16384);
    int status = -1;
-   int reqrc = resp ? kb_tls_client_request(host, port, ca_cert_pem, cur_cert_pem, cur_key_pem,
-                                            "POST", "/v1/enroll/renew", body, resp, 16384, &status)
+   int reqrc = resp ? kb_tls_client_request_auth(host, port, ca_cert_pem, cur_cert_pem, cur_key_pem,
+                                                 "POST", "/v1/enroll/renew", body, authorization,
+                                                 resp, 16384, &status)
                     : -1;
    free(body);
    if (reqrc != 0 || status != 200)

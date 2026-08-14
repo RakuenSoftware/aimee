@@ -8,11 +8,12 @@
 #include <stddef.h>
 
 #define KB_CLIENT_ERR_POOL_EXHAUSTED (-2)
+#define KB_CLIENT_ERR_AUTH_REQUIRED  (-3)
 
 typedef int (*kb_client_mtls_renew_fn)(const char *host, int port, const char *ca_cert_pem,
                                        const char *cur_cert_pem, const char *cur_key_pem,
-                                       char *cert_out, size_t cert_cap, char *key_out,
-                                       size_t key_cap);
+                                       const char *authorization, char *cert_out, size_t cert_cap,
+                                       char *key_out, size_t key_cap);
 
 /* 1 when Vault holds an AIMEE_KB_CONN aimee:// connection string (a remote kb), else 0.
  * The string supplies the stable endpoint + CA pin after its one-time token has

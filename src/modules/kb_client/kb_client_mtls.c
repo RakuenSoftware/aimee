@@ -17,6 +17,7 @@
 #include "config.h"
 #include "cJSON.h"
 #include "runtime_secret.h"
+#include <aimee/core/connection/auth.h>
 
 #include <pthread.h>
 #include <errno.h>
@@ -44,6 +45,34 @@ static char g_identity_path_override[1024];
 static char g_server_identity_path_override[1024];
 
 #define KB_CLIENT_IDENTITY_MAX 32768
+#define KB_CLIENT_BEARER_MAX   4096
+
+/* Read the outbound service bearer for every request. It is deliberately not
+ * cached with the mTLS identity: bearer rotation must take effect on the next
+ * request even when the HTTP/TLS connection remains pooled. */
+static int service_authorization(char *out, size_t cap)
+{
+   char token[KB_CLIENT_BEARER_MAX + 1] = "";
+   char value[KB_CLIENT_BEARER_MAX + 8] = "";
+   if (!out || cap == 0)
+      return -1;
+   out[0] = '\0';
+   int have = runtime_secret_get("AIMEE_KB_CLIENT_BEARER_TOKEN", token, sizeof(token));
+   if (!have)
+      have = runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", token, sizeof(token));
+   int n = have && aimee_core_bearer_value(value, sizeof(value), token) == 0
+               ? snprintf(out, cap, "Authorization: %s\r\n", value)
+               : -1;
+   runtime_secret_wipe(value, sizeof(value));
+   runtime_secret_wipe(token, sizeof(token));
+   if (n <= 0 || (size_t)n >= cap)
+   {
+      if (cap)
+         out[0] = '\0';
+      return -1;
+   }
+   return 0;
+}
 
 static int identity_path(char *out, size_t cap)
 {
@@ -707,7 +736,7 @@ static int ensure_enrolled(void)
  * while it rotates the identity in place. */
 #define KB_CLIENT_MTLS_RENEW_WINDOW (60L * 60 * 24 * 14) /* < 14 days left */
 
-static void maybe_renew(void)
+static void maybe_renew(const char *authorization)
 {
    pthread_mutex_lock(&g_lock);
    long renew_window =
@@ -716,7 +745,8 @@ static void maybe_renew(void)
    {
       char nc[sizeof(g_cert)], nk[sizeof(g_key)];
       kb_client_mtls_renew_fn renew = g_renew_for_test ? g_renew_for_test : kb_tls_renew;
-      if (renew(g_host, g_port, g_ca, g_cert, g_key, nc, sizeof(nc), nk, sizeof(nk)) == 0)
+      if (renew(g_host, g_port, g_ca, g_cert, g_key, authorization, nc, sizeof(nc), nk,
+                sizeof(nk)) == 0)
       {
          /* Never switch the live process to an identity a restart would lose.
           * The old cert remains usable through its existing validity window if
@@ -750,7 +780,14 @@ char *kb_client_mtls_request_timeout_with_type(const char *method, const char *p
       return NULL;
    if (timeout_ms <= 0)
       timeout_ms = KB_CLIENT_MTLS_DEFAULT_TIMEOUT_MS;
-   maybe_renew();
+   char authorization[KB_CLIENT_BEARER_MAX + 32];
+   if (service_authorization(authorization, sizeof(authorization)) != 0)
+   {
+      if (status_out)
+         *status_out = KB_CLIENT_ERR_AUTH_REQUIRED;
+      return NULL;
+   }
+   maybe_renew(authorization);
 
    size_t cap = 1u << 20; /* 1 MiB — covers kb /v1 responses (status/search/etc.) */
    char *resp = malloc(cap);
@@ -772,8 +809,8 @@ char *kb_client_mtls_request_timeout_with_type(const char *method, const char *p
       kb_tls_client_conn_t *conn = resp ? kb_tls_client_conn_open(host, port, ca, cert, key) : NULL;
       int rc = conn && kb_tls_client_conn_set_timeout(conn, timeout_ms) == 0
                    ? kb_tls_client_conn_request_with_type(
-                         conn, method, path, (body && body[0]) ? body : NULL, NULL, content_type, 1,
-                         resp, cap, &status, &reusable)
+                         conn, method, path, (body && body[0]) ? body : NULL, authorization,
+                         content_type, 1, resp, cap, &status, &reusable)
                    : -1;
       kb_tls_client_conn_close(conn);
       if (status_out)
@@ -792,6 +829,7 @@ char *kb_client_mtls_request_timeout_with_type(const char *method, const char *p
        * which names the file, the key and the trap. The operator saw "knowledge
        * service reembed failed". */
       char *out = (rc == 0) ? strdup(resp) : NULL;
+      runtime_secret_wipe(authorization, sizeof(authorization));
       free(resp);
       return out;
    }
@@ -799,6 +837,7 @@ char *kb_client_mtls_request_timeout_with_type(const char *method, const char *p
    kb_pool_entry_t *entry = resp ? pool_borrow(&pool_error) : NULL;
    if (!entry)
    {
+      runtime_secret_wipe(authorization, sizeof(authorization));
       free(resp);
       if (status_out)
          *status_out = pool_error;
@@ -808,7 +847,7 @@ char *kb_client_mtls_request_timeout_with_type(const char *method, const char *p
    int reusable = 0;
    int rc = kb_tls_client_conn_set_timeout(entry->conn, timeout_ms) == 0
                 ? kb_tls_client_conn_request_with_type(
-                      entry->conn, method, path, (body && body[0]) ? body : NULL, NULL,
+                      entry->conn, method, path, (body && body[0]) ? body : NULL, authorization,
                       content_type, 0, resp, cap, &status, &reusable)
                 : -1;
    pool_return(entry, rc == 0 && reusable);
@@ -816,6 +855,7 @@ char *kb_client_mtls_request_timeout_with_type(const char *method, const char *p
       *status_out = status;
    /* Body preserved on non-2xx as above; *status_out distinguishes. */
    char *out = (rc == 0) ? strdup(resp) : NULL;
+   runtime_secret_wipe(authorization, sizeof(authorization));
    free(resp);
    return out;
 }

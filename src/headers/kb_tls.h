@@ -163,8 +163,8 @@ extern "C"
     * the presented cert). The new key never leaves the client. Returns 0 on
     * success, -1 on connect / TLS / renew failure. */
    int kb_tls_renew(const char *host, int port, const char *ca_cert_pem, const char *cur_cert_pem,
-                    const char *cur_key_pem, char *cert_out, size_t cert_cap, char *key_out,
-                    size_t key_cap);
+                    const char *cur_key_pem, const char *authorization, char *cert_out,
+                    size_t cert_cap, char *key_out, size_t key_cap);
 
 #ifdef __cplusplus
 }

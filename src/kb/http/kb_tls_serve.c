@@ -25,11 +25,14 @@
 #include "db2/db2.h"    /* request-scoped DB2 lease */
 #include "kb_ingress.h" /* B5 identity-header ingress guard */
 #include "kb_reqctx.h"
+#include "kb_verifier.h"
 #include "config.h"
 #include "log.h"             /* LOG_WARN */
 #include "db2/enrollments.h" /* revocation source of truth + last-seen */
 #include "kb_paths.h"        /* kb_default_config_dir */
 #include "kb_pki.h"          /* CA load + CSR signing for renew */
+#include "runtime_secret.h"
+#include <aimee/core/connection/auth.h>
 
 #include <fcntl.h>
 #include <stdlib.h>
@@ -45,6 +48,8 @@
 #define KB_TLS_URI_MAX          4096
 #define KB_TLS_HEADER_COUNT_MAX 64
 #define KB_TLS_RESP_MAX         262144
+#define KB_TLS_AUTH_MAX         8192
+#define KB_TLS_BEARER_MAX       4096
 
 static int header_name_char(unsigned char c)
 {
@@ -72,6 +77,18 @@ static int header_value_has_token(const char *start, const char *end, const char
    return 0;
 }
 
+/* All three connection layers must name the same enrolled identity. The
+ * certificate carries "<kind>:<id>" in its verified CN; the bearer verifier
+ * derives the corresponding scope exclusively from the verified credential. */
+static int bearer_identity_matches_certificate(const char *cn, const kb_verify_result_t *identity)
+{
+   if (!cn || !identity || !identity->scope_kind[0] || !identity->scope_id[0])
+      return 0;
+   char scope[sizeof(identity->scope_kind) + sizeof(identity->scope_id) + 2];
+   int n = snprintf(scope, sizeof(scope), "%s:%s", identity->scope_kind, identity->scope_id);
+   return n > 0 && (size_t)n < sizeof(scope) && strcmp(scope, cn) == 0;
+}
+
 static void set_recv_timeout(SSL *ssl, int seconds)
 {
    int fd = SSL_get_fd(ssl);
@@ -83,10 +100,14 @@ static void set_recv_timeout(SSL *ssl, int seconds)
 /* Read exactly one strict HTTP/1.1 request. Returns an HTTP error status, 0 on
  * success, or -1 when an idle/cleanly closed peer supplied no request bytes. */
 static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, int *header_out,
-                               size_t *body_out, int *close_out)
+                               size_t *body_out, int *close_out, char *authorization_out,
+                               size_t authorization_cap)
 {
    size_t total = 0, header_len = 0, content_len = 0;
-   int have_cl = 0;
+   int have_cl = 0, have_authorization = 0;
+   if (!authorization_out || authorization_cap == 0)
+      return 400;
+   authorization_out[0] = '\0';
    while (total + 1 < cap && total < KB_TLS_HEADER_MAX)
    {
       int n = SSL_read(ssl, buf + total, (int)(KB_TLS_HEADER_MAX - total));
@@ -178,6 +199,23 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
          memcpy(ct, v, vlen);
          ct[vlen] = '\0';
          kb_reqctx_set_content_type(ct);
+      }
+      if (name_len == 13 && !strncasecmp(p, "Authorization", 13))
+      {
+         if (have_authorization)
+            return 400;
+         have_authorization = 1;
+         char *v = colon + 1;
+         while (v < e && (*v == ' ' || *v == '\t'))
+            v++;
+         char *ve = e;
+         while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t'))
+            ve--;
+         size_t vlen = (size_t)(ve - v);
+         if (!vlen || vlen >= authorization_cap)
+            return 400;
+         memcpy(authorization_out, v, vlen);
+         authorization_out[vlen] = '\0';
       }
       if (name_len == 10 && !strncasecmp(p, "Connection", 10) &&
           header_value_has_token(colon + 1, e, "close"))
@@ -412,8 +450,10 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       int total = 0, header_len = 0;
       size_t declared_body = 0;
       int close_after_response = 0;
-      int read_status = strict_request_read(ssl, buf, KB_TLS_REQ_MAX, &total, &header_len,
-                                            &declared_body, &close_after_response);
+      char presented_authorization[KB_TLS_AUTH_MAX] = "";
+      int read_status = strict_request_read(
+          ssl, buf, KB_TLS_REQ_MAX, &total, &header_len, &declared_body, &close_after_response,
+          presented_authorization, sizeof(presented_authorization));
       io_timeout.tv_sec = 30;
       setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
       if (read_status < 0)
@@ -479,32 +519,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
          snprintf(cpath, sizeof(cpath), "%s", path);
       }
 
-      /* Derive the caller's scope from the verified client certificate. A scoped
-       * CN "<kind>:<id>" becomes a synthetic scoped credential the router enforces
-       * via verify-then-trust; a bare word (no ':') becomes an unscoped
-       * credential, which the router resolves to the owner actor.
-       *
-       * aimee-server no longer relies on the unscoped half. Its CN is
-       * KB_SERVER_CLIENT_SCOPE, a `service` scope, so it arrives as a data-plane
-       * caller and every administrative gate refuses it. That was previously
-       * impossible because the server proxied two owner-only routes — write-tier
-       * grants and repo trust — and both have been removed.
-       *
-       * The unscoped half remains for an operator credential minted with a bare
-       * scope. Both shapes still manufacture the same request-local verifier
-       * input: the certificate has already passed TLS verification and the
-       * primary enrollment lookup by then. */
       char cn[128] = "";
-      char synth[160] = "", authhdr[180] = "";
       int have_cert = (kb_tls_peer_cn(ssl, cn, sizeof(cn)) == 0);
-      if (have_cert)
-      {
-         if (strchr(cn, ':'))
-            snprintf(synth, sizeof(synth), "scope:%s:m", cn);
-         else
-            snprintf(synth, sizeof(synth), "mtls-owner");
-         snprintf(authhdr, sizeof(authhdr), "Bearer %s", synth);
-      }
 
       /* Primary-authoritative mTLS seam: issuer + normalized serial must resolve
        * to an active enrollment. Unknown, revoked, and authority-error outcomes
@@ -523,7 +539,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
          {
             cert_authority = db2_enrollment_is_active_by_key(transport.issuer, transport.subject);
             if (cert_authority == 1)
-               db2_enrollment_touch_last_seen(fp, cn); /* cn = the cert's scope identity */
+               db2_enrollment_touch_last_seen(fp, cn); /* transport-use telemetry */
          }
       }
 
@@ -531,6 +547,23 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
        * the CA for TOFU pinning, and redeem a token for a cert. */
       int is_bootstrap =
           (strcmp(cpath, "/v1/enroll/ca") == 0 || strcmp(cpath, "/v1/enroll/redeem") == 0);
+
+      /* The certificate authenticates the transport; it does not stand in for
+       * the independently rotating service bearer. Verify the bearer afresh on
+       * every request so a pooled connection observes rotation/revocation at
+       * request N+1. OIDC, when configured, runs through this same verifier
+       * registry with its issuer/audience/signature policy pinned. */
+      char expected_bearer[KB_TLS_BEARER_MAX + 1] = "";
+      if (!runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", expected_bearer,
+                              sizeof(expected_bearer)))
+         snprintf(expected_bearer, sizeof(expected_bearer), "%s", config_kb_api_bearer_token());
+      const char *presented_bearer = aimee_core_bearer_token(presented_authorization);
+      kb_verify_result_t service_identity;
+      int bearer_authority =
+          expected_bearer[0] && presented_bearer &&
+          kb_verifier_authenticate(presented_bearer, expected_bearer, &service_identity, NULL, 0);
+      int identity_matches =
+          bearer_authority && bearer_identity_matches_certificate(cn, &service_identity);
 
       int status;
       /* B5: kb never honors a client-supplied identity header; reject fail-closed
@@ -569,6 +602,32 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
                   "{\"error\":\"client certificate required (enroll first via "
                   "/v1/enroll/redeem)\"}");
          status = 401;
+      }
+      /* Enrollment bootstrap is the only bearer-less exception. Every request
+       * made with an enrolled certificate must also carry the current bearer;
+       * a missing KB-side authority is a service/configuration failure, while a
+       * missing or rejected presented credential is ordinary unauthorized. */
+      else if (have_cert && !is_bootstrap && !bearer_authority)
+      {
+         close_after_response = 1;
+         if (!expected_bearer[0])
+         {
+            snprintf(resp, KB_TLS_RESP_MAX,
+                     "{\"error\":\"service bearer authority is not configured\"}");
+            status = 503;
+         }
+         else
+         {
+            snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"service bearer required\"}");
+            status = 401;
+         }
+      }
+      else if (have_cert && !is_bootstrap && !identity_matches)
+      {
+         close_after_response = 1;
+         snprintf(resp, KB_TLS_RESP_MAX,
+                  "{\"error\":\"service identity does not match client certificate\"}");
+         status = 403;
       }
       /* GET /v1/enroll/ca: return the CA cert so a bootstrapping client can pin it
        * by fingerprint (the value in its connection string). */
@@ -629,11 +688,14 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       }
       else
       {
-         status = kb_http_route_ex(method, cpath, qs, authhdr[0] ? authhdr : NULL,
-                                   synth[0] ? synth : NULL, body, body_len, resp, KB_TLS_RESP_MAX);
+         status = kb_http_route_ex(method, cpath, qs, presented_authorization, expected_bearer,
+                                   body, body_len, resp, KB_TLS_RESP_MAX);
       }
       kb_reqctx_clear(); /* drop the request's actor before the next request on this conn */
       db2_lease_end();
+      OPENSSL_cleanse(&service_identity, sizeof(service_identity));
+      runtime_secret_wipe(expected_bearer, sizeof(expected_bearer));
+      OPENSSL_cleanse(presented_authorization, sizeof(presented_authorization));
 
       char head[256];
       int hn = snprintf(head, sizeof(head),
