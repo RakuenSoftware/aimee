@@ -322,9 +322,11 @@ func (r *RegistryExecutor) PlanGroup(ctx context.Context,
 		}
 		if best < 0 {
 			if hasEligible {
+				// Eligible candidates filtered out only by occupancy are retryable load.
 				return nil, fmt.Errorf("%w: delegate group cannot fill seat %d (%s/%s) within enabled capacity",
 					delegatecontract.ErrDelegateCapacity, i+1, seat.Role, seat.Persona)
 			}
+			// No eligible healthy candidate is reachability, deliberately not capacity.
 			return nil, fmt.Errorf("delegate group has no eligible healthy backend for seat %d (%s/%s)",
 				i+1, seat.Role, seat.Persona)
 		}

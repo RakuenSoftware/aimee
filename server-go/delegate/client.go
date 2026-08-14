@@ -367,6 +367,8 @@ func IsExecutionDeadline(err error) bool {
 		strings.Contains(err.Error(), "aimee_err=execution_deadline"))
 }
 
+// classifyDelegateError preserves the specific typed deadline sentinel even
+// though both deadline classes intentionally unwrap to context.DeadlineExceeded.
 func classifyDelegateError(err error) error {
 	switch {
 	case err == nil:

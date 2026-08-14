@@ -44,6 +44,15 @@ backpressure.
 - `cd ../src && make -s lint`
 - Draft PR: https://github.com/RakuenSoftware/aimee/pull/2653
 
+### Live campaign transcript — 2026-08-14
+
+```text
+=== RUN   TestTenOverlappingPanelsCrossGoProducerAdmissionWithoutUnreachable (x10)
+--- PASS: TestTenOverlappingPanelsCrossGoProducerAdmissionWithoutUnreachable (all 10 runs)
+PASS
+ok github.com/JBailes/aimee/server-go/modules/roundtable 58.399s
+```
+
 The PR CI run is the independent build validation. The repeated deterministic campaign is the
 load-dependent regression gate: one lucky provider-backed build is supporting evidence, not the
 proof of correct classification.

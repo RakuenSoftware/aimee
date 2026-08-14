@@ -178,10 +178,11 @@ func TestRegistryExecutorEnforcesMaxParallelWithoutPoisoningAgentHealth(t *testi
 	}
 	registry := map[string]any{"default_agent": "helper", "agents": []map[string]any{{
 		"name": "helper", "cli_kind": "generic", "cli_cmd": script, "roles": []string{"code"},
-		"max_parallel": 1,
+		"max_parallel": 1, "delegate_available": true,
 	}}}
 	body, _ := json.Marshal(registry)
-	if err := os.WriteFile(filepath.Join(home, "models.json"), body, 0o600); err != nil {
+	registryPath := filepath.Join(home, "models.json")
+	if err := os.WriteFile(registryPath, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	executor, err := NewRegistryExecutor(home)
@@ -214,6 +215,13 @@ func TestRegistryExecutorEnforcesMaxParallelWithoutPoisoningAgentHealth(t *testi
 	}); !errors.Is(err, delegatecontract.ErrDelegateCapacity) || errors.Is(err, delegatecontract.ErrDelegateTerminal) {
 		t.Fatalf("occupied agent was not classified as retryable capacity: %v", err)
 	}
+	healthAfter, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(healthAfter, body) {
+		t.Fatalf("capacity response mutated authoritative health: before=%s after=%s", body, healthAfter)
+	}
 	if err := os.WriteFile(filepath.Join(home, "release"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -228,6 +236,37 @@ func TestRegistryExecutorEnforcesMaxParallelWithoutPoisoningAgentHealth(t *testi
 	})
 	if err != nil || !slices.Equal(models, []string{"helper"}) {
 		t.Fatalf("capacity response poisoned subsequent agent health: models=%v err=%v", models, err)
+	}
+}
+
+func TestRegistryExecutorTypesCallerDeadlineAsExecutionDeadline(t *testing.T) {
+	home := t.TempDir()
+	workdir := filepath.Join(home, "worktree")
+	if err := os.MkdirAll(filepath.Join(workdir, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(home, "slow-delegate")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 2\nprintf done\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	registry := map[string]any{"agents": []map[string]any{{
+		"name": "helper", "cli_kind": "generic", "cli_cmd": script, "roles": []string{"code"},
+	}}}
+	body, _ := json.Marshal(registry)
+	if err := os.WriteFile(filepath.Join(home, "models.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executor, err := NewRegistryExecutor(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	result := executor.Execute(ctx, delegatecontract.Invocation{Version: 2, Role: "code",
+		Persona: "engineer", Prompt: "work", Workdir: workdir, Tools: true})
+	if result.Status != "failed" || !delegatecontract.IsExecutionDeadline(errors.New(result.Error)) ||
+		delegatecontract.IsCapacityDeadline(errors.New(result.Error)) {
+		t.Fatalf("caller deadline was not typed as an execution deadline: %+v", result)
 	}
 }
 
