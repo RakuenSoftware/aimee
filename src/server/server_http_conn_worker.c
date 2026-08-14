@@ -59,7 +59,11 @@ static void *conn_worker(void *arg)
    {
       do
       {
+         request_context_clear();
+         server_http_identity_clear();
          handle_conn(j->fd, j->is_tcp, j->is_management);
+         request_context_clear();
+         server_http_identity_clear();
       } while (j->is_tls && server_http_keepalive_take());
    }
    server_tls_end(j->fd, ssl);

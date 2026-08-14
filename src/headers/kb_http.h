@@ -10,6 +10,8 @@
  * Authorization: Bearer <token>; unauthenticated requests get 401. */
 #pragma once
 
+#include "kb_identity.h"
+
 /* Start the HTTP listener thread on the given port.
  * bearer_token may be NULL or empty to disable auth.
  * Returns 0 on success, -1 on error. */
@@ -36,3 +38,11 @@ int kb_http_route(const char *method, const char *path, const char *auth_header,
 int kb_http_route_ex(const char *method, const char *path, const char *query_string,
                      const char *auth_header, const char *bearer_token, const char *body,
                      int body_len, char *out_buf, int out_cap);
+
+/* Route with a canonical caller asserted by the fully authenticated service
+ * transport. If the request credential also identifies an actor, both identities
+ * must match. This entry point is not for the ordinary HTTP listener. */
+int kb_http_route_ex_with_actor(const char *method, const char *path, const char *query_string,
+                                const char *auth_header, const char *bearer_token, const char *body,
+                                int body_len, const kb_principal_t *asserted_actor, char *out_buf,
+                                int out_cap);

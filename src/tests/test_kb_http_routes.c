@@ -716,6 +716,11 @@ static int g_stub_secret_configured;
 static int g_stub_secret_store_calls;
 static char g_stub_kb_api_bearer_token[4097] = "scope:service:aimee-server:token-one";
 static char g_test_pam_password[64] = "server-password";
+static char g_test_outbound_caller[577] = "";
+const char *request_context_caller_subject(void)
+{
+   return g_test_outbound_caller;
+}
 static int test_pam_check_credentials(const char *user, const char *password)
 {
    return user && password &&
@@ -2370,6 +2375,15 @@ static void test_team_routes(void)
    s = kb_http_route_ex("POST", "/v1/team", NULL, "Bearer scope:project:x:secret",
                         "scope:project:x:secret", "{\"name\":\"t\"}", 12, buf, sizeof(buf));
    assert(s == 401);
+   kb_principal_t asserted;
+   assert(kb_principal_from_host_account("alice", &asserted) == 0);
+   s = kb_http_route_ex_with_actor(
+       "POST", "/v1/team", NULL, "Bearer scope:service:aimee-server:secret",
+       "scope:service:aimee-server:secret", "{\"name\":\"t\"}", 12, &asserted, buf, sizeof(buf));
+   assert(s == 503); /* asserted actor reached the SQLite tenant guard */
+   s = kb_http_route_ex_with_actor("POST", "/v1/team", NULL, "Bearer owner-secret", "owner-secret",
+                                   "{\"name\":\"t\"}", 12, &asserted, buf, sizeof(buf));
+   assert(s == 403 && strstr(buf, "caller context conflicts"));
    /* Missing name -> 400 before any DB work (owner bearer). */
    s = kb_http_route_ex("POST", "/v1/team", NULL, "Bearer owner-secret", "owner-secret", "{}", 2,
                         buf, sizeof(buf));
@@ -3112,6 +3126,11 @@ static void test_mtls_serve(void)
    assert(strstr(resp, "403 Forbidden") &&
           strstr(resp, "service identity does not match client certificate"));
    mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "X-Aimee-Caller-Subject: uid:1000\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request") && strstr(resp, "invalid caller subject"));
+   mtls_request_raw(sctx, cctx,
                     "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
                     "Authorization: Bearer token-one\r\n"
                     "X-Aimee-Service-Authorization: Basic d3Jvbmc6Y3JlZGVudGlhbA==\r\n"
@@ -3168,6 +3187,19 @@ static void test_mtls_serve(void)
       assert(c);
       SSL_set_fd(c, sv[1]);
       assert(SSL_connect(c) == 1);
+      const char *with_caller = "GET /v1/team HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                                "X-Aimee-Caller-Subject: alice\r\n\r\n";
+      assert(SSL_write(c, with_caller, (int)strlen(with_caller)) == (int)strlen(with_caller));
+      assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
+      assert(strstr(resp, "503 Service Unavailable") && strstr(resp, "Connection: keep-alive"));
+
+      const char *without_caller =
+          "GET /v1/team HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER "\r\n";
+      assert(SSL_write(c, without_caller, (int)strlen(without_caller)) ==
+             (int)strlen(without_caller));
+      assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
+      assert(strstr(resp, "401 Unauthorized") && strstr(resp, "Connection: keep-alive"));
+
       const char *first = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER "\r\n";
       assert(SSL_write(c, first, (int)strlen(first)) == (int)strlen(first));
       assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
@@ -3676,6 +3708,21 @@ static void test_mtls_listener(void)
                                 &pool_exhausted);
       assert(pool_total == 1 && pool_idle == 1 && pool_busy == 0 && pool_waiters == 0);
       assert(pool_exhausted == 0);
+
+      unsigned long caller_handshakes = 0, caller_resumed = 0;
+      kb_client_mtls_tls_stats(&caller_handshakes, &caller_resumed);
+      snprintf(g_test_outbound_caller, sizeof(g_test_outbound_caller), "%s", "alice");
+      r = kb_client_mtls_request("GET", "/v1/team", NULL, &st2);
+      assert(st2 == 503 && r);
+      free(r);
+      g_test_outbound_caller[0] = '\0';
+      r = kb_client_mtls_request("GET", "/v1/team", NULL, &st2);
+      assert(st2 == 401 && r);
+      free(r);
+      unsigned long caller_handshakes_after = 0, caller_resumed_after = 0;
+      kb_client_mtls_tls_stats(&caller_handshakes_after, &caller_resumed_after);
+      assert(caller_handshakes_after == caller_handshakes &&
+             caller_resumed_after == caller_resumed);
 
       enum
       {

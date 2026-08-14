@@ -55,6 +55,7 @@
 #define KB_TLS_RESP_MAX         262144
 #define KB_TLS_AUTH_MAX         8192
 #define KB_TLS_BEARER_MAX       4096
+#define KB_TLS_CALLER_MAX       576
 
 static int (*g_pam_check_override)(const char *, const char *);
 
@@ -193,15 +194,17 @@ static void set_recv_timeout(SSL *ssl, int seconds)
 static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, int *header_out,
                                size_t *body_out, int *close_out, char *authorization_out,
                                size_t authorization_cap, char *service_authorization_out,
-                               size_t service_authorization_cap)
+                               size_t service_authorization_cap, char *caller_subject_out,
+                               size_t caller_subject_cap)
 {
    size_t total = 0, header_len = 0, content_len = 0;
-   int have_cl = 0, have_authorization = 0, have_service_authorization = 0;
+   int have_cl = 0, have_authorization = 0, have_service_authorization = 0, have_caller_subject = 0;
    if (!authorization_out || authorization_cap == 0 || !service_authorization_out ||
-       service_authorization_cap == 0)
+       service_authorization_cap == 0 || !caller_subject_out || caller_subject_cap == 0)
       return 400;
    authorization_out[0] = '\0';
    service_authorization_out[0] = '\0';
+   caller_subject_out[0] = '\0';
    while (total + 1 < cap && total < KB_TLS_HEADER_MAX)
    {
       int n = SSL_read(ssl, buf + total, (int)(KB_TLS_HEADER_MAX - total));
@@ -328,6 +331,24 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
             return 400;
          memcpy(service_authorization_out, v, vlen);
          service_authorization_out[vlen] = '\0';
+      }
+      if (name_len == sizeof("X-Aimee-Caller-Subject") - 1 &&
+          !strncasecmp(p, "X-Aimee-Caller-Subject", name_len))
+      {
+         if (have_caller_subject)
+            return 400;
+         have_caller_subject = 1;
+         char *v = colon + 1;
+         while (v < e && (*v == ' ' || *v == '\t'))
+            v++;
+         char *ve = e;
+         while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t'))
+            ve--;
+         size_t vlen = (size_t)(ve - v);
+         if (!vlen || vlen >= caller_subject_cap)
+            return 400;
+         memcpy(caller_subject_out, v, vlen);
+         caller_subject_out[vlen] = '\0';
       }
       if (name_len == 10 && !strncasecmp(p, "Connection", 10) &&
           header_value_has_token(colon + 1, e, "close"))
@@ -564,10 +585,11 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       int close_after_response = 0;
       char presented_authorization[KB_TLS_AUTH_MAX] = "";
       char service_authorization[KB_TLS_AUTH_MAX] = "";
+      char caller_subject[KB_TLS_CALLER_MAX + 1] = "";
       int read_status = strict_request_read(
           ssl, buf, KB_TLS_REQ_MAX, &total, &header_len, &declared_body, &close_after_response,
           presented_authorization, sizeof(presented_authorization), service_authorization,
-          sizeof(service_authorization));
+          sizeof(service_authorization), caller_subject, sizeof(caller_subject));
       io_timeout.tv_sec = 30;
       setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
       if (read_status < 0)
@@ -681,16 +703,27 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       kb_principal_t application_identity;
       int application_authority =
           service_identity_authenticate(service_authorization, &application_identity);
+      kb_principal_t caller_identity = {0};
+      int caller_authority =
+          caller_subject[0]
+              ? kb_principal_from_identity_key(caller_subject, &caller_identity) == 0 ? 1 : -1
+              : 0;
 
       int status;
       /* B5: kb never honors a client-supplied identity header; reject fail-closed
        * before any route runs. */
-      if (kb_ingress_identity_header_present(buf))
+      if (kb_ingress_identity_header_present_ex(buf, 1))
       {
          LOG_WARN(
              "kb.tls",
              "kb ingress (mtls): rejected request bearing a spoofable X-Aimee-* identity header");
          snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"identity header not permitted\"}");
+         status = 400;
+      }
+      else if (caller_subject[0] && is_bootstrap)
+      {
+         snprintf(resp, KB_TLS_RESP_MAX,
+                  "{\"error\":\"caller subject is not permitted on bootstrap routes\"}");
          status = 400;
       }
       /* A revoked/unknown cert or unavailable authority is rejected before any
@@ -767,6 +800,11 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
                   "{\"error\":\"service identity does not match client certificate\"}");
          status = 403;
       }
+      else if (have_cert && !is_bootstrap && caller_authority < 0)
+      {
+         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"invalid caller subject\"}");
+         status = 400;
+      }
       /* GET /v1/enroll/ca: return the CA cert so a bootstrapping client can pin it
        * by fingerprint (the value in its connection string). */
       else if (strcmp(cpath, "/v1/enroll/ca") == 0)
@@ -826,16 +864,19 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       }
       else
       {
-         status = kb_http_route_ex(method, cpath, qs, presented_authorization, expected_bearer,
-                                   body, body_len, resp, KB_TLS_RESP_MAX);
+         status = kb_http_route_ex_with_actor(
+             method, cpath, qs, presented_authorization, expected_bearer, body, body_len,
+             caller_authority == 1 ? &caller_identity : NULL, resp, KB_TLS_RESP_MAX);
       }
       kb_reqctx_clear(); /* drop the request's actor before the next request on this conn */
       db2_lease_end();
       OPENSSL_cleanse(&service_identity, sizeof(service_identity));
       OPENSSL_cleanse(&application_identity, sizeof(application_identity));
+      OPENSSL_cleanse(&caller_identity, sizeof(caller_identity));
       runtime_secret_wipe(expected_bearer, sizeof(expected_bearer));
       OPENSSL_cleanse(presented_authorization, sizeof(presented_authorization));
       OPENSSL_cleanse(service_authorization, sizeof(service_authorization));
+      OPENSSL_cleanse(caller_subject, sizeof(caller_subject));
 
       char head[256];
       int hn = snprintf(head, sizeof(head),

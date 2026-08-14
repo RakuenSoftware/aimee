@@ -3,8 +3,9 @@
  * The request router (kb_http_route_ex) resolves the caller's actor principal
  * after verification and stashes it here so tenant-aware handlers (e.g. the
  * /v1/team routes) can read it without threading it through every signature.
- * Set at request start, cleared at request end. Slice-4 minimal form (actor only);
- * the transport principal + full composite context wire in with P2's egress path. */
+ * The actor may come from a KB-verified caller credential or from canonical caller
+ * context carried over a fully authenticated service transport. Set at request
+ * start and cleared at request end. */
 #ifndef DEC_KB_REQCTX_H
 #define DEC_KB_REQCTX_H 1
 

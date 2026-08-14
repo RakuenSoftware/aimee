@@ -80,6 +80,12 @@ extern "C"
     * success, -1 if the principal is unauthenticated or args invalid. */
    int kb_identity_key(const kb_principal_t *p, char *out, size_t cap);
 
+   /* Parse one existing canonical identity key back into its existing principal
+    * kind. Used only for caller context asserted over the fully authenticated
+    * aimee-server service channel; this validates and decodes, it does not
+    * authenticate an arbitrary network header. */
+   int kb_principal_from_identity_key(const char *identity_key, kb_principal_t *out);
+
    /* Normalize a certificate serial to a stable revocation key: strip colons and
     * 0x, lowercase hex, drop leading zeros (but keep a single "0"). Returns 0 on
     * success. Used for the immutable (cert_issuer, cert_serial_norm) key (I5). */

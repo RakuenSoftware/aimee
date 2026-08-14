@@ -38,6 +38,7 @@ typedef struct
    char idempotency_key[128]; /* Idempotency-Key header, empty if absent */
    char session_key[128];     /* X-Aimee-Session-Key — per-session boundary, empty if absent */
    char principal[128];       /* account/tenant boundary; empty = anonymous */
+   char caller_subject[577];  /* canonical KB caller context; distinct from vault principal */
    char source[64];           /* turn-origin tag for token_audit, empty = default */
    long peer_uid;             /* UDS peer uid (SO_PEERCRED), -1 if unknown */
    req_transport_t transport;
@@ -67,8 +68,15 @@ const char *request_context_idempotency_key(void);
  * context / untrusted. Never returns NULL. */
 const char *request_context_principal(void);
 
+/* Canonical caller context for the authenticated server-to-KB request, or ""
+ * when this request has no end-user caller (for example background work). */
+const char *request_context_caller_subject(void);
+
 /* Internal server-authoritative replacement after a verified mTLS serial has
  * resolved to a durable user grant. Client headers never call this seam. */
 void request_context_override_principal(const char *principal);
+
+/* Server-authoritative replacement after ingress authentication. */
+void request_context_override_caller_subject(const char *subject);
 
 #endif /* DEC_REQUEST_CONTEXT_H */

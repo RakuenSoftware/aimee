@@ -1626,7 +1626,14 @@ void handle_conn(int fd, int is_tcp, int is_management)
     * as the outer route gate. */
    server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path, effective_caps);
    if (first_user_principal[0])
+   {
       request_context_override_principal(first_user_principal);
+      request_context_override_caller_subject(!strncmp(first_user_principal, "webuser:", 8)
+                                                  ? first_user_principal + 8
+                                                  : first_user_principal);
+   }
+   if (identity_present && identity_claims.subject[0])
+      request_context_override_caller_subject(identity_claims.subject);
    /* Authorize before reading the body: TCP requires either the durably valid
     * client certificate above or a valid bearer; UDS relies on permissions. */
    {
@@ -2147,7 +2154,11 @@ static void *listener_thread(void *arg)
          int fd = server_conn_accept(pfds[uds_idx].fd);
          if (fd >= 0 && !conn_offload(fd, 0, 0, 0))
          {
+            request_context_clear();
+            server_http_identity_clear();
             handle_conn(fd, 0, 0);
+            request_context_clear();
+            server_http_identity_clear();
             close(fd);
          }
       }
@@ -2156,7 +2167,11 @@ static void *listener_thread(void *arg)
          int fd = server_conn_accept(pfds[tcp_idx].fd);
          if (fd >= 0 && !conn_offload(fd, 1, 0, 0))
          {
+            request_context_clear();
+            server_http_identity_clear();
             handle_conn(fd, 1, 0);
+            request_context_clear();
+            server_http_identity_clear();
             close(fd);
          }
       }

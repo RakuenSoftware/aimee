@@ -619,9 +619,10 @@ static void purge_fence_current(const char *project, char *out, size_t out_cap)
 }
 /* ── Phase 5 extended routing ────────────────────────────────────────────── */
 
-int kb_http_route_ex(const char *method, const char *path, const char *query_string,
-                     const char *auth_header, const char *bearer_token, const char *body,
-                     int body_len, char *out_buf, int out_cap)
+int kb_http_route_ex_with_actor(const char *method, const char *path, const char *query_string,
+                                const char *auth_header, const char *bearer_token, const char *body,
+                                int body_len, const kb_principal_t *asserted_actor, char *out_buf,
+                                int out_cap)
 {
    /* Credential bootstrap, both pre-auth: the login surface is how a caller with
     * no credential gets one (§3), and the enrollment token IS the credential.
@@ -643,7 +644,6 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       if (tk >= 0)
          return tk;
    }
-
    /* Auth + scope authorization via the pluggable Verifier seam (kb_verifier.h): the built-in
     * kb-token verifier validates the configured bearer (which may be self-describing
     * "scope:<kind>:<id>:<secret>") and yields the verified scope. Per verify-then-trust, the
@@ -737,6 +737,21 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
             return json_body_error(out_buf, out_cap, 403,
                                    "forbidden: console-admin credential not permitted");
       }
+   }
+   if (asserted_actor && asserted_actor->authenticated)
+   {
+      const kb_principal_t *credential_actor = kb_reqctx_actor();
+      if (credential_actor)
+      {
+         char credential_key[600] = "";
+         char asserted_key[600] = "";
+         if (kb_identity_key(credential_actor, credential_key, sizeof(credential_key)) != 0 ||
+             kb_identity_key(asserted_actor, asserted_key, sizeof(asserted_key)) != 0 ||
+             strcmp(credential_key, asserted_key) != 0)
+            return json_body_error(out_buf, out_cap, 403,
+                                   "caller context conflicts with credential identity");
+      }
+      kb_reqctx_set_actor(asserted_actor);
    }
    /* Tenancy routes (P1 slice 4): /v1/team*, /v1/project*. Reachable for any
     * authenticated caller; the org-admin capability for writes is enforced at the
@@ -2491,4 +2506,12 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
 
    /* Fallthrough to Phase 1 handler */
    return kb_http_route(method, path, auth_header, bearer_token, out_buf, out_cap);
+}
+
+int kb_http_route_ex(const char *method, const char *path, const char *query_string,
+                     const char *auth_header, const char *bearer_token, const char *body,
+                     int body_len, char *out_buf, int out_cap)
+{
+   return kb_http_route_ex_with_actor(method, path, query_string, auth_header, bearer_token, body,
+                                      body_len, NULL, out_buf, out_cap);
 }

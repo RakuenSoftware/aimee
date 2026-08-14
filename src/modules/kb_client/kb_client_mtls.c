@@ -50,6 +50,24 @@ static char g_server_identity_path_override[1024];
 #define KB_CLIENT_HEADERS_MAX  16384
 #define KB_CLIENT_PAM_USER_MAX 63
 #define KB_CLIENT_PAM_PASS_MAX 1023
+#define KB_CLIENT_CALLER_MAX   576
+
+/* Only aimee-server links the request-context module. Other binaries reuse the
+ * transport for service/background work and therefore have no caller context. */
+extern const char *request_context_caller_subject(void) __attribute__((weak));
+
+static int caller_subject_valid(const char *subject)
+{
+   if (!subject || !subject[0])
+      return 0;
+   size_t n = strnlen(subject, KB_CLIENT_CALLER_MAX + 1);
+   if (!n || n > KB_CLIENT_CALLER_MAX)
+      return 0;
+   for (size_t i = 0; i < n; ++i)
+      if ((unsigned char)subject[i] < 0x20 || (unsigned char)subject[i] == 0x7f)
+         return 0;
+   return 1;
+}
 
 /* Read both independent application credentials for every request. Neither is
  * cached with the mTLS identity: bearer/OIDC/PAM rotation must take effect on
@@ -97,6 +115,14 @@ static int service_request_headers(char *out, size_t cap)
    }
    else
       n = -1;
+   const char *caller = request_context_caller_subject ? request_context_caller_subject() : "";
+   if (n > 0 && (size_t)n < cap && caller && caller[0])
+   {
+      int added = caller_subject_valid(caller)
+                      ? snprintf(out + n, cap - (size_t)n, "X-Aimee-Caller-Subject: %s\r\n", caller)
+                      : -1;
+      n = added > 0 && (size_t)added < cap - (size_t)n ? n + added : -1;
+   }
    runtime_secret_wipe(pam_b64, sizeof(pam_b64));
    runtime_secret_wipe(pam_pair, sizeof(pam_pair));
    runtime_secret_wipe(pam_pass, sizeof(pam_pass));
