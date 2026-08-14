@@ -126,8 +126,8 @@ operator enables it.
 
 ## Status
 
-Implementation in progress. The connection/caller-context path and project-bound background worker
-scope are wired while content RLS remains disabled. Project-attribution operations, live two-project
-RLS coverage, and the slice-6 readiness marker remain; `kb_content_scope_enable()` therefore still
-refuses by construction. The companion identity map records why no additional proof mechanism is
-required.
+Implementation in progress. The connection/caller-context path, explicit admin-only project
+attribution, and project-bound background worker scope are wired while content RLS remains disabled.
+An operator backfill, live two-project RLS coverage, and the slice-6 readiness marker remain;
+`kb_content_scope_enable()` therefore still refuses by construction. The companion identity map
+records why no additional proof mechanism is required.

@@ -766,6 +766,7 @@ static int kb_run_fusion_probe(const char *query)
  *   aimee-kb team remove-member <team_id> <identity_key>
  *   aimee-kb project create <team_id> <name> [team-open|restricted]
  *   aimee-kb project list [team_id]
+ *   aimee-kb project attribute <code_project> <kb_project_id>
  * Runs in-process against DB2 as the 'owner' (bootstrap) principal, so an operator
  * with the kb DB credential can manage tenancy without a running listener. (The
  * remote thin-client `aimee team` needs human-actor forwarding to kb — P5.) */
@@ -1469,6 +1470,31 @@ static int kb_cmd_tenancy(int argc, char **argv)
                 rows[i].name, rows[i].access_mode);
       rc_http = (n < 0) ? 1 : 0;
    }
+   else if (strcmp(group, "project") == 0 && strcmp(sub, "attribute") == 0 && argc == 5)
+   {
+      unsigned long long project_id = 0;
+      if (kb_parse_unsigned(argv[4], INT64_MAX, &project_id) == 0 && project_id > 0 &&
+          db2_project_attribute_code(argv[3], (int64_t)project_id) == 0)
+      {
+         cJSON *result = cJSON_CreateObject();
+         if (result)
+         {
+            cJSON_AddStringToObject(result, "code_project", argv[3]);
+            cJSON_AddNumberToObject(result, "kb_project", (double)project_id);
+            char *json = cJSON_PrintUnformatted(result);
+            cJSON_Delete(result);
+            if (json)
+            {
+               printf("%s\n", json);
+               free(json);
+               rc_http = 0;
+            }
+         }
+      }
+      else
+         fprintf(stderr,
+                 "project attribute failed (org-admin required; both exact projects must exist)\n");
+   }
    else if (strcmp(group, "models") == 0 && strcmp(sub, "list") == 0)
    {
       db2_model_catalog_row_t rows[512];
@@ -1539,7 +1565,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
    else
    {
       fprintf(stderr, "Usage: aimee-kb team create|list|add-member|remove-member ...\n"
-                      "       aimee-kb project create|list ...\n"
+                      "       aimee-kb project create|list|attribute ...\n"
                       "       aimee-kb models list\n"
                       "       aimee-kb models org add|set <model_id> <provider> "
                       "<anthropic|openai|responses|gemini> [display_name] [endpoint] [--disabled]\n"
@@ -1747,7 +1773,7 @@ int main(int argc, char **argv)
              "       aimee-kb vault resume [--secret-stdin] [--json]\n"
              "       aimee-kb vault unseal [--secret-stdin] [--json]\n"
              "       aimee-kb team create|list|add-member|remove-member ...\n"
-             "       aimee-kb project create|list ...\n"
+             "       aimee-kb project create|list|attribute ...\n"
              "       aimee-kb models list | models org add|set|remove|entitle|unentitle ...\n"
              "       aimee-kb budget set|show --team N ...\n"
              "       aimee-kb rate set|show --dim D --scope S ...\n"

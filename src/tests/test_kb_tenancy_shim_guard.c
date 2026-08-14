@@ -149,6 +149,7 @@ int main(void)
    REQUIRES_PG(db2_project_create(1, "p", "team-open", "op", &id), "db2_project_create");
    REQUIRES_PG(db2_project_list(1, NULL, 0), "db2_project_list");
    REQUIRES_PG(db2_project_get(1, NULL), "db2_project_get");
+   REQUIRES_PG(db2_project_attribute_code("p", 1), "db2_project_attribute_code");
 
    REQUIRES_PG(db2_membership_add("k", 1, 0, &id), "db2_membership_add");
    REQUIRES_PG(db2_membership_remove("k", 1), "db2_membership_remove");

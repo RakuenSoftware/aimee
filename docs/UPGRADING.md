@@ -187,6 +187,18 @@ before any embedder, model, or sidecar call. The scope does not impersonate a us
 credential. Content-scope readiness remains disabled until operators can explicitly attribute every
 code project to its tenancy project and the enabled policies pass live two-project coverage.
 
+The attribution is deliberately numeric and explicit because tenancy-project names are unique only
+inside a team. On the KB host, list the tenancy project ids and bind each existing code-index project
+that owns documents or file-index rows:
+
+```bash
+aimee-kb project list [team-id]
+aimee-kb project attribute <code-index-project> <kb-project-id>
+```
+
+Re-running `project attribute` replaces the prior binding atomically. It is an org-admin operation;
+both exact projects must already exist, and no name-based fallback is attempted.
+
 Grants are keyed by server, team, and exact authenticated subject:
 
 | Subject | Form |

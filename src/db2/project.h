@@ -37,6 +37,11 @@ extern "C"
     * absent/error. */
    int db2_project_get(int64_t id, db2_project_row_t *out);
 
+   /* Explicitly bind a code-index `projects.name` to one tenancy kb_project id.
+    * The database function is admin-gated and never infers this link by name.
+    * Must run inside an authenticated tenant scope. */
+   int db2_project_attribute_code(const char *code_project, int64_t kb_project);
+
 #ifdef __cplusplus
 }
 #endif

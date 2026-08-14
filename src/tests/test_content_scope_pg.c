@@ -32,6 +32,7 @@
 #include "db2/db2_internal.h"
 #include "db2/db_postgres.h"
 #include "db2/db2_tenant.h"
+#include "db2/project.h"
 #include "kb_identity.h"
 
 #include <assert.h>
@@ -312,17 +313,47 @@ int main(void)
 
       snprintf(sql, sizeof(sql),
                "INSERT INTO projects(name,root,scanned_at,kb_project)"
-               " VALUES ('scope-maintenance-a','/scope/a','',%s)"
-               " ON CONFLICT (name) DO UPDATE SET kb_project=EXCLUDED.kb_project RETURNING id",
-               project_a);
+               " VALUES ('scope-maintenance-a','/scope/a','',NULL)"
+               " ON CONFLICT (name) DO UPDATE SET kb_project=NULL RETURNING id");
       char ignored[64] = "";
       assert(scalar(sql, ignored, sizeof(ignored)) == 0);
       snprintf(sql, sizeof(sql),
                "INSERT INTO projects(name,root,scanned_at,kb_project)"
-               " VALUES ('scope-maintenance-b','/scope/b','',%s)"
-               " ON CONFLICT (name) DO UPDATE SET kb_project=EXCLUDED.kb_project RETURNING id",
-               project_b);
+               " VALUES ('scope-maintenance-b','/scope/b','',NULL)"
+               " ON CONFLICT (name) DO UPDATE SET kb_project=NULL RETURNING id");
       assert(scalar(sql, ignored, sizeof(ignored)) == 0);
+
+      kb_principal_t owner = {.kind = KB_PRIN_OWNER, .authenticated = 1};
+      assert(db2_tenant_scope_begin(&owner, 0) == 0);
+      assert(db2_project_attribute_code("scope-maintenance-a", (int64_t)atoll(project_a)) == 0);
+      assert(db2_project_attribute_code("scope-maintenance-b", (int64_t)atoll(project_b)) == 0);
+      assert(db2_tenant_scope_commit() == 0);
+      snprintf(sql, sizeof(sql),
+               "SELECT CASE WHEN kb_project=%s THEN 'bound' ELSE 'wrong' END"
+               " FROM projects WHERE name='scope-maintenance-a'",
+               project_a);
+      expect(sql, "bound");
+
+      kb_principal_t member = {.kind = KB_PRIN_OIDC, .authenticated = 1};
+      snprintf(member.issuer, sizeof(member.issuer), "%s", "https://member.invalid");
+      snprintf(member.subject, sizeof(member.subject), "%s", "not-admin");
+      char member_key[640] = "";
+      assert(kb_identity_key(&member, member_key, sizeof(member_key)) == 0);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_team_membership(identity_key,team,is_default)"
+               " VALUES ('%s',%s,0) ON CONFLICT (identity_key,team)"
+               " DO UPDATE SET is_default=EXCLUDED.is_default RETURNING id",
+               member_key, team_id);
+      assert(scalar(sql, ignored, sizeof(ignored)) == 0);
+      assert(db2_tenant_scope_begin(&member, (int64_t)atoll(team_id)) == 0);
+      assert(db2_project_attribute_code("scope-maintenance-a", (int64_t)atoll(project_b)) != 0);
+      db2_tenant_scope_rollback();
+      snprintf(sql, sizeof(sql),
+               "SELECT CASE WHEN kb_project=%s THEN 'bound' ELSE 'wrong' END"
+               " FROM projects WHERE name='scope-maintenance-a'",
+               project_a);
+      expect(sql, "bound");
+      printf("  PASS: attribution is explicit by id and denied to a non-admin member\n");
 
       assert(db2_maintenance_scope_begin(DB2_MAINTENANCE_CURATOR, "scope-maintenance-a") == 0);
       expect("SELECT current_setting('aimee.maintenance_worker',true)", "curator");

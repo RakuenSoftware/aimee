@@ -2299,6 +2299,41 @@ LANGUAGE sql STABLE AS $$
                    AND revoked_at = '');
 $$;
 
+-- A code-index project name and a tenancy project name are different namespaces:
+-- projects.name is globally unique, while kb_project.name is unique only inside
+-- one team. Attribution is therefore an explicit admin operation by numeric id,
+-- never a name join or an ingest-side guess. This is the only application API for
+-- changing projects.kb_project.
+CREATE OR REPLACE FUNCTION kb_content_project_attribute(
+  p_code_project TEXT, p_kb_project BIGINT) RETURNS BIGINT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE code_id BIGINT;
+BEGIN
+  IF NOT public.kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'kb_content_project_attribute: org-admin required'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_code_project IS NULL OR p_code_project = '' OR char_length(p_code_project) > 255
+     OR p_kb_project IS NULL OR p_kb_project <= 0 THEN
+    RAISE EXCEPTION 'kb_content_project_attribute: invalid project'
+      USING ERRCODE = '22023';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.kb_project WHERE id = p_kb_project) THEN
+    RAISE EXCEPTION 'kb_content_project_attribute: tenancy project % does not exist', p_kb_project
+      USING ERRCODE = '22023';
+  END IF;
+  UPDATE public.projects SET kb_project = p_kb_project
+   WHERE name = p_code_project
+   RETURNING id INTO code_id;
+  IF code_id IS NULL THEN
+    RAISE EXCEPTION 'kb_content_project_attribute: code project % does not exist', p_code_project
+      USING ERRCODE = '22023';
+  END IF;
+  RETURN code_id;
+END;
+$$;
+REVOKE ALL ON FUNCTION kb_content_project_attribute(TEXT, BIGINT) FROM PUBLIC;
+
 DROP POLICY IF EXISTS p_team_admin_write ON kb_team;
 CREATE POLICY p_team_admin_write ON kb_team FOR INSERT WITH CHECK (kb_principal_is_admin());
 DROP POLICY IF EXISTS p_team_admin_mod ON kb_team;
