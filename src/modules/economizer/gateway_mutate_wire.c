@@ -309,9 +309,8 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
     * gw_bypass_reason_str emits, so the string goes straight to telemetry.
     *
     * A module that was not reached returns no verdict, and an absent verdict is
-    * never read as consent: that is the reduce_internal_assertion path, exactly
-    * what gw_should_apply returned for a non-zero rc before. The request is
-    * pristine either way, so forwarding it is correct. */
+    * never read as consent: that is the reduce_internal_assertion path. The
+    * request is pristine either way, so forwarding it is correct. */
    const char *bypass = gw_module_bypass(rrc, mres.bypass);
    if (strcmp(bypass, gw_bypass_reason_str(GW_BYPASS_NONE)) != 0)
    {
