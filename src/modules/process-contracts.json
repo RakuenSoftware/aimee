@@ -596,6 +596,11 @@
           "id": 5,
           "name": "economizer-record-build",
           "event_kind": 11013
+        },
+        {
+          "id": 6,
+          "name": "economizer-post-status",
+          "event_kind": 11014
         }
       ]
     }

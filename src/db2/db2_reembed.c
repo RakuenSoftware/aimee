@@ -9,14 +9,16 @@
 #include "db2.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "db2_tenant.h"
 #include "db_schema.h"
 #include "lifecycle.h"
 #include "artifacts.h"        /* db2_curator_reembed_all */
 #include "evidence_vectors.h" /* db2_evidence_reembed_all */
-#include "kb_payload.h"       /* db2_kb_pdf_reembed_all */
+#include "kb_payload.h"       /* db2_kb_pdf_reembed_project */
 #include "../headers/log.h"
 
 #include <stdarg.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -123,6 +125,62 @@ static int has_inbound_fk(void *conn, const char *table)
 static int exec1(void *conn, const char *sql, char *err, size_t errlen)
 {
    return aimee_pg_exec(conn, sql, err, errlen);
+}
+
+static int pdf_reembed_all_projects(void)
+{
+   /* Collect project names from the unscoped index registry, then give each
+    * project's authoritative PDF rows its own named reembed transaction. */
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "SELECT name FROM projects WHERE lifecycle_state='current' ORDER BY id", err,
+       sizeof(err));
+   if (!st)
+      return 0;
+
+   int cap = 64;
+   int count = 0;
+   char(*projects)[256] = calloc((size_t)cap, sizeof(*projects));
+   if (!projects)
+   {
+      aimee_pg_finalize(st);
+      return 0;
+   }
+   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      if (count == cap)
+      {
+         int next = cap * 2;
+         void *grown = realloc(projects, (size_t)next * sizeof(*projects));
+         if (!grown)
+            break;
+         projects = grown;
+         memset(projects + cap, 0, (size_t)(next - cap) * sizeof(*projects));
+         cap = next;
+      }
+      const char *name = aimee_pg_column_text(st, 0);
+      if (name && name[0] && strlen(name) < sizeof(projects[0]))
+         snprintf(projects[count++], sizeof(projects[0]), "%s", name);
+   }
+   aimee_pg_finalize(st);
+
+   int total = 0;
+   for (int i = 0; i < count; ++i)
+   {
+      if (db2_maintenance_job_enter(DB2_MAINTENANCE_REEMBED, projects[i]) != 0)
+         continue;
+      int scope = db2_maintenance_scope_begin_current();
+      int n = scope < 0 ? 0 : db2_kb_pdf_reembed_project(projects[i]);
+      if (scope == 1 && db2_maintenance_scope_commit() != 0)
+         n = 0;
+      db2_maintenance_job_leave();
+      total += n;
+   }
+   free(projects);
+   return total;
 }
 
 /* Read the reembed_in_progress maintenance marker ("<target_dim>:<started_epoch>").
@@ -337,8 +395,7 @@ int db2_dim_change_reset(int target_dim, int force, int dry_run, db2_reembed_pla
     * path (`aimee memory reembed`); surfaced in the command's guidance. */
    p->curator_requeued = db2_curator_reembed_all();
    p->evidence_requeued = db2_evidence_reembed_all();
-   (void)
-       db2_kb_pdf_reembed_all(); /* PDF vectors re-derive from embed_pdf jobs (no auto-backfill) */
+   (void)pdf_reembed_all_projects(); /* PDF vectors re-derive from per-project embed_pdf jobs. */
    rpt(p,
        "reset done: dropped %d table(s), recorded dim=%d, requeued curator=%d evidence=%d; "
        "doc-embed backfill re-embeds kb chunks; run `aimee memory reembed --start` for memory\n",

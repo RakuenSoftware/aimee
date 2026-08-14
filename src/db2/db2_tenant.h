@@ -31,9 +31,21 @@ extern "C"
       DB2_ERR_TENANT_REQUIRES_PG = -100,     /* tenant op attempted on the SQLite shim */
       DB2_ERR_TENANT_UNAUTHENTICATED = -101, /* principal not verifier-produced */
       DB2_ERR_TENANT_NO_CONN = -102,
-      DB2_ERR_TENANT_BEGIN = -103,  /* BEGIN / set_tenant_context failed */
-      DB2_ERR_TENANT_DENIED = -104, /* team not in principal memberships */
+      DB2_ERR_TENANT_BEGIN = -103,        /* BEGIN / set_tenant_context failed */
+      DB2_ERR_TENANT_DENIED = -104,       /* team not in principal memberships */
+      DB2_ERR_MAINTENANCE_INVALID = -105, /* unknown worker or unattributed project */
    };
+
+   /* Background content work is not an end-user principal. These are the only
+    * named actors permitted to open the project-bound maintenance scope. Keep
+    * this enum and set_maintenance_context()'s SQL allowlist in lockstep. */
+   typedef enum
+   {
+      DB2_MAINTENANCE_INGEST = 1,
+      DB2_MAINTENANCE_REEMBED,
+      DB2_MAINTENANCE_CURATOR,
+      DB2_MAINTENANCE_CODE_INDEXER,
+   } db2_maintenance_worker_t;
 
    /* Fail-closed guard: 0 when the live backend is Postgres (RLS-enforcing),
     * DB2_ERR_TENANT_REQUIRES_PG when it is the SQLite shim or DB2 is down. Called
@@ -55,6 +67,32 @@ extern "C"
     * call rollback on an already-aborted transaction. */
    int db2_tenant_scope_commit(void);
    void db2_tenant_scope_rollback(void);
+
+   /* Open a transaction-local, project-bound content scope for one named
+    * background worker. This does not construct or impersonate a user principal:
+    * set_maintenance_context() resolves `project` to its attributed kb_project
+    * and RLS admits only content carrying that exact project. The scope holds one
+    * pooled connection and must never span an external/model call. */
+   int db2_maintenance_scope_begin(db2_maintenance_worker_t worker, const char *project);
+   int db2_maintenance_scope_commit(void);
+   void db2_maintenance_scope_rollback(void);
+
+   /* Bind one durable background job to the current worker thread. This stores
+    * no database state; it lets short DB transactions re-apply the same named
+    * project scope on either side of an external call. enter() rejects nesting
+    * and leave() clears the thread-local copy. */
+   int db2_maintenance_job_enter(db2_maintenance_worker_t worker, const char *project);
+   void db2_maintenance_job_leave(void);
+   int db2_maintenance_job_active(void);
+
+   /* Worker-facing helpers. They are no-ops while content RLS is disabled, so
+    * wiring can land before the final readiness marker without changing legacy
+    * behavior. With content RLS enabled, begin_current opens a fresh scoped
+    * transaction (1 = opened), while apply_current stamps an existing open
+    * transaction (1 = applied). Zero means no scope was needed; negative is a
+    * fail-closed error. */
+   int db2_maintenance_scope_begin_current(void);
+   int db2_maintenance_context_apply_current(void);
 
 #ifdef __cplusplus
 }

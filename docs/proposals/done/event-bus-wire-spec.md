@@ -1,12 +1,12 @@
 # Spec: Aimee shared-memory event bus — wire and segment specification (v0)
 
-- **State:** DONE — v0 promoted and archived 2026-08-04; third-language residual extracted.
+- **State:** DONE — v0 promoted and archived 2026-08-04; third-language residual later rejected.
 
 > **Archived after partial delivery.** The C host, C and Go clients, frozen vectors, cross-process
 > conformance, arena routing, capture, performance gate, and shipping module-runtime integration are
 > on `testing`. The conformance section explicitly leaves its independent third-language client
-> unwritten; that proof is now
-> [`event-bus-third-language-conformance.md`](../pending/event-bus-third-language-conformance.md).
+> unwritten. That proof was later
+> [rejected](../rejected/event-bus-third-language-conformance.md) under the Go-or-rejected policy.
 
 The v0 substrate this spec describes was written and green on the
   `feat/event-bus` integration branch (2026-07-24), awaiting parent-suite acceptance and promotion to

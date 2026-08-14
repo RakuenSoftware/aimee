@@ -11,6 +11,7 @@
 #include <openssl/bn.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 #include "cJSON.h"
 #include "kb_enroll.h" /* connection-string parse */
 #include "kb_pki.h"    /* CA fingerprint for TOFU pinning */
@@ -22,13 +23,60 @@
  * non-NULL — load (cert, key) as this peer's own identity. A NULL cert/key pair
  * yields a CA-verify-only context (e.g. a client doing the cert-less enrollment
  * bootstrap). Returns 0 on success, -1 on any failure. */
+static int exact_cert_eku(X509 *cert, int required_nid)
+{
+   int pos = cert ? X509_get_ext_by_NID(cert, NID_ext_key_usage, -1) : -1;
+   if (pos < 0 || X509_get_ext_by_NID(cert, NID_ext_key_usage, pos) >= 0)
+      return 0;
+   EXTENDED_KEY_USAGE *eku = X509_get_ext_d2i(cert, NID_ext_key_usage, NULL, NULL);
+   int ok = eku && sk_ASN1_OBJECT_num(eku) == 1 &&
+            OBJ_obj2nid(sk_ASN1_OBJECT_value(eku, 0)) == required_nid;
+   EXTENDED_KEY_USAGE_free(eku);
+   return ok;
+}
+
+int kb_tls_cert_has_exact_role(const char *cert_pem, int server_role)
+{
+   BIO *bio = cert_pem ? BIO_new_mem_buf(cert_pem, -1) : NULL;
+   X509 *cert = bio ? PEM_read_bio_X509(bio, NULL, NULL, NULL) : NULL;
+   BIO_free(bio);
+   int ok = exact_cert_eku(cert, server_role ? NID_server_auth : NID_client_auth);
+   X509_free(cert);
+   return ok;
+}
+
+static int verify_leaf_eku(int preverify_ok, X509_STORE_CTX *store, int required_nid)
+{
+   if (!preverify_ok)
+      return 0;
+   if (X509_STORE_CTX_get_error_depth(store) != 0)
+      return 1;
+   if (exact_cert_eku(X509_STORE_CTX_get_current_cert(store), required_nid))
+      return 1;
+   X509_STORE_CTX_set_error(store, X509_V_ERR_INVALID_PURPOSE);
+   return 0;
+}
+
+static int verify_client_leaf(int preverify_ok, X509_STORE_CTX *store)
+{
+   return verify_leaf_eku(preverify_ok, store, NID_client_auth);
+}
+
+static int verify_server_leaf(int preverify_ok, X509_STORE_CTX *store)
+{
+   return verify_leaf_eku(preverify_ok, store, NID_server_auth);
+}
+
 static int ctx_load_identity(SSL_CTX *ctx, const char *cert_pem, const char *key_pem,
-                             const char *ca_pem)
+                             const char *ca_pem, int identity_eku)
 {
    if (!ca_pem)
       return -1;
+   if (!!cert_pem != !!key_pem)
+      return -1;
    int want_identity = (cert_pem && key_pem);
-   if (want_identity && aimee_core_tls_use_identity_pem(ctx, cert_pem, key_pem) != 0)
+   if (want_identity && (!kb_tls_cert_has_exact_role(cert_pem, identity_eku == NID_server_auth) ||
+                         aimee_core_tls_use_identity_pem(ctx, cert_pem, key_pem) != 0))
       return -1;
    return aimee_core_tls_trust_pem(ctx, ca_pem);
 }
@@ -39,7 +87,7 @@ SSL_CTX *kb_tls_server_ctx(const char *ca_cert_pem, const char *server_cert_pem,
    SSL_CTX *ctx = aimee_core_tls_server_context();
    if (!ctx)
       return NULL;
-   if (ctx_load_identity(ctx, server_cert_pem, server_key_pem, ca_cert_pem) != 0)
+   if (ctx_load_identity(ctx, server_cert_pem, server_key_pem, ca_cert_pem, NID_server_auth) != 0)
    {
       SSL_CTX_free(ctx);
       return NULL;
@@ -47,7 +95,7 @@ SSL_CTX *kb_tls_server_ctx(const char *ca_cert_pem, const char *server_cert_pem,
    /* Request a client cert and REJECT a presented-but-untrusted one, but allow a
     * cert-less handshake so a not-yet-enrolled client can reach /v1/enroll/redeem
     * to bootstrap. kb_tls_serve_conn gates everything else on cert presence. */
-   SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+   SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, verify_client_leaf);
    static const unsigned char session_id_context[] = "aimee-kb-mtls";
    if (SSL_CTX_set_session_id_context(ctx, session_id_context,
                                       (unsigned int)(sizeof(session_id_context) - 1)) != 1)
@@ -65,12 +113,12 @@ SSL_CTX *kb_tls_client_ctx(const char *ca_cert_pem, const char *client_cert_pem,
    SSL_CTX *ctx = aimee_core_tls_client_context();
    if (!ctx)
       return NULL;
-   if (ctx_load_identity(ctx, client_cert_pem, client_key_pem, ca_cert_pem) != 0)
+   if (ctx_load_identity(ctx, client_cert_pem, client_key_pem, ca_cert_pem, NID_client_auth) != 0)
    {
       SSL_CTX_free(ctx);
       return NULL;
    }
-   SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+   SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, verify_server_leaf);
    SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_CLIENT);
    return ctx;
 }
@@ -724,10 +772,11 @@ int kb_tls_cert_expires_within(const char *cert_pem, long seconds)
 }
 
 int kb_tls_renew(const char *host, int port, const char *ca_cert_pem, const char *cur_cert_pem,
-                 const char *cur_key_pem, char *cert_out, size_t cert_cap, char *key_out,
-                 size_t key_cap)
+                 const char *cur_key_pem, const char *authorization, char *cert_out,
+                 size_t cert_cap, char *key_out, size_t key_cap)
 {
-   if (!host || !ca_cert_pem || !cur_cert_pem || !cur_key_pem || !cert_out || !key_out)
+   if (!host || !ca_cert_pem || !cur_cert_pem || !cur_key_pem || !authorization ||
+       !authorization[0] || !cert_out || !key_out)
       return -1;
 
    /* Fresh keypair + CSR (the new private key stays here). */
@@ -745,8 +794,9 @@ int kb_tls_renew(const char *host, int port, const char *ca_cert_pem, const char
    /* POST /v1/enroll/renew authenticated by the CURRENT cert (mTLS). */
    char *resp = malloc(16384);
    int status = -1;
-   int reqrc = resp ? kb_tls_client_request(host, port, ca_cert_pem, cur_cert_pem, cur_key_pem,
-                                            "POST", "/v1/enroll/renew", body, resp, 16384, &status)
+   int reqrc = resp ? kb_tls_client_request_auth(host, port, ca_cert_pem, cur_cert_pem, cur_key_pem,
+                                                 "POST", "/v1/enroll/renew", body, authorization,
+                                                 resp, 16384, &status)
                     : -1;
    free(body);
    if (reqrc != 0 || status != 200)

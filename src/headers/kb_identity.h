@@ -80,14 +80,22 @@ extern "C"
     * success, -1 if the principal is unauthenticated or args invalid. */
    int kb_identity_key(const kb_principal_t *p, char *out, size_t cap);
 
+   /* Parse one existing canonical identity key back into its existing principal
+    * kind. Used only for caller context asserted over the fully authenticated
+    * aimee-server service channel; this validates and decodes, it does not
+    * authenticate an arbitrary network header. */
+   int kb_principal_from_identity_key(const char *identity_key, kb_principal_t *out);
+
    /* Normalize a certificate serial to a stable revocation key: strip colons and
     * 0x, lowercase hex, drop leading zeros (but keep a single "0"). Returns 0 on
     * success. Used for the immutable (cert_issuer, cert_serial_norm) key (I5). */
    int kb_cert_serial_normalize(const char *serial, char *out, size_t cap);
 
    /* ---- Composite identity resolution (slice 2, I7) ---------------------------
-    * A request carries up to two authenticated principals: the mTLS transport
-    * (cert:CN) and the actor (OIDC/owner). Resolution combines them FAIL-CLOSED:
+    * A request carries up to two authenticated principals: its enrolled service
+    * identity (historically named `transport` here) and its actor. The mTLS peer
+    * is verified independently before this resolver is called. Resolution
+    * combines them FAIL-CLOSED:
     * the billing team must be valid for EVERY principal present (the intersection
     * of their team sets), a named team must lie in that set, and a composite
     * default is auto-selected only when both principals' defaults agree. */

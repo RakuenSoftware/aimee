@@ -1,7 +1,13 @@
 # Delegate execution moves into the module
 
-Status: pending
-Owner: delegates
+- **State:** DONE — Go sandbox-specification slice delivered and archived 2026-08-14.
+- **Owner:** delegates.
+
+> **Archived after delivery.** This proposal explicitly scoped itself to order-of-work step 1,
+> the pure sandbox specification. That specification, its Docker rendering, its Go lifecycle,
+> and its runtime isolation proof are implemented in `server-go/modules/delegates`. The
+> specification was delivered by commit `5a34e3f7da` and extended by the follow-on Go work
+> cited below.
 
 ## The design
 
@@ -95,3 +101,26 @@ branch. The mode is the enforcement; the role is only what selects it.
 
 Sequencing matters: the specification is where the safety properties live, so it
 is written and tested before anything creates a container.
+
+## Delivery evidence
+
+- [`BuildSandboxSpec`](../../../server-go/modules/delegates/sandbox.go#L242) and
+  [`ValidateSandboxSpec`](../../../server-go/modules/delegates/sandbox.go#L368) implement the
+  pure specification; [`sandbox_test.go`](../../../server-go/modules/delegates/sandbox_test.go#L45)
+  pins the git-checkout, mount-mode, runtime-socket, credential, and proxy invariants.
+- [`DockerCreateArgs`](../../../server-go/modules/delegates/dockerargs.go#L110) renders the
+  specification with `--network none`, while
+  [`TranslateMountPath`](../../../server-go/modules/delegates/dockerargs.go#L30) maps bind
+  sources into the Docker daemon's namespace.
+- [`ContainerRunner.Start`](../../../server-go/modules/delegates/container.go#L68) and
+  [`JudgeIsolation`](../../../server-go/modules/delegates/isolation.go#L63) create, start,
+  probe, refuse, destroy, and stop containers without handing an unverified sandbox to a
+  caller; their failure-path coverage begins in
+  [`container_test.go`](../../../server-go/modules/delegates/container_test.go#L61).
+- The launch-args tests prove the Go stages consume the specification, including
+  `--network none`, mount layering, unsafe-request refusal, path translation, and the egress
+  proxy ([`launchargs_stage_test.go`](../../../server-go/modules/delegates/launchargs_stage_test.go#L116)).
+
+The later parent-proxy and broad C-backend retirement programme is tracked outside
+this explicitly scoped sandbox-specification slice; archiving this record does not
+claim those independent programmes are complete.

@@ -11,10 +11,14 @@ import (
 // algorithms that already live here: fresh-result JSON compaction, spill recall,
 // and the process-local condensation counters.
 //
-// The module is STATELESS: per-conversation reducer state travels in and out
-// with the request, because the caller already persists it (db1_economizer_state
-// save/load). That keeps the module free of a store and lets any process serve
-// the stage.
+// Per-conversation reducer state travels in and out with the request, because
+// the caller already persists it (db1_economizer_state save/load).
+//
+// The gateway's circuit breaker is the one thing the module DOES hold, in
+// breaker.go. It is the module's own lever -- "my reduction is switched off for
+// this session" -- not the caller's session state, and it is deliberately
+// volatile. Holding it here is what makes tripping it mean anything: a breaker
+// written on one side of the bus and read on the other would never fire.
 
 // Event kind and stage id, fixed by the process contract at
 // 4096 + ordinal*256 + stage. The economizer is inventory ordinal 27, so these
@@ -30,7 +34,42 @@ const (
 	StageToolStats   uint32 = 4
 	EventRecordBuild uint32 = 11013
 	StageRecordBuild uint32 = 5
+	EventPostStatus  uint32 = 11014
+	StagePostStatus  uint32 = 6
 )
+
+// PostStatusRequest asks what a dispatched gateway turn owes now its upstream
+// status is known.
+//
+// The request body is NOT here and never will be: restoring the pristine array
+// and resending are the HTTP caller's, over a body it owns. This decides, and
+// owns the breaker the decision writes to.
+type PostStatusRequest struct {
+	SessionKey string `json:"session_key"`
+	HTTPStatus int    `json:"http_status,omitempty"`
+	Mutated    bool   `json:"mutated"`
+	TTLMS      int    `json:"ttl_ms,omitempty"`
+	// HaveKey and StreamReason select the streaming path, where bytes have
+	// already reached the client so nothing can be restored or resent.
+	HaveKey      bool   `json:"have_key,omitempty"`
+	StreamReason string `json:"stream_reason,omitempty"`
+}
+
+// PostStatusResponse is the decision plus what was done to the breaker.
+type PostStatusResponse struct {
+	// Action is "none" or "resend". "resend" means the caller must put its
+	// pristine array back and send exactly once more.
+	Action  string `json:"action"`
+	Restore bool   `json:"restore,omitempty"`
+	// Disabled reports that the breaker was tripped HERE, so the caller records
+	// it once rather than inferring it.
+	Disabled bool   `json:"disabled,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+	// Counter is the telemetry counter the caller should increment, empty when
+	// there is nothing to record. Naming it here keeps the labels in one place
+	// while the tap itself stays with the caller.
+	Counter string `json:"counter,omitempty"`
+}
 
 // ReduceRequest is the wire form of one reduction.
 //
@@ -41,6 +80,11 @@ type ReduceRequest struct {
 	Messages     json.RawMessage `json:"messages"`
 	SystemPrompt string          `json:"system_prompt,omitempty"`
 	Seam         string          `json:"seam"` // "gateway" | "delegate"
+	// SessionKey identifies whose lever this is, for the gateway seam's breaker.
+	// Empty means the request carried no resolvable identity, which reduces
+	// normally but can never trip or read a breaker — otherwise one anonymous
+	// request could switch off another identity's session.
+	SessionKey string `json:"session_key,omitempty"`
 
 	// Config, resolved by the caller.
 	HistoryFold        bool       `json:"history_fold,omitempty"`
@@ -119,18 +163,28 @@ var reduceReasonNames = map[ReduceReason]string{
 }
 
 // NewHandler serves the economizer's reduce stage.
+//
+// The breaker is created per handler rather than as a package global so a test
+// gets a clean one and two handlers never share a lever.
 func NewHandler() bus.ModuleHandler {
+	breaker := NewSessionBreaker()
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 		if invocation.Cancelled() {
 			return nil, bus.ModuleStatusCancelled
 		}
 		switch invocation.StageID {
+		case StagePostStatus:
+			var req PostStatusRequest
+			if err := json.Unmarshal(request, &req); err != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			return handlePostStatus(breaker, &req)
 		case StageReduce:
 			var req ReduceRequest
 			if err := json.Unmarshal(request, &req); err != nil {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
-			return handleReduce(&req)
+			return handleReduce(breaker, &req)
 		case StageJSONCompact:
 			return handleJSONCompact(invocation, request)
 		case StageToolRecall:
@@ -145,7 +199,7 @@ func NewHandler() bus.ModuleHandler {
 	}
 }
 
-func handleReduce(req *ReduceRequest) ([]byte, bus.ModuleStatus) {
+func handleReduce(breaker *SessionBreaker, req *ReduceRequest) ([]byte, bus.ModuleStatus) {
 	messages := ParseJSON(string(req.Messages))
 	if messages == nil || !messages.IsArray() {
 		return nil, bus.ModuleStatusInvalidRequest
@@ -187,6 +241,23 @@ func handleReduce(req *ReduceRequest) ([]byte, bus.ModuleStatus) {
 			},
 		},
 	}
+	// Honour the breaker BEFORE reducing. A disabled session is a pristine
+	// passthrough: the whole point of tripping it was to stop spending effort on
+	// a payload shape this session has already shown the provider rejects.
+	//
+	// Read here rather than by the caller because the write side lives here too;
+	// split across the bus, a trip on one side would never be seen by the other.
+	if seam == SeamGateway && req.SessionKey != "" && breaker.IsDisabled(req.SessionKey) {
+		body, err := json.Marshal(ReduceResponse{
+			Reason: reduceReasonNames[ReduceReasonNone],
+			Bypass: GWBypassSessionDisabled.String(),
+		})
+		if err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		return body, bus.ModuleStatusOK
+	}
+
 	// The seam gate lives in the config, so set the one this request arrived on.
 	if seam == SeamGateway {
 		cfg.GatewaySeam = true
@@ -239,6 +310,45 @@ func handleReduce(req *ReduceRequest) ([]byte, bus.ModuleStatus) {
 	}
 	if blob, ok := SerializeState(st); ok {
 		resp.State = blob
+	}
+
+	body, err := json.Marshal(resp)
+	if err != nil {
+		return nil, bus.ModuleStatusInternal
+	}
+	return body, bus.ModuleStatusOK
+}
+
+// handlePostStatus applies the post-dispatch decision and owns the breaker write.
+//
+// The caller is told what to DO rather than asked what to do: it has the request
+// body and the socket, this has the lever. Splitting it the other way — caller
+// decides, module stores — is what left the C seam with a breaker nothing ever
+// wrote to.
+func handlePostStatus(breaker *SessionBreaker, req *PostStatusRequest) ([]byte, bus.ModuleStatus) {
+	var d GWPostDecision
+	if req.StreamReason != "" {
+		// Streaming: bytes are already with the client, so the breaker is the only
+		// lever left. HaveKey gates it because without a key there is nothing to
+		// disable.
+		d = GWStreamDisable(req.Mutated, req.HaveKey, req.StreamReason)
+	} else {
+		d = GWPostStatus(req.HTTPStatus, req.Mutated)
+	}
+
+	resp := PostStatusResponse{Action: "none", Restore: d.Restore, Counter: d.Counter}
+	if d.Action == PostResend {
+		resp.Action = "resend"
+	}
+	// A trip needs somewhere to record it and a window to last for. Report
+	// Disabled only when the write actually happened, so the caller never records
+	// a breaker that was never set.
+	if d.Disable && req.SessionKey != "" && req.TTLMS > 0 {
+		breaker.Disable(req.SessionKey, req.TTLMS, d.Reason)
+		resp.Disabled = true
+		resp.Reason = d.Reason
+	} else if d.Reason != "" {
+		resp.Reason = d.Reason
 	}
 
 	body, err := json.Marshal(resp)

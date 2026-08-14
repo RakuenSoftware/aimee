@@ -139,6 +139,66 @@ ready. Successful enrollment atomically saves the mTLS certificate and private k
 token, and it validates the stored identity against the connection string's CA pin on every restart.
 Startup logs name the missing input when a deployment remains read-only.
 
+Each Aimee mTLS identity must now carry exactly one extended-key-usage role: `serverAuth` for a
+listener or `clientAuth` for an outbound peer. Certificates with no EKU, `anyExtendedKeyUsage`, or
+both roles are rejected. Reissue any older broad-purpose certificate before upgrading. Keep every
+connection pair on distinct key material and rotate each pair independently; in particular,
+aimee-server's thinclient-facing server certificate must not be reused as its KB client identity.
+
+Stage this upgrade by issuing both role-specific identities before switching the new binaries over.
+Keep the previous certificate/key bundles intact until both new handshakes and one authenticated
+request have succeeded. A rollback restores each old certificate and its matching private key as a
+pair; do not move either new identity into the other role to make a rollback connect. The new release
+fails closed when the counterpart identity is absent, so partial certificate installation is a
+startup/configuration error rather than a bearer-only fallback.
+
+Every networked Aimee hop now applies three independent checks on ordinary requests: the verified
+pair-specific mTLS identity, the current rotating connection bearer, and the enrolled PAM or OIDC
+application identity. On server-to-KB traffic these are configured with
+`AIMEE_KB_CLIENT_BEARER_TOKEN` plus either `AIMEE_KB_CLIENT_OIDC_TOKEN` or the
+`AIMEE_KB_CLIENT_PAM_USERNAME`/`AIMEE_KB_CLIENT_PAM_PASSWORD` pair. OIDC mode does not fall back to
+PAM when its federation is unavailable. On thinclient-to-server content traffic, a caller identity
+JWT occupies `Authorization` while the independent rotating connection bearer is carried in
+`x-api-key`; a verified client certificate no longer bypasses that bearer check.
+
+Those four server-to-KB values are first-boot inputs: bootstrap seals them into Vault, removes them
+from the process environment, and the client reads the current Vault values for every request so
+bearer, OIDC-token, and PAM-password rotation takes effect on an existing pooled TLS connection.
+Changing `AIMEE_KB_CLIENT_PAM_USERNAME` is an identity migration, not password rotation: provision
+that PAM account on the KB and rotate the matching `service:<name>` certificate enrollment in the
+same staged change.
+
+Caller context is distinct from those service-connection checks. A KB-signed OIDC caller token is
+forwarded unchanged and cryptographically verified again by aimee-kb with token type, issuer,
+server audience, team and certificate-bound JWKS pinned. A host/PAM caller is asserted by the
+triple-authenticated aimee-server channel. This is the explicit compromise: a compromised server can
+name a host account, but it cannot forge an OIDC caller, and it cannot grant either caller a team or
+project because membership remains KB-owned and is intersected with the enrolled server scope. A new
+per-request mint would ask the KB to trust the same host assertion at mint time, so it would add a
+round trip and audit artefact without changing that authority.
+
+The local CLI remains on the OS-authenticated Unix-socket boundary and is resolved to its host
+account before any KB content request; an unresolved uid is refused. Physical host takeover is not a
+separate Aimee protocol threat. Browser and MCP identity continue to terminate at aimee-server and
+use the same server-to-KB path. Caller-less ingest, re-embed, curator and code-index work uses a
+closed-name, project-bound maintenance scope. Durable queues are read only far enough to claim work
+and learn its project; content transactions then admit only that project's attributed rows and end
+before any embedder, model, or sidecar call. The scope does not impersonate a user or add a network
+credential. Content-scope readiness remains disabled until operators can explicitly attribute every
+code project to its tenancy project and the enabled policies pass live two-project coverage.
+
+The attribution is deliberately numeric and explicit because tenancy-project names are unique only
+inside a team. On the KB host, list the tenancy project ids and bind each existing code-index project
+that owns documents or file-index rows:
+
+```bash
+aimee-kb project list [team-id]
+aimee-kb project attribute <code-index-project> <kb-project-id>
+```
+
+Re-running `project attribute` replaces the prior binding atomically. It is an org-admin operation;
+both exact projects must already exist, and no name-based fallback is attempted.
+
 Grants are keyed by server, team, and exact authenticated subject:
 
 | Subject | Form |

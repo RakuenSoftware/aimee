@@ -113,3 +113,25 @@ int db2_project_get(int64_t id, db2_project_row_t *out)
    aimee_pg_finalize(st);
    return rc;
 }
+
+int db2_project_attribute_code(const char *code_project, int64_t kb_project)
+{
+   int guard = db2_tenant_require_pg();
+   if (guard)
+      return guard;
+   if (!code_project || !code_project[0] || strlen(code_project) > 255 || kb_project <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT kb_content_project_attribute(?1, ?2)", err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", code_project);
+   aimee_pg_bind_int64(st, "?2", kb_project);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return step == AIMEE_PG_ROW ? 0 : -1;
+}
