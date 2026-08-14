@@ -84,8 +84,7 @@ extern "C"
    int db2_kb_documents_fts_search(const char *project, const char *query, int64_t *ids,
                                    double *scores, int max);
    int db2_kb_documents_fts_search_scoped(const char *project, const char *exclude_project,
-                                          const char *query, int64_t *ids, double *scores,
-                                          int max);
+                                          const char *query, int64_t *ids, double *scores, int max);
 
    /* INSERT OR IGNORE a kb_async_jobs row: (kind, subject id, project,
     * status='pending'). Used by kb_build to enqueue an async embedding
@@ -190,12 +189,12 @@ extern "C"
     * inputs; see db2_kb_pdf_search_chunks for the weights. */
    typedef struct
    {
-      double score;     /* [0,1] */
-      char label[8];    /* "NONE" | "LOW" | "MEDIUM" | "HIGH" */
+      double score;      /* [0,1] */
+      char label[8];     /* "NONE" | "LOW" | "MEDIUM" | "HIGH" */
       double top_score;  /* query-scoped: best candidate relevance among the top-k hits */
       double coverage;   /* query-scoped: fraction of query terms present across matched chunks */
       double saturation; /* query-scoped: hit-count saturation = min(1, n_hits / target_k) */
-      int table_facts;   /* corpus-scoped: table-cell facts for query entities (§B; 0 until built) */
+      int table_facts; /* corpus-scoped: table-cell facts for query entities (§B; 0 until built) */
    } db2_kb_answerability_t;
 
    /* Phase A2 two-stage retrieval: lexical (case-insensitive substring) AND — when the
@@ -234,7 +233,7 @@ extern "C"
     * chunk so the isolated kb_pdf_embeddings relation is re-derived (used by the
     * dim-change reset, which truncates it). No-op when kb_pdf_vector_enabled is
     * off. Returns the number of jobs enqueued. */
-   int db2_kb_pdf_reembed_all(void);
+   int db2_kb_pdf_reembed_project(const char *project);
 
    /* Count rows in kb_async_jobs for a given kind (e.g. "embed_pdf"). Test/observability
     * helper. Returns the count (>=0) or -1 on error. */
@@ -284,7 +283,8 @@ extern "C"
     * withheld/unreadable, 1 on a hit. */
    void db2_kb_documents_set_tsr_state(const char *project, const char *file_path,
                                        const char *state);
-   int db2_kb_pdf_tsr_state(const char *project, const char *document_key, char *out, size_t out_len);
+   int db2_kb_pdf_tsr_state(const char *project, const char *document_key, char *out,
+                            size_t out_len);
 
    /* structured-pdf Phase C: a visual asset (crop) row. blob_ref (the sha256) is DELIBERATELY
     * absent from this struct — it is KB-internal and never surfaced to a client; the agent-

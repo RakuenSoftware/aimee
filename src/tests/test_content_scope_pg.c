@@ -13,25 +13,26 @@
  *     principal set. Deny is the direction the whole design rests on, and a
  *     predicate that answered true here would open every content policy built on
  *     it at once.
- *  3. The policies exist but are INERT: RLS is not enabled on either table, so
- *     applying this schema changes what nobody can read. A policy that switched
+ *  3. The user-read and maintenance-write policies exist but are INERT: RLS is
+ *     not enabled on either table, so applying this schema changes what nobody
+ *     can read. A policy that switched
  *     itself on would turn an upgrade into an outage for every row not yet
  *     attributed, so the off state is asserted rather than assumed.
  *  4. Enabling REFUSES while content is unattributed, because turning it on
  *     then hides those rows from everyone.
- *  5. A tenant scope does not outlive its transaction. aimee.principal lives on
- *     a POOLED connection, so a leak there is one tenant reading another's rows
+ *  5. Tenant and maintenance scopes do not outlive their transactions. Their
+ *     GUCs live on a POOLED connection, so a leak there is one tenant reading another's rows
  *     rather than merely a stale value.
  *
- * WHAT IS NOT HERE: whether a member sees their own project and a stranger does
- * not. That needs the policies, which land with the backfill in slice 2. The
- * end-to-end behaviour was prototyped in
- * docs/validation/per-user-content-scope-prototype.md.
+ * WHAT IS NOT HERE: the full worker wiring or whether a member sees their own
+ * project and a stranger does not. Those are end-to-end checks rather than this
+ * DB boundary check.
  */
 #include "db2.h"
 #include "db2/db2_internal.h"
 #include "db2/db_postgres.h"
 #include "db2/db2_tenant.h"
+#include "db2/project.h"
 #include "kb_identity.h"
 
 #include <assert.h>
@@ -41,6 +42,15 @@
 
 /* Single-value scalar query. Returns 0 and fills out on success. */
 static int scalar(const char *sql, char *out, size_t cap);
+
+static int exec_sql(const char *sql)
+{
+   char err[256] = "";
+   int rc = aimee_pg_exec(db2_conn(), sql, err, sizeof(err));
+   if (rc != 0)
+      fprintf(stderr, "exec failed: %s\n  sql: %s\n", err, sql);
+   return rc;
+}
 
 /* assert that `sql` returns `want`, and say what came back when it does not. */
 static void expect(const char *sql, const char *want)
@@ -120,8 +130,8 @@ int main(void)
     *     schema change at the worst possible moment. */
    expect("SELECT count(*) FROM pg_policies"
           " WHERE tablename IN ('kb_documents','kb_file_index')",
-          "2");
-   printf("  PASS: the content policies are defined\n");
+          "4");
+   printf("  PASS: the user-read and maintenance-write policies are defined\n");
 
    /* 4. And INERT. A policy does nothing until RLS is enabled on its table, and
     *    that is what keeps applying this schema from hiding rows nobody has
@@ -275,6 +285,116 @@ int main(void)
             the roles provisioned; say so rather than passing silently. */
          printf("  SKIP: could not open a tenant scope here (roles not provisioned)\n");
       }
+   }
+
+   /* 7. Background work gets a named PROJECT scope, never a synthetic user.
+    *    The SQL setter independently allowlists the worker and resolves the
+    *    project to its attributed kb_project. Prove that the selected project is
+    *    visible, a sibling is not, and every maintenance GUC is gone on commit. */
+   {
+      char team_id[64] = "";
+      assert(scalar("INSERT INTO kb_team(name) VALUES ('scope-maintenance-team')"
+                    " ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id",
+                    team_id, sizeof(team_id)) == 0);
+
+      char project_a[64] = "", project_b[64] = "", sql[2048];
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_project(parent,name,access_mode)"
+               " VALUES (%s,'scope-maintenance-a','team-open')"
+               " ON CONFLICT (parent,name) DO UPDATE SET access_mode='team-open' RETURNING id",
+               team_id);
+      assert(scalar(sql, project_a, sizeof(project_a)) == 0);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_project(parent,name,access_mode)"
+               " VALUES (%s,'scope-maintenance-b','team-open')"
+               " ON CONFLICT (parent,name) DO UPDATE SET access_mode='team-open' RETURNING id",
+               team_id);
+      assert(scalar(sql, project_b, sizeof(project_b)) == 0);
+
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO projects(name,root,scanned_at,kb_project)"
+               " VALUES ('scope-maintenance-a','/scope/a','',NULL)"
+               " ON CONFLICT (name) DO UPDATE SET kb_project=NULL RETURNING id");
+      char ignored[64] = "";
+      assert(scalar(sql, ignored, sizeof(ignored)) == 0);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO projects(name,root,scanned_at,kb_project)"
+               " VALUES ('scope-maintenance-b','/scope/b','',NULL)"
+               " ON CONFLICT (name) DO UPDATE SET kb_project=NULL RETURNING id");
+      assert(scalar(sql, ignored, sizeof(ignored)) == 0);
+
+      kb_principal_t owner = {.kind = KB_PRIN_OWNER, .authenticated = 1};
+      assert(db2_tenant_scope_begin(&owner, 0) == 0);
+      assert(db2_project_attribute_code("scope-maintenance-a", (int64_t)atoll(project_a)) == 0);
+      assert(db2_project_attribute_code("scope-maintenance-b", (int64_t)atoll(project_b)) == 0);
+      assert(db2_tenant_scope_commit() == 0);
+      snprintf(sql, sizeof(sql),
+               "SELECT CASE WHEN kb_project=%s THEN 'bound' ELSE 'wrong' END"
+               " FROM projects WHERE name='scope-maintenance-a'",
+               project_a);
+      expect(sql, "bound");
+
+      kb_principal_t member = {.kind = KB_PRIN_OIDC, .authenticated = 1};
+      snprintf(member.issuer, sizeof(member.issuer), "%s", "https://member.invalid");
+      snprintf(member.subject, sizeof(member.subject), "%s", "not-admin");
+      char member_key[640] = "";
+      assert(kb_identity_key(&member, member_key, sizeof(member_key)) == 0);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_team_membership(identity_key,team,is_default)"
+               " VALUES ('%s',%s,0) ON CONFLICT (identity_key,team)"
+               " DO UPDATE SET is_default=EXCLUDED.is_default RETURNING id",
+               member_key, team_id);
+      assert(scalar(sql, ignored, sizeof(ignored)) == 0);
+      assert(db2_tenant_scope_begin(&member, (int64_t)atoll(team_id)) == 0);
+      assert(db2_project_attribute_code("scope-maintenance-a", (int64_t)atoll(project_b)) != 0);
+      db2_tenant_scope_rollback();
+      snprintf(sql, sizeof(sql),
+               "SELECT CASE WHEN kb_project=%s THEN 'bound' ELSE 'wrong' END"
+               " FROM projects WHERE name='scope-maintenance-a'",
+               project_a);
+      expect(sql, "bound");
+      printf("  PASS: attribution is explicit by id and denied to a non-admin member\n");
+
+      assert(db2_maintenance_scope_begin(DB2_MAINTENANCE_CURATOR, "scope-maintenance-a") == 0);
+      expect("SELECT current_setting('aimee.maintenance_worker',true)", "curator");
+      expect("SELECT current_setting('aimee.maintenance_project',true)", "scope-maintenance-a");
+      snprintf(sql, sizeof(sql),
+               "SELECT CASE WHEN kb_project_visible(%s) THEN 'allow' ELSE 'deny' END", project_a);
+      expect(sql, "allow");
+      snprintf(sql, sizeof(sql),
+               "SELECT CASE WHEN kb_project_visible(%s) THEN 'allow' ELSE 'deny' END", project_b);
+      expect(sql, "deny");
+      assert(db2_maintenance_scope_commit() == 0);
+
+      expect("SELECT coalesce(current_setting('aimee.maintenance_worker',true),'')", "");
+      expect("SELECT coalesce(current_setting('aimee.maintenance_project',true),'')", "");
+      expect("SELECT coalesce(current_setting('aimee.maintenance_kb_project',true),'')", "");
+      assert(db2_maintenance_scope_begin((db2_maintenance_worker_t)999, "scope-maintenance-a") ==
+             DB2_ERR_MAINTENANCE_INVALID);
+      assert(
+          db2_maintenance_scope_begin(DB2_MAINTENANCE_CURATOR, "scope-maintenance-unattributed") ==
+          DB2_ERR_MAINTENANCE_INVALID);
+
+      /* Worker wiring is inert before the operator enables content RLS, then
+       * begins a fresh short transaction for every content phase. This lets the
+       * wiring land without changing behavior before the final slice. */
+      assert(db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, "scope-maintenance-a") == 0);
+      assert(db2_maintenance_scope_begin_current() == 0);
+      db2_maintenance_job_leave();
+      assert(exec_sql("ALTER TABLE kb_documents ENABLE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_documents FORCE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_file_index ENABLE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_file_index FORCE ROW LEVEL SECURITY") == 0);
+      assert(db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, "scope-maintenance-a") == 0);
+      assert(db2_maintenance_scope_begin_current() == 1);
+      expect("SELECT current_setting('aimee.maintenance_project',true)", "scope-maintenance-a");
+      assert(db2_maintenance_scope_commit() == 0);
+      db2_maintenance_job_leave();
+      assert(exec_sql("ALTER TABLE kb_documents NO FORCE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_documents DISABLE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_file_index NO FORCE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_file_index DISABLE ROW LEVEL SECURITY") == 0);
+      printf("  PASS: maintenance authority is named, project-bound, and transaction-local\n");
    }
 
    db2_shutdown();
