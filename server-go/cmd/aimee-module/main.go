@@ -260,6 +260,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			{EventKind: economizer.EventToolRecall, StageID: economizer.StageToolRecall},
 			{EventKind: economizer.EventToolStats, StageID: economizer.StageToolStats},
 			{EventKind: economizer.EventRecordBuild, StageID: economizer.StageRecordBuild},
+			{EventKind: economizer.EventPostStatus, StageID: economizer.StagePostStatus},
 		}
 		// Stateless: per-conversation reducer state travels with each request, so
 		// there is no store to open and no failure mode before serving.
