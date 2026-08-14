@@ -550,6 +550,16 @@
           "id": 2,
           "name": "sandbox-learned-load",
           "event_kind": 10754
+        },
+        {
+          "id": 3,
+          "name": "sandbox-proxy-request-policy",
+          "event_kind": 10755
+        },
+        {
+          "id": 4,
+          "name": "sandbox-proxy-address-policy",
+          "event_kind": 10756
         }
       ]
     },

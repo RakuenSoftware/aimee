@@ -2,27 +2,37 @@
 
 ## Purpose and non-goals
 
-`sandbox` owns the **learned toolchain** for delegate sandboxes: the apt packages a
-project turned out to need, captured from what delegates actually ran and recorded
-against the project's git root so the next sandbox image pre-bakes them.
+`sandbox` owns the **learned toolchain** and package-egress policy for delegate
+sandboxes. It records apt packages a project needed so the next image pre-bakes them,
+and decides which proxy requests and resolved addresses are safe to reach.
 
 A delegate sandbox is `--network none` by intent, so its toolchain has to exist in the
 image at build time. Rather than make every project author a toolchain spec, aimee
 learns the set: when a delegate runs `apt-get install <pkgs>` inside its sandbox, the
 package names are captured and unioned into that project's set.
 
-It does not build images, choose base images, or execute anything. It parses a command
-and owns a store; the delegate sandbox image builder consumes the result.
+It does not build images, choose base images, open sockets, resolve hosts, or forward
+bytes. It parses commands, owns a store, classifies proxy requests, applies the registry
+allowlist, and rejects non-public addresses. The C server remains the connectivity seam
+that resolves and dials the exact address approved by the module.
+
+The boundary is mechanical rather than topical: C owns `getaddrinfo`, the exact
+`sockaddr` selected for a dial, socket creation, `connect`, polling, and byte I/O. The Go
+module owns side-effect-free decisions about whether that mechanism may be used. Proxy
+policy does not open a connection and cannot substitute a different address after C's
+per-result check.
 
 ## Public contracts
 
-Two stages, both carrying JSON in each direction. A shell command and a git root are
-variable-length, so the fixed binary framing the pure-decision stages use does not fit.
+Four stages, all carrying JSON in each direction because their strings are
+variable-length.
 
 | Stage | Kind | Request | Response |
 |---|---|---|---|
 | `sandbox-learned-observe` | 10753 | `{git_root, command}` | `{parsed, recorded, packages}` |
 | `sandbox-learned-load` | 10754 | `{git_root}` | `{packages}` |
+| `sandbox-proxy-request-policy` | 10755 | `{line, allowlist?}` | `{kind, host, port, allowed, forward_head?}` |
+| `sandbox-proxy-address-policy` | 10756 | `{ip}` | `{blocked}` |
 
 The kinds are fixed by the process contract at `4096 + ordinal*256 + stage`; sandbox is
 ordinal 26, so they are not a free choice. The public header
@@ -39,8 +49,9 @@ content-hash image tag, is stable regardless of insertion order.
 - `module-runtime`: supplies the supervised process lifecycle, bus attachment, and capability state.
 
 Consumers are `tools`, whose `agent_tools.c` and `agent_tools_dispatch.c` capture the
-command a delegate ran, and `delegates`, whose `delegate_sandbox_image.c` calls
-`sandbox_learned_load` to pre-bake the learned set into the next image.
+command a delegate ran; `delegates`, whose `delegate_sandbox_image.c` calls
+`sandbox_learned_load` to pre-bake the learned set into the next image; and the C
+package-proxy transport, which asks stages 3 and 4 before forwarding any connection.
 
 ## Providers and readiness
 
@@ -51,7 +62,8 @@ normally and simply never learns a toolchain.
 
 Attachment is the readiness signal. When the module is not attached, `observe` is
 skipped and `load` yields an empty set, which degrades image builds to the un-augmented
-base image rather than failing them.
+base image rather than failing them. Proxy policy fails closed: no classification or
+address approval means no outbound connection.
 
 ## Configuration and activation
 
@@ -68,8 +80,9 @@ module running but the gate off, nothing is recorded.
 ## Surfaces
 
 There is no HTTP route, CLI command, or console page. The module's entire surface is the
-two bus stages above plus the C entry points `sandbox_learned_observe` and
-`sandbox_learned_load` declared in `aimee/sandbox/module_api.h`.
+four bus stages above. C keeps `sandbox_learned_observe`, `sandbox_learned_load`, and
+`sandbox_pkg_proxy_serve` as bus/connectivity adapters; it no longer contains the
+package-proxy decision rules.
 
 The operator-visible surface is indirect: the packages that appear in a generated
 sandbox Dockerfile, and the resulting content-hash image tag.
@@ -102,6 +115,16 @@ falls back to the un-augmented base image. There is no path from this parser to 
 execution. The store holds package names and git-root paths only; it carries no command
 text, no delegate output, and no credential material.
 
+The proxy policy accepts only HTTP/1.0 or HTTP/1.1 CONNECT/absolute-form requests,
+ports 80 and 443, and an exact-or-label-bounded registry allowlist. Every resolved
+address is checked separately. IPv4 private, loopback, link-local, CGNAT,
+documentation, multicast, and reserved ranges are blocked, as are IPv6 unspecified,
+loopback, unique-local, link-local, multicast, IPv4-mapped, NAT64, and 6to4 encodings
+of blocked IPv4 space. Invalid policy responses and an unavailable module both fail
+closed in C. For allowed absolute-form HTTP, the module also rewrites the request to
+origin form and removes hop-by-hop and credential-bearing headers before C writes it
+upstream.
+
 ## Supported journeys
 
 A delegate runs `apt-get install ripgrep jq` inside its sandbox to finish a task. `tools`
@@ -115,9 +138,14 @@ after deciding a project's toolchain should be pinned by hand instead.
 
 ## Tests and failure behavior
 
-`src/tests/test_sandbox_pkg_proxy.c` covers the C-side proxy, and
-`server-go/modules/sandbox/sandbox_test.go` covers the parser, the package-name grammar,
-and the store.
+`server-go/modules/sandbox/sandbox_test.go` covers the learned-toolchain parser,
+package-name grammar, store, and stages. `proxy_policy_test.go` ports every IPv4, IPv6,
+port, allowlist, and request-classification vector from the former C test one-for-one,
+then adds handler and header-rewrite checks. `test_sandbox_pkg_proxy_adapter.c` controls
+policy replies and exercises public-listener refusal, unavailable/malformed policy,
+denial, blocked resolved addresses, and sanitized forwarding through a loopback socket.
+The bus conformance suite also exercises the shipped C-host/Go-module boundary for all
+four stages.
 
 Learning is best-effort and must never fail a delegate turn. A missing, oversized
 (> 1 MiB), or unparseable store reads as empty rather than as an error, and an
@@ -136,7 +164,7 @@ an absent key for a git root means nothing was ever captured for that project.
 
 ## Compatibility
 
-The two event kinds are fixed by the process-contract formula and are not renegotiable
+The four event kinds are fixed by the process-contract formula and are not renegotiable
 without a contract change. The store is derived data with no schema version, so a format
 change is handled by reading the old shape as empty and re-learning rather than by
 migration.

@@ -13,15 +13,16 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/sandbox/sandbox_learned.c",
-    "src/modules/sandbox/sandbox_pkg_proxy.c",
-    "src/modules/sandbox/sandbox_pkg_proxy_core.c"
+    "src/modules/sandbox/sandbox_pkg_proxy.c"
   ],
   "go_sources": [
     "server-go/modules/sandbox/sandbox.go",
-    "server-go/modules/sandbox/module.go"
+    "server-go/modules/sandbox/module.go",
+    "server-go/modules/sandbox/proxy_policy.go"
   ],
   "go_tests": [
-    "server-go/modules/sandbox/sandbox_test.go"
+    "server-go/modules/sandbox/sandbox_test.go",
+    "server-go/modules/sandbox/proxy_policy_test.go"
   ],
   "public_headers": [
     "src/modules/sandbox/include/aimee/sandbox/module_api.h"
@@ -31,7 +32,7 @@
     "src/modules/sandbox/sandbox_pkg_proxy.h"
   ],
   "tests": [
-    "src/tests/test_sandbox_pkg_proxy.c"
+    "src/tests/test_sandbox_pkg_proxy_adapter.c"
   ],
   "docs": [
     "docs/modules/sandbox.md"

@@ -1,11 +1,16 @@
-/* sandbox_pkg_proxy.c — the socket I/O of the delegate-sandbox package proxy: the
- * CONNECT tunnel and absolute-form forwarder that use the pure decision core in
- * sandbox_pkg_proxy_core.c. Kept separate so the security-critical pure functions
- * unit-test without pulling logging/sockets. */
+/* sandbox_pkg_proxy.c — the socket I/O of the delegate-sandbox package proxy.
+ *
+ * C owns the resolver, sockets and byte transport. Request classification,
+ * allowlisting and SSRF address policy live in the Go sandbox module and are
+ * reached over the event bus. */
 
 #include "sandbox_pkg_proxy.h"
 
+#include "cJSON.h"
 #include "log.h"
+#include "headers/module_json_call.h"
+
+#include <aimee/sandbox/module_api.h>
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -14,15 +19,116 @@
 #include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
+#define SBX_POLICY_TIMEOUT_MS 5000
+#define SBX_POLICY_MAX_BODY   (256u * 1024u)
+
+typedef enum
+{
+   SBX_REQ_INVALID = 0,
+   SBX_REQ_API,
+   SBX_REQ_CONNECT,
+   SBX_REQ_ABSOLUTE,
+} sbx_req_kind_t;
+
+static cJSON *proxy_policy_call(uint32_t event_kind, uint32_t stage_id, cJSON *payload)
+{
+   return aimee_module_json_call(event_kind, stage_id, payload, SBX_POLICY_MAX_BODY,
+                                 SBX_POLICY_TIMEOUT_MS, NULL);
+}
+
+/* Ask the sandbox module to parse and authorize one proxy request. The module
+ * owns the default allowlist; omitting `allowlist` is distinct from explicitly
+ * supplying an empty one. */
+static int proxy_request_policy(const char *line, const char *allowlist, sbx_req_kind_t *kind,
+                                char *host, size_t hostcap, int *port, int *allowed,
+                                char **forward_head)
+{
+   if (!line || !kind || !host || hostcap == 0 || !port || !allowed || !forward_head)
+      return -1;
+   *kind = SBX_REQ_INVALID;
+   host[0] = '\0';
+   *port = 0;
+   *allowed = 0;
+   *forward_head = NULL;
+
+   cJSON *payload = cJSON_CreateObject();
+   if (!payload)
+      return -1;
+   cJSON_AddStringToObject(payload, "line", line);
+   if (allowlist)
+      cJSON_AddStringToObject(payload, "allowlist", allowlist);
+
+   cJSON *reply = proxy_policy_call(AIMEE_SANDBOX_EVENT_PROXY_REQUEST,
+                                    AIMEE_SANDBOX_STAGE_PROXY_REQUEST, payload);
+   if (!reply)
+      return -1;
+   const cJSON *reply_kind = cJSON_GetObjectItemCaseSensitive(reply, "kind");
+   const cJSON *reply_host = cJSON_GetObjectItemCaseSensitive(reply, "host");
+   const cJSON *reply_port = cJSON_GetObjectItemCaseSensitive(reply, "port");
+   const cJSON *reply_allowed = cJSON_GetObjectItemCaseSensitive(reply, "allowed");
+   const cJSON *reply_forward = cJSON_GetObjectItemCaseSensitive(reply, "forward_head");
+   int rc = -1;
+   if (cJSON_IsNumber(reply_kind) && reply_kind->valueint >= SBX_REQ_INVALID &&
+       reply_kind->valueint <= SBX_REQ_ABSOLUTE && cJSON_IsNumber(reply_port) &&
+       reply_port->valueint >= 0 && reply_port->valueint <= 65535 && cJSON_IsBool(reply_allowed) &&
+       cJSON_IsString(reply_host) && strlen(reply_host->valuestring) < hostcap &&
+       (!reply_forward || cJSON_IsString(reply_forward)) &&
+       !(reply_kind->valueint == SBX_REQ_ABSOLUTE && cJSON_IsTrue(reply_allowed) && !reply_forward))
+   {
+      *kind = (sbx_req_kind_t)reply_kind->valueint;
+      snprintf(host, hostcap, "%s", reply_host->valuestring);
+      *port = reply_port->valueint;
+      *allowed = cJSON_IsTrue(reply_allowed);
+      *forward_head = reply_forward ? strdup(reply_forward->valuestring) : NULL;
+      if (!reply_forward || *forward_head)
+         rc = 0;
+   }
+   cJSON_Delete(reply);
+   return rc;
+}
+
+/* Fail closed on malformed addresses and on an unavailable policy module. The
+ * sockaddr is the exact resolver result that proxy_dial will connect, so there
+ * is no DNS-rebinding gap between the checked address and the connected one. */
+static int proxy_address_blocked(const struct sockaddr *address)
+{
+   if (!address)
+      return 1;
+   char ip[INET6_ADDRSTRLEN];
+   const void *bytes = NULL;
+   if (address->sa_family == AF_INET)
+      bytes = &((const struct sockaddr_in *)address)->sin_addr;
+   else if (address->sa_family == AF_INET6)
+      bytes = &((const struct sockaddr_in6 *)address)->sin6_addr;
+   else
+      return 1;
+   if (!inet_ntop(address->sa_family, bytes, ip, sizeof(ip)))
+      return 1;
+
+   cJSON *payload = cJSON_CreateObject();
+   if (!payload)
+      return 1;
+   cJSON_AddStringToObject(payload, "ip", ip);
+   cJSON *reply = proxy_policy_call(AIMEE_SANDBOX_EVENT_PROXY_ADDRESS,
+                                    AIMEE_SANDBOX_STAGE_PROXY_ADDRESS, payload);
+   if (!reply)
+      return 1;
+   const cJSON *blocked = cJSON_GetObjectItemCaseSensitive(reply, "blocked");
+   int result = !cJSON_IsBool(blocked) || cJSON_IsTrue(blocked);
+   cJSON_Delete(reply);
+   return result;
+}
+
 /* --- socket I/O ---------------------------------------------------------------
- * The functions above are pure and unit-tested; the plumbing below wires them to
- * real sockets and is exercised by the integration test (docker). */
+ * The functions above only marshal policy calls. The plumbing below owns the
+ * resolver, sockets and byte transport. */
 
 static int write_all(int fd, const char *p, size_t n)
 {
@@ -59,7 +165,7 @@ static int proxy_dial(const char *host, int port, char *ipbuf, size_t ipcap, con
    int fd = -1;
    for (struct addrinfo *ai = res; ai; ai = ai->ai_next)
    {
-      if (sandbox_pkg_ip_is_blocked(ai->ai_addr))
+      if (proxy_address_blocked(ai->ai_addr))
       {
          *why = "ssrf-blocked";
          continue;
@@ -141,99 +247,6 @@ static void proxy_pump(int a, int b, unsigned long *a2b, unsigned long *b2a)
    }
 }
 
-/* Headers the proxy must NOT forward upstream: hop-by-hop headers (tunnel/keepalive
- * correctness) AND credential-bearing headers (never leak a delegate secret to a
- * registry). */
-static int header_should_strip(const char *name, size_t len)
-{
-   static const char *const h[] = {"connection",
-                                   "proxy-connection",
-                                   "keep-alive",
-                                   "transfer-encoding",
-                                   "te",
-                                   "trailer",
-                                   "upgrade",
-                                   "authorization",       /* credential-bearing */
-                                   "proxy-authorization", /* credential-bearing */
-                                   "cookie",              /* credential-bearing */
-                                   NULL};
-   for (int i = 0; h[i]; i++)
-      if (strlen(h[i]) == len && strncasecmp(name, h[i], len) == 0)
-         return 1;
-   return 0;
-}
-
-/* Rewrite an absolute-form request head to origin-form for the upstream: replace the
- * `http://host[:port]/path` target with just `/path`, drop hop-by-hop headers, force
- * `Connection: close`. Writes the rewritten head to `up`. Returns 0 on success. */
-static int proxy_forward_head(int up, const char *head)
-{
-   const char *eol = strstr(head, "\n");
-   if (!eol)
-      return -1;
-   /* first line: METHOD SP http://host/path SP HTTP/x.y */
-   const char *sp1 = strchr(head, ' ');
-   const char *sp2 = sp1 ? strchr(sp1 + 1, ' ') : NULL;
-   if (!sp1 || !sp2 || sp2 > eol)
-      return -1;
-   const char *target = sp1 + 1;
-   /* skip scheme://authority to the path */
-   const char *path = NULL;
-   if (strncmp(target, "http://", 7) == 0)
-   {
-      const char *p = target + 7;
-      while (p < sp2 && *p != '/')
-         p++;
-      path = (p < sp2 && *p == '/') ? p : "/";
-   }
-   if (!path)
-      return -1;
-   size_t pathlen = (size_t)(sp2 - path);
-   if (path[0] != '/')
-      pathlen = 1, path = "/";
-
-   /* The version at sp2+1 is exactly "HTTP/1.0" or "HTTP/1.1" (validated by classify,
-    * which runs before this path), so take its 8 chars and always append CRLF — no
-    * fragile trailing-CR trimming. */
-   char firstline[2100];
-   int fl = snprintf(firstline, sizeof(firstline), "%.*s %.*s %.8s\r\n", (int)(sp1 - head), head,
-                     (int)pathlen, path, sp2 + 1);
-   if (fl <= 0 || (size_t)fl >= sizeof(firstline))
-      return -1;
-   if (write_all(up, firstline, (size_t)fl) != 0)
-      return -1;
-
-   /* headers: forward each well-formed, non-stripped header line verbatim */
-   const char *ln = eol + 1;
-   while (*ln)
-   {
-      const char *nl = strchr(ln, '\n');
-      size_t linelen = nl ? (size_t)(nl - ln + 1) : strlen(ln);
-      if (linelen <= 2) /* blank line — end of headers */
-         break;
-      const char *colon = memchr(ln, ':', linelen);
-      if (!colon)
-         return -1; /* a header line without a colon is malformed — refuse the request */
-      size_t namelen = (size_t)(colon - ln);
-      if (namelen == 0)
-         return -1;
-      /* the field name must be a token: no space, control byte, or CR/LF injection */
-      for (size_t i = 0; i < namelen; i++)
-      {
-         unsigned char c = (unsigned char)ln[i];
-         if (c <= 0x20 || c == 0x7F)
-            return -1;
-      }
-      if (!header_should_strip(ln, namelen))
-         if (write_all(up, ln, linelen) != 0)
-            return -1;
-      if (!nl)
-         break;
-      ln = nl + 1;
-   }
-   return write_all(up, "Connection: close\r\n\r\n", 21);
-}
-
 int sandbox_pkg_proxy_serve(int client_fd, int is_uds, const char *head, const char *allowlist,
                             const char *tag)
 {
@@ -246,8 +259,6 @@ int sandbox_pkg_proxy_serve(int client_fd, int is_uds, const char *head, const c
                 "public listener)");
       return 0;
    }
-   if (!allowlist)
-      allowlist = sandbox_pkg_default_allowlist();
    if (!tag)
       tag = "sandbox";
    if (!head)
@@ -255,15 +266,26 @@ int sandbox_pkg_proxy_serve(int client_fd, int is_uds, const char *head, const c
 
    char host[256];
    int port = 0;
-   sbx_req_kind_t kind = sandbox_pkg_classify_request_line(head, host, sizeof(host), &port);
+   int allowed = 0;
+   char *forward_head = NULL;
+   sbx_req_kind_t kind = SBX_REQ_INVALID;
+   if (proxy_request_policy(head, allowlist, &kind, host, sizeof(host), &port, &allowed,
+                            &forward_head) != 0)
+   {
+      aimee_log(LOG_WARN, "sandbox-proxy", "%s: DENY reason=policy-unavailable", tag);
+      (void)write_all(client_fd, "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n", 46);
+      return 0;
+   }
 
    if (kind == SBX_REQ_INVALID || kind == SBX_REQ_API)
    {
+      free(forward_head);
       (void)write_all(client_fd, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n", 46);
       return 0;
    }
-   if (!sandbox_pkg_port_allowed(port) || !sandbox_pkg_host_allowed(host, allowlist))
+   if (!allowed)
    {
+      free(forward_head);
       aimee_log(LOG_WARN, "sandbox-proxy", "%s: DENY host=%s port=%d (allowlist/port)", tag, host,
                 port);
       (void)write_all(client_fd, "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n", 46);
@@ -275,6 +297,7 @@ int sandbox_pkg_proxy_serve(int client_fd, int is_uds, const char *head, const c
    int up = proxy_dial(host, port, ip, sizeof(ip), &why);
    if (up < 0)
    {
+      free(forward_head);
       aimee_log(LOG_WARN, "sandbox-proxy", "%s: DENY host=%s port=%d reason=%s", tag, host, port,
                 why ? why : "?");
       (void)write_all(client_fd, "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n", 46);
@@ -293,9 +316,10 @@ int sandbox_pkg_proxy_serve(int client_fd, int is_uds, const char *head, const c
    }
    else /* SBX_REQ_ABSOLUTE */
    {
-      if (proxy_forward_head(up, head) == 0)
+      if (forward_head && write_all(up, forward_head, strlen(forward_head)) == 0)
          proxy_pump(client_fd, up, &up_bytes, &down_bytes);
    }
+   free(forward_head);
    close(up);
    aimee_log(LOG_INFO, "sandbox-proxy", "%s: OK host=%s port=%d ip=%s up=%lu down=%lu kind=%s", tag,
              host, port, ip[0] ? ip : "?", up_bytes, down_bytes,
