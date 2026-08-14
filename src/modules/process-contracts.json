@@ -566,6 +566,26 @@
           "id": 1,
           "name": "economizer-reduce",
           "event_kind": 11009
+        },
+        {
+          "id": 2,
+          "name": "economizer-json-compact",
+          "event_kind": 11010
+        },
+        {
+          "id": 3,
+          "name": "economizer-tool-recall",
+          "event_kind": 11011
+        },
+        {
+          "id": 4,
+          "name": "economizer-tool-stats",
+          "event_kind": 11012
+        },
+        {
+          "id": 5,
+          "name": "economizer-record-build",
+          "event_kind": 11013
         }
       ]
     }

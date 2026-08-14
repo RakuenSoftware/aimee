@@ -2070,6 +2070,152 @@ CREATE POLICY p_project_member ON kb_project
          OR id IN (SELECT project FROM kb_project_membership
                    WHERE identity_key = current_setting('aimee.principal', true))));
 
+-- ---------------------------------------------------------------------------
+-- CONTENT SCOPE, part 1: the referent and the predicate. Neither enforces
+-- anything on its own; the policies that read them land with the backfill.
+-- See docs/proposals/pending/per-user-content-scope-visibility.md.
+--
+-- WHY A COLUMN ON `projects` AND NOT ON EACH CONTENT TABLE. kb_documents,
+-- kb_file_index, kb_embeddings and kb_pdf_embeddings all carry `project`, which
+-- holds projects.name (bound at ingest in kb_payload.c). projects.name is
+-- globally UNIQUE, so it identifies exactly one row; one link here therefore
+-- gives every content table a route to tenancy.
+--
+-- AND WHY NOT BY NAME. kb_project is UNIQUE(parent, name): two teams may each
+-- own a project called `aimee`, so a name identifies NOTHING on its own.
+-- Resolving content to tenancy by name lets a member of one team read another
+-- team's content, which is a cross-tenant leak introduced by the control meant
+-- to prevent one. Reproduced in
+-- docs/validation/per-user-content-scope-prototype.md; do not "simplify" this
+-- into a name match.
+--
+-- NULL means unattributed, and kb_project_visible() denies it. Nothing reads
+-- that yet, so an existing deployment is unaffected until the policies land.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS kb_project BIGINT REFERENCES kb_project(id);
+CREATE INDEX IF NOT EXISTS idx_projects_kb_project ON projects(kb_project);
+
+-- May the current principal see this tenancy project? The rule is
+-- p_project_member's, said ONCE so every content policy calls it rather than
+-- carrying its own copy: (a) the parent team is one of the principal's teams;
+-- (b) a selected billing team narrows it further; (c) a `restricted` project
+-- needs an explicit membership where `team-open` does not.
+--
+-- STABLE, not IMMUTABLE: it reads current_setting and the membership tables.
+-- SECURITY INVOKER (the default) on purpose -- it must see exactly what the
+-- caller sees, and a definer function here would hand back rows the caller's
+-- own RLS denies.
+CREATE OR REPLACE FUNCTION kb_project_visible(p BIGINT) RETURNS boolean
+LANGUAGE sql STABLE AS $$
+  SELECT p IS NOT NULL AND EXISTS (
+    SELECT 1 FROM kb_project k
+     WHERE k.id = p
+       AND k.parent IN (SELECT team FROM kb_team_membership
+                        WHERE identity_key = current_setting('aimee.principal', true))
+       AND (current_setting('aimee.team', true) IS NULL
+            OR current_setting('aimee.team', true) = ''
+            OR k.parent = current_setting('aimee.team', true)::bigint)
+       AND (k.access_mode = 'team-open'
+            OR k.id IN (SELECT project FROM kb_project_membership
+                        WHERE identity_key = current_setting('aimee.principal', true))));
+$$;
+
+-- CONTENT SCOPE, part 2: the policies, DEFINED BUT NOT ENABLED.
+--
+-- A policy is inert until RLS is enabled on its table, so applying this file
+-- changes nothing about what anyone can read. That is the whole design: the
+-- migrate step re-runs this file on every deployment, and a policy that switched
+-- itself on here would hide every row that has not been attributed yet -- an
+-- outage delivered by an upgrade.
+--
+-- Enabling is therefore an ACT, not a migration: attribute the rows, check the
+-- counts, then call kb_content_scope_enable(). See the proposal for the two
+-- orderings and why this is the one without a window where the control is
+-- advertised and absent.
+DROP POLICY IF EXISTS p_documents_project ON kb_documents;
+CREATE POLICY p_documents_project ON kb_documents
+  FOR SELECT USING (EXISTS (SELECT 1 FROM projects p
+                            WHERE p.name = kb_documents.project
+                              AND kb_project_visible(p.kb_project)));
+
+DROP POLICY IF EXISTS p_file_index_project ON kb_file_index;
+CREATE POLICY p_file_index_project ON kb_file_index
+  FOR SELECT USING (EXISTS (SELECT 1 FROM projects p
+                            WHERE p.name = kb_file_index.project
+                              AND kb_project_visible(p.kb_project)));
+
+-- Turn content scoping on, once the rows carry a kb_project.
+--
+-- FORCE as well as ENABLE: without FORCE the table OWNER bypasses its own
+-- policies, and the owner is who the application connects as in a good many
+-- deployments, which would leave the control on paper only.
+--
+-- Refuses while any content is unattributed, and says how much. Enabling over
+-- unattributed rows is not a smaller version of the control: those rows become
+-- invisible to everyone, which is an outage that looks like data loss. The
+-- caller is told to finish the backfill instead.
+CREATE OR REPLACE FUNCTION kb_content_scope_enable() RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  orphan_docs BIGINT;
+  orphan_files BIGINT;
+  reader_ready TEXT;
+BEGIN
+  -- THE READER SIDE MUST EXIST FIRST, and today it does not.
+  --
+  -- aimee.principal is transaction-scoped and reset on pooled connections
+  -- (db2_tenant.c), and it is set only inside db2_tenant_scope_begin. Every one
+  -- of that function's callers is a governance, management or vault path: the
+  -- content readers -- kb_payload.c, memory_query.c, kb_service_backend.c --
+  -- open NO tenant scope at all. The service also connects as a non-owner with
+  -- NOBYPASSRLS, by design, so nothing rescues it.
+  --
+  -- So enabling before the read paths carry a principal does not hide
+  -- unattributed rows. It returns NOTHING to EVERY content read, for everyone,
+  -- which is a total outage wearing the costume of a security control.
+  --
+  -- The marker is written by the change that threads the principal through
+  -- those reads. Until then this refuses, because a comment in a proposal is not
+  -- a safeguard and this is exactly the mistake an operator cannot un-make in a
+  -- hurry.
+  SELECT value INTO reader_ready FROM kb_meta WHERE key = 'content_scope_reader_ready';
+  IF reader_ready IS DISTINCT FROM '1' THEN
+    RAISE EXCEPTION 'refusing to enable content scope: the content read paths do not set '
+                    'aimee.principal yet, so every content read would return nothing for '
+                    'everyone. The change that threads the principal through those reads sets '
+                    'kb_meta.content_scope_reader_ready=1; enable after it ships.';
+  END IF;
+  SELECT count(*) INTO orphan_docs FROM kb_documents d
+    WHERE NOT EXISTS (SELECT 1 FROM projects p
+                      WHERE p.name = d.project AND p.kb_project IS NOT NULL);
+  SELECT count(*) INTO orphan_files FROM kb_file_index f
+    WHERE NOT EXISTS (SELECT 1 FROM projects p
+                      WHERE p.name = f.project AND p.kb_project IS NOT NULL);
+  IF orphan_docs > 0 OR orphan_files > 0 THEN
+    RAISE EXCEPTION 'refusing to enable content scope: % document rows and % file-index rows '
+                    'have no kb_project, and would become invisible to everyone. Attribute them '
+                    '(projects.kb_project) and call again.', orphan_docs, orphan_files;
+  END IF;
+  ALTER TABLE kb_documents ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE kb_documents FORCE ROW LEVEL SECURITY;
+  ALTER TABLE kb_file_index ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE kb_file_index FORCE ROW LEVEL SECURITY;
+  RETURN 'content scope enabled on kb_documents, kb_file_index';
+END;
+$$;
+
+-- The way back. An operator who enables this and finds a surface they had not
+-- accounted for needs a door that is not "restore from backup".
+CREATE OR REPLACE FUNCTION kb_content_scope_disable() RETURNS text
+LANGUAGE plpgsql AS $$
+BEGIN
+  ALTER TABLE kb_documents NO FORCE ROW LEVEL SECURITY;
+  ALTER TABLE kb_documents DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE kb_file_index NO FORCE ROW LEVEL SECURITY;
+  ALTER TABLE kb_file_index DISABLE ROW LEVEL SECURITY;
+  RETURN 'content scope disabled';
+END;
+$$;
+
 -- Admin-gated tenant WRITES (slice 4). Writes are permitted only when the current
 -- principal holds an active org-admin grant, OR is the bootstrap owner. The admin
 -- check keys on the principal's OWN grant row (own-rows policy on kb_admin_grant),

@@ -77,7 +77,7 @@ $(TESTPREFIX)/unit-test-server-management-listener-live: \
 TEST_CORE_OBJS = $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o $(OBJDIR)/modules/config/config_elements.o $(OBJDIR)/modules/config/config_econ.o $(OBJDIR)/modules/config/config_mode.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/modules/config/config_accessors_0.o $(OBJDIR)/modules/config/config_accessors_1.o $(OBJDIR)/modules/config/config_accessors_2.o $(OBJDIR)/modules/config/config_accessors_3.o $(OBJDIR)/modules/config/config_accessors_4.o $(OBJDIR)/modules/config/config_accessors_5.o $(OBJDIR)/modules/config/config_accessors_6.o $(OBJDIR)/modules/config/config_accessors_7.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                  $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS) \
                  $(OBJDIR)/aimee_home.o $(OBJDIR)/shared/kb_paths.o \
-                 $(OBJDIR)/log.o $(OBJDIR)/shutdown_forensics.o $(OBJDIR)/cJSON.o $(OBJDIR)/util_url.o $(OBJDIR)/report_enrichment.o $(OBJDIR)/compact.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/economizer/coord_closet.o $(OBJDIR)/modules/economizer/tool_condense.o $(OBJDIR)/modules/economizer/fold_register.o $(OBJDIR)/slop_detect.o $(OBJDIR)/proxy_bootstrap.o \
+                 $(OBJDIR)/log.o $(OBJDIR)/shutdown_forensics.o $(OBJDIR)/cJSON.o $(OBJDIR)/util_url.o $(OBJDIR)/report_enrichment.o $(OBJDIR)/compact.o $(OBJDIR)/wire_fence.o $(OBJDIR)/slop_detect.o $(OBJDIR)/proxy_bootstrap.o \
                  $(OBJDIR)/json_fluent.o $(OBJDIR)/markdown.o $(OBJDIR)/modules/vault/runtime_secret.o
 TEST_CORE_OBJS += $(OBJDIR)/http_content_encoding.o
 # Extended set for tests that need workspace/worktree/guardrails functions (pulls in agents).
@@ -158,7 +158,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-guardrails $(TESTPREFIX)/unit-test-session-degraded-notice $(TESTPREFIX)/unit-test-kb-http-json $(TESTPREFIX)/unit-test-memory $(TESTPREFIX)/unit-test-tasks \
                $(TESTPREFIX)/unit-test-cmd-hooks-scope \
                $(TESTPREFIX)/unit-test-agent $(TESTPREFIX)/unit-test-agent-repair $(TESTPREFIX)/unit-test-agent-apikey $(TESTPREFIX)/unit-test-script-runner $(TESTPREFIX)/unit-test-provider-cli-adapter $(TESTPREFIX)/unit-test-cli-acp $(TESTPREFIX)/unit-test-acp-server $(TESTPREFIX)/unit-test-toolset-thread-scope $(TESTPREFIX)/unit-test-workspace-provider-container $(TESTPREFIX)/unit-test-mcp-native-surface $(TESTPREFIX)/unit-test-mcp-native-dispatch $(TESTPREFIX)/unit-test-extractors \
-               $(TESTPREFIX)/unit-test-text $(TESTPREFIX)/unit-test-config $(TESTPREFIX)/unit-test-roundtable-preset $(TESTPREFIX)/unit-test-roundtable-seat-resolve $(TESTPREFIX)/unit-test-audit-worm $(TESTPREFIX)/unit-test-audit-worm-chain $(TESTPREFIX)/unit-test-kb-audit-worm $(TESTPREFIX)/unit-test-config-economizer $(TESTPREFIX)/unit-test-config-snapshot $(TESTPREFIX)/unit-test-config-snapshot-race $(TESTPREFIX)/unit-test-msg-session-disable $(TESTPREFIX)/unit-test-gateway-mutate $(TESTPREFIX)/unit-test-gateway-mutate-wire $(TESTPREFIX)/unit-test-config-surface $(TESTPREFIX)/unit-test-config-field-eligibility $(TESTPREFIX)/unit-test-config-defaults-golden $(TESTPREFIX)/unit-test-config-schema-derive $(TESTPREFIX)/unit-test-config-flat-parse $(TESTPREFIX)/unit-test-config-set $(TESTPREFIX)/unit-test-config-cross-verify $(TESTPREFIX)/unit-test-config-set-section $(TESTPREFIX)/unit-test-tool-condense $(TESTPREFIX)/unit-test-tool-output-cap $(TESTPREFIX)/unit-test-ingress-preinject $(TESTPREFIX)/unit-test-code-span $(TESTPREFIX)/unit-test-code-match $(TESTPREFIX)/unit-test-gw-stage-memory $(TESTPREFIX)/unit-test-attention-guard $(TESTPREFIX)/unit-test-client-session-worktree $(TESTPREFIX)/unit-test-session-worktree-key $(TESTPREFIX)/unit-test-codex-auth $(TESTPREFIX)/unit-test-code-audit $(TESTPREFIX)/unit-test-code-audit-graph $(TESTPREFIX)/unit-test-cochange $(TESTPREFIX)/unit-test-db2-code-audit $(TESTPREFIX)/unit-test-cron-config $(TESTPREFIX)/unit-test-cron-runtime $(TESTPREFIX)/unit-test-feedback \
+               $(TESTPREFIX)/unit-test-text $(TESTPREFIX)/unit-test-config $(TESTPREFIX)/unit-test-roundtable-preset $(TESTPREFIX)/unit-test-roundtable-seat-resolve $(TESTPREFIX)/unit-test-audit-worm $(TESTPREFIX)/unit-test-audit-worm-chain $(TESTPREFIX)/unit-test-kb-audit-worm $(TESTPREFIX)/unit-test-config-economizer $(TESTPREFIX)/unit-test-config-snapshot $(TESTPREFIX)/unit-test-config-snapshot-race $(TESTPREFIX)/unit-test-msg-session-disable $(TESTPREFIX)/unit-test-gateway-mutate $(TESTPREFIX)/unit-test-gateway-mutate-wire $(TESTPREFIX)/unit-test-config-surface $(TESTPREFIX)/unit-test-config-field-eligibility $(TESTPREFIX)/unit-test-config-defaults-golden $(TESTPREFIX)/unit-test-config-schema-derive $(TESTPREFIX)/unit-test-config-flat-parse $(TESTPREFIX)/unit-test-config-set $(TESTPREFIX)/unit-test-config-cross-verify $(TESTPREFIX)/unit-test-config-set-section $(TESTPREFIX)/unit-test-tool-output-cap $(TESTPREFIX)/unit-test-ingress-preinject $(TESTPREFIX)/unit-test-code-span $(TESTPREFIX)/unit-test-code-match $(TESTPREFIX)/unit-test-gw-stage-memory $(TESTPREFIX)/unit-test-attention-guard $(TESTPREFIX)/unit-test-client-session-worktree $(TESTPREFIX)/unit-test-session-worktree-key $(TESTPREFIX)/unit-test-codex-auth $(TESTPREFIX)/unit-test-code-audit $(TESTPREFIX)/unit-test-code-audit-graph $(TESTPREFIX)/unit-test-cochange $(TESTPREFIX)/unit-test-db2-code-audit $(TESTPREFIX)/unit-test-cron-config $(TESTPREFIX)/unit-test-cron-runtime $(TESTPREFIX)/unit-test-feedback \
                $(TESTPREFIX)/unit-test-render $(TESTPREFIX)/unit-test-index $(TESTPREFIX)/unit-test-manuscript $(TESTPREFIX)/unit-test-persona $(TESTPREFIX)/unit-test-server-http $(TESTPREFIX)/unit-test-openai-shape $(TESTPREFIX)/unit-test-openai-chat-policed $(TESTPREFIX)/unit-test-openai-responses-store \
                $(TESTPREFIX)/unit-test-feedback-shadow $(TESTPREFIX)/unit-test-graph-fusion $(TESTPREFIX)/unit-test-code-vectors $(TESTPREFIX)/unit-test-graph-scoring $(TESTPREFIX)/unit-test-code-projection $(TESTPREFIX)/unit-test-entity-nodes $(TESTPREFIX)/unit-test-memory-advanced $(TESTPREFIX)/unit-test-memory-health \
                $(TESTPREFIX)/unit-test-memory-ranker-boundary \
@@ -278,6 +278,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-bus-runtime \
                $(TESTPREFIX)/unit-test-module-runtime \
                $(TESTPREFIX)/unit-test-module-json-call \
+               $(TESTPREFIX)/unit-test-economizer-module-client \
                $(TESTPREFIX)/unit-test-sandbox-learned-observe \
                $(TESTPREFIX)/unit-test-routing-module \
                $(TESTPREFIX)/unit-test-bus-capture \
@@ -373,8 +374,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-web-search \
                $(TESTPREFIX)/unit-test-tdd \
                $(TESTPREFIX)/unit-test-compact \
-               $(TESTPREFIX)/unit-test-coord-closet \
-               $(TESTPREFIX)/unit-test-economizer-activation \
                $(TESTPREFIX)/unit-test-wire-fence \
                $(TESTPREFIX)/unit-test-economizer-live-surface \
                $(TESTPREFIX)/unit-test-token-audit \
@@ -1428,7 +1427,6 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
                       $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
-                      $(OBJDIR)/modules/economizer/economizer_json.o \
                       $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
                       $(OBJDIR)/server/anthropic_profile.o $(OBJDIR)/server/minimax_profile.o \
                       $(OBJDIR)/server/mistral_profile.o $(OBJDIR)/server/openrouter_profile.o \
@@ -1448,7 +1446,6 @@ $(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
                       $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
-                      $(OBJDIR)/modules/economizer/economizer_json.o \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1466,7 +1463,6 @@ $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/test_agent_apikey.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
                       $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
-                      $(OBJDIR)/modules/economizer/economizer_json.o \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3172,6 +3168,16 @@ $(TESTPREFIX)/unit-test-module-json-call: $(OBJDIR)/tests/test_module_json_call.
 unit-test-module-json-call: $(TESTPREFIX)/unit-test-module-json-call
 	$<
 
+$(OBJDIR)/tests/test_economizer_module_client.o: C_FLAGS += -Icore/event_bus/include
+$(TESTPREFIX)/unit-test-economizer-module-client: \
+                                        $(OBJDIR)/tests/test_economizer_module_client.o \
+                                        $(OBJDIR)/modules/economizer/economizer_module_client.o \
+                                        $(OBJDIR)/module_json_call.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+unit-test-economizer-module-client: $(TESTPREFIX)/unit-test-economizer-module-client
+	$<
+
 $(TESTPREFIX)/unit-test-sandbox-learned-observe: $(OBJDIR)/tests/test_sandbox_learned_observe.o \
                                         $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o \
                                         $(OBJDIR)/modules/guardrails/guardrails_tdd.o \
@@ -3984,14 +3990,6 @@ $(TESTPREFIX)/unit-test-edit-anchored: $(OBJDIR)/tests/test_edit_anchored.o \
                       $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-# Links the config closure: tool_condense_enabled reads live config through
-# econ_preset_current now, which makes config_field_read reachable, which pulls
-# config_load_file and therefore every section parser. Previously config.o was
-# linked but config_field_read was never called, so LTO dropped all of it.
-$(TESTPREFIX)/unit-test-tool-condense: $(OBJDIR)/tests/test_tool_condense.o $(OBJDIR)/modules/economizer/tool_condense.o \
-                      $(TEST_CORE_OBJS) $(OBJDIR)/platform_random.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 $(TESTPREFIX)/unit-test-workspace-provider: $(OBJDIR)/tests/test_workspace_provider.o \
                       $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
@@ -4311,15 +4309,6 @@ $(TESTPREFIX)/unit-test-tdd: $(OBJDIR)/tests/test_tdd.o \
 
 $(TESTPREFIX)/unit-test-compact: $(OBJDIR)/tests/test_compact.o $(OBJDIR)/compact.o \
                                   $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-coord-closet: $(OBJDIR)/tests/test_coord_closet.o $(OBJDIR)/modules/economizer/coord_closet.o \
-                                  $(PLATFORM_BASIC_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-economizer-activation: \
-                                  $(OBJDIR)/tests/test_economizer_activation.o \
-                                  $(OBJDIR)/modules/economizer/economizer_json.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-wire-fence: \
@@ -5274,6 +5263,16 @@ $(TESTPREFIX)/p7-vault-rewrap-live: $(OBJDIR)/tests/test_kb_vault_rewrap_live.o 
 # [C, SQL, C] kb_audit_event chain and asserts the C verifier accepts it + the SQL row
 # hashes byte-identically in C. Same KB object closure as unit-test-vault-pg (real libpq
 # via db_postgres.o + the kb db2 layer that carries kb_audit_worm.o/schema.sql).
+# Content-scope referent + predicate (slice 1). REAL-PG test: SKIPs cleanly
+# without AIMEE_TEST_PG_URL, because RLS and current_setting mean nothing on the
+# SQLite shim.
+$(TESTPREFIX)/unit-test-content-scope-pg: $(OBJDIR)/tests/test_content_scope_pg.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB)
+
 $(TESTPREFIX)/unit-test-kb-audit-worm-pg: $(OBJDIR)/tests/test_kb_audit_worm_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
@@ -6911,6 +6910,7 @@ $(TESTPREFIX)/unit-test-config-set-section: $(OBJDIR)/tests/test_config_set_sect
 # cache from binaries that do not reference it.
 TEST_KB_RUNTIME_TARGETS = \
   $(TESTPREFIX)/unit-test-kb-audit-worm-pg \
+  $(TESTPREFIX)/unit-test-content-scope-pg \
   $(TESTPREFIX)/unit-test-kb-bedrock-live \
   $(TESTPREFIX)/unit-test-kb-p2b-egress-live \
   $(TESTPREFIX)/unit-test-kb-vault-key-use-live \

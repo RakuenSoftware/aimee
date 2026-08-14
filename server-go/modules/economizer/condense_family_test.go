@@ -2,12 +2,14 @@ package economizer
 
 import (
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
 
-// DIFFERENTIAL tests for the family filters and the two line models, against the
-// real C (tool_condense.c compiled behind a throwaway harness).
+// DIFFERENTIAL tests for the family filters and the two line models. The
+// expectations were captured from the retired C implementation before removal.
 
 // THE TWO LINE MODELS. tc_strip_noise stops at end-of-string; the dedup /
 // truncate / signal-filter family counts the empty segment after a trailing
@@ -202,6 +204,52 @@ func TestTCRecallRejectsBadRef(t *testing.T) {
 	}
 	if _, err := TCRecall("", "tc-0123456789abcdef"); err == nil {
 		t.Error("an empty spill dir must be refused")
+	}
+}
+
+func TestTCRecallRefusesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "secret")
+	if err := os.WriteFile(target, []byte("must not escape"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ref := "tc-0123456789abcdef"
+	if err := os.Symlink(target, filepath.Join(dir, ref+".out")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := TCRecall(dir, ref); err == nil || got != "" {
+		t.Fatalf("symlink recall = %q, %v", got, err)
+	}
+}
+
+func TestTCSpillWriteRefusesTempSymlink(t *testing.T) {
+	dir := t.TempDir()
+	ref := "tc-0123456789abcdef"
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("unchanged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tmp := filepath.Join(dir, ref+"."+strconv.Itoa(os.Getpid())+".tmp")
+	if err := os.Symlink(target, tmp); err != nil {
+		t.Fatal(err)
+	}
+	if err := tcSpillWrite(dir, ref, "replacement"); err == nil {
+		t.Fatal("writer followed a planted temp symlink")
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != "unchanged" {
+		t.Fatalf("target changed: %q, %v", got, err)
+	}
+}
+
+func TestTCRecallRefusesOversizedSpill(t *testing.T) {
+	dir := t.TempDir()
+	ref := "tc-0123456789abcdef"
+	if err := os.WriteFile(filepath.Join(dir, ref+".out"), make([]byte, TCCeiling+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := TCRecall(dir, ref); err == nil || got != "" {
+		t.Fatalf("oversized recall = %d bytes, %v", len(got), err)
 	}
 }
 

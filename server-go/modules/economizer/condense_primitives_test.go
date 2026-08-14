@@ -2,11 +2,11 @@ package economizer
 
 import "testing"
 
-// DIFFERENTIAL test against the real C primitives.
+// DIFFERENTIAL test against the retired C primitives.
 //
 // Every `want` is the verbatim stdout of tc_strip_noise / tc_dedup_lines /
-// tc_truncate_with_signal for that input, captured by compiling
-// src/modules/economizer/tool_condense.c against a throwaway harness.
+// tc_truncate_with_signal for that input, captured before the C implementation
+// was removed.
 //
 // Line-splitting edge cases (trailing newline, all-blank input, empty input) are
 // where a reimplementation silently drifts, so they are pinned explicitly rather

@@ -27,13 +27,18 @@ design.
 
 ## Public contracts
 
-One stage. `coord_closet`, `fold_recall`, the fold itself and the condensation primitives
-are internal to a reduction rather than separately callable, so exposing them would be
-surface with no caller.
+Reduction is the main stage. Four narrow compatibility stages retire the last live C
+implementations of algorithms already owned by Go: strict byte-preserving JSON compaction,
+lossless spill recall, and process-local condensation telemetry. They expose no reduction
+policy; they let C callers marshal bytes onto the event bus instead of keeping duplicate engines.
 
 | Stage | Kind | Request | Response |
 |---|---|---|---|
 | `economizer-reduce` | 11009 | `{messages, system_prompt, seam, …config, state, turn}` | `{messages?, mutated, reason, …ledger, state}` |
+| `economizer-json-compact` | 11010 | raw JSON bytes | result header plus compacted raw bytes |
+| `economizer-tool-recall` | 11011 | bounded spill-directory/ref wire | result header plus recalled raw bytes |
+| `economizer-tool-stats` | 11012 | empty | fixed process-counter snapshot |
+| `economizer-record-build` | 11013 | session messages and range | record-derived files/errors/decisions plus Coordinate Closet |
 
 The kind is fixed by the process contract at `4096 + ordinal*256 + stage`; economizer is
 ordinal 27, so it is not a free choice.
@@ -54,20 +59,26 @@ exchanges.
 - `module-runtime`: bus registration, stage dispatch and the process lifecycle.
 
 Everything in C reaches it through one file, `src/modules/economizer/economizer_module_client.c`,
-which owns the whole call: build the request, hand it to `aimee_module_json_call`, parse
-the reply. Two seams consume it.
+which owns request construction, event-bus calls, and reply decoding. Reduction uses the
+shared JSON call helper; auxiliary byte-preserving stages use bounded binary frames.
 
 | Consumer | Seam | Entry point |
 |---|---|---|
 | `src/posix/agent_runtime.c` | delegate (aimee's own agent loop) | `econ_module_reduce` |
 | `src/modules/economizer/gateway_mutate_wire.c` | gateway (inbound `/v1` proxy) | `econ_module_reduce` |
+| `src/posix/agent_runtime.c` | fresh authenticated tool result | `econ_module_json_compact` |
+| `src/modules/tools/agent_tools_dispatch.c` | `tool_output_get` | `econ_module_tool_recall` |
+| `src/server/server_state.c` | economizer dashboard | `econ_module_tool_stats` |
+| `src/server/session_compact.c` | record-derived flashback | `econ_module_record_build` |
 
 The client NEVER mutates its input array. `*reduced == NULL` means "use the original",
 which is also what every failure path yields.
+The dashboard's tool-condensation object includes `available`; zero counters from an
+unattached module are therefore not presented as genuine zero activity.
 
 ## Providers and readiness
 
-The module serves one bus stage and calls no provider itself, so it has no upstream to be
+The module serves five bus stages and calls no provider itself, so it has no upstream to be
 ready for. Readiness is binary and observed at the call site: `obs_bus_module_available`
 reports whether an `aimee-module-economizer` process is attached to the bus.
 
@@ -89,14 +100,15 @@ than a model name, so the pricing table stays with whoever owns it.
 
 ## Surfaces
 
-There is no HTTP surface, no MCP tool and no CLI verb. The single entry point is the bus
-stage above, and the only in-process surface is the C client header
+There is no direct HTTP surface, MCP tool or CLI verb. The only in-process surface is the C client header
 `economizer_module_client.h`.
 
-Two C files remain beside the client, and both are seam mechanics rather than reduction
-policy: `gateway_mutate.c` decides whether a reported reduction is safe to dispatch, and
+The only remaining C files are the bus client and gateway connectivity seams; their exported
+entry points only marshal requests to the Go process. They contain no reduction policy:
+`gateway_mutate.c` decides whether a reported reduction is safe to dispatch, and
 `gateway_mutate_wire.c` drives the snapshot/restore/retry dance around the provider call.
-The reduction itself is entirely Go.
+JSON compaction, tool condensation/recall, register parsing, and Coordinate Closet extraction
+are entirely Go.
 
 ## Data and migrations
 
@@ -104,7 +116,7 @@ No schema, no tables, no migrations. Reducer state is not the module's to keep: 
 freeze boundary, its `prefix_digest` and the page table travel in and out with each
 request because the caller already persists them.
 
-The one durable artifact is the **condensation spill store** on local disk, written with
+The one durable artifact is the **condensation spill store** on local disk, written by Go with
 temp file, `fsync`, atomic rename. Spill refs are content-derived rather than sequential,
 so the store is not enumerable by guessing. A state blob that cannot be read is discarded
 rather than treated as fatal: the reduction still runs, starting from a cold freeze and an
@@ -135,9 +147,10 @@ registry, so no proof-authorized transform can run.
 ## Tests and failure behavior
 
 The Go package carries the reduction tests, including the differential ones that pinned
-the port against the C originals byte for byte. On the C side `unit-test-gateway-mutate`,
-`unit-test-gateway-mutate-wire` and `unit-test-economizer-activation` cover the seam
-decision, the wire dance and the JSON canonicaliser.
+the port against the C originals byte for byte. It also covers JSON compaction (including
+invalid UTF-8), condensation/recall, counters, and every process-stage frame. On the C side
+`unit-test-gateway-mutate` and `unit-test-gateway-mutate-wire` cover the seam decision and
+provider retry dance.
 
 Failure behavior is uniform and fail-open. Every failure mode returns non-zero and leaves
 the caller's array untouched: bus unavailable, malformed reply, allocation failure, or a
@@ -159,8 +172,8 @@ looking at the reducer.
 
 ## Compatibility
 
-The bus kind `11009` is derived from the module's ordinal, so it is stable as long as the
-ordinal is. Request and response are JSON objects read field-by-field: an unknown field is
+The bus kinds `11009` through `11013` are derived from the module's ordinal and stage, so they
+are stable as long as the ordinal is. Reduction request and response bodies are JSON objects read field-by-field: an unknown field is
 ignored, and an absent optional field takes its zero value, so a newer module and an older
 caller interoperate in both directions.
 

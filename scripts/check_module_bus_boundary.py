@@ -113,7 +113,6 @@ CORE_LINKED_REACH = {
     ("src/modules/delegates/delegate_sandbox_image.c", "config/config.h"),
     ("src/modules/delegates/include/aimee/delegates/delegate_credentials.h", "vault/vault_principal.h"),
     ("src/modules/economizer/gateway_mutate_wire.c", "config/config.h"),
-    ("src/modules/economizer/tool_condense.h", "config/config.h"),
     ("src/modules/execution-policy/execution_policy.c", "config/config.h"),
     ("src/modules/gateway/gateway_policy.c", "config/config.h"),
     ("src/modules/git/git_forge_vault.c", "vault/vault_service.h"),
