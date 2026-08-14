@@ -103,6 +103,13 @@ of the earlier slices.
 - **Negative.** An expired or wrong-audience token yields no actor rather than a fallback identity,
   and the read returns nothing rather than everything.
 
+## Superseded in part
+
+`per-user-content-scope-identity-map.md` corrects the "forward the token" decision here. It holds for
+OIDC, which carries its own proof. It cannot hold for the webchat and local-CLI surfaces, whose
+identities are attested by the operating system on aimee-server's own machine and have no signed
+artefact to forward.
+
 ## Status
 
 Pending, and blocking `kb_content_scope_enable()` by construction: the marker it checks is set by
