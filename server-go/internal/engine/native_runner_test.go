@@ -884,6 +884,8 @@ func TestConfiguredRoundtableReportsEveryPhaseDeadline(t *testing.T) {
 		wantPause string
 	}{
 		{
+			// The analysis seats consume the configured deadline, so failure to
+			// reach quorum is an execution deadline rather than unreachability.
 			name:      "analysis",
 			preset:    `{"name":"default","seats":[{"model":"codex","persona":"security"},{"model":"minimax","persona":"qa"}],"min_successful":2,"discussion":true,"deadline_ms":90}`,
 			agents:    deadlineSeatAgents{},

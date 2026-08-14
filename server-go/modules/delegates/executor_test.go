@@ -123,6 +123,16 @@ func TestGroupPlanStagePreservesTypedCapacityFailure(t *testing.T) {
 	}
 }
 
+func TestGroupPlanStageKeepsNonCapacityFailureAsTransportError(t *testing.T) {
+	executor := &planningExecutor{err: errors.New("registry unavailable")}
+	request, _ := json.Marshal(delegatecontract.GroupPlan{Version: delegatecontract.WireVersion,
+		Seats: []delegatecontract.GroupPlanSeat{{Role: "review", Persona: "qa"}}})
+	reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageGroupPlan}, request)
+	if status != bus.ModuleStatusInternal || len(reply) != 0 {
+		t.Fatalf("non-capacity planner failure became a domain reply: status=%d reply=%q", status, reply)
+	}
+}
+
 func TestRegistryExecutorRunsArgvWithoutShell(t *testing.T) {
 	home := t.TempDir()
 	script := filepath.Join(home, "delegate-helper")
@@ -288,6 +298,29 @@ func TestPlanGroupExcludesUnavailableLocalBackendAndKeepsHealthyFallback(t *test
 	}
 }
 
+func TestPlanGroupDoesNotCallMissingEligibilityCapacity(t *testing.T) {
+	home := t.TempDir()
+	registry := map[string]any{"agents": []map[string]any{
+		{"name": "unavailable", "cli_kind": "codex", "cli_cmd": "codex", "delegate_available": false,
+			"roles": []string{"review"}, "personas": []string{"all"}},
+		{"name": "wrong-role", "cli_kind": "codex", "cli_cmd": "codex", "delegate_available": true,
+			"roles": []string{"code"}, "personas": []string{"all"}},
+	}}
+	body, _ := json.Marshal(registry)
+	if err := os.WriteFile(filepath.Join(home, "models.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executor, err := NewRegistryExecutor(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = executor.PlanGroup(t.Context(), []delegatecontract.GroupPlanSeat{{Role: "review", Persona: "qa"}})
+	if err == nil || delegatecontract.IsCapacityBackpressure(err) ||
+		errors.Is(err, delegatecontract.ErrDelegateCapacity) {
+		t.Fatalf("missing eligible healthy backend was mislabeled as capacity: %v", err)
+	}
+}
+
 func TestAgentLimiterTypesDeadlineReachedWhileWaitingForCapacity(t *testing.T) {
 	limiter := &agentLimiter{max: 1, changed: make(chan struct{})}
 	release, err := limiter.acquire(t.Context())
@@ -301,6 +334,22 @@ func TestAgentLimiterTypesDeadlineReachedWhileWaitingForCapacity(t *testing.T) {
 	if !errors.Is(err, delegatecontract.ErrDelegateCapacityDeadline) ||
 		!errors.Is(err, context.DeadlineExceeded) || errors.Is(err, delegatecontract.ErrDelegateTerminal) {
 		t.Fatalf("capacity wait deadline lost its identity: %v", err)
+	}
+}
+
+func TestAgentLimiterPreservesCancellationWhileWaitingForCapacity(t *testing.T) {
+	limiter := &agentLimiter{max: 1, changed: make(chan struct{})}
+	release, err := limiter.acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = limiter.acquire(ctx)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		delegatecontract.IsCapacityDeadline(err) || delegatecontract.IsExecutionDeadline(err) {
+		t.Fatalf("capacity wait cancellation was retyped as a deadline: %v", err)
 	}
 }
 

@@ -197,7 +197,10 @@ func (l *agentLimiter) acquire(ctx context.Context) (func(), error) {
 		l.mu.Unlock()
 		select {
 		case <-ctx.Done():
-			return nil, errors.Join(delegatecontract.ErrDelegateCapacityDeadline, ctx.Err())
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return nil, errors.Join(delegatecontract.ErrDelegateCapacityDeadline, ctx.Err())
+			}
+			return nil, ctx.Err()
 		case <-changed:
 		}
 	}
@@ -303,9 +306,13 @@ func (r *RegistryExecutor) PlanGroup(ctx context.Context,
 			continue
 		}
 		best := -1
+		hasEligible := false
 		for j, candidate := range candidates {
-			if !eligible(candidate.agent, seat.Role, seat.Persona) ||
-				(candidate.max > 0 && candidate.active+agentUses[candidate.agent.Name] >= candidate.max) {
+			if !eligible(candidate.agent, seat.Role, seat.Persona) {
+				continue
+			}
+			hasEligible = true
+			if candidate.max > 0 && candidate.active+agentUses[candidate.agent.Name] >= candidate.max {
 				continue
 			}
 			if best < 0 || groupCandidateLess(candidate, candidates[best],
@@ -314,8 +321,12 @@ func (r *RegistryExecutor) PlanGroup(ctx context.Context,
 			}
 		}
 		if best < 0 {
-			return nil, fmt.Errorf("%w: delegate group cannot fill seat %d (%s/%s) within enabled capacity",
-				delegatecontract.ErrDelegateCapacity, i+1, seat.Role, seat.Persona)
+			if hasEligible {
+				return nil, fmt.Errorf("%w: delegate group cannot fill seat %d (%s/%s) within enabled capacity",
+					delegatecontract.ErrDelegateCapacity, i+1, seat.Role, seat.Persona)
+			}
+			return nil, fmt.Errorf("delegate group has no eligible healthy backend for seat %d (%s/%s)",
+				i+1, seat.Role, seat.Persona)
 		}
 		if err := assign(i, candidates[best]); err != nil {
 			return nil, err
@@ -763,6 +774,13 @@ func (r *RegistryExecutor) Execute(ctx context.Context, request delegatecontract
 	if err := cmd.Run(); err != nil {
 		if monitor.Exceeded() {
 			result.Error = fmt.Sprintf("delegate maximum turn count exceeded (%d)", request.MaxTurns)
+			return result
+		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			result.Error = delegatecontract.ErrDelegateExecutionDeadline.Error()
+			if detail := strings.TrimSpace(output.String()); detail != "" {
+				result.Error += ": " + delegatecontract.SafeDiagnostic(detail)
+			}
 			return result
 		}
 		detail := strings.TrimSpace(output.String())

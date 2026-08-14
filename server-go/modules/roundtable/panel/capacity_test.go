@@ -14,6 +14,21 @@ type unavailableDelegates struct {
 	waitForContext bool
 }
 
+type categorizedDelegates []string
+
+func (d categorizedDelegates) Group(_ context.Context, _ Run, requests []SeatRequest) []SeatResult {
+	out := make([]SeatResult, len(requests))
+	for i := range out {
+		category := d[i]
+		out[i] = SeatResult{Err: errors.New(category), FailureCategory: category, FailureDetail: category}
+	}
+	return out
+}
+
+func (d categorizedDelegates) One(ctx context.Context, run Run, request SeatRequest) SeatResult {
+	return d.Group(ctx, run, []SeatRequest{request})[0]
+}
+
 func (d unavailableDelegates) Group(ctx context.Context, _ Run, requests []SeatRequest) []SeatResult {
 	if d.waitForContext {
 		<-ctx.Done()
@@ -72,6 +87,22 @@ func TestCapacityWaitDeadlineIsDistinctFromDelegateExecutionDeadline(t *testing.
 	}
 	if execution.PauseReason != "panel_deadline" || !execution.DeadlineHit {
 		t.Fatalf("delegate execution deadline was not distinct: %+v", execution)
+	}
+}
+
+func TestMixedCapacityAndExecutionDeadlineRemainsExecutionDeadline(t *testing.T) {
+	for _, categories := range []categorizedDelegates{
+		{"capacity_backpressure", "deadline"},
+		{"capacity_deadline", "deadline"},
+	} {
+		result, err := Convene(t.Context(), categories,
+			capacityTestRun("mixed-deadline"), capacityTestPanel(0), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.PauseReason != "panel_deadline" || !result.DeadlineHit {
+			t.Fatalf("execution timeout was mislabeled as a capacity-wait deadline: %+v", result)
+		}
 	}
 }
 

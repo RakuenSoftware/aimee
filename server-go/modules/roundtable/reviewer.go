@@ -164,6 +164,8 @@ func seatResult(participant, response string, cost float64, costUnknown bool, er
 // seatFailureCategory names why a seat failed in the transport's own terms, so
 // a panel that cannot review is distinguishable from a reviewer that would not.
 func seatFailureCategory(err error) string {
+	// Typed deadlines intentionally unwrap to context.DeadlineExceeded, so their
+	// specific sentinels must stay ahead of the generic deadline branch.
 	switch {
 	case errors.Is(err, delegate.ErrDelegateCapacityDeadline):
 		return "capacity_deadline"

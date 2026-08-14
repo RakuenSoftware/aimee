@@ -225,26 +225,27 @@ func Convene(ctx context.Context, delegates Delegates, run Run, panel Panel, foc
 func panelUnavailableState(analysis Analysis, panelDeadline bool) (reason, detail string, deadlineHit bool) {
 	hasCapacity := false
 	hasCapacityDeadline := false
-	hasDeadline := panelDeadline
+	hasExecutionDeadline := false
 	for _, failure := range analysis.Failures {
 		switch failure.Category {
 		case "capacity_backpressure":
 			hasCapacity = true
 		case "capacity_deadline":
 			hasCapacityDeadline = true
-			hasDeadline = true
 		case "deadline":
-			hasDeadline = true
+			hasExecutionDeadline = true
 		}
 	}
 	switch {
-	case hasCapacityDeadline || (hasCapacity && hasDeadline):
+	case hasExecutionDeadline:
+		return "panel_deadline", "delegate execution deadline expired before the panel reached quorum: " + analysis.Unreachable, true
+	case hasCapacityDeadline || (hasCapacity && panelDeadline):
 		return "panel_capacity_deadline", "deadline expired while waiting for eligible delegate capacity: " + analysis.Unreachable, true
+	case panelDeadline:
+		return "panel_deadline", "delegate execution deadline expired before the panel reached quorum: " + analysis.Unreachable, true
 	case hasCapacity:
 		return "panel_capacity", "eligible delegate capacity is saturated; retry after capacity clears: " + analysis.Unreachable, false
-	case hasDeadline:
-		return "panel_deadline", "delegate execution deadline expired before the panel reached quorum: " + analysis.Unreachable, true
 	default:
-		return "panel_unreachable", analysis.Unreachable, false
+		return "panel_unreachable", analysis.Unreachable, panelDeadline
 	}
 }

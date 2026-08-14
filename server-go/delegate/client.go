@@ -83,6 +83,7 @@ var (
 	ErrDelegateCostLimitUnsupported = errors.New("delegate CLI execution cannot enforce a monetary cost limit")
 	ErrDelegateCapacity             = errors.New("delegate capacity unavailable [aimee_err=concurrency_limit]")
 	ErrDelegateCapacityDeadline     = errors.New("delegate capacity wait deadline exceeded [aimee_err=capacity_deadline]")
+	ErrDelegateExecutionDeadline    = errors.New("delegate execution deadline exceeded [aimee_err=execution_deadline]")
 )
 
 type DelegateExecutionError struct {
@@ -143,17 +144,24 @@ type GroupPlanResult struct {
 	Error string `json:"error,omitempty"`
 }
 
-type stageCaller interface {
+// StageCaller is the delegate bus-call seam. The production implementation is
+// bus.ConcurrentModuleCaller; exposing the narrow contract also lets integration
+// tests cross the real module handler without opening a daemon socket.
+type StageCaller interface {
 	Call(context.Context, uint32, uint32, uint64, time.Duration, []byte) ([]byte, error)
 }
 
 type BusClient struct {
-	caller   stageCaller
+	caller   StageCaller
 	deadline time.Duration
 	trace    atomic.Uint64
 }
 
 func NewBusClient(caller *bus.ConcurrentModuleCaller, deadline time.Duration) (*BusClient, error) {
+	return NewClient(caller, deadline)
+}
+
+func NewClient(caller StageCaller, deadline time.Duration) (*BusClient, error) {
 	if caller == nil {
 		return nil, errors.New("delegate bus caller is required")
 	}
@@ -208,7 +216,7 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 	}
 	reply, err := c.caller.Call(ctx, EventKind, StageInvoke, c.trace.Add(1), deadline, body)
 	if err != nil {
-		err = classifyCapacityError(err)
+		err = classifyDelegateError(err)
 		if errors.Is(err, bus.ErrModuleCallCapabilityAbsent) ||
 			errors.Is(err, bus.ErrModuleCallRejected) ||
 			errors.Is(err, bus.ErrModuleCallNotDispatched) {
@@ -236,8 +244,8 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 		if detail == "" {
 			detail = ErrDelegateTerminal.Error()
 		}
-		failure := classifyCapacityError(errors.New(detail))
-		if !IsCapacityBackpressure(failure) && !IsCapacityDeadline(failure) {
+		failure := classifyDelegateError(errors.New(detail))
+		if !IsCapacityBackpressure(failure) && !IsCapacityDeadline(failure) && !IsExecutionDeadline(failure) {
 			failure = fmt.Errorf("%w: %s", ErrDelegateTerminal, detail)
 		}
 		return DelegateResult{}, &DelegateExecutionError{Err: failure,
@@ -292,7 +300,7 @@ func (c *BusClient) DelegateGroup(ctx context.Context, requests []DelegateReques
 		}
 	}
 	if err != nil {
-		err = classifyCapacityError(err)
+		err = classifyDelegateError(err)
 		for i := range out {
 			out[i] = DelegateGroupResult{Participant: requests[i].Participant, Err: err}
 		}
@@ -354,7 +362,12 @@ func IsCapacityDeadline(err error) bool {
 		strings.Contains(err.Error(), "aimee_err=capacity_deadline"))
 }
 
-func classifyCapacityError(err error) error {
+func IsExecutionDeadline(err error) bool {
+	return err != nil && (errors.Is(err, ErrDelegateExecutionDeadline) ||
+		strings.Contains(err.Error(), "aimee_err=execution_deadline"))
+}
+
+func classifyDelegateError(err error) error {
 	switch {
 	case err == nil:
 		return nil
@@ -362,6 +375,8 @@ func classifyCapacityError(err error) error {
 		return errors.Join(ErrDelegateCapacityDeadline, context.DeadlineExceeded, err)
 	case IsCapacityBackpressure(err):
 		return errors.Join(ErrDelegateCapacity, err)
+	case IsExecutionDeadline(err):
+		return errors.Join(ErrDelegateExecutionDeadline, context.DeadlineExceeded, err)
 	default:
 		return err
 	}
