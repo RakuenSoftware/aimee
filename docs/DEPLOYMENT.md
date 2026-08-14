@@ -114,11 +114,16 @@ sessions can use `aimee git`, but cannot read the token back out.
 
 Supply it at first boot as `AIMEE_FORGE_TOKEN`, which the server seals and then
 unsets. If a deployment came up without it, seal it afterwards instead of
-re-creating the stack:
+re-creating the stack. Run it as the Vault owner, the same way the webchat seal
+does, so the entry is not written by root:
 
 ```bash
-printf '%s' "$TOKEN" | aimee-server --forge-vault-seal forge_token
+# inside the server container
+printf '%s' "$TOKEN" | runuser -u aimee -- aimee-server --forge-vault-seal forge_token
 ```
+
+No restart is needed: the next forge call reads the new value straight from
+Vault.
 
 The secret travels on stdin only, never argv or an environment mapping, so it
 cannot leak through a process list or `/proc`. Re-sealing replaces the value, so
