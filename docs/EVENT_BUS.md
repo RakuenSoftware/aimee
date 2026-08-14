@@ -167,6 +167,54 @@ The bus is intra-daemon. `aimee-server` and `aimee-kb` each host their own bus f
 browsers, thin clients, and providers uses the authenticated `/v1` network surfaces through the
 shared connection layer.
 
+## Admitting a module process
+
+A module process is not admitted because it connected. The host reads a policy directory at
+`<config dir>/modules.d/<daemon>` and admits only principals granted there, so a module started
+against a daemon with no matching grant is refused with `bus: attach denied` and never serves a
+stage. Each grant is one `*.grant` file (any other suffix is ignored) of `key=value` lines:
+
+| Key | Meaning |
+| --- | --- |
+| `version` | `1` |
+| `principal_class` | principal class; module processes use `1` |
+| `principal_ref` | the module's stable principal id, from `cmd/aimee-module/main.go` |
+| `uid` | `self` to require the daemon's own uid, or a numeric uid |
+| `executable` | absolute path of the module binary |
+| `publish` / `subscribe` / `request` / `serve` | comma-separated event kinds, empty for none |
+
+`serve` lists event KINDS, not stage ids. The kinds and stage ids for a module live in its
+`module_api.h` (for git, `src/modules/git/include/aimee/git/module_api.h`).
+
+Granting the git module on `aimee-server`, which serves six kinds (`7425` to `7430`):
+
+```
+# <AIMEE_HOME>/modules.d/server/git.grant
+version=1
+principal_class=1
+principal_ref=13
+uid=self
+executable=/opt/aimee/aimee-module-git
+publish=
+subscribe=
+request=
+serve=7425,7426,7427,7428,7429,7430
+```
+
+One binary hosts every module and selects by its own name, so build it once and invoke it as
+`aimee-module-<name>` with the daemon's bus socket:
+
+```bash
+go build -o aimee-module-git ./cmd/aimee-module
+./aimee-module-git "$AIMEE_HOME/server-module-bus.sock"
+```
+
+Read the failure from both ends. The module says `bus: attach denied`; the daemon side shows up as
+whatever depended on that stage, which is rarely phrased as a bus problem. A git module that never
+attaches makes every forge call report that the git module could not be reached, and makes credential
+resolution report that the credential-resolve stage could not be reached, because the stage that
+answers "which workspace owns this checkout" is the module itself.
+
 ## Adding a consumer
 
 Keep the contract small:
