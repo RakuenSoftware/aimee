@@ -92,15 +92,6 @@ extern "C"
    /* Estimated token count of a messages array (for the token-delta telemetry). */
    int gw_snapshot_token_count(cJSON *messages);
 
-   /* Decide whether the reduced result may be applied to the live request.
-    * `reduce_rc` is context_reduce's return; `res` its populated result. Returns
-    * GW_BYPASS_NONE only if: the reducer reported no internal error; the result is a
-    * genuine REDUCED net shrink (a no-op reduce is not a mutation); and a
-    * message_history_repair run on a COPY of the reduced result reports no structural
-    * violation. Otherwise returns the specific hard-bypass reason. Pure: does not
-    * mutate `res` or emit telemetry. */
-   gw_bypass_reason_t gw_should_apply(int reduce_rc, const gw_reduce_report_t *res);
-
    /* Install `reduced` as container[key], replacing the existing array. Takes
     * ownership of `reduced` on success (it is added to `container`). Returns 0 on
     * success; on failure returns non-zero (map to GW_BYPASS_REPLACE_FAILED), leaves
