@@ -2,7 +2,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include "db1.h"
-#include "db1/model_pricing.h"
+#include "modules/db1/model_pricing.h"
 
 static int near_eq(double a, double b)
 {

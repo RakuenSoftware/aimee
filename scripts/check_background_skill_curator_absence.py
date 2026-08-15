@@ -87,7 +87,7 @@ def validate(root: Path) -> None:
     memory = read(root / "src/modules/memory/memory_maintenance.c")
     require("db1_maintenance_state_load" in memory, "memory-maintenance-preserved", "load anchor")
     require("db1_maintenance_state_save" in memory, "memory-maintenance-preserved", "save anchor")
-    require((root / "src/db1/maintenance.c").is_file(), "maintenance-state-preserved", "DB1 implementation")
+    require((root / "src/modules/db1/maintenance.c").is_file(), "maintenance-state-preserved", "DB1 implementation")
 
     kb_files = list((root / "src/modules/kb-synthesis").glob("kb_curator_*.c"))
     require(len(kb_files) >= 3, "kb-curator-preserved", "KB curator implementation family")

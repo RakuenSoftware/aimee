@@ -51,7 +51,7 @@
 #include "model_provider.h"
 #include "model_registry.h"
 #include "db1.h"
-#include "db1/user_memory.h"
+#include "modules/db1/user_memory.h"
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"

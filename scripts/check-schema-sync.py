@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DB1_SCHEMA = ROOT / "src" / "db1" / "schema.sql"
+DB1_SCHEMA = ROOT / "src" / "modules" / "db1" / "schema.sql"
 DB2_SCHEMA_PG = ROOT / "src" / "db2" / "schema.sql"
 DB2_SCHEMA_SQLITE = ROOT / "src" / "db2" / "schema_sqlite.sql"
 
@@ -200,7 +200,7 @@ def main() -> int:
         return 0
 
     if db1_unexpected:
-        print("schema drift: non-DB1 tables present in src/db1/schema.sql:")
+        print("schema drift: non-DB1 tables present in src/modules/db1/schema.sql:")
         for name in sorted(db1_unexpected):
             print(f"  - {name}")
     if db1_only_in_db2_native:

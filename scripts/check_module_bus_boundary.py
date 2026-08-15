@@ -42,6 +42,53 @@ IR_SHARED_TYPE = {
 }
 # A peer service called directly in process. Each one must become bus traffic.
 PENDING_BUS_MIGRATION = {
+    # DB1 moved under src/modules in the module boundary phase, which made every
+    # existing reach into it a visible cross-module crossing. None of these are
+    # new coupling: they are the pre-existing direct includes, now named. Phase B
+    # of the DB1 proposal removes them one at a time, and the stale-allowlist rule
+    # below forces each to be struck from this list as it goes -- so this block
+    # shrinking to nothing IS the progress bar for that migration.
+    ("src/modules/audit/include/aimee/audit/obs_bus.h", "db1/guardrail_events.h"),
+    ("src/modules/benchmarks/agent_eval.c", "db1/db1.h"),
+    ("src/modules/config/config.c", "db1/maintenance.h"),
+    ("src/modules/config/config_save.c", "db1/maintenance.h"),
+    ("src/modules/db1/db1_cron_jobs.h", "config/config.h"),
+    ("src/modules/db1/ensemble.c", "config/config.h"),
+    ("src/modules/delegates/delegate_launch.c", "db1/db1.h"),
+    ("src/modules/delegates/delegate_run_phases.c", "modules/db1/delegate_learning.h"),
+    ("src/modules/delegates/delegate_run_phases.c", "modules/db1/interaction_events.h"),
+    ("src/modules/delegates/include/aimee/delegates/delegate_economics.h", "db1/coord_jobs.h"),
+    ("src/modules/delegates/include/aimee/delegates/delegate_patch_coordinator.h", "db1/coord_jobs.h"),
+    ("src/modules/execution-policy/execution_policy.c", "db1/db1.h"),
+    ("src/modules/git/mcp_git_query.c", "modules/db1/git_ownership.h"),
+    ("src/modules/guardrails/guardrails_semantic.c", "modules/db1/guardrail_events.h"),
+    ("src/modules/kb_client/kb_client_memory.c", "modules/db1/user_memory.h"),
+    ("src/modules/learning/learning_router.c", "db1/db1.h"),
+    ("src/modules/memory/memory_advanced.c", "db1/db1.h"),
+    ("src/modules/protocols/mcp/mcp_client_registry.c", "db1/mcp_osv_cache.h"),
+    ("src/modules/roadmap/roadmap_auto.c", "modules/db1/roadmap_runtime.h"),
+    ("src/modules/roadmap/roadmap_milestone.c", "modules/db1/roadmap_runtime.h"),
+    ("src/modules/roadmap/roadmap_report.c", "modules/db1/roadmap_runtime.h"),
+    ("src/modules/roundtable/delegate_ensemble.c", "db1/cost_fold.h"),
+    ("src/modules/roundtable/delegate_ensemble_review.c", "db1/cost_fold.h"),
+    ("src/modules/roundtable/roundtable_pipeline_capture.c", "db1/roundtable_pipeline.h"),
+    ("src/modules/roundtable/roundtable_pipeline_eval.c", "db1/roundtable_pipeline.h"),
+    ("src/modules/tools/agent_tools.c", "db1/db1.h"),
+    ("src/modules/tools/agent_tools_dispatch.c", "db1/db1.h"),
+    ("src/modules/workflows/wfe_advance_exec.c", "db1/wfe_binding.h"),
+    ("src/modules/workflows/wfe_advance_exec.c", "db1/wfe_store.h"),
+    ("src/modules/workflows/wfe_approval.c", "db1/wfe_store.h"),
+    ("src/modules/workflows/wfe_autonomy.c", "db1/wfe_store.h"),
+    ("src/modules/workflows/wfe_bind_ingress.c", "db1/wfe_binding.h"),
+    ("src/modules/workflows/wfe_bind_ingress.c", "db1/wfe_store.h"),
+    ("src/modules/workflows/wfe_block_resolve.c", "db1/wfe_binding.h"),
+    ("src/modules/workflows/wfe_block_resolve.c", "db1/wfe_store.h"),
+    ("src/modules/workflows/wfe_blocks.c", "db1/wfe_store.h"),
+    ("src/modules/workflows/wfe_engine.c", "db1/wfe_store.h"),
+    ("src/modules/workflows/wfe_live_foreach.c", "db1/db1.h"),
+    ("src/modules/workflows/wfe_live_foreach.c", "db1/wfe_store.h"),
+    ("src/modules/workflows/wfe_roundtable.c", "db1/wfe_store.h"),
+    ("src/modules/workflows/wfe_scheduler.c", "db1/wfe_store.h"),
     ("src/modules/delegates/delegate_openai.c", "aimee/tools/agent_tools.h"),
     ("src/modules/delegates/delegate_run_phases.c", "aimee/workspace/workspace.h"),
     ("src/modules/execution-policy/execution_policy.c", "aimee/protocols/mcp/mcp_client_registry.h"),

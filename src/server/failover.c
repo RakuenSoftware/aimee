@@ -3,7 +3,7 @@
 #include "failover.h"
 #include "util.h"
 #include "cJSON.h"
-#include "db1/interaction_events.h"
+#include "modules/db1/interaction_events.h"
 #include "model_provider.h"
 
 #include <ctype.h>

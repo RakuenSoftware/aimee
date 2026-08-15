@@ -2,8 +2,8 @@
  * resolve/validate) and the DB1 per-user memory store + recall merge
  * (Proposal 2). The legacy harness_memory .md-mirror table was retired. */
 
-#include "db1/db1.h"
-#include "db1/user_memory.h"
+#include "modules/db1/db1.h"
+#include "modules/db1/user_memory.h"
 #include "harness_memory_common.h"
 #include "cJSON.h"
 

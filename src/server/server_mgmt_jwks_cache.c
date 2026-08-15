@@ -1,7 +1,7 @@
 #include "server_mgmt_jwks_cache.h"
 
 #include "cJSON.h"
-#include "db1/db1_internal.h"
+#include "modules/db1/db1_internal.h"
 
 #include <math.h>
 #include <fcntl.h>

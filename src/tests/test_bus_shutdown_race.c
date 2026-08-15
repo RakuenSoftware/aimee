@@ -19,7 +19,7 @@
 #include <time.h>
 
 #include <aimee/audit/obs_bus.h>
-#include "db1/db1.h"
+#include "modules/db1/db1.h"
 #include "server/obs_bus_adapter.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 

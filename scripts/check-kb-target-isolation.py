@@ -294,8 +294,8 @@ def plant_test() -> int:
         src_dir = root / "src"
         src_dir.mkdir(parents=True, exist_ok=True)
         (src_dir / "kb_main.c").write_text("/* plant */\n", encoding="utf-8")
-        (src_dir / "db1").mkdir(parents=True, exist_ok=True)
-        (src_dir / "db1" / "db.c").write_text("/* plant */\n", encoding="utf-8")
+        (src_dir / "modules" / "db1").mkdir(parents=True, exist_ok=True)
+        (src_dir / "modules" / "db1" / "db.c").write_text("/* plant */\n", encoding="utf-8")
         cmake = root / "CMakeLists.txt"
         cmake.write_text(
             'set(AIMEE_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")\n'

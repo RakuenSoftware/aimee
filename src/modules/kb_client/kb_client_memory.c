@@ -16,7 +16,7 @@
 
 #include "kb_client.h"
 #include "kb_client_memory_internal.h"
-#include "db1/user_memory.h"
+#include "modules/db1/user_memory.h"
 #include "cJSON.h"
 #include "memory_query.h" /* db2_memory_low_eff_row_t etc. */
 #include "tasks.h"

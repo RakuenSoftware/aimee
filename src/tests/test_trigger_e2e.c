@@ -95,7 +95,7 @@ int platform_random_bytes(void *buf, size_t len)
    return 0;
 }
 
-#include "db1/db1_cron_jobs.h"
+#include "modules/db1/db1_cron_jobs.h"
 int db1_cron_jobs_load(cron_job_t *out, int max, int enabled_only)
 {
    (void)out;

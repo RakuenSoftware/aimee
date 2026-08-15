@@ -11,7 +11,7 @@
  * guardrail result is unaffected. One warning is logged on failure. */
 #include "guardrails_semantic.h"
 #include <aimee/audit/obs_bus.h> /* guardrail events cross the event bus, not a direct db1 insert */
-#include "db1/guardrail_events.h"
+#include "modules/db1/guardrail_events.h"
 #if !defined(AIMEE_DB2_DISABLED)
 #include "db2/bandit.h"
 #endif
