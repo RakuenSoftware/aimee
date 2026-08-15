@@ -23,6 +23,7 @@ import (
 	kbsynthesis "github.com/JBailes/aimee/server-go/modules/kb-synthesis"
 	"github.com/JBailes/aimee/server-go/modules/learning"
 	"github.com/JBailes/aimee/server-go/modules/memory"
+	"github.com/JBailes/aimee/server-go/modules/postgres"
 	responsecomposition "github.com/JBailes/aimee/server-go/modules/response-composition"
 	"github.com/JBailes/aimee/server-go/modules/roundtable"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
@@ -266,6 +267,11 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// Stateless: per-conversation reducer state travels with each request, so
 		// there is no store to open and no failure mode before serving.
 		config.Handler = economizer.NewHandler()
+	case "postgres":
+		config.ModuleName = name
+		config.PrincipalRef = 28
+		config.Stages = []bus.ModuleStage{{EventKind: postgres.EventHealth, StageID: postgres.StageHealth}}
+		config.Handler = postgres.Handle
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25
@@ -287,6 +293,9 @@ func run(ctx context.Context, args []string) error {
 	config, ok := moduleConfigRuntime(ctx, args[0], args[1])
 	if !ok {
 		return fmt.Errorf("unknown Go module executable %q", filepath.Base(args[0]))
+	}
+	if config.ModuleName == "postgres" {
+		defer postgres.Close()
 	}
 	config.SocketPath = args[1]
 	return bus.RunModuleProcess(ctx, config)

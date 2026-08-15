@@ -29,6 +29,7 @@
     "control-web",
     "benchmarks",
     "sandbox",
-    "economizer"
+    "economizer",
+    "postgres"
   ]
 }

@@ -230,6 +230,24 @@ func TestStandaloneModuleInvocationUsesDeadlineWithoutSyntheticCancellation(t *t
 	}
 }
 
+func TestModuleInvocationRemaining(t *testing.T) {
+	const limit = time.Second
+	if got := (ModuleInvocation{}).Remaining(limit); got != limit {
+		t.Fatalf("no deadline remaining = %v, want %v", got, limit)
+	}
+	if got := (ModuleInvocation{DeadlineNS: 1}).Remaining(limit); got != 0 {
+		t.Fatalf("expired deadline remaining = %v, want 0", got)
+	}
+	now := monotonicNowNS()
+	if now == 0 {
+		t.Skip("CLOCK_MONOTONIC unavailable")
+	}
+	got := (ModuleInvocation{DeadlineNS: now + uint64(25*time.Millisecond)}).Remaining(limit)
+	if got <= 0 || got > 25*time.Millisecond {
+		t.Fatalf("bounded remaining = %v, want (0, 25ms]", got)
+	}
+}
+
 // A failing handler's reason is logged before the non-OK reply drops it, so the
 // rendering has to survive whatever a handler returns -- including a truncated
 // or non-UTF8 body.
