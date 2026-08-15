@@ -310,7 +310,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "c9937d368af29109dabb1015bdbf6ccaecadd85e314d86e7295566c282d48b9a"
+      "source_sha256": "2e4a1b6897c38c155dc6faa11b8b973c85cbdd08502e3b0dc0d3599952c2b992"
     },
     {
       "id": "execution-policy",
@@ -513,7 +513,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "cc0914a4db8fcef1f481339ef6fc7207e036a06d24750db780f3a91f83e9504c",
+      "source_sha256": "1c531bcc3779f19d28c42e62903e37a35f4c2a60e354bb725561141ffaf71a75",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 27,
