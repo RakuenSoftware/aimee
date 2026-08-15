@@ -706,6 +706,10 @@ typedef struct
    size_t data_len;
    size_t data_cap;
    int emitted;
+   /* An upstream error FRAME saying our request was invalid. The HTTP status is
+      200 on a stream that opens and then fails, so the frame is the only place
+      this shows up. */
+   int saw_invalid_request;
    /* Usage observed by tapping the relayed Anthropic SSE (message_start carries
     * input + cache tokens, message_delta the final output_tokens), for the
     * ingress cost row written after the stream. The relayed bytes are unchanged. */
@@ -908,6 +912,11 @@ static void relay_flush(anthropic_relay_ctx_t *c)
 
    if (c->data_len > 0 && strcmp(c->data, "[DONE]") != 0)
    {
+      /* Classify BEFORE emitting: the bytes go to the client either way, but a
+         frame blaming the request is what tells the breaker this session's
+         reduced payload is the suspect. */
+      if (gw_stream_anthropic_error_is_invalid_request(c->data))
+         c->saw_invalid_request = 1;
       relay_capture_usage(c, event, c->data);
       relay_observe_reasoning(c, event, c->data);
       c->emit(c->emit_ctx, event, c->data); /* provider bytes, unchanged */
@@ -1063,10 +1072,13 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
 /* Native Anthropic streaming relay: forward the upstream Anthropic SSE
  * verbatim through the mutation breaker, then record realized/partial cost.
  * Extracted from messages_stream(); goto cleanup became return. */
-static void messages_stream_native_relay(const char *url, const char *auth, const void *prov_body,
-                                         size_t prov_body_len, const char *extra, agent_t *ag,
-                                         const char *model, server_http_sse_event_emit emit,
-                                         void *ctx)
+/* Returns the upstream HTTP status. `invalid_frame_out` reports an upstream
+ * error frame that blamed the request, which a 200-then-fail stream cannot show
+ * any other way. */
+static int messages_stream_native_relay(const char *url, const char *auth, const void *prov_body,
+                                        size_t prov_body_len, const char *extra, agent_t *ag,
+                                        const char *model, server_http_sse_event_emit emit,
+                                        void *ctx, int *invalid_frame_out)
 {
    anthropic_relay_ctx_t relay;
    int stream_status;
@@ -1103,7 +1115,9 @@ static void messages_stream_native_relay(const char *url, const char *auth, cons
    sse_parser_free(&relay.parser);
    free(relay.data);
    free(relay.reasoning);
-   return;
+   if (invalid_frame_out)
+      *invalid_frame_out = relay.saw_invalid_request;
+   return stream_status;
 }
 
 /* Slice-5 IR-delta streaming relay: drive the OpenAI-chat -> Anthropic SSE relay
@@ -1234,6 +1248,9 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    /* 200 unless a streaming helper reports otherwise. The native relay path
       jumps to cleanup without calling one, and it must not read as a rejection. */
    int stream_status = 200;
+   /* Set only by the native relay, which is the one path that can see an
+      upstream error frame; the translator paths leave it 0. */
+   int stream_bad_frame = 0;
    const void *wire_prov_body = NULL;
    size_t wire_prov_body_len = 0;
 
@@ -1387,8 +1404,8 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    if (driver_is_anthropic(driver))
    {
-      messages_stream_native_relay(url, auth, wire_prov_body, wire_prov_body_len, extra, ag, model,
-                                   emit, ctx);
+      stream_status = messages_stream_native_relay(url, auth, wire_prov_body, wire_prov_body_len,
+                                                   extra, ag, model, emit, ctx, &stream_bad_frame);
       goto cleanup;
    }
 
@@ -1411,7 +1428,7 @@ cleanup:
     * Only the payload-class statuses count. 401/403/404/429 are auth, not-found
     * and rate-limit; disabling the lever on those would switch reduction off for
     * ordinary throttling. */
-   if (gw_status_is_invalid_request(stream_status))
+   if (gw_status_is_invalid_request(stream_status) || stream_bad_frame)
       gw_stream_disable(&gwmc, "stream_invalid_request");
    wire_fence_destroy(wire_snapshot);
    gw_mutate_ctx_free(&gwmc);
