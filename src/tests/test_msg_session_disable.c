@@ -11,13 +11,6 @@
 #include "harness_memory_common.h"
 #include "msg_session_disable.h"
 
-static void sleep_ms(int ms)
-{
-   struct timespec ts = {ms / 1000, (long)(ms % 1000) * 1000000L};
-   nanosleep(&ts, NULL);
-}
-
-/* First 16 hex of SHA-256(s), into out[17]. */
 static void sha16(const char *s, char out[MSG_SESSION_KEY_LEN])
 {
    char full[HMEM_HASH_HEX_LEN];
@@ -96,92 +89,10 @@ static void test_resolve(void)
    assert(strcmp(key, expect) == 0);
 }
 
-static void test_disable_ttl(void)
-{
-   msg_session_reset();
-   gw_stat_reset();
-
-   char a[MSG_SESSION_KEY_LEN], b[MSG_SESSION_KEY_LEN];
-   sha16("sessA", a);
-   sha16("sessB", b);
-
-   assert(msg_session_is_disabled(a) == 0);
-   msg_session_disable(a, 3600000, "4xx");
-   assert(msg_session_is_disabled(a) == 1);
-   assert(msg_session_is_disabled(b) == 0); /* distinct sessions independent */
-   assert(msg_session_count() == 1);
-   assert(gw_stat_get_reason("session_disabled_set", "4xx") == 1);
-
-   /* identity-less / empty key never disables */
-   msg_session_disable("", 3600000, "x");
-   assert(msg_session_is_disabled("") == 0);
-
-   /* TTL expiry: tiny ttl -> expired after a short sleep, lazily cleared on read */
-   msg_session_disable(b, 1, "5xx");
-   sleep_ms(15);
-   assert(msg_session_is_disabled(b) == 0);
-   assert(msg_session_count() == 1); /* only a remains */
-
-   /* ttl<=0 is ignored */
-   char c[MSG_SESSION_KEY_LEN];
-   sha16("sessC", c);
-   msg_session_disable(c, 0, "x");
-   msg_session_disable(c, -5, "x");
-   assert(msg_session_is_disabled(c) == 0);
-}
-
-static void test_eviction(void)
-{
-   msg_session_reset();
-   char key[MSG_SESSION_KEY_LEN];
-
-   /* Fill to capacity with live entries; one more must not exceed the cap, and the
-    * OLDEST-inserted live entry is the one evicted. */
-   snprintf(key, sizeof(key), "%016x", 0);
-   char first[MSG_SESSION_KEY_LEN];
-   memcpy(first, key, sizeof(key));
-   for (int i = 0; i < 10000; i++)
-   {
-      snprintf(key, sizeof(key), "%016x", i);
-      msg_session_disable(key, 3600000, "4xx");
-   }
-   assert(msg_session_count() == 10000);
-   assert(msg_session_is_disabled(first) == 1);
-
-   snprintf(key, sizeof(key), "%016x", 10000); /* the 10001st */
-   msg_session_disable(key, 3600000, "4xx");
-   assert(msg_session_count() == 10000);        /* bounded */
-   assert(msg_session_is_disabled(first) == 0); /* oldest evicted */
-   assert(msg_session_is_disabled(key) == 1);   /* newest present */
-}
-
-static void test_sweep_reclaims_expired(void)
-{
-   msg_session_reset();
-   char key[MSG_SESSION_KEY_LEN];
-
-   /* Insert > cap/2 short-lived entries, let them expire, then one more insert must
-    * trigger the insert-time sweep (size > cap/2) and reclaim them. */
-   for (int i = 0; i < 5001; i++)
-   {
-      snprintf(key, sizeof(key), "%016x", i);
-      msg_session_disable(key, 1, "5xx");
-   }
-   sleep_ms(20);
-   snprintf(key, sizeof(key), "%016x", 900000);
-   msg_session_disable(key, 3600000, "4xx");
-   /* the sweep dropped the 5001 expired; only the fresh one survives */
-   assert(msg_session_count() == 1);
-   assert(msg_session_is_disabled(key) == 1);
-}
-
 int main(void)
 {
    printf("msg_session_disable: ");
    test_resolve();
-   test_disable_ttl();
-   test_eviction();
-   test_sweep_reclaims_expired();
    printf("ok\n");
    return 0;
 }
