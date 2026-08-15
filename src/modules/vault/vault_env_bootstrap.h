@@ -43,4 +43,19 @@ int vault_env_check_webchat_bootstrap(void);
  * or arbitrary-vault-write CLI. */
 int vault_env_seal_webchat_record(const char *record_name);
 
+/* Seal one server-principal git credential supplied on stdin, so a deployment
+ * that missed the first-boot AIMEE_FORGE_TOKEN can be provisioned without being
+ * torn down and re-created.
+ *
+ * The forge token is only ever readable through git_forge_vault_server_token
+ * (the server principal's own vault), so vault_service_set is not a substitute:
+ * it stores under the CALLING principal, where the forge reader never looks.
+ * Before this existed, first-boot env was the single writer of that entry.
+ *
+ * Same shape as the webchat seal, for the same reasons: the secret travels on
+ * stdin (never argv or env, so it cannot leak through /proc or a process list),
+ * and the accepted credential names are a closed allowlist. Returns 0 on
+ * success, -1 on a rejected name or a fail-closed Vault error. */
+int vault_env_seal_forge_credential(const char *cred_name);
+
 #endif /* AIMEE_VAULT_ENV_BOOTSTRAP_H */

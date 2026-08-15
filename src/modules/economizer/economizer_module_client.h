@@ -22,8 +22,8 @@ extern "C"
 
 /* Fixed by the process contract at 4096 + ordinal*256 + stage; economizer is
  * inventory ordinal 27, so these are not a free choice. */
-#define AIMEE_ECONOMIZER_EVENT_REDUCE 11009u
-#define AIMEE_ECONOMIZER_STAGE_REDUCE 1u
+#define AIMEE_ECONOMIZER_EVENT_REDUCE       11009u
+#define AIMEE_ECONOMIZER_STAGE_REDUCE       1u
 #define AIMEE_ECONOMIZER_EVENT_JSON_COMPACT 11010u
 #define AIMEE_ECONOMIZER_STAGE_JSON_COMPACT 2u
 #define AIMEE_ECONOMIZER_EVENT_TOOL_RECALL  11011u
@@ -32,6 +32,8 @@ extern "C"
 #define AIMEE_ECONOMIZER_STAGE_TOOL_STATS   4u
 #define AIMEE_ECONOMIZER_EVENT_RECORD_BUILD 11013u
 #define AIMEE_ECONOMIZER_STAGE_RECORD_BUILD 5u
+#define AIMEE_ECONOMIZER_EVENT_POST_STATUS  11014u
+#define AIMEE_ECONOMIZER_STAGE_POST_STATUS  6u
 
 #define ECON_MODULE_JSON_MAX_INPUT  (16u * 1024u * 1024u)
 #define ECON_MODULE_TOOL_OUTPUT_MAX (2u * 1024u * 1024u)
@@ -55,7 +57,11 @@ extern "C"
    } econ_module_seam_t;
 
    /* Everything the module needs, resolved by the caller. The module reads no
-    * ambient config and holds no state, so a request is self-contained. */
+    * ambient config, so a request is self-contained.
+    *
+    * It does hold ONE piece of state -- the gateway seam's circuit breaker, keyed
+    * by session_key below -- because a breaker written on one side of the bus and
+    * read on the other could never fire. Nothing else survives a call. */
    typedef struct
    {
       int history_fold;
@@ -89,6 +95,12 @@ extern "C"
       const char *closet_denylist; /* borrowed; may be NULL */
 
       int turn;
+      /* Whose lever this is, for the gateway seam's circuit breaker. NULL or
+       * empty means the request carried no resolvable identity: it reduces
+       * normally but can never read or trip a breaker, so one anonymous request
+       * cannot switch off another identity's session. Ignored on the delegate
+       * seam, which has no breaker. */
+      const char *session_key;
       /* Serialized reducer state from the previous turn, or NULL on the first.
        * Borrowed. */
       const char *state;
@@ -154,6 +166,31 @@ extern "C"
                           econ_module_result_t *out);
 
    void econ_module_result_free(econ_module_result_t *out);
+
+   /* What a dispatched gateway turn owes now its upstream status is known.
+    *
+    * The module decides AND owns the breaker the decision writes to; this only
+    * carries the answer back. The request body is deliberately not sent: restoring
+    * the pristine array and resending are the caller's, over a body it owns.
+    *
+    * `stream_reason` non-NULL selects the streaming path, where bytes have already
+    * reached the client so nothing can be restored or resent.
+    *
+    * Returns 0 when the module answered. On ANY failure returns non-zero and
+    * zeroes `out`, which reads as "nothing owed": an unreachable module must not
+    * invent a resend, and cannot have tripped a breaker it never saw. */
+   typedef struct
+   {
+      int resend;  /* 1 => restore the pristine array and send exactly once more */
+      int restore; /* 1 => put the pristine array back before anything else */
+      int disabled;
+      char reason[32];
+      char counter[40]; /* telemetry counter to increment; empty when none */
+   } econ_module_post_status_t;
+
+   int econ_module_post_status(const char *session_key, int http_status, int mutated, int have_key,
+                               int ttl_ms, const char *stream_reason,
+                               econ_module_post_status_t *out);
 
    /* Compact one strict JSON value in Go without changing any non-whitespace
     * source byte. Returns 0 with a newly allocated NUL-terminated buffer when
