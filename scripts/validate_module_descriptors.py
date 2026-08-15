@@ -27,7 +27,7 @@ BASE_KEYS = {"descriptor_version", "id", "dependencies", "runtime_toggle"}
 OWNERSHIP_FIELDS = (
     "sources", "private_headers", "public_headers", "tests", "docs", "go_sources", "go_tests",
 )
-DEFAULT_ON = {"runtime-web", "control-web", "sandbox"}
+DEFAULT_ON = {"runtime-web", "control-web", "sandbox", "postgres"}
 ROLE_EXTENSIONS = {
     "sources": {".c", ".cpp", ".S", ".s"},
     "private_headers": {".h", ".hpp"},

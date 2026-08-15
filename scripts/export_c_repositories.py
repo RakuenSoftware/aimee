@@ -271,6 +271,7 @@ def go_module_main(module_id: str, principal_ref: int,
 \t\tos.Exit(code)
 \t}
 """ if module_id == "delegates" else ""
+    cleanup = "\tdefer handler.Close()\n" if module_id == "postgres" else ""
     return f"""package main
 
 import (
@@ -286,6 +287,7 @@ import (
 
 func main() {{
 {watchdog}\
+{cleanup}\
 \tif len(os.Args) != 2 {{
 \t\tfmt.Fprintf(os.Stderr, "usage: %s DAEMON_MODULE_BUS_SOCKET\\n", os.Args[0])
 \t\tos.Exit(2)
@@ -334,13 +336,38 @@ def go_process_shared_sources(module_id: str) -> list[str]:
     )
 
 
-def go_xsys_version() -> str:
-    """Read the one external bus dependency from the canonical Go module."""
+def go_dependency_version(module_path: str) -> str:
+    """Read an external dependency version from the canonical Go module."""
     text = (ROOT / "server-go/go.mod").read_text(encoding="utf-8")
-    match = re.search(r"^\s*golang\.org/x/sys\s+(v\S+)\s*(?://.*)?$", text, re.MULTILINE)
+    match = re.search(
+        rf"^\s*{re.escape(module_path)}\s+(v\S+)\s*(?://.*)?$", text, re.MULTILINE
+    )
     if match is None:
-        raise ExportError("server-go/go.mod: missing golang.org/x/sys dependency")
+        raise ExportError(f"server-go/go.mod: missing {module_path} dependency")
     return match.group(1)
+
+
+def go_module_requirements(module_id: str) -> tuple[list[str], list[str]]:
+    """Return direct and indirect requirements for an isolated Go export."""
+    direct = ["golang.org/x/sys"]
+    indirect: list[str] = []
+    if module_id == "postgres":
+        direct.append("github.com/jackc/pgx/v5")
+        indirect.extend([
+            "github.com/jackc/pgpassfile",
+            "github.com/jackc/pgservicefile",
+            "github.com/jackc/puddle/v2",
+            "golang.org/x/sync",
+            "golang.org/x/text",
+        ])
+    direct_lines = [
+        f"\t{module} {go_dependency_version(module)}" for module in sorted(direct)
+    ]
+    indirect_lines = [
+        f"\t{module} {go_dependency_version(module)} // indirect"
+        for module in sorted(indirect)
+    ]
+    return direct_lines, indirect_lines
 
 
 def export_module(
@@ -454,13 +481,21 @@ jobs:
             for relative in shared_sources:
                 copy_file(relative, repository)
             shutil.copy2(ROOT / "server-go/go.sum", repository / "go.sum")
+            direct_requirements, indirect_requirements = go_module_requirements(module_id)
+            require_text = "\n".join(direct_requirements)
+            indirect_text = ""
+            if indirect_requirements:
+                indirect_text = "\nrequire (\n" + "\n".join(indirect_requirements) + "\n)\n"
             write_text(
                 repository / "go.mod",
                 f"""module github.com/JBailes/aimee
 
 go 1.25.0
 
-require golang.org/x/sys {go_xsys_version()}
+require (
+{require_text}
+)
+{indirect_text}
 """,
             )
             write_text(

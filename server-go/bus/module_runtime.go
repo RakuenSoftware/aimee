@@ -52,6 +52,27 @@ func (i ModuleInvocation) Cancelled() bool {
 	return now != 0 && i.DeadlineNS != 0 && now >= i.DeadlineNS
 }
 
+// Remaining clamps work to both a stage-owned limit and the transport's
+// absolute CLOCK_MONOTONIC deadline. A missing or unreadable transport clock
+// leaves the stage-owned limit in force.
+func (i ModuleInvocation) Remaining(limit time.Duration) time.Duration {
+	if limit <= 0 {
+		return 0
+	}
+	now := monotonicNowNS()
+	if i.DeadlineNS == 0 || now == 0 {
+		return limit
+	}
+	if now >= i.DeadlineNS {
+		return 0
+	}
+	remaining := i.DeadlineNS - now
+	if remaining < uint64(limit) {
+		return time.Duration(remaining)
+	}
+	return limit
+}
+
 // ModuleHandler implements one or more stages. Non-OK results never carry a
 // body. A response over ModuleMessageMaxBody is converted to Internal.
 type ModuleHandler func(ModuleInvocation, []byte) ([]byte, ModuleStatus)

@@ -27,7 +27,8 @@
     "governance",
     "runtime-web",
     "sandbox",
-    "economizer"
+    "economizer",
+    "postgres"
   ],
   "debt": []
 }
