@@ -40,7 +40,7 @@
   source_hash` for embeddings that have it (no false positives from a re-scan that
   changed nothing), falling back to the scanned-since-embed staleness heuristic only
   for legacy rows with `source_hash=''`. **P3 storage substrate landed next**:
-  `src/db2/fidelity.{c,h}` records answer-level `fidelity_report` (supported /
+  `src/modules/db2/c/fidelity.{c,h}` records answer-level `fidelity_report` (supported /
   unsupported / abstained buckets + four-state status, upserted per turn_id) and
   per-chunk `fidelity_attribution` (`accepted`/`irrelevant`, `operator_id`
   `fidelity-judge`) as **non-scored** artifact kinds — structurally invisible to
@@ -92,7 +92,7 @@
   ingress path), Evaluate (fidelity verdicts as an answer-level quality signal),
   Calibrate (the fidelity threshold and the staleness ranking half-life),
   Gate-Promote (default-off flag rollout per the readiness program).
-- **Scope:** `src/db2/kb_service_memory.c` + `src/memory_context.c` (emit the
+- **Scope:** `src/modules/db2/c/kb_service_memory.c` + `src/memory_context.c` (emit the
   `retrieval_event` **KB-side**, where the row ids and a DB2 connection exist;
   accept a caller-supplied turn id so the ingress turn and the recall share one
   canonical event), the code-search KB handler (`src/kb/kb_service_*.c`) +
@@ -106,11 +106,11 @@
   `src/server/kb_client_memory.c` (receive the `turn_id` as a parameter, thread
   it to both KB calls, return surfaced refs out instead of discarding them),
   `src/server/openai_chat.c` (accept `turn_id`; emit it in the `response.created`
-  SSE frame on the streaming path), `src/db2/demotion.c` +
+  SSE frame on the streaming path), `src/modules/db2/c/demotion.c` +
   `src/learning_evidence.c` (a `..._typed` **event and attribution** writer pair
   — string `scope_id` — alongside the existing int64 writers; the new non-scored
   `fidelity_attribution` + `fidelity_report` artifact kinds; the
-  `db2_demotion_candidates` numeric-`scope_id` SQL guard), `src/db2/schema.sql`
+  `db2_demotion_candidates` numeric-`scope_id` SQL guard), `src/modules/db2/c/schema.sql`
   (the D14 migration: nullable `turn_id` column + partial unique index `WHERE
   kind='retrieval_event'` for the idempotent upsert — a column+index, **not** a
   new table), `src/headers/server.h` (widen the stream-handler ctx to

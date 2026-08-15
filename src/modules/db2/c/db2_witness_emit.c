@@ -4,8 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "db2/db2_internal.h" /* db2_conn */
-#include "db2/db_postgres.h"  /* aimee_pg_* */
+#include "db2_internal.h" /* db2_conn */
+#include "db_postgres.h"  /* aimee_pg_* */
 #include "modules/vault/vault_witness_checkpoint.h"
 #include "modules/vault/vault_witness_record.h"
 #include "modules/vault/vault_witness_signer.h"

@@ -48,14 +48,14 @@ went unnoticed:
 
 ## The actual blocker
 
-`db2_eval_open_temp_store_pg` (`src/db2/db2_init.c`) creates a private
+`db2_eval_open_temp_store_pg` (`src/modules/db2/c/db2_init.c`) creates a private
 `aimee_eval_<pid>_<seq>` schema, sets `search_path` to it, and applies the full
 schema there. The design comment is explicit that this is a safety property: eval
 tables **shadow** same-named production tables, so pointing the harness at a live
 database cannot corrupt it, with `public` left on the path only so pgvector and
 pg_trgm types resolve.
 
-`src/db2/schema.sql` addresses objects as `public.<name>` in roughly **950
+`src/modules/db2/c/schema.sql` addresses objects as `public.<name>` in roughly **950
 places**. Applied into a shadow schema on a fresh database, tables are created in
 `aimee_eval_*` while those references still resolve to `public`, which is empty.
 

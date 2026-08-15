@@ -69,7 +69,7 @@
   a new PDF extraction front-end (`src/kb/kb_doc_pdf.{c,h}` — parse to pages /
   blocks / lines / chunks + per-line geometry, OCR/TSR via optional local
   sidecars, same pattern as the embedder/reranker), additive geometry on the
-  existing chunk spine (`src/db2/schema_sqlite.sql` + the Postgres equivalent:
+  existing chunk spine (`src/modules/db2/c/schema_sqlite.sql` + the Postgres equivalent:
   `page_start` / `page_end` columns on `kb_documents`; a new fine-grained
   `kb_doc_regions` table keyed by chunk id for per-line `page_no` + normalized
   `bbox` + `quote`; a `kb_doc_assets` table for figure/table crops), reuse of

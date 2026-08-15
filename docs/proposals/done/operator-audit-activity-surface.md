@@ -27,9 +27,9 @@ already exist, with no new write path.
 ## §0 What already exists
 
 - **Provenance columns.** `operator_id` is on shareable rows across
-  `src/db2/` (`fidelity.c`, `corpus_structural.c`, `artifacts.c`, memory rows,
+  `src/modules/db2/c/` (`fidelity.c`, `corpus_structural.c`, `artifacts.c`, memory rows,
   …), alongside `content_hash` + timestamps.
-- **WORM ledger.** `src/modules/audit/audit_ledger.c` + `src/db2/kb_audit_worm.c` record
+- **WORM ledger.** `src/modules/audit/audit_ledger.c` + `src/modules/db2/c/kb_audit_worm.c` record
   privileged/append-only actions with a verify chain.
 - **The CLI verb exists but is integrity-only.** `cmd_audit`
   (`{"audit", "Verify/checkpoint the WORM audit store …"}`) has `verify` +
@@ -39,7 +39,7 @@ Everything needed to *read* is present; only the read surface is missing.
 
 ## §1 DB2 read API: scoped activity query
 
-Add a read-only DB2 accessor (in the owning `src/db2/` module, behind the KB
+Add a read-only DB2 accessor (in the owning `src/modules/db2/c/` module, behind the KB
 service — server/CLI must not touch DB2 directly per the storage boundary) that
 aggregates activity by `(operator_id, scope, action, day)` over a time window,
 unioning the provenance columns and the WORM ledger. Read-only; no new table.

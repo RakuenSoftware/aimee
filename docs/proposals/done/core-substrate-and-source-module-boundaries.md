@@ -658,7 +658,7 @@ The core-contract proposal owns the `core` profile; the product proposal owns `r
 Make/CMake object equality and individual module docs; the product proposal owns headless operation;
 the liveness and delivery proposals own dispositions, cleanup ledgers, compatibility, and recovery.
 At completion, omitted optional modules leave no residue and feature implementation no longer lives
-in broad `src/`, `src/server/`, `src/kb/`, `src/db1/`, `src/db2/`, or global-header buckets.
+in broad `src/`, `src/server/`, `src/kb/`, `src/db1/`, `src/modules/db2/c/`, or global-header buckets.
 
 ### Tracked delegates header transition
 

@@ -11,9 +11,9 @@
  *
  * Exercised against the in-memory sqlite shim. */
 #include "../headers/aimee.h"
-#include "../db2/db2_test_shim.h"
-#include "../db2/lifecycle.h"      /* db2_set_embedding_dim */
-#include "../db2/memory_vectors.h" /* pgvec_memory_vector_upsert_memory + search */
+#include "../modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/lifecycle.h"      /* db2_set_embedding_dim */
+#include "../modules/db2/c/memory_vectors.h" /* pgvec_memory_vector_upsert_memory + search */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

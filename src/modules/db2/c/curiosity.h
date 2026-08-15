@@ -1,7 +1,7 @@
 /* db2/curiosity.h: curiosity backlog, DB2 subsystem.
  *
  * Pure domain API. No backend types. SQL is encapsulated in
- * src/db2/curiosity.c, which goes through the libpq shim via
+ * src/modules/db2/c/curiosity.c, which goes through the libpq shim via
  * aimee_pg_* helpers. */
 #ifndef DEC_DB2_CURIOSITY_H
 #define DEC_DB2_CURIOSITY_H 1

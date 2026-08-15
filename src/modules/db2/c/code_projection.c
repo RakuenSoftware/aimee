@@ -1,4 +1,4 @@
-/* src/db2/code_projection.c: code-index graph projection ledger. */
+/* src/modules/db2/c/code_projection.c: code-index graph projection ledger. */
 
 #include "code_projection.h"
 #include "db2_internal.h"

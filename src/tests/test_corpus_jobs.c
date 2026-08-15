@@ -1,8 +1,8 @@
 /* test_corpus_jobs.c: staged corpus processing pipeline. */
 
 #include "corpus_jobs.h"
-#include "db2_internal.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "db_postgres.h"
 #include "kb_docs.h"
 

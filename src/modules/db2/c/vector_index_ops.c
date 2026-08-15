@@ -1,6 +1,6 @@
 /* vector_index_ops.c: DB2-side bookkeeping for pgvector write status.
  *
- * Postgres via libpq. The pgvector transport lives in src/db2/pgvec_*;
+ * Postgres via libpq. The pgvector transport lives in src/modules/db2/c/pgvec_*;
  * this file only persists shared retry/status metadata for those writes. */
 
 #include "vector_index_ops.h"

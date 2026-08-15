@@ -7,7 +7,7 @@
 #include "kb_management_cert_crypto.h"
 #include "kb_management_cert_storage.h"
 #include "kb_management_cert_lifecycle_test.h"
-#include "db2/lifecycle.h"
+#include "modules/db2/c/lifecycle.h"
 
 #include <openssl/crypto.h>
 #include <openssl/rand.h>

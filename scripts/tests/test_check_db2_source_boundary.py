@@ -27,13 +27,13 @@ class BoundaryTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         root = Path(tmp.name)
         files = {
-            "src/db2/store.c": '#include "store.h"\n',
-            "src/db2/store.h": "int db2_store(void);\n",
-            "src/db2/schema.sql": "CREATE TABLE sample(id integer);\n",
-            "src/kb/consumer.c": '#include "db2/store.h"\n',
-            "src/server/consumer.c": '#include "../db2/store.h"\n',
-            "src/tests/test_store.c": '#include "db2/store.h"\n',
-            "src/modules/memory/consumer.c": '#include "db2/store.h"\n',
+            "src/modules/db2/c/store.c": '#include "store.h"\n',
+            "src/modules/db2/c/store.h": "int db2_store(void);\n",
+            "src/modules/db2/c/schema.sql": "CREATE TABLE sample(id integer);\n",
+            "src/kb/consumer.c": '#include "modules/db2/c/store.h"\n',
+            "src/server/consumer.c": '#include "../modules/db2/c/store.h"\n',
+            "src/tests/test_store.c": '#include "modules/db2/c/store.h"\n',
+            "src/modules/memory/consumer.c": '#include "modules/db2/c/store.h"\n',
         }
         for relative, content in files.items():
             path = root / relative
@@ -96,7 +96,9 @@ class BoundaryTests(unittest.TestCase):
         tmp = self.repo()
         try:
             root = Path(tmp.name)
-            (root / "src/kb/new.c").write_text('#include "db2/store.h"\n', encoding="utf-8")
+            (root / "src/kb/new.c").write_text(
+                '#include "modules/db2/c/store.h"\n', encoding="utf-8"
+            )
             with self.assertRaisesRegex(checker.BoundaryError, "rule=include-growth"):
                 checker.check(root)
         finally:
@@ -107,7 +109,8 @@ class BoundaryTests(unittest.TestCase):
         try:
             root = Path(tmp.name)
             (root / "src/kb/consumer.c").write_text(
-                '#include "db2/store.h"\n#include "db2/store.h"\n', encoding="utf-8"
+                '#include "modules/db2/c/store.h"\n'
+                '#include "modules/db2/c/store.h"\n', encoding="utf-8"
             )
             with self.assertRaisesRegex(checker.BoundaryError, "baseline permits 1"):
                 checker.check(root)
@@ -118,8 +121,20 @@ class BoundaryTests(unittest.TestCase):
         tmp = self.repo()
         try:
             root = Path(tmp.name)
-            (root / "src/db2/new.c").write_text("int new_db2_file;\n", encoding="utf-8")
+            (root / "src/modules/db2/c/new.c").write_text("int new_db2_file;\n", encoding="utf-8")
             with self.assertRaisesRegex(checker.BoundaryError, "rule=source-drift"):
+                checker.check(root)
+        finally:
+            tmp.cleanup()
+
+    def test_legacy_boundary_is_rejected(self) -> None:
+        tmp = self.repo()
+        try:
+            root = Path(tmp.name)
+            legacy = root / "src/db2/stray.h"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text("int stray;\n", encoding="utf-8")
+            with self.assertRaisesRegex(checker.BoundaryError, "rule=legacy-boundary"):
                 checker.check(root)
         finally:
             tmp.cleanup()
@@ -177,7 +192,7 @@ class BoundaryTests(unittest.TestCase):
             added["consumers"].append({
                 "path": "src/zz_new.c",
                 "classification": "host-generated-client",
-                "includes": [{"header": "db2/store.h", "count": 1}],
+                "includes": [{"header": "modules/db2/c/store.h", "count": 1}],
             })
             with self.assertRaisesRegex(checker.BoundaryError, "new allowlist entry"):
                 checker.enforce_shrink_only(previous, added)

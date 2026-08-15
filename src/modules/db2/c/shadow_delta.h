@@ -1,4 +1,4 @@
-/* src/db2/shadow_delta.h: Phase 7 shadow-mode rank-delta persistence.
+/* src/modules/db2/c/shadow_delta.h: Phase 7 shadow-mode rank-delta persistence.
  *
  * Backs memory_recall_shadow_deltas (created in schema.sql, Phase 0).
  * Stores compact per-query rank/score deltas so the eval harness can compare

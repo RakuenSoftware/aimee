@@ -123,7 +123,7 @@ static int is_fts_ident(const char *start, const char *end)
 /* Text-search views that use trigram matching expose a generated
  * `<name>_text` column as `match_text`. The rewriter emits ILIKE and pg_trgm
  * `similarity()` against this column rather than @@ / ts_rank_cd. See the
- * DB2 text-search block in src/db2/schema.sql. */
+ * DB2 text-search block in src/modules/db2/c/schema.sql. */
 static const char *const fts_trigram_tables[] = {
     "memories_code_fts",
 };

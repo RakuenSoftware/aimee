@@ -7,7 +7,7 @@
 #include "learning_bundle.h"
 
 #include "aimee.h"
-#include "db2/evidence_vectors.h"
+#include "modules/db2/c/evidence_vectors.h"
 #include "memory.h" /* memory_embed_text */
 
 #include <math.h>

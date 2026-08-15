@@ -17,7 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "roadmap_decompose.h"
 
 /* The well-formed decomposition from test_roadmap.c — validated by

@@ -5,15 +5,15 @@
 
 #include "aimee.h" /* now_utc */
 #include "cJSON.h"
-#include "config.h"                 /* config_load / config_save (§8 tune) */
-#include "config_fields.h"          /* typed get/set of the pipeline config keys */
-#include "kb_curator_drain.h"       /* kb_curator_stages_json / _presets_json */
-#include "kb_service.h"             /* kb_service_workers_json, kb_service_ctx_t */
-#include "kb_service_kb.h"          /* kb_service_health_json */
-#include "db2/kb_service_backend.h" /* async queue status */
-#include "db2/ontology_evolution.h" /* db2_ontology_* (§8 observe + act) */
-#include "rel_types.h"              /* REL_TYPE_NAME_MAX */
-#include <openssl/crypto.h>         /* wipe transient credential request copies */
+#include "config.h"                           /* config_load / config_save (§8 tune) */
+#include "config_fields.h"                    /* typed get/set of the pipeline config keys */
+#include "kb_curator_drain.h"                 /* kb_curator_stages_json / _presets_json */
+#include "kb_service.h"                       /* kb_service_workers_json, kb_service_ctx_t */
+#include "kb_service_kb.h"                    /* kb_service_health_json */
+#include "modules/db2/c/kb_service_backend.h" /* async queue status */
+#include "modules/db2/c/ontology_evolution.h" /* db2_ontology_* (§8 observe + act) */
+#include "rel_types.h"                        /* REL_TYPE_NAME_MAX */
+#include <openssl/crypto.h>                   /* wipe transient credential request copies */
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -36,13 +36,13 @@ Implemented behavior:
 
 ## Verification evidence
 
-- `src/db2/corpus_jobs.c`
-- `src/db2/corpus_jobs.h`
+- `src/modules/db2/c/corpus_jobs.c`
+- `src/modules/db2/c/corpus_jobs.h`
 - `src/kb/kb_curator_synthesize.c`
 - `src/kb/kb_curator_synthesize.h`
 - `src/headers/memory.h`
 - `src/memory_core_search.inc`
-- `src/db2/kb_service_backend_memory.c`
+- `src/modules/db2/c/kb_service_backend_memory.c`
 - `src/server/kb_client_memory.c`
 - `src/server/server_mcp.c`
 - `src/tests/test_corpus_jobs.c`

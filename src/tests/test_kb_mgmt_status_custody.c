@@ -1,6 +1,6 @@
 #include "kb/kb_mgmt_status_custody.h"
 #include "kb/kb_vault_protected_use.h"
-#include "db2/management_status_key.h"
+#include "modules/db2/c/management_status_key.h"
 
 #include <assert.h>
 #include <pthread.h>

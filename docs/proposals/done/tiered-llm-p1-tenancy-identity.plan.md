@@ -9,8 +9,8 @@ deferred.**
 
 ## Grounding (verified code map)
 
-- **"DB2" = Postgres** via libpq behind a typed boundary (`src/db2/db2.h`); code
-  outside `src/db2/` never sees SQL/libpq. One idempotent `src/db2/schema.sql`
+- **"DB2" = Postgres** via libpq behind a typed boundary (`src/modules/db2/c/db2.h`); code
+  outside `src/modules/db2/c/` never sees SQL/libpq. One idempotent `src/modules/db2/c/schema.sql`
   (+ `schema_sqlite.sql` shim, which **cannot enforce RLS**). No versioned
   migrations. RLS/roles/verify-full/`SET LOCAL`/transaction-pooling — greenfield.
 - OIDC verifier `src/kb/auth_oidc.c::kb_oidc_verify_jwt` validates `exp`(+60s)
@@ -47,7 +47,7 @@ deferred.**
 **Slice 1 — Tenancy schema + Postgres hardening baseline** (I1–I4, I11, plus the
 schema for I5/I10/I12). Tables `kb_team`, `kb_project`, `kb_team_membership`,
 `kb_project_membership`, `kb_admin_grant`, `kb_oidc_jwks`, enrollment
-`cert_issuer/cert_serial_norm` columns; typed `src/db2/team.*`, `project.*`,
+`cert_issuer/cert_serial_norm` columns; typed `src/modules/db2/c/team.*`, `project.*`,
 `membership.*`, `admin_grant.*` modules; `schema_roles.sql`; RLS policies +
 `FORCE`; `db2_tenant_scope_begin/_end`; `verify-full` enforcement in `db2_init`;
 DDL/runtime startup split; backup/restore scripts. **Tests ride with slice:** the

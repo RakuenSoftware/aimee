@@ -4,11 +4,11 @@
 #include <string.h>
 
 #include "db_postgres.h"
-#include "db2.h"
-#include "db2_internal.h"
-#include "db2_pool.h"
-#include "db2/db_schema.h"  /* §2b: db2_dim_read_t / DB2_DIM_* for the dim-read stub */
-#include "../headers/log.h" /* log_level_t for the aimee_log stub below */
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db2_pool.h"
+#include "modules/db2/c/db_schema.h" /* §2b: db2_dim_read_t / DB2_DIM_* for the dim-read stub */
+#include "../headers/log.h"          /* log_level_t for the aimee_log stub below */
 #include <stdarg.h>
 
 struct aimee_pg_stmt

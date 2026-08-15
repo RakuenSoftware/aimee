@@ -147,9 +147,9 @@ operator must finish attribution and call `kb_content_scope_enable()`; incomplet
 fails closed. The [archived companion identity map](per-user-content-scope-identity-map.md)
 records why no additional proof mechanism is required.
 
-- [`kb_content_scope_enable`](../../../src/db2/schema.sql) refuses activation until the reader
+- [`kb_content_scope_enable`](../../../src/modules/db2/c/schema.sql) refuses activation until the reader
   readiness marker is present and all content-bearing projects are attributed.
-- [`db2_maintenance_scope_begin`](../../../src/db2/db2_tenant.c) opens the closed-name,
+- [`db2_maintenance_scope_begin`](../../../src/modules/db2/c/db2_tenant.c) opens the closed-name,
   exact-project maintenance context on a transaction-local lease.
 - [`test_content_scope_pg.c`](../../../src/tests/test_content_scope_pg.c) verifies readiness, the
   unattributed-row refusal, ordinary two-user search isolation, and that a caller-less pooled search

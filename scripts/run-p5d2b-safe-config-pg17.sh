@@ -17,12 +17,12 @@ trap cleanup EXIT
 cleanup
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "CREATE DATABASE $DB"
 psql -v ON_ERROR_STOP=1 "$URL" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm"
-psql -v ON_ERROR_STOP=1 "$URL" -f "$ROOT/src/db2/schema_roles.sql" >/dev/null
-sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/db2/schema.sql" | psql -v ON_ERROR_STOP=1 "$URL" -f - >/dev/null
+psql -v ON_ERROR_STOP=1 "$URL" -f "$ROOT/src/modules/db2/c/schema_roles.sql" >/dev/null
+sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/db2/c/schema.sql" | psql -v ON_ERROR_STOP=1 "$URL" -f - >/dev/null
 psql -v ON_ERROR_STOP=1 "$URL" -f "$ROOT/scripts/p5d2b-safe-config-upgrade-fixture.sql" >/dev/null
 sed -n '/^-- P5-D2b: widen/,/^ALTER TABLE kb_management_read_intent ENABLE ROW LEVEL SECURITY;/p' \
-  "$ROOT/src/db2/schema.sql" | sed '$d' | psql -v ON_ERROR_STOP=1 "$URL" -f - >/dev/null
-psql -v ON_ERROR_STOP=1 "$URL" -f "$ROOT/src/db2/schema_grants.sql" >/dev/null
+  "$ROOT/src/modules/db2/c/schema.sql" | sed '$d' | psql -v ON_ERROR_STOP=1 "$URL" -f - >/dev/null
+psql -v ON_ERROR_STOP=1 "$URL" -f "$ROOT/src/modules/db2/c/schema_grants.sql" >/dev/null
 {
   sed '/INSERT INTO public.kb_management_token_intent_namespace(correlation_id,jti,kind)/,$d' \
     "$ROOT/scripts/p5c2d-token-authority-pg17-test.sql"

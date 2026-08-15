@@ -10,11 +10,11 @@
 #include "aimee.h"
 #include "memory.h"
 #include "memory_graph_fusion.h"
-#include "db2/entity_edges.h"
-#include "db2/entity_nodes.h"
-#include "db2/memory_query.h"
-#include "db2/db2_internal.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/entity_nodes.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db_postgres.h"
 
 #include <ctype.h>
 #include <math.h>

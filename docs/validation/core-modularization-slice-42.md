@@ -24,7 +24,7 @@ The descriptor now declares what lives under `src/modules/learning/`:
 - Two direct tests: `src/tests/test_learning_bundle.c` and `src/tests/test_learning_metrics.c`.
 - `docs/modules/learning.md`.
 
-DB2 persistence for learning (`src/db2/db2_learning.h`, `src/db2/learning_synth_ops.c`) and the KB
+DB2 persistence for learning (`src/modules/db2/c/db2_learning.h`, `src/modules/db2/c/learning_synth_ops.c`) and the KB
 synthesis lane remain outside the module root and are physical-ownership debt the document already
 records; the descriptor claims only what is module-local.
 
@@ -38,7 +38,7 @@ root. The completeness latch treats `public_headers` as an explicit audited clai
 So the private-header declaration is accurate to the layout that exists and is accepted by every check.
 
 `learning.h` is nonetheless the module's public API in practice: it is included repository-wide via the
-`-Imodules/learning` search path as `"learning.h"`, including by `src/headers/aimee.h`, `src/db2/db2_learning.h`,
+`-Imodules/learning` search path as `"learning.h"`, including by `src/headers/aimee.h`, `src/modules/db2/c/db2_learning.h`,
 `kb/kb_mining.c`, `kb/kb_service.c`, and tests. Declaring it as a `public_header` today would require it
 to sit under the canonical include tree, which the layout checker enforces, so that path forces a
 file move and roughly six repository-wide include rewrites into this slice. The declare-then-latch split
@@ -54,13 +54,13 @@ Every declared source has tracked production consumers:
 - `learning_router.c` — the router and proposal API (`learning_router_enabled`,
   `learning_router_record_signal`, `learning_list_proposals`, `learning_accept_proposal`,
   `learning_metrics_commit_ratio`, and the JSON marshalling), called by `src/cmd_learning.c`,
-  `src/cmd_rules.c`, `src/db2/kb_service_backend_agent.c`, and the config layer.
-- `learning_bundle.c` — called by `src/db2/artifacts.c`, `src/db2/learning_synth_ops.c`,
+  `src/cmd_rules.c`, `src/modules/db2/c/kb_service_backend_agent.c`, and the config layer.
+- `learning_bundle.c` — called by `src/modules/db2/c/artifacts.c`, `src/modules/db2/c/learning_synth_ops.c`,
   `src/kb/kb_learning_synth.c`, `src/kb/kb_learning_version.c`, `src/kb/kb_curator_drain.c`,
   `src/kb/kb_service_workers.c`, `src/modules/config/config_learning.c`, and
   `src/modules/delegates/delegate_prompt.c`.
-- `learning_evidence.c` — called by `src/db2/kb_service_backend_agent.c` and `src/kb/kb_service_agent.c`.
-- `learning_implicit.c` — called by `src/db2/kb_service_backend_agent.c`, `src/dogfood.c`, and
+- `learning_evidence.c` — called by `src/modules/db2/c/kb_service_backend_agent.c` and `src/kb/kb_service_agent.c`.
+- `learning_implicit.c` — called by `src/modules/db2/c/kb_service_backend_agent.c`, `src/dogfood.c`, and
   `src/server/openai_chat.c`.
 
 Make's `DATA_SRCS` compiles all four sources and carries the `-Imodules/learning` include path. CMake

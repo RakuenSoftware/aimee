@@ -1,6 +1,6 @@
 #include "kb_vault_key_use.h"
 
-#include "db2_tenant.h"
+#include "modules/db2/c/db2_tenant.h"
 #include "kb_vault_policy.h"
 #include "kb_vault_protected_use.h"
 #include "org_vault_key_use.h"

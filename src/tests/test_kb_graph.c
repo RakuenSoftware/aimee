@@ -3,7 +3,7 @@
  * (skip-when-unchanged vs publish-a-new-generation) is driven deterministically
  * without a live Postgres. */
 #include "kb_service_graph.h"
-#include "db2/code_projection.h"
+#include "modules/db2/c/code_projection.h"
 
 #include <assert.h>
 #include <stdint.h>

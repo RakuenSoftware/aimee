@@ -32,7 +32,7 @@
 # run-pam-login-live.sh and run-write-tier-enforce-live.sh are on it.
 #
 # run-grant-cli-live.sh is NOT, and should not be: it provisions the REAL
-# cluster-scope roles from src/db2/schema_roles.sql and connects as the real
+# cluster-scope roles from src/modules/db2/c/schema_roles.sql and connects as the real
 # aimee_kb_owner, because whoever pre-applies the schema has to be the role kb
 # will connect as. That provisioning IS part of what the rig tests, so putting it
 # behind this helper's disposable-database path would quietly reduce its coverage

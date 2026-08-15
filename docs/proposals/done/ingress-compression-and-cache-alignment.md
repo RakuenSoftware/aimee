@@ -52,7 +52,7 @@
   any missing durable resolver tools such as `memory_get` / code-span read,
   discovery metadata + goldens), config plumbing (`src/headers/config.h`,
   `src/config.c`, `src/config_fields.c`, `src/config_sections.c`,
-  `src/config_save.c`), the learning machinery (`src/db2/learning.c/.h`,
+  `src/config_save.c`), the learning machinery (`src/modules/db2/c/learning.c/.h`,
   `src/kb/kb_learning_synth.c`, `src/config_learning.c`, the
   `interaction_event_embeddings` table, `src/kb/kb_mining.c`) for failure
   mining, `src/payload_rewrite.c` + `src/headers/payload_rewrite.h` +
@@ -589,7 +589,7 @@ complete:
 ### §4.1 Route through the existing learning machinery (resolves review #7)
 
 The repo already has a learning pipeline: signals → proposals → review/accept →
-promotion to a sink. The public surface is in `src/db2/learning.c/.h`
+promotion to a sink. The public surface is in `src/modules/db2/c/learning.c/.h`
 (`db2_learning_signal_insert`, `db2_learning_proposal_insert`,
 `db2_learning_proposal_find_pending`, `db2_learning_proposal_list`, accept/reject
 states), synthesis in `src/kb/kb_learning_synth.c`, CLI in `src/cmd_learning.c`.

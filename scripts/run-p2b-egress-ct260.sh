@@ -16,10 +16,10 @@ runuser -u postgres -- createdb "$db"
 url="postgres:///$db"
 runuser -u postgres -- psql -v ON_ERROR_STOP=1 -d "$db" \
   -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;'
-runuser -u postgres -- psql -v ON_ERROR_STOP=1 -d "$db" -f src/db2/schema_roles.sql
-sed 's/__EMBED_DIM__/1024/g' src/db2/schema.sql | \
+runuser -u postgres -- psql -v ON_ERROR_STOP=1 -d "$db" -f src/modules/db2/c/schema_roles.sql
+sed 's/__EMBED_DIM__/1024/g' src/modules/db2/c/schema.sql | \
   runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -d "$db"
-runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -d "$db" -f src/db2/schema_grants.sql
+runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -d "$db" -f src/modules/db2/c/schema_grants.sql
 runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -d "$db" \
   -f scripts/p2b_egress_pg_test.sql
 runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -d "$db" -f scripts/p2b_egress_ct260_seed.sql

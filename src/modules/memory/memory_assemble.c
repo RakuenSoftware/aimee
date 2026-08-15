@@ -12,13 +12,13 @@
 #include "kb.h"
 #include "db1_optional.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db2/anti_patterns.h"
-#include "db2/entity_edges.h"
-#include "db2/memory_query.h"
-#include "db2/memory_vectors.h"
-#include "db2/memory_relations.h"
-#include "db2/memory_scope_query.h"
-#include "db2/rules.h"
+#include "modules/db2/c/anti_patterns.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/memory_vectors.h"
+#include "modules/db2/c/memory_relations.h"
+#include "modules/db2/c/memory_scope_query.h"
+#include "modules/db2/c/rules.h"
 #endif
 #include <ctype.h>
 #include <limits.h>

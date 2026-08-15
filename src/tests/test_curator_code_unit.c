@@ -14,7 +14,7 @@
 #include <sqlite3.h>
 
 #include <aimee/core/event_bus/module_runtime.h>
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "cJSON.h"
 #include "config.h"
 #include "kb_curator_extract.h"

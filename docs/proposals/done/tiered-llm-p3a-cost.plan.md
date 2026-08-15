@@ -33,8 +33,8 @@ membership-bound policies) — this is an additive schema packet, no new auth mo
    (reuse the P1 `set_tenant_context`/`aimee.principal` pattern), admin/team-lead
    write via P3b. `org_model_pricing` is org-global read (all authenticated), admin
    write.
-5. **Typed db2 modules:** `src/db2/org_pricing.{h,c}` (get_current_price(model) →
-   pins version; add_price_version; seed), `src/db2/org_token_audit.{h,c}`
+5. **Typed db2 modules:** `src/modules/db2/c/org_pricing.{h,c}` (get_current_price(model) →
+   pins version; add_price_version; seed), `src/modules/db2/c/org_token_audit.{h,c}`
    (insert_started, settle, get by key), each guarded by `db2_tenant_require_pg()`.
 6. **Cost calc:** `org_token_estimate_cost(model, version, tokens…) → usd` computed
    from the pinned `org_model_pricing` row (never the server's 3-tier resolver — that

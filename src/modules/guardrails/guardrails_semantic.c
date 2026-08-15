@@ -13,7 +13,7 @@
 #include <aimee/audit/obs_bus.h> /* guardrail events cross the event bus, not a direct db1 insert */
 #include "modules/db1/guardrail_events.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db2/bandit.h"
+#include "modules/db2/c/bandit.h"
 #endif
 #include "headers/log.h"
 #include "platform_process.h"

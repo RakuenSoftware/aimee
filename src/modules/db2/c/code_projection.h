@@ -1,4 +1,4 @@
-/* src/db2/code_projection.h: code-index graph projection ledger — Postgres. */
+/* src/modules/db2/c/code_projection.h: code-index graph projection ledger — Postgres. */
 
 #ifndef CODE_PROJECTION_H
 #define CODE_PROJECTION_H

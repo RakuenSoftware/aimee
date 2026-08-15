@@ -1,4 +1,4 @@
-# Debian 13 (trixie) for libpq 17. The kb links db2/vault_operator_status_runtime.c,
+# Debian 13 (trixie) for libpq 17. The kb links modules/db2/c/vault_operator_status_runtime.c,
 # which uses the PostgreSQL 17 async-cancel API (PQcancelCreate / PGcancelConn /
 # PQcancelPoll). Bookworm ships libpq 15, where those symbols do not exist, so the
 # kb build failed here with -Werror=implicit-function-declaration while the native
@@ -59,7 +59,7 @@ RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
 # pgvectorscale (StreamingDiskANN). Always installed: it adds ~1 MB to the image,
 # and the kb already decides at RUNTIME whether to use it -- pgvec_vectorscale_available()
 # probes pg_extension and falls back to HNSW with a warning when it is absent
-# (src/db2/pgvec_transport.c). Gating it at build time would defeat that and make
+# (src/modules/db2/c/pgvec_transport.c). Gating it at build time would defeat that and make
 # the index type a property of which image you happened to pull.
 #
 # Upstream ships the built extension as a .deb per (version, pg major, arch), so

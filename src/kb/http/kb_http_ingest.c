@@ -9,7 +9,7 @@
 #include "kb_http_ws.h"
 #include "kb_doc_hash.h"
 #include "kb_ingest_normalize.h"
-#include "db2/kb_docs.h"
+#include "modules/db2/c/kb_docs.h"
 #include "config.h"
 #include "kb_doc_pdf.h"
 #include "kb_ocr_sidecar.h"

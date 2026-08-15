@@ -5,11 +5,11 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "css_render_oracle.h"
-#include "db2/css_graph.h"
-#include "db2/css_insights.h"
-#include "db2/css_migration.h"
-#include "db2/css_render.h"
-#include "db2/typed_facts.h"
+#include "modules/db2/c/css_graph.h"
+#include "modules/db2/c/css_insights.h"
+#include "modules/db2/c/css_migration.h"
+#include "modules/db2/c/css_render.h"
+#include "modules/db2/c/typed_facts.h"
 
 #include <string.h>
 

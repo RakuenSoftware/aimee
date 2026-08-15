@@ -144,7 +144,7 @@ static void test_unexecuted_tool_plan_detected(void)
 
 static void test_unexecuted_tool_plan_preserves_findings(void)
 {
-   const char *content = "I found the calibration bug in src/db2/calibration.c.\n"
+   const char *content = "I found the calibration bug in src/modules/db2/c/calibration.c.\n"
                          "```\n"
                          "make test\n"
                          "```\n"

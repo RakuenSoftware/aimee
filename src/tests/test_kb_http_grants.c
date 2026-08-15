@@ -21,7 +21,7 @@
 #include "kb_http_grants.h"
 
 #include "cJSON.h"
-#include "db2/write_tier_grant.h"
+#include "modules/db2/c/write_tier_grant.h"
 #include "kb_identity.h"
 #include "kb_reqctx.h"
 

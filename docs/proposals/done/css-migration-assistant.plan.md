@@ -37,10 +37,10 @@ config flag per the rollout-readiness program.
   `src/extractors_extra.c:225-283`.
 - Indexer write path: `src/index.c` `extract_definitions` (`:696`) →
   `db2_code_index_file_definitions` (`:803`).
-- Code-index schema pattern: `src/db2/schema.sql` (`files`, `file_exports`,
+- Code-index schema pattern: `src/modules/db2/c/schema.sql` (`files`, `file_exports`,
   `terms`, all `… REFERENCES files(id) ON DELETE CASCADE`), applied idempotently
-  by `db_apply_schema_postgres` from `src/db2/db2_init.c:232`.
-- Code-index ops pattern to mirror: `src/db2/code_index.c` /
+  by `db_apply_schema_postgres` from `src/modules/db2/c/db2_init.c:232`.
+- Code-index ops pattern to mirror: `src/modules/db2/c/code_index.c` /
   `code_index_ops.c`.
 - Config-flag pattern: struct field in `src/headers/config.h`, descriptor in
   `src/config_fields.c` (`{"name", offsetof(...), sizeof(int), DEFAULT,
@@ -75,12 +75,12 @@ config flag per the rollout-readiness program.
 
 ## WP-B — Style-graph storage (#1) — depends on WP-A
 
-- `src/db2/schema.sql`: add (idempotent `CREATE TABLE IF NOT EXISTS`)
+- `src/modules/db2/c/schema.sql`: add (idempotent `CREATE TABLE IF NOT EXISTS`)
   - `css_rules (id, file_id BIGINT REFERENCES files(id) ON DELETE CASCADE,
     selector TEXT, spec_a/spec_b/spec_c BIGINT, at_context TEXT, line BIGINT)`
   - `css_declarations (id, rule_id BIGINT REFERENCES css_rules(id) ON DELETE
     CASCADE, property TEXT, value TEXT, important BIGINT)`
-- New `src/db2/css_graph.{c,h}` mirroring `code_index.c`:
+- New `src/modules/db2/c/css_graph.{c,h}` mirroring `code_index.c`:
   `db2_css_graph_upsert_file(project, file_path, rules, n)` (delete-then-insert
   per file, same as the code-index file refresh) + query helpers
   (`db2_css_graph_rules_by_selector`, `_declarations_by_property`).

@@ -4,7 +4,7 @@
  * accessors are stubbed: db2_tenant_require_pg() returns early on the shim, so no
  * accessor is ever reached; the stubs exist only to satisfy the linker. */
 
-#include "db2_tenant.h"
+#include "modules/db2/c/db2_tenant.h"
 #include "team.h"
 #include "project.h"
 #include "membership.h"

@@ -3,7 +3,7 @@
  * state.
  *
  * Thread-safety: a single process-global connection pointer is guarded
- * by a mutex during init/shutdown. Callers outside src/db2/ never see
+ * by a mutex during init/shutdown. Callers outside src/modules/db2/c/ never see
  * the libpq handle; future DB2 subsystems fetch it through db2_conn().
  */
 

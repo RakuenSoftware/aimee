@@ -2,12 +2,12 @@
  * against the sqlite shim. P5. */
 #include "../headers/aimee.h"
 #include "../headers/memory.h" /* edge_t */
-#include "../db2/fact_ingest.h"
-#include "../db2/fact_lifecycle.h"
-#include "../db2/rel_types_store.h"
-#include "../db2/entity_edges.h"
-#include "../db2/ontology_evolution.h"
-#include "../db2/db2_test_shim.h"
+#include "../modules/db2/c/fact_ingest.h"
+#include "../modules/db2/c/fact_lifecycle.h"
+#include "../modules/db2/c/rel_types_store.h"
+#include "../modules/db2/c/entity_edges.h"
+#include "../modules/db2/c/ontology_evolution.h"
+#include "../modules/db2/c/db2_test_shim.h"
 #include "modules/memory/memory_extract_patterns.h"
 #include <assert.h>
 #include <stdio.h>

@@ -5,7 +5,7 @@
  * setUp / tearDown so the test code does not touch sqlite3,
  * db2_register_shared_sqlite, or db2_apply_schema_sqlite_shim
  * directly. Only src/tests/aimee_pg_sqlite_shim.c (the shim impl) and
- * src/db2/ retain knowledge of the sqlite backing.
+ * src/modules/db2/c/ retain knowledge of the sqlite backing.
  *
  * Not used by aimee-server, aimee-kb, or any production code path.
  */

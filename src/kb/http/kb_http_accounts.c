@@ -3,7 +3,7 @@
 #include "kb_http_accounts.h"
 
 #include "cJSON.h"
-#include "db2/enrollments.h"
+#include "modules/db2/c/enrollments.h"
 #include "log.h"
 
 #include <stdio.h>

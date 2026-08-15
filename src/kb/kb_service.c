@@ -7,10 +7,10 @@
 #include "kb.h"
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
-#include "db2/kb_service_backend.h"
-#include "db2/db2_internal.h"
-#include "db2/pgvec_kb_service.h"
-#include "db2/vector_verify.h"
+#include "modules/db2/c/kb_service_backend.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/pgvec_kb_service.h"
+#include "modules/db2/c/vector_verify.h"
 #include <aimee/learning/learning.h>
 #include "log.h"
 #include "memory.h"

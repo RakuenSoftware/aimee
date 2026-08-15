@@ -102,11 +102,11 @@ trap cleanup EXIT
 step "Provisioning $db"
 snapshot_owner_role
 runuser -u postgres -- dropdb --force --if-exists "$db" >/dev/null 2>&1
-runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -f src/db2/schema_roles.sql >/dev/null 2>&1
+runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -f src/modules/db2/c/schema_roles.sql >/dev/null 2>&1
 runuser -u postgres -- createdb -O aimee_kb_owner "$db" || fail "createdb"
 psqlq -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;' \
   || fail "extensions"
-psqlq -f src/db2/schema_roles.sql >/dev/null 2>&1
+psqlq -f src/modules/db2/c/schema_roles.sql >/dev/null 2>&1
 psqlq -c 'GRANT USAGE, CREATE ON SCHEMA public TO aimee_kb_owner' >/dev/null 2>&1
 
 step "Starting aimee-kb (dev shape: owner role, schema applied at boot)"

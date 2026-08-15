@@ -42,7 +42,7 @@ must rule on before P2.
   top — no schema change.
 - **Memory kinds.** `KIND_*` string defines + `KIND_COUNT` (`src/headers/aimee.h`);
   `memory_units` table in **DB2** with `is_episode_card` flag
-  (`src/db2/schema_sqlite.sql:77`, `src/db2/schema.sql`). Episode cards:
+  (`src/modules/db2/c/schema_sqlite.sql:77`, `src/modules/db2/c/schema.sql`). Episode cards:
   `memory_episode_card_generate` / `memory_episode_cards_query`
   (`src/memory_episodes.c:114`,`:239`).
 - **Plan/snapshot storage (DB1).** `checkpoints(snapshot TEXT)`,

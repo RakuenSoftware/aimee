@@ -21,7 +21,7 @@ psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $DB;"
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "CREATE DATABASE $DB;"
 DB_URL="${BASE_URL%/*}/$DB"
 psql -v ON_ERROR_STOP=1 "$DB_URL" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;" >/dev/null
-sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/db2/schema.sql" | psql -v ON_ERROR_STOP=1 "$DB_URL" -f - >/dev/null
+sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/db2/c/schema.sql" | psql -v ON_ERROR_STOP=1 "$DB_URL" -f - >/dev/null
 
 echo "== P7-witness-e2 wiring: audit + reseal + open ledgers =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_witness_wiring_pg_test.sql"
@@ -36,7 +36,7 @@ psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $ADB;"
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "CREATE DATABASE $ADB;"
 ADB_URL="${BASE_URL%/*}/$ADB"
 psql -v ON_ERROR_STOP=1 "$ADB_URL" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;" >/dev/null
-sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/db2/schema.sql" | psql -v ON_ERROR_STOP=1 "$ADB_URL" -f - >/dev/null
+sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/db2/c/schema.sql" | psql -v ON_ERROR_STOP=1 "$ADB_URL" -f - >/dev/null
 
 echo "== P7-witness-e3 source-plus-witness atomicity =="
 psql -v ON_ERROR_STOP=1 "$ADB_URL" -f "$ROOT/scripts/p7_witness_atomicity_pg_test.sql"

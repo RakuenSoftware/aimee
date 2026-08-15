@@ -8,14 +8,14 @@
 #include "aimee.h"
 #include "db.h"
 #include "db1.h"
-#include "db2.h"
-#include "db2_internal.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "db_postgres.h"
 #include "platform_test_util.h"
-#include "../db2/code_projection.h"
-#include "../db2/entity_edges.h"
-#include "../db2/entity_nodes.h"
+#include "../modules/db2/c/code_projection.h"
+#include "../modules/db2/c/entity_edges.h"
+#include "../modules/db2/c/entity_nodes.h"
 
 static char g_db_path[512];
 

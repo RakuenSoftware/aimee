@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Freeze DB2's source boundary and classify every outside include consumer.
+"""Freeze DB2's module-owned C boundary and classify every outside consumer.
 
 The phase-one DB2 process migration needs two different kinds of evidence:
 
@@ -29,7 +29,7 @@ from typing import NoReturn
 
 ROOT = Path(__file__).resolve().parent.parent
 BASELINE = Path("tests/baselines/db2/source-boundary-v1.json")
-BOUNDARY = PurePosixPath("src/db2")
+BOUNDARY = PurePosixPath("src/modules/db2/c")
 CONTRACTS = Path("src/modules/process-contracts.json")
 SCHEMA_VERSION = 1
 SOURCE_KINDS = {"c": ".c", "headers": ".h", "sql": ".sql"}
@@ -81,6 +81,9 @@ def _repo_path(root: Path, relative: PurePosixPath | Path) -> Path:
 
 
 def _source_files(root: Path) -> dict[str, list[str]]:
+    legacy_boundary = _repo_path(root, PurePosixPath("src/db2"))
+    if legacy_boundary.exists() or legacy_boundary.is_symlink():
+        fail("legacy-boundary", "src/db2 must not coexist with the module-owned C boundary")
     boundary = _repo_path(root, BOUNDARY)
     if not boundary.is_dir() or boundary.is_symlink():
         fail("boundary", f"{BOUNDARY} must be a real directory")

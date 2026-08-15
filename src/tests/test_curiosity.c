@@ -7,13 +7,13 @@
 #include "aimee.h"
 #include "db.h"
 #include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "kb_service_backend.h"
 #include "memory.h"
-#include "../db2/curiosity.h"
-#include "../db2/db_postgres.h"
-#include "../db2/db2_internal.h"
+#include "../modules/db2/c/curiosity.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/db2_internal.h"
 
 /* Each test block needs the curiosity_items, memories, memory_directives,
  * failed_queries tables on the *same* DB2 connection so the cross-tier

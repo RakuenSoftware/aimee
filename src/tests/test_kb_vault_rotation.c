@@ -1,5 +1,5 @@
 #include "kb/kb_vault_rotation.h"
-#include "db2/org_vault_rotation.h"
+#include "modules/db2/c/org_vault_rotation.h"
 
 #include <assert.h>
 #include <stdint.h>

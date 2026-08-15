@@ -19,10 +19,10 @@
 #include <stdio.h>
 #include <string.h>
 #include "feature_rows.h"
-#include "db2_test_shim.h"
-#include "../db2/db_postgres.h"
-#include "../db2/lifecycle.h"
-#include "../db2/sketch.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/lifecycle.h"
+#include "../modules/db2/c/sketch.h"
 #include "../kb_features.h"
 #include "../kb_ranker.h"
 #include "../kb_detect.h"

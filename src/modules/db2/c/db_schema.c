@@ -30,7 +30,7 @@ static void copy_sqlite_err(char *errbuf, size_t errlen, const char *src)
 
 /* The DB2 SQLite shim is test/support infrastructure for DB2's Postgres
  * domain APIs. The SQLite-flavoured DB2 schema lives in
- * src/db2/schema_sqlite.sql and is embedded as AIMEE_DB2_SCHEMA_SQLITE_SQL. */
+ * src/modules/db2/c/schema_sqlite.sql and is embedded as AIMEE_DB2_SCHEMA_SQLITE_SQL. */
 
 #ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
 static int db2_sqlite_name_seen(void *ctx, int argc, char **argv, char **columns)

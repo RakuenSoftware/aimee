@@ -5,7 +5,7 @@
  * The pgvector upsert path calls these builders immediately before
  * writing.
  *
- * Pure domain API.  Backend access stays private to src/db2/.
+ * Pure domain API.  Backend access stays private to src/modules/db2/c/.
  */
 #ifndef DEC_DB2_MEMORY_PAYLOAD_H
 #define DEC_DB2_MEMORY_PAYLOAD_H 1

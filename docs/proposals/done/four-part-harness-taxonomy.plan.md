@@ -76,7 +76,7 @@ not assumed:
   substrings in `result_looks_like_error()` (`src/trace_analysis.c:38-52`):
   `error/Error/ERROR`, `failed/Failed/FAILED`, `No such file`, `not found`,
   `Permission denied`, `command not found`. **Verified identical.**
-- **Anti-pattern hit-rate** — `src/db2/anti_patterns.h` exposes `int hit_count`
+- **Anti-pattern hit-rate** — `src/modules/db2/c/anti_patterns.h` exposes `int hit_count`
   (`:27`), `db2_anti_pattern_list()` (`:38`), `db2_anti_pattern_bump()` (`:55`).
   `delete_pressure.py`'s `load_anti_patterns()` keys on `hit_count` (with
   `bumps`/`hits` fallbacks) and treats `hit_count == 0` as a removal candidate —
@@ -212,7 +212,7 @@ to one reviewable claim: "here is the framing and two tools that measure it."
 - `python3 scripts/harness/classify_failures.py --json <trace>` → well-formed
   incidents + distribution; an all-success trace yields "no failures detected".
 - Grounding re-checked against `src/trace_analysis.c`,
-  `src/db1/execution_trace.h`, `src/db2/anti_patterns.h`, `src/tool_prompts/`.
+  `src/db1/execution_trace.h`, `src/modules/db2/c/anti_patterns.h`, `src/tool_prompts/`.
 - **Not verified (honest boundary):** the C ports, the two new subcommands, and the
   A/B harness are design-only and not built or run in this change — matching the
   proposal's own §7. The deciding test for those is an in-process run that this

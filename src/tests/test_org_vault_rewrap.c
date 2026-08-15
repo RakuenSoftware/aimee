@@ -1,6 +1,6 @@
-#include "db2/db2_pool.h"
-#include "db2/db_postgres.h"
-#include "db2/org_vault_rewrap.h"
+#include "modules/db2/c/db2_pool.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/org_vault_rewrap.h"
 
 #include <assert.h>
 #include <pthread.h>

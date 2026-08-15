@@ -6,8 +6,8 @@
  * helpers shared with cmd_hooks.c live in cmd_hooks_scope.c. */
 #include "aimee.h"
 #include "db1.h"
-#include "db2/memory_query.h"
-#include "db2/rules.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/rules.h"
 #include "kb_client.h"
 #include "headers/cmd_hooks_scope.h"
 #include "platform_process.h"

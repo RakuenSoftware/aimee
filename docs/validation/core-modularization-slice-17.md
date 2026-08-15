@@ -43,7 +43,7 @@ round-trip compatibility, and supported-journey evidence.
 `src/modules/audit/module.yaml` declares `config`, `module-runtime`, and `vault` with no runtime toggle.
 Physical source comprises action hashing/preview, the legacy ledger reader, SQLite WORM storage, and the
 shared WORM chain. Consumers include guardrails, server management/state, trajectory export, KB vault
-operations, and `src/db2/kb_audit_worm.c`.
+operations, and `src/modules/db2/c/kb_audit_worm.c`.
 
 | Property | Current evidence | Limit |
 |---|---|---|

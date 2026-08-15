@@ -10,7 +10,7 @@
 
 #include "aimee.h" /* KIND_FACT, TIER_L2 */
 #include "cJSON.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "kb/kb_memory_audit_bridge.h"
 #include "log.h" /* audit_log_open */
 #include "memory.h"

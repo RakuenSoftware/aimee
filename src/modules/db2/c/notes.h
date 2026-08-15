@@ -1,7 +1,7 @@
 /* db2/notes.h: investigation notes, DB2 subsystem.
  *
  * Pure domain API. No backend types. SQL is encapsulated in
- * src/db2/notes.c, which goes through the libpq shim via
+ * src/modules/db2/c/notes.c, which goes through the libpq shim via
  * aimee_pg_* helpers. */
 #ifndef DEC_DB2_NOTES_H
 #define DEC_DB2_NOTES_H 1

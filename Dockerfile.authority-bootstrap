@@ -26,7 +26,7 @@ RUN apt-get update \
 COPY --from=build /src/aimee-kb-token-roots-provision /usr/local/bin/
 COPY --from=build /src/aimee-kb-jwks-publish /usr/local/bin/
 COPY scripts/managed_kms_helper.py /usr/libexec/aimee/managed-kms-helper.py
-COPY src/db2/schema_roles.sql src/db2/schema_grants.sql /usr/share/aimee/
+COPY src/modules/db2/c/schema_roles.sql src/modules/db2/c/schema_grants.sql /usr/share/aimee/
 COPY deploy/container/aimee-managed-authority-bootstrap.sh /usr/local/bin/aimee-managed-authority-bootstrap
 RUN chmod 0755 /usr/local/bin/aimee-managed-authority-bootstrap \
         /usr/libexec/aimee/managed-kms-helper.py \

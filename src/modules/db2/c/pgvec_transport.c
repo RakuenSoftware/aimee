@@ -2,9 +2,9 @@
 #include "memory_scope_query.h"
 #include "pgvec_scope_query.h"
 
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
-#include "../db2/lifecycle.h" /* db2_embedding_dim */
+#include "db2_internal.h"
+#include "db_postgres.h"
+#include "lifecycle.h" /* db2_embedding_dim */
 #include "cJSON.h"
 #include "log.h"
 

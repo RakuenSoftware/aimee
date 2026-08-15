@@ -1,4 +1,4 @@
-/* src/db2/entity_nodes.h: entity_nodes table + aliases — Postgres via libpq. */
+/* src/modules/db2/c/entity_nodes.h: entity_nodes table + aliases — Postgres via libpq. */
 
 #ifndef ENTITY_NODES_H
 #define ENTITY_NODES_H

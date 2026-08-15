@@ -102,9 +102,9 @@ endif
 # NOTE: must come AFTER the branch-switch block above, which deletes $(OBJDIR) on
 # branch changes — if this ran before, the directories would be wiped and gcc
 # would fail trying to write .d dependency files into non-existent subdirectories.
-_DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/db2)
+_DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/modules/db2/c)
 
-C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Imodules/db1 -Idb2 -Imodules/config -Imodules/economizer -Imodules/learning/include -Imodules/roadmap -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -Imodules/memory/include -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/connection/include -Icore/event_bus/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
+C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Imodules/db1 -Imodules/db2/c -Imodules/config -Imodules/economizer -Imodules/learning/include -Imodules/roadmap -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -Imodules/memory/include -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/connection/include -Icore/event_bus/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
 
 # DB2 client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
@@ -211,7 +211,7 @@ C_FLAGS += $(PIC_FLAGS)
 
 # Client sources are intentionally DB-blind. They compile without DB include
 # paths or libpq discovery flags, and link without DB libraries.
-CLIENT_C_FLAGS := $(filter-out -I. -Imodules/db1 -Idb2 $(PQ_CFLAGS),$(C_FLAGS)) $(TLS_FLAGS)
+CLIENT_C_FLAGS := $(filter-out -I. -Imodules/db1 -Imodules/db2/c $(PQ_CFLAGS),$(C_FLAGS)) $(TLS_FLAGS)
 
 # --- Lean build profile ---
 LEAN_BINARY = ../aimee-lean$(EXEEXT)
@@ -326,23 +326,26 @@ DB1_SRCS = modules/db1/db1_init.c modules/db1/db1_write.c modules/db1/wm.c modul
 DB1_OBJS = $(DB1_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 0c: DB2 (shared knowledge tier) ---
-DB2_PG_SRCS = db2/db_postgres.c
-DB2_PG_OBJS = $(DB2_PG_SRCS:%.c=$(OBJDIR)/%.o)
-DB2_SRCS = db2/db2_init.c db2/db2_reembed.c db2/db2_pool.c db2/agent_hints.c db2/agent_outcomes.c db2/canonical_index.c db2/anti_patterns.c db2/workflow_patterns.c db2/evidence_vectors.c db2/learning_synth_ops.c db2/collab_rules.c db2/curiosity.c db2/decision_log.c db2/kb_audit_worm.c db2/enrollments.c db2/db2_tenant.c db2/db2_hardening.c db2/team.c db2/project.c db2/membership.c db2/admin_grant.c db2/write_tier_grant.c db2/oidc_jwks.c db2/entity_edges.c db2/rel_types_store.c db2/entity_registry.c db2/fact_lifecycle.c db2/ontology_evolution.c db2/fact_ingest.c db2/fact_recall.c db2/entity_nodes.c db2/code_projection.c db2/lessons.c db2/shadow_delta.c db2/entity_profiles.c db2/epistemic_directives.c db2/failed_queries.c db2/feedback.c db2/notes.c db2/prospective_memories.c db2/rules.c db2/stopwords.c db2/tasks.c db2/tool_registry.c db2/trace_mining.c db2/kind_lifecycle.c db2/kb_payload.c db2/kb_runtime_state.c db2/kb_service_backend.c db2/kb_service_backend_ingest.c db2/kb_service_backend_agent.c db2/kb_service_backend_memory.c db2/memory_briefing.c db2/memory_conflicts.c db2/memory_export.c db2/memory_health.c db2/memory_lifecycle.c db2/memory_payload.c db2/memory_promotion.c db2/memory_query.c db2/memory_query_bookkeeping.c db2/memory_entity_graph.c db2/memory_row_mapper_pg.c db2/memory_score_fields.c db2/memory_scope_query.c db2/memory_relations.c db2/memory_scenes.c db2/vector_index_ops.c db2/code_index_ops.c db2/learning.c db2/code_index.c db2/code_project_lifecycle.c db2/css_graph.c db2/css_migration.c db2/css_render.c db2/css_insights.c db2/typed_facts.c db2/db_schema.c db2/memory_lint.c db2/sketch.c db2/artifacts.c db2/corpus_structural.c db2/corpus_jobs.c db2/mining.c db2/calibration.c db2/demotion.c db2/fidelity.c db2/feature_rows.c db2/report_enrichments.c db2/bandit.c db2/kb_maintenance.c db2/kb_service_backend_export.c db2/kb_docs.c db2/kb_releases.c db2/code_audit.c \
-           db2/pgvec_transport.c db2/memory_vectors.c db2/kb_vectors.c db2/vector_status.c db2/pgvec_verify.c db2/pgvec_kb_service.c \
-           db2/curator_terms.c db2/curator_gaps.c \
-           db2/cross_repo_resolver.c db2/cross_repo_classify.c db2/cross_repo_stats.c \
-           db2/cross_repo_deps.c db2/cross_repo_review.c db2/cross_repo_identity.c \
-           db2/cross_repo_route.c db2/cross_repo_build.c \
-           db2/vault_pg.c db2/org_vault_rewrap.c db2/org_vault_rotation.c db2/org_vault_key_use.c db2/org_model_catalog.c db2/org_spend.c db2/org_budget.c db2/org_rate.c db2/org_egress.c db2/org_telemetry.c db2/org_telemetry_fmt.c
-DB2_SRCS += db2/server_registry.c db2/management_client_instance.c db2/management_action_journal.c db2/management_identity_journal.c db2/management_read_journal.c db2/management_jwks_runtime.c
-DB2_SRCS += db2/db2_witness_checkpoint.c
-DB2_SRCS += db2/db2_witness_emit.c
-DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
+DB2_PG_SRCS = modules/db2/c/db_postgres.c
+DB2_PG_OBJS = $(DB2_PG_SRCS:modules/db2/c/%.c=$(OBJDIR)/db2/%.o)
+DB2_SRCS = modules/db2/c/db2_init.c modules/db2/c/db2_reembed.c modules/db2/c/db2_pool.c modules/db2/c/agent_hints.c modules/db2/c/agent_outcomes.c modules/db2/c/canonical_index.c modules/db2/c/anti_patterns.c modules/db2/c/workflow_patterns.c modules/db2/c/evidence_vectors.c modules/db2/c/learning_synth_ops.c modules/db2/c/collab_rules.c modules/db2/c/curiosity.c modules/db2/c/decision_log.c modules/db2/c/kb_audit_worm.c modules/db2/c/enrollments.c modules/db2/c/db2_tenant.c modules/db2/c/db2_hardening.c modules/db2/c/team.c modules/db2/c/project.c modules/db2/c/membership.c modules/db2/c/admin_grant.c modules/db2/c/write_tier_grant.c modules/db2/c/oidc_jwks.c modules/db2/c/entity_edges.c modules/db2/c/rel_types_store.c modules/db2/c/entity_registry.c modules/db2/c/fact_lifecycle.c modules/db2/c/ontology_evolution.c modules/db2/c/fact_ingest.c modules/db2/c/fact_recall.c modules/db2/c/entity_nodes.c modules/db2/c/code_projection.c modules/db2/c/lessons.c modules/db2/c/shadow_delta.c modules/db2/c/entity_profiles.c modules/db2/c/epistemic_directives.c modules/db2/c/failed_queries.c modules/db2/c/feedback.c modules/db2/c/notes.c modules/db2/c/prospective_memories.c modules/db2/c/rules.c modules/db2/c/stopwords.c modules/db2/c/tasks.c modules/db2/c/tool_registry.c modules/db2/c/trace_mining.c modules/db2/c/kind_lifecycle.c modules/db2/c/kb_payload.c modules/db2/c/kb_runtime_state.c modules/db2/c/kb_service_backend.c modules/db2/c/kb_service_backend_ingest.c modules/db2/c/kb_service_backend_agent.c modules/db2/c/kb_service_backend_memory.c modules/db2/c/memory_briefing.c modules/db2/c/memory_conflicts.c modules/db2/c/memory_export.c modules/db2/c/memory_health.c modules/db2/c/memory_lifecycle.c modules/db2/c/memory_payload.c modules/db2/c/memory_promotion.c modules/db2/c/memory_query.c modules/db2/c/memory_query_bookkeeping.c modules/db2/c/memory_entity_graph.c modules/db2/c/memory_row_mapper_pg.c modules/db2/c/memory_score_fields.c modules/db2/c/memory_scope_query.c modules/db2/c/memory_relations.c modules/db2/c/memory_scenes.c modules/db2/c/vector_index_ops.c modules/db2/c/code_index_ops.c modules/db2/c/learning.c modules/db2/c/code_index.c modules/db2/c/code_project_lifecycle.c modules/db2/c/css_graph.c modules/db2/c/css_migration.c modules/db2/c/css_render.c modules/db2/c/css_insights.c modules/db2/c/typed_facts.c modules/db2/c/db_schema.c modules/db2/c/memory_lint.c modules/db2/c/sketch.c modules/db2/c/artifacts.c modules/db2/c/corpus_structural.c modules/db2/c/corpus_jobs.c modules/db2/c/mining.c modules/db2/c/calibration.c modules/db2/c/demotion.c modules/db2/c/fidelity.c modules/db2/c/feature_rows.c modules/db2/c/report_enrichments.c modules/db2/c/bandit.c modules/db2/c/kb_maintenance.c modules/db2/c/kb_service_backend_export.c modules/db2/c/kb_docs.c modules/db2/c/kb_releases.c modules/db2/c/code_audit.c \
+           modules/db2/c/pgvec_transport.c modules/db2/c/memory_vectors.c modules/db2/c/kb_vectors.c modules/db2/c/vector_status.c modules/db2/c/pgvec_verify.c modules/db2/c/pgvec_kb_service.c \
+           modules/db2/c/curator_terms.c modules/db2/c/curator_gaps.c \
+           modules/db2/c/cross_repo_resolver.c modules/db2/c/cross_repo_classify.c modules/db2/c/cross_repo_stats.c \
+           modules/db2/c/cross_repo_deps.c modules/db2/c/cross_repo_review.c modules/db2/c/cross_repo_identity.c \
+           modules/db2/c/cross_repo_route.c modules/db2/c/cross_repo_build.c \
+           modules/db2/c/vault_pg.c modules/db2/c/org_vault_rewrap.c modules/db2/c/org_vault_rotation.c modules/db2/c/org_vault_key_use.c modules/db2/c/org_model_catalog.c modules/db2/c/org_spend.c modules/db2/c/org_budget.c modules/db2/c/org_rate.c modules/db2/c/org_egress.c modules/db2/c/org_telemetry.c modules/db2/c/org_telemetry_fmt.c
+DB2_SRCS += modules/db2/c/server_registry.c modules/db2/c/management_client_instance.c modules/db2/c/management_action_journal.c modules/db2/c/management_identity_journal.c modules/db2/c/management_read_journal.c modules/db2/c/management_jwks_runtime.c
+DB2_SRCS += modules/db2/c/db2_witness_checkpoint.c
+DB2_SRCS += modules/db2/c/db2_witness_emit.c
+# Preserve the established test object namespace while all sources live under
+# the module boundary. tests/Rules.mk names these objects directly and relies on
+# make de-duplicating them with DB2_OBJS in composite fixtures.
+DB2_OBJS = $(DB2_SRCS:modules/db2/c/%.c=$(OBJDIR)/db2/%.o)
 
 # Vault core (P10): the credential-vault crypto/store/service, shared by aimee-server
 # (in SERVER_SRCS above, compiled as $(OBJDIR)/modules/vault/*.o) and aimee-kb (linked
-# as KB_VAULT_OBJS below, kb/-prefixed objects). db2/vault_pg.c (the kb Postgres store)
+# as KB_VAULT_OBJS below, kb/-prefixed objects). modules/db2/c/vault_pg.c (the kb Postgres store)
 # rides DB2_SRCS -> KB_DB2_OBJS and never enters aimee-server (the server links no
 # DB2_OBJS). The dual-compile is intentional: one crypto core, two persistence backends.
 VAULT_CORE_SRCS = modules/vault/vault_witness_record.c modules/vault/vault_witness_merkle.c modules/vault/vault_witness_checkpoint.c modules/vault/vault_witness_export.c modules/vault/vault_witness_verify.c modules/vault/vault_witness_offline.c modules/vault/vault_witness_proof.c modules/vault/vault_witness_signer.c modules/vault/vault_witness_signer_kek.c \
@@ -575,7 +578,7 @@ KB_SRCS += kb/http/kb_http_entry.c
 KB_SRCS += kb/http/kb_http_code_context.c
 KB_SRCS += kb/http/kb_http_code_lifecycle.c
 KB_SRCS += kb/kb_tenancy_cli.c
-KB_SRCS += kb/kb_bedrock_egress.c kb/kb_egress_admission.c kb/kb_vault_key_use.c kb/kb_vault_protected_use.c kb/kb_vault_rewrap.c kb/kb_vault_rotation.c kb/kb_vault_rotation_ops.c kb/kb_mgmt_endpoint.c kb/kb_mgmt_client.c kb/kb_mgmt_token.c kb/kb_identity_token.c kb/kb_mgmt_status.c kb/http/kb_http_servers.c kb/http/kb_http_egress.c db2/org_token_audit.c
+KB_SRCS += kb/kb_bedrock_egress.c kb/kb_egress_admission.c kb/kb_vault_key_use.c kb/kb_vault_protected_use.c kb/kb_vault_rewrap.c kb/kb_vault_rotation.c kb/kb_vault_rotation_ops.c kb/kb_mgmt_endpoint.c kb/kb_mgmt_client.c kb/kb_mgmt_token.c kb/kb_identity_token.c kb/kb_mgmt_status.c kb/http/kb_http_servers.c kb/http/kb_http_egress.c modules/db2/c/org_token_audit.c
 KB_SRCS += kb/kb_workload_provider.c kb/kb_workload_helper_posix.c kb/kb_workload_wire.c \
            kb/kb_workload_proof.c kb/kb_workload_jwt.c
 KB_SRCS += kb/kb_management_cert_codec.c kb/kb_management_cert_crypto.c \
@@ -593,7 +596,7 @@ KB_SRCS += kb/kb_vault_operator_status.c kb/kb_vault_protected_secret.c \
            kb/kb_vault_activation_latch.c kb/kb_vault_operator_mutation.c \
            kb/kb_vault_operator_runtime.c \
            kb/kb_vault_tpm_runtime_lock.c \
-           db2/vault_operator_status_runtime.c db2/vault_operator_rewrap_runtime.c
+           modules/db2/c/vault_operator_status_runtime.c modules/db2/c/vault_operator_rewrap_runtime.c
 $(OBJDIR)/kb/kb_workload_jwt.o: C_FLAGS += -Imodules/aws
 
 # P5-B1c online authority. This hand-maintained closure intentionally excludes
@@ -602,8 +605,8 @@ STATUS_AUTHORITY_SRCS = kb/kb_mgmt_status_authority_main.c \
                         kb/kb_mgmt_status_listener.c kb/kb_mgmt_status_peer.c \
                         kb/kb_mgmt_status_authority.c kb/kb_mgmt_status_custody.c \
                         kb/kb_mgmt_status.c kb/kb_vault_protected_use.c \
-                        db2/management_status_key.c db2/management_status_runtime.c \
-                        db2/db_postgres.c
+                        modules/db2/c/management_status_key.c modules/db2/c/management_status_runtime.c \
+                        modules/db2/c/db_postgres.c
 STATUS_AUTHORITY_OBJS = $(STATUS_AUTHORITY_SRCS:%.c=$(OBJDIR)/%.o)
 STATUS_AUTHORITY_VAULT_OBJS = $(OBJDIR)/modules/vault/vault_crypto.o \
                               $(OBJDIR)/modules/vault/vault_kek_check.o \
@@ -626,8 +629,8 @@ TOKEN_AUTHORITY_OBJS = $(OBJDIR)/kb/kb_mgmt_token_authority_main.o \
                        $(OBJDIR)/kb/kb_identity_token.o \
                        $(OBJDIR)/server/oauth_pkce.o \
                        $(OBJDIR)/kb/kb_mgmt_token_public.o \
-                       $(OBJDIR)/db2/management_token_authority.o \
-                       $(OBJDIR)/db2/db_postgres.o
+                       $(OBJDIR)/modules/db2/c/management_token_authority.o \
+                       $(OBJDIR)/modules/db2/c/db_postgres.o
 TOKEN_AUTHORITY_VAULT_OBJS = $(STATUS_AUTHORITY_VAULT_OBJS)
 .PHONY: status-authority-core status-authority-package-check
 status-authority-package-check:
@@ -639,8 +642,8 @@ status-authority-core: status-authority-package-check $(KB_STATUS_AUTHORITY)
 # install targets, runtime images, and ordinary KB linkage.
 STATUS_PROVISIONER_OBJS = $(OBJDIR)/kb/kb_mgmt_status_provision_main.o \
                           $(OBJDIR)/kb/kb_mgmt_status_provision.o \
-                          $(OBJDIR)/db2/management_status_provision.o \
-                          $(OBJDIR)/db2/db_postgres.o
+                          $(OBJDIR)/modules/db2/c/management_status_provision.o \
+                          $(OBJDIR)/modules/db2/c/db_postgres.o
 STATUS_PROVISIONER_VAULT_OBJS = $(OBJDIR)/kb/modules/vault/vault_crypto.o \
                                 $(OBJDIR)/kb/modules/vault/vault_kek_check.o \
                                 $(OBJDIR)/kb/modules/vault/vault_hwm.o \
@@ -657,8 +660,8 @@ TOKEN_ROOTS_PROVISIONER_OBJS = $(OBJDIR)/kb/kb_mgmt_token_roots_provision_main.o
                                $(OBJDIR)/kb/kb_mgmt_offline_hardening.o \
                                $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
                                $(OBJDIR)/kb/kb_mgmt_token_public.o \
-                               $(OBJDIR)/db2/management_token_roots.o \
-                               $(OBJDIR)/db2/db_postgres.o
+                               $(OBJDIR)/modules/db2/c/management_token_roots.o \
+                               $(OBJDIR)/modules/db2/c/db_postgres.o
 TOKEN_ROOTS_PROVISIONER_VAULT_OBJS = $(OBJDIR)/kb/modules/vault/vault_crypto.o \
                                      $(OBJDIR)/kb/modules/vault/vault_kek_check.o \
                                      $(OBJDIR)/kb/modules/vault/vault_hwm.o \
@@ -673,8 +676,8 @@ JWKS_PUBLISHER_OBJS = $(OBJDIR)/kb/kb_mgmt_jwks_publish_main.o \
                       $(OBJDIR)/kb/kb_mgmt_jwks_publication.o \
                       $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
                       $(OBJDIR)/kb/kb_mgmt_token_public.o \
-                      $(OBJDIR)/db2/management_jwks_publication.o \
-                      $(OBJDIR)/db2/db_postgres.o
+                      $(OBJDIR)/modules/db2/c/management_jwks_publication.o \
+                      $(OBJDIR)/modules/db2/c/db_postgres.o
 JWKS_PUBLISHER_VAULT_OBJS = $(TOKEN_ROOTS_PROVISIONER_VAULT_OBJS)
 KB_OBJS = $(KB_SRCS:%.c=$(OBJDIR)/%.o)
 # MCP-plugin adapter hosted on aimee-kb (config install: kb). Reuses the shared
@@ -703,7 +706,7 @@ KB_BEDROCK_IR_OBJS = $(OBJDIR)/modules/translation/aimee_backend_bedrock.o \
                      $(OBJDIR)/modules/ir/aimee_ir.o
 # modules/audit/audit_worm.c is the aimee-server SQLite WORM store (#include <sqlite3.h>); the
 # kb is DB2/Postgres-only and MUST stay sqlite-free (see the boundary integrity
-# check below), using its own db2/kb_audit_worm.c. Its SQLite API has no kb-side
+# check below), using its own modules/db2/c/kb_audit_worm.c. Its SQLite API has no kb-side
 # callers (guardrails_action_audit.c / cmd_audit.c / server_state.c are server/
 # CLI only), while the shared modules/audit/audit_worm_chain.c is pure hashing (no sqlite) and
 # stays. Excluding it keeps the kb-only/split image build from needing sqlite3.h.
@@ -854,7 +857,7 @@ GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o \
                $(OBJDIR)/modules/vault/runtime_secret.o $(GATEWAY_PLATFORM_OBJS)
 
 # All source files for linting (excluding vendored cJSON)
-ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c db2/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c db2/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c db2/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
+ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c modules/db2/c/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c modules/db2/c/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c modules/db2/c/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
            $(CORE_CONNECTION_SRCS) $(CORE_EVENT_BUS_SRCS) $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(KB_SYNTHESIS_SRCS) $(GATEWAY_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
 LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(wildcard tests/fuzz_*.c) $(wildcard tests/bench_*.c)
 
@@ -1317,7 +1320,7 @@ $(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_O
 #
 # dashboard_kb.o carries the kb-side dashboard JSON helpers
 # (api_memory_stats, api_logs, api_dashboard_*) that
-# db2/kb_service_backend_agent.c references when serving "dashboard.*" RPCs.
+# modules/db2/c/kb_service_backend_agent.c references when serving "dashboard.*" RPCs.
 # It's pulled in directly here, not via CMD_OBJS, because the kb sidecar
 # does not link the cmd_*/CLI surface.
 # oauth_pkce.o provides the base64url encoder kb/enroll.c uses to mint
@@ -1646,7 +1649,7 @@ $(OBJDIR)/server/agent_policy.o: server/agent_policy.c tool_prompts_data.h
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -o $@ $<
 
-SCHEMA_FILES := modules/db1/schema.sql modules/db1/roadmap_runtime.sql db2/schema.sql db2/schema_sqlite.sql
+SCHEMA_FILES := modules/db1/schema.sql modules/db1/roadmap_runtime.sql modules/db2/c/schema.sql modules/db2/c/schema_sqlite.sql
 
 schema_data.h: $(SCHEMA_FILES) gen_schema.py
 	@tmp='$@.$$$$.tmp'; \
@@ -1815,11 +1818,20 @@ $(OBJDIR)/modules/db1/db_schema.o: modules/db1/db_schema.c schema_data.h
 	@mkdir -p $(OBJDIR)
 	$(CC) -c $(C_FLAGS) -o $@ $<
 
-$(OBJDIR)/db2/db_schema.o: db2/db_schema.c schema_data.h
-	@mkdir -p $(OBJDIR)/db2
+$(OBJDIR)/modules/db2/c/db_schema.o: modules/db2/c/db_schema.c schema_data.h
+	@mkdir -p $(OBJDIR)/modules/db2/c
 	$(CC) -c $(C_FLAGS) -o $@ $<
 
-$(OBJDIR)/kb/db2/db_schema.o: db2/db_schema.c schema_data.h
+# tests/Rules.mk retains its test-only DB2 object namespace while the source
+# tree migrates. Every such object is compiled from the module-owned boundary;
+# no source compatibility directory or symlink is permitted.
+$(OBJDIR)/db2/%.o: modules/db2/c/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -c $(C_FLAGS) -o $@ $<
+
+$(OBJDIR)/db2/db_schema.o: modules/db2/c/db_schema.c schema_data.h
+
+$(OBJDIR)/kb/modules/db2/c/db_schema.o: modules/db2/c/db_schema.c schema_data.h
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM -o $@ $<
 

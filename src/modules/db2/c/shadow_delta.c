@@ -1,4 +1,4 @@
-/* src/db2/shadow_delta.c: Phase 7 shadow-mode rank-delta persistence. */
+/* src/modules/db2/c/shadow_delta.c: Phase 7 shadow-mode rank-delta persistence. */
 
 #include "shadow_delta.h"
 #include "db2_internal.h"

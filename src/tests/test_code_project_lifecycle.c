@@ -3,12 +3,12 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../db2/code_index.h"
-#include "../db2/code_project_lifecycle.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db2_test_shim.h"
-#include "../db2/db_postgres.h"
-#include "../db2/kb_audit_worm.h"
+#include "../modules/db2/c/code_index.h"
+#include "../modules/db2/c/code_project_lifecycle.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/kb_audit_worm.h"
 
 static long scalar(const char *sql)
 {

@@ -1,10 +1,10 @@
 /* On-demand P7 D2b integration harness.  Each command is a fresh process so
  * TPM/provider caches and the process-local primary epoch cannot leak between
  * crash-boundary fixtures.  Driven only by p7_reseal_d2b_swtpm_pg_test.sh. */
-#include "db2.h"
-#include "db2/db2_internal.h"
-#include "db2/db_postgres.h"
-#include "db2/org_vault_rewrap.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/org_vault_rewrap.h"
 #include "kb/kb_vault_policy.h"
 #include "modules/vault/vault_crypto.h"
 #include "modules/vault/vault_custody_tpm2.h"

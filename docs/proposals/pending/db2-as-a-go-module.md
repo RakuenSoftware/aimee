@@ -1,11 +1,12 @@
 # Proposal: put DB2 behind a module boundary, then port it to Go
 
-- **State:** PENDING — scoped migration; no production DB2 operation has moved under this
-  proposal yet.
+- **State:** PENDING — the C source boundary has moved under module ownership; no production DB2
+  operation has moved behind the process boundary yet.
 - **Date:** 2026-08-15.
 - **Charter roles:** Constrain-Verify / Gate-Promote.
-- **Thesis:** `src/db2` was created as a portable source boundary. Preserve its behavior by
-  moving the existing C implementation intact into a KB-local module process first. Once
+- **Thesis:** DB2 was created as a portable source boundary and now resides intact at
+  `src/modules/db2/c`. Preserve its behavior by putting that C implementation behind a KB-local
+  module process first. Once
   `aimee-kb` has no direct DB2 linkage, replace that module's internals with pure Go without
   changing its event contract.
 
@@ -13,7 +14,7 @@
 
 DB2 moves in two ownership transfers:
 
-1. **C library to C module.** The existing `src/db2` implementation becomes the private
+1. **C library to C module.** The relocated `src/modules/db2/c` implementation becomes the private
    implementation of a separately supervised `aimee-module-db2` process placed with
    `aimee-kb`. The C code, schema, SQL, transaction behavior, pool, and tests move together.
    `aimee-kb` reaches the process only through typed, versioned bus events and no longer links
@@ -38,7 +39,8 @@ the public KB HTTP/CLI contracts keep their meanings.
 
 ## 2. Why the existing boundary is portable
 
-The C implementation already hides its PostgreSQL handle inside `src/db2`. Callers use typed
+The C implementation already hid its PostgreSQL handle inside the former `src/db2` boundary. That
+tree has been relocated intact to `src/modules/db2/c`; callers use typed
 headers; code outside the boundary is not supposed to receive a libpq handle or issue SQL.
 Schema, lifecycle, pooling, tenant transactions, query implementations, and pgvector transport
 are all present under the same directory. That is the unit to package behind the process
@@ -48,11 +50,11 @@ Measured on `origin/testing` at `0916c09472`:
 
 | Measure | Count |
 | --- | ---: |
-| C translation units under `src/db2` | 141 |
-| Headers under `src/db2` | 137 |
-| SQL files under `src/db2` | 6 |
+| C translation units under `src/modules/db2/c` | 141 |
+| Headers under `src/modules/db2/c` | 137 |
+| SQL files under `src/modules/db2/c` | 6 |
 | C, header, and SQL lines | 92,852 |
-| Files outside `src/db2` that include a DB2 header | 297 |
+| Files outside `src/modules/db2/c` that include a DB2 header | 297 |
 | — production files | 147 |
 | — test files | 150 |
 | Direct DB2-header include directives outside the boundary | 967 |
@@ -64,14 +66,14 @@ pattern is intentionally the same for file and directive counts):
 
 ```sh
 git checkout 0916c09472
-rg --files src/db2 -g '*.c' | wc -l
-rg --files src/db2 -g '*.h' | wc -l
-rg --files src/db2 -g '*.sql' | wc -l
-wc -l src/db2/*.[ch] src/db2/*.sql | tail -1
+rg --files src/modules/db2/c -g '*.c' | wc -l
+rg --files src/modules/db2/c -g '*.h' | wc -l
+rg --files src/modules/db2/c -g '*.sql' | wc -l
+wc -l src/modules/db2/c/*.[ch] src/modules/db2/c/*.sql | tail -1
 rg -l '#include [<"](?:\.\./)?db2/|#include [<"][^">]*db2[^">]*\.h' \
-  src --glob '!src/db2/**' | wc -l
+  src --glob '!src/modules/db2/c/**' | wc -l
 rg -n '^#include [<"](?:\.\./)?db2/|^#include [<"][^">]*db2[^">]*\.h' \
-  src --glob '!src/db2/**' | wc -l
+  src --glob '!src/modules/db2/c/**' | wc -l
 ```
 
 These planning-time counts are evidence, not a frozen migration manifest. The first implementation
@@ -256,7 +258,7 @@ src/modules/db2/
   include/aimee/db2/module_api.h
   client/{client.c,client.h,generated.c}
   runtime/{main.c,module_adapter.c,generated_dispatch.c}
-  c/                         # the current src/db2 tree, paths preserved below this point
+  c/                         # the current src/modules/db2/c tree, paths preserved below this point
 docs/modules/db2.md
 tests/db2/{replay.c,fixtures/,schema_inventory.sql}
 server-go/modules/db2/       # created in phase two; absent from the phase-one runtime closure

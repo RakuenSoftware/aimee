@@ -1,7 +1,7 @@
 /* corpus_jobs_http_stub.c: corpus pipeline stubs for kb_http route tests. */
 
 #include "corpus_jobs.h"
-#include "db2/artifacts.h"
+#include "modules/db2/c/artifacts.h"
 
 #include <stdio.h>
 #include <string.h>

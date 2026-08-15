@@ -7,7 +7,7 @@
 #include "json_fluent.h" /* jo_ok */
 #include "dstr.h"
 #include "commands.h"
-#include "db2/curiosity.h"
+#include "modules/db2/c/curiosity.h"
 #include "memory.h"
 #include "index.h"
 #include "code_span.h"

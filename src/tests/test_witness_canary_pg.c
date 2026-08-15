@@ -29,11 +29,11 @@
 #include <openssl/evp.h>
 #include <openssl/kdf.h>
 
-#include "db2.h"
-#include "db2/db2_internal.h"
-#include "db2/db2_witness_checkpoint.h"
-#include "db2/db2_witness_emit.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db2_witness_checkpoint.h"
+#include "modules/db2/c/db2_witness_emit.h"
+#include "modules/db2/c/db_postgres.h"
 #include "modules/vault/vault_witness_signer.h"
 
 #define MUST(cond, ...)                                                                            \

@@ -1674,7 +1674,7 @@ CREATE INDEX IF NOT EXISTS idx_ee_projection_generation ON entity_edges(projecti
 -- Cross-repo dependency graph (proposal docs/proposals/pending/cross-repo-dependency-graph.md).
 -- S1 foundation: per-repo trust, a global version/epoch store, the corpus-derived blocked-symbol
 -- set, the AMBIGUOUS review queue, and the trust-change audit log. Resolver/stats/orchestration
--- land in later slices. Dialect parity with src/db2/schema_sqlite.sql is at the table-set level
+-- land in later slices. Dialect parity with src/modules/db2/c/schema_sqlite.sql is at the table-set level
 -- (schema-sync-check); intentional per-dialect deltas: timestamp exprs (to_char vs datetime('now')),
 -- JSONB (Postgres) vs TEXT (sqlite) for `evidence`, identity vs AUTOINCREMENT primary keys.
 --

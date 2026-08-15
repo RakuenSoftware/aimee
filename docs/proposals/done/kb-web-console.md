@@ -117,11 +117,11 @@ an adapter in the console rather than coupling the KB's auth surface to a PAM-ty
   surface for the lattice UI.
 
 **The governance data — already built (governance-decision-records work, S1–S7 merged).**
-- `decision_log` (`src/db2/schema.sql:49`) — decision records: `options, chosen, rationale,
+- `decision_log` (`src/modules/db2/c/schema.sql:49`) — decision records: `options, chosen, rationale,
   assumptions, outcome, status, subject, author, linked_policy_id, supersedes_id,
   revisit_when`; **one-active-per-scope** enforced by
   `idx_dl_active_scope (subject, linked_policy_id) WHERE status='active'`.
-- `audit_events` (`src/db2/schema.sql:526`) — the per-action **policy-verdict audit**.
+- `audit_events` (`src/modules/db2/c/schema.sql:526`) — the per-action **policy-verdict audit**.
 - Curator **review queue** already served at `GET /v1/review` +
   `POST /v1/review/{id}/{accept,reject}` (a **curator-scope** action, not owner — see §4).
 - **Gap:** `decision_log`/`audit_events` have **no `/v1` read surface**; the decision

@@ -1,7 +1,7 @@
 /* memory_scenes.h: DB2 domain API for the scene-clustering tables.
  *
  * Callers pass pure domain values; backend access stays private to
- * src/db2/. */
+ * src/modules/db2/c/. */
 #ifndef DEC_DB2_MEMORY_SCENES_H
 #define DEC_DB2_MEMORY_SCENES_H 1
 

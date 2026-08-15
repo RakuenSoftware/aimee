@@ -1,8 +1,8 @@
-/* db2_internal.h: private to src/db2/.
+/* db2_internal.h: private to src/modules/db2/c/.
  *
  * Shared state between subsystem .c files and the init/shutdown pair
  * in db2_init.c. NOT installed; NOT included by anything outside
- * src/db2/ or focused unit tests that verify lifecycle behavior.
+ * src/modules/db2/c/ or focused unit tests that verify lifecycle behavior.
  */
 #ifndef DEC_DB2_INTERNAL_H
 #define DEC_DB2_INTERNAL_H 1
@@ -63,13 +63,13 @@ extern "C"
     * memory_t via the standard SELECT shape: (id, tier, kind, key, content,
     * confidence, use_count, last_used_at, created_at, updated_at,
     * source_session, salience). Implemented in db2/memory_row_mapper_pg.c.
-    * Reads via aimee_pg_column_*. Callers inside src/db2/ only. */
+    * Reads via aimee_pg_column_*. Callers inside src/modules/db2/c/ only. */
    void db2_fill_memory_12col_pg(struct aimee_pg_stmt *stmt, memory_t *m);
 
    /* Test-shim sqlite accessor. Production DB2 callers use db2_conn()
     * (libpq); this returns the raw sqlite3* that backs the in-memory
     * shim used by unit tests. Returns NULL when no shim handle is
-    * registered. Callers inside src/db2/ only. */
+    * registered. Callers inside src/modules/db2/c/ only. */
    struct sqlite3 *db2_shared_sqlite(void);
 
    /* Register the raw sqlite3 handle the test shim should use. Tests

@@ -9,8 +9,8 @@
 #include "aimee.h"
 #include "db1_optional.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db2/entity_edges.h"
-#include "db2/entity_profiles.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/entity_profiles.h"
 #include "entity_edges.h"
 #include "entity_profiles.h"
 #endif

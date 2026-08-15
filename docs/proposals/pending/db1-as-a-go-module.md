@@ -37,7 +37,7 @@ Taken from `origin/testing` at `2687`:
 | — of those, in `src/tests` | 1,975 |
 | — in `src/server` | 360 |
 | — in `src/modules` | 241 |
-| — in `src/posix`, `src/kb`, `src/db2`, platform | 46 |
+| — in `src/posix`, `src/kb`, `src/modules/db2/c`, platform | 46 |
 | **Distinct symbols used in production** (non-test) | **242** |
 
 The gap between 409 exported and 242 production-used is the first useful finding: **167
@@ -152,7 +152,7 @@ it finishes a seam that is otherwise complete. `gw_state_key` / `gw_fnv1a` /
 #### Phase B ordering, measured
 
 Counted on `testing` at 2695, excluding `db_schema.h`, which exists in both `src/db1` and
-`src/db2` so a name match cannot tell the two apart:
+`src/modules/db2/c` so a name match cannot tell the two apart:
 
 | Module | db1 includes |
 | --- | --- |

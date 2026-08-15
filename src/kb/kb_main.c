@@ -4,14 +4,14 @@
 #include "config.h"
 #include "config_database.h"
 #include "css_render_cmd.h"
-#include "db2/code_index.h"
-#include "db2/db2.h"
+#include "modules/db2/c/code_index.h"
+#include "modules/db2/c/db2.h"
 #include "kb_witness_cadence.h"
 #include "managed_server_identity_install.h"
 #include "kb_auth_oidc.h"
 #include "kb_oidc_jwks_fleet.h"
 #include "kb_identity.h"
-#include "db2_tenant.h"
+#include "modules/db2/c/db2_tenant.h"
 #include "team.h"
 #include "membership.h"
 #include "kb_insights_util.h"
@@ -39,16 +39,16 @@
 #include "cJSON.h"
 #include "memory.h"
 #include "modules/memory/memory_graph_fusion.h"
-#include "db2/memory_vectors.h"
-#include "db2/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
-#include "db2/vault_pg.h"        /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
-#include "kb/kb_vault_policy.h"  /* kb_vault_policy_select (custody selection, P7 §3) */
+#include "modules/db2/c/memory_vectors.h"
+#include "modules/db2/c/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
+#include "modules/db2/c/vault_pg.h" /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
+#include "kb/kb_vault_policy.h"     /* kb_vault_policy_select (custody selection, P7 §3) */
 #include "kb/kb_management_runtime.h"
 #include "kb/kb_vault_operator_runtime.h"
 #include "kb_vault_operator_status.h"
 #include "kb_vault_tpm_runtime_lock.h"
-#include "db2/kb_audit_worm.h"
-#include "db2/vault_operator_status_runtime.h"
+#include "modules/db2/c/kb_audit_worm.h"
+#include "modules/db2/c/vault_operator_status_runtime.h"
 #include "vault_server_key.h"         /* startup durable seal-epoch synchronization */
 #include "vault_env_bootstrap.h"      /* first-boot credential env -> Vault */
 #include "vault_config_bootstrap.h"   /* legacy config credential -> Vault */

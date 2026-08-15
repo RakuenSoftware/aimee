@@ -8,7 +8,7 @@ serve several modules; they do not inherit authority over those modules.
 | event bus | runtime core | `src/core/event_bus/`, `server-go/bus/` | wire vectors, ordering, backpressure, leases, admission, shutdown |
 | audit and governance | audit module | `src/modules/audit/` | completeness, PII bounds, WORM parity, witness behavior |
 | DB1 | server | `src/db1/` | migrations, transaction ownership, local privacy |
-| DB2 | KB | `src/db2/`, `src/kb/` | schema, scope, retrieval, pgvector, ingest |
+| DB2 | KB | `src/modules/db2/c/`, `src/kb/` | schema, scope, retrieval, pgvector, ingest |
 | workflow lifecycle | Go WFE | `server-go/internal/` | single writer, durable transition before dispatch, recovery, forge confinement |
 | tool execution | server tools/policy | tool and guardrail modules | schemas, capabilities, worktree/path checks, audit |
 | delegate sandbox | sandbox module | `src/modules/sandbox/`, delegate backends | mounts, network, credentials, packages, resource bounds |

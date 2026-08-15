@@ -2,9 +2,9 @@
 #include "aimee.h"
 #if !defined(AIMEE_DB2_DISABLED)
 #include "db1.h"
-#include "db2/artifacts.h"
-#include "db2/collab_rules.h"
-#include "db2/db2_learning.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/collab_rules.h"
+#include "modules/db2/c/db2_learning.h"
 #include "dogfood.h"
 #endif
 #include "cJSON.h"

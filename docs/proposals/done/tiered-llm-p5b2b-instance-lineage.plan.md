@@ -87,7 +87,7 @@ validation includes a three-hop chain plus distinct successor-fork attempts.
 
 ## PostgreSQL state
 
-Add three primary-only tables to `src/db2/schema.sql`, with SQLite shape mirrors
+Add three primary-only tables to `src/modules/db2/c/schema.sql`, with SQLite shape mirrors
 only:
 
 - `kb_management_instance_grant`: installation id, replacement lineage id,
@@ -193,7 +193,7 @@ digest and previous enrollment identity)`; only an exact match is replay success
 
 ## Typed adapter and statuses
 
-Add `src/db2/management_client_instance.{h,c}` to the KB-only source closure. Public
+Add `src/modules/db2/c/management_client_instance.{h,c}` to the KB-only source closure. Public
 structs use fixed bounds and enums, reject truncation, clear outputs on every
 failure, recompute the binding digest, and never log tuple values, anchors, digests
 or certificate identities. No server/status-authority binary links this adapter.

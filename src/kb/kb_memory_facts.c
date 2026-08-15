@@ -10,12 +10,12 @@
 #include "kb_curator_llm.h"
 #include "log.h"
 
-#include "db2/db2_internal.h"
-#include "db2/db_postgres.h"
-#include "db2/fact_lifecycle.h"  /* FACT_AUTHORITY_MODEL */
-#include "db2/memory_query.h"    /* db2_memory_get */
-#include "db2/rel_types_store.h" /* db2_fact_commit */
-#include "db2/fact_ingest.h"     /* db2_fact_ingest_text (offline pattern extraction) */
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/fact_lifecycle.h"  /* FACT_AUTHORITY_MODEL */
+#include "modules/db2/c/memory_query.h"    /* db2_memory_get */
+#include "modules/db2/c/rel_types_store.h" /* db2_fact_commit */
+#include "modules/db2/c/fact_ingest.h"     /* db2_fact_ingest_text (offline pattern extraction) */
 #include "fact_grounding.h"
 #include "rel_types.h" /* seed ontology: rel_types_seed_* (extractor constraint, §7) */
 #include "memory.h"    /* memory_t */

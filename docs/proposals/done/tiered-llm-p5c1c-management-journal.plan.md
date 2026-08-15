@@ -53,7 +53,7 @@ Canonical audit detail uses fixed `json_build_object` member order and only the 
 
 ## C facade
 
-Add `src/db2/management_action_journal.{h,c}` with fixed-capacity typed input/output structures and closed enums. The facade validates all bounded arrays including the full unused zero tail, generates correlation/JTI with the OS CSPRNG when asked to create a fresh operation, computes or accepts only an already canonical SHA-256 digest through an explicit API, begins the tenant transaction, calls the exact SQL function, copies every column with strict type/length checks, and commits before releasing output. It clears outputs on every failure or commit ambiguity.
+Add `src/modules/db2/c/management_action_journal.{h,c}` with fixed-capacity typed input/output structures and closed enums. The facade validates all bounded arrays including the full unused zero tail, generates correlation/JTI with the OS CSPRNG when asked to create a fresh operation, computes or accepts only an already canonical SHA-256 digest through an explicit API, begins the tenant transaction, calls the exact SQL function, copies every column with strict type/length checks, and commits before releasing output. It clears outputs on every failure or commit ambiguity.
 
 Ambiguous start retry must reuse the exact same correlation id, JTI, and caller inputs. The API therefore exposes the generated identifiers before the first database attempt through a caller-owned operation object and never silently regenerates them. A confirmed journal result has no signer callback, bearer token, endpoint, socket, or dispatch method. Outcome commit ambiguity is retried with the exact same outcome; it is never converted to `indeterminate` merely because the database acknowledgement was lost.
 

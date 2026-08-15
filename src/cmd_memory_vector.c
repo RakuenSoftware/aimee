@@ -7,7 +7,7 @@
 #include "entity_edges.h"
 #include "platform_process.h"
 #include "config_database.h" /* config_embedder_dims_current — the one width declaration */
-#include "db2/vector_verify.h"
+#include "modules/db2/c/vector_verify.h"
 #include "kb.h"
 #include "kb_client.h"
 #include <ctype.h>

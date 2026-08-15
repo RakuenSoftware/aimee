@@ -7,7 +7,7 @@
 #include "json_fluent.h" /* jo_ok */
 #include "cmd_memory_internal.h"
 #include "cmd_review.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/memory_query.h"
 #include "platform_process.h"
 #include "tasks_compose.h"
 #include "kb.h"

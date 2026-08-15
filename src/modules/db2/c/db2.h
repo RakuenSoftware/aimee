@@ -1,12 +1,12 @@
 /* db2.h: DB2 (shared relational tier) — public umbrella header.
  *
- * Code outside src/db2/ never includes libpq headers, never sees a
+ * Code outside src/modules/db2/c/ never includes libpq headers, never sees a
  * connection handle, and never constructs DB2 SQL. Callers use typed
  * domain functions declared by DB2 subsystem headers as they land.
  *
  * Lifecycle: db2_init() is called once at startup with the DB2 libpq
  * connection URL. db2_shutdown() is called at exit. The connection and
- * all subsystem state are private to src/db2/.
+ * all subsystem state are private to src/modules/db2/c/.
  */
 #ifndef DEC_DB2_H
 #define DEC_DB2_H 1

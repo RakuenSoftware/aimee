@@ -5,13 +5,13 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "db2_test_shim.h"
-#include "../db2/typed_facts.h"
-#include "../db2/fact_recall.h"              /* db2_fact_recall_block */
-#include "../db2/fact_lifecycle.h"           /* FACT_AUTHORITY_MODEL */
-#include "../db2/rel_types_store.h"          /* db2_fact_commit */
-#include "modules/memory/memory_fact_gate.h" /* FACT_GATE_NOVEL */
-#include "modules/memory/memory_ontology.h"  /* NODE_PERSON, NODE_OTHER */
+#include "modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/typed_facts.h"
+#include "../modules/db2/c/fact_recall.h"     /* db2_fact_recall_block */
+#include "../modules/db2/c/fact_lifecycle.h"  /* FACT_AUTHORITY_MODEL */
+#include "../modules/db2/c/rel_types_store.h" /* db2_fact_commit */
+#include "modules/memory/memory_fact_gate.h"  /* FACT_GATE_NOVEL */
+#include "modules/memory/memory_ontology.h"   /* NODE_PERSON, NODE_OTHER */
 
 int main(void)
 {

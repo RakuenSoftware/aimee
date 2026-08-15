@@ -14,7 +14,7 @@
 #include "util.h"
 #include "memory.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db2/prospective_memories.h"
+#include "modules/db2/c/prospective_memories.h"
 #include "dogfood.h"
 #include "log.h"
 #endif

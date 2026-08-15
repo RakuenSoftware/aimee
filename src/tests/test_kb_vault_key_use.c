@@ -1,7 +1,7 @@
 #include "kb/kb_vault_key_use.h"
 #include "kb/kb_vault_protected_use.h"
 
-#include "db2/org_vault_key_use.h"
+#include "modules/db2/c/org_vault_key_use.h"
 #include "modules/vault/vault_crypto.h"
 
 #include <assert.h>

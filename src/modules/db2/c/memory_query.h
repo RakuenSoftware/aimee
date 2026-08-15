@@ -746,7 +746,7 @@ extern "C"
    /* Look up the first memory matching `key` and `kind` exactly. Returns
     * the row id on hit (>0), or 0 on no match / error. Used by the
     * agent-feedback path to link an outcome episode to its source task
-    * memory without leaking SQL outside src/db2/. */
+    * memory without leaking SQL outside src/modules/db2/c/. */
    int64_t db2_memory_find_id_by_key_kind(const char *key, const char *kind);
 
    /* Returns 1 if a memory row exists matching `key` AND tier ∈

@@ -4,7 +4,7 @@
 #define DEC_MEMORY_GRAPH_FUSION_H 1
 
 #include "memory.h"
-#include "db2/entity_edges.h"
+#include "modules/db2/c/entity_edges.h"
 
 /* Relation gravity table: traversal multiplier per relation label.
  * These are provisional priors — must be labelled as such in diagnostics

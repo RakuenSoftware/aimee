@@ -3,10 +3,10 @@
 #include "aimee.h"
 #include "cJSON.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db2/entity_edges.h"
-#include "db2/memory_query.h"
-#include "db2/memory_relations.h"
-#include "db2/memory_scenes.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/memory_relations.h"
+#include "modules/db2/c/memory_scenes.h"
 #endif
 #include "log.h"
 #include "memory.h"

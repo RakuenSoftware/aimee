@@ -18,7 +18,7 @@ PRIVATE = {
     "kb/kb_mgmt_token_authority_daemon.o",
     "kb/kb_mgmt_token_authority_service.o",
     "kb/kb_mgmt_token_authority.o",
-    "db2/management_token_authority.o",
+    "modules/db2/c/management_token_authority.o",
 }
 CLIENT = "kb/kb_mgmt_token_authority_ipc.o"
 

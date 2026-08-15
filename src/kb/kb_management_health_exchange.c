@@ -1,7 +1,7 @@
 #include "kb_management_health_exchange.h"
 
 #include "cJSON.h"
-#include "db2/db2_tenant.h"
+#include "modules/db2/c/db2_tenant.h"
 #include "kb_mgmt_endpoint.h"
 
 #include <openssl/crypto.h>

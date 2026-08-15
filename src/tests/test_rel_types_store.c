@@ -2,10 +2,10 @@
  * §1 / P1b), exercised against the in-memory sqlite shim. */
 #include "../headers/aimee.h"
 #include "../headers/memory.h" /* edge_t (needs aimee.h first) */
-#include "../db2/rel_types_store.h"
-#include "../db2/entity_edges.h"
-#include "../db2/entity_registry.h"
-#include "../db2/db2_test_shim.h"
+#include "../modules/db2/c/rel_types_store.h"
+#include "../modules/db2/c/entity_edges.h"
+#include "../modules/db2/c/entity_registry.h"
+#include "../modules/db2/c/db2_test_shim.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
