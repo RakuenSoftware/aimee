@@ -3,7 +3,9 @@
  *
  * Needs a live Postgres: RLS and current_setting have no meaning on the SQLite
  * shim. Reads AIMEE_TEST_PG_URL and SKIPS CLEANLY (exit 0) when it is unset,
- * mirroring test_vault_pg.c, so `make unit-tests` stays green without one.
+ * mirroring test_vault_pg.c, so `make unit-tests` stays green without one. The
+ * vector ownership half also requires pgvector; a database where schema apply
+ * deliberately omitted those optional relations skips this combined proof.
  *
  * WHAT IS PINNED HERE, and why each would otherwise be silent:
  *
@@ -13,9 +15,9 @@
  *     principal set. Deny is the direction the whole design rests on, and a
  *     predicate that answered true here would open every content policy built on
  *     it at once.
- *  3. The user-read and maintenance-write policies exist but are INERT: RLS is
- *     not enabled on either table, so applying this schema changes what nobody
- *     can read. A policy that switched
+ *  3. The user-read and maintenance-write policies exist for documents, file
+ *     index, vector rows, regions, table cells, and document assets, but are
+ *     INERT: applying this schema changes what nobody can read. A policy that switched
  *     itself on would turn an upgrade into an outage for every row not yet
  *     attributed, so the off state is asserted rather than assumed.
  *  4. Reader readiness is declared without enabling RLS, and enabling still
@@ -27,7 +29,8 @@
  *     under a fresh exact-project scope, without crossing into a sibling project.
  *  7. Maintenance authority is named, exact-project, and transaction-local.
  *  8. Two users on two teams search the ordinary KB path with FORCE RLS enabled;
- *     each sees only their own project, and a caller-less search sees neither.
+ *     each sees only their own project in every covered table, and a caller-less
+ *     search sees neither.
  */
 #include "db2.h"
 #include "db2/db2_internal.h"
@@ -96,6 +99,34 @@ static void expect(const char *sql, const char *want)
    }
 }
 
+/* Assert the mechanical per-table half of content scope for one project. The
+ * inherited tables are deliberately joined through their owner ids rather than
+ * their denormalised document_key fields, matching the policies under test. */
+static void expect_project_content_counts(const char *project, const char *want)
+{
+   char sql[1024];
+   snprintf(sql, sizeof(sql), "SELECT count(*) FROM kb_documents WHERE project='%s'", project);
+   expect(sql, want);
+   snprintf(sql, sizeof(sql), "SELECT count(*) FROM kb_file_index WHERE project='%s'", project);
+   expect(sql, want);
+   snprintf(sql, sizeof(sql), "SELECT count(*) FROM kb_embeddings WHERE project='%s'", project);
+   expect(sql, want);
+   snprintf(sql, sizeof(sql), "SELECT count(*) FROM kb_pdf_embeddings WHERE project='%s'", project);
+   expect(sql, want);
+   snprintf(sql, sizeof(sql),
+            "SELECT count(*) FROM kb_doc_regions r JOIN kb_documents d ON d.id=r.chunk_id"
+            " WHERE d.project='%s'",
+            project);
+   expect(sql, want);
+   snprintf(sql, sizeof(sql),
+            "SELECT count(*) FROM kb_table_cells c JOIN kb_doc_regions r ON r.id=c.region_id"
+            " JOIN kb_documents d ON d.id=r.chunk_id WHERE d.project='%s'",
+            project);
+   expect(sql, want);
+   snprintf(sql, sizeof(sql), "SELECT count(*) FROM kb_doc_assets WHERE project='%s'", project);
+   expect(sql, want);
+}
+
 static int scalar(const char *sql, char *out, size_t cap)
 {
    char err[256] = "";
@@ -131,6 +162,17 @@ int main(void)
    }
    printf("test_content_scope_pg\n");
 
+   char vector_relations[16] = "";
+   if (scalar("SELECT (to_regclass('kb_embeddings') IS NOT NULL)::int"
+              " + (to_regclass('kb_pdf_embeddings') IS NOT NULL)::int",
+              vector_relations, sizeof(vector_relations)) != 0 ||
+       strcmp(vector_relations, "2") != 0)
+   {
+      printf("content_scope_pg: SKIP (pgvector relations unavailable)\n");
+      db2_shutdown();
+      return 0;
+   }
+
    /* 1. The referent exists. */
    expect("SELECT count(*) FROM information_schema.columns"
           " WHERE table_name='projects' AND column_name='kb_project'",
@@ -157,8 +199,9 @@ int main(void)
    /* 3. The policies are DEFINED. They have to be, or enabling would be a
     *     schema change at the worst possible moment. */
    expect("SELECT count(*) FROM pg_policies"
-          " WHERE tablename IN ('kb_documents','kb_file_index')",
-          "4");
+          " WHERE tablename IN ('kb_documents','kb_file_index','kb_embeddings',"
+          " 'kb_pdf_embeddings','kb_doc_regions','kb_table_cells','kb_doc_assets')",
+          "14");
    printf("  PASS: the user-read and maintenance-write policies are defined\n");
 
    /* 4. And INERT. A policy does nothing until RLS is enabled on its table, and
@@ -170,7 +213,8 @@ int main(void)
     *    both must be off, because FORCE without ENABLE is not a state worth
     *    reasoning about later. */
    expect("SELECT count(*) FROM pg_class"
-          " WHERE relname IN ('kb_documents','kb_file_index')"
+          " WHERE relname IN ('kb_documents','kb_file_index','kb_embeddings',"
+          " 'kb_pdf_embeddings','kb_doc_regions','kb_table_cells','kb_doc_assets')"
           "   AND (relrowsecurity OR relforcerowsecurity)",
           "0");
    printf("  PASS: they are inert until an operator enables them\n");
@@ -220,7 +264,8 @@ int main(void)
       printf("  PASS: enabling refuses while content is unattributed\n");
       /* Whatever happened, leave the tables as they were found. */
       expect("SELECT count(*) FROM pg_class"
-             " WHERE relname IN ('kb_documents','kb_file_index')"
+             " WHERE relname IN ('kb_documents','kb_file_index','kb_embeddings',"
+             " 'kb_pdf_embeddings','kb_doc_regions','kb_table_cells','kb_doc_assets')"
              "   AND (relrowsecurity OR relforcerowsecurity)",
              "0");
       assert(exec_sql("DELETE FROM kb_documents"
@@ -413,6 +458,10 @@ int main(void)
                       "SELECT id FROM kb_documents"
                       " WHERE project='scope-maintenance-a'"
                       " AND file_path='scope-maintenance-reembed.md')") == 0);
+      assert(exec_sql("DELETE FROM kb_doc_assets"
+                      " WHERE project='scope-maintenance-a'"
+                      " AND document_key='scope-maintenance-reembed.md'") == 0);
+      /* Regions and cells, if a prior run left any, cascade from kb_documents. */
       assert(exec_sql("DELETE FROM kb_documents"
                       " WHERE project='scope-maintenance-a'"
                       " AND file_path='scope-maintenance-reembed.md'") == 0);
@@ -420,6 +469,9 @@ int main(void)
                       "SELECT id FROM kb_documents"
                       " WHERE project='scope-maintenance-b'"
                       " AND file_path='scope-maintenance-sibling.md')") == 0);
+      assert(exec_sql("DELETE FROM kb_doc_assets"
+                      " WHERE project='scope-maintenance-a'"
+                      " AND document_key='scope-maintenance-sibling.md'") == 0);
       assert(exec_sql("DELETE FROM kb_documents"
                       " WHERE project='scope-maintenance-b'"
                       " AND file_path='scope-maintenance-sibling.md'") == 0);
@@ -446,6 +498,12 @@ int main(void)
       assert(exec_sql("ALTER TABLE kb_documents FORCE ROW LEVEL SECURITY") == 0);
       assert(exec_sql("ALTER TABLE kb_file_index ENABLE ROW LEVEL SECURITY") == 0);
       assert(exec_sql("ALTER TABLE kb_file_index FORCE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_embeddings ENABLE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_embeddings FORCE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_pdf_embeddings ENABLE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_pdf_embeddings FORCE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_doc_assets ENABLE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_doc_assets FORCE ROW LEVEL SECURITY") == 0);
       assert(db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, "scope-maintenance-a") == 0);
       assert(db2_maintenance_scope_begin_current() == 1);
       expect("SELECT current_setting('aimee.maintenance_project',true)", "scope-maintenance-a");
@@ -466,14 +524,81 @@ int main(void)
       snprintf(sql, sizeof(sql), "SELECT count(*) FROM kb_embeddings WHERE point_id=%s",
                sibling_doc);
       expect(sql, "0");
+
+      /* Both vector tables use point_id's document as the owner. A matching
+       * maintenance write succeeds; relabelling the sibling's point_id with the
+       * selected project is rejected even though the cached project alone would
+       * satisfy the maintenance scope. Each expected policy error aborts its
+       * transaction, so start a fresh short scope for the next proof. */
+      assert(db2_maintenance_scope_begin_current() == 1);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_pdf_embeddings(point_id,project,payload_json)"
+               " VALUES (%s,'scope-maintenance-a','{}')",
+               reembed_doc);
+      assert(exec_sql(sql) == 0);
+      assert(db2_maintenance_scope_commit() == 0);
+
+      assert(db2_maintenance_scope_begin_current() == 1);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_embeddings(point_id,project,payload_json)"
+               " VALUES (%s,'scope-maintenance-a','{}')",
+               sibling_doc);
+      assert(exec_sql(sql) != 0);
+      db2_maintenance_scope_rollback();
+
+      assert(db2_maintenance_scope_begin_current() == 1);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_pdf_embeddings(point_id,project,payload_json)"
+               " VALUES (%s,'scope-maintenance-a','{}')",
+               sibling_doc);
+      assert(exec_sql(sql) != 0);
+      db2_maintenance_scope_rollback();
+
+      assert(db2_maintenance_scope_begin_current() == 1);
+      assert(exec_sql("INSERT INTO kb_doc_assets"
+                      " (project,generation,document_key,page_no,kind,caption,content_type,"
+                      "  blob_ref,sensitivity_class)"
+                      " SELECT name,current_generation,'scope-maintenance-reembed.md',1,'page',"
+                      " 'maintenance asset','image/png','maintenance-asset-blob','internal'"
+                      " FROM projects WHERE name='scope-maintenance-a'") == 0);
+      assert(db2_maintenance_scope_commit() == 0);
+
+      assert(db2_maintenance_scope_begin_current() == 1);
+      assert(exec_sql("INSERT INTO kb_doc_assets"
+                      " (project,generation,document_key,page_no,kind,caption,content_type,"
+                      "  blob_ref,sensitivity_class)"
+                      " SELECT 'scope-maintenance-a',current_generation,"
+                      " 'scope-maintenance-sibling.md',1,'page','relabelled asset','image/png',"
+                      " 'relabelled-asset-blob','internal'"
+                      " FROM projects WHERE name='scope-maintenance-a'") != 0);
+      db2_maintenance_scope_rollback();
       db2_maintenance_job_leave();
       printf("  PASS: re-embed reapplies exact-project scope after the embedder round-trip\n");
       printf("  PASS: re-embed cannot cross into an unselected sibling chunk\n");
+      printf("  PASS: both vector writers reject cached-project relabelling\n");
+      printf("  PASS: asset writes require an exact project, generation, and document key\n");
 
       assert(exec_sql("ALTER TABLE kb_documents NO FORCE ROW LEVEL SECURITY") == 0);
       assert(exec_sql("ALTER TABLE kb_documents DISABLE ROW LEVEL SECURITY") == 0);
       assert(exec_sql("ALTER TABLE kb_file_index NO FORCE ROW LEVEL SECURITY") == 0);
       assert(exec_sql("ALTER TABLE kb_file_index DISABLE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_embeddings NO FORCE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_embeddings DISABLE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_pdf_embeddings NO FORCE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_pdf_embeddings DISABLE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_doc_assets NO FORCE ROW LEVEL SECURITY") == 0);
+      assert(exec_sql("ALTER TABLE kb_doc_assets DISABLE ROW LEVEL SECURITY") == 0);
+      snprintf(sql, sizeof(sql), "SELECT count(*) FROM kb_embeddings WHERE point_id=%s",
+               sibling_doc);
+      expect(sql, "0");
+      snprintf(sql, sizeof(sql), "SELECT count(*) FROM kb_pdf_embeddings WHERE point_id=%s",
+               sibling_doc);
+      expect(sql, "0");
+      snprintf(sql, sizeof(sql), "DELETE FROM kb_pdf_embeddings WHERE point_id=%s", reembed_doc);
+      assert(exec_sql(sql) == 0);
+      assert(exec_sql("DELETE FROM kb_doc_assets"
+                      " WHERE project='scope-maintenance-a'"
+                      " AND document_key='scope-maintenance-reembed.md'") == 0);
       printf("  PASS: maintenance authority is named, project-bound, and transaction-local\n");
    }
 
@@ -542,23 +667,106 @@ int main(void)
                key_b, team_b);
       assert(scalar(sql, ignored, sizeof(ignored)) == 0);
 
+      assert(exec_sql("DELETE FROM kb_embeddings"
+                      " WHERE project IN ('scope-reader-a','scope-reader-b')") == 0);
+      assert(exec_sql("DELETE FROM kb_pdf_embeddings"
+                      " WHERE project IN ('scope-reader-a','scope-reader-b')") == 0);
+      assert(exec_sql("DELETE FROM kb_doc_assets"
+                      " WHERE project IN ('scope-reader-a','scope-reader-b')") == 0);
+      assert(exec_sql("DELETE FROM kb_file_index"
+                      " WHERE project IN ('scope-reader-a','scope-reader-b')") == 0);
       assert(exec_sql("DELETE FROM kb_documents"
                       " WHERE project IN ('scope-reader-a','scope-reader-b')"
                       " AND file_path IN ('reader-a.md','reader-b.md')") == 0);
+      char reader_doc_a[64] = "", reader_doc_b[64] = "";
       assert(scalar("INSERT INTO kb_documents"
                     " (project,generation,file_path,file_hash,chunk_index,heading_path,"
                     "  line_start,line_end,content,token_count)"
                     " SELECT name,current_generation,'reader-a.md','reader-a-hash',0,"
                     "  'Reader A',1,1,'readinessisolationtoken belongs to reader alpha',5"
                     " FROM projects WHERE name='scope-reader-a' RETURNING id",
-                    ignored, sizeof(ignored)) == 0);
+                    reader_doc_a, sizeof(reader_doc_a)) == 0);
       assert(scalar("INSERT INTO kb_documents"
                     " (project,generation,file_path,file_hash,chunk_index,heading_path,"
                     "  line_start,line_end,content,token_count)"
                     " SELECT name,current_generation,'reader-b.md','reader-b-hash',0,"
                     "  'Reader B',1,1,'readinessisolationtoken belongs to reader beta',5"
                     " FROM projects WHERE name='scope-reader-b' RETURNING id",
-                    ignored, sizeof(ignored)) == 0);
+                    reader_doc_b, sizeof(reader_doc_b)) == 0);
+
+      assert(exec_sql("INSERT INTO kb_file_index(project,generation,file_path,file_hash,content)"
+                      " SELECT name,current_generation,'reader-a.md','reader-a-hash',"
+                      " 'reader alpha file index' FROM projects WHERE name='scope-reader-a'"
+                      " ON CONFLICT (project,generation,file_path) DO UPDATE"
+                      " SET file_hash=EXCLUDED.file_hash,content=EXCLUDED.content") == 0);
+      assert(exec_sql("INSERT INTO kb_file_index(project,generation,file_path,file_hash,content)"
+                      " SELECT name,current_generation,'reader-b.md','reader-b-hash',"
+                      " 'reader beta file index' FROM projects WHERE name='scope-reader-b'"
+                      " ON CONFLICT (project,generation,file_path) DO UPDATE"
+                      " SET file_hash=EXCLUDED.file_hash,content=EXCLUDED.content") == 0);
+
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_embeddings(point_id,project,payload_json)"
+               " VALUES (%s,'scope-reader-a','{\"project\":\"scope-reader-a\"}')"
+               " ON CONFLICT (point_id) DO UPDATE SET project=EXCLUDED.project,"
+               " payload_json=EXCLUDED.payload_json",
+               reader_doc_a);
+      assert(exec_sql(sql) == 0);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_embeddings(point_id,project,payload_json)"
+               " VALUES (%s,'scope-reader-b','{\"project\":\"scope-reader-b\"}')"
+               " ON CONFLICT (point_id) DO UPDATE SET project=EXCLUDED.project,"
+               " payload_json=EXCLUDED.payload_json",
+               reader_doc_b);
+      assert(exec_sql(sql) == 0);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_pdf_embeddings(point_id,project,payload_json)"
+               " VALUES (%s,'scope-reader-a','{\"project\":\"scope-reader-a\"}')"
+               " ON CONFLICT (point_id) DO UPDATE SET project=EXCLUDED.project,"
+               " payload_json=EXCLUDED.payload_json",
+               reader_doc_a);
+      assert(exec_sql(sql) == 0);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_pdf_embeddings(point_id,project,payload_json)"
+               " VALUES (%s,'scope-reader-b','{\"project\":\"scope-reader-b\"}')"
+               " ON CONFLICT (point_id) DO UPDATE SET project=EXCLUDED.project,"
+               " payload_json=EXCLUDED.payload_json",
+               reader_doc_b);
+      assert(exec_sql(sql) == 0);
+
+      char reader_region_a[64] = "", reader_region_b[64] = "";
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_doc_regions(chunk_id,document_key,page_no,quote,line_index)"
+               " VALUES (%s,'reader-a.md',1,'reader alpha region',0) RETURNING id",
+               reader_doc_a);
+      assert(scalar(sql, reader_region_a, sizeof(reader_region_a)) == 0);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_doc_regions(chunk_id,document_key,page_no,quote,line_index)"
+               " VALUES (%s,'reader-b.md',1,'reader beta region',0) RETURNING id",
+               reader_doc_b);
+      assert(scalar(sql, reader_region_b, sizeof(reader_region_b)) == 0);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_table_cells(region_id,document_key,page_no,cell_text)"
+               " VALUES (%s,'reader-a.md',1,'reader alpha cell')",
+               reader_region_a);
+      assert(exec_sql(sql) == 0);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO kb_table_cells(region_id,document_key,page_no,cell_text)"
+               " VALUES (%s,'reader-b.md',1,'reader beta cell')",
+               reader_region_b);
+      assert(exec_sql(sql) == 0);
+      assert(exec_sql("INSERT INTO kb_doc_assets"
+                      " (project,generation,document_key,page_no,kind,caption,content_type,"
+                      "  blob_ref,sensitivity_class)"
+                      " SELECT name,current_generation,'reader-a.md',1,'page',"
+                      " 'reader alpha asset','image/png','reader-alpha-blob','internal'"
+                      " FROM projects WHERE name='scope-reader-a'") == 0);
+      assert(exec_sql("INSERT INTO kb_doc_assets"
+                      " (project,generation,document_key,page_no,kind,caption,content_type,"
+                      "  blob_ref,sensitivity_class)"
+                      " SELECT name,current_generation,'reader-b.md',1,'page',"
+                      " 'reader beta asset','image/png','reader-beta-blob','internal'"
+                      " FROM projects WHERE name='scope-reader-b'") == 0);
 
       expect("SELECT count(*) FROM kb_documents d"
              " WHERE NOT EXISTS (SELECT 1 FROM projects p"
@@ -568,10 +776,76 @@ int main(void)
              " WHERE NOT EXISTS (SELECT 1 FROM projects p"
              " WHERE p.name=f.project AND p.kb_project IS NOT NULL)",
              "0");
-      expect("SELECT kb_content_scope_enable()",
-             "content scope enabled on kb_documents, kb_file_index");
+
+      /* A cached vector project is not ownership. point_id is authoritative, so
+       * a stale/relabelled cache must stop the operator switch rather than hide
+       * the inconsistent row behind RLS. */
+      snprintf(sql, sizeof(sql),
+               "UPDATE kb_embeddings SET project='scope-reader-a' WHERE point_id=%s", reader_doc_b);
+      assert(exec_sql(sql) == 0);
+      char err[512] = "";
+      aimee_pg_stmt_t *st =
+          aimee_pg_prepare(db2_conn(), "SELECT kb_content_scope_enable()", err, sizeof(err));
+      int refused = 0;
+      if (st)
+      {
+         if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
+            refused = 1;
+         aimee_pg_finalize(st);
+      }
+      else
+      {
+         refused = 1;
+      }
+      if (!refused)
+         fprintf(stderr, "kb_content_scope_enable() accepted a relabelled embedding\n");
+      assert(refused);
+      expect("SELECT count(*) FROM pg_class"
+             " WHERE relname IN ('kb_documents','kb_file_index','kb_embeddings',"
+             " 'kb_pdf_embeddings','kb_doc_regions','kb_table_cells','kb_doc_assets')"
+             "   AND (relrowsecurity OR relforcerowsecurity)",
+             "0");
+      snprintf(sql, sizeof(sql),
+               "UPDATE kb_embeddings SET project='scope-reader-b' WHERE point_id=%s", reader_doc_b);
+      assert(exec_sql(sql) == 0);
+      printf("  PASS: enabling refuses a vector whose cached project disagrees with its owner\n");
+
+      assert(exec_sql("UPDATE kb_doc_assets SET document_key='missing-reader-b.md'"
+                      " WHERE project='scope-reader-b'"
+                      " AND blob_ref='reader-beta-blob'") == 0);
+      memset(err, 0, sizeof(err));
+      st = aimee_pg_prepare(db2_conn(), "SELECT kb_content_scope_enable()", err, sizeof(err));
+      refused = 0;
+      if (st)
+      {
+         if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
+            refused = 1;
+         aimee_pg_finalize(st);
+      }
+      else
+      {
+         refused = 1;
+      }
+      if (!refused)
+         fprintf(stderr, "kb_content_scope_enable() accepted an orphan document asset\n");
+      assert(refused);
+      expect("SELECT count(*) FROM pg_class"
+             " WHERE relname IN ('kb_documents','kb_file_index','kb_embeddings',"
+             " 'kb_pdf_embeddings','kb_doc_regions','kb_table_cells','kb_doc_assets')"
+             "   AND (relrowsecurity OR relforcerowsecurity)",
+             "0");
+      assert(exec_sql("UPDATE kb_doc_assets SET document_key='reader-b.md'"
+                      " WHERE project='scope-reader-b'"
+                      " AND blob_ref='reader-beta-blob'") == 0);
+      printf("  PASS: enabling refuses a structured child without an exact owner\n");
+
+      expect("SELECT kb_content_scope_enable()", "content scope enabled on project content tables");
+      expect("SELECT kb_content_scope_enable()", "content scope enabled on project content tables");
+      printf("  PASS: an already-enabled deployment can re-run the expanded switch atomically\n");
 
       assert(db2_tenant_scope_begin(&reader_a, (int64_t)atoll(team_a)) == 0);
+      expect_project_content_counts("scope-reader-a", "1");
+      expect_project_content_counts("scope-reader-b", "0");
       char *result_a =
           kb_search_json_ex(NULL, "readinessisolationtoken", MEMORY_EMBED_TEST_FIXTURE, 10, "rrf");
       assert(result_a);
@@ -594,8 +868,12 @@ int main(void)
       assert(anonymous_a == 0);
       assert(anonymous_b == 0);
       free(anonymous);
+      expect_project_content_counts("scope-reader-a", "0");
+      expect_project_content_counts("scope-reader-b", "0");
 
       assert(db2_tenant_scope_begin(&reader_b, (int64_t)atoll(team_b)) == 0);
+      expect_project_content_counts("scope-reader-a", "0");
+      expect_project_content_counts("scope-reader-b", "1");
       char *result_b =
           kb_search_json_ex(NULL, "readinessisolationtoken", MEMORY_EMBED_TEST_FIXTURE, 10, "rrf");
       assert(result_b);
@@ -610,8 +888,17 @@ int main(void)
 
       expect("SELECT kb_content_scope_disable()", "content scope disabled");
       printf("  PASS: two users on two teams search only their own project under FORCE RLS\n");
+      printf("  PASS: every vector and structured-document child inherits exact ownership\n");
       printf("  PASS: caller-less search inherits no pooled content identity\n");
 
+      assert(exec_sql("DELETE FROM kb_embeddings"
+                      " WHERE project IN ('scope-reader-a','scope-reader-b')") == 0);
+      assert(exec_sql("DELETE FROM kb_pdf_embeddings"
+                      " WHERE project IN ('scope-reader-a','scope-reader-b')") == 0);
+      assert(exec_sql("DELETE FROM kb_doc_assets"
+                      " WHERE project IN ('scope-reader-a','scope-reader-b')") == 0);
+      assert(exec_sql("DELETE FROM kb_file_index"
+                      " WHERE project IN ('scope-reader-a','scope-reader-b')") == 0);
       assert(exec_sql("DELETE FROM kb_documents"
                       " WHERE project IN ('scope-reader-a','scope-reader-b')"
                       " AND file_path IN ('reader-a.md','reader-b.md')") == 0);

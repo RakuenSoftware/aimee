@@ -1,6 +1,14 @@
 # Getting caller context to the KB, so content scope can be switched on
 
-Companion to `per-user-content-scope-visibility.md`. That proposal built the database half; this one
+- **State:** DONE — all six bounded reader-context slices delivered and archived 2026-08-15.
+- **Owner:** KB request identity and content scope.
+
+> **Archived after delivery.** This record covers the authenticated request-context half only. The
+> broader table, filesystem, and memory proposal is closed as rejected, with its rationale preserved
+> in [`per-user-content-scope-visibility.md`](../rejected/per-user-content-scope-visibility.md).
+
+Companion to [`per-user-content-scope-visibility.md`](../rejected/per-user-content-scope-visibility.md).
+That proposal tracks the broader database half; this one
 is about the request-context half that has to exist before any of it can be enabled.
 
 ## Problem
@@ -126,12 +134,23 @@ operator enables it.
 - **Negative.** Caller context cannot widen the service principal's KB-resolved membership, and a
   request with no context cannot inherit the previous pooled request's principal.
 
-## Status
+## Delivery evidence
 
-Implemented cumulatively through slice 6. #2656 supplied pair-specific mTLS enforcement, UDS/web/
-thinclient/MCP identity convergence, and caller-scoped reads; #2658 and #2661 supplied exact-project
-background maintenance; the final slice adds live two-user/two-team ordinary-search RLS coverage.
+Implemented cumulatively through slice 6. [#2656](https://github.com/RakuenSoftware/aimee/pull/2656)
+supplied pair-specific mTLS enforcement, UDS/web/thinclient/MCP identity convergence, and
+caller-scoped reads; [#2658](https://github.com/RakuenSoftware/aimee/pull/2658) and
+[#2661](https://github.com/RakuenSoftware/aimee/pull/2661) supplied exact-project background
+maintenance; [#2670](https://github.com/RakuenSoftware/aimee/pull/2670) declared reader readiness
+with live two-user/two-team ordinary-search RLS coverage.
 Schema application records `content_scope_reader_ready = '1'` but does not enable content RLS. The
 operator must finish attribution and call `kb_content_scope_enable()`; incomplete attribution still
-fails closed. The [archived companion identity map](../done/per-user-content-scope-identity-map.md)
+fails closed. The [archived companion identity map](per-user-content-scope-identity-map.md)
 records why no additional proof mechanism is required.
+
+- [`kb_content_scope_enable`](../../../src/db2/schema.sql) refuses activation until the reader
+  readiness marker is present and all content-bearing projects are attributed.
+- [`db2_maintenance_scope_begin`](../../../src/db2/db2_tenant.c) opens the closed-name,
+  exact-project maintenance context on a transaction-local lease.
+- [`test_content_scope_pg.c`](../../../src/tests/test_content_scope_pg.c) verifies readiness, the
+  unattributed-row refusal, ordinary two-user search isolation, and that a caller-less pooled search
+  inherits no prior identity.
