@@ -1,7 +1,13 @@
 # C to Go module migration: what is left, and why
 
-- **State:** NOTES, 2026-08-06. Not a proposal; a record of measurement so the
-  next pass does not repeat the search.
+- **State:** DONE — completed measurement record archived 2026-08-15; not an implementation
+  proposal.
+- **Recorded:** 2026-08-06.
+- **Scope:** C-to-Go module migration inventory.
+
+> **Archived as completed research.** The measurements are a historical snapshot. Items under
+> “Open” require separately scoped architecture proposals; they are not unfinished acceptance
+> criteria for this record.
 - **Context:** the modularization suite's endpoint is that module logic lives in
   Go, runs as its own process, and is reached over the event bus. The C core
   keeps the bus and what is needed to keep things running.
@@ -109,3 +115,9 @@ them and watching the build, lint and full test suites still pass.
   architectural question about dispatch, not a tooling one.
 - **`memory`** is the largest single body of unmigrated C (22,173 lines) and the
   one whose migration would need the kb-over-bus decision first.
+
+## Disposition
+
+Archived 2026-08-15 as a completed measurement record. This document requests no implementation and
+defines no acceptance checklist; its unresolved architecture choices must be proposed and reviewed
+independently before any migration work begins.
