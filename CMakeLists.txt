@@ -1276,7 +1276,7 @@ add_library(aimee-core STATIC
 )
 target_include_directories(aimee-core PUBLIC
     ${AIMEE_PROJECT_INCLUDE_DIRS}
-    ${AIMEE_SRC_DIR}/db1
+    ${AIMEE_SRC_DIR}/modules/db1
     ${AIMEE_SRC_DIR}/db2
 )
 target_compile_options(aimee-core PRIVATE ${AIMEE_COMMON_WARNINGS})
@@ -1531,7 +1531,7 @@ target_include_directories(aimee PRIVATE
     ${AIMEE_SRC_DIR}/headers
     ${AIMEE_SRC_DIR}/modules/config
     ${AIMEE_SRC_DIR}/vendor/headers
-    ${AIMEE_SRC_DIR}/db1
+    ${AIMEE_SRC_DIR}/modules/db1
     ${AIMEE_SRC_DIR}/db2)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee PRIVATE aimee-core-connection)
