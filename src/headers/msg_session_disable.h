@@ -1,11 +1,14 @@
-/* msg_session_disable.h: the per-session circuit breaker for the economizer
- * gateway-mutation path (proposal economizer-gateway-mutation §2.4). A bounded,
- * process-local, TTL'd set of session keys whose gateway reduction has been
- * disabled because a mutated request failed upstream. Mutation is only ever
- * attempted for a session whose key is RESOLVABLE from a per-identity credential —
- * there is no shared "_anonymous" bucket, so one caller's failure can never disable
- * reduction for an unrelated caller (§7 R5). Process-local; no cross-process
- * replication in v1. All entry points are thread-safe (one internal mutex). */
+/* msg_session_disable.h: the per-identity session key the economizer's
+ * gateway-mutation path is keyed by (proposal economizer-gateway-mutation §2.4).
+ *
+ * The circuit breaker itself is gone from C. It is state, so it lives in the Go
+ * economizer module now, which is what makes it work at all: written on one side
+ * of the bus and read on the other, a trip could never fire.
+ *
+ * What remains is the key derivation, and its property still matters. A key is
+ * only ever RESOLVABLE from a per-identity credential — there is no shared
+ * "_anonymous" bucket — so one caller's failure can never disable reduction for an
+ * unrelated caller (§7 R5). Pure and thread-safe: no state, no lock. */
 #ifndef DEC_MSG_SESSION_DISABLE_H
 #define DEC_MSG_SESSION_DISABLE_H 1
 
@@ -49,21 +52,6 @@ extern "C"
    msg_session_key_status_t msg_session_key_resolve(const char *hdr_session_id, const char *bearer,
                                                     const char *auth_identity,
                                                     char key[MSG_SESSION_KEY_LEN]);
-
-   /* Is `key` currently disabled (present and not expired)? Lazily clears an expired
-    * hit. Safe with any NUL-terminated string; a non-resolved key is never disabled. */
-   int msg_session_is_disabled(const char *key);
-
-   /* Disable `key` for ttl_ms with a stable static-literal `reason` (stored by
-    * pointer). ttl_ms must be > 0 (a non-positive ttl is ignored — the caller is
-    * expected to have failed startup validation). Triggers an insert-time sweep when
-    * the table is more than half full, and evicts (expired-first, else
-    * oldest-inserted) when at capacity. */
-   void msg_session_disable(const char *key, int ttl_ms, const char *reason);
-
-   /* Introspection / test support. */
-   size_t msg_session_count(void); /* live (non-expired) entry count */
-   void msg_session_reset(void);   /* clear the whole table + timers (test-only) */
 
 #ifdef __cplusplus
 }

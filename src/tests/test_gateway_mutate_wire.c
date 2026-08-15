@@ -107,7 +107,6 @@ static void test_post_status_is_inert_without_a_module(void)
    gw_stream_disable(&ctx2, "stream_invalid_request");
    assert(gw_stat_get(GW_STAT_STREAM_ERROR_DISABLE) == 0);
    assert(ctx2.mutated == 1);
-   assert(msg_session_count() == 0); /* nothing wrote a breaker anywhere */
    gw_mutate_ctx_free(&ctx2);
    cJSON_Delete(c2);
 }
