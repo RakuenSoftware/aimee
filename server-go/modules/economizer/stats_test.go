@@ -130,25 +130,23 @@ func TestStatsStageCountsWhatTheModuleDecided(t *testing.T) {
 	}
 }
 
-// The caller reports only what it alone can see; a read must never be able to
-// increment something by accident.
-func TestStatsStageRecordsCallerObservedEvents(t *testing.T) {
+// The stage is read-only: the caller has no counter to report, so there is no
+// operation that can write one. Anything but a snapshot is refused rather than
+// quietly treated as a read.
+func TestStatsStageIsReadOnly(t *testing.T) {
 	h := NewHandler()
-	statsSnapshot(t, h, StatsRequest{Op: "inc_reason", Group: "hard_bypass", Reason: "replace_failed"})
-	snap := statsSnapshot(t, h, StatsRequest{Op: "snapshot"})
-	if snap.Reasons["hard_bypass"]["replace_failed"] != 1 {
-		t.Errorf("replace_failed = %v", snap.Reasons["hard_bypass"])
-	}
-
-	// An empty op is a read, not a silent write.
+	before := statsSnapshot(t, h, StatsRequest{Op: "snapshot"})
+	// A bare request is a read, not a silent write.
 	statsSnapshot(t, h, StatsRequest{})
-	if got := statsSnapshot(t, h, StatsRequest{Op: "snapshot"}).
-		Reasons["hard_bypass"]["replace_failed"]; got != 1 {
-		t.Errorf("a bare request changed a counter: %d", got)
+	after := statsSnapshot(t, h, StatsRequest{Op: "snapshot"})
+	for name, v := range before.Counters {
+		if after.Counters[name] != v {
+			t.Errorf("%s moved from %d to %d without any work being done", name, v, after.Counters[name])
+		}
 	}
 
-	body, _ := json.Marshal(StatsRequest{Op: "inc"}) // no counter named
+	body, _ := json.Marshal(StatsRequest{Op: "inc"})
 	if _, st := h(bus.ModuleInvocation{StageID: StageStats}, body); st != bus.ModuleStatusInvalidRequest {
-		t.Errorf("an unnamed counter should be rejected, got %v", st)
+		t.Errorf("a write operation should be refused, got %v", st)
 	}
 }

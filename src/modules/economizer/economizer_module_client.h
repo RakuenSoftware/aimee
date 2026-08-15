@@ -194,13 +194,6 @@ extern "C"
                                int ttl_ms, const char *stream_reason,
                                econ_module_post_status_t *out);
 
-   /* Record a (group, reason) the CALLER alone can see -- its own snapshot
-    * allocation failing, or installing the reduced array failing. Everything the
-    * module decides it counts itself, so this is only for the two events that
-    * happen on this side of the bus. Best-effort: a lost counter is not worth
-    * failing a request over. */
-   void econ_module_stat_reason(const char *group, const char *reason);
-
    /* The published gateway counters, as a NEW cJSON object the caller owns, or
     * NULL when the module could not be reached. The counters live in the module;
     * this is how the HTTP surface, which lives here, gets them to render. */

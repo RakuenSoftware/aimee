@@ -27,7 +27,12 @@ extern "C"
       int have_key;  /* a per-identity session key was resolvable */
       int mutated;   /* the reduced payload was actually installed + dispatched */
       char skey[MSG_SESSION_KEY_LEN];
-      cJSON *pristine;    /* owned deep copy of the original array (NULL once restored/freed) */
+      /* The request's ORIGINAL array, detached from the container when the
+       * reduced one was swapped in, and owned here until it is either swapped
+       * back or freed. NULL whenever no swap happened -- which is every path
+       * where the module did not answer or answered unusably, because those
+       * leave the container untouched. Detached, never copied. */
+      cJSON *original;
       gw_provenance_t st; /* provenance marker owner */
       int ttl_ms;         /* disable-window TTL resolved from config */
    } gw_mutate_ctx_t;

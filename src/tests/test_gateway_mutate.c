@@ -1,9 +1,12 @@
 /* test_gateway_mutate.c: what C still owns on the gateway-mutation path
- * (proposal §2.2/§2.3). The apply/bypass decision itself now lives in the Go
- * economizer module, so what is covered here is reading its verdict without
- * ever treating silence as consent; snapshot is an independent deep copy;
- * replace installs cleanly; provenance is mark-only-after-replace /
- * clear-on-bypass. */
+ * (proposal §2.2/§2.3). The apply/bypass decision lives in the Go economizer
+ * module, so what is covered here is reading its verdict without ever treating
+ * silence as consent; replace installs cleanly; provenance is
+ * mark-only-after-replace / clear-on-bypass.
+ *
+ * The snapshot helpers are gone with the deep copy they served: the seam now
+ * DETACHES the original array instead of duplicating it, so there is no copy to
+ * prove independent of its source. */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -50,34 +53,6 @@ static void test_module_bypass(void)
    assert(strcmp(gw_bypass_reason_str(GW_BYPASS_REPLACE_FAILED), "replace_failed") == 0);
    assert(strcmp(gw_bypass_reason_str(GW_BYPASS_STRUCTURAL_VIOLATION), "structural_violation") ==
           0);
-}
-
-static void test_snapshot_independence(void)
-{
-   cJSON *orig = clean_messages();
-   assert(gw_snapshot_messages(NULL) == NULL);
-   cJSON *snap = gw_snapshot_messages(orig);
-   assert(snap != NULL);
-   assert(cJSON_GetArraySize(snap) == 1);
-   assert(gw_snapshot_token_count(snap) > 0);
-
-   /* mutate the original: the snapshot is a fully independent deep copy */
-   cJSON *extra = cJSON_CreateObject();
-   cJSON_AddStringToObject(extra, "role", "user");
-   cJSON_AddStringToObject(extra, "content", "second");
-   cJSON_AddItemToArray(orig, extra);
-   assert(cJSON_GetArraySize(orig) == 2);
-   assert(cJSON_GetArraySize(snap) == 1); /* unchanged */
-
-   /* editing a string in the original does not touch the snapshot */
-   cJSON *first = cJSON_GetArrayItem(orig, 0);
-   cJSON_ReplaceItemInObjectCaseSensitive(first, "content", cJSON_CreateString("mutated"));
-   cJSON *snap_first = cJSON_GetArrayItem(snap, 0);
-   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(snap_first, "content")),
-                 "hello world this is a longer message") == 0);
-
-   cJSON_Delete(orig);
-   cJSON_Delete(snap);
 }
 
 static void test_replace(void)
@@ -132,7 +107,6 @@ int main(void)
 {
    printf("gateway_mutate: ");
    test_module_bypass();
-   test_snapshot_independence();
    test_replace();
    test_provenance();
    printf("ok\n");
