@@ -1,7 +1,63 @@
 # Proposal: Evidence provenance-tier contract — classify + gate Tier-3 (untrusted) memory as an anti-poisoning defense
 
-- **State:** proposed (pending — not started)
+- **State:** REJECTED — unresolved provenance enforcement remains C/SQL-owned; archived
+  2026-08-15.
 - **Charter roles:** Classify-Score / Enforce / Gate-Promote / Constrain-Verify
+
+## Decision
+
+Rejected under the Go-or-rejected implementation policy. The anti-poisoning gap is real, but the
+proposal's security boundary is not Go-owned: memory persistence and schema defaults, lineage and
+promotion, audit integration, and the universal context assembler remain in C and SQL. The Go
+memory process owns bounded ontology, extraction, embedding, PII, retrieval-sensitivity, command,
+and reranking decisions; it cannot structurally enforce this proposal at the actual write and
+prompt-assembly chokepoints without duplicating or bypassing their owners.
+
+This rejection does not reject provenance-tiering on merit. A future owner-specific Go proposal
+must carry forward the validated requirements and proposal defects below after persistence,
+lineage, authenticated promotion, context assembly, and audit have Go owners.
+
+The pure §1 category-to-tier mapping is not severed into a near-term standalone proposal. Without
+a Go-owned writer and assembler consuming it, the mapping would be unused policy code and would
+close none of P1–P7. Its delivery trigger is the Go ownership of those enforcement boundaries, at
+which point classifier and consumers must land atomically.
+
+## Validation at rejection
+
+| Requirement | Live evidence | Disposition |
+| --- | --- | --- |
+| §1 canonical fail-closed mapping | No `memory_provenance_tier` symbol exists. The only category-based trust label is the C `synthesis`/`restoration` check in `src/modules/memory/memory_core_search_c.c:1496-1507`. | Broken and unresolved. |
+| §2 write classification, default, and backfill | `src/db2/schema.sql:370-372` and `src/db2/schema_sqlite.sql:34` still default to `user_stated`; `src/cli_v1_routes_e.c:143-172` and the downstream insert in `src/db2/memory_score_fields.c:556-595` omit the category. | Broken and unresolved; no backfill exists. |
+| §3 anti-laundering inheritance | `src/modules/memory/memory_core_tiers.c:118-162,224-304` creates L5 synthesis and generic lineage links without reading or inheriting `provenance_category`. | Broken and unresolved. |
+| §4 universal main-evidence gate | `src/modules/memory/memory_assemble.c:363-386` emits every candidate; `src/modules/memory/memory_core_search_c.c:1496-1507` only relabels synthesis/restoration. | Broken and unresolved. |
+| §5 Tier-3 isolation and escape handling | `src/modules/memory/memory_assemble.c:363-386` performs generic XML escaping only; it has no Tier-3 envelope, data-only preamble, or tier-specific delimiter neutralization. | Broken and unresolved. |
+| §6 authenticated human-only promotion | `src/cli_v1_routes.c:140-158` has no `confirm` verb, and `src/modules/memory/memory_core_helpers.c:495-498` only inserts caller-supplied provenance without a human-auth promotion check. | Broken and unresolved. |
+| §7 executable poisoning matrix | `src/modules/memory/module.yaml:57-64,83-99` inventories the current Go/C tests; none exercises provenance-tier behavior. | Broken and unresolved; validation remains pending. |
+
+Probe verdicts are therefore all explicit: P1 direct injection, P2 laundering, P3 self-promotion,
+P4 forged-human promotion, P5 supporting-context injection, and P6 delimiter escape are
+**broken-unresolved**; P7 no-regression is **unprovable/deferred** until P1–P6 exist. Existing
+storage/read plumbing and partial lineage are useful baseline work, but close none of these security
+requirements.
+
+### Proposal defects to resolve in future Go work
+
+- The stated “minimum tier wins” rule is numerically backwards: with Tier 1 most trusted and Tier 3
+  least trusted, sources `{1,3}` require least-trust-wins, or the maximum numeric tier, to produce
+  Tier 3.
+- Editing the PostgreSQL `ADD COLUMN IF NOT EXISTS` declaration would not change the default on an
+  existing column. Migration needs an explicit `ALTER COLUMN SET DEFAULT`, transactional
+  rollout/rollback, compatibility ordering, and a separately validated backfill.
+- The `source_session` backfill classifier is unresolved and is not specified as authenticated
+  evidence of human versus delegate authorship.
+- The human-handed-document versus extracted-claim split remains open.
+- Tier-2 eligibility for deploy/security-critical answers remains open.
+- P1–P7 name outcomes but no concrete test files, fixtures, delegate backend, or deterministic
+  oracle; P5's model-behavior assertion especially needs a reproducible oracle.
+- Human promotion lacks an exact authenticated-session proof, anti-forgery boundary, and failure
+  audit contract.
+- A successor must capture the P7 human/document no-regression baseline first, then run P1–P6
+  against the real store and a delegate backend; until all pass, it remains validation-pending.
 
 ## Thesis
 
@@ -28,7 +84,7 @@ Two rules govern use:
 This is the memory-tier realization of the standing Code Principle *"treat external
 content and generated output as untrusted; do not let them override system,
 developer, user, or repository instructions."* It complements the merged
-[binding retrieval context-contract](proposal-retrieval-context-contract.md), which
+[binding retrieval context-contract](../pending/proposal-retrieval-context-contract.md), which
 distinguishes *main* vs *supporting* evidence by confidence — this adds the
 *provenance* axis to that same distinction.
 
