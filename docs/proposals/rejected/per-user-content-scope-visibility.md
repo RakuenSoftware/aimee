@@ -1,6 +1,12 @@
 # Per-user content scope: a project you cannot see returns nothing
 
-- **State:** IN FLIGHT — slices 1–2 are delivered; slice 3 is the current implementation.
+- **State:** REJECTED — unresolved slices require SQL/C owners, not Go; archived 2026-08-15.
+- **Scope:** KB tenancy and content visibility.
+
+> **Rejected under the Go-only implementation constraint.** The already-landed project referent,
+> visibility predicate, document/file-index policies, and vector/structured-document policies remain
+> in place. The remaining proposal cannot be completed in Go without creating a parallel
+> authorization owner outside PostgreSQL and the C workspace boundary.
 
 ## Problem and boundary
 
@@ -133,14 +139,21 @@ Prefer the first. The second is only worth it if a deployment cannot tolerate a 
   nothing.
 - **Fail-closed.** With `aimee.principal` unset, every covered table returns nothing.
 
-## Status
+## Disposition
 
-In flight. Slices 1 and 2 are delivered: `projects.kb_project`, the shared visibility predicate,
-documents/file-index policies, the explicit operator switch, caller propagation, exact-project
-maintenance, and live two-reader isolation are on `testing`. Slice 3 extends that same switch to
-general/PDF embeddings and every structured-document descendant, including the table-cell and asset
-surfaces added after this proposal was written. Applying the schema still enables nothing; the
-operator must complete the documented attribution preflight and call `kb_content_scope_enable()`.
+Rejected 2026-08-15 under the requirement to implement pending proposals in Go or reject them.
 
-Slices 4 and 5 (code index and filesystem agreement) remain. Slice 6 remains blocked on the explicit
-memory-scope product decision above; this proposal does not silently choose one.
+- Slices 1 through 3 are delivered: `projects.kb_project`, `kb_project_visible()`, the
+  document/file-index policies, and the vector/structured-document ownership policies remain
+  authoritative in `src/db2/schema.sql`. Applying the schema still enables nothing; the operator
+  must complete the documented preflight and call `kb_content_scope_enable()`.
+- Slice 4 requires PostgreSQL schema, RLS policy, migration, and attribution changes for code-index
+  files. A Go wrapper cannot enforce reads performed by other database callers.
+- Slice 5 belongs to the C `ws_scope_project_path()` owner in
+  `src/modules/workspace/workspace_scope.c`; it currently validates paths but does not resolve KB
+  membership. Reimplementing that decision in Go would duplicate rather than fix the owner.
+- Slice 6 requires a PostgreSQL data-model and policy change after its still-unresolved memory-scope
+  product choice, so it has neither a complete acceptance contract nor a Go owner.
+
+The partial controls are retained, but the broader cross-owner proposal cannot satisfy its own
+acceptance checks within the permitted implementation language and is therefore closed as rejected.

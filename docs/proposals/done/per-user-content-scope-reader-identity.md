@@ -4,10 +4,10 @@
 - **Owner:** KB request identity and content scope.
 
 > **Archived after delivery.** This record covers the authenticated request-context half only. The
-> broader table, filesystem, and memory work remains tracked by the
-> [visibility proposal](../pending/per-user-content-scope-visibility.md).
+> broader table, filesystem, and memory proposal is closed as rejected, with its rationale preserved
+> in [`per-user-content-scope-visibility.md`](../rejected/per-user-content-scope-visibility.md).
 
-Companion to [`per-user-content-scope-visibility.md`](../pending/per-user-content-scope-visibility.md).
+Companion to [`per-user-content-scope-visibility.md`](../rejected/per-user-content-scope-visibility.md).
 That proposal tracks the broader database half; this one
 is about the request-context half that has to exist before any of it can be enabled.
 
