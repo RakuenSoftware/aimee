@@ -20,7 +20,7 @@ from pathlib import Path
 
 MODULE_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 DEFAULT_INVENTORY = Path("tests/baselines/modules/canonical-inventory.yaml")
-ALLOWED_KEYS = {"schema_version", "required", "optional"}
+ALLOWED_KEYS = {"schema_version", "required", "optional", "principal_refs", "retired_principal_refs"}
 REQUIRED_COUNT = 18
 # PostgreSQL is appended while its C-to-Go migration is staged so existing
 # optional-module principal references remain stable.
@@ -92,10 +92,10 @@ def validate_inventory(
 ) -> None:
     data, required, optional = load_inventory(path)
 
-    if type(data["schema_version"]) is not int or data["schema_version"] != 1:
+    if type(data["schema_version"]) is not int or data["schema_version"] != 2:
         _fail(
             "schema-version",
-            f"expected 1, actual {data['schema_version']!r}",
+            f"expected 2, actual {data['schema_version']!r}",
             path=path,
         )
 

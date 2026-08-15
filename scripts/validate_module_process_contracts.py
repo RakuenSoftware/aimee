@@ -55,14 +55,42 @@ def validate() -> dict[str, dict[str, object]]:
     components = contract["components"]
     if not isinstance(components, list) or len(components) != len(ordered):
         raise ContractError("component count differs from canonical inventory")
-    if [item.get("id") for item in components if isinstance(item, dict)] != ordered:
-        raise ContractError("components must exactly follow canonical inventory order")
+    contract_ids = [item.get("id") for item in components if isinstance(item, dict)]
+    if len(contract_ids) != len(set(contract_ids)):
+        raise ContractError("components contains duplicate ids")
+    # COVERAGE, not order. Order used to matter because the ref was the position;
+    # now the ref is declared, so where a component sits in the file says nothing
+    # and reordering it must not be a change to anyone's identity.
+    if set(contract_ids) != set(ordered):
+        raise ContractError("components must cover exactly the canonical inventory")
 
     result: dict[str, dict[str, object]] = {}
     refs: set[int] = set()
     kinds: set[int] = set()
     stage_names: set[str] = set()
     optional = set(inventory.get("optional", []))
+    # The principal ref is DECLARED, not derived from position. It is a module's
+    # permanent identity: grants match on it and event kinds are carved from it,
+    # so it must survive a module changing classification or the list being
+    # reordered. Deriving it from position welded "is this module essential" to
+    # "which event kinds does it own", which meant promoting a module to required
+    # renumbered every module after it.
+    declared_refs = inventory.get("principal_refs")
+    if not isinstance(declared_refs, dict):
+        raise ContractError("canonical inventory must declare principal_refs")
+    retired = inventory.get("retired_principal_refs")
+    if not isinstance(retired, list):
+        raise ContractError("canonical inventory must declare retired_principal_refs")
+    for module_id, ref in declared_refs.items():
+        if type(ref) is not int or ref < 1:
+            raise ContractError(f"{module_id}: principal_ref must be a positive integer")
+        if ref in retired:
+            raise ContractError(
+                f"{module_id}: principal_ref {ref} is retired and must never be reused")
+    if len(set(declared_refs.values())) != len(declared_refs):
+        raise ContractError("principal_refs contains duplicates")
+    if set(declared_refs) != set(ordered):
+        raise ContractError("principal_refs must cover exactly the canonical inventory")
     for ordinal, raw in enumerate(components, start=1):
         if not isinstance(raw, dict):
             raise ContractError(f"component {ordinal}: expected object")
@@ -105,8 +133,11 @@ def validate() -> dict[str, dict[str, object]]:
             if (component_id in GO_PROCESSES) != (runtime == "go"):
                 raise ContractError(f"{component_id}: runtime differs from the migration set")
             principal_ref = raw["principal_ref"]
-            if type(principal_ref) is not int or principal_ref != ordinal or principal_ref in refs:
-                raise ContractError(f"{component_id}: principal_ref must equal inventory ordinal")
+            expected_ref = declared_refs[component_id]
+            if type(principal_ref) is not int or principal_ref != expected_ref or principal_ref in refs:
+                raise ContractError(
+                    f"{component_id}: principal_ref must equal the inventory's declared "
+                    f"{expected_ref}")
             refs.add(principal_ref)
             stages = raw["stages"]
             if not isinstance(stages, list) or not stages:
@@ -115,7 +146,9 @@ def validate() -> dict[str, dict[str, object]]:
                 if not isinstance(stage, dict) or set(stage) != {"id", "name", "event_kind"}:
                     raise ContractError(f"{component_id}: invalid stage shape")
                 name, stage_id, kind = stage["name"], stage["id"], stage["event_kind"]
-                expected_kind = 4096 + ordinal * 256 + stage_ordinal
+                # Carved from the DECLARED ref, so a module's event kinds move only
+                # when its identity does -- which is never.
+                expected_kind = 4096 + principal_ref * 256 + stage_ordinal
                 if type(stage_id) is not int or stage_id != stage_ordinal:
                     raise ContractError(f"{component_id}: stage IDs must be dense from one")
                 if not isinstance(name, str) or not STAGE_RE.fullmatch(name) or name in stage_names:

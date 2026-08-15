@@ -145,7 +145,15 @@ class DescriptorTests(unittest.TestCase):
             path = repo / validator.INVENTORY_PATH
             path.parent.mkdir(parents=True)
             path.write_text(
-                json.dumps({"schema_version": True, "required": ["memory"], "optional": ["x"]}),
+                json.dumps(
+                    {
+                        "schema_version": True,
+                        "required": ["memory"],
+                        "optional": ["x"],
+                        "principal_refs": {"memory": 7, "x": 29},
+                        "retired_principal_refs": [],
+                    }
+                ),
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(validator.DescriptorError, "rule=inventory-version"):

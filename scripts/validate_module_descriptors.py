@@ -116,10 +116,16 @@ def module_id(value: object, pointer: str) -> str:
 
 def load_inventory(repo: Path) -> tuple[set[str], set[str]]:
     value = load_json(repo / INVENTORY_PATH)
-    if not isinstance(value, dict) or set(value) != {"schema_version", "required", "optional"}:
-        fail("inventory-shape", "canonical inventory keys differ from v1")
-    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
-        fail("inventory-version", "canonical inventory schema_version must be 1")
+    if not isinstance(value, dict) or set(value) != {
+        "schema_version",
+        "required",
+        "optional",
+        "principal_refs",
+        "retired_principal_refs",
+    }:
+        fail("inventory-shape", "canonical inventory keys differ from v2")
+    if type(value["schema_version"]) is not int or value["schema_version"] != 2:
+        fail("inventory-version", "canonical inventory schema_version must be 2")
     groups: list[set[str]] = []
     for label in ("required", "optional"):
         entries = value[label]
