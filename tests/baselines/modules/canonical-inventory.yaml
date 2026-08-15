@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "required": [
     "module-runtime",
     "config",
@@ -31,5 +31,36 @@
     "sandbox",
     "economizer",
     "postgres"
-  ]
+  ],
+  "principal_refs": {
+    "module-runtime": 1,
+    "config": 2,
+    "ir": 3,
+    "translation": 4,
+    "protocols": 5,
+    "gateway": 6,
+    "memory": 7,
+    "learning": 8,
+    "routing": 9,
+    "delegates": 10,
+    "tools": 11,
+    "workspace": 12,
+    "git": 13,
+    "skills": 14,
+    "response-composition": 15,
+    "vault": 16,
+    "execution-policy": 17,
+    "audit": 18,
+    "governance": 19,
+    "workflows": 20,
+    "roundtable": 21,
+    "kb-synthesis": 22,
+    "runtime-web": 23,
+    "control-web": 24,
+    "benchmarks": 25,
+    "sandbox": 26,
+    "economizer": 27,
+    "postgres": 28
+  },
+  "retired_principal_refs": []
 }
