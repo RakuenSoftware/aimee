@@ -41,7 +41,7 @@ declared per module in the same file (`principal_refs`) rather than derived from
 position, because it is the module's permanent identity: grants match on it and
 event kinds are carved from it as `4096 + ref*256 + stage`. Deriving it from
 position meant promoting a module from optional to required renumbered every
-module after it — moving ten modules' event kinds, and every grant naming them,
+module after it, moving ten modules' event kinds and every grant naming them,
 for a change that is nothing at runtime.
 
 A ref is **retired, never recycled**. When a module goes away its number is added
