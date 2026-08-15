@@ -34,6 +34,8 @@ extern "C"
 #define AIMEE_ECONOMIZER_STAGE_RECORD_BUILD 5u
 #define AIMEE_ECONOMIZER_EVENT_POST_STATUS  11014u
 #define AIMEE_ECONOMIZER_STAGE_POST_STATUS  6u
+#define AIMEE_ECONOMIZER_EVENT_STATS        11015u
+#define AIMEE_ECONOMIZER_STAGE_STATS        7u
 
 #define ECON_MODULE_JSON_MAX_INPUT  (16u * 1024u * 1024u)
 #define ECON_MODULE_TOOL_OUTPUT_MAX (2u * 1024u * 1024u)
@@ -191,6 +193,18 @@ extern "C"
    int econ_module_post_status(const char *session_key, int http_status, int mutated, int have_key,
                                int ttl_ms, const char *stream_reason,
                                econ_module_post_status_t *out);
+
+   /* Record a (group, reason) the CALLER alone can see -- its own snapshot
+    * allocation failing, or installing the reduced array failing. Everything the
+    * module decides it counts itself, so this is only for the two events that
+    * happen on this side of the bus. Best-effort: a lost counter is not worth
+    * failing a request over. */
+   void econ_module_stat_reason(const char *group, const char *reason);
+
+   /* The published gateway counters, as a NEW cJSON object the caller owns, or
+    * NULL when the module could not be reached. The counters live in the module;
+    * this is how the HTTP surface, which lives here, gets them to render. */
+   cJSON *econ_module_stats_snapshot(void);
 
    /* Compact one strict JSON value in Go without changing any non-whitespace
     * source byte. Returns 0 with a newly allocated NUL-terminated buffer when

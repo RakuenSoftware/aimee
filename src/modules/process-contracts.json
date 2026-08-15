@@ -601,6 +601,11 @@
           "id": 6,
           "name": "economizer-post-status",
           "event_kind": 11014
+        },
+        {
+          "id": 7,
+          "name": "economizer-stats",
+          "event_kind": 11015
         }
       ]
     }

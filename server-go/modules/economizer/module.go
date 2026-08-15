@@ -36,7 +36,22 @@ const (
 	StageRecordBuild uint32 = 5
 	EventPostStatus  uint32 = 11014
 	StagePostStatus  uint32 = 6
+	EventStats       uint32 = 11015
+	StageStats       uint32 = 7
 )
+
+// StatsRequest either records one counter or asks for the published snapshot.
+//
+// Recording exists for the two events only the CALLER can see -- its snapshot
+// allocation failing, and installing the reduced array failing. Both are rare
+// failure paths, so a bus call to report them is affordable; everything the
+// module decides it counts itself, on the call it was already handling.
+type StatsRequest struct {
+	Op      string `json:"op"`                // "snapshot" | "inc" | "inc_reason"
+	Counter string `json:"counter,omitempty"` // for "inc"
+	Group   string `json:"group,omitempty"`   // for "inc_reason"
+	Reason  string `json:"reason,omitempty"`
+}
 
 // PostStatusRequest asks what a dispatched gateway turn owes now its upstream
 // status is known.
@@ -65,10 +80,6 @@ type PostStatusResponse struct {
 	// it once rather than inferring it.
 	Disabled bool   `json:"disabled,omitempty"`
 	Reason   string `json:"reason,omitempty"`
-	// Counter is the telemetry counter the caller should increment, empty when
-	// there is nothing to record. Naming it here keeps the labels in one place
-	// while the tap itself stays with the caller.
-	Counter string `json:"counter,omitempty"`
 }
 
 // ReduceRequest is the wire form of one reduction.
@@ -168,23 +179,30 @@ var reduceReasonNames = map[ReduceReason]string{
 // gets a clean one and two handlers never share a lever.
 func NewHandler() bus.ModuleHandler {
 	breaker := NewSessionBreaker()
+	stats := NewGatewayStatsStore()
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 		if invocation.Cancelled() {
 			return nil, bus.ModuleStatusCancelled
 		}
 		switch invocation.StageID {
+		case StageStats:
+			var req StatsRequest
+			if err := json.Unmarshal(request, &req); err != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			return handleStats(stats, &req)
 		case StagePostStatus:
 			var req PostStatusRequest
 			if err := json.Unmarshal(request, &req); err != nil {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
-			return handlePostStatus(breaker, &req)
+			return handlePostStatus(breaker, stats, &req)
 		case StageReduce:
 			var req ReduceRequest
 			if err := json.Unmarshal(request, &req); err != nil {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
-			return handleReduce(breaker, &req)
+			return handleReduce(breaker, stats, &req)
 		case StageJSONCompact:
 			return handleJSONCompact(invocation, request)
 		case StageToolRecall:
@@ -199,7 +217,7 @@ func NewHandler() bus.ModuleHandler {
 	}
 }
 
-func handleReduce(breaker *SessionBreaker, req *ReduceRequest) ([]byte, bus.ModuleStatus) {
+func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, req *ReduceRequest) ([]byte, bus.ModuleStatus) {
 	messages := ParseJSON(string(req.Messages))
 	if messages == nil || !messages.IsArray() {
 		return nil, bus.ModuleStatusInvalidRequest
@@ -248,6 +266,7 @@ func handleReduce(breaker *SessionBreaker, req *ReduceRequest) ([]byte, bus.Modu
 	// Read here rather than by the caller because the write side lives here too;
 	// split across the bus, a trip on one side would never be seen by the other.
 	if seam == SeamGateway && req.SessionKey != "" && breaker.IsDisabled(req.SessionKey) {
+		stats.Inc(StatSessionDisabledBlocks)
 		body, err := json.Marshal(ReduceResponse{
 			Reason: reduceReasonNames[ReduceReasonNone],
 			Bypass: GWBypassSessionDisabled.String(),
@@ -296,11 +315,22 @@ func handleReduce(breaker *SessionBreaker, req *ReduceRequest) ([]byte, bus.Modu
 		RecallSurfaced: out.RecallSurfaced,
 	}
 	if seam == SeamGateway {
+		// Counted where the decision is made. An attempt is every gateway turn
+		// that got past the breaker; what it became is the verdict below.
+		stats.Inc(StatMutateAttempted)
 		// MessageHistoryRepair is passed explicitly: GWShouldApply SKIPS the
 		// structural check when the port is nil, and skipping it is how an
 		// orphaned tool pair reaches a provider. The reduction itself succeeded
 		// to reach this point, so the error argument is ReduceErrNone.
 		resp.Bypass = GWShouldApply(true, &out, ReduceErrNone, MessageHistoryRepair).String()
+		if resp.Bypass == GWBypassNone.String() {
+			// The caller can still fail to install it, and reports that itself;
+			// this counts the decision, not the installation.
+			stats.Inc(StatMutateApplied)
+			stats.RecordTokenDelta(out.BaselineTokens, out.ReducedTokens)
+		} else {
+			stats.IncReason("hard_bypass", resp.Bypass)
+		}
 	}
 	if out.Mutated && out.Messages != nil {
 		// Emitted with the cJSON-compatible printer, so the bytes the caller
@@ -325,7 +355,7 @@ func handleReduce(breaker *SessionBreaker, req *ReduceRequest) ([]byte, bus.Modu
 // body and the socket, this has the lever. Splitting it the other way — caller
 // decides, module stores — is what left the C seam with a breaker nothing ever
 // wrote to.
-func handlePostStatus(breaker *SessionBreaker, req *PostStatusRequest) ([]byte, bus.ModuleStatus) {
+func handlePostStatus(breaker *SessionBreaker, stats *GatewayStatsStore, req *PostStatusRequest) ([]byte, bus.ModuleStatus) {
 	var d GWPostDecision
 	if req.StreamReason != "" {
 		// Streaming: bytes are already with the client, so the breaker is the only
@@ -336,7 +366,7 @@ func handlePostStatus(breaker *SessionBreaker, req *PostStatusRequest) ([]byte, 
 		d = GWPostStatus(req.HTTPStatus, req.Mutated)
 	}
 
-	resp := PostStatusResponse{Action: "none", Restore: d.Restore, Counter: d.Counter}
+	resp := PostStatusResponse{Action: "none", Restore: d.Restore}
 	if d.Action == PostResend {
 		resp.Action = "resend"
 	}
@@ -345,13 +375,49 @@ func handlePostStatus(breaker *SessionBreaker, req *PostStatusRequest) ([]byte, 
 	// a breaker that was never set.
 	if d.Disable && req.SessionKey != "" && req.TTLMS > 0 {
 		breaker.Disable(req.SessionKey, req.TTLMS, d.Reason)
+		stats.IncReason("session_disabled_set", d.Reason)
 		resp.Disabled = true
 		resp.Reason = d.Reason
 	} else if d.Reason != "" {
 		resp.Reason = d.Reason
 	}
+	if d.Counter != "" {
+		stats.Inc(d.Counter)
+	}
 
 	body, err := json.Marshal(resp)
+	if err != nil {
+		return nil, bus.ModuleStatusInternal
+	}
+	return body, bus.ModuleStatusOK
+}
+
+// handleStats records a caller-observed counter, or returns the snapshot the
+// HTTP surface publishes.
+//
+// Reading is a call rather than a push because the counters are the module's and
+// the HTTP surface is C's: the side that owns the numbers hands them over when
+// the side that owns the endpoint asks.
+func handleStats(stats *GatewayStatsStore, req *StatsRequest) ([]byte, bus.ModuleStatus) {
+	switch req.Op {
+	case "inc":
+		if req.Counter == "" {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		stats.Inc(req.Counter)
+	case "inc_reason":
+		if req.Group == "" {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		stats.IncReason(req.Group, req.Reason)
+	case "snapshot", "":
+		// Empty defaults to snapshot: a read is the harmless operation, so a
+		// malformed request can never silently increment something instead.
+	default:
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+
+	body, err := json.Marshal(stats.Snapshot())
 	if err != nil {
 		return nil, bus.ModuleStatusInternal
 	}
