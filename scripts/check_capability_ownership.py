@@ -168,10 +168,16 @@ def parse_proposal_contract(path: Path) -> dict[str, object]:
 def inventory(root: Path) -> tuple[set[str], set[str]]:
     path = root_path(root, INVENTORY)
     value = load_json(path)
-    if not isinstance(value, dict) or set(value) != {"schema_version", "required", "optional"}:
+    if not isinstance(value, dict) or set(value) != {
+        "schema_version",
+        "required",
+        "optional",
+        "principal_refs",
+        "retired_principal_refs",
+    }:
         fail("inventory-structure", "canonical inventory has an invalid envelope", path)
-    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
-        fail("inventory-version", "canonical inventory version must be 1", path)
+    if type(value["schema_version"]) is not int or value["schema_version"] != 2:
+        fail("inventory-version", "canonical inventory version must be 2", path)
     required = string_list(value["required"], "required", path)
     optional = string_list(value["optional"], "optional", path)
     for identifier in required + optional:

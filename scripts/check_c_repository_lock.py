@@ -41,6 +41,12 @@ def main() -> int:
             return fail("core vendored mirror differs from its repository pin")
 
         expected_ids = inventory.get("required", []) + inventory.get("optional", [])
+        # Declared, not positional: see validate_module_process_contracts. A
+        # module's ref is its permanent identity, so classification and list
+        # order must not move it.
+        declared_refs = inventory.get("principal_refs")
+        if not isinstance(declared_refs, dict) or set(declared_refs) != set(expected_ids):
+            return fail("canonical inventory principal_refs must cover the inventory")
         if len(modules) != len(expected_ids):
             return fail(f"expected {len(expected_ids)} module pins, found {len(modules)}")
         by_id = {item.get("id"): item for item in modules if isinstance(item, dict)}
@@ -48,7 +54,8 @@ def main() -> int:
             return fail("module pin set differs from canonical inventory")
         required = set(inventory.get("required", []))
         contracts = exporter.process_contracts.validate()
-        for principal_ref, module_id in enumerate(expected_ids, start=1):
+        for module_id in expected_ids:
+            principal_ref = declared_refs[module_id]
             item = by_id[module_id]
             classification = "required" if module_id in required else "optional"
             if item.get("classification") != classification:
