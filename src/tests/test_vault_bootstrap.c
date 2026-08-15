@@ -18,12 +18,14 @@
 #include "runtime_secret.h"
 #include <openssl/crypto.h>
 #include <assert.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char g_root[256]; /* test sandbox: <root>/home is AIMEE_HOME */
 static char g_home[320];
@@ -117,7 +119,8 @@ static void test_forge_env_source(void)
  * writes, because that is the only slot git_forge_vault_server_token reads. */
 static void seal_from_stdin(const char *payload, const char *cred, int expect_ok)
 {
-   char path[] = "/tmp/aimee-forge-seal-XXXXXX";
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-forge-seal-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    assert(write(fd, payload, strlen(payload)) == (ssize_t)strlen(payload));
@@ -167,8 +170,9 @@ static void test_generic_env_source(void)
 {
    setenv("AIMEE_DB2_URL", "postgresql://user:db-password@db/aimee", 1);
    setenv("AIMEE_VAULT_PKCS11_PIN", "vaulted-hsm-pin", 1);
+   setenv("AIMEE_KB_CLIENT_PAM_USERNAME", "aimee-server", 1);
    assert(vault_env_has_credential_environment() == 1);
-   assert(vault_env_bootstrap_init() == 2);
+   assert(vault_env_bootstrap_init() == 3);
    assert(vault_env_has_credential_environment() == 0);
    assert(getenv("AIMEE_DB2_URL") == NULL);
    assert(getenv("AIMEE_VAULT_PKCS11_PIN") == NULL);
@@ -178,6 +182,9 @@ static void test_generic_env_source(void)
    runtime_secret_wipe(value, sizeof(value));
    assert(runtime_secret_get("AIMEE_VAULT_PKCS11_PIN", value, sizeof(value)) == 1);
    assert(strcmp(value, "vaulted-hsm-pin") == 0);
+   runtime_secret_wipe(value, sizeof(value));
+   assert(runtime_secret_get("AIMEE_KB_CLIENT_PAM_USERNAME", value, sizeof(value)) == 1);
+   assert(strcmp(value, "aimee-server") == 0);
    runtime_secret_wipe(value, sizeof(value));
    printf("  PASS: test_generic_env_source\n");
 }

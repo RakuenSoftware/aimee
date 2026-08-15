@@ -10,6 +10,7 @@
 #endif
 
 #include "db2/db2.h"
+#include "db2/db2_tenant.h"
 #include "db2/decision_log.h"        /* db2_decision_log_mark_revisit_due (P1) */
 #include "db2/cross_repo_identity.h" /* db2_cross_repo_rebuild_identities (H0c) */
 #include "db2/cross_repo_route.h"    /* db2_cross_repo_rebuild_routes (H0d) */
@@ -268,8 +269,13 @@ static int stage_embed_code(const kb_curator_extract_opts_t *opts)
    {
       kb_code_embed_result_t r;
       memset(&r, 0, sizeof(r));
-      if (kb_code_embed_refresh(projects[i].name, "changed_files", NULL, 0, 0, 0, 0, &r) != 0)
+      if (db2_maintenance_job_enter(DB2_MAINTENANCE_CODE_INDEXER, projects[i].name) != 0)
          continue;
+      if (kb_code_embed_refresh(projects[i].name, "changed_files", NULL, 0, 0, 0, 0, &r) != 0)
+      {
+         db2_maintenance_job_leave();
+         continue;
+      }
       total += (int)r.embedded;
 
       /* indexed -> embedded -> CURATED. The scan handler used to enqueue curation
@@ -283,6 +289,7 @@ static int stage_embed_code(const kb_curator_extract_opts_t *opts)
        * on a synthesis endpoint being configured. */
       if (kb_code_embed_project_fully_embedded(projects[i].name))
          kb_curator_queue_code_units_for_project(projects[i].name, NULL);
+      db2_maintenance_job_leave();
    }
    if (total > 0)
       aimee_log(LOG_DEBUG, "kb.code.embed", "embedded %d code/doc vector(s) across %d project(s)",
@@ -309,6 +316,10 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
       return 0;
    size_t selected = next_project % (size_t)np;
    next_project = (selected + 1) % (size_t)np;
+   int reembed = db2_reembed_in_progress_get(NULL, NULL) == 1;
+   db2_maintenance_worker_t worker = reembed ? DB2_MAINTENANCE_REEMBED : DB2_MAINTENANCE_CURATOR;
+   if (db2_maintenance_job_enter(worker, projects[selected].name) != 0)
+      return 0;
    int total = 0;
    int e = kb_doc_refresh(projects[selected].name, embedder, CURATOR_DOC_SWEEP_BATCH);
    if (e > 0)
@@ -316,12 +327,13 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
    int b = kb_doc_embed_backfill(projects[selected].name, embedder, CURATOR_DOC_SWEEP_BATCH);
    if (b > 0)
       total += b;
+   db2_maintenance_job_leave();
    if (total > 0)
       aimee_log(LOG_DEBUG, "kb.docs.ingest", "ingested %d doc chunk(s) for project '%s'", total,
                 projects[selected].name);
    /* dim-change re-embed clears its maintenance marker once the backfill has caught
     * up (a pass that embedded nothing means every chunk has a vector). */
-   if (total == 0 && db2_reembed_in_progress_get(NULL, NULL) == 1)
+   if (total == 0 && reembed)
    {
       db2_reembed_in_progress_clear();
       aimee_log(LOG_INFO, "kb.reembed",

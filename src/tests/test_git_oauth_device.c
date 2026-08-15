@@ -10,10 +10,18 @@
 #include <string.h>
 
 /* ── Link-only stubs for the module's externals (never called by these tests) ── */
+/* Canned POST reply, so the device flow can be walked start -> poll without a
+ * network. NULL leaves the original link-only behaviour (no response body). */
+static const char *g_http_reply = NULL;
 int agent_http_post_content_type(const char *url, const char *auth_header, const char *content_type,
                                  const char *body, char **response_buf, int timeout_ms,
                                  const char *extra_headers)
 {
+   if (g_http_reply && response_buf)
+   {
+      *response_buf = strdup(g_http_reply);
+      return 200;
+   }
    (void)url;
    (void)auth_header;
    (void)content_type;
@@ -24,11 +32,17 @@ int agent_http_post_content_type(const char *url, const char *auth_header, const
       *response_buf = NULL;
    return 0;
 }
+/* Scripted so the sign-in completion can be driven both ways: the store is a
+ * separate failure from the provider returning a token, and the whole point of
+ * checking it is what happens when it fails. */
+static int g_cred_set_rc = 0;
+static int g_cred_set_calls = 0;
 int git_host_cred_set(const char *host, const char *token)
 {
    (void)host;
    (void)token;
-   return 0;
+   g_cred_set_calls++;
+   return g_cred_set_rc;
 }
 vault_status_t vault_service_set_server(const char *agent, const char *cred, const char *secret)
 {
@@ -37,6 +51,9 @@ vault_status_t vault_service_set_server(const char *agent, const char *cred, con
    (void)secret;
    return VAULT_OK;
 }
+/* A configured client ID, when a test needs the flow to get past "sign-in is
+ * not configured". Gitea has no built-in app, so this is the only way in. */
+static const char *g_vault_client_id = NULL;
 vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
                                                   size_t out_len)
 {
@@ -44,6 +61,11 @@ vault_status_t vault_service_get_server_principal(const char *agent, const char 
    (void)cred;
    if (out && out_len)
       out[0] = '\0';
+   if (g_vault_client_id && out && out_len)
+   {
+      snprintf(out, out_len, "%s", g_vault_client_id);
+      return VAULT_OK;
+   }
    return VAULT_NO_ENTRY;
 }
 
@@ -96,11 +118,61 @@ static void test_endpoints(void)
    printf("  endpoints: OK\n");
 }
 
+/* Completing a sign-in means the token is STORED, not merely received. The
+ * provider returning one and the vault keeping it fail independently, and
+ * reporting completion on the first alone leaves the host with no credential
+ * while the user is told they are connected — after which every forge call
+ * reports "no credential" and points back at a sign-in that looked fine. */
+static void test_poll_requires_the_token_to_be_stored(void)
+{
+   char user_code[64], verify[256], err[256];
+   int interval = 0;
+
+   /* Walk a real start -> poll against canned replies. */
+   g_vault_client_id = "CID-TEST";
+   g_http_reply = "{\"device_code\":\"DEV-CODE\",\"user_code\":\"UC-1\","
+                  "\"verification_uri\":\"https://gitea.example.com/login/device\"}";
+   assert(oauth_dev_start(OAUTH_DEV_GITEA, "gitea.example.com", "alice", user_code,
+                          sizeof(user_code), verify, sizeof(verify), &interval, err,
+                          sizeof(err)) == 0);
+
+   /* The store succeeds → the sign-in completes. */
+   g_http_reply = "{\"access_token\":\"TOK-1\"}";
+   g_cred_set_rc = 0;
+   g_cred_set_calls = 0;
+   err[0] = '\0';
+   assert(oauth_dev_poll(OAUTH_DEV_GITEA, "gitea.example.com", "alice", err, sizeof(err)) == 1);
+   assert(g_cred_set_calls == 1);
+   assert(err[0] == '\0');
+
+   /* The store fails → the sign-in must FAIL and say so, not report complete.
+    * Before this was checked, the call returned 1 here and the credential was
+    * silently gone. */
+   g_http_reply = "{\"device_code\":\"DEV-CODE\",\"user_code\":\"UC-2\","
+                  "\"verification_uri\":\"https://gitea.example.com/login/device\"}";
+   assert(oauth_dev_start(OAUTH_DEV_GITEA, "gitea.example.com", "alice", user_code,
+                          sizeof(user_code), verify, sizeof(verify), &interval, err,
+                          sizeof(err)) == 0);
+   g_http_reply = "{\"access_token\":\"TOK-2\"}";
+   g_cred_set_rc = -1;
+   g_cred_set_calls = 0;
+   err[0] = '\0';
+   assert(oauth_dev_poll(OAUTH_DEV_GITEA, "gitea.example.com", "alice", err, sizeof(err)) == -1);
+   assert(g_cred_set_calls == 1);
+   assert(strstr(err, "could not store") != NULL);
+
+   g_http_reply = NULL;
+   g_cred_set_rc = 0;
+   g_vault_client_id = NULL;
+   printf("  poll requires the token to be stored: OK\n");
+}
+
 int main(void)
 {
    printf("test_git_oauth_device:\n");
    test_provider_name();
    test_endpoints();
+   test_poll_requires_the_token_to_be_stored();
    printf("ALL PASS\n");
    return 0;
 }

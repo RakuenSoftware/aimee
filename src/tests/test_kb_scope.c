@@ -122,15 +122,14 @@ static void test_request_target_none(void)
 
 /* The identity aimee-server actually presents.
  *
- * KB_SERVER_CLIENT_SCOPE becomes the certificate CN, and the mTLS seam turns a
- * CN containing ':' into "scope:<CN>:m" — so this string alone decides whether
- * the server is a data-plane caller or the install owner. It was a bare word,
- * which made it the owner. A regression to any bare word would silently restore
- * that, and nothing else in the suite would notice. */
+ * KB_SERVER_CLIENT_SCOPE becomes both the certificate CN and the independently
+ * verified service bearer's scope. The mTLS seam requires them to match. It was
+ * once a bare word, which made the old synthetic bearer the owner; a regression
+ * to any bare word would make pair binding impossible. */
 static void test_server_identity_is_scoped_not_owner(void)
 {
    char kind[32] = "", id[128] = "", secret[256] = "";
-   /* Exactly what kb_tls_serve.c builds from the CN. */
+   /* Exactly what the enrolled outbound bearer encodes independently. */
    char synth[192];
    snprintf(synth, sizeof(synth), "scope:%s:m", KB_SERVER_CLIENT_SCOPE);
    kb_scope_token_parse(synth, kind, sizeof(kind), id, sizeof(id), secret, sizeof(secret));

@@ -23,7 +23,7 @@
 #define WEBCHAT_AGENT         "webchat-login"
 /* Mirrors GIT_FORGE_VAULT_AGENT. Spelled out rather than included so this
  * first-boot module keeps no link dependency on the git modules. */
-#define GIT_FORGE_AGENT       "git"
+#define GIT_FORGE_AGENT "git"
 
 static int span_has_suffix(const char *name, size_t name_len, const char *suffix)
 {
@@ -55,6 +55,8 @@ static int name_span_is_credential(const char *name, size_t len, int include_del
        (len == strlen("AIMEE_WEBCHAT_USER") && memcmp(name, "AIMEE_WEBCHAT_USER", len) == 0) ||
        (len == strlen("AIMEE_WEBCHAT_USERS") && memcmp(name, "AIMEE_WEBCHAT_USERS", len) == 0) ||
        (len == strlen("AIMEE_KB_CONN") && memcmp(name, "AIMEE_KB_CONN", len) == 0) ||
+       (len == strlen("AIMEE_KB_CLIENT_PAM_USERNAME") &&
+        memcmp(name, "AIMEE_KB_CLIENT_PAM_USERNAME", len) == 0) ||
        (len == strlen("AIMEE_GIT_AUTHOR_NAME") &&
         memcmp(name, "AIMEE_GIT_AUTHOR_NAME", len) == 0) ||
        (len == strlen("AIMEE_GIT_AUTHOR_EMAIL") &&
@@ -352,8 +354,7 @@ int vault_env_seal_forge_credential(const char *cred_name)
 {
    /* Closed allowlist, like the webchat seal. These are exactly the two
     * credentials git_forge_vault.c reads back out of the server principal. */
-   if (!cred_name ||
-       (strcmp(cred_name, "forge_token") != 0 && strcmp(cred_name, "ssh_key") != 0))
+   if (!cred_name || (strcmp(cred_name, "forge_token") != 0 && strcmp(cred_name, "ssh_key") != 0))
       return -1;
 
    char *value = calloc(1, WEBCHAT_SECRET_MAX + 1);

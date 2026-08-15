@@ -40,10 +40,36 @@ const char *request_context_principal(void)
    return g_req_ctx_set ? g_req_ctx.principal : "";
 }
 
+const char *request_context_caller_subject(void)
+{
+   return g_req_ctx_set ? g_req_ctx.caller_subject : "";
+}
+
+const char *request_context_caller_authorization(void)
+{
+   return g_req_ctx_set ? g_req_ctx.caller_authorization : "";
+}
+
 void request_context_override_principal(const char *principal)
 {
    if (!g_req_ctx_set || !principal || !principal[0])
       return;
    snprintf(g_req_ctx.principal, sizeof(g_req_ctx.principal), "%s", principal);
    g_req_ctx.trusted = 1;
+}
+
+void request_context_override_caller_subject(const char *subject)
+{
+   if (!g_req_ctx_set || !subject || !subject[0])
+      return;
+   memset(g_req_ctx.caller_authorization, 0, sizeof(g_req_ctx.caller_authorization));
+   snprintf(g_req_ctx.caller_subject, sizeof(g_req_ctx.caller_subject), "%s", subject);
+}
+
+void request_context_override_caller_authorization(const char *jwt)
+{
+   if (!g_req_ctx_set || !jwt || !jwt[0] || strlen(jwt) >= sizeof(g_req_ctx.caller_authorization))
+      return;
+   memset(g_req_ctx.caller_subject, 0, sizeof(g_req_ctx.caller_subject));
+   snprintf(g_req_ctx.caller_authorization, sizeof(g_req_ctx.caller_authorization), "%s", jwt);
 }

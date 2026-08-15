@@ -8,10 +8,14 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http.h"
+#include "aimee/core/connection/auth.h"
+#include "kb_identity_token.h"
 #include "request_context.h"
 #include "config.h"
 #include "runtime_secret.h"
 #include <netinet/in.h> /* INADDR_ANY / INADDR_LOOPBACK */
+#include <openssl/crypto.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,6 +56,78 @@ static long reqctx_peer_uid(int fd, int is_tcp)
       return (long)cred.uid;
 #endif
    return -1;
+}
+
+int server_http_host_subject_for_uid(long uid, char *out, size_t cap)
+{
+   if (out && cap)
+      out[0] = '\0';
+   if (uid < 0 || !out || cap == 0)
+      return -1;
+   struct passwd pwd;
+   struct passwd *resolved = NULL;
+   char scratch[16384];
+   if (getpwuid_r((uid_t)uid, &pwd, scratch, sizeof(scratch), &resolved) != 0 || !resolved ||
+       !resolved->pw_name || !resolved->pw_name[0])
+   {
+      out[0] = '\0';
+      return -1;
+   }
+   int n = snprintf(out, cap, "%s", resolved->pw_name);
+   if (n <= 0 || (size_t)n >= cap)
+   {
+      out[0] = '\0';
+      return -1;
+   }
+   return 0;
+}
+
+int server_http_apply_caller_context(int is_tcp, const char *request,
+                                     const char *first_user_principal, int identity_present,
+                                     const char *identity_subject)
+{
+   const request_context_t *ctx = request_context_get();
+   if (!is_tcp && (!ctx || ctx->peer_uid < 0 || !request_context_caller_subject()[0]))
+      return -1;
+   if (first_user_principal && first_user_principal[0])
+   {
+      request_context_override_principal(first_user_principal);
+      request_context_override_caller_subject(!strncmp(first_user_principal, "webuser:", 8)
+                                                  ? first_user_principal + 8
+                                                  : first_user_principal);
+   }
+   if (!identity_present || !identity_subject || !identity_subject[0])
+      return 0;
+   if (strncmp(identity_subject, "oidc:", 5) != 0)
+   {
+      request_context_override_caller_subject(identity_subject);
+      return 0;
+   }
+
+   /* Preserve the original KB-signed identity token. The server verifies it for
+    * its own gates; the KB verifies it again before accepting an OIDC caller. */
+   char authorization[KB_IDENTITY_TOKEN_WIRE_MAX + 1] = "";
+   if (http_header(request, "Authorization", authorization, sizeof(authorization)))
+   {
+      const char *jwt = aimee_core_bearer_token(authorization);
+      if (jwt)
+         request_context_override_caller_authorization(jwt);
+   }
+   OPENSSL_cleanse(authorization, sizeof(authorization));
+   return 0;
+}
+
+static void reqctx_caller_from_principal(request_context_t *ctx, const char *principal)
+{
+   if (!ctx || !principal || !principal[0])
+      return;
+   static const char webuser_prefix[] = "webuser:";
+   if (strncmp(principal, webuser_prefix, sizeof(webuser_prefix) - 1) == 0)
+      principal += sizeof(webuser_prefix) - 1;
+   /* uid:<n> is a vault/audit principal, not a KB subject. The UDS path resolves
+    * it through getpwuid_r below instead of forwarding the numeric label. */
+   if (strncmp(principal, "uid:", 4) != 0 && principal[0])
+      snprintf(ctx->caller_subject, sizeof(ctx->caller_subject), "%s", principal);
 }
 
 /* Populate the thread-local request context (#3) from the socket and headers so
@@ -95,7 +171,11 @@ void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
 
    /* Server-derived principal from the kernel-verified UDS peer uid. */
    if (ctx.peer_uid >= 0)
+   {
       snprintf(ctx.principal, sizeof(ctx.principal), "uid:%ld", ctx.peer_uid);
+      (void)server_http_host_subject_for_uid(ctx.peer_uid, ctx.caller_subject,
+                                             sizeof(ctx.caller_subject));
+   }
 
    /* The root-owned webchat proxy is kernel-attested over the Unix socket. Root
     * already controls the host/container, so a second shared secret adds only a
@@ -131,7 +211,10 @@ void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
       char principal[128] = "";
       char source[64] = "";
       if (http_header(buf, "X-Aimee-Principal", principal, sizeof(principal)) && principal[0])
+      {
          snprintf(ctx.principal, sizeof(ctx.principal), "%s", principal);
+         reqctx_caller_from_principal(&ctx, principal);
+      }
       if (http_header(buf, "X-Aimee-Source", source, sizeof(source)) && source[0])
          snprintf(ctx.source, sizeof(ctx.source), "%s", source);
       http_header(buf, "X-Aimee-Session-Key", ctx.session_key, sizeof(ctx.session_key));

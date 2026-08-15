@@ -101,6 +101,19 @@ extern "C"
    int kb_oidc_verify_id_token(const char *jwt, const char *expected_audience, long now,
                                kb_verify_result_t *out);
 
+   /* Service-connection OIDC is deliberately narrower than the general bearer
+    * verifier. The registered issuer and audience are both mandatory and the
+    * protected header typ is pinned to "at+jwt", so an aimee management JWT
+    * (typ "JWT") cannot arrive on the data-plane service connection wearing the
+    * wrong hat. Returns 1 only when OIDC is configured and every check passes. */
+   int kb_oidc_verify_service_token(const char *jwt, long now, kb_verify_result_t *out);
+
+   /* 1 when a complete service OIDC policy is registered, 0 when OIDC is not
+    * configured, and -1 when OIDC was requested but the service policy is
+    * incomplete/invalid. The -1 state must fail closed rather than fall back to
+    * PAM for service connections. */
+   int kb_oidc_service_mode(void);
+
    /* Read the `nonce` claim out of an id_token's payload into out[cap].
     * Returns 0 on success, -1 if absent, empty, unparseable or too long.
     *

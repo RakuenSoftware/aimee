@@ -12,6 +12,7 @@
  * were file-local statics shared by textual .inc inclusion. */
 /* promoted cross-TU (former .inc statics) */
 int conn_offload(int fd, int is_tcp, int is_tls, int is_management);
+void handle_conn_inline(int fd, int is_tcp);
 int server_http_management_health_route(const char *method, const char *path);
 int server_http_management_route(const char *method, const char *path);
 int server_http_management_action_route(const char *method, const char *path);

@@ -235,6 +235,16 @@ extern "C"
    void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
                                              const char *request_id, const char *method,
                                              const char *path, uint32_t caps);
+
+   /* Install the authenticated surface caller after base context capture.
+    * Returns -1 only when a UDS peer does not resolve to a local host account. */
+   int server_http_apply_caller_context(int is_tcp, const char *request,
+                                        const char *first_user_principal, int identity_present,
+                                        const char *identity_subject);
+
+   /* Resolve a kernel peer uid to the PAM/host subject forwarded to the KB.
+    * Returns 0 only for a non-empty local account name. */
+   int server_http_host_subject_for_uid(long uid, char *out, size_t cap);
    int server_http_route_allowed(int is_tcp, const char *bearer, const char *method,
                                  const char *path, int remote_writes);
    /* Whether a route is reachable ONLY over the local UDS listener — never over TCP,

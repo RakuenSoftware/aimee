@@ -4,6 +4,7 @@
 #include "server_http_authz.h"
 #include "server_http_internal.h"
 #include "runtime_secret.h"
+#include "request_context.h"
 #include "http_content_encoding.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
@@ -21,7 +22,9 @@
 #include "util.h"
 #include <netinet/in.h> /* INADDR_ANY / INADDR_LOOPBACK for the bind-policy test */
 #include <assert.h>
+#include <limits.h>
 #include <pthread.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -1097,6 +1100,12 @@ int main(void)
       assert(server_http_authorize(1, "secret", "Bearer secret", NULL, 0) == 0);
       assert(server_http_authorize(1, "secret", NULL, "secret", 0) == 0);
       assert(server_http_authorize(1, "secret", "Bearer nope", "secret", 0) == 0);
+      /* The caller identity JWT may occupy Authorization while the independent
+       * rotating connection bearer occupies x-api-key. A valid identity-shaped
+       * Authorization value does not replace the connection bearer. */
+      assert(server_http_authorize(1, "secret", "Bearer header.payload.signature", "secret", 0) ==
+             0);
+      assert(server_http_authorize(1, "secret", "Bearer header.payload.signature", NULL, 0) == 401);
       assert(server_http_authorize(1, "secret", NULL, "nope", 0) == 401);
       assert(server_http_authorize(1, "secret", NULL, NULL, 0) == 401);
       assert(server_http_authorize(1, "secret", "secret", NULL, 0) == 401);
@@ -2226,6 +2235,62 @@ int main(void)
       /* The TLS listener (allow_external=1) may face the network when asked. */
       assert(server_http_resolve_bind_addr(0 /*want_ext*/, 1 /*tls*/) == INADDR_LOOPBACK);
       assert(server_http_resolve_bind_addr(1 /*want_ext*/, 1 /*tls*/) == INADDR_ANY);
+   }
+
+   /* Every user-facing ingress converges on one canonical caller context before
+    * kb_client opens the independently authenticated server -> KB hop. This is
+    * attribution, not another credential protocol at the KB boundary. */
+   {
+      int pair[2];
+      assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+      server_http_populate_request_context(pair[0], 0, "GET /v1/search HTTP/1.1\r\n\r\n", "ctx-uds",
+                                           "GET", "/v1/search", CAPS_ALL);
+      struct passwd *pw = getpwuid(getuid());
+      assert(pw && pw->pw_name && pw->pw_name[0]);
+      assert(strcmp(request_context_caller_subject(), pw->pw_name) == 0); /* local CLI */
+      char missing_subject[64];
+      assert(server_http_host_subject_for_uid(LONG_MAX, missing_subject, sizeof(missing_subject)) ==
+             -1);
+      assert(missing_subject[0] == '\0');
+      request_context_clear();
+      close(pair[0]);
+      close(pair[1]);
+
+      assert(runtime_secret_store("AIMEE_INGRESS_PROXY_SECRET", "ctx-secret") == 0);
+      static const struct
+      {
+         const char *surface;
+         const char *principal;
+         const char *want;
+      } proxied[] = {
+          {"web", "webuser:web-alice", "web-alice"},
+          {"remote-cli", "cli-alice", "cli-alice"},
+          {"mcp", "mcp-alice", "mcp-alice"},
+      };
+      for (size_t i = 0; i < sizeof(proxied) / sizeof(proxied[0]); ++i)
+      {
+         char request[512];
+         snprintf(request, sizeof(request),
+                  "GET /v1/search HTTP/1.1\r\nX-Aimee-Proxy-Authorization: ctx-secret\r\n"
+                  "X-Aimee-Principal: %s\r\nX-Aimee-Source: %s\r\n\r\n",
+                  proxied[i].principal, proxied[i].surface);
+         server_http_populate_request_context(-1, 1, request, "ctx-proxy", "GET", "/v1/search",
+                                              CAPS_ALL);
+         const request_context_t *ctx = request_context_get();
+         assert(ctx && ctx->trusted && strcmp(ctx->source, proxied[i].surface) == 0);
+         assert(strcmp(request_context_caller_subject(), proxied[i].want) == 0);
+         request_context_clear();
+      }
+      runtime_secret_remove("AIMEE_INGRESS_PROXY_SECRET");
+
+      /* Remote thinclient OIDC is verified by the existing identity-token gate;
+       * handle_conn installs those verified claims after base context capture. */
+      server_http_populate_request_context(-1, 1, "GET /v1/search HTTP/1.1\r\n\r\n", "ctx-oidc",
+                                           "GET", "/v1/search", CAPS_ALL);
+      request_context_override_caller_authorization("header.payload.signature");
+      assert(strcmp(request_context_caller_authorization(), "header.payload.signature") == 0);
+      assert(request_context_caller_subject()[0] == '\0');
+      request_context_clear();
    }
 
    /* --- AIMEE_WEBCHAT_GIT=0 disables the whole git surface (503 first) --- */
