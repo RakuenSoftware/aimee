@@ -186,7 +186,11 @@ class SignModuleDocsTests(unittest.TestCase):
             inventory = repo / signer.INVENTORY_PATH
             inventory.parent.mkdir(parents=True)
             inventory.write_text(json.dumps({
-                "schema_version": 1, "required": ["config"], "optional": ["runtime-web"]
+                "schema_version": 2,
+                "required": ["config"],
+                "optional": ["runtime-web"],
+                "principal_refs": {"config": 2, "runtime-web": 23},
+                "retired_principal_refs": [],
             }, indent=2) + "\n", encoding="ascii")
             (repo / "evidence.txt").write_text("evidence\n", encoding="ascii")
             template = (

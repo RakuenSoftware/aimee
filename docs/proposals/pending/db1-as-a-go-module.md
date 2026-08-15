@@ -3,10 +3,12 @@
 - **State:** PENDING — scope only; no implementation has started.
 - **Date:** 2026-08-15.
 - **Charter roles:** Constrain-Verify / Gate-Promote.
-- **Thesis:** DB1 is state, so by the module doctrine it belongs in a Go module reached over
-  the event bus rather than a C library every component links. This proposal measures that
-  surface, names the three constraints that decide the module's shape, and proposes a
-  sequence. It does not propose a schema change, a second store, or any new policy surface.
+- **Thesis:** DB1 is state, so by the module doctrine it belongs behind a module reached over
+  the event bus rather than a C library every component links. The boundary moves FIRST, with
+  the existing C behind it; the language port follows, per domain, against a contract that is
+  already settled. This proposal measures that surface and names the constraints that decide
+  the module's shape. It does not propose a schema change, a second store, or any new policy
+  surface.
 
 ## 1. Why this exists
 
@@ -44,7 +46,7 @@ difference should be resolved before porting, not carried across — either the 
 exercising internals that need no module surface, or they are the only coverage of
 functions nothing calls.
 
-## 3. Three constraints that decide the shape
+## 3. Four constraints that decide the shape
 
 ### 3.1 The stage ceiling is 255, and 242 is not headroom
 
@@ -84,6 +86,19 @@ prepared statements, migrations, or a 242-symbol surface. This will be the first
 data-access module, so the first slice should be chosen to establish that pattern rather
 than to move the most code.
 
+### 3.4 A module owns its sources, so the directory moves
+
+`validate_module_descriptors` resolves each ownership field against a fixed root and rejects
+anything outside it (`ownership-role-boundary`): `sources` and `private_headers` must live
+under `src/modules/<id>/`, `public_headers` under `src/modules/<id>/include/aimee/<id>/`. No
+module today owns a source outside those roots.
+
+So db1 cannot become a module while its C sits in `src/db1/`. The move is mechanical and its
+cost is bounded: the 587 include sites across 349 files are bare includes resolved by `-Idb1`,
+so the build's include path changes and the call sites do not. What it is NOT is a boundary:
+moving the directory leaves 349 files including db1 headers exactly as before. That is why
+Phase A and Phase B are separate.
+
 ## 4. What has to be decided before any code
 
 1. **Domain stages or one generic query stage** (§3.1).
@@ -100,18 +115,86 @@ than to move the most code.
 
 ## 5. Proposed sequence
 
-1. **Establish the pattern on one domain.** Economizer reducer state is the natural first
-   slice: two functions, one caller, and it unblocks a seam that is otherwise finished. Port
-   `db1_economizer_state_load` / `_save` behind one stage, with the pure-Go driver, and let
-   that settle the transaction and error-mapping questions on something small.
-2. **Move the fingerprint with it.** `gw_state_key` / `gw_fnv1a` / `gw_state_next_turn`
-   exist only to key and sequence that blob; they follow it into the module and the gateway
-   seam is then done.
-3. **Resolve the test-only surface** before porting further, so the module is not shaped by
-   symbols nothing calls.
-4. **Then domain by domain**, largest caller-count first, each with the C wrapper deleted in
-   a following change rather than the same one — the pattern this migration has used
-   throughout: add the owner, cut the caller over, delete the C, each reviewable alone.
+**Corrected 2026-08-15.** An earlier draft of this section had the first slice port
+`db1_economizer_state_load/_save` into Go behind a stage. That is the wrong order: it moves a
+boundary and rewrites an implementation in one step, so a failure has two candidate causes.
+The boundary moves first, with the C behind it unchanged.
+
+### Phase A — db1 becomes a module, still C
+
+`src/db1/` is a source boundary, not a module: 129 files, 64 headers, no descriptor, no
+`docs/modules/db1.md`, absent from the canonical inventory. Making it a module means:
+
+- **The directory moves** to `src/modules/db1/`. Descriptors enforce `sources` under
+  `src/modules/<id>/` (`ownership-role-boundary`), so this is not optional. The 587 include
+  sites across 349 files survive it: they are bare (`#include "db1.h"` against `-Idb1`), so
+  the build's include path changes and the call sites do not.
+- **It is a `process` component with `runtime: "c"`.** The contract already permits this —
+  `validate_module_process_contracts` asserts `(id in GO_PROCESSES) != (runtime == "go")`, so
+  a component simply absent from that set must be C. No process module is C today; db1 would
+  be the first, and its grant pins its own executable the way every module's does.
+- **It is `required`**, which is now free of consequence: since the principal ref became a
+  declared identity rather than a position, classification no longer renumbers anything.
+
+Phase A moves no logic and changes no caller. It is packaging plus a bus surface.
+
+### Phase B — callers cross the bus, domain by domain
+
+This is the phase that makes it a boundary rather than a directory. 349 files stop including
+db1 headers and call stages instead. It is the bulk of the work and the only phase that
+changes behaviour, so it goes one domain at a time, each with its C wrapper deleted in a
+following change rather than the same one.
+
+The economizer reducer state is still the right first domain: two functions, one caller, and
+it finishes a seam that is otherwise complete. `gw_state_key` / `gw_fnv1a` /
+`gw_state_next_turn` follow the blob they key.
+
+#### Phase B ordering, measured
+
+Counted on `testing` at 2695, excluding `db_schema.h`, which exists in both `src/db1` and
+`src/db2` so a name match cannot tell the two apart:
+
+| Module | db1 includes |
+| --- | --- |
+| workflows | 14 |
+| delegates | 5 |
+| roundtable | 4 |
+| roadmap | 3 |
+| config, tools | 2 each |
+| audit, benchmarks, execution-policy, git, guardrails, kb_client, learning, memory, protocols | 1 each |
+
+Fifteen modules, 39 include sites. Nine have a single include, so most of Phase B is small
+cutovers and the ordering falls out of the table: the single-include modules establish the
+pattern, then `roadmap`, `roundtable`, `delegates`, and `workflows` last.
+
+**The coupling is direct, not inherited.** 271 files include a db1 header themselves; only 31
+gain the dependency solely through another header, and 16 of those are through
+`src/headers/db1_optional.h`. So there is no tangle to unpick first: Phase B is a large number
+of individually small cutovers, not a small number of load-bearing ones.
+
+#### `db1_optional.h` is the existing optionality seam, and Phase B must replace it
+
+`src/headers/db1_optional.h` already answers "which DB1 calls may be absent". Server builds
+link the real objects; KB builds do not, and under `AIMEE_DB1_DISABLED` the optional calls
+become null pointers that callers must guard. `src/kb/kb_mcp_osv_stub.c` is the same mechanism
+by hand: it stubs three DB1 symbols so a kb-hosted MCP plugin still runs the OSV supply-chain
+scan without linking DB1.
+
+Two consequences. The set of calls that file marks optional is a ready-made first cut at which
+DB1 surface is genuinely server-only, which informs the stage grouping in §3.1. And the
+weak-reference trick does not survive the move: once a caller reaches DB1 over the bus, "absent
+because unlinked" becomes "absent because unreachable", which is the availability answer every
+other module already gives. Phase B has to carry that guard across rather than delete it, or
+`aimee-kb` silently loses a security gate.
+
+### Phase C — port the implementation to Go, per domain
+
+Only now does the language change, against a stage contract already proven by Phase B. This
+is where the pure-Go SQLite driver (§3.2) and the transaction questions (§4.3) actually land,
+and where the 167 test-only symbols (§2) should already have been resolved.
+
+Splitting B from C matters: a caller that has already crossed the bus does not care which
+language answers, so Phase C can proceed domain by domain without touching a single call site.
 
 ## 6. What this proposal does not do
 
