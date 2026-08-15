@@ -478,15 +478,42 @@ static void test_pdf_evidence_tools(void)
  * AIMEE_HOME/aimee.yaml that flips kb_pdf_vector_enabled on; the sqlite shim has no
  * halfvec so the vector leg yields no rows (search degrades to lexical) — exactly the
  * embedder-absent degradation path. */
-static void write_vector_config(const char *home)
+static void write_vector_config(const char *home, int enabled)
 {
    mkdir(home, 0700);
    char path[512];
    snprintf(path, sizeof(path), "%s/aimee.yaml", home);
    FILE *fp = fopen(path, "w");
    assert(fp);
-   fputs("kb_pdf_vector_enabled: true\n", fp);
+   fprintf(fp, "kb_pdf_vector_enabled: %s\n", enabled ? "true" : "false");
    fclose(fp);
+}
+
+static void test_pdf_reembed_disabled(void)
+{
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee_pdf_vec_off_test_XXXXXX", platform_tmpdir());
+   assert(mkdtemp(home));
+   setenv("AIMEE_HOME", home, 1);
+   setenv("AIMEE_NO_CACHE", "1", 1);
+   write_vector_config(home, 0);
+
+   open_pdf_test_db();
+   kb_pdf_ingest_stats_t stats;
+   assert(kb_doc_pdf_ingest_xhtml("proj", "disabled.pdf", "h0", FIXTURE_2PAGE, "internal",
+                                  &stats) == 2);
+   assert(db2_kb_async_count_kind("embed_pdf") == 0);
+   assert(db2_kb_pdf_reembed_project("proj") == 0);
+   assert(db2_kb_async_count_kind("embed_pdf") == 0);
+   db2_test_shim_close();
+
+   char path[512];
+   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
+   unlink(path);
+   rmdir(home);
+   unsetenv("AIMEE_NO_CACHE");
+   unsetenv("AIMEE_HOME");
+   PASS("pdf_reembed_disabled");
 }
 
 static void test_pdf_vector_enqueue_and_answerability(void)
@@ -496,7 +523,7 @@ static void test_pdf_vector_enqueue_and_answerability(void)
    assert(mkdtemp(home));
    setenv("AIMEE_HOME", home, 1);
    setenv("AIMEE_NO_CACHE", "1", 1); /* bypass the config mtime cache so the yaml is re-read */
-   write_vector_config(home);
+   write_vector_config(home, 1);
 
    open_pdf_test_db();
 
@@ -1024,6 +1051,7 @@ int main(void)
    test_search_chunks_shim();
    test_pdf_quarantine_admin();
    test_pdf_evidence_tools();
+   test_pdf_reembed_disabled();
    test_pdf_vector_enqueue_and_answerability();
    test_tsr_sidecar_client();
    test_pdf_table_cells();

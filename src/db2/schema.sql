@@ -1972,6 +1972,9 @@ BEGIN
   IF p_principal IS NULL OR p_principal = '' THEN
     RAISE EXCEPTION 'set_tenant_context: empty principal' USING ERRCODE = '42501';
   END IF;
+  PERFORM set_config('aimee.maintenance_worker', '', true);
+  PERFORM set_config('aimee.maintenance_project', '', true);
+  PERFORM set_config('aimee.maintenance_kb_project', '', true);
   PERFORM set_config('aimee.principal', p_principal, true);  -- transaction-local
   IF p_team IS NOT NULL AND p_team > 0 THEN
     IF NOT EXISTS (SELECT 1 FROM kb_team_membership
@@ -1983,6 +1986,40 @@ BEGIN
   ELSE
     PERFORM set_config('aimee.team', '', true);
   END IF;
+END
+$$;
+
+-- Background workers act for a durable job, not for an end user. Give those
+-- jobs one explicit scope rather than inventing another identity kind or letting
+-- the runtime role read every project. The worker name is a closed allowlist and
+-- the project must already be attributed to exactly one kb_project. All values
+-- are transaction-local and the C boundary resets them before returning a pooled
+-- connection.
+CREATE OR REPLACE FUNCTION set_maintenance_context(p_worker TEXT, p_project TEXT)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  project_ref BIGINT;
+BEGIN
+  IF p_worker IS NULL OR p_worker NOT IN ('ingest','reembed','curator','code-indexer') THEN
+    RAISE EXCEPTION 'set_maintenance_context: unknown worker' USING ERRCODE = '42501';
+  END IF;
+  IF p_project IS NULL OR p_project = '' THEN
+    RAISE EXCEPTION 'set_maintenance_context: empty project' USING ERRCODE = '42501';
+  END IF;
+  SELECT kb_project INTO project_ref FROM projects WHERE name = p_project;
+  IF project_ref IS NULL THEN
+    RAISE EXCEPTION 'set_maintenance_context: project % is not attributed', p_project
+      USING ERRCODE = '42501';
+  END IF;
+  PERFORM set_config('aimee.principal', '', true);
+  PERFORM set_config('aimee.team', '', true);
+  PERFORM set_config('aimee.maintenance_worker', p_worker, true);
+  PERFORM set_config('aimee.maintenance_project', p_project, true);
+  PERFORM set_config('aimee.maintenance_kb_project', project_ref::text, true);
 END
 $$;
 
@@ -2106,7 +2143,11 @@ CREATE INDEX IF NOT EXISTS idx_projects_kb_project ON projects(kb_project);
 -- own RLS denies.
 CREATE OR REPLACE FUNCTION kb_project_visible(p BIGINT) RETURNS boolean
 LANGUAGE sql STABLE AS $$
-  SELECT p IS NOT NULL AND EXISTS (
+  SELECT (p IS NOT NULL
+          AND current_setting('aimee.maintenance_worker', true)
+                IN ('ingest','reembed','curator','code-indexer')
+          AND current_setting('aimee.maintenance_kb_project', true) = p::text)
+      OR (p IS NOT NULL AND EXISTS (
     SELECT 1 FROM kb_project k
      WHERE k.id = p
        AND k.parent IN (SELECT team FROM kb_team_membership
@@ -2116,7 +2157,23 @@ LANGUAGE sql STABLE AS $$
             OR k.parent = current_setting('aimee.team', true)::bigint)
        AND (k.access_mode = 'team-open'
             OR k.id IN (SELECT project FROM kb_project_membership
-                        WHERE identity_key = current_setting('aimee.principal', true))));
+            WHERE identity_key = current_setting('aimee.principal', true)))));
+$$;
+
+-- Maintenance writes are allowed only when the row's project is the exact
+-- attributed project selected by set_maintenance_context(). Interactive writes
+-- continue to enter through their existing write-tier routes and durable queues;
+-- this policy does not turn a user content read scope into direct table DML.
+CREATE OR REPLACE FUNCTION kb_maintenance_content_project(p_project TEXT) RETURNS boolean
+LANGUAGE sql STABLE AS $$
+  SELECT p_project IS NOT NULL
+     AND p_project = current_setting('aimee.maintenance_project', true)
+     AND current_setting('aimee.maintenance_worker', true)
+           IN ('ingest','reembed','curator','code-indexer')
+     AND EXISTS (SELECT 1 FROM projects p
+                  WHERE p.name = p_project
+                    AND p.kb_project::text =
+                        current_setting('aimee.maintenance_kb_project', true));
 $$;
 
 -- CONTENT SCOPE, part 2: the policies, DEFINED BUT NOT ENABLED.
@@ -2143,6 +2200,18 @@ CREATE POLICY p_file_index_project ON kb_file_index
                             WHERE p.name = kb_file_index.project
                               AND kb_project_visible(p.kb_project)));
 
+DROP POLICY IF EXISTS p_documents_maintenance_write ON kb_documents;
+CREATE POLICY p_documents_maintenance_write ON kb_documents
+  FOR ALL
+  USING (kb_maintenance_content_project(project))
+  WITH CHECK (kb_maintenance_content_project(project));
+
+DROP POLICY IF EXISTS p_file_index_maintenance_write ON kb_file_index;
+CREATE POLICY p_file_index_maintenance_write ON kb_file_index
+  FOR ALL
+  USING (kb_maintenance_content_project(project))
+  WITH CHECK (kb_maintenance_content_project(project));
+
 -- Turn content scoping on, once the rows carry a kb_project.
 --
 -- FORCE as well as ENABLE: without FORCE the table OWNER bypasses its own
@@ -2160,29 +2229,17 @@ DECLARE
   orphan_files BIGINT;
   reader_ready TEXT;
 BEGIN
-  -- THE READER SIDE MUST EXIST FIRST, and today it does not.
-  --
-  -- aimee.principal is transaction-scoped and reset on pooled connections
-  -- (db2_tenant.c), and it is set only inside db2_tenant_scope_begin. Every one
-  -- of that function's callers is a governance, management or vault path: the
-  -- content readers -- kb_payload.c, memory_query.c, kb_service_backend.c --
-  -- open NO tenant scope at all. The service also connects as a non-owner with
-  -- NOBYPASSRLS, by design, so nothing rescues it.
-  --
-  -- So enabling before the read paths carry a principal does not hide
-  -- unattributed rows. It returns NOTHING to EVERY content read, for everyone,
-  -- which is a total outage wearing the costume of a security control.
-  --
-  -- The marker is written by the change that threads the principal through
-  -- those reads. Until then this refuses, because a comment in a proposal is not
-  -- a safeguard and this is exactly the mistake an operator cannot un-make in a
-  -- hurry.
+  -- THE READER SIDE MUST EXIST FIRST. The marker is a release capability fact,
+  -- written only after the authenticated caller path, transaction-local tenant
+  -- scope, every ingress, and project-bound maintenance work have live coverage.
+  -- It does not enable RLS: attribution and the operator act below remain
+  -- separate so applying a migration cannot turn an incomplete backfill into an
+  -- outage.
   SELECT value INTO reader_ready FROM kb_meta WHERE key = 'content_scope_reader_ready';
   IF reader_ready IS DISTINCT FROM '1' THEN
-    RAISE EXCEPTION 'refusing to enable content scope: the content read paths do not set '
-                    'aimee.principal yet, so every content read would return nothing for '
-                    'everyone. The change that threads the principal through those reads sets '
-                    'kb_meta.content_scope_reader_ready=1; enable after it ships.';
+    RAISE EXCEPTION 'refusing to enable content scope: this schema has not declared the '
+                    'authenticated caller path and transaction-local content reader scope ready. '
+                    'Upgrade before enabling.';
   END IF;
   SELECT count(*) INTO orphan_docs FROM kb_documents d
     WHERE NOT EXISTS (SELECT 1 FROM projects p
@@ -2229,6 +2286,41 @@ LANGUAGE sql STABLE AS $$
                  WHERE identity_key = current_setting('aimee.principal', true)
                    AND revoked_at = '');
 $$;
+
+-- A code-index project name and a tenancy project name are different namespaces:
+-- projects.name is globally unique, while kb_project.name is unique only inside
+-- one team. Attribution is therefore an explicit admin operation by numeric id,
+-- never a name join or an ingest-side guess. This is the only application API for
+-- changing projects.kb_project.
+CREATE OR REPLACE FUNCTION kb_content_project_attribute(
+  p_code_project TEXT, p_kb_project BIGINT) RETURNS BIGINT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE code_id BIGINT;
+BEGIN
+  IF NOT public.kb_principal_is_admin() THEN
+    RAISE EXCEPTION 'kb_content_project_attribute: org-admin required'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_code_project IS NULL OR p_code_project = '' OR char_length(p_code_project) > 255
+     OR p_kb_project IS NULL OR p_kb_project <= 0 THEN
+    RAISE EXCEPTION 'kb_content_project_attribute: invalid project'
+      USING ERRCODE = '22023';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.kb_project WHERE id = p_kb_project) THEN
+    RAISE EXCEPTION 'kb_content_project_attribute: tenancy project % does not exist', p_kb_project
+      USING ERRCODE = '22023';
+  END IF;
+  UPDATE public.projects SET kb_project = p_kb_project
+   WHERE name = p_code_project
+   RETURNING id INTO code_id;
+  IF code_id IS NULL THEN
+    RAISE EXCEPTION 'kb_content_project_attribute: code project % does not exist', p_code_project
+      USING ERRCODE = '22023';
+  END IF;
+  RETURN code_id;
+END;
+$$;
+REVOKE ALL ON FUNCTION kb_content_project_attribute(TEXT, BIGINT) FROM PUBLIC;
 
 DROP POLICY IF EXISTS p_team_admin_write ON kb_team;
 CREATE POLICY p_team_admin_write ON kb_team FOR INSERT WITH CHECK (kb_principal_is_admin());
@@ -8500,6 +8592,27 @@ BEGIN
   RETURN n=1;
 END $$;
 
+CREATE OR REPLACE FUNCTION kb_server_registry_client_match(
+  p_server_id TEXT,p_team BIGINT,p_issuer TEXT,p_serial TEXT,p_fingerprint TEXT
+) RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF p_server_id !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$' OR p_team < 1
+     OR char_length(p_issuer) NOT BETWEEN 1 AND 600
+     OR p_serial !~ '^[0-9a-f]{1,128}$' OR p_fingerprint !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'invalid server client identity' USING ERRCODE='22023';
+  END IF;
+  RETURN EXISTS (
+    SELECT 1 FROM kb_server_registry r
+    JOIN kb_enrollments e ON e.scope='service:aimee-server'
+      AND e.cert_issuer=r.client_issuer AND e.cert_serial_norm=r.client_serial_norm
+      AND e.fingerprint=r.client_fingerprint AND e.state='active' AND e.revoked_at=''
+    WHERE r.server_id=p_server_id AND r.team_id=p_team AND r.status='active'
+      AND r.client_issuer=p_issuer AND r.client_serial_norm=p_serial
+      AND r.client_fingerprint=p_fingerprint
+  );
+END $$;
+
 CREATE OR REPLACE FUNCTION kb_server_registry_list(p_team BIGINT)
 RETURNS SETOF kb_server_registry LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
 BEGIN
@@ -10234,6 +10347,7 @@ REVOKE ALL ON FUNCTION kb_management_jwks_publication_guard(),
 REVOKE ALL ON FUNCTION kb_server_registry_pending(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_finalize(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_server_registry_client_match(TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_list(BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_snapshot(BIGINT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
@@ -13920,6 +14034,12 @@ REVOKE ALL ON FUNCTION kb_management_token_key_use_worm_guard(),
 -- dim); on a one-shot migrate this is simply the recorded build dim.
 INSERT INTO kb_meta (key, value) VALUES ('schema_embedding_dim', '__EMBED_DIM__')
   ON CONFLICT (key) DO NOTHING;
+-- Reader readiness is a SOFTWARE capability, not the operator's enable switch.
+-- Recording it here makes upgrades declare the completed six-slice reader path
+-- while leaving both content tables' RLS flags unchanged. kb_content_scope_enable()
+-- still refuses until every content row has an exact projects.kb_project.
+INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.

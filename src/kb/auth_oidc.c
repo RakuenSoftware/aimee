@@ -436,6 +436,65 @@ static int effective_config(kb_oidc_config_t *cfg)
    return 1;
 }
 
+int kb_oidc_service_mode(void)
+{
+   kb_oidc_config_t cfg;
+   int configured = effective_config(&cfg);
+   const char *requested = getenv("AIMEE_KB_OIDC_JWKS_FILE");
+   if (!configured)
+      return requested && requested[0] ? -1 : 0;
+   return cfg.issuer[0] && cfg.audience[0] ? 1 : -1;
+}
+
+/* The ordinary OIDC verifier intentionally accepts provider-specific extra
+ * protected-header fields. For the service connection we add one exact rule:
+ * there must be exactly one string typ and it must be at+jwt. */
+static int service_token_type_pinned(const char *jwt)
+{
+   if (!jwt)
+      return 0;
+   const char *dot = strchr(jwt, '.');
+   if (!dot || dot == jwt)
+      return 0;
+   char header_json[1024];
+   if (b64url_decode_str(jwt, (size_t)(dot - jwt), header_json, sizeof(header_json)) != 0)
+      return 0;
+   cJSON *header = cJSON_Parse(header_json);
+   if (!cJSON_IsObject(header))
+   {
+      cJSON_Delete(header);
+      return 0;
+   }
+   const cJSON *member = NULL;
+   const cJSON *typ = NULL;
+   int count = 0;
+   cJSON_ArrayForEach(member, header)
+   {
+      if (member->string && strcmp(member->string, "typ") == 0)
+      {
+         typ = member;
+         count++;
+      }
+   }
+   int ok = count == 1 && cJSON_IsString(typ) && strcmp(typ->valuestring, "at+jwt") == 0;
+   cJSON_Delete(header);
+   return ok;
+}
+
+int kb_oidc_verify_service_token(const char *jwt, long now, kb_verify_result_t *out)
+{
+   kb_oidc_config_t cfg;
+   if (!jwt || !out || now < 0 || !effective_config(&cfg) || !cfg.issuer[0] || !cfg.audience[0] ||
+       !service_token_type_pinned(jwt))
+      return 0;
+   if (!kb_oidc_verify_jwt(jwt, &cfg, now, out) || !out->subject[0])
+   {
+      memset(out, 0, sizeof(*out));
+      return 0;
+   }
+   return 1;
+}
+
 int kb_oidc_verify_id_token(const char *jwt, const char *expected_audience, long now,
                             kb_verify_result_t *out)
 {

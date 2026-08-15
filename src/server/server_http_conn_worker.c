@@ -59,7 +59,11 @@ static void *conn_worker(void *arg)
    {
       do
       {
+         request_context_clear();
+         server_http_identity_clear();
          handle_conn(j->fd, j->is_tcp, j->is_management);
+         request_context_clear();
+         server_http_identity_clear();
       } while (j->is_tls && server_http_keepalive_take());
    }
    server_tls_end(j->fd, ssl);
@@ -109,4 +113,13 @@ int conn_offload(int fd, int is_tcp, int is_tls, int is_management)
    }
    pthread_detach(t);
    return 1;
+}
+
+void handle_conn_inline(int fd, int is_tcp)
+{
+   request_context_clear();
+   server_http_identity_clear();
+   handle_conn(fd, is_tcp, 0);
+   request_context_clear();
+   server_http_identity_clear();
 }

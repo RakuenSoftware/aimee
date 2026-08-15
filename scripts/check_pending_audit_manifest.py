@@ -78,14 +78,17 @@ def main() -> int:
         residual_value = row["residual_path"]
         if disposition == "partial_archived":
             residual = ROOT / residual_value
-            if not residual.is_file() or residual.parent.name != "pending":
-                fail(f"{name}: residual does not exist in pending")
+            if not residual.is_file() or residual.parent.name not in {"pending", "rejected"}:
+                fail(f"{name}: residual does not exist in pending or rejected")
             residual_text = residual.read_text(encoding="utf-8")
-            if "**state:** pending" not in residual_text.lower() or name not in residual_text:
-                fail(f"{name}: residual lacks pending state or archived-parent link")
+            residual_state = residual.parent.name
+            has_state = f"**state:** {residual_state}" in residual_text.lower()
+            if not has_state or name not in residual_text:
+                fail(f"{name}: residual lacks {residual_state} state or archived-parent link")
             if residual.name not in text:
                 fail(f"{name}: archive lacks reciprocal residual link")
-            expected_pending.add(residual.name)
+            if residual_state == "pending":
+                expected_pending.add(residual.name)
         elif residual_value != "-":
             fail(f"{name}: non-partial disposition has a residual")
 

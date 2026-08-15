@@ -1496,10 +1496,8 @@ void handle_conn(int fd, int is_tcp, int is_management)
       return;
    }
 
-   /* A verified mTLS leaf is a first-class TCP authenticator. Re-check its
-    * durable roster row before the bearer gate so required-mode clients do not
-    * still depend on the shared bearer. This remains authentication only: the
-    * normal route/capability gates below still deny remote-write surfaces. */
+   /* mTLS is the transport layer, not a bearer substitute. Re-check its durable
+    * roster row; the independently rotating request bearer remains required. */
    int mtls_authenticated = 0;
    int management_authenticated = 0;
    int mtls_mode = server_tls_mtls_mode();
@@ -1621,16 +1619,23 @@ void handle_conn(int fd, int is_tcp, int is_management)
    effective_caps =
        server_http_enrollment_caps(effective_caps, is_tcp, mtls_authenticated,
                                    server_conn_io_has_ssl(fd), request_bearer, method, path);
-   /* Establish the per-request context (#3) only after authenticating the
-    * durable certificate, so downstream dispatch sees the same effective caps
-    * as the outer route gate. */
+   /* Capture context only after the certificate and effective caps are known. */
    server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path, effective_caps);
-   if (first_user_principal[0])
-      request_context_override_principal(first_user_principal);
-   /* Authorize before reading the body: TCP requires either the durably valid
-    * client certificate above or a valid bearer; UDS relies on permissions. */
+   if (server_http_apply_caller_context(is_tcp, buf, first_user_principal, identity_present,
+                                        identity_claims.subject) != 0)
    {
-      char auth[512] = "";
+      send_response(fd, 403,
+                    "{\"error\":{\"message\":\"local peer uid does not resolve to a host "
+                    "account\",\"type\":\"authentication_error\"}}",
+                    request_id);
+      LOG_INFO("server.http", "%s %s -> 403 (unresolved UDS host account) req_id=%s", method, path,
+               request_id);
+      return;
+   }
+   /* Every ordinary TCP request needs a rotating bearer after mTLS. If
+    * Authorization carries caller proof, x-api-key carries that bearer. */
+   {
+      char auth[KB_IDENTITY_TOKEN_WIRE_MAX + 8] = "";
       char api_key[512] = "";
       char skey[256] = "";
       int has_auth = http_header(buf, "Authorization", auth, sizeof(auth));
@@ -1648,7 +1653,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
        * fresh one below when evidence emission is on. */
       ingress_preinject_set_turn_id("");
       anthropic_http_capture_request_headers(buf); /* parity: per-request anthropic-* hdrs */
-      int az = transport_authenticated
+      int az = management_authenticated
                    ? 0
                    : server_http_authorize_enrolled(is_tcp, g_bearer, has_auth ? auth : NULL,
                                                     has_api_key ? api_key : NULL, has_skey);
@@ -2147,7 +2152,7 @@ static void *listener_thread(void *arg)
          int fd = server_conn_accept(pfds[uds_idx].fd);
          if (fd >= 0 && !conn_offload(fd, 0, 0, 0))
          {
-            handle_conn(fd, 0, 0);
+            handle_conn_inline(fd, 0);
             close(fd);
          }
       }
@@ -2156,7 +2161,7 @@ static void *listener_thread(void *arg)
          int fd = server_conn_accept(pfds[tcp_idx].fd);
          if (fd >= 0 && !conn_offload(fd, 1, 0, 0))
          {
-            handle_conn(fd, 1, 0);
+            handle_conn_inline(fd, 1);
             close(fd);
          }
       }

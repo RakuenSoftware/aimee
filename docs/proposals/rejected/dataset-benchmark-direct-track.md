@@ -1,9 +1,25 @@
 # Proposal: restore a dataset benchmark track (LoCoMo / LongMemEval)
 
-- **State:** PENDING — tech debt. The direct track was deleted rather than
-  repaired; this records what it did, why it went, and what restoring it costs.
-  Not urgent: the per-PR regression gate that exercises these datasets is
-  unaffected and still runs.
+- **State:** REJECTED — archived 2026-08-14 under the Go-or-rejected policy.
+
+## Decision
+
+This proposal is rejected under the current implementation policy: pending proposal work must be
+implemented in Go or moved to `rejected/`. The recorded restoration path is a C benchmark-module
+entry point in `aimee-kb`, backed by C DB2/pgvector code and the rejected C/SQL scratch-store
+design. The synchronous `memory.benchmark` service explicitly returns an async-only envelope for
+LoCoMo and LongMemEval rather than hosting those suites.
+
+Porting the benchmark engine and its scratch-store ownership to Go would be a new architecture, not
+completion of this direct-track proposal. It would also duplicate the existing benchmark and DB2
+owners. This rejection does not remove working coverage: the per-PR LLM regression track, live
+retrieval suites, and poison gate remain unaffected as recorded below.
+
+## Archived technical record
+
+The direct track was deleted rather than repaired; this records what it did, why it went, and what
+restoring it costs. It was not urgent because the per-PR regression gate that exercises these
+datasets remained unaffected.
 
 ## Why this exists
 
@@ -48,9 +64,10 @@ help", cheaply and deterministically.
    `aimee-server` links no DB2 — `$(SERVER)` takes `$(DB1_OBJS)` only — so it
    cannot host them; that was tried and fails at link. `aimee-kb` can, and a
    `--eval` entry point there was prototyped and dropped with the track.
-2. **A working scratch store.** Blocked today on the shadow-schema conflict
-   described in `eval-temp-store-schema-relocation.md`. That proposal must be
-   resolved first, or the suites have nowhere to load a corpus.
+2. **A working scratch store.** Blocked today on the shadow-schema conflict described in the
+   [rejected C/SQL remediation record](../rejected/eval-temp-store-schema-relocation.md). Under the
+   Go-or-rejected policy, any revival needs a new Go-owned design that avoids the C scratch store;
+   otherwise the suites still have nowhere to load a corpus.
 3. **Embedder wiring.** `config_embedder_command` resolves `EMBEDDER_URL`, then
    the `embedder_command` field — never `embedder_model`. The kb entrypoint
    exports `EMBEDDER_URL` only into processes it spawns, so any separately-exec'd
@@ -72,8 +89,9 @@ is independent of the harness and cheap.
 
 ## Sequencing
 
-`eval-temp-store-schema-relocation.md` first — without a scratch store there is
-nothing to build on. Then (1) and (3), which are small. (4) and (5) are routine.
+Replace the [rejected C/SQL scratch-store design](../rejected/eval-temp-store-schema-relocation.md)
+first — without a working storage path there is nothing to build on. Then (1) and (3), which are
+small. (4) and (5) are routine.
 
 Do not start this to chase the two open rollout gates in
 `BENCHMARK_RESULTS.md` unless someone wants those specific numbers; the per-PR

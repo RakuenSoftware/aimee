@@ -204,49 +204,47 @@ func BufferedAfterStatus(container *JSONValue, key string, httpStatus int,
 	if ctx == nil || !ctx.Mutated || container == nil || key == "" {
 		return PostNone
 	}
-	switch httpStatus / 100 {
-	case 4:
-		if ctx.Pristine != nil {
-			if GWReplaceMessages(container, key, ctx.Pristine) {
-				ctx.Pristine = nil // ownership moved back into the container
-				if restored := container.Get(key); restored != nil && deps.Repair != nil {
-					deps.Repair(restored)
-				}
-			}
-		}
-		if deps.Sessions != nil {
-			deps.Sessions.Disable(ctx.Key, ctx.TTLMS, "4xx")
-		}
-		GWProvenanceClear(&ctx.State)
-		statsInc(deps, Stat4xxRestoreResend)
-		ctx.Mutated = false // the request is pristine now; no double handling
-		return PostResend
-	case 5:
-		if deps.Sessions != nil {
-			deps.Sessions.Disable(ctx.Key, ctx.TTLMS, "5xx")
-		}
-		GWProvenanceClear(&ctx.State)
-		statsInc(deps, Stat5xxDisable)
-		ctx.Mutated = false
+	// The decision is GWPostStatus's; this only carries it out over the request
+	// body it owns. Keeping the two apart is what lets the bus caller, which has
+	// the status but not the body, reach the same verdict.
+	d := GWPostStatus(httpStatus, ctx.Mutated)
+	if !d.Disable && d.Action == PostNone {
 		return PostNone
 	}
-	return PostNone
+	if d.Restore && ctx.Pristine != nil {
+		if GWReplaceMessages(container, key, ctx.Pristine) {
+			ctx.Pristine = nil // ownership moved back into the container
+			if restored := container.Get(key); restored != nil && deps.Repair != nil {
+				deps.Repair(restored)
+			}
+		}
+	}
+	if d.Disable && deps.Sessions != nil {
+		deps.Sessions.Disable(ctx.Key, ctx.TTLMS, d.Reason)
+	}
+	GWProvenanceClear(&ctx.State)
+	if d.Counter != "" {
+		statsInc(deps, d.Counter)
+	}
+	ctx.Mutated = false // handled; never twice
+	return d.Action
 }
 
 // StreamDisable trips the breaker for a streaming turn that failed after
 // dispatch. One disable per turn: a later frame no-ops.
 func StreamDisable(deps GatewayDeps, ctx *MutateCtx, reason string) {
-	if ctx == nil || !ctx.Mutated || !ctx.HaveKey {
+	if ctx == nil {
 		return
 	}
-	if reason == "" {
-		reason = "stream"
+	d := GWStreamDisable(ctx.Mutated, ctx.HaveKey, reason)
+	if !d.Disable {
+		return
 	}
 	if deps.Sessions != nil {
-		deps.Sessions.Disable(ctx.Key, ctx.TTLMS, reason)
+		deps.Sessions.Disable(ctx.Key, ctx.TTLMS, d.Reason)
 	}
 	GWProvenanceClear(&ctx.State)
-	statsInc(deps, StatStreamErrorDisable)
+	statsInc(deps, d.Counter)
 	ctx.Mutated = false
 }
 

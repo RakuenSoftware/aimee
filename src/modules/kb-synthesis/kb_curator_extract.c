@@ -15,6 +15,7 @@
 #include "log.h"
 #include "db2/artifacts.h"
 #include "db2/db2_internal.h"
+#include "db2/db2_tenant.h"
 #include "db2/db_postgres.h"
 #include "db2/feature_rows.h"
 #include "kb_mdl.h"
@@ -130,11 +131,9 @@ static int ce_claim_job(ce_job_t *out)
                             " WHERE id = ("
                             "   SELECT id FROM kb_async_jobs"
                             "   WHERE kind = 'extract_doc' AND status = 'pending'"
-                            "     AND EXISTS (SELECT 1 FROM kb_documents d"
-                            "       JOIN projects p ON p.name=d.project"
-                            "       WHERE d.id=kb_async_jobs.document_id"
-                            "         AND p.lifecycle_state='current'"
-                            "         AND d.generation=p.current_generation)"
+                            "     AND EXISTS (SELECT 1 FROM projects p"
+                            "       WHERE p.name=kb_async_jobs.project"
+                            "         AND p.lifecycle_state='current')"
                             /* Skip jobs still serving their retry backoff. '' is
                              * "never failed" and must always be claimable. */
                             "     AND (next_attempt_at = '' OR next_attempt_at <= ?1)"
@@ -573,7 +572,14 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
              "claimed extract_doc job %lld for doc %lld project '%s'", (long long)job.job_id,
              (long long)job.document_id, job.project);
 
-   if (ce_fetch_document(&job) != 0)
+   int scope_rc = db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, job.project);
+   int read_scope = scope_rc == 0 ? db2_maintenance_scope_begin_current() : scope_rc;
+   int fetch_rc = read_scope < 0 ? -1 : ce_fetch_document(&job);
+   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+      fetch_rc = -1;
+   if (scope_rc == 0)
+      db2_maintenance_job_leave();
+   if (fetch_rc != 0)
    {
       aimee_log(LOG_WARN, "kb.curator.extract", "doc %lld not found for job %lld; marking failed",
                 (long long)job.document_id, (long long)job.job_id);
