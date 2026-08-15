@@ -100,6 +100,27 @@ class PrincipalRefIsAnIdentity(unittest.TestCase):
     def test_the_shipped_inventory_validates(self) -> None:
         self.assertEqual(run_validator().returncode, 0)
 
+    def test_c_build_is_reserved_for_c_processes(self) -> None:
+        for identifier in ("memory", "config"):
+            descriptor_path = ROOT / f"src/modules/{identifier}/module.yaml"
+            original = descriptor_path.read_text(encoding="utf-8")
+            try:
+                descriptor = json.loads(original)
+                descriptor["c_build"] = {
+                    "include_roots": ["src"],
+                    "pkg_config": [],
+                    "system_libraries": [],
+                }
+                descriptor_path.write_text(
+                    json.dumps(descriptor, indent=2) + "\n", encoding="utf-8"
+                )
+                result = run_validator()
+                with self.subTest(identifier=identifier):
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("c_build", result.stderr)
+            finally:
+                descriptor_path.write_text(original, encoding="utf-8")
+
 
 if __name__ == "__main__":
     unittest.main()

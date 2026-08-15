@@ -76,6 +76,15 @@ jobs:
         run: python3 -I -S scripts/check_module_source_ownership.py
       - name: Test module source ownership failure modes
         run: python3 -I scripts/tests/test_check_module_source_ownership.py -v
+      - name: Freeze the DB2 source boundary and consumer inventory
+        run: python3 -I -S scripts/check_db2_source_boundary.py
+      - name: Refuse DB2 compatibility-include allowlist growth
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+          python3 -I -S scripts/check_db2_source_boundary.py --previous-ref FETCH_HEAD
+      - name: Test DB2 source-boundary failure modes
+        run: python3 -I scripts/tests/test_check_db2_source_boundary.py -v
       - name: Enforce module bus boundary
         run: python3 -I -S scripts/check_module_bus_boundary.py
       - name: Test module bus-boundary failure modes
@@ -212,6 +221,8 @@ jobs:
         run: python3 -I -S scripts/validate_module_process_contracts.py
       - name: Test descriptor failure modes and taxonomy convergence
         run: python3 -I scripts/tests/test_validate_module_descriptors.py -v
+      - name: Test exhaustive standalone C-process export generation
+        run: python3 -I scripts/tests/test_export_c_process_build.py -v
       - name: Enforce canonical module public-header layout
         run: python3 -I -S scripts/check_module_header_layout.py
       - name: Test module public-header layout failure modes
