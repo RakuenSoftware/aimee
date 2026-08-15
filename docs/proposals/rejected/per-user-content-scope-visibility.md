@@ -1,5 +1,13 @@
 # Per-user content scope: a project you cannot see returns nothing
 
+- **State:** REJECTED — unresolved slices require SQL/C owners, not Go; archived 2026-08-15.
+- **Owner:** KB tenancy and content scope.
+
+> **Rejected under the Go-only implementation constraint.** The already-landed project referent,
+> visibility predicate, and document/file-index policies remain in place. The broader proposal cannot
+> be completed in Go without creating a parallel authorization owner outside PostgreSQL and the C
+> workspace boundary.
+
 ## Problem and boundary
 
 A user who is not a member of a project can still read that project's content.
@@ -128,10 +136,20 @@ Prefer the first. The second is only worth it if a deployment cannot tolerate a 
   nothing.
 - **Fail-closed.** With `aimee.principal` unset, every covered table returns nothing.
 
-## Status
+## Disposition
 
-Pending. Amended after reading the ingest path: the content-to-tenancy link is one column on
-`projects`, not a change to each content table, and resolving it by project NAME is unsafe because
-`kb_project` names are unique only within a team. Evidence gathered on the merged state of #2632 (all counts and column facts above are read
-from `src/db2/schema.sql` at that commit). Slice 5 blocked on the memory-scope decision; slices 1 to
-4 blocked only on choosing a migration option.
+Rejected 2026-08-15 under the requirement to implement pending proposals in Go or reject them.
+
+- Slices 1 and 2 are partially delivered: `projects.kb_project`, `kb_project_visible()`, and the
+  `kb_documents`/`kb_file_index` policies remain authoritative in `src/db2/schema.sql`.
+- Slices 3, 4, and 6 require PostgreSQL schema, RLS policy, migration, and data-model changes for
+  embeddings, document regions, code-index files, and memories. A Go wrapper cannot enforce reads
+  performed by other database callers.
+- Slice 5 belongs to the C `ws_scope_project_path()` owner in
+  `src/modules/workspace/workspace_scope.c`; it currently validates paths but does not resolve KB
+  membership. Reimplementing that decision in Go would duplicate rather than fix the owner.
+- The memory scope dimension remains an unresolved product choice, so slice 6 has no complete
+  acceptance contract to implement.
+
+The partial controls are retained, but the broader cross-owner proposal cannot satisfy its own
+acceptance checks within the permitted implementation language and is therefore closed as rejected.
