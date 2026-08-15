@@ -1109,10 +1109,12 @@ static void messages_stream_native_relay(const char *url, const char *auth, cons
 /* Slice-5 IR-delta streaming relay: drive the OpenAI-chat -> Anthropic SSE relay
  * through the neutral IR-delta model, synthesize a clean close if the upstream
  * cut off early, and record cost. Extracted from messages_stream(). */
-static void messages_stream_ir_relay(const char *url, const char *auth, const void *prov_body,
-                                     size_t prov_body_len, const char *extra, agent_t *ag,
-                                     const char *model, const char *msg_id, int input_est,
-                                     server_http_sse_event_emit emit, void *ctx)
+/* Returns the upstream HTTP status, so the caller can tell a payload the
+ * provider rejected from a stream that merely ended. */
+static int messages_stream_ir_relay(const char *url, const char *auth, const void *prov_body,
+                                    size_t prov_body_len, const char *extra, agent_t *ag,
+                                    const char *model, const char *msg_id, int input_est,
+                                    server_http_sse_event_emit emit, void *ctx)
 {
    prov_stream_ctx_t pc;
    /* Slice 5-wire (default-off): drive the incremental OpenAI-chat -> Anthropic
@@ -1162,22 +1164,24 @@ static void messages_stream_ir_relay(const char *url, const char *auth, const vo
       agent_ingress_record_cost(ag->name, ag->model, model, NULL, input_est, (int)pc.ir_usage_out,
                                 0, 0, "anthropic-ingress",
                                 ir_status == 200 ? "realized" : "partial");
-   return;
+   return ir_status;
 }
 
 /* OpenAI-via-translator streaming: the legacy incremental translator path.
  * Begins an Anthropic stream, feeds upstream OpenAI-chat chunks through it,
  * finishes, and records cost. Extracted from messages_stream(). */
-static void messages_stream_xlate(const char *url, const char *auth, const void *prov_body,
-                                  size_t prov_body_len, const char *extra, agent_t *ag,
-                                  const char *model, const char *msg_id, int input_est,
-                                  server_http_sse_event_emit emit, void *ctx)
+/* Same contract as the relay above: the upstream status comes back so the
+ * gateway breaker can be tripped on a rejected payload. */
+static int messages_stream_xlate(const char *url, const char *auth, const void *prov_body,
+                                 size_t prov_body_len, const char *extra, agent_t *ag,
+                                 const char *model, const char *msg_id, int input_est,
+                                 server_http_sse_event_emit emit, void *ctx)
 {
    anthropic_stream_xlate_t *xl;
    prov_stream_ctx_t pc;
    xl = anthropic_stream_begin(msg_id, model, input_est, emit, ctx);
    if (!xl)
-      return;
+      return 0; /* never started: no upstream status, and not a rejection */
 
    sse_parser_init(&pc.parser);
    pc.xl = xl;
@@ -1205,6 +1209,7 @@ static void messages_stream_xlate(const char *url, const char *auth, const void 
    }
 
    anthropic_stream_free(xl);
+   return xlate_status;
 }
 
 static int messages_stream(const char *body, server_http_sse_event_emit emit, void *ctx)
@@ -1226,6 +1231,9 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    int responses_wire = 0;
    wire_fence_t *wire_snapshot = NULL;
    gw_mutate_ctx_t gwmc;
+   /* 200 unless a streaming helper reports otherwise. The native relay path
+      jumps to cleanup without calling one, and it must not read as a rejection. */
+   int stream_status = 200;
    const void *wire_prov_body = NULL;
    size_t wire_prov_body_len = 0;
 
@@ -1388,14 +1396,23 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    if (aimee_ir_stream_relay_enabled())
    {
-      messages_stream_ir_relay(url, auth, wire_prov_body, wire_prov_body_len, extra, ag, model,
-                               msg_id, input_est, emit, ctx);
+      stream_status = messages_stream_ir_relay(url, auth, wire_prov_body, wire_prov_body_len, extra,
+                                               ag, model, msg_id, input_est, emit, ctx);
       goto cleanup;
    }
 
-   messages_stream_xlate(url, auth, wire_prov_body, wire_prov_body_len, extra, ag, model, msg_id,
-                         input_est, emit, ctx);
+   stream_status = messages_stream_xlate(url, auth, wire_prov_body, wire_prov_body_len, extra, ag,
+                                         model, msg_id, input_est, emit, ctx);
 cleanup:
+   /* THE STREAMING HALF OF THE SAFETY NET. Bytes are already with the client, so
+    * nothing can be restored or resent -- the breaker is all that is left, and
+    * tripping it is what stops the next turn rebuilding the same bad payload.
+    *
+    * Only the payload-class statuses count. 401/403/404/429 are auth, not-found
+    * and rate-limit; disabling the lever on those would switch reduction off for
+    * ordinary throttling. */
+   if (gw_status_is_invalid_request(stream_status))
+      gw_stream_disable(&gwmc, "stream_invalid_request");
    wire_fence_destroy(wire_snapshot);
    gw_mutate_ctx_free(&gwmc);
    free(prov_body);
