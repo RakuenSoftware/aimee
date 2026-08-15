@@ -516,6 +516,16 @@ int main(int argc, char **argv)
    if (argc == 3 && strcmp(argv[1], "--webchat-vault-seal") == 0)
       return vault_env_seal_webchat_record(argv[2]) == 0 ? 0 : 1;
 
+   /* Provision the server-principal git credentials after first boot. Without
+    * this, AIMEE_FORGE_TOKEN at first boot was the only writer of that entry:
+    * a deployment that came up without it could not be given a forge token at
+    * all (`aimee vault set` stores under the calling principal, which the forge
+    * reader never consults), so `aimee git pr` failed with "no github
+    * credential" until the whole deployment was re-created. Same transport
+    * rules as the webchat seal: stdin only, closed name allowlist. */
+   if (argc == 3 && strcmp(argv[1], "--forge-vault-seal") == 0)
+      return vault_env_seal_forge_credential(argv[2]) == 0 ? 0 : 1;
+
    /* Container/POD entrypoints use this short-lived process to consume
     * first-boot credential inputs before launching any long-lived process. */
    if (argc >= 2 && strcmp(argv[1], "--bootstrap-vault-env") == 0)

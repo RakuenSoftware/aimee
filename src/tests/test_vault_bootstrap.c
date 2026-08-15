@@ -18,12 +18,14 @@
 #include "runtime_secret.h"
 #include <openssl/crypto.h>
 #include <assert.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char g_root[256]; /* test sandbox: <root>/home is AIMEE_HOME */
 static char g_home[320];
@@ -109,6 +111,59 @@ static void test_forge_env_source(void)
    assert(strcmp(token, "ghs-forge-DELTA") == 0);
    memset(token, 0, sizeof(token));
    printf("  PASS: test_forge_env_source\n");
+}
+
+/* The post-first-boot seal is the only way to provision the forge token into a
+ * deployment that came up without AIMEE_FORGE_TOKEN. It reads the secret from
+ * stdin and must land in the same server-principal slot the first-boot path
+ * writes, because that is the only slot git_forge_vault_server_token reads. */
+static void seal_from_stdin(const char *payload, const char *cred, int expect_ok)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-forge-seal-XXXXXX", platform_tmpdir());
+   int fd = mkstemp(path);
+   assert(fd >= 0);
+   assert(write(fd, payload, strlen(payload)) == (ssize_t)strlen(payload));
+   assert(lseek(fd, 0, SEEK_SET) == 0);
+   int saved = dup(STDIN_FILENO);
+   assert(saved >= 0);
+   assert(dup2(fd, STDIN_FILENO) >= 0);
+   int rc = vault_env_seal_forge_credential(cred);
+   assert(dup2(saved, STDIN_FILENO) >= 0);
+   close(saved);
+   close(fd);
+   unlink(path);
+   assert(expect_ok ? rc == 0 : rc != 0);
+}
+
+static void test_forge_stdin_seal(void)
+{
+   char token[128];
+
+   /* A token piped with `echo` carries a trailing newline. Sealing it verbatim
+    * would corrupt every Authorization header built from it, so it is stripped. */
+   seal_from_stdin("ghs-sealed-EPSILON\n", "forge_token", 1);
+   assert(vault_service_get_server_principal("git", "forge_token", token, sizeof(token)) ==
+          VAULT_OK);
+   assert(strcmp(token, "ghs-sealed-EPSILON") == 0);
+
+   /* Re-sealing replaces the value, so a rotated token does not need a redeploy. */
+   seal_from_stdin("ghs-rotated-ZETA", "forge_token", 1);
+   assert(vault_service_get_server_principal("git", "forge_token", token, sizeof(token)) ==
+          VAULT_OK);
+   assert(strcmp(token, "ghs-rotated-ZETA") == 0);
+
+   /* The name allowlist is closed, and an all-whitespace payload is not a
+    * credential — neither may overwrite the good value above. */
+   seal_from_stdin("irrelevant", "author_name", 0);
+   seal_from_stdin("irrelevant", "../../etc/shadow", 0);
+   seal_from_stdin("\n\n", "forge_token", 0);
+   assert(vault_service_get_server_principal("git", "forge_token", token, sizeof(token)) ==
+          VAULT_OK);
+   assert(strcmp(token, "ghs-rotated-ZETA") == 0);
+
+   memset(token, 0, sizeof(token));
+   printf("  PASS: test_forge_stdin_seal\n");
 }
 
 static void test_generic_env_source(void)
@@ -381,6 +436,7 @@ int main(void)
    test_idempotent_and_overwrite();
    test_env_source();
    test_forge_env_source();
+   test_forge_stdin_seal();
    test_generic_env_source();
    test_server_tls_key_first_boot_source();
    test_management_tls_key_first_boot_sources();
