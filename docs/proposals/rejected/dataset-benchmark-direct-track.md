@@ -1,6 +1,9 @@
 # Proposal: restore a dataset benchmark track (LoCoMo / LongMemEval)
 
 - **State:** REJECTED — archived 2026-08-14 under the Go-or-rejected policy.
+- **Corrective status:** The 2026-08-15 rejection audit classifies this proposal as misrejected.
+  Its Go runner rewrite remains a separate queued correction after the pending disposable-run
+  boundary; it stays here only until that atomic corrective PR is published.
 
 ## Decision
 
@@ -64,10 +67,10 @@ help", cheaply and deterministically.
    `aimee-server` links no DB2 — `$(SERVER)` takes `$(DB1_OBJS)` only — so it
    cannot host them; that was tried and fails at link. `aimee-kb` can, and a
    `--eval` entry point there was prototyped and dropped with the track.
-2. **A working scratch store.** Blocked today on the shadow-schema conflict described in the
-   [rejected C/SQL remediation record](../rejected/eval-temp-store-schema-relocation.md). Under the
-   Go-or-rejected policy, any revival needs a new Go-owned design that avoids the C scratch store;
-   otherwise the suites still have nowhere to load a corpus.
+2. **A working isolation boundary.** Blocked today on the shadow-schema conflict described in the
+   [pending Go-owned retirement plan](../pending/eval-temp-store-schema-relocation.md). That plan
+   replaces the C scratch store with a leased disposable database and an isolated memory endpoint;
+   the dataset runner must consume that boundary rather than apply schema or access DB2 directly.
 3. **Embedder wiring.** `config_embedder_command` resolves `EMBEDDER_URL`, then
    the `embedder_command` field — never `embedder_model`. The kb entrypoint
    exports `EMBEDDER_URL` only into processes it spawns, so any separately-exec'd
@@ -89,8 +92,8 @@ is independent of the harness and cheap.
 
 ## Sequencing
 
-Replace the [rejected C/SQL scratch-store design](../rejected/eval-temp-store-schema-relocation.md)
-first — without a working storage path there is nothing to build on. Then (1) and (3), which are
+Deliver the [pending Go-owned isolation and scratch-store retirement plan](../pending/eval-temp-store-schema-relocation.md)
+first — without a working memory boundary there is nothing to build on. Then (1) and (3), which are
 small. (4) and (5) are routine.
 
 Do not start this to chase the two open rollout gates in

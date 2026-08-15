@@ -14,12 +14,18 @@ The classification was independently approved by Aimee review
 exist on `testing`; each misrejected row changes back to pending only in that proposal's own
 corrective PR. This keeps one atomic proposal per PR without hiding the remaining correction queue.
 
+The governance/evidence-provenance proposal that triggered this audit is rejection #2692. It was
+restored under Go memory-policy ownership by corrective PR #2694. Corrective PRs #2699 and #2702
+subsequently restored #2634 and #2655. This PR sequence is intentionally atomic: #2660 is the
+current correction, and #2662, #2678, #2686, #2688, and #2690 remain explicitly queued below rather
+than being silently left rejected or bundled into an unrelated rewrite.
+
 | Rejection PR | Proposal | Audit verdict | Reason | Corrective tracking |
 | --- | --- | --- | --- | --- |
 | #2634 | [`delegate-limit-diagnostics-residual.md`](pending/delegate-limit-diagnostics-residual.md) | **Misrejected** | Grouped dispatch is Go-owned, and provider-independent limit-exhaustion diagnostics remain a valid executable requirement. | Corrective PR [#2699](https://github.com/RakuenSoftware/aimee/pull/2699). |
 | #2655 | [`config-field-descriptor-save-residual.md`](pending/config-field-descriptor-save-residual.md) | **Misrejected** | Descriptor-owned save semantics and mechanical coverage remain valid; C serialization is a compatibility baseline, not a reason to discard the objective. | Corrective PR [#2702](https://github.com/RakuenSoftware/aimee/pull/2702). |
 | #2657 | [`event-bus-third-language-conformance.md`](rejected/event-bus-third-language-conformance.md) | **Appropriately rejected** | Its defining acceptance criterion requires a client in a language other than C or Go and forbids using either reference implementation. A Go rewrite cannot truthfully satisfy independent third-language evidence. | None; rejection stands. |
-| #2660 | [`eval-temp-store-schema-relocation.md`](rejected/eval-temp-store-schema-relocation.md) | **Misrejected** | The objective explicitly permits making the store openable or retiring it; a Go-owned disposable eval-store contract can resolve the live C/SQL conflict. | Separate PR required: rewrite for a Go harness or migrate the last consumer and retire the legacy store. |
+| #2660 | [`eval-temp-store-schema-relocation.md`](pending/eval-temp-store-schema-relocation.md) | **Misrejected** | The objective explicitly permits making the store openable or retiring it; a Go-owned disposable eval-store contract can resolve the live C/SQL conflict. | Current corrective branch `agent/go-eval-temp-store-schema`; PR link is added after draft publication. |
 | #2662 | [`dataset-benchmark-direct-track.md`](rejected/dataset-benchmark-direct-track.md) | **Misrejected** | Deterministic non-LLM LoCoMo/LongMemEval retrieval measurement remains useful without restoring the retired C binary. | Separate PR required: specify a Go benchmark runner, disposable corpus store, and structured output. |
 | #2678 | [`per-user-content-scope-visibility.md`](rejected/per-user-content-scope-visibility.md) | **Misrejected** | The cross-tenant read hole is a live security objective. SQL RLS and workspace/database paths can mechanically apply a Go-owned visibility decision. | Separate PR required: restore pending with Go actor/project binding, fail-closed policy, and migration authority. |
 | #2686 | [`capability-scoped-agent-execution.md`](rejected/capability-scoped-agent-execution.md) | **Misrejected** | Resolve-once disclosure/execution parity remains a valid authorization invariant, and delegate execution now has a Go owner. | Separate PR required: rewrite around `server-go/modules/delegates` and an immutable effective capability set. |
@@ -27,6 +33,7 @@ corrective PR. This keeps one atomic proposal per PR without hiding the remainin
 | #2690 | [`runtime-control-product-boundary-residual.md`](rejected/runtime-control-product-boundary-residual.md) | **Misrejected** | Separate Runtime/Control Go processes, truthful omit behavior, effective config, transport, packaging, and upgrade evidence remain the intended product boundary. | Separate PR required: rewrite around the existing Go process owners and treat packaging/adapters as delivery mechanics. |
 | #2692 | [`proposal-evidence-provenance-tiers.md`](pending/proposal-evidence-provenance-tiers.md) | **Misrejected** | The anti-poisoning objective is live; memory policy belongs in Go while existing C/SQL seams transport, persist, migrate, and fail closed. | Corrective PR [#2694](https://github.com/RakuenSoftware/aimee/pull/2694). |
 
-This audit is a lifecycle verdict, not completion evidence. The nine misrejected proposals remain
-unresolved until their rewritten acceptance criteria are implemented and pass. The corrective PR
-sequence must update this table's tracking text as PR numbers become available.
+This audit is a lifecycle verdict, not implementation-completion evidence. A corrective PR restores
+a misrejected proposal to `pending/`; the restored proposal remains unresolved until its rewritten
+acceptance criteria are implemented and pass. The corrective sequence must update each tracking cell
+with its PR link as soon as that draft is published.
