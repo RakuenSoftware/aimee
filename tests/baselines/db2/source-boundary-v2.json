@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "source_revision": "9ba836017ed4299600d1cc3f76b2e252b20d7920",
+  "schema_version": 2,
+  "source_revision": "92d5e436a12079dfff94dba0febfce882d108f57",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 141,
@@ -9,7 +9,9 @@
     "consumer_files": 297,
     "production_consumers": 147,
     "test_consumers": 150,
-    "include_directives": 967
+    "include_directives": 967,
+    "outbound_dependency_rows": 187,
+    "outbound_include_directives": 187
   },
   "source_files": {
     "c": [
@@ -5955,5 +5957,1316 @@
       ]
     }
   ],
-  "fingerprint": "7f81672282ee6929abb2dbe4a71f94ddded25d3b40f8e492d61faf94e9409677"
+  "outbound_dependencies": [
+    {
+      "source": "src/modules/db2/c/admin_grant.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/artifacts.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/artifacts.c",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/artifacts.c",
+      "header": "kb_mdl.h",
+      "resolved": "src/kb_mdl.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/artifacts.c",
+      "header": "platform_random.h",
+      "resolved": "src/headers/platform_random.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/bandit.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/calibration.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/calibration.c",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/canonical_index.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/canonical_index.c",
+      "header": "config.h",
+      "resolved": "src/modules/config/config.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/canonical_index.c",
+      "header": "index.h",
+      "resolved": "src/headers/index.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/canonical_index.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/canonical_index.c",
+      "header": "modules/memory/memory_ontology.h",
+      "resolved": "src/modules/memory/memory_ontology.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/canonical_index.c",
+      "header": "util.h",
+      "resolved": "src/headers/util.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/canonical_index.h",
+      "header": "index.h",
+      "resolved": "src/headers/index.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_audit.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_audit.c",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_audit.c",
+      "header": "code_audit_graph.h",
+      "resolved": "src/headers/code_audit_graph.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_index.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_index.c",
+      "header": "../headers/code_match.h",
+      "resolved": "src/headers/code_match.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_index.c",
+      "header": "../headers/log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_index.c",
+      "header": "util.h",
+      "resolved": "src/headers/util.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_index.h",
+      "header": "../headers/index.h",
+      "resolved": "src/headers/index.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_index_ops.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_project_lifecycle.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_projection.c",
+      "header": "modules/memory/memory_ontology.h",
+      "resolved": "src/modules/memory/memory_ontology.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/collab_rules.c",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/collab_rules.c",
+      "header": "dstr.h",
+      "resolved": "src/headers/dstr.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/collab_rules.h",
+      "header": "../headers/collab_rules.h",
+      "resolved": "src/headers/collab_rules.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/corpus_structural.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/corpus_structural.c",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/corpus_structural.c",
+      "header": "util.h",
+      "resolved": "src/headers/util.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_build.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_build.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_deps.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_deps.c",
+      "header": "config.h",
+      "resolved": "src/modules/config/config.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_deps.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_deps.h",
+      "header": "index.h",
+      "resolved": "src/headers/index.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_identity.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_identity.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_resolver.c",
+      "header": "c_system_headers.h",
+      "resolved": "src/headers/c_system_headers.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_review.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_review.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_route.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_route.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_stats.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_stats.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_graph.h",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_graph.h",
+      "header": "css_analyze.h",
+      "resolved": "src/modules/css/css_analyze.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_migration.c",
+      "header": "config.h",
+      "resolved": "src/modules/config/config.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_migration.h",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_render.c",
+      "header": "config.h",
+      "resolved": "src/modules/config/config.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/css_render.c",
+      "header": "css_render_oracle.h",
+      "resolved": "src/modules/css/css_render_oracle.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/curiosity.c",
+      "header": "util.h",
+      "resolved": "src/headers/util.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_hardening.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_init.c",
+      "header": "../headers/log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_internal.h",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_learning.h",
+      "header": "aimee/learning/learning.h",
+      "resolved": "src/modules/learning/include/aimee/learning/learning.h",
+      "classification": "module-public-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_reembed.c",
+      "header": "../headers/log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_tenant.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_tenant.h",
+      "header": "kb_identity.h",
+      "resolved": "src/headers/kb_identity.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_test_shim.c",
+      "header": "modules/config/config_embedder_dims.h",
+      "resolved": "src/modules/config/config_embedder_dims.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_checkpoint.c",
+      "header": "modules/vault/vault_witness_checkpoint.h",
+      "resolved": "src/modules/vault/vault_witness_checkpoint.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_checkpoint.c",
+      "header": "modules/vault/vault_witness_merkle.h",
+      "resolved": "src/modules/vault/vault_witness_merkle.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_checkpoint.c",
+      "header": "modules/vault/vault_witness_record.h",
+      "resolved": "src/modules/vault/vault_witness_record.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_checkpoint.c",
+      "header": "modules/vault/vault_witness_signer.h",
+      "resolved": "src/modules/vault/vault_witness_signer.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_checkpoint.c",
+      "header": "modules/vault/vault_witness_verify.h",
+      "resolved": "src/modules/vault/vault_witness_verify.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_emit.c",
+      "header": "modules/vault/vault_witness_checkpoint.h",
+      "resolved": "src/modules/vault/vault_witness_checkpoint.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_emit.c",
+      "header": "modules/vault/vault_witness_record.h",
+      "resolved": "src/modules/vault/vault_witness_record.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_emit.c",
+      "header": "modules/vault/vault_witness_signer.h",
+      "resolved": "src/modules/vault/vault_witness_signer.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_emit.h",
+      "header": "modules/vault/vault_witness_export.h",
+      "resolved": "src/modules/vault/vault_witness_export.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db_schema.c",
+      "header": "../schema_data.h",
+      "resolved": "src/schema_data.h",
+      "classification": "generated-schema-input",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db_schema.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/demotion.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/demotion.c",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/enrollments.c",
+      "header": "kb_identity.h",
+      "resolved": "src/headers/kb_identity.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/enrollments.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/entity_edges.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/entity_edges.c",
+      "header": "../headers/rel_types.h",
+      "resolved": "src/headers/rel_types.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/entity_registry.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/epistemic_directives.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_ingest.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_ingest.c",
+      "header": "../headers/log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_ingest.c",
+      "header": "config.h",
+      "resolved": "src/modules/config/config.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_ingest.c",
+      "header": "modules/memory/memory_extract_patterns.h",
+      "resolved": "src/modules/memory/memory_extract_patterns.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_ingest.c",
+      "header": "modules/memory/memory_pii_gate.h",
+      "resolved": "src/modules/memory/memory_pii_gate.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_lifecycle.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_lifecycle.c",
+      "header": "../headers/rel_types.h",
+      "resolved": "src/headers/rel_types.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_lifecycle.h",
+      "header": "modules/memory/memory_fact_gate.h",
+      "resolved": "src/modules/memory/memory_fact_gate.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_recall.c",
+      "header": "modules/memory/memory_pii_gate.h",
+      "resolved": "src/modules/memory/memory_pii_gate.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/feature_rows.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/feedback.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fidelity.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fidelity.c",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_audit_worm.c",
+      "header": "aimee/audit/audit_worm_chain.h",
+      "resolved": "src/modules/audit/include/aimee/audit/audit_worm_chain.h",
+      "classification": "module-public-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_audit_worm.c",
+      "header": "config.h",
+      "resolved": "src/modules/config/config.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_maintenance.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_payload.c",
+      "header": "../headers/log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_payload.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_payload.c",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_payload.c",
+      "header": "config.h",
+      "resolved": "src/modules/config/config.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_payload.c",
+      "header": "memory.h",
+      "resolved": "src/headers/memory.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_payload.h",
+      "header": "../headers/sketch.h",
+      "resolved": "src/headers/sketch.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_runtime_state.c",
+      "header": "config.h",
+      "resolved": "src/modules/config/config.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend.c",
+      "header": "config.h",
+      "resolved": "src/modules/config/config.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend.c",
+      "header": "platform_process.h",
+      "resolved": "src/headers/platform_process.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend.h",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_agent.c",
+      "header": "agent_coord.h",
+      "resolved": "src/headers/agent_coord.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_agent.c",
+      "header": "agent_eval.h",
+      "resolved": "src/modules/benchmarks/agent_eval.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_agent.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_agent.c",
+      "header": "dashboard.h",
+      "resolved": "src/headers/dashboard.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_agent.c",
+      "header": "memory.h",
+      "resolved": "src/headers/memory.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_agent.c",
+      "header": "modules/learning/learning_evidence.h",
+      "resolved": "src/modules/learning/learning_evidence.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_agent.c",
+      "header": "modules/learning/learning_implicit.h",
+      "resolved": "src/modules/learning/learning_implicit.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_agent.c",
+      "header": "trace_analysis.h",
+      "resolved": "src/headers/trace_analysis.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_export.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_export.c",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_export.h",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_ingest.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_memory.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_memory.c",
+      "header": "config.h",
+      "resolved": "src/modules/config/config.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_memory.c",
+      "header": "memory.h",
+      "resolved": "src/headers/memory.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_memory.c",
+      "header": "modules/memory/memory_pii_gate.h",
+      "resolved": "src/modules/memory/memory_pii_gate.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend_memory.c",
+      "header": "session_briefing.h",
+      "resolved": "src/headers/session_briefing.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kind_lifecycle.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/learning.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_action_journal.c",
+      "header": "platform_random.h",
+      "resolved": "src/headers/platform_random.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_action_journal.h",
+      "header": "kb_identity.h",
+      "resolved": "src/headers/kb_identity.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_identity_journal.h",
+      "header": "kb_identity.h",
+      "resolved": "src/headers/kb_identity.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_intent_fields.h",
+      "header": "platform_random.h",
+      "resolved": "src/headers/platform_random.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_jwks_publication.h",
+      "header": "../kb/kb_mgmt_jwks_publication.h",
+      "resolved": "src/kb/kb_mgmt_jwks_publication.h",
+      "classification": "kb-authority-leak",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_read_journal.c",
+      "header": "platform_random.h",
+      "resolved": "src/headers/platform_random.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_read_journal.h",
+      "header": "kb_identity.h",
+      "resolved": "src/headers/kb_identity.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_read_journal.h",
+      "header": "management_read.h",
+      "resolved": "src/headers/management_read.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_token_authority.h",
+      "header": "../kb/kb_mgmt_token_authority.h",
+      "resolved": "src/kb/kb_mgmt_token_authority.h",
+      "classification": "kb-authority-leak",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_token_authority.h",
+      "header": "kb_mgmt_token_authority_ipc.h",
+      "resolved": "src/headers/kb_mgmt_token_authority_ipc.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/management_token_roots.h",
+      "header": "../kb/kb_mgmt_token_roots_provision.h",
+      "resolved": "src/kb/kb_mgmt_token_roots_provision.h",
+      "classification": "kb-authority-leak",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/membership.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_conflicts.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_entity_graph.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_export.c",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_health.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_lint.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_payload.c",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_query.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_query_bookkeeping.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_relations.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_row_mapper_pg.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_scope_query.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/memory_score_fields.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/oidc_jwks.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/ontology_evolution.c",
+      "header": "../headers/rel_types.h",
+      "resolved": "src/headers/rel_types.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/ontology_evolution.h",
+      "header": "../headers/rel_types.h",
+      "resolved": "src/headers/rel_types.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_model_catalog.c",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_model_catalog.c",
+      "header": "kb_models_validate.h",
+      "resolved": "src/headers/kb_models_validate.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_vault_rewrap.h",
+      "header": "vault_crypto.h",
+      "resolved": "src/modules/vault/vault_crypto.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/org_vault_rewrap.h",
+      "header": "vault_reseal_receipt.h",
+      "resolved": "src/modules/vault/vault_reseal_receipt.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/pgvec_transport.c",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/pgvec_transport.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/project.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/prospective_memories.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/rel_types_store.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/rel_types_store.c",
+      "header": "../headers/rel_types.h",
+      "resolved": "src/headers/rel_types.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/rel_types_store.c",
+      "header": "modules/memory/memory_pii_gate.h",
+      "resolved": "src/modules/memory/memory_pii_gate.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/rel_types_store.h",
+      "header": "modules/memory/memory_fact_gate.h",
+      "resolved": "src/modules/memory/memory_fact_gate.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/rel_types_store.h",
+      "header": "modules/memory/memory_ontology.h",
+      "resolved": "src/modules/memory/memory_ontology.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/report_enrichments.c",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/report_enrichments.h",
+      "header": "../headers/report_enrichment.h",
+      "resolved": "src/headers/report_enrichment.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/rules.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/rules.c",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/rules.c",
+      "header": "config.h",
+      "resolved": "src/modules/config/config.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/sketch.h",
+      "header": "../headers/sketch.h",
+      "resolved": "src/headers/sketch.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/tasks.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/team.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/typed_facts.h",
+      "header": "../headers/aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+      "header": "vault_mutation_budget.h",
+      "resolved": "src/modules/vault/vault_mutation_budget.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+      "header": "vault_reseal_receipt.h",
+      "resolved": "src/modules/vault/vault_reseal_receipt.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_pg.c",
+      "header": "log.h",
+      "resolved": "src/headers/log.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_pg.c",
+      "header": "vault_crypto.h",
+      "resolved": "src/modules/vault/vault_crypto.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_pg.c",
+      "header": "vault_kek_check.h",
+      "resolved": "src/modules/vault/vault_kek_check.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_pg.c",
+      "header": "vault_principal.h",
+      "resolved": "src/modules/vault/vault_principal.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_pg.c",
+      "header": "vault_store.h",
+      "resolved": "src/modules/vault/vault_store.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vault_pg.h",
+      "header": "vault_internal.h",
+      "resolved": "src/modules/vault/vault_internal.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vector_index_ops.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/vector_status.h",
+      "header": "cJSON.h",
+      "resolved": "src/vendor/headers/cJSON.h",
+      "classification": "vendored-system-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/write_tier_grant.h",
+      "header": "kb_identity_token.h",
+      "resolved": "src/headers/kb_identity_token.h",
+      "classification": "host-api",
+      "count": 1
+    }
+  ],
+  "fingerprint": "35b4469ef5de6da05f6c6cbc1a9c46a2d28aeb74a5a2aed1adbad0c97ff17317"
 }

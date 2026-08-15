@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Freeze DB2's module-owned C boundary and classify every outside consumer.
+"""Freeze DB2's module-owned C boundary and classify both sides of it.
 
 The phase-one DB2 process migration needs two different kinds of evidence:
 
 * the implementation unit being moved (C, header, and SQL files); and
 * every direct include that must eventually become a generated client or remain
-  a private implementation test.
+  a private implementation test; and
+* every project header imported by the DB2 implementation that must be removed,
+  promoted to a portable core API, or declared as a module dependency.
 
-The checked-in manifest is exact for boundary files. Outside includes are
-shrink-only: removing an include is progress, while adding a consumer, header,
-or duplicate directive fails until the reviewed manifest is deliberately
-regenerated. This checker does not claim that an include is already a wire
-operation; the operation catalog and codecs are the next migration slice.
+The checked-in manifest is exact for boundary files. Both inbound and outbound
+project includes are shrink-only: removing one is progress, while adding a
+consumer, dependency, header, or duplicate directive fails until the reviewed
+manifest is deliberately regenerated. This checker does not claim that an
+include is already a wire operation. It makes the portability debt measurable
+before the C tree is packaged as an independent process.
 """
 
 from __future__ import annotations
@@ -28,14 +31,25 @@ from typing import NoReturn
 
 
 ROOT = Path(__file__).resolve().parent.parent
-BASELINE = Path("tests/baselines/db2/source-boundary-v1.json")
+BASELINE = Path("tests/baselines/db2/source-boundary-v2.json")
 BOUNDARY = PurePosixPath("src/modules/db2/c")
 CONTRACTS = Path("src/modules/process-contracts.json")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SOURCE_KINDS = {"c": ".c", "headers": ".h", "sql": ".sql"}
 INCLUDE = re.compile(r'^\s*#\s*include\s*[<"]([^">]+)[">]')
+INCLUDE_DETAIL = re.compile(r'^\s*#\s*include\s*([<"])([^">]+)[">]')
 DB2_BASENAME = re.compile(r"db2[^/]*\.h$")
 REVISION = re.compile(r"^[0-9a-f]{40}$")
+DEPENDENCY_CLASSES = {
+    "generated-schema-input",
+    "host-api",
+    "kb-authority-leak",
+    "module-private-api",
+    "module-public-api",
+    "portable-core-api",
+    "unresolved-project-include",
+    "vendored-system-api",
+}
 
 
 class BoundaryError(ValueError):
@@ -171,9 +185,139 @@ def _consumers(root: Path) -> list[dict[str, object]]:
     return rows
 
 
-def _payload_fingerprint(source_files: object, consumers: object) -> str:
+def _header_index(root: Path) -> dict[str, list[str]]:
+    """Index repository headers by the spellings accepted by project builds."""
+    source_root = _repo_path(root, Path("src"))
+    candidates: dict[str, set[str]] = {}
+    for path in sorted(source_root.rglob("*.h")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        relative = PurePosixPath(path.relative_to(root).as_posix())
+        source_relative = PurePosixPath(path.relative_to(source_root).as_posix())
+        spellings = {source_relative.as_posix(), relative.name}
+        if "include" in source_relative.parts:
+            index = source_relative.parts.index("include")
+            suffix = PurePosixPath(*source_relative.parts[index + 1:]).as_posix()
+            if suffix:
+                spellings.add(suffix)
+        for spelling in spellings:
+            candidates.setdefault(spelling, set()).add(relative.as_posix())
+    return {key: sorted(values) for key, values in sorted(candidates.items())}
+
+
+def _resolve_project_header(
+    root: Path,
+    source: Path,
+    target: str,
+    index: dict[str, list[str]],
+) -> str | None:
+    """Resolve an include to a repository header, or return None for system headers."""
+    direct = source.parent.joinpath(*PurePosixPath(target).parts)
+    try:
+        resolved = direct.resolve(strict=True)
+        resolved.relative_to(root.resolve())
+    except (OSError, ValueError):
+        pass
+    else:
+        if resolved.is_file() and resolved.suffix == ".h":
+            return resolved.relative_to(root).as_posix()
+
+    # Historical DB2 sources use ../headers and ../kb spellings. Project
+    # include roots made these resolve before the directory relocation, so
+    # normalize only leading parent components and then consult the exact
+    # repository index. Embedded '..' components remain unresolved/fail-safe.
+    parts = list(PurePosixPath(target).parts)
+    while parts and parts[0] == "..":
+        parts.pop(0)
+    # schema_data.h is a deterministic build output, not a tracked source
+    # header. Account for the dependency even in a clean checkout where the
+    # generator has not run yet.
+    if parts == ["schema_data.h"]:
+        return "src/schema_data.h"
+    spellings = [target]
+    if parts:
+        spellings.append(PurePosixPath(*parts).as_posix())
+    spellings.append(PurePosixPath(target).name)
+    for spelling in dict.fromkeys(spellings):
+        matches = index.get(spelling, [])
+        if len(matches) == 1:
+            return matches[0]
+    return None
+
+
+def _dependency_classification(resolved: PurePosixPath) -> str:
+    parts = resolved.parts
+    if parts[:2] == ("src", "core"):
+        return "portable-core-api"
+    if parts[:2] == ("src", "vendor"):
+        return "vendored-system-api"
+    if parts[:2] == ("src", "kb"):
+        return "kb-authority-leak"
+    if len(parts) >= 3 and parts[:2] == ("src", "modules"):
+        if "include" in parts[3:]:
+            return "module-public-api"
+        return "module-private-api"
+    if parts[:2] == ("src", "headers"):
+        return "host-api"
+    if resolved.as_posix() == "src/schema_data.h":
+        return "generated-schema-input"
+    return "host-api"
+
+
+def _outbound_dependencies(root: Path) -> list[dict[str, object]]:
+    boundary = _repo_path(root, BOUNDARY)
+    index = _header_index(root)
+    rows: list[dict[str, object]] = []
+    for path in sorted(boundary.iterdir()):
+        if not path.is_file() or path.is_symlink() or path.suffix not in {".c", ".h"}:
+            continue
+        counts: Counter[tuple[str, str, str]] = Counter()
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError) as exc:
+            fail("source-input", f"cannot read {path.relative_to(root)}: {exc}")
+        for line in lines:
+            match = INCLUDE_DETAIL.match(line)
+            if not match:
+                continue
+            delimiter, target = match.groups()
+            resolved = _resolve_project_header(root, path, target, index)
+            if resolved is None:
+                if delimiter == '"':
+                    counts[(
+                        target,
+                        f"unresolved:{target}",
+                        "unresolved-project-include",
+                    )] += 1
+                continue
+            resolved_path = PurePosixPath(resolved)
+            if resolved_path.is_relative_to(BOUNDARY):
+                continue
+            classification = _dependency_classification(resolved_path)
+            counts[(target, resolved, classification)] += 1
+        relative = path.relative_to(root).as_posix()
+        for (target, resolved, classification), count in sorted(counts.items()):
+            rows.append({
+                "source": relative,
+                "header": target,
+                "resolved": resolved,
+                "classification": classification,
+                "count": count,
+            })
+    return rows
+
+
+def _payload_fingerprint(
+    source_files: object,
+    consumers: object,
+    outbound_dependencies: object,
+) -> str:
     canonical = json.dumps(
-        {"source_files": source_files, "consumers": consumers},
+        {
+            "source_files": source_files,
+            "consumers": consumers,
+            "outbound_dependencies": outbound_dependencies,
+        },
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=True,
@@ -181,7 +325,11 @@ def _payload_fingerprint(source_files: object, consumers: object) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
-def _summary(source_files: dict[str, list[str]], consumers: list[dict[str, object]]) -> dict[str, int]:
+def _summary(
+    source_files: dict[str, list[str]],
+    consumers: list[dict[str, object]],
+    outbound_dependencies: list[dict[str, object]],
+) -> dict[str, int]:
     include_count = sum(
         include["count"]
         for row in consumers
@@ -198,6 +346,10 @@ def _summary(source_files: dict[str, list[str]], consumers: list[dict[str, objec
         "production_consumers": len(consumers) - test_count,
         "test_consumers": test_count,
         "include_directives": include_count,
+        "outbound_dependency_rows": len(outbound_dependencies),
+        "outbound_include_directives": sum(
+            row["count"] for row in outbound_dependencies  # type: ignore[misc]
+        ),
     }
 
 
@@ -206,7 +358,8 @@ def build_inventory(root: Path, source_revision: str) -> dict[str, object]:
         fail("source-revision", "source revision must be a full lowercase SHA-1")
     source_files = _source_files(root)
     consumers = _consumers(root)
-    summary = _summary(source_files, consumers)
+    outbound_dependencies = _outbound_dependencies(root)
+    summary = _summary(source_files, consumers, outbound_dependencies)
     return {
         "schema_version": SCHEMA_VERSION,
         "source_revision": source_revision,
@@ -214,7 +367,10 @@ def build_inventory(root: Path, source_revision: str) -> dict[str, object]:
         "summary": summary,
         "source_files": source_files,
         "consumers": consumers,
-        "fingerprint": _payload_fingerprint(source_files, consumers),
+        "outbound_dependencies": outbound_dependencies,
+        "fingerprint": _payload_fingerprint(
+            source_files, consumers, outbound_dependencies
+        ),
     }
 
 
@@ -247,6 +403,58 @@ def _baseline_rows(value: object) -> dict[tuple[str, str], tuple[int, str]]:
     return result
 
 
+def _dependency_rows(value: object) -> dict[tuple[str, str, str], tuple[int, str]]:
+    if not isinstance(value, list):
+        fail("baseline-shape", "outbound_dependencies must be an array")
+    result: dict[tuple[str, str, str], tuple[int, str]] = {}
+    previous: tuple[str, str, str] | None = None
+    for index, row in enumerate(value):
+        if not isinstance(row, dict) or set(row) != {
+            "source", "header", "resolved", "classification", "count"
+        }:
+            fail("baseline-shape", f"outbound dependency {index} has invalid keys")
+        source = row["source"]
+        header = row["header"]
+        resolved = row["resolved"]
+        classification = row["classification"]
+        count = row["count"]
+        if not all(isinstance(item, str) for item in (
+            source, header, resolved, classification
+        )) or type(count) is not int or count < 1:
+            fail("baseline-order", f"outbound dependency {index} is invalid")
+        source_path = PurePosixPath(source)
+        if (source_path.is_absolute() or ".." in source_path.parts or
+                not source_path.is_relative_to(BOUNDARY) or
+                source_path.suffix not in {".c", ".h"}):
+            fail("baseline-path", f"outbound dependency {index} has unsafe source {source!r}")
+        header_path = PurePosixPath(header)
+        if (not header or "\\" in header or "\x00" in header or header_path.is_absolute()):
+            fail("baseline-path", f"outbound dependency {index} has unsafe header {header!r}")
+        if resolved.startswith("unresolved:"):
+            if resolved != f"unresolved:{header}":
+                fail("baseline-path", f"outbound dependency {index} has invalid unresolved path")
+        else:
+            resolved_path = PurePosixPath(resolved)
+            if (resolved_path.is_absolute() or ".." in resolved_path.parts or
+                    not resolved_path.parts or resolved_path.parts[0] != "src" or
+                    resolved_path.suffix != ".h"):
+                fail(
+                    "baseline-path",
+                    f"outbound dependency {index} has unsafe resolved path {resolved!r}",
+                )
+        if classification not in DEPENDENCY_CLASSES:
+            fail(
+                "baseline-classification",
+                f"outbound dependency {index} has unknown class {classification!r}",
+            )
+        key = (source, header, resolved)
+        if previous is not None and key <= previous:
+            fail("baseline-order", "outbound dependencies are not sorted and unique")
+        previous = key
+        result[key] = (count, classification)
+    return result
+
+
 def enforce_shrink_only(previous: object, current: object) -> None:
     """Reject compatibility-include allowlist growth across a reviewed PR."""
     if not isinstance(previous, dict) or not isinstance(current, dict):
@@ -268,6 +476,32 @@ def enforce_shrink_only(previous: object, current: object) -> None:
                 f"allowlist entry {key[1]!r} in {key[0]} changed from "
                 f"{prior[1]} to {classification}",
             )
+    # Schema v2 seeds outbound accounting. During that one upgrade, the v1
+    # base still constrains inbound consumers; only the new outbound half has
+    # no predecessor. Every subsequent comparison has both arrays.
+    if "outbound_dependencies" not in previous:
+        return
+    previous_dependencies = _dependency_rows(previous.get("outbound_dependencies"))
+    current_dependencies = _dependency_rows(current.get("outbound_dependencies"))
+    for key, (count, classification) in current_dependencies.items():
+        prior = previous_dependencies.get(key)
+        if prior is None:
+            fail(
+                "baseline-growth",
+                f"new outbound dependency {key[1]!r} in {key[0]} resolves to {key[2]}",
+            )
+        if count > prior[0]:
+            fail(
+                "baseline-growth",
+                f"outbound dependency {key[1]!r} in {key[0]} grew from "
+                f"{prior[0]} to {count}",
+            )
+        if classification != prior[1]:
+            fail(
+                "baseline-classification",
+                f"outbound dependency {key[1]!r} in {key[0]} changed from "
+                f"{prior[1]} to {classification}",
+            )
 
 
 def check_previous_ref(root: Path, baseline_path: Path, previous_ref: str) -> bool:
@@ -286,10 +520,17 @@ def check_previous_ref(root: Path, baseline_path: Path, previous_ref: str) -> bo
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
     )
     if prior.returncode != 0:
-        # The merge that introduces the v1 manifest has no previous payload.
-        # Every later base contains it, so this exception cannot be reused to
-        # expand an established allowlist.
-        return False
+        legacy = relative.as_posix().replace("source-boundary-v2.json", "source-boundary-v1.json")
+        if legacy != relative.as_posix():
+            prior = subprocess.run(
+                ["git", "show", f"{previous_ref}:{legacy}"], cwd=root,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+            )
+        if prior.returncode != 0:
+            # The merge that introduces the first manifest has no previous
+            # payload. Every later base contains v1 or v2, so this exception
+            # cannot be reused to expand an established allowlist.
+            return False
     previous = _loads(prior.stdout, f"{previous_ref}:{relative.as_posix()}")
     current = _load(_repo_path(root, baseline_path))
     enforce_shrink_only(previous, current)
@@ -300,17 +541,19 @@ def check(root: Path, baseline_path: Path = BASELINE) -> dict[str, int]:
     raw = _load(_repo_path(root, baseline_path))
     if not isinstance(raw, dict) or set(raw) != {
         "schema_version", "source_revision", "source_boundary", "summary",
-        "source_files", "consumers", "fingerprint",
+        "source_files", "consumers", "outbound_dependencies", "fingerprint",
     }:
-        fail("baseline-shape", "top-level keys differ from source-boundary v1")
+        fail("baseline-shape", "top-level keys differ from source-boundary v2")
     if raw["schema_version"] != SCHEMA_VERSION or raw["source_boundary"] != BOUNDARY.as_posix():
-        fail("baseline-version", "schema version or source boundary differs from v1")
+        fail("baseline-version", "schema version or source boundary differs from v2")
     if not isinstance(raw["source_revision"], str) or not REVISION.fullmatch(raw["source_revision"]):
         fail("source-revision", "baseline source revision is not a full lowercase SHA-1")
-    if raw["fingerprint"] != _payload_fingerprint(raw["source_files"], raw["consumers"]):
+    if raw["fingerprint"] != _payload_fingerprint(
+        raw["source_files"], raw["consumers"], raw["outbound_dependencies"]
+    ):
         fail("baseline-fingerprint", "baseline payload fingerprint does not match")
     if not isinstance(raw["source_files"], dict) or set(raw["source_files"]) != set(SOURCE_KINDS):
-        fail("baseline-shape", "source_files keys differ from v1")
+        fail("baseline-shape", "source_files keys differ from v2")
     baseline_source_files: dict[str, list[str]] = {}
     for kind in SOURCE_KINDS:
         values = raw["source_files"].get(kind)
@@ -320,7 +563,11 @@ def check(root: Path, baseline_path: Path = BASELINE) -> dict[str, int]:
         baseline_source_files[kind] = values
     baseline_consumers = raw["consumers"]
     _baseline_rows(baseline_consumers)
-    if raw["summary"] != _summary(baseline_source_files, baseline_consumers):
+    baseline_dependencies = raw["outbound_dependencies"]
+    baseline_dependency_rows = _dependency_rows(baseline_dependencies)
+    if raw["summary"] != _summary(
+        baseline_source_files, baseline_consumers, baseline_dependencies
+    ):
         fail("summary-drift", "baseline summary differs from its payload")
     actual_sources = _source_files(root)
     if raw["source_files"] != actual_sources:
@@ -343,10 +590,36 @@ def check(root: Path, baseline_path: Path = BASELINE) -> dict[str, int]:
                 "consumer-classification",
                 f"{key[0]} changed from {expected_classification} to {classification}",
             )
+    actual_dependencies = _outbound_dependencies(root)
+    actual_dependency_rows = _dependency_rows(actual_dependencies)
+    for key, (count, classification) in actual_dependency_rows.items():
+        expected = baseline_dependency_rows.get(key)
+        if expected is None:
+            fail(
+                "dependency-growth",
+                f"new outbound dependency {key[1]!r} in {key[0]} resolves to {key[2]}",
+            )
+        expected_count, expected_classification = expected
+        if count > expected_count:
+            fail(
+                "dependency-growth",
+                f"{key[0]} includes outbound {key[1]!r} {count} times; "
+                f"baseline permits {expected_count}",
+            )
+        if classification != expected_classification:
+            fail(
+                "dependency-classification",
+                f"{key[0]} dependency {key[1]!r} changed from "
+                f"{expected_classification} to {classification}",
+            )
     return {
         "source_files": sum(len(items) for items in actual_sources.values()),
         "consumer_files": len(actual_consumers),
         "include_directives": sum(count for count, _ in actual_rows.values()),
+        "outbound_dependencies": len(actual_dependencies),
+        "outbound_include_directives": sum(
+            count for count, _ in actual_dependency_rows.values()
+        ),
     }
 
 
@@ -387,7 +660,8 @@ def main() -> int:
                 "check_db2_source_boundary: ok "
                 f"({result['source_files']} boundary files, "
                 f"{result['consumer_files']} consumers, "
-                f"{result['include_directives']} includes remain; {suffix})"
+                f"{result['include_directives']} inbound includes, "
+                f"{result['outbound_include_directives']} outbound includes remain; {suffix})"
             )
     except (OSError, BoundaryError) as exc:
         print(f"check_db2_source_boundary: error: {exc}", file=sys.stderr)

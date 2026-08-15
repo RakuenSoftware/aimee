@@ -61,6 +61,16 @@ Measured on `origin/testing` at `0916c09472`:
 | — production directives | 532 |
 | Lines across the six SQL files | 16,349 |
 
+The physical move also exposed the other side of the source boundary. At the relocation merge,
+DB2's C and header files contain 187 project or vendored-header include directives that resolve
+outside `src/modules/db2/c`: 119 host APIs, 45 private APIs from other modules, 17 vendored cJSON
+includes, three KB-authority headers, two public module APIs, and the generated schema header. A
+directory boundary therefore exists, but the process build is not yet a standalone dependency
+closure. `tests/baselines/db2/source-boundary-v2.json` accounts for every one of these imports and
+the boundary gate rejects growth. Phase one must remove, invert, relocate, or explicitly replace
+them with portable core/system dependencies before the standalone C process can activate; linking
+the monolithic core into the DB2 executable does not satisfy the boundary.
+
 The inventory is reproducible from the cited revision with these bounded commands (the include
 pattern is intentionally the same for file and directive counts):
 
