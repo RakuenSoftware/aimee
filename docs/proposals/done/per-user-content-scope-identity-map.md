@@ -1,6 +1,14 @@
 # The KB boundary already has an identity; preserve it for content scope
 
-Amends `per-user-content-scope-reader-identity.md`. The earlier framing treated every ingress surface
+- **State:** DONE — all six bounded slices delivered and archived 2026-08-15.
+- **Owner:** KB content scope.
+
+> **Archived after delivery.** The identity map, caller-context propagation, project-bound
+> maintenance authority, readiness gate, and live reader-isolation proof are present on `testing`.
+> Content RLS remains operator-enabled after attribution, exactly as this record requires.
+
+Amends [`per-user-content-scope-reader-identity.md`](../pending/per-user-content-scope-reader-identity.md).
+The earlier framing treated every ingress surface
 as if it connected to aimee-kb and therefore needed to carry independently verifiable proof to it.
 That is the wrong boundary: CLI, web and MCP terminate at aimee-server. Only aimee-server connects to
 aimee-kb.
@@ -124,10 +132,20 @@ observable when an operator subsequently enables content scope.
 - **Background decision remains explicit.** The separately selected #2646 policy is implemented and
   tested before the readiness marker is set; this proposal does not preselect it.
 
-## Status
+## Delivery evidence
 
 Implemented cumulatively through slice 6: #2656 supplied pair-specific mTLS enforcement, ingress
 identity convergence, and caller-scoped reads; #2658 and #2661 supplied exact-project maintenance;
 the final slice records reader readiness after live RLS isolation coverage. Schema application still
 leaves content RLS disabled. An operator must explicitly attribute every content-bearing code project
 and call `kb_content_scope_enable()`; the function refuses an incomplete backfill.
+
+- [`kb_project_visible`](../../../src/db2/schema.sql#L2144) centralizes project visibility, while
+  [`kb_content_scope_enable`](../../../src/db2/schema.sql#L2225) fails closed until readers and
+  attribution are ready.
+- [`db2_maintenance_scope_begin`](../../../src/db2/db2_tenant.c#L197) owns the closed-name,
+  exact-project maintenance context and transaction-local cleanup.
+- [`test_content_scope_pg.c`](../../../src/tests/test_content_scope_pg.c#L140) proves the predicate,
+  readiness marker, maintenance isolation, re-embed boundary, pooled-context cleanup, and ordinary
+  two-reader search isolation; the end-to-end reader proof begins at
+  [`test_content_scope_pg.c:480`](../../../src/tests/test_content_scope_pg.c#L480).
