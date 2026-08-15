@@ -1,4 +1,4 @@
-/* test_msg_session_disable.c: the gateway-mutation per-session circuit breaker —
+/* test_msg_session_key.c: the gateway-mutation per-session circuit breaker —
  * key resolution (validated header -> bearer -> none, NULL-first, cross-tenant),
  * disable/TTL/expiry, cap eviction (expired-first, live-not-silently-re-enabled),
  * insert-time sweep, and stats emission. */
@@ -8,7 +8,7 @@
 #include <time.h>
 
 #include "harness_memory_common.h"
-#include "msg_session_disable.h"
+#include "msg_session_key.h"
 
 static void sha16(const char *s, char out[MSG_SESSION_KEY_LEN])
 {
@@ -90,7 +90,7 @@ static void test_resolve(void)
 
 int main(void)
 {
-   printf("msg_session_disable: ");
+   printf("msg_session_key: ");
    test_resolve();
    printf("ok\n");
    return 0;
