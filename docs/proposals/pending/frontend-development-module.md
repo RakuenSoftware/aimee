@@ -45,8 +45,11 @@ them.
   unix socket to aimee-server, which holds all credentials and performs every
   external reach (`delegate-sandbox-aimee-sole-egress.md`); Aimee already has a
   hardened `web_read`/`web_search` egress policy.
-- **The capability vocabulary exists.** `capability-scoped-agent-execution.md`
-  supplies observe/standard/hardened tiers and admission.
+- **The capability vocabulary remains externally owned.** The rejected
+  [`capability-scoped-agent-execution.md`](../rejected/capability-scoped-agent-execution.md)
+  described only a C turn-local toolset snapshot and explicitly supplied neither posture tiers nor
+  admission. This module must consume those decisions from the pending
+  [`governance-policy-surface-and-posture.md`](governance-policy-surface-and-posture.md) owner.
 
 What is **absent** — and is the value-add:
 

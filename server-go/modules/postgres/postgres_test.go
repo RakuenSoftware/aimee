@@ -19,19 +19,22 @@ func healthRequest() []byte {
 func TestHealthReportsSchemaAndExtensionEvidence(t *testing.T) {
 	tests := []struct {
 		name      string
-		schema    bool
-		pgTrgm    bool
+		evidence  healthEvidence
 		wantFlags uint32
 	}{
-		{"ready", true, true, flagSchema | flagPGTrgm},
-		{"schema-missing", false, true, flagPGTrgm},
-		{"extension-missing", true, false, flagSchema},
-		{"both-missing", false, false, 0},
+		{"ready", healthEvidence{true, true, true}, flagSchema | flagPGTrgm | flagKBTables},
+		{"schema-missing", healthEvidence{false, true, true}, flagPGTrgm | flagKBTables},
+		{"extension-missing", healthEvidence{true, false, true}, flagSchema | flagKBTables},
+		{"kb-tables-missing", healthEvidence{true, true, false}, flagSchema | flagPGTrgm},
+		{"only-schema", healthEvidence{true, false, false}, flagSchema},
+		{"only-extension", healthEvidence{false, true, false}, flagPGTrgm},
+		{"only-kb-tables", healthEvidence{false, false, true}, flagKBTables},
+		{"all-missing", healthEvidence{}, 0},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			handler := newHandler(func(context.Context) (bool, bool, error) {
-				return test.schema, test.pgTrgm, nil
+			handler := newHandler(func(context.Context) (healthEvidence, error) {
+				return test.evidence, nil
 			})
 			response, status := handler(bus.ModuleInvocation{StageID: StageHealth}, healthRequest())
 			if status != bus.ModuleStatusOK {
@@ -48,7 +51,9 @@ func TestHealthReportsSchemaAndExtensionEvidence(t *testing.T) {
 }
 
 func TestHealthRejectsMalformedOrWrongStageRequests(t *testing.T) {
-	handler := newHandler(func(context.Context) (bool, bool, error) { return true, true, nil })
+	handler := newHandler(func(context.Context) (healthEvidence, error) {
+		return healthEvidence{true, true, true}, nil
+	})
 	valid := healthRequest()
 	cases := [][]byte{
 		nil,
@@ -71,8 +76,8 @@ func TestHealthRejectsMalformedOrWrongStageRequests(t *testing.T) {
 }
 
 func TestHealthMapsProbeFailureAndCancellation(t *testing.T) {
-	failing := newHandler(func(context.Context) (bool, bool, error) {
-		return false, false, errors.New("unavailable")
+	failing := newHandler(func(context.Context) (healthEvidence, error) {
+		return healthEvidence{}, errors.New("unavailable")
 	})
 	if response, status := failing(bus.ModuleInvocation{StageID: StageHealth}, healthRequest()); status != bus.ModuleStatusInternal || response != nil {
 		t.Fatalf("failure = (%x, %v)", response, status)
