@@ -44,9 +44,8 @@ const healthQuery = `SELECT
   )`
 
 type defaultProbeState struct {
-	once sync.Once
+	mu   sync.Mutex
 	pool *pgxpool.Pool
-	err  error
 }
 
 var (
@@ -54,16 +53,19 @@ var (
 	productionHandler = newHandler(defaultProbe)
 )
 
-func (state *defaultProbeState) open() {
+func (state *defaultProbeState) getPool() (*pgxpool.Pool, error) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.pool != nil {
+		return state.pool, nil
+	}
 	dsn := os.Getenv("AIMEE_DB2_URL")
 	if dsn == "" {
-		state.err = errors.New("postgres: AIMEE_DB2_URL is unset")
-		return
+		return nil, errors.New("postgres: AIMEE_DB2_URL is unset")
 	}
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		state.err = errors.New("postgres: invalid AIMEE_DB2_URL")
-		return
+		return nil, errors.New("postgres: invalid AIMEE_DB2_URL")
 	}
 	// The C substrate already owns the KB's main connection pool. This module's
 	// first bounded slice needs only enough capacity for concurrent health calls.
@@ -71,19 +73,30 @@ func (state *defaultProbeState) open() {
 	config.MinConns = 0
 	pool, err := pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
-		state.err = errors.New("postgres: connection pool initialization failed")
-		return
+		return nil, errors.New("postgres: connection pool initialization failed")
 	}
 	state.pool = pool
+	return pool, nil
+}
+
+func (state *defaultProbeState) close() {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.pool != nil {
+		state.pool.Close()
+		state.pool = nil
+	}
 }
 
 func defaultProbe(ctx context.Context) (bool, bool, error) {
-	productionProbe.once.Do(productionProbe.open)
-	if productionProbe.err != nil {
-		return false, false, productionProbe.err
+	pool, err := productionProbe.getPool()
+	if err != nil {
+		// Failed initialization is deliberately not latched: a corrected secret or
+		// transient startup failure can recover on a later bounded health call.
+		return false, false, err
 	}
 	var schemaOK, havePGTrgm bool
-	if err := productionProbe.pool.QueryRow(ctx, healthQuery).Scan(&schemaOK, &havePGTrgm); err != nil {
+	if err := pool.QueryRow(ctx, healthQuery).Scan(&schemaOK, &havePGTrgm); err != nil {
 		// Do not wrap the driver error: it may contain connection details. The
 		// process boundary reports a typed failure and keeps the DSN private.
 		return false, false, errors.New("postgres: health query failed")
@@ -116,13 +129,20 @@ func healthResponse(schemaOK, havePGTrgm bool) []byte {
 // the package Handle entry point; tests inject the same evidence without a DB.
 func newHandler(probe func(context.Context) (bool, bool, error)) bus.ModuleHandler {
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
-		if invocation.StageID != StageHealth || !requestValid(request) || probe == nil {
+		if invocation.StageID != StageHealth || !requestValid(request) {
 			return nil, bus.ModuleStatusInvalidRequest
+		}
+		if probe == nil {
+			return nil, bus.ModuleStatusInternal
 		}
 		if invocation.Cancelled() {
 			return nil, bus.ModuleStatusCancelled
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+		timeout := invocation.Remaining(probeTimeout)
+		if timeout <= 0 {
+			return nil, bus.ModuleStatusCancelled
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		schemaOK, havePGTrgm, err := probe(ctx)
 		if invocation.Cancelled() {
@@ -139,4 +159,10 @@ func newHandler(probe func(context.Context) (bool, bool, error)) bus.ModuleHandl
 // crosses the bus; the KB-local process reads its existing environment secret.
 func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	return productionHandler(invocation, request)
+}
+
+// Close releases the process-local connection pool during graceful module
+// shutdown. Configuration rotation is applied by restarting this process.
+func Close() {
+	productionProbe.close()
 }

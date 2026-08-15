@@ -92,8 +92,10 @@ class DescriptorTests(unittest.TestCase):
 
     def test_complete_production_graph(self) -> None:
         required, optional = self.taxonomy()
-        self.assertEqual(len(required | optional), 27)
-        self.assertEqual(validator.validate_roots(REPO_ROOT, [Path("src/modules")]), 27)
+        expected = len(required | optional)
+        self.assertEqual(
+            validator.validate_roots(REPO_ROOT, [Path("src/modules")]), expected
+        )
 
     def test_schema_is_generated_byte_for_byte(self) -> None:
         validator.check_schema(REPO_ROOT)
@@ -465,7 +467,7 @@ class DescriptorTests(unittest.TestCase):
             tmp.cleanup()
 
     def test_latched_modules_all_have_a_non_empty_domain(self) -> None:
-        """Derived from the graph, so latching a tenth module needs no edit here."""
+        """Derived from the graph, so latching another module needs no edit here."""
         latched = 0
         for path in sorted((REPO_ROOT / "src/modules").glob("*/module.yaml")):
             descriptor = json.loads(path.read_text(encoding="utf-8"))
@@ -473,14 +475,18 @@ class DescriptorTests(unittest.TestCase):
                 continue
             latched += 1
             with self.subTest(identifier=path.parent.name):
-                self.assertTrue(descriptor.get("sources") or descriptor.get("private_headers"))
+                self.assertTrue(
+                    any(descriptor.get(field) for field in validator.OWNERSHIP_FIELDS)
+                )
         self.assertTrue(latched, "no latched descriptor found; the guard would be untested")
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
-        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "runtime-web", "control-web", "roundtable", "ir", "translation", "skills", "audit",
-                           "module-runtime", "gateway", "governance", "learning",
-                           "workspace", "vault", "config", "git", "delegates", "workflows",
-                           "memory"):
+        identifiers = []
+        for path in sorted((REPO_ROOT / "src/modules").glob("*/module.yaml")):
+            descriptor = json.loads(path.read_text(encoding="utf-8"))
+            if descriptor.get("ownership_complete") is True:
+                identifiers.append(path.parent.name)
+        for identifier in identifiers:
             tmp = self.production_repo()
             try:
                 repo = Path(tmp.name)
@@ -500,8 +506,10 @@ class DescriptorTests(unittest.TestCase):
             public = repo / "src/modules/roundtable/include/aimee/roundtable/public.h"
             public.parent.mkdir(parents=True, exist_ok=True)
             public.write_text("/* public contract */\n", encoding="utf-8")
+            required, optional = validator.load_inventory(repo)
             self.assertEqual(
-                validator.validate_roots(repo, [Path("src/modules")]), 27
+                validator.validate_roots(repo, [Path("src/modules")]),
+                len(required | optional),
             )
         finally:
             tmp.cleanup()
@@ -928,7 +936,8 @@ class OwnershipCliTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["schema_version"], 1)
         self.assertEqual(payload["result"], "PASS")
-        self.assertEqual(len(payload["descriptors"]), 27)
+        required, optional = validator.load_inventory(REPO_ROOT)
+        self.assertEqual(len(payload["descriptors"]), len(required | optional))
         for descriptor in payload["descriptors"]:
             self.assertEqual(
                 set(descriptor), {"id", "module_root", "ownership", "result"}

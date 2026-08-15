@@ -10,7 +10,7 @@ team membership, schema bootstrap, migrations, or arbitrary SQL dispatch.
 
 ## Public contracts
 
-The Go process serves principal 28/event 11265 on the KB bus. Its fixed-size
+The Go process serves principal 28/event `11265` on the KB bus. Its fixed-size
 health request contains only a magic and version; its response contains only
 schema and extension bits. SQL, connection URLs, credentials, subjects, and
 content never cross the bus. Malformed requests fail closed and query failures
@@ -43,40 +43,64 @@ surface is introduced. Its optional-inventory classification preserves existing
 principal references while the migration is incomplete; disabling it makes the
 KB health dependency degrade rather than falling back to duplicate C policy.
 
+- `runtime_toggle.supported`: `true`; changing the selection requires a process
+  restart, and disabling this default-on migration stage degrades KB health.
+
 ## Surfaces
 
-The only surface in this slice is the fixed-size health event on the KB-local
-module bus. There is deliberately no generic query event, HTTP listener, CLI
-endpoint, or management API.
+The only surface in this slice is the fixed-size `AIMEE_POSTGRES_EVENT_HEALTH`
+event on the KB-local Unix-domain module bus. The process is colocated with the
+KB and is not a network-reachable Aimee service. There is deliberately no
+generic query event, HTTP listener, CLI endpoint, or management API.
 
 ## Data and migrations
 
 This stage is read-only and performs no schema migration. Schema initialization
-remains in the C startup substrate until a later slice can move it without making
-startup depend on a process that requires the initialized store.
+remains in the C `db2_init` startup substrate until a later slice can move it
+without making startup depend on a process that requires the initialized store.
 
 ## Security and privacy
 
-The DSN remains process-local and is neither logged nor returned. Driver errors
+The `AIMEE_DB2_URL` DSN remains process-local and is neither logged nor returned. Driver errors
 are collapsed to a typed internal failure so connection details cannot cross the
 bus. PostgreSQL TLS behavior remains pinned by the deployed DSN; this module does
 not weaken or add a parallel transport mode. The local event bus retains its
 existing executable, UID, principal, and event-grant admission controls.
 
+This local process boundary does not replace or reinterpret the existing
+inter-service trust model. Network links such as `aimee-thinclient` to
+`aimee-server` and `aimee-server` to `aimee-kb` retain mTLS, rotating bearer
+tokens, and PAM or federated OIDC identity as configured. Each mTLS peer pair
+must retain its own independently rotated certificate; in particular, the
+server-to-thinclient credential is distinct from the server-to-KB credential.
+Those controls terminate at their existing service boundary and are not
+duplicated as a fourth identity layer on this KB-local module bus.
+
+The distinct-key invariant is already enforced fail closed by
+`identity_distinct_from_server()` in `kb_client_mtls.c`, with missing-pair and
+key-collision coverage in `test_kb_http_routes.c`; deployment and independent
+rotation remain specified in `docs/UPGRADING.md`. This slice neither replaces
+nor bypasses that guard.
+
+`AIMEE_DB2_URL` is read until a pool is initialized successfully. After that,
+credential rotation requires restarting the module process; graceful shutdown
+closes the cached pool before the replacement process starts.
+
 ## Supported journeys
 
-On KB startup the module supervisor starts the PostgreSQL process from the
+On KB startup the module supervisor starts `aimee-module-postgres` from the
 default manifest. A health request proves the store is reachable and reports the
 two required capabilities. A missing process, invalid request, timeout, or query
 failure degrades KB health visibly.
 
 ## Tests and failure behavior
 
-Go tests cover every capability-bit combination, malformed magic/version/length,
+Go tests cover every `StageHealth` capability-bit combination, malformed magic/version/length,
 wrong stages, query failure, and expired invocation deadlines. The registry and
 contract tests pin principal 28/event 11265. Failures never echo a request or
 connection detail and never fall back to a second implementation in the KB
-health path.
+health path. Failed pool initialization is retried on a later health request,
+and every attempt remains bounded by the caller's bus deadline.
 
 ## Operational diagnostics
 
@@ -89,10 +113,13 @@ unchanged until their owning startup phase moves.
 The existing health JSON fields retain their meaning. `AIMEE_DB2_URL` remains the
 configuration surface. The wire format is versioned independently so later
 PostgreSQL stages do not reinterpret this health request.
+Specifically, `db2_ok` means that the PostgreSQL store is reachable through the
+module and has the base schema; the C `db2_health_probe` is no longer the source
+of that health-path verdict.
 
 ## Extension and removal
 
 Future slices should add typed, bounded operations with explicit wire contracts
 and move each C caller in the same change. A generic SQL-over-bus stage is not an
-extension point. The remaining C probe can be removed only after every pre-module
-bootstrap and doctor consumer has an equivalent ordered boundary.
+extension point. The remaining `db2_health_probe` can be removed only after every
+pre-module bootstrap and doctor consumer has an equivalent ordered boundary.

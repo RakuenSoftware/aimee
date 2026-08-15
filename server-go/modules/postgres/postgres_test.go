@@ -65,7 +65,7 @@ func TestHealthRejectsMalformedOrWrongStageRequests(t *testing.T) {
 	if _, status := handler(bus.ModuleInvocation{StageID: StageHealth + 1}, valid); status != bus.ModuleStatusInvalidRequest {
 		t.Fatalf("wrong stage status = %v", status)
 	}
-	if _, status := newHandler(nil)(bus.ModuleInvocation{StageID: StageHealth}, valid); status != bus.ModuleStatusInvalidRequest {
+	if _, status := newHandler(nil)(bus.ModuleInvocation{StageID: StageHealth}, valid); status != bus.ModuleStatusInternal {
 		t.Fatalf("nil probe status = %v", status)
 	}
 }

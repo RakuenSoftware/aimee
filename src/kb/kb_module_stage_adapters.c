@@ -77,7 +77,7 @@ static int control_web_authorize(const char *method, const char *path, int *allo
 int kb_module_postgres_health_probe(int *schema_ok, int *have_pg_trgm)
 {
    uint8_t request[AIMEE_POSTGRES_REQUEST_LEN];
-   uint8_t response[AIMEE_POSTGRES_RESPONSE_LEN];
+   uint8_t response[AIMEE_POSTGRES_RESPONSE_LEN] = {0};
    uint32_t response_len = 0;
    if (schema_ok)
       *schema_ok = 0;

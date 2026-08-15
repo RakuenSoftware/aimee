@@ -271,6 +271,7 @@ def go_module_main(module_id: str, principal_ref: int,
 \t\tos.Exit(code)
 \t}
 """ if module_id == "delegates" else ""
+    cleanup = "\tdefer handler.Close()\n" if module_id == "postgres" else ""
     return f"""package main
 
 import (
@@ -286,6 +287,7 @@ import (
 
 func main() {{
 {watchdog}\
+{cleanup}\
 \tif len(os.Args) != 2 {{
 \t\tfmt.Fprintf(os.Stderr, "usage: %s DAEMON_MODULE_BUS_SOCKET\\n", os.Args[0])
 \t\tos.Exit(2)

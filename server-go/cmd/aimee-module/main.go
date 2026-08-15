@@ -294,6 +294,9 @@ func run(ctx context.Context, args []string) error {
 	if !ok {
 		return fmt.Errorf("unknown Go module executable %q", filepath.Base(args[0]))
 	}
+	if config.ModuleName == "postgres" {
+		defer postgres.Close()
+	}
 	config.SocketPath = args[1]
 	return bus.RunModuleProcess(ctx, config)
 }
