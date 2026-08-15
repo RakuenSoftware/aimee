@@ -1,6 +1,6 @@
 # Proposal: Effective agent tool scoping through aimee's existing toolset seams
 
-- **State:** PENDING — architecture proposal; no implementation has started.
+- **State:** REJECTED — superseded C-only delegate execution seam; archived 2026-08-15.
 - **Date:** 2026-07-21.
 - **Charter roles:** Enforce / Constrain-Verify / Gate-Promote.
 - **Thesis:** aimee already resolves role toolsets, filters advertised tools, and checks
@@ -9,6 +9,23 @@
   server-delegate path. Adjacent
   authorities remain unchanged and outside this proposal. Add no runtime, graph, service, registry, schema surface,
   policy object, approval vocabulary, persistence path, audit vocabulary, or CLI family.
+
+## Decision
+
+Rejected under the Go-or-rejected implementation policy. The prescribed implementation adds
+private `_Thread_local` capability state to `src/server/agent_tools.c`, binds it from
+`src/server/server_compute.c`, and proves it through C test targets. That was a design for the old
+POSIX server-delegate execution path.
+
+Delegate execution has since moved into the Go `delegates` module (`5273532f96`). The module now
+owns role-permission resolution, the permission-to-tool clamp, CLI construction, container
+lifecycle, and sandbox enforcement. Adding the proposed C snapshot would create a second delegate
+authorization owner and violate the current module boundary.
+
+This rejects the obsolete placement, not the resolve-once safety invariant. Any remaining
+disclosure/dispatch parity work must be specified against `server-go/modules/delegates` and its
+provider adapters, then implemented and tested there. The remainder of this document is retained as
+the rejected C design record; its named symbols and acceptance targets were not implemented.
 
 ## 1. Problem
 
