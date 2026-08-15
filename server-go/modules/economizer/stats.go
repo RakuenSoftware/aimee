@@ -1,6 +1,9 @@
 package economizer
 
-import "sync"
+import (
+	"encoding/json"
+	"sync"
+)
 
 // The gateway seam's operational counters.
 //
@@ -128,11 +131,57 @@ func (s *GatewayStatsStore) RecordTokenDelta(baseline, reduced int) {
 	s.tokenSamples++
 }
 
-// StatsSnapshot is the published shape. It mirrors gw_stat_to_json exactly.
+// StatsSnapshot is the published shape.
+//
+// The counters serialize FLAT, as siblings of token_delta and reasons, because
+// that is what gw_stat_to_json emitted and what the /state endpoint has always
+// published. Nesting them under a "counters" object would have been tidier and
+// would have silently broken every dashboard keyed on gateway_mutate_applied,
+// so the struct keeps them in a field and the marshaller flattens them.
 type StatsSnapshot struct {
-	Counters   map[string]uint64            `json:"counters"`
-	TokenDelta StatsTokenDelta              `json:"token_delta"`
-	Reasons    map[string]map[string]uint64 `json:"reasons"`
+	Counters   map[string]uint64
+	TokenDelta StatsTokenDelta
+	Reasons    map[string]map[string]uint64
+}
+
+func (s StatsSnapshot) MarshalJSON() ([]byte, error) {
+	out := make(map[string]any, len(s.Counters)+2)
+	for name, v := range s.Counters {
+		out[name] = v
+	}
+	out["token_delta"] = s.TokenDelta
+	out["reasons"] = s.Reasons
+	return json.Marshal(out)
+}
+
+// UnmarshalJSON is the inverse, so a round trip through the wire keeps the same
+// shape a reader sees. Anything that is not token_delta or reasons is a counter.
+func (s *StatsSnapshot) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	s.Counters = map[string]uint64{}
+	s.Reasons = map[string]map[string]uint64{}
+	for name, v := range raw {
+		switch name {
+		case "token_delta":
+			if err := json.Unmarshal(v, &s.TokenDelta); err != nil {
+				return err
+			}
+		case "reasons":
+			if err := json.Unmarshal(v, &s.Reasons); err != nil {
+				return err
+			}
+		default:
+			var n uint64
+			if err := json.Unmarshal(v, &n); err != nil {
+				return err
+			}
+			s.Counters[name] = n
+		}
+	}
+	return nil
 }
 
 type StatsTokenDelta struct {

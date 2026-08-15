@@ -82,16 +82,6 @@ extern "C"
     * string owned by gw_bypass_reason_str, never NULL. */
    const char *gw_module_bypass(int reduce_rc, const char *bypass);
 
-   /* Deep copy of a messages array (every message + string independently allocated),
-    * so restoring the pristine original is independent of any retained references.
-    * Returns NULL on allocation failure (cJSON_Duplicate frees its own partial work);
-    * the caller MUST then hard-bypass (never send an un-restorable reduced payload).
-    * `messages` is not modified. */
-   cJSON *gw_snapshot_messages(const cJSON *messages);
-
-   /* Estimated token count of a messages array (for the token-delta telemetry). */
-   int gw_snapshot_token_count(cJSON *messages);
-
    /* Install `reduced` as container[key], replacing the existing array. Takes
     * ownership of `reduced` on success (it is added to `container`). Returns 0 on
     * success; on failure returns non-zero (map to GW_BYPASS_REPLACE_FAILED), leaves

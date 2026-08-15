@@ -125,10 +125,12 @@ void gw_mutate_ctx_free(gw_mutate_ctx_t *ctx)
 {
    if (!ctx)
       return;
-   if (ctx->pristine)
+   if (ctx->original)
    {
-      cJSON_Delete(ctx->pristine);
-      ctx->pristine = NULL;
+      /* The swap stood: the container owns the reduced array and this is the
+       * original we set aside. Nothing put it back, so free it here. */
+      cJSON_Delete(ctx->original);
+      ctx->original = NULL;
    }
 }
 
@@ -199,14 +201,6 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
    cJSON *msgs = cJSON_GetObjectItemCaseSensitive(container, key);
    if (!cJSON_IsArray(msgs))
       return;
-
-   /* Snapshot FIRST: never send a reduced payload we cannot restore. */
-   ctx->pristine = gw_snapshot_messages(msgs);
-   if (!ctx->pristine)
-   {
-      econ_module_stat_reason("hard_bypass", "snapshot_oom");
-      return;
-   }
 
    /* The reduction itself lives in the Go economizer module now; this seam
     * resolves config and owns the pristine/restore contract.
@@ -312,30 +306,35 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
    const char *bypass = gw_module_bypass(rrc, mres.bypass);
    if (strcmp(bypass, gw_bypass_reason_str(GW_BYPASS_NONE)) != 0)
    {
-      /* The module counted this verdict already, on the call that made it. */
-      gw_provenance_clear(&ctx->st);
-      cJSON_Delete(reduced);
-      econ_module_result_free(&mres);
-      /* keep pristine: not mutated, but harmless; freed in ctx_free */
-      return;
-   }
-
-   if (gw_replace_messages(container, key, reduced) != 0)
-   {
-      econ_module_stat_reason("hard_bypass", "replace_failed");
+      /* Unusable answer: the request goes as it already is. Nothing was taken
+       * apart, so there is nothing to put back. */
       gw_provenance_clear(&ctx->st);
       cJSON_Delete(reduced);
       econ_module_result_free(&mres);
       return;
    }
-   int baseline_tok = mres.baseline_tokens;
-   int reduced_tok = mres.reduced_tokens;
    econ_module_result_free(&mres);
 
-   gw_provenance_mark_reduced(&ctx->st); /* mark ONLY after replace succeeds */
+   /* DETACH, don't copy. The original array leaves the container intact and
+    * stays owned here, so swapping it back is a pointer move rather than a
+    * restore -- and the deep copy this seam used to take on EVERY request,
+    * only to free it unused, is gone. Detaching cannot fail, so neither can
+    * this. */
+   cJSON *original = cJSON_DetachItemFromObjectCaseSensitive(container, key);
+   if (!cJSON_AddItemToObject(container, key, reduced))
+   {
+      /* Install failed: put the original straight back. The request is exactly
+       * what it was before this function ran. */
+      cJSON_Delete(reduced);
+      if (original)
+         cJSON_AddItemToObject(container, key, original);
+      gw_provenance_clear(&ctx->st);
+      return;
+   }
+   ctx->original = original;
+
+   gw_provenance_mark_reduced(&ctx->st); /* mark ONLY after the swap succeeds */
    ctx->mutated = 1;
-   (void)baseline_tok;
-   (void)reduced_tok;
 }
 
 gw_post_action_t gw_buffered_after_status(cJSON *container, const char *key, int http_status,
@@ -354,11 +353,13 @@ gw_post_action_t gw_buffered_after_status(cJSON *container, const char *key, int
    if (!d.resend && !d.restore && !d.disabled && !d.counter[0])
       return GW_POST_NONE; /* nothing owed: a 2xx, or a turn we never mutated */
 
-   if (d.restore && ctx->pristine)
+   if (d.restore && ctx->original)
    {
-      if (gw_replace_messages(container, key, ctx->pristine) == 0)
+      /* Swap the original back in. gw_replace_messages frees the reduced array
+       * the container currently holds and installs this one. */
+      if (gw_replace_messages(container, key, ctx->original) == 0)
       {
-         ctx->pristine = NULL; /* ownership moved back into container */
+         ctx->original = NULL; /* ownership moved back into the container */
          cJSON *restored = cJSON_GetObjectItemCaseSensitive(container, key);
          if (restored)
             message_history_repair(restored);

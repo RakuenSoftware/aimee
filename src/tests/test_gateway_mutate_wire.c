@@ -69,9 +69,12 @@ static void make_mutated(cJSON **container, gw_mutate_ctx_t *ctx, const char *sk
    ctx->mutated = 1;
    ctx->ttl_ms = 3600000;
    snprintf(ctx->skey, sizeof(ctx->skey), "%s", skey);
-   ctx->st.reduced = 1; /* provenance marked (post-replace) */
-   cJSON *pc = container_with("pristine");
-   ctx->pristine = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(pc, "messages"), 1);
+   ctx->st.reduced = 1; /* provenance marked (post-swap) */
+   /* Stand in for the detached original the seam sets aside when it swaps the
+      reduced array in. Detached, not copied -- so this is simply an array the
+      ctx owns. */
+   cJSON *pc = container_with("original");
+   ctx->original = cJSON_DetachItemFromObjectCaseSensitive(pc, "messages");
    cJSON_Delete(pc);
 }
 
