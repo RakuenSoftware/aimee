@@ -48,23 +48,8 @@ RUN sh scripts/fetch-treesitter.sh \
 
 RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
     && mkdir -p /module-runtime/bin \
-    && for source in /module-runtime/src/*.c; do \
-         [ -e "$source" ] || continue; \
-         binary="${source##*/}"; binary="${binary%.c}"; \
-         cc -std=c11 -O2 -Wall -Wextra -Werror -Isrc/core/event_bus/include \
-           -Isrc/modules/memory/include -Isrc/modules/learning/include \
-           -Isrc/modules/routing/include -Isrc/modules/delegates/include \
-           -Isrc/modules/tools/include -Isrc/modules/workspace/include \
-           -Isrc/modules/git/include -Isrc/modules/skills/include \
-           -Isrc/modules/response-composition/include \
-           "$source" \
-           src/core/event_bus/bus_attach.c src/core/event_bus/bus_client.c \
-           src/core/event_bus/bus_endpoint.c src/core/event_bus/bus_region.c \
-           src/core/event_bus/bus_ring.c src/core/event_bus/bus_wire.c \
-           src/core/event_bus/module_protocol.c src/core/event_bus/module_runtime.c \
-           -pthread \
-           -o "/module-runtime/bin/$binary"; \
-       done \
+    && python3 scripts/build_c_module_runtime_bundle.py \
+         --bundle /module-runtime --output /module-runtime/bin \
     && while IFS= read -r module_id; do \
          [ -n "$module_id" ] || continue; \
          install -m 0755 /tmp/aimee-module-go \

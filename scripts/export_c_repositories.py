@@ -358,6 +358,11 @@ install(FILES ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant
 """
 
 
+def c_process_has_handler(sources: list[str]) -> bool:
+    """A C process owns a handler when any declared source is its module adapter."""
+    return any(PurePosixPath(source).name == "module_adapter.c" for source in sources)
+
+
 def go_module_main(module_id: str, principal_ref: int,
                    stages: list[dict[str, object]]) -> str:
     """Generate one independently buildable Go process entry point."""
@@ -482,8 +487,9 @@ def export_module(
     if descriptor.get("id") != module_id:
         raise ExportError(f"{descriptor_path}: descriptor id mismatch")
     owned = module_owned_files(module_id, descriptor)
-    adapter_source = f"src/modules/{module_id}/module_adapter.c"
-    has_handler = adapter_source in owned
+    declared_sources = descriptor.get("sources", [])
+    assert isinstance(declared_sources, list)
+    has_handler = c_process_has_handler(declared_sources)
     repository = output_root / f"aimee-module-{module_id}"
     repository.mkdir()
     for relative in owned:
@@ -730,14 +736,13 @@ def export_runtime_bundle(output_root: Path) -> int:
     placement_rows: dict[str, list[str]] = {"server": [], "kb": []}
     runtimes: dict[str, str] = {}
     go_modules: list[str] = []
+    c_builds: list[dict[str, object]] = []
     count = 0
     for module_id, contract in contracts.items():
         if contract["execution"] != "process":
             continue
         descriptor = load_json(ROOT / f"src/modules/{module_id}/module.yaml")
-        adapter_source = f"src/modules/{module_id}/module_adapter.c"
-        owned = module_owned_files(module_id, descriptor)
-        has_handler = adapter_source in owned
+        module_owned_files(module_id, descriptor)
         enabled = module_id in required or descriptor.get("enabled_by_default") is True
         principal_ref = contract["principal_ref"]
         stages = contract["stages"]
@@ -752,10 +757,24 @@ def export_runtime_bundle(output_root: Path) -> int:
         assert isinstance(runtime, str)
         runtimes[module_id] = runtime
         if runtime == "c":
-            generated = module_main(module_id, principal_ref, stages, has_handler)
-            if has_handler:
-                generated += "\n" + (ROOT / adapter_source).read_text(encoding="utf-8")
-            write_text(output_root / "src" / f"{binary}.c", generated)
+            sources, include_roots, pkg_config, libraries = c_process_build(
+                module_id, descriptor
+            )
+            has_handler = c_process_has_handler(sources)
+            main_path = f"src/{binary}.c"
+            write_text(
+                output_root / main_path,
+                module_main(module_id, principal_ref, stages, has_handler),
+            )
+            c_builds.append({
+                "id": module_id,
+                "binary": binary,
+                "main": main_path,
+                "sources": sources,
+                "include_roots": include_roots,
+                "pkg_config": pkg_config,
+                "system_libraries": libraries,
+            })
         else:
             go_sources = descriptor.get("go_sources", [])
             if not isinstance(go_sources, list) or not go_sources:
@@ -801,11 +820,17 @@ serve=
     for placement, rows in placement_rows.items():
         write_text(output_root / f"{placement}.modules", "\n".join(rows) + "\n")
     write_text(output_root / "go.modules", "\n".join(go_modules) + "\n")
+    c_builds.sort(key=lambda row: str(row["id"]))
+    write_text(
+        output_root / "c-build.json",
+        json.dumps({"schema_version": 1, "modules": c_builds}, indent=2) + "\n",
+    )
     write_text(
         output_root / "MANIFEST.json",
         json.dumps(
             {"schema_version": 1, "contracts": str(process_contracts.CONTRACTS.relative_to(ROOT)),
-             "process_count": count, "runtimes": runtimes, "placements": placement_rows},
+             "c_build": "c-build.json", "process_count": count,
+             "runtimes": runtimes, "placements": placement_rows},
             indent=2,
         ) + "\n",
     )

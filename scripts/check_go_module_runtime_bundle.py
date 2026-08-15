@@ -46,6 +46,12 @@ def main() -> int:
             if set(actual_go) & set(actual_c):
                 return fail("a migrated module also has a generated C runtime")
             manifest = json.loads((bundle / "MANIFEST.json").read_text(encoding="utf-8"))
+            c_build = json.loads((bundle / "c-build.json").read_text(encoding="utf-8"))
+            if c_build.get("schema_version") != 1 or \
+                    [row.get("id") for row in c_build.get("modules", [])] != sorted(expected_c):
+                return fail("C build manifest differs from the canonical contracts")
+            if manifest.get("c_build") != "c-build.json":
+                return fail("runtime manifest does not bind the C build manifest")
             if manifest.get("runtimes") != {name: row["runtime"] for name, row in contracts.items()
                                              if row["execution"] == "process"}:
                 return fail("runtime manifest differs from the canonical contracts")
@@ -77,9 +83,14 @@ def main() -> int:
         for dockerfile in (ROOT / "Dockerfile", ROOT / "Dockerfile.server"):
             text = dockerfile.read_text(encoding="utf-8")
             for required in ("AS module-go-build", "./cmd/aimee-module",
-                             "/module-runtime/go.modules", "/tmp/aimee-module-go"):
+                             "/module-runtime/go.modules", "/tmp/aimee-module-go",
+                             "build_c_module_runtime_bundle.py"):
                 if required not in text:
                     return fail(f"{dockerfile.name}: missing {required!r}")
+            for forbidden in ("for source in /module-runtime/src/*.c",
+                              "src/core/event_bus/bus_attach.c src/core/event_bus/bus_client.c"):
+                if forbidden in text:
+                    return fail(f"{dockerfile.name}: retains legacy C build fragment {forbidden!r}")
     except (OSError, UnicodeError, json.JSONDecodeError, exporter.ExportError) as exc:
         return fail(str(exc))
     print(f"check_go_module_runtime_bundle: ok ({len(expected_go)} Go, {len(expected_c)} C)")

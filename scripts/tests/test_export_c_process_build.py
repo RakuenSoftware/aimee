@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -109,6 +112,51 @@ class CProcessBuildTests(unittest.TestCase):
         self.assertEqual(cmake.count("find_package(OpenSSL REQUIRED)"), 1)
         self.assertIn("OpenSSL::Crypto", cmake)
         self.assertIn("OpenSSL::SSL", cmake)
+
+    def test_runtime_bundle_emits_an_exhaustive_non_amalgamated_c_build(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "repo"
+            bundle = Path(temporary) / "bundle"
+            descriptor_path = root / "src/modules/db2/module.yaml"
+            descriptor_path.parent.mkdir(parents=True)
+            descriptor = {
+                "id": "db2",
+                **self.descriptor(),
+            }
+            descriptor_path.write_text(json.dumps(descriptor), encoding="utf-8")
+            inventory = root / "inventory.json"
+            inventory.write_text(
+                json.dumps({"required": ["db2"], "optional": []}), encoding="utf-8"
+            )
+            contracts_path = root / "process-contracts.json"
+            contracts_path.write_text('{"clients": []}\n', encoding="utf-8")
+            contract = {
+                "execution": "process",
+                "runtime": "c",
+                "principal_ref": 29,
+                "placements": ["kb"],
+                "stages": [{"id": 1, "name": "lifecycle", "event_kind": 11521}],
+            }
+            with mock.patch.object(exporter, "ROOT", root), \
+                    mock.patch.object(exporter, "INVENTORY", inventory), \
+                    mock.patch.object(exporter.process_contracts, "CONTRACTS", contracts_path), \
+                    mock.patch.object(exporter.process_contracts, "validate",
+                                      return_value={"db2": contract}):
+                self.assertEqual(exporter.export_runtime_bundle(bundle), 1)
+
+            build = json.loads((bundle / "c-build.json").read_text(encoding="utf-8"))
+            self.assertEqual(build["modules"], [{
+                "id": "db2",
+                "binary": "aimee-module-db2",
+                "main": "src/aimee-module-db2.c",
+                **self.descriptor()["c_build"],
+                "sources": self.descriptor()["sources"],
+            }])
+            main = (bundle / "src/aimee-module-db2.c").read_text(encoding="utf-8")
+            self.assertIn("extern aimee_module_status_t aimee_module_handler", main)
+            self.assertNotIn("db2_init", main)
+            self.assertIn("db2\t/usr/local/libexec/aimee-modules/aimee-module-db2",
+                          (bundle / "kb.modules").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

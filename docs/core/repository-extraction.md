@@ -20,6 +20,16 @@ target. Its generated grant is executable/UID/principal-bound and starts with no
 event capabilities; capabilities are added only with the corresponding stable
 event schema.
 
+Container builds use the same descriptor contract through a two-step runtime
+bundle. `export_c_repositories.py --runtime-bundle <directory>` writes generated
+process mains, grants, placement lists, and `c-build.json`. Then
+`build_c_module_runtime_bundle.py` compiles each C process from its generated
+main, every descriptor-owned C source, the canonical event-bus client sources,
+and its declared include roots, pkg-config packages, and system libraries. The
+manifest is data rather than a shell fragment: paths and dependency tokens are
+validated before they become compiler arguments, and no module source is
+concatenated into the generated main.
+
 `dependencies/aimee-repositories.lock.json` records repository URLs, semantic
 versions, exact commits, stable principal identities, and source digests.
 `python3 scripts/check_c_repository_lock.py` fails when a vendored core/module
