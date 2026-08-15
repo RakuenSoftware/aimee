@@ -190,12 +190,11 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
       return;
    ctx->have_key = 1;
 
-   /* Honor the circuit breaker: a disabled session is a pristine passthrough. */
-   if (msg_session_is_disabled(ctx->skey))
-   {
-      gw_stat_inc(GW_STAT_SESSION_DISABLED_BLOCKS);
-      return;
-   }
+   /* The circuit breaker is the module's, and it is consulted as part of the
+    * reduce call rather than read here: a breaker written on one side of the bus
+    * and read on the other would never fire, which is exactly how this seam's
+    * safety net came to be inert. A disabled session comes back as the
+    * session_disabled bypass below and is forwarded pristine. */
 
    cJSON *msgs = cJSON_GetObjectItemCaseSensitive(container, key);
    if (!cJSON_IsArray(msgs))
@@ -245,6 +244,7 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
    mreq.recall_inject = config_fold_recall_inject();
    mreq.state = state_blob[0] ? state_blob : NULL;
    mreq.turn = gw_state_next_turn(state_blob);
+   mreq.session_key = ctx->skey; /* the module reads its breaker off this */
 
    char closet_denylist[CONFIG_COPY_MAX];
    config_coord_closet_denylist_copy(closet_denylist, sizeof(closet_denylist));
@@ -314,7 +314,13 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
    const char *bypass = gw_module_bypass(rrc, mres.bypass);
    if (strcmp(bypass, gw_bypass_reason_str(GW_BYPASS_NONE)) != 0)
    {
-      gw_stat_inc_reason("hard_bypass", bypass);
+      /* A breaker block is its own counter, not a hard bypass: it is the lever
+       * working as designed, and folding it into hard_bypass would make a healthy
+       * tripped session look like a reduction fault. */
+      if (strcmp(bypass, "session_disabled") == 0)
+         gw_stat_inc(GW_STAT_SESSION_DISABLED_BLOCKS);
+      else
+         gw_stat_inc_reason("hard_bypass", bypass);
       gw_provenance_clear(&ctx->st);
       cJSON_Delete(reduced);
       econ_module_result_free(&mres);
@@ -340,52 +346,88 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
    gw_stat_record_token_delta(baseline_tok, reduced_tok); /* sampled §4 */
 }
 
+/* Map the module's counter label onto the local enum.
+ *
+ * The module names the counter rather than the caller inferring it, so the
+ * decision and the thing it is recorded as cannot drift apart. An unrecognised
+ * label is DROPPED rather than guessed: a miscounted lever is worse than an
+ * uncounted one, and the label set is pinned on both sides by tests. */
+static int gw_stat_by_name(const char *name, gw_stat_t *out)
+{
+   static const struct
+   {
+      const char *name;
+      gw_stat_t stat;
+   } table[] = {
+       {"4xx_restore_resend", GW_STAT_4XX_RESTORE_RESEND},
+       {"5xx_disable", GW_STAT_5XX_DISABLE},
+       {"stream_error_disable", GW_STAT_STREAM_ERROR_DISABLE},
+       {"session_disabled_blocks", GW_STAT_SESSION_DISABLED_BLOCKS},
+   };
+   if (!name || !name[0] || !out)
+      return 1;
+   for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++)
+      if (strcmp(name, table[i].name) == 0)
+      {
+         *out = table[i].stat;
+         return 0;
+      }
+   return 1;
+}
+
+static void gw_stat_inc_name(const char *name)
+{
+   gw_stat_t which;
+   if (gw_stat_by_name(name, &which) == 0)
+      gw_stat_inc(which);
+}
+
 gw_post_action_t gw_buffered_after_status(cJSON *container, const char *key, int http_status,
                                           gw_mutate_ctx_t *ctx)
 {
    if (!ctx || !ctx->mutated || !container || !key)
       return GW_POST_NONE;
 
-   int cls = http_status / 100;
-   if (cls == 4)
-   {
-      /* Restore the pristine original, repair defensively, disable the session for
-       * subsequent turns, clear provenance, and signal a single resend. */
-      if (ctx->pristine)
-      {
-         if (gw_replace_messages(container, key, ctx->pristine) == 0)
-         {
-            ctx->pristine = NULL; /* ownership moved back into container */
-            cJSON *restored = cJSON_GetObjectItemCaseSensitive(container, key);
-            if (restored)
-               message_history_repair(restored);
-         }
-      }
-      msg_session_disable(ctx->skey, ctx->ttl_ms, "4xx");
-      gw_provenance_clear(&ctx->st);
-      gw_stat_inc(GW_STAT_4XX_RESTORE_RESEND);
-      ctx->mutated = 0; /* the request is now pristine; no double handling */
-      return GW_POST_RESEND;
-   }
-   if (cls == 5)
-   {
-      /* Provider state is uncertain after a 5xx: disable, do NOT resend. */
-      msg_session_disable(ctx->skey, ctx->ttl_ms, "5xx");
-      gw_provenance_clear(&ctx->st);
-      gw_stat_inc(GW_STAT_5XX_DISABLE);
-      ctx->mutated = 0;
+   /* The decision and the breaker are the module's; what is left here is the
+    * request body and the socket. An unreachable module owes nothing, so the
+    * turn is left exactly as dispatched rather than half-handled. */
+   econ_module_post_status_t d;
+   if (econ_module_post_status(ctx->skey, http_status, ctx->mutated, ctx->have_key, ctx->ttl_ms,
+                               NULL, &d) != 0)
       return GW_POST_NONE;
+   if (!d.resend && !d.restore && !d.disabled && !d.counter[0])
+      return GW_POST_NONE; /* nothing owed: a 2xx, or a turn we never mutated */
+
+   if (d.restore && ctx->pristine)
+   {
+      if (gw_replace_messages(container, key, ctx->pristine) == 0)
+      {
+         ctx->pristine = NULL; /* ownership moved back into container */
+         cJSON *restored = cJSON_GetObjectItemCaseSensitive(container, key);
+         if (restored)
+            message_history_repair(restored);
+      }
    }
-   return GW_POST_NONE;
+   gw_provenance_clear(&ctx->st);
+   if (d.counter[0])
+      gw_stat_inc_name(d.counter);
+   ctx->mutated = 0; /* handled; never twice */
+   return d.resend ? GW_POST_RESEND : GW_POST_NONE;
 }
 
 void gw_stream_disable(gw_mutate_ctx_t *ctx, const char *reason)
 {
-   if (!ctx || !ctx->mutated || !ctx->have_key)
+   if (!ctx)
       return;
-   msg_session_disable(ctx->skey, ctx->ttl_ms, reason ? reason : "stream");
+   econ_module_post_status_t d;
+   if (econ_module_post_status(ctx->skey, 0, ctx->mutated, ctx->have_key, ctx->ttl_ms,
+                               reason ? reason : "stream", &d) != 0)
+      return;
+   if (!d.disabled && !d.counter[0])
+      return;
    gw_provenance_clear(&ctx->st);
-   gw_stat_inc(GW_STAT_STREAM_ERROR_DISABLE);
+   if (d.counter[0])
+      gw_stat_inc_name(d.counter);
    ctx->mutated = 0; /* one disable per turn; a later frame no-ops */
 }
 
