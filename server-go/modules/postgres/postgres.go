@@ -24,8 +24,9 @@ const (
 	requestLen  = 8
 	responseLen = 16
 
-	flagSchema = uint32(1 << 0)
-	flagPGTrgm = uint32(1 << 1)
+	flagSchema   = uint32(1 << 0)
+	flagPGTrgm   = uint32(1 << 1)
+	flagKBTables = uint32(1 << 2)
 
 	probeTimeout = 400 * time.Millisecond
 )
@@ -41,7 +42,19 @@ const healthQuery = `SELECT
     SELECT 1
       FROM pg_extension
      WHERE extname = 'pg_trgm'
+  ),
+  (
+    SELECT COUNT(*) = 2
+      FROM information_schema.tables
+     WHERE table_schema = current_schema()
+       AND table_name IN ('kb_documents', 'kb_async_jobs')
   )`
+
+type healthEvidence struct {
+	schemaOK   bool
+	havePGTrgm bool
+	kbTablesOK bool
+}
 
 type defaultProbeState struct {
 	mu   sync.Mutex
@@ -88,20 +101,24 @@ func (state *defaultProbeState) close() {
 	}
 }
 
-func defaultProbe(ctx context.Context) (bool, bool, error) {
+func defaultProbe(ctx context.Context) (healthEvidence, error) {
 	pool, err := productionProbe.getPool()
 	if err != nil {
 		// Failed initialization is deliberately not latched: a corrected secret or
 		// transient startup failure can recover on a later bounded health call.
-		return false, false, err
+		return healthEvidence{}, err
 	}
-	var schemaOK, havePGTrgm bool
-	if err := pool.QueryRow(ctx, healthQuery).Scan(&schemaOK, &havePGTrgm); err != nil {
+	var evidence healthEvidence
+	if err := pool.QueryRow(ctx, healthQuery).Scan(
+		&evidence.schemaOK,
+		&evidence.havePGTrgm,
+		&evidence.kbTablesOK,
+	); err != nil {
 		// Do not wrap the driver error: it may contain connection details. The
 		// process boundary reports a typed failure and keeps the DSN private.
-		return false, false, errors.New("postgres: health query failed")
+		return healthEvidence{}, errors.New("postgres: health query failed")
 	}
-	return schemaOK, havePGTrgm, nil
+	return evidence, nil
 }
 
 func requestValid(request []byte) bool {
@@ -110,16 +127,19 @@ func requestValid(request []byte) bool {
 		binary.LittleEndian.Uint32(request[4:8]) == wireVersion
 }
 
-func healthResponse(schemaOK, havePGTrgm bool) []byte {
+func healthResponse(evidence healthEvidence) []byte {
 	response := make([]byte, responseLen)
 	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], wireVersion)
 	var flags uint32
-	if schemaOK {
+	if evidence.schemaOK {
 		flags |= flagSchema
 	}
-	if havePGTrgm {
+	if evidence.havePGTrgm {
 		flags |= flagPGTrgm
+	}
+	if evidence.kbTablesOK {
+		flags |= flagKBTables
 	}
 	binary.LittleEndian.PutUint32(response[8:12], flags)
 	return response
@@ -127,7 +147,7 @@ func healthResponse(schemaOK, havePGTrgm bool) []byte {
 
 // newHandler builds the health stage around a bounded probe. Production uses
 // the package Handle entry point; tests inject the same evidence without a DB.
-func newHandler(probe func(context.Context) (bool, bool, error)) bus.ModuleHandler {
+func newHandler(probe func(context.Context) (healthEvidence, error)) bus.ModuleHandler {
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 		if invocation.StageID != StageHealth || !requestValid(request) {
 			return nil, bus.ModuleStatusInvalidRequest
@@ -144,14 +164,14 @@ func newHandler(probe func(context.Context) (bool, bool, error)) bus.ModuleHandl
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		schemaOK, havePGTrgm, err := probe(ctx)
+		evidence, err := probe(ctx)
 		if invocation.Cancelled() {
 			return nil, bus.ModuleStatusCancelled
 		}
 		if err != nil {
 			return nil, bus.ModuleStatusInternal
 		}
-		return healthResponse(schemaOK, havePGTrgm), bus.ModuleStatusOK
+		return healthResponse(evidence), bus.ModuleStatusOK
 	}
 }
 

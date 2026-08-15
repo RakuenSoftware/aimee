@@ -5,16 +5,19 @@
 `postgres` is the KB-local process boundary for PostgreSQL operations as they move
 out of the C data layer. The first bounded stage owns generic store health and
 capability evidence: connectivity, the current-schema `memories` table, and the
-`pg_trgm` extension. It does not own content authorization, identity resolution,
-team membership, schema bootstrap, migrations, or arbitrary SQL dispatch.
+`pg_trgm` extension. The second bounded slice adds catalog evidence that both KB
+runtime tables (`kb_documents` and `kb_async_jobs`) exist, replacing the remaining
+duplicate C query in the daemon health path. It does not own content authorization,
+identity resolution, team membership, schema bootstrap, migrations, or arbitrary
+SQL dispatch.
 
 ## Public contracts
 
 The Go process serves principal 28/event `11265` on the KB bus. Its fixed-size
 health request contains only a magic and version; its response contains only
-schema and extension bits. SQL, connection URLs, credentials, subjects, and
-content never cross the bus. Malformed requests fail closed and query failures
-return a typed module failure without a response body.
+schema, extension, and KB-table readiness bits. SQL, connection URLs, credentials,
+subjects, and content never cross the bus. Malformed requests fail closed and query
+failures return a typed module failure without a response body.
 
 ## Dependencies and consumers
 
@@ -22,7 +25,8 @@ return a typed module failure without a response body.
 - `module-runtime` authenticates the exact executable, UID, principal, and
   event-kind grant on the KB-local bus.
 
-The first consumer is the KB health response. Bootstrap and the local CLI doctor
+The consumer is the KB health response, including its `db2_kb_tables_ok` field.
+Bootstrap and the local CLI doctor
 keep their existing C probe because they execute before the module boundary is
 available; later slices can move operations only after their startup ordering and
 state ownership are explicit.
@@ -31,9 +35,9 @@ state ownership are explicit.
 
 The physical provider is `aimee-module-postgres`, a separately supervised Go
 process placed with `aimee-kb`. Readiness requires a successful bounded query.
-The result independently reports whether the base `memories` table and
-`pg_trgm` extension exist, so a reachable but incomplete store is not reported
-as ready.
+The result independently reports whether the base `memories` table, `pg_trgm`
+extension, and both KB runtime tables exist, so a reachable but incomplete store
+is not reported as ready.
 
 ## Configuration and activation
 

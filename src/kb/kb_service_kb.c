@@ -379,8 +379,8 @@ static cJSON *kb_service_health_object(void)
 
    /* DB2: generic schema + KB-specific tables */
    int schema_ok = 0, have_pg_trgm = 0, kb_tables_ok = 0;
-   int db2_ok = (kb_module_postgres_health_probe(&schema_ok, &have_pg_trgm) == 0 && schema_ok);
-   (void)db2_kb_health_probe(&kb_tables_ok);
+   int db2_ok = (kb_module_postgres_health_probe(&schema_ok, &have_pg_trgm, &kb_tables_ok) == 0 &&
+                 schema_ok);
    cJSON_AddBoolToObject(resp, "db2_ok", db2_ok);
    cJSON_AddBoolToObject(resp, "db2_kb_tables_ok", kb_tables_ok);
 

@@ -533,12 +533,12 @@
       "repository": "https://github.com/RakuenSoftware/aimee-module-postgres.git",
       "ref": "v0.3.0",
       "version": "0.3.0",
-      "commit": "7039764fba2a261f4281a7feaaee9b2d7223e66e",
+      "commit": "f6067ec357299ac43e9da00e333e424bfea2d524",
       "execution": "process",
       "placements": [
         "kb"
       ],
-      "source_sha256": "73d5922ddb83085e044eb5695e40f2dadf13d9996bceadb95f0a094b3609281d",
+      "source_sha256": "fa23cd51d397fa83914b91a18cb8824994e1c2ad58e6e3f1d20399df2f9cb2c4",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 28,
