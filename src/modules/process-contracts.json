@@ -624,6 +624,22 @@
           "event_kind": 11265
         }
       ]
+    },
+    {
+      "id": "db1",
+      "execution": "process",
+      "runtime": "c",
+      "principal_ref": 29,
+      "placements": [
+        "server"
+      ],
+      "stages": [
+        {
+          "id": 1,
+          "name": "db1-economizer-state",
+          "event_kind": 11521
+        }
+      ]
     }
   ],
   "clients": [
