@@ -43,21 +43,45 @@ func TestStatsReasonRegistryOverflowsRatherThanDrops(t *testing.T) {
 	}
 }
 
+// Carried over from the C this replaced (test_token_delta_sampling), case for
+// case: WHICH call is sampled is the property, not just how many. The gate is
+// deterministic on the count seen, so the first is taken and the next N-1 are
+// not — get that off by one and the sums describe different turns than the
+// count claims.
 func TestStatsTokenDeltaSamples(t *testing.T) {
 	s := NewGatewayStatsStore()
-	for i := 0; i < statTokenSampleN*3; i++ {
-		s.RecordTokenDelta(100, 50)
-	}
+
+	s.RecordTokenDelta(1000, 500) // n=0 is sampled
 	snap := s.Snapshot()
-	if snap.TokenDelta.SampleCount != 3 {
-		t.Errorf("sample count = %d, want 3 (1 in %d)", snap.TokenDelta.SampleCount, statTokenSampleN)
+	if snap.TokenDelta.SampleCount != 1 ||
+		snap.TokenDelta.BaselineSum != 1000 || snap.TokenDelta.ReducedSum != 500 {
+		t.Fatalf("first call should be the sample: %+v", snap.TokenDelta)
 	}
-	if snap.TokenDelta.PctReduced != 50 {
-		t.Errorf("pct_reduced = %v, want 50", snap.TokenDelta.PctReduced)
+
+	for i := 0; i < statTokenSampleN-1; i++ {
+		s.RecordTokenDelta(2000, 1900)
 	}
+	if got := s.Snapshot().TokenDelta.SampleCount; got != 1 {
+		t.Errorf("n=1..%d must not be sampled, count = %d", statTokenSampleN-1, got)
+	}
+
+	s.RecordTokenDelta(4000, 1000) // n=N -> sampled again
+	snap = s.Snapshot()
+	if snap.TokenDelta.SampleCount != 2 ||
+		snap.TokenDelta.BaselineSum != 5000 || snap.TokenDelta.ReducedSum != 1500 {
+		t.Errorf("second sample: %+v", snap.TokenDelta)
+	}
+	// The property the sums exist to answer: sampled reduced is below baseline.
+	if snap.TokenDelta.ReducedSum >= snap.TokenDelta.BaselineSum {
+		t.Error("sampled reduction should shrink the transcript")
+	}
+	if snap.TokenDelta.PctReduced != 70 {
+		t.Errorf("pct_reduced = %v, want 70", snap.TokenDelta.PctReduced)
+	}
+
 	// A negative reading is rejected rather than accumulated as a huge unsigned.
-	s.RecordTokenDelta(-1, 10)
-	if s.Snapshot().TokenDelta.BaselineSum != 300 {
+	s.RecordTokenDelta(-1, 5)
+	if s.Snapshot().TokenDelta.BaselineSum != 5000 {
 		t.Error("a negative baseline must not be accumulated")
 	}
 }
