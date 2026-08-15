@@ -4,6 +4,40 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "c_build": {
+      "additionalProperties": false,
+      "properties": {
+        "include_roots": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "pkg_config": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:+-]*$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "system_libraries": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:+-]*$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "include_roots",
+        "pkg_config",
+        "system_libraries"
+      ],
+      "type": "object"
+    },
     "dependencies": {
       "items": {
         "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",

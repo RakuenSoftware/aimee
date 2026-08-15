@@ -213,6 +213,55 @@ class DescriptorTests(unittest.TestCase):
         complete_type["ownership_complete"] = 1
         self.assert_rule(complete_type, "ownership-complete-type")
 
+    def test_c_build_contract_is_closed_sorted_and_safe(self) -> None:
+        descriptor = self.required()
+        descriptor["c_build"] = {
+            "include_roots": ["src", "src/modules/memory"],
+            "pkg_config": ["libpq"],
+            "system_libraries": ["OpenSSL::Crypto", "m"],
+        }
+        required, optional = self.taxonomy()
+        self.assertEqual(
+            validator.validate_descriptor(descriptor, required, optional), "memory"
+        )
+
+        cases = (
+            ({"include_roots": ["src"], "pkg_config": []}, "c-build-shape"),
+            ({"include_roots": [], "pkg_config": [], "system_libraries": []},
+             "c-build-empty"),
+            ({"include_roots": ["src", "src"], "pkg_config": [],
+              "system_libraries": []}, "c-build-order"),
+            ({"include_roots": ["../outside"], "pkg_config": [],
+              "system_libraries": []}, "c-build-path"),
+            ({"include_roots": ["src"], "pkg_config": ["libpq;injected"],
+              "system_libraries": []}, "c-build-token"),
+            ({"include_roots": ["src"], "pkg_config": [],
+              "system_libraries": [7]}, "c-build-type"),
+        )
+        for build, rule in cases:
+            mutated = self.required()
+            mutated["c_build"] = build
+            with self.subTest(rule=rule):
+                self.assert_rule(mutated, rule)
+
+    def test_c_build_include_roots_must_be_real_directories(self) -> None:
+        descriptor = json.loads(
+            (REPO_ROOT / "src/modules/module-runtime/module.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        descriptor["c_build"] = {
+            "include_roots": ["src/modules/module-runtime/missing"],
+            "pkg_config": [],
+            "system_libraries": [],
+        }
+        required, optional = self.taxonomy()
+        validator.validate_descriptor(descriptor, required, optional)
+        with self.assertRaisesRegex(
+            validator.DescriptorError, r"rule=c-build-directory"
+        ):
+            validator.validate_ownership(REPO_ROOT, "module-runtime", descriptor)
+
     def test_ownership_is_optional_and_report_preserves_declared_order(self) -> None:
         report = validator.ownership_report(REPO_ROOT, [Path("src/modules")])
         self.assertEqual(report["schema_version"], 1)
