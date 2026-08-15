@@ -28,7 +28,8 @@
     "runtime-web",
     "sandbox",
     "economizer",
-    "postgres"
+    "postgres",
+    "db2"
   ],
   "debt": []
 }

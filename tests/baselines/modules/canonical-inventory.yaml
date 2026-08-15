@@ -30,7 +30,8 @@
     "benchmarks",
     "sandbox",
     "economizer",
-    "postgres"
+    "postgres",
+    "db2"
   ],
   "principal_refs": {
     "module-runtime": 1,
@@ -60,7 +61,8 @@
     "benchmarks": 25,
     "sandbox": 26,
     "economizer": 27,
-    "postgres": 28
+    "postgres": 28,
+    "db2": 29
   },
   "retired_principal_refs": []
 }

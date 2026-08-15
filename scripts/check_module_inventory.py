@@ -24,7 +24,7 @@ ALLOWED_KEYS = {"schema_version", "required", "optional", "principal_refs", "ret
 REQUIRED_COUNT = 18
 # PostgreSQL is appended while its C-to-Go migration is staged so existing
 # optional-module principal references remain stable.
-OPTIONAL_COUNT = 10
+OPTIONAL_COUNT = 11
 PINNED_REQUIRED = {"git"}
 
 

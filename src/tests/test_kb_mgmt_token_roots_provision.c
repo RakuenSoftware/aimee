@@ -1,4 +1,4 @@
-#include "kb/kb_mgmt_token_roots_provision.h"
+#include "kb_mgmt_token_roots_provision.h"
 #include "modules/vault/vault_server_key.h"
 
 #include <assert.h>

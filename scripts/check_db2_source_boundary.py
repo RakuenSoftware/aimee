@@ -33,6 +33,7 @@ from typing import NoReturn
 ROOT = Path(__file__).resolve().parent.parent
 BASELINE = Path("tests/baselines/db2/source-boundary-v2.json")
 BOUNDARY = PurePosixPath("src/modules/db2/c")
+MODULE_ROOT = PurePosixPath("src/modules/db2")
 CONTRACTS = Path("src/modules/process-contracts.json")
 SCHEMA_VERSION = 2
 SOURCE_KINDS = {"c": ".c", "headers": ".h", "sql": ".sql"}
@@ -128,6 +129,11 @@ def _process_placements(root: Path) -> dict[str, set[str]]:
 
 
 def _is_db2_include(target: str) -> bool:
+    # This is the replacement process contract, not a direct implementation
+    # dependency. New callers may adopt it while the old private-header
+    # inventory remains shrink-only.
+    if target == "aimee/db2/module_api.h":
+        return False
     path = PurePosixPath(target)
     parts = path.parts
     return "db2" in parts[:-1] or bool(DB2_BASENAME.search(path.name))
@@ -160,7 +166,7 @@ def _consumers(root: Path) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for path in sorted(source_root.rglob("*")):
         if (not path.is_file() or path.is_symlink() or path.suffix not in {".c", ".h"} or
-                path.is_relative_to(_repo_path(root, BOUNDARY))):
+                path.is_relative_to(_repo_path(root, MODULE_ROOT))):
             continue
         counts: Counter[str] = Counter()
         try:
@@ -486,6 +492,29 @@ def enforce_shrink_only(previous: object, current: object) -> None:
     for key, (count, classification) in current_dependencies.items():
         prior = previous_dependencies.get(key)
         if prior is None:
+            source, header, resolved = key
+            # A private KB contract may move to the host's public header boundary
+            # without becoming new dependency debt. Require the same source and
+            # basename, a directional src/kb -> src/headers move, a narrower
+            # classification, and no count growth. All other retargeting remains
+            # fail-closed.
+            promoted = next(
+                (
+                    value
+                    for (old_source, old_header, old_resolved), value
+                    in previous_dependencies.items()
+                    if old_source == source
+                    and PurePosixPath(old_header).name == PurePosixPath(header).name
+                    and PurePosixPath(old_resolved).name == PurePosixPath(resolved).name
+                    and old_resolved.startswith("src/kb/")
+                    and resolved.startswith("src/headers/")
+                    and value[1] == "kb-authority-leak"
+                    and classification == "host-api"
+                ),
+                None,
+            )
+            if promoted is not None and count <= promoted[0]:
+                continue
             fail(
                 "baseline-growth",
                 f"new outbound dependency {key[1]!r} in {key[0]} resolves to {key[2]}",
@@ -592,6 +621,15 @@ def check(root: Path, baseline_path: Path = BASELINE) -> dict[str, int]:
             )
     actual_dependencies = _outbound_dependencies(root)
     actual_dependency_rows = _dependency_rows(actual_dependencies)
+    authority_leaks = [
+        row for row in actual_dependencies if row["classification"] == "kb-authority-leak"
+    ]
+    if authority_leaks:
+        first = authority_leaks[0]
+        fail(
+            "kb-authority-import",
+            f"{first['source']} imports private KB header {first['resolved']}",
+        )
     for key, (count, classification) in actual_dependency_rows.items():
         expected = baseline_dependency_rows.get(key)
         if expected is None:

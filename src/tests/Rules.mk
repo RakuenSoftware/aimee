@@ -725,6 +725,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-server-mgmt-jwks-cache
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening
 TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
+TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract
 
 MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/memory.o \
@@ -3213,6 +3214,20 @@ $(TESTPREFIX)/unit-test-routing-module: $(OBJDIR)/tests/test_routing_module.o \
 
 .PHONY: unit-test-routing-module
 unit-test-routing-module: $(TESTPREFIX)/unit-test-routing-module
+	$<
+
+$(OBJDIR)/tests/test_db2_module_contract.o: C_FLAGS += -Icore/event_bus/include \
+                                                        -Imodules/db2 \
+                                                        -Imodules/db2/include
+$(OBJDIR)/modules/db2/module_adapter.o: C_FLAGS += -Icore/event_bus/include \
+                                                   -Imodules/db2/include
+$(TESTPREFIX)/unit-test-db2-module-contract: \
+                                        $(OBJDIR)/tests/test_db2_module_contract.o \
+                                        $(OBJDIR)/modules/db2/module_adapter.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+.PHONY: unit-test-db2-module-contract
+unit-test-db2-module-contract: $(TESTPREFIX)/unit-test-db2-module-contract
 	$<
 
 # Event-bus conformance host harness (feature tree slice 10). A test binary that

@@ -1,7 +1,7 @@
 #ifndef AIMEE_DB2_MANAGEMENT_JWKS_PUBLICATION_H
 #define AIMEE_DB2_MANAGEMENT_JWKS_PUBLICATION_H
 
-#include "../kb/kb_mgmt_jwks_publication.h"
+#include "kb_mgmt_jwks_publication.h"
 
 #include <stddef.h>
 #include <stdint.h>

@@ -1,7 +1,7 @@
 # Proposal: put DB2 behind a module boundary, then port it to Go
 
-- **State:** PENDING — the C source boundary has moved under module ownership; no production DB2
-  operation has moved behind the process boundary yet.
+- **State:** PENDING — the C source boundary and separately buildable C process shell are registered;
+  no production DB2 operation has moved behind the process boundary yet.
 - **Date:** 2026-08-15.
 - **Charter roles:** Constrain-Verify / Gate-Promote.
 - **Thesis:** DB2 was created as a portable source boundary and now resides intact at
@@ -63,8 +63,11 @@ Measured on `origin/testing` at `0916c09472`:
 
 The physical move also exposed the other side of the source boundary. At the relocation merge,
 DB2's C and header files contain 187 project or vendored-header include directives that resolve
-outside `src/modules/db2/c`: 119 host APIs, 45 private APIs from other modules, 17 vendored cJSON
-includes, three KB-authority headers, two public module APIs, and the generated schema header. A
+outside `src/modules/db2/c`: 122 host APIs, 45 private APIs from other modules, 17 vendored cJSON
+includes, two public module APIs, and the generated schema header. The initial process-boundary
+slice promoted the three shared management-authority contracts and their token-public dependency
+out of private `src/kb` ownership;
+the boundary now rejects any direct DB2 import from that private tree. A
 directory boundary therefore exists, but the process build is not yet a standalone dependency
 closure. `tests/baselines/db2/source-boundary-v2.json` accounts for every one of these imports and
 the boundary gate rejects growth. Phase one must remove, invert, relocate, or explicitly replace
@@ -231,16 +234,15 @@ Default routing is deterministic:
 
 1. with no selected ready DB3 observer, portable operations use DB2 pgvector;
 2. with exactly one selected observer, portable writes fan out to it and portable searches use it;
-3. with several observers, writes fan out to all, while search requires an explicit `primary`,
-   `compare`, or `federated` policy; and
+3. with several observers, committed writes may fan out to every routed observer, while search uses
+   exactly one explicitly selected primary; and
 4. an unavailable selected DB3 uses pgvector only when the declared route permits fallback. Fallback
    is never silent: readiness, trace evidence, and result provenance identify it.
 
-`compare` is a migration/verification mode: pgvector remains the served result while DB3 rankings are
-measured. `primary` serves one DB3 and keeps the others warm. `federated` uses rank fusion over
-provider ranks (not incomparable raw scores), then DB2 rehydrates and rechecks every candidate.
-Changing the serving provider requires matching model, dimension, metric, collection content hash,
-and acknowledged generation; otherwise the route remains on pgvector.
+Multiple installed observers do not imply score fusion, comparison, or multi-provider reads. Those
+would be separate product contracts. Changing the selected serving provider requires matching model,
+dimension, metric, collection content hash, and acknowledged generation; otherwise the route remains
+on pgvector.
 
 DB3 runtime work cannot activate before the phase-one C DB2 process owns the real serving path. The
 provider-neutral package, descriptors, and observer runners land only with a C DB2 adapter that
@@ -251,6 +253,37 @@ headline deliverable ahead of its owner.
 The DB3 contract is stable across the C-to-Go DB2 port. Provider endpoints and secrets stay inside
 their DB3 processes. Adding a DB3 implementation changes its provider artifact/descriptor and the
 conformance matrix, not the KB route, DB2 public stage, or caller grant.
+
+### 3.4 Ordered implementation slices
+
+The migration lands in independently testable slices, but activation remains atomic:
+
+1. **S1 — boundary and process shell.** Relocate the C tree, inventory both sides of the source
+   boundary, register principal 29/event 11521, compile a standalone C runtime bundle, freeze the
+   lifecycle-health codec, and return `capability_absent` until the real backend closure is linked.
+   Exit: the bundle builds, malformed wire vectors fail closed, and DB2 imports no private KB header.
+2. **S2 — catalog and C closure.** Classify every external C declaration and consumer, generate the
+   eight family dispatch surfaces, and remove or promote every dependency that prevents the complete
+   descriptor-owned C source set from linking standalone. Exit: exhaustive catalog and no monolithic
+   core link.
+3. **S3 — replayable C process.** Package schema, DSN, pool, tenancy, and every catalog handler in the
+   disabled C process; add reference-vs-process replay, schema, concurrency, cancellation, and fault
+   fixtures. Exit: byte and database-effect parity while the KB still serves local calls.
+4. **S4 — atomic C activation.** Start DB2 before consumers, move the DSN and every caller to generated
+   bus clients, remove DB2/libpq from the KB link, and make failed DB2 readiness fail closed. Exit:
+   only `aimee-module-db2` owns DB2 in the image.
+5. **S5 — DB3 contract and providers.** Land the provider-neutral observer contract, pgvector default
+   adapter, deterministic selection/fallback, committed outbox fan-out, candidate revalidation, and
+   conformance tests for a fake and optional external providers. Exit: one selected external provider
+   can replace every eligible operation without moving retained PostgreSQL-coupled work.
+6. **S6 — pure-Go parity.** Implement the frozen DB2 catalog in `server-go/modules/db2`, embed the same
+   SQL, and pass C-vs-Go replay, schema, tenant, concurrency, vector, DB3, durability, and performance
+   gates. Exit: a descriptor/runtime switch selects Go without caller or wire changes.
+7. **S7 — C retirement.** Deploy only the Go provider, remove the C tree and C-only shims after the
+   compatibility window, and prove no C DB2 object, stale grant, or fallback executable ships.
+
+Material changes to operation ownership, fallback semantics, observer selection, or the activation
+boundary return to roundtable review. Mechanical catalog additions follow the frozen rules above.
 
 ## 4. Phase one: put the existing C boundary behind the module
 

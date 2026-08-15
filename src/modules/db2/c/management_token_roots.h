@@ -1,7 +1,7 @@
 #ifndef AIMEE_DB2_MANAGEMENT_TOKEN_ROOTS_H
 #define AIMEE_DB2_MANAGEMENT_TOKEN_ROOTS_H
 
-#include "../kb/kb_mgmt_token_roots_provision.h"
+#include "kb_mgmt_token_roots_provision.h"
 
 #include <stddef.h>
 

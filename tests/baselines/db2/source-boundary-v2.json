@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "source_revision": "92d5e436a12079dfff94dba0febfce882d108f57",
+  "source_revision": "a596eaba2b74160e1d7d8709aaf58d0554a1802c",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 141,
@@ -6877,9 +6877,9 @@
     },
     {
       "source": "src/modules/db2/c/management_jwks_publication.h",
-      "header": "../kb/kb_mgmt_jwks_publication.h",
-      "resolved": "src/kb/kb_mgmt_jwks_publication.h",
-      "classification": "kb-authority-leak",
+      "header": "kb_mgmt_jwks_publication.h",
+      "resolved": "src/headers/kb_mgmt_jwks_publication.h",
+      "classification": "host-api",
       "count": 1
     },
     {
@@ -6905,9 +6905,9 @@
     },
     {
       "source": "src/modules/db2/c/management_token_authority.h",
-      "header": "../kb/kb_mgmt_token_authority.h",
-      "resolved": "src/kb/kb_mgmt_token_authority.h",
-      "classification": "kb-authority-leak",
+      "header": "kb_mgmt_token_authority.h",
+      "resolved": "src/headers/kb_mgmt_token_authority.h",
+      "classification": "host-api",
       "count": 1
     },
     {
@@ -6919,9 +6919,9 @@
     },
     {
       "source": "src/modules/db2/c/management_token_roots.h",
-      "header": "../kb/kb_mgmt_token_roots_provision.h",
-      "resolved": "src/kb/kb_mgmt_token_roots_provision.h",
-      "classification": "kb-authority-leak",
+      "header": "kb_mgmt_token_roots_provision.h",
+      "resolved": "src/headers/kb_mgmt_token_roots_provision.h",
+      "classification": "host-api",
       "count": 1
     },
     {
@@ -7268,5 +7268,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "35b4469ef5de6da05f6c6cbc1a9c46a2d28aeb74a5a2aed1adbad0c97ff17317"
+  "fingerprint": "c5cfc391db118cb48753b79338a308fff193fc56516f762f169611fd0581b5f3"
 }

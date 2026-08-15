@@ -89,6 +89,23 @@ class BoundaryTests(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def test_module_owned_adapter_is_not_an_outside_consumer(self) -> None:
+        tmp = self.repo()
+        try:
+            root = Path(tmp.name)
+            adapter = root / "src/modules/db2/module_adapter.c"
+            adapter.write_text(
+                '#include <aimee/db2/module_api.h>\n', encoding="utf-8"
+            )
+            inventory = checker.build_inventory(root, self.revision)
+            self.assertNotIn(
+                adapter.relative_to(root).as_posix(),
+                {row["path"] for row in inventory["consumers"]},
+            )
+            checker.check(root)
+        finally:
+            tmp.cleanup()
+
     def test_include_removal_is_allowed(self) -> None:
         tmp = self.repo()
         try:
@@ -205,6 +222,23 @@ class BoundaryTests(unittest.TestCase):
             self.assertEqual(classes["src/vendor/headers/vendor_api.h"], "vendored-system-api")
             self.assertEqual(classes["src/kb/private.h"], "kb-authority-leak")
             self.assertEqual(classes["src/schema_data.h"], "generated-schema-input")
+        finally:
+            tmp.cleanup()
+
+    def test_private_kb_import_is_forbidden_even_when_baselined(self) -> None:
+        tmp = self.repo()
+        try:
+            root = Path(tmp.name)
+            private = root / "src/kb/private.h"
+            private.write_text("int kb_private(void);\n", encoding="utf-8")
+            source = root / "src/modules/db2/c/store.c"
+            source.write_text(
+                source.read_text(encoding="utf-8") + '#include "kb/private.h"\n',
+                encoding="utf-8",
+            )
+            self.write_baseline(root)
+            with self.assertRaisesRegex(checker.BoundaryError, "rule=kb-authority-import"):
+                checker.check(root)
         finally:
             tmp.cleanup()
 
@@ -333,6 +367,20 @@ class BoundaryTests(unittest.TestCase):
             })
             with self.assertRaisesRegex(checker.BoundaryError, "new outbound dependency"):
                 checker.enforce_shrink_only(previous, dependency_added)
+
+            private_to_public = json.loads(json.dumps(previous))
+            row = private_to_public["outbound_dependencies"][0]
+            row["header"] = "kb_mgmt_contract.h"
+            row["resolved"] = "src/kb/kb_mgmt_contract.h"
+            row["classification"] = "kb-authority-leak"
+            promoted = json.loads(json.dumps(private_to_public))
+            promoted_row = promoted["outbound_dependencies"][0]
+            promoted_row["resolved"] = "src/headers/kb_mgmt_contract.h"
+            promoted_row["classification"] = "host-api"
+            checker.enforce_shrink_only(private_to_public, promoted)
+            promoted_row["count"] += 1
+            with self.assertRaisesRegex(checker.BoundaryError, "new outbound dependency"):
+                checker.enforce_shrink_only(private_to_public, promoted)
 
             legacy_v1 = json.loads(json.dumps(previous))
             legacy_v1.pop("outbound_dependencies")

@@ -1,7 +1,7 @@
 #ifndef AIMEE_DB2_MANAGEMENT_TOKEN_AUTHORITY_H
 #define AIMEE_DB2_MANAGEMENT_TOKEN_AUTHORITY_H
 
-#include "../kb/kb_mgmt_token_authority.h"
+#include "kb_mgmt_token_authority.h"
 #include "kb_mgmt_token_authority_ipc.h"
 
 #include <stddef.h>
