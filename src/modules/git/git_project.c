@@ -605,12 +605,28 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
          git_cred_inject_free_env(envp);
 
       /* A working inline token is worth keeping: persist it for the host so
-       * future pulls/pushes on any repo there reuse it (no re-entry). */
+       * future pulls/pushes on any repo there reuse it (no re-entry).
+       *
+       * The clone itself already succeeded, so a failure here must not fail the
+       * call — the caller has their repository. But it must not pass silently
+       * either: this is the only moment the token exists to be kept, and losing
+       * it here is indistinguishable afterwards from never having supplied one.
+       * Every later forge call then reports "no github credential" and points at
+       * a sign-in flow that appears to have worked. Say so where an operator
+       * will find it. */
       if (rc == 0 && token && token[0])
       {
          char host[GIT_HOST_MAX];
-         if (git_host_from_url(url, host, sizeof(host)))
-            git_host_cred_set(host, token);
+         if (!git_host_from_url(url, host, sizeof(host)))
+            aimee_log(LOG_WARN, "git.project.clone",
+                      "clone succeeded but the host could not be derived from the remote, so the "
+                      "supplied token was not kept; re-enter it to avoid re-authenticating");
+         else if (git_host_cred_set(host, token) != 0)
+            aimee_log(LOG_WARN, "git.project.clone",
+                      "clone succeeded but storing the token for %s failed, so it was not kept; "
+                      "forge operations on that host will report no credential until it is "
+                      "supplied again",
+                      host);
       }
 
       struct stat hst;
