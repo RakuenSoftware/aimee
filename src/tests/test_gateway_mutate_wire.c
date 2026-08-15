@@ -10,7 +10,7 @@
 
 #include "cJSON.h"
 #include "gateway_mutate_wire.h"
-#include "msg_session_disable.h"
+#include "msg_session_key.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
 

@@ -1,4 +1,4 @@
-/* msg_session_disable.h: the per-identity session key the economizer's
+/* msg_session_key.h: the per-identity session key the economizer's
  * gateway-mutation path is keyed by (proposal economizer-gateway-mutation §2.4).
  *
  * The circuit breaker itself is gone from C. It is state, so it lives in the Go
@@ -9,8 +9,8 @@
  * only ever RESOLVABLE from a per-identity credential — there is no shared
  * "_anonymous" bucket — so one caller's failure can never disable reduction for an
  * unrelated caller (§7 R5). Pure and thread-safe: no state, no lock. */
-#ifndef DEC_MSG_SESSION_DISABLE_H
-#define DEC_MSG_SESSION_DISABLE_H 1
+#ifndef DEC_MSG_SESSION_KEY_H
+#define DEC_MSG_SESSION_KEY_H 1
 
 #include <stddef.h>
 
@@ -57,4 +57,4 @@ extern "C"
 }
 #endif
 
-#endif /* DEC_MSG_SESSION_DISABLE_H */
+#endif /* DEC_MSG_SESSION_KEY_H */
