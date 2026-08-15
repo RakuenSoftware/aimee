@@ -25,7 +25,7 @@ class CuratorAbsenceTests(unittest.TestCase):
         (root / "src/server").mkdir(parents=True)
         files = set(checker.CONFIG_FILES + checker.BUILD_FILES + (
             "src/modules/memory/memory_maintenance.c",
-            "src/db1/maintenance.c",
+            "src/modules/db1/maintenance.c",
             "src/modules/config/config_kb_curator.c",
             "src/modules/kb-synthesis/kb_curator_pipeline.c",
             "src/modules/kb-synthesis/kb_curator_queue.c",

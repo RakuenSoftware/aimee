@@ -21,7 +21,7 @@
 #include "aimee.h"
 #include "db1.h"
 #include "db_schema.h"
-#include "db1/roadmap_runtime.h"
+#include "modules/db1/roadmap_runtime.h"
 #include "roadmap_milestone.h"
 #include "roadmap_reassess.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */

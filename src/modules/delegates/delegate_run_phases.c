@@ -13,8 +13,8 @@
 #include "agent.h"
 #include "agent_config.h"
 #include "cmd_agent_delegate_impl.h"
-#include "db1/delegate_learning.h"
-#include "db1/interaction_events.h"
+#include "modules/db1/delegate_learning.h"
+#include "modules/db1/interaction_events.h"
 #include "guardrails.h" /* git_repo_root, is_aimee_worktree_path */
 #include "log.h"
 #include "util.h"                      /* run_cmd, run_cmd_set_cwd */

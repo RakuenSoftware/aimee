@@ -13,8 +13,8 @@
 #include "server.h"
 
 #include "cJSON.h"
-#include "db1/agent_jobs.h"
-#include "db1/delegate_reservation.h"
+#include "modules/db1/agent_jobs.h"
+#include "modules/db1/delegate_reservation.h"
 #include "json_fluent.h" /* jo_ok */
 
 int handle_delegate_reservation_forget(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

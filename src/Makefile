@@ -104,7 +104,7 @@ endif
 # would fail trying to write .d dependency files into non-existent subdirectories.
 _DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/db2)
 
-C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1 -Idb2 -Imodules/config -Imodules/economizer -Imodules/learning/include -Imodules/roadmap -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -Imodules/memory/include -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/connection/include -Icore/event_bus/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
+C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Imodules/db1 -Idb2 -Imodules/config -Imodules/economizer -Imodules/learning/include -Imodules/roadmap -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -Imodules/memory/include -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/connection/include -Icore/event_bus/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
 
 # DB2 client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
@@ -211,7 +211,7 @@ C_FLAGS += $(PIC_FLAGS)
 
 # Client sources are intentionally DB-blind. They compile without DB include
 # paths or libpq discovery flags, and link without DB libraries.
-CLIENT_C_FLAGS := $(filter-out -I. -Idb1 -Idb2 $(PQ_CFLAGS),$(C_FLAGS)) $(TLS_FLAGS)
+CLIENT_C_FLAGS := $(filter-out -I. -Imodules/db1 -Idb2 $(PQ_CFLAGS),$(C_FLAGS)) $(TLS_FLAGS)
 
 # --- Lean build profile ---
 LEAN_BINARY = ../aimee-lean$(EXEEXT)
@@ -306,7 +306,7 @@ MCP_GIT_SRCS = modules/git/mcp_git_query.c modules/git/mcp_git_write.c modules/g
 MCP_GIT_OBJS = $(MCP_GIT_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 0: Foundation (db, config, util, text, render, log, platform, cJSON) ---
-CORE_SRCS = command_registry.c db1/db.c db1/db_schema.c modules/config/config.c modules/config/config_sections.c modules/config/config_database.c modules/config/config_learning.c modules/config/config_memory.c modules/config/config_charter.c modules/config/config_trigger.c modules/config/config_kb_maintenance.c modules/config/config_kb_curator.c modules/config/config_server_api.c modules/config/config_skills.c modules/config/config_save.c modules/config/config_elements.c modules/config/config_econ.c modules/config/config_mode.c modules/config/config_fields.c modules/config/config_accessors_0.c modules/config/config_accessors_1.c modules/config/config_accessors_2.c modules/config/config_accessors_3.c modules/config/config_accessors_4.c modules/config/config_accessors_5.c modules/config/config_accessors_6.c modules/config/config_accessors_7.c toolset.c util.c util_url.c aimee_sha256.c module_json_call.c kb/kb_identity.c modules/git/forge_credentials.c forge_app_token.c modules/vault/runtime_secret.c modules/workspace/workspace_mirror.c report_enrichment.c modules/audit/audit_action.c modules/audit/audit_worm.c modules/audit/audit_worm_chain.c modules/audit/audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c rrf.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
+CORE_SRCS = command_registry.c modules/db1/db.c modules/db1/db_schema.c modules/config/config.c modules/config/config_sections.c modules/config/config_database.c modules/config/config_learning.c modules/config/config_memory.c modules/config/config_charter.c modules/config/config_trigger.c modules/config/config_kb_maintenance.c modules/config/config_kb_curator.c modules/config/config_server_api.c modules/config/config_skills.c modules/config/config_save.c modules/config/config_elements.c modules/config/config_econ.c modules/config/config_mode.c modules/config/config_fields.c modules/config/config_accessors_0.c modules/config/config_accessors_1.c modules/config/config_accessors_2.c modules/config/config_accessors_3.c modules/config/config_accessors_4.c modules/config/config_accessors_5.c modules/config/config_accessors_6.c modules/config/config_accessors_7.c toolset.c util.c util_url.c aimee_sha256.c module_json_call.c kb/kb_identity.c modules/git/forge_credentials.c forge_app_token.c modules/vault/runtime_secret.c modules/workspace/workspace_mirror.c report_enrichment.c modules/audit/audit_action.c modules/audit/audit_worm.c modules/audit/audit_worm_chain.c modules/audit/audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c rrf.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
             aimee_home.c shared/kb_paths.c provider_client.c kb_curator_provider.c \
             compact.c wire_fence.c modules/economizer/economizer_module_client.c platform_random.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
             client_integrations.c modules/protocols/mcp/mcp_group_tool.c modules/protocols/mcp/mcp_tools.c modules/protocols/mcp/mcp_tool_profile.c modules/protocols/mcp/mcp_tools_extended.c modules/protocols/mcp/mcp_skill_tools.c modules/protocols/mcp/mcp_tools_gateway.c events.c \
@@ -317,12 +317,12 @@ CORE_SRCS = command_registry.c db1/db.c db1/db_schema.c modules/config/config.c 
 CORE_OBJS = $(CORE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o
 
 # --- Layer 0b: DB1 (user-local tier) ---
-# See docs/STORAGE_TIERS.md. Files in src/db1/
+# See docs/STORAGE_TIERS.md. Files in src/modules/db1/
 # are the only ones that include <sqlite3.h> for DB1; callers in the rest
-# of the tree call typed domain functions declared in db1/*.h and never
-# see a handle. db1/*_mock.c are alternative implementations linked by
+# of the tree call typed domain functions declared in modules/db1/*.h and never
+# see a handle. modules/db1/*_mock.c are alternative implementations linked by
 # tests that want to exercise the API contract without a real backend.
-DB1_SRCS = db1/db1_init.c db1/db1_write.c db1/wm.c db1/fsnap.c db1/checkpoints.c db1/roadmap_runtime.c db1/clarify.c db1/diagnose.c db1/ensemble.c db1/caches.c db1/web_page_cache.c db1/primary_sessions.c db1/webchat_claude_sessions.c db1/webchat_live.c db1/env.c db1/delegations.c db1/delegation_checkpoint.c db1/decisions.c db1/eval.c db1/runtime_state.c db1/server_sessions.c db1/session_state.c db1/session_paths.c db1/token_audit.c db1/model_pricing.c db1/agent_log.c db1/agent_jobs.c db1/coord_jobs.c db1/execution_plans.c db1/pipelines.c db1/roundtable_pipeline.c db1/secrets.c db1/cognify_jobs.c db1/cost_fold.c db1/local_operator.c db1/remote_client_grant.c db1/project_clones.c db1/git_ownership.c db1/tool_local_availability.c db1/model_catalog.c db1/execution_trace.c db1/working_profile_local.c db1/windows.c db1/diagnostics.c db1/maintenance.c db1/conv_context.c db1/payload_rewrite_state.c db1/guardrail_events.c db1/db1_trigger.c db1/db1_cron_jobs.c db1/delegate_learning.c db1/delegate_reservation.c db1/interaction_events.c db1/mcp_osv_cache.c db1/server_management_jti.c db1/server_identity_jti.c server/server_mgmt_jwks_cache.c db1/wfe_store.c db1/wfe_binding.c db1/user_memory.c
+DB1_SRCS = modules/db1/db1_init.c modules/db1/db1_write.c modules/db1/wm.c modules/db1/fsnap.c modules/db1/checkpoints.c modules/db1/roadmap_runtime.c modules/db1/clarify.c modules/db1/diagnose.c modules/db1/ensemble.c modules/db1/caches.c modules/db1/web_page_cache.c modules/db1/primary_sessions.c modules/db1/webchat_claude_sessions.c modules/db1/webchat_live.c modules/db1/env.c modules/db1/delegations.c modules/db1/delegation_checkpoint.c modules/db1/decisions.c modules/db1/eval.c modules/db1/runtime_state.c modules/db1/server_sessions.c modules/db1/session_state.c modules/db1/session_paths.c modules/db1/token_audit.c modules/db1/model_pricing.c modules/db1/agent_log.c modules/db1/agent_jobs.c modules/db1/coord_jobs.c modules/db1/execution_plans.c modules/db1/pipelines.c modules/db1/roundtable_pipeline.c modules/db1/secrets.c modules/db1/cognify_jobs.c modules/db1/cost_fold.c modules/db1/local_operator.c modules/db1/remote_client_grant.c modules/db1/project_clones.c modules/db1/git_ownership.c modules/db1/tool_local_availability.c modules/db1/model_catalog.c modules/db1/execution_trace.c modules/db1/working_profile_local.c modules/db1/windows.c modules/db1/diagnostics.c modules/db1/maintenance.c modules/db1/conv_context.c modules/db1/payload_rewrite_state.c modules/db1/guardrail_events.c modules/db1/db1_trigger.c modules/db1/db1_cron_jobs.c modules/db1/delegate_learning.c modules/db1/delegate_reservation.c modules/db1/interaction_events.c modules/db1/mcp_osv_cache.c modules/db1/server_management_jti.c modules/db1/server_identity_jti.c server/server_mgmt_jwks_cache.c modules/db1/wfe_store.c modules/db1/wfe_binding.c modules/db1/user_memory.c
 DB1_OBJS = $(DB1_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 0c: DB2 (shared knowledge tier) ---
@@ -707,7 +707,7 @@ KB_BEDROCK_IR_OBJS = $(OBJDIR)/modules/translation/aimee_backend_bedrock.o \
 # callers (guardrails_action_audit.c / cmd_audit.c / server_state.c are server/
 # CLI only), while the shared modules/audit/audit_worm_chain.c is pure hashing (no sqlite) and
 # stays. Excluding it keeps the kb-only/split image build from needing sqlite3.h.
-KB_CORE_SRCS = $(filter-out db1/% modules/audit/audit_worm.c,$(CORE_SRCS))
+KB_CORE_SRCS = $(filter-out modules/db1/% modules/audit/audit_worm.c,$(CORE_SRCS))
 KB_CORE_OBJS = $(KB_CORE_SRCS:%.c=$(OBJDIR)/kb/%.o) $(OBJDIR)/cJSON.o
 KB_DB2_PG_OBJS = $(DB2_PG_SRCS:%.c=$(OBJDIR)/kb/%.o)
 KB_DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/kb/%.o)
@@ -1461,8 +1461,8 @@ oidc-login-live: ../oidc-login-live
                             $(OBJDIR)/kb/kb_identity_token.o \
                             $(OBJDIR)/server/oauth_pkce.o \
                             $(OBJDIR)/modules/vault/vault_crypto.o \
-                            $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db.o \
-                            $(OBJDIR)/db1/db_schema.o $(OBJDIR)/cJSON.o
+                            $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db.o \
+                            $(OBJDIR)/modules/db1/db_schema.o $(OBJDIR)/cJSON.o
 	$(CC) -o $@ $^ $(L_SERVER)
 
 .PHONY: write-tier-enforce-live
@@ -1646,7 +1646,7 @@ $(OBJDIR)/server/agent_policy.o: server/agent_policy.c tool_prompts_data.h
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -o $@ $<
 
-SCHEMA_FILES := db1/schema.sql db1/roadmap_runtime.sql db2/schema.sql db2/schema_sqlite.sql
+SCHEMA_FILES := modules/db1/schema.sql modules/db1/roadmap_runtime.sql db2/schema.sql db2/schema_sqlite.sql
 
 schema_data.h: $(SCHEMA_FILES) gen_schema.py
 	@tmp='$@.$$$$.tmp'; \
@@ -1811,7 +1811,7 @@ sdk-parity-check:
 curator-story-check:
 	@python3 ../scripts/check-curator-story.py
 
-$(OBJDIR)/db1/db_schema.o: db1/db_schema.c schema_data.h
+$(OBJDIR)/modules/db1/db_schema.o: modules/db1/db_schema.c schema_data.h
 	@mkdir -p $(OBJDIR)
 	$(CC) -c $(C_FLAGS) -o $@ $<
 

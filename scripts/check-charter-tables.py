@@ -114,7 +114,7 @@ def main() -> int:
         return plant_test()
 
     src = pathlib.Path(args.src_dir)
-    return check(src / "db2" / "schema.sql", src / "db1" / "schema.sql")
+    return check(src / "db2" / "schema.sql", src / "modules" / "db1" / "schema.sql")
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@
 #include "agent_config.h" /* agent_request_cancelled — server-owned turn lifecycle */
 #include "aimee_errors.h"
 #include "db1.h"
-#include "db1/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
+#include "modules/db1/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
 #include <aimee/delegates/delegate_role.h>
 #include <aimee/delegates/delegate_launch_args.h>
 #include "role_templates.h"

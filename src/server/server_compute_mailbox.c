@@ -29,10 +29,10 @@
 #include <openssl/crypto.h>
 #include <aimee/delegates/delegate_economics.h>
 #include <aimee/delegates/delegate_run_phases.h>
-#include "db1/delegate_learning.h"
+#include "modules/db1/delegate_learning.h"
 #include "kb_client.h"
 #include "kb_bandit.h"
-#include "db1/interaction_events.h"
+#include "modules/db1/interaction_events.h"
 #include <aimee/delegates/delegate_role.h>
 #include "evidence_replay.h"
 #include "guardrails.h"
