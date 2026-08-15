@@ -199,17 +199,53 @@ aimee-kb project attribute <code-index-project> <kb-project-id>
 Re-running `project attribute` replaces the prior binding atomically. It is an org-admin operation;
 both exact projects must already exist, and no name-based fallback is attempted.
 
-Before enabling, the following query must return no rows for either content table:
+Before enabling, the following query must return no rows. Embeddings must agree with their owning
+chunk, regions and table cells inherit through their foreign-key chain, and assets must still have a
+matching document. If pgvector is intentionally unavailable, omit the two embedding arms because
+those optional relations do not exist.
 
 ```bash
 psql "$AIMEE_DB2_URL" -c "
-  SELECT 'kb_documents' AS source, d.project, count(*)
+  SELECT 'kb_documents' AS source, d.project, count(*) AS rows
     FROM kb_documents d LEFT JOIN projects p ON p.name=d.project
    WHERE p.kb_project IS NULL GROUP BY d.project
   UNION ALL
   SELECT 'kb_file_index', f.project, count(*)
     FROM kb_file_index f LEFT JOIN projects p ON p.name=f.project
-   WHERE p.kb_project IS NULL GROUP BY f.project;"
+   WHERE p.kb_project IS NULL GROUP BY f.project
+  UNION ALL
+  SELECT 'kb_embeddings', e.project, count(*)
+    FROM kb_embeddings e
+    LEFT JOIN kb_documents d ON d.id=e.point_id AND d.project=e.project
+    LEFT JOIN projects p ON p.name=d.project
+   WHERE p.kb_project IS NULL GROUP BY e.project
+  UNION ALL
+  SELECT 'kb_pdf_embeddings', e.project, count(*)
+    FROM kb_pdf_embeddings e
+    LEFT JOIN kb_documents d ON d.id=e.point_id AND d.project=e.project
+    LEFT JOIN projects p ON p.name=d.project
+   WHERE p.kb_project IS NULL GROUP BY e.project
+  UNION ALL
+  SELECT 'kb_doc_regions', coalesce(d.project,'<missing chunk>'), count(*)
+    FROM kb_doc_regions r LEFT JOIN kb_documents d ON d.id=r.chunk_id
+    LEFT JOIN projects p ON p.name=d.project
+   WHERE p.kb_project IS NULL GROUP BY d.project
+  UNION ALL
+  SELECT 'kb_table_cells',
+         coalesce(d.project,CASE WHEN r.id IS NULL THEN '<missing region>' ELSE '<missing chunk>' END),
+         count(*)
+    FROM kb_table_cells c LEFT JOIN kb_doc_regions r ON r.id=c.region_id
+    LEFT JOIN kb_documents d ON d.id=r.chunk_id LEFT JOIN projects p ON p.name=d.project
+   WHERE p.kb_project IS NULL
+   GROUP BY coalesce(d.project,
+                     CASE WHEN r.id IS NULL THEN '<missing region>' ELSE '<missing chunk>' END)
+  UNION ALL
+  SELECT 'kb_doc_assets', a.project, count(*)
+    FROM kb_doc_assets a
+    LEFT JOIN kb_documents d ON d.project=a.project AND d.generation=a.generation
+                            AND d.file_path=a.document_key
+    LEFT JOIN projects p ON p.name=d.project
+   WHERE p.kb_project IS NULL GROUP BY a.project;"
 ```
 
 Then enable the policies as a deliberate operator act:
@@ -219,8 +255,14 @@ psql "$AIMEE_DB2_URL" -c "select kb_content_scope_enable();"
 ```
 
 The function refuses unless the release readiness marker is present and every content-bearing
-project is attributed. To roll back enforcement without changing attribution, call
+project and child row is attributed consistently. It atomically enables documents, file index,
+general/PDF embeddings, document regions, table cells, and document assets. To roll back enforcement
+without changing attribution, call
 `select kb_content_scope_disable();`.
+
+Re-run `kb_content_scope_enable()` after this upgrade even when document/file-index scope was already
+enabled. The call is idempotent and brings the newly covered vector and structured-document tables
+under the same operator-controlled switch.
 
 Grants are keyed by server, team, and exact authenticated subject:
 

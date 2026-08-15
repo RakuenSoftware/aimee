@@ -2126,8 +2126,8 @@ CREATE POLICY p_project_member ON kb_project
 -- docs/validation/per-user-content-scope-prototype.md; do not "simplify" this
 -- into a name match.
 --
--- NULL means unattributed, and kb_project_visible() denies it. Nothing reads
--- that yet, so an existing deployment is unaffected until the policies land.
+-- NULL means unattributed, and kb_project_visible() denies it. The policies
+-- below remain inert until the operator completes attribution and enables RLS.
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS kb_project BIGINT REFERENCES kb_project(id);
 CREATE INDEX IF NOT EXISTS idx_projects_kb_project ON projects(kb_project);
 
@@ -2176,6 +2176,16 @@ LANGUAGE sql STABLE AS $$
                         current_setting('aimee.maintenance_kb_project', true));
 $$;
 
+-- Resolve a code-index project name through the one authoritative tenancy link.
+-- Child-content policies call this rather than repeating the membership rule or
+-- trying to resolve a non-unique kb_project name.
+CREATE OR REPLACE FUNCTION kb_content_project_visible(p_project TEXT) RETURNS boolean
+LANGUAGE sql STABLE AS $$
+  SELECT p_project IS NOT NULL AND EXISTS (
+    SELECT 1 FROM projects p
+     WHERE p.name = p_project AND kb_project_visible(p.kb_project));
+$$;
+
 -- CONTENT SCOPE, part 2: the policies, DEFINED BUT NOT ENABLED.
 --
 -- A policy is inert until RLS is enabled on its table, so applying this file
@@ -2190,15 +2200,11 @@ $$;
 -- advertised and absent.
 DROP POLICY IF EXISTS p_documents_project ON kb_documents;
 CREATE POLICY p_documents_project ON kb_documents
-  FOR SELECT USING (EXISTS (SELECT 1 FROM projects p
-                            WHERE p.name = kb_documents.project
-                              AND kb_project_visible(p.kb_project)));
+  FOR SELECT USING (kb_content_project_visible(project));
 
 DROP POLICY IF EXISTS p_file_index_project ON kb_file_index;
 CREATE POLICY p_file_index_project ON kb_file_index
-  FOR SELECT USING (EXISTS (SELECT 1 FROM projects p
-                            WHERE p.name = kb_file_index.project
-                              AND kb_project_visible(p.kb_project)));
+  FOR SELECT USING (kb_content_project_visible(project));
 
 DROP POLICY IF EXISTS p_documents_maintenance_write ON kb_documents;
 CREATE POLICY p_documents_maintenance_write ON kb_documents
@@ -2211,6 +2217,109 @@ CREATE POLICY p_file_index_maintenance_write ON kb_file_index
   FOR ALL
   USING (kb_maintenance_content_project(project))
   WITH CHECK (kb_maintenance_content_project(project));
+
+-- Embedding rows carry a cached project, but point_id is the owning
+-- kb_documents row. Require BOTH to agree so a stale or forged cached project
+-- cannot relabel another tenant's payload_json. These relations are optional
+-- when pgvector is unavailable, so their policies are installed conditionally.
+DO $content_scope_vectors$ BEGIN
+  IF to_regclass('kb_embeddings') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS p_embeddings_project ON kb_embeddings';
+    EXECUTE 'CREATE POLICY p_embeddings_project ON kb_embeddings FOR SELECT USING ('
+            'kb_content_project_visible(project) AND EXISTS ('
+            'SELECT 1 FROM kb_documents d WHERE d.id=kb_embeddings.point_id '
+            'AND d.project=kb_embeddings.project))';
+    EXECUTE 'DROP POLICY IF EXISTS p_embeddings_maintenance_write ON kb_embeddings';
+    EXECUTE 'CREATE POLICY p_embeddings_maintenance_write ON kb_embeddings FOR ALL '
+            'USING (kb_maintenance_content_project(project) AND EXISTS ('
+            'SELECT 1 FROM kb_documents d WHERE d.id=kb_embeddings.point_id '
+            'AND d.project=kb_embeddings.project)) '
+            'WITH CHECK (kb_maintenance_content_project(project) AND EXISTS ('
+            'SELECT 1 FROM kb_documents d WHERE d.id=kb_embeddings.point_id '
+            'AND d.project=kb_embeddings.project))';
+  END IF;
+  IF to_regclass('kb_pdf_embeddings') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS p_pdf_embeddings_project ON kb_pdf_embeddings';
+    EXECUTE 'CREATE POLICY p_pdf_embeddings_project ON kb_pdf_embeddings FOR SELECT USING ('
+            'kb_content_project_visible(project) AND EXISTS ('
+            'SELECT 1 FROM kb_documents d WHERE d.id=kb_pdf_embeddings.point_id '
+            'AND d.project=kb_pdf_embeddings.project))';
+    EXECUTE 'DROP POLICY IF EXISTS p_pdf_embeddings_maintenance_write ON kb_pdf_embeddings';
+    EXECUTE 'CREATE POLICY p_pdf_embeddings_maintenance_write ON kb_pdf_embeddings FOR ALL '
+            'USING (kb_maintenance_content_project(project) AND EXISTS ('
+            'SELECT 1 FROM kb_documents d WHERE d.id=kb_pdf_embeddings.point_id '
+            'AND d.project=kb_pdf_embeddings.project)) '
+            'WITH CHECK (kb_maintenance_content_project(project) AND EXISTS ('
+            'SELECT 1 FROM kb_documents d WHERE d.id=kb_pdf_embeddings.point_id '
+            'AND d.project=kb_pdf_embeddings.project))';
+  END IF;
+END $content_scope_vectors$;
+
+-- Regions and cells inherit their owner through the mandatory chunk/region
+-- foreign-key chain, never their denormalised document_key. Assets have no
+-- single document row to reference, so they require project + generation +
+-- document_key to match an authoritative chunk. kb_table_cells and kb_doc_assets
+-- were added after the original slice-3 proposal; leaving them out would preserve
+-- direct readable-content bypasses beside protected regions.
+DROP POLICY IF EXISTS p_doc_regions_project ON kb_doc_regions;
+CREATE POLICY p_doc_regions_project ON kb_doc_regions
+  FOR SELECT USING (EXISTS (SELECT 1 FROM kb_documents d
+                             WHERE d.id = kb_doc_regions.chunk_id
+                               AND kb_content_project_visible(d.project)));
+
+DROP POLICY IF EXISTS p_doc_regions_maintenance_write ON kb_doc_regions;
+CREATE POLICY p_doc_regions_maintenance_write ON kb_doc_regions
+  FOR ALL
+  USING (EXISTS (SELECT 1 FROM kb_documents d
+                  WHERE d.id = kb_doc_regions.chunk_id
+                    AND kb_maintenance_content_project(d.project)))
+  WITH CHECK (EXISTS (SELECT 1 FROM kb_documents d
+                       WHERE d.id = kb_doc_regions.chunk_id
+                         AND kb_maintenance_content_project(d.project)));
+
+DROP POLICY IF EXISTS p_table_cells_project ON kb_table_cells;
+CREATE POLICY p_table_cells_project ON kb_table_cells
+  FOR SELECT USING (EXISTS (SELECT 1 FROM kb_doc_regions r
+                              JOIN kb_documents d ON d.id = r.chunk_id
+                             WHERE r.id = kb_table_cells.region_id
+                               AND kb_content_project_visible(d.project)));
+
+DROP POLICY IF EXISTS p_table_cells_maintenance_write ON kb_table_cells;
+CREATE POLICY p_table_cells_maintenance_write ON kb_table_cells
+  FOR ALL
+  USING (EXISTS (SELECT 1 FROM kb_doc_regions r
+                   JOIN kb_documents d ON d.id = r.chunk_id
+                  WHERE r.id = kb_table_cells.region_id
+                    AND kb_maintenance_content_project(d.project)))
+  WITH CHECK (EXISTS (SELECT 1 FROM kb_doc_regions r
+                        JOIN kb_documents d ON d.id = r.chunk_id
+                       WHERE r.id = kb_table_cells.region_id
+                         AND kb_maintenance_content_project(d.project)));
+
+DROP POLICY IF EXISTS p_doc_assets_project ON kb_doc_assets;
+CREATE POLICY p_doc_assets_project ON kb_doc_assets
+  FOR SELECT USING (
+    kb_content_project_visible(project)
+    AND EXISTS (SELECT 1 FROM kb_documents d
+                 WHERE d.project = kb_doc_assets.project
+                   AND d.generation = kb_doc_assets.generation
+                   AND d.file_path = kb_doc_assets.document_key));
+
+DROP POLICY IF EXISTS p_doc_assets_maintenance_write ON kb_doc_assets;
+CREATE POLICY p_doc_assets_maintenance_write ON kb_doc_assets
+  FOR ALL
+  USING (
+    kb_maintenance_content_project(project)
+    AND EXISTS (SELECT 1 FROM kb_documents d
+                 WHERE d.project = kb_doc_assets.project
+                   AND d.generation = kb_doc_assets.generation
+                   AND d.file_path = kb_doc_assets.document_key))
+  WITH CHECK (
+    kb_maintenance_content_project(project)
+    AND EXISTS (SELECT 1 FROM kb_documents d
+                 WHERE d.project = kb_doc_assets.project
+                   AND d.generation = kb_doc_assets.generation
+                   AND d.file_path = kb_doc_assets.document_key));
 
 -- Turn content scoping on, once the rows carry a kb_project.
 --
@@ -2227,6 +2336,11 @@ LANGUAGE plpgsql AS $$
 DECLARE
   orphan_docs BIGINT;
   orphan_files BIGINT;
+  orphan_embeddings BIGINT := 0;
+  orphan_pdf_embeddings BIGINT := 0;
+  orphan_regions BIGINT;
+  orphan_cells BIGINT;
+  orphan_assets BIGINT;
   reader_ready TEXT;
 BEGIN
   -- THE READER SIDE MUST EXIST FIRST. The marker is a release capability fact,
@@ -2241,22 +2355,130 @@ BEGIN
                     'authenticated caller path and transaction-local content reader scope ready. '
                     'Upgrade before enabling.';
   END IF;
+  -- ALTER TABLE below already requires owner authority, but make the full-row
+  -- preflight assumption explicit. A direct owner, a role inheriting the owner,
+  -- or a PostgreSQL BYPASSRLS/superuser role can audit every row once FORCE is
+  -- removed; anyone else is refused rather than allowed to count a tenant slice.
+  IF EXISTS (
+       SELECT 1
+         FROM (VALUES ('kb_documents'), ('kb_file_index'), ('kb_embeddings'),
+                      ('kb_pdf_embeddings'), ('kb_doc_regions'), ('kb_table_cells'),
+                      ('kb_doc_assets')) AS required_relation(name)
+         JOIN pg_class c ON c.oid=to_regclass(required_relation.name)
+        WHERE NOT pg_has_role(current_user, c.relowner, 'USAGE'))
+     AND NOT EXISTS (SELECT 1 FROM pg_roles
+                      WHERE rolname=current_user AND (rolsuper OR rolbypassrls)) THEN
+    RAISE EXCEPTION 'refusing to enable content scope: current role cannot audit every row '
+                    'as the owner or a BYPASSRLS role.';
+  END IF;
+  -- Refuse partial/manual schema states. Optional vector relations are omitted
+  -- only when pgvector made the relation itself unavailable; every relation that
+  -- exists must have both its reader and exact-project maintenance policy.
+  IF EXISTS (
+       SELECT 1
+         FROM (VALUES
+           ('kb_documents','p_documents_project'),
+           ('kb_documents','p_documents_maintenance_write'),
+           ('kb_file_index','p_file_index_project'),
+           ('kb_file_index','p_file_index_maintenance_write'),
+           ('kb_embeddings','p_embeddings_project'),
+           ('kb_embeddings','p_embeddings_maintenance_write'),
+           ('kb_pdf_embeddings','p_pdf_embeddings_project'),
+           ('kb_pdf_embeddings','p_pdf_embeddings_maintenance_write'),
+           ('kb_doc_regions','p_doc_regions_project'),
+           ('kb_doc_regions','p_doc_regions_maintenance_write'),
+           ('kb_table_cells','p_table_cells_project'),
+           ('kb_table_cells','p_table_cells_maintenance_write'),
+           ('kb_doc_assets','p_doc_assets_project'),
+           ('kb_doc_assets','p_doc_assets_maintenance_write'))
+              AS required_policy(relation_name, policy_name)
+        WHERE to_regclass(required_policy.relation_name) IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM pg_policy p
+                           WHERE p.polrelid=to_regclass(required_policy.relation_name)
+                             AND p.polname=required_policy.policy_name)) THEN
+    RAISE EXCEPTION 'refusing to enable content scope: a covered relation exists without '
+                    'its reader or maintenance policy. Reapply the current schema first.';
+  END IF;
+  -- An already-enabled deployment must be able to re-run this switch after an
+  -- upgrade adds another covered table. FORCE would otherwise make the owner's
+  -- preflight queries see only its (normally empty) tenant scope. Removing FORCE
+  -- acquires the table locks inside this transaction; an exception rolls every
+  -- flag back, and success re-enables FORCE below, so there is no unscoped window.
+  ALTER TABLE kb_documents NO FORCE ROW LEVEL SECURITY;
+  ALTER TABLE kb_file_index NO FORCE ROW LEVEL SECURITY;
+  IF to_regclass('kb_embeddings') IS NOT NULL THEN
+    EXECUTE 'ALTER TABLE kb_embeddings NO FORCE ROW LEVEL SECURITY';
+  END IF;
+  IF to_regclass('kb_pdf_embeddings') IS NOT NULL THEN
+    EXECUTE 'ALTER TABLE kb_pdf_embeddings NO FORCE ROW LEVEL SECURITY';
+  END IF;
+  ALTER TABLE kb_doc_regions NO FORCE ROW LEVEL SECURITY;
+  ALTER TABLE kb_table_cells NO FORCE ROW LEVEL SECURITY;
+  ALTER TABLE kb_doc_assets NO FORCE ROW LEVEL SECURITY;
   SELECT count(*) INTO orphan_docs FROM kb_documents d
     WHERE NOT EXISTS (SELECT 1 FROM projects p
                       WHERE p.name = d.project AND p.kb_project IS NOT NULL);
   SELECT count(*) INTO orphan_files FROM kb_file_index f
     WHERE NOT EXISTS (SELECT 1 FROM projects p
                       WHERE p.name = f.project AND p.kb_project IS NOT NULL);
-  IF orphan_docs > 0 OR orphan_files > 0 THEN
-    RAISE EXCEPTION 'refusing to enable content scope: % document rows and % file-index rows '
-                    'have no kb_project, and would become invisible to everyone. Attribute them '
-                    '(projects.kb_project) and call again.', orphan_docs, orphan_files;
+  IF to_regclass('kb_embeddings') IS NOT NULL THEN
+    EXECUTE 'SELECT count(*) FROM kb_embeddings e WHERE NOT EXISTS ('
+            'SELECT 1 FROM kb_documents d JOIN projects p ON p.name=d.project '
+            'WHERE d.id=e.point_id AND d.project=e.project AND p.kb_project IS NOT NULL)'
+      INTO orphan_embeddings;
+  END IF;
+  IF to_regclass('kb_pdf_embeddings') IS NOT NULL THEN
+    EXECUTE 'SELECT count(*) FROM kb_pdf_embeddings e WHERE NOT EXISTS ('
+            'SELECT 1 FROM kb_documents d JOIN projects p ON p.name=d.project '
+            'WHERE d.id=e.point_id AND d.project=e.project AND p.kb_project IS NOT NULL)'
+      INTO orphan_pdf_embeddings;
+  END IF;
+  -- Structured-document relations are mandatory schema tables wherever this
+  -- switch exists; only pgvector-backed relations have an optional arm.
+  SELECT count(*) INTO orphan_regions FROM kb_doc_regions r
+    WHERE NOT EXISTS (SELECT 1 FROM kb_documents d
+                       JOIN projects p ON p.name=d.project
+                      WHERE d.id=r.chunk_id AND p.kb_project IS NOT NULL);
+  SELECT count(*) INTO orphan_cells FROM kb_table_cells c
+    WHERE NOT EXISTS (SELECT 1 FROM kb_doc_regions r
+                       JOIN kb_documents d ON d.id=r.chunk_id
+                       JOIN projects p ON p.name=d.project
+                      WHERE r.id=c.region_id AND p.kb_project IS NOT NULL);
+  SELECT count(*) INTO orphan_assets FROM kb_doc_assets a
+    WHERE NOT EXISTS (SELECT 1 FROM kb_documents d
+                       JOIN projects p ON p.name=d.project
+                      WHERE d.project=a.project AND d.generation=a.generation
+                        AND d.file_path=a.document_key
+                        AND p.kb_project IS NOT NULL);
+  IF orphan_docs > 0 OR orphan_files > 0 OR orphan_embeddings > 0
+     OR orphan_pdf_embeddings > 0 OR orphan_regions > 0 OR orphan_cells > 0
+     OR orphan_assets > 0 THEN
+    RAISE EXCEPTION 'refusing to enable content scope: unattributed/mismatched rows: '
+                    '% documents, % file-index, % embeddings, % PDF embeddings, '
+                    '% regions, % table cells, % assets. They would become invisible to '
+                    'everyone. Attribute projects.kb_project, repair child ownership, and call '
+                    'again.', orphan_docs, orphan_files, orphan_embeddings,
+                    orphan_pdf_embeddings, orphan_regions, orphan_cells, orphan_assets;
   END IF;
   ALTER TABLE kb_documents ENABLE ROW LEVEL SECURITY;
   ALTER TABLE kb_documents FORCE ROW LEVEL SECURITY;
   ALTER TABLE kb_file_index ENABLE ROW LEVEL SECURITY;
   ALTER TABLE kb_file_index FORCE ROW LEVEL SECURITY;
-  RETURN 'content scope enabled on kb_documents, kb_file_index';
+  IF to_regclass('kb_embeddings') IS NOT NULL THEN
+    EXECUTE 'ALTER TABLE kb_embeddings ENABLE ROW LEVEL SECURITY';
+    EXECUTE 'ALTER TABLE kb_embeddings FORCE ROW LEVEL SECURITY';
+  END IF;
+  IF to_regclass('kb_pdf_embeddings') IS NOT NULL THEN
+    EXECUTE 'ALTER TABLE kb_pdf_embeddings ENABLE ROW LEVEL SECURITY';
+    EXECUTE 'ALTER TABLE kb_pdf_embeddings FORCE ROW LEVEL SECURITY';
+  END IF;
+  ALTER TABLE kb_doc_regions ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE kb_doc_regions FORCE ROW LEVEL SECURITY;
+  ALTER TABLE kb_table_cells ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE kb_table_cells FORCE ROW LEVEL SECURITY;
+  ALTER TABLE kb_doc_assets ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE kb_doc_assets FORCE ROW LEVEL SECURITY;
+  RETURN 'content scope enabled on project content tables';
 END;
 $$;
 
@@ -2269,6 +2491,20 @@ BEGIN
   ALTER TABLE kb_documents DISABLE ROW LEVEL SECURITY;
   ALTER TABLE kb_file_index NO FORCE ROW LEVEL SECURITY;
   ALTER TABLE kb_file_index DISABLE ROW LEVEL SECURITY;
+  IF to_regclass('kb_embeddings') IS NOT NULL THEN
+    EXECUTE 'ALTER TABLE kb_embeddings NO FORCE ROW LEVEL SECURITY';
+    EXECUTE 'ALTER TABLE kb_embeddings DISABLE ROW LEVEL SECURITY';
+  END IF;
+  IF to_regclass('kb_pdf_embeddings') IS NOT NULL THEN
+    EXECUTE 'ALTER TABLE kb_pdf_embeddings NO FORCE ROW LEVEL SECURITY';
+    EXECUTE 'ALTER TABLE kb_pdf_embeddings DISABLE ROW LEVEL SECURITY';
+  END IF;
+  ALTER TABLE kb_doc_regions NO FORCE ROW LEVEL SECURITY;
+  ALTER TABLE kb_doc_regions DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE kb_table_cells NO FORCE ROW LEVEL SECURITY;
+  ALTER TABLE kb_table_cells DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE kb_doc_assets NO FORCE ROW LEVEL SECURITY;
+  ALTER TABLE kb_doc_assets DISABLE ROW LEVEL SECURITY;
   RETURN 'content scope disabled';
 END;
 $$;
