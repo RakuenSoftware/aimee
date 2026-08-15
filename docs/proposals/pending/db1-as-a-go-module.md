@@ -149,6 +149,44 @@ The economizer reducer state is still the right first domain: two functions, one
 it finishes a seam that is otherwise complete. `gw_state_key` / `gw_fnv1a` /
 `gw_state_next_turn` follow the blob they key.
 
+#### Phase B ordering, measured
+
+Counted on `testing` at 2695, excluding `db_schema.h`, which exists in both `src/db1` and
+`src/db2` so a name match cannot tell the two apart:
+
+| Module | db1 includes |
+| --- | --- |
+| workflows | 14 |
+| delegates | 5 |
+| roundtable | 4 |
+| roadmap | 3 |
+| config, tools | 2 each |
+| audit, benchmarks, execution-policy, git, guardrails, kb_client, learning, memory, protocols | 1 each |
+
+Fifteen modules, 39 include sites. Nine have a single include, so most of Phase B is small
+cutovers and the ordering falls out of the table: the single-include modules establish the
+pattern, then `roadmap`, `roundtable`, `delegates`, and `workflows` last.
+
+**The coupling is direct, not inherited.** 271 files include a db1 header themselves; only 31
+gain the dependency solely through another header, and 16 of those are through
+`src/headers/db1_optional.h`. So there is no tangle to unpick first: Phase B is a large number
+of individually small cutovers, not a small number of load-bearing ones.
+
+#### `db1_optional.h` is the existing optionality seam, and Phase B must replace it
+
+`src/headers/db1_optional.h` already answers "which DB1 calls may be absent". Server builds
+link the real objects; KB builds do not, and under `AIMEE_DB1_DISABLED` the optional calls
+become null pointers that callers must guard. `src/kb/kb_mcp_osv_stub.c` is the same mechanism
+by hand: it stubs three DB1 symbols so a kb-hosted MCP plugin still runs the OSV supply-chain
+scan without linking DB1.
+
+Two consequences. The set of calls that file marks optional is a ready-made first cut at which
+DB1 surface is genuinely server-only, which informs the stage grouping in §3.1. And the
+weak-reference trick does not survive the move: once a caller reaches DB1 over the bus, "absent
+because unlinked" becomes "absent because unreachable", which is the availability answer every
+other module already gives. Phase B has to carry that guard across rather than delete it, or
+`aimee-kb` silently loses a security gate.
+
 ### Phase C — port the implementation to Go, per domain
 
 Only now does the language change, against a stage contract already proven by Phase B. This
