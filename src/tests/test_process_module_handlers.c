@@ -13,6 +13,7 @@
 #include <aimee/kb-synthesis/module_api.h>
 #include <aimee/learning/module_api.h>
 #include <aimee/memory/module_api.h>
+#include <aimee/postgres/module_api.h>
 #include <aimee/providers/module_api.h>
 #include <aimee/roundtable/module_api.h>
 #include <aimee/runtime-web/module_api.h>
@@ -89,6 +90,29 @@ static void test_learning(void)
        (AIMEE_LEARNING_SINK_RERANKER | AIMEE_LEARNING_SINK_SUPERSEDE | AIMEE_LEARNING_SINK_RULE));
    assert(learning_mask("workflow_repetition") == AIMEE_LEARNING_SINK_WORKFLOW);
    assert(learning_mask("unknown") == 0);
+}
+
+static void test_postgres_health_contract(void)
+{
+   uint8_t response[AIMEE_POSTGRES_RESPONSE_LEN] = {0};
+   int schema_ok = 0, have_pg_trgm = 0, kb_tables_ok = 0;
+   aimee_postgres_put_u32(response, AIMEE_POSTGRES_RESPONSE_MAGIC);
+   aimee_postgres_put_u32(response + 4, AIMEE_POSTGRES_WIRE_VERSION);
+   aimee_postgres_put_u32(response + 8, AIMEE_POSTGRES_FLAG_SCHEMA | AIMEE_POSTGRES_FLAG_PG_TRGM |
+                                            AIMEE_POSTGRES_FLAG_KB_TABLES);
+   assert(aimee_postgres_health_response_decode(response, sizeof(response), &schema_ok,
+                                                &have_pg_trgm, &kb_tables_ok) == 0);
+   assert(schema_ok && have_pg_trgm && kb_tables_ok);
+
+   /* Unknown evidence bits and non-zero reserved bytes are wire errors. */
+   aimee_postgres_put_u32(response + 8, 0x8u);
+   assert(aimee_postgres_health_response_decode(response, sizeof(response), &schema_ok,
+                                                &have_pg_trgm, &kb_tables_ok) == -1);
+   assert(!schema_ok && !have_pg_trgm && !kb_tables_ok);
+   aimee_postgres_put_u32(response + 8, AIMEE_POSTGRES_FLAG_KB_TABLES);
+   aimee_postgres_put_u32(response + 12, 1u);
+   assert(aimee_postgres_health_response_decode(response, sizeof(response), &schema_ok,
+                                                &have_pg_trgm, &kb_tables_ok) == -1);
 }
 
 /* Canonicalize `in` by going through the REAL bus module handler (encode ->
@@ -899,6 +923,7 @@ int main(void)
 {
    test_memory();
    test_learning();
+   test_postgres_health_contract();
    test_delegates();
    test_tools();
    test_workspace();
