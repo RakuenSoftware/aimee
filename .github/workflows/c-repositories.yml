@@ -1,7 +1,12 @@
 name: c-repository-pins
 
 on:
+  # main ONLY, on both triggers. The pins describe a RELEASE, so they are a
+  # main-branch question and nothing else: pushes to main, and pull requests
+  # INTO main. Nothing here runs for a branch or a PR targeting testing.
   push:
+    branches:
+      - main
     paths:
       - "dependencies/aimee-repositories.lock.json"
       - "src/core/**"
@@ -19,6 +24,8 @@ on:
       - "Dockerfile.server"
       - ".github/workflows/c-repositories.yml"
   pull_request:
+    branches:
+      - main
     paths:
       - "dependencies/aimee-repositories.lock.json"
       - "src/core/**"

@@ -44,22 +44,6 @@ const char *gw_module_bypass(int reduce_rc, const char *bypass)
    return bypass;
 }
 
-cJSON *gw_snapshot_messages(const cJSON *messages)
-{
-   if (!messages)
-      return NULL;
-   /* cJSON_Duplicate(recurse=1) deep-copies every child + string, and frees all
-    * partially-built sub-objects itself on any allocation failure, returning NULL. */
-   return cJSON_Duplicate((cJSON *)messages, 1);
-}
-
-int gw_snapshot_token_count(cJSON *messages)
-{
-   if (!messages)
-      return 0;
-   return session_compact_estimate_tokens(messages);
-}
-
 int gw_replace_messages(cJSON *container, const char *key, cJSON *reduced)
 {
    if (!container || !key || !reduced)

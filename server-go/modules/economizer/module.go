@@ -40,17 +40,14 @@ const (
 	StageStats       uint32 = 7
 )
 
-// StatsRequest either records one counter or asks for the published snapshot.
+// StatsRequest asks for the published snapshot.
 //
-// Recording exists for the two events only the CALLER can see -- its snapshot
-// allocation failing, and installing the reduced array failing. Both are rare
-// failure paths, so a bus call to report them is affordable; everything the
-// module decides it counts itself, on the call it was already handling.
+// Read-only by design. The counters are the module's, incremented where the
+// decisions are made, so there is no way for a caller to write one -- it has
+// nothing to report. The caller passes an IR and uses whatever IR comes back;
+// how many were mutated is not its business.
 type StatsRequest struct {
-	Op      string `json:"op"`                // "snapshot" | "inc" | "inc_reason"
-	Counter string `json:"counter,omitempty"` // for "inc"
-	Group   string `json:"group,omitempty"`   // for "inc_reason"
-	Reason  string `json:"reason,omitempty"`
+	Op string `json:"op"` // "snapshot" (the only operation)
 }
 
 // PostStatusRequest asks what a dispatched gateway turn owes now its upstream
@@ -392,31 +389,15 @@ func handlePostStatus(breaker *SessionBreaker, stats *GatewayStatsStore, req *Po
 	return body, bus.ModuleStatusOK
 }
 
-// handleStats records a caller-observed counter, or returns the snapshot the
-// HTTP surface publishes.
+// handleStats returns the snapshot the HTTP surface publishes.
 //
-// Reading is a call rather than a push because the counters are the module's and
-// the HTTP surface is C's: the side that owns the numbers hands them over when
+// A call rather than a push because the counters are the module's and the HTTP
+// surface is the caller's: the side that owns the numbers hands them over when
 // the side that owns the endpoint asks.
 func handleStats(stats *GatewayStatsStore, req *StatsRequest) ([]byte, bus.ModuleStatus) {
-	switch req.Op {
-	case "inc":
-		if req.Counter == "" {
-			return nil, bus.ModuleStatusInvalidRequest
-		}
-		stats.Inc(req.Counter)
-	case "inc_reason":
-		if req.Group == "" {
-			return nil, bus.ModuleStatusInvalidRequest
-		}
-		stats.IncReason(req.Group, req.Reason)
-	case "snapshot", "":
-		// Empty defaults to snapshot: a read is the harmless operation, so a
-		// malformed request can never silently increment something instead.
-	default:
+	if req.Op != "" && req.Op != "snapshot" {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-
 	body, err := json.Marshal(stats.Snapshot())
 	if err != nil {
 		return nil, bus.ModuleStatusInternal
