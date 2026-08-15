@@ -12,6 +12,11 @@ path and any residual. After reconciliation and the workflow proof there are 4 c
 20 partially delivered originals, 45 still-accurate pending originals, 19 new residuals, and 64
 final pending proposals.
 
+**2026-08-15 follow-up:** the later Go-or-reject lifecycle decisions are reconciled in the
+[`REJECTION_AUDIT_2026-08-15.md`](REJECTION_AUDIT_2026-08-15.md) correction audit. In particular,
+it restores evidence provenance to pending under review `roundtable-5b208f991988ccfcd75d915e` and
+records which other rejection PRs require their own Go-context rewrite.
+
 ## Decision rules
 
 1. A proposal stays pending only when its own stated deliverable remains coherent and unshipped.
