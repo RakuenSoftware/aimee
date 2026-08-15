@@ -84,7 +84,7 @@ normalizing. It guards one path. Wire it, staged shadow→enforce per source, in
 2. **Memory/KB write path** — at the `memory_fact_gate` seam so agent- and
    delegate-sourced memory is screened before persistence (complements, does not
    replace, the pending
-   [evidence provenance tiers](../rejected/proposal-evidence-provenance-tiers.md) — that
+   [evidence provenance tiers](proposal-evidence-provenance-tiers.md) — that
    proposal decides *how much a stored memory is trusted*; this one decides
    *whether hostile content is stored at all*).
 3. **KB document ingest** ahead of the Normalize stage (the pending
