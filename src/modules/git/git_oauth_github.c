@@ -248,9 +248,21 @@ int git_oauth_github_web_callback(const char *principal, const char *code, const
    int rc;
    if (cJSON_IsString(at) && at->valuestring[0])
    {
-      git_host_cred_set("github.com", at->valuestring);
+      /* Sign-in is not complete until the token is actually stored. GitHub
+       * handing us a token and the vault keeping it are separate failures, and
+       * reporting success on the first alone leaves the user believing they are
+       * connected while nothing was persisted — the next forge call then says
+       * "no github credential" with no hint that the sign-in it just completed
+       * is what dropped it. */
+      int stored = git_host_cred_set("github.com", at->valuestring) == 0;
       memset(at->valuestring, 0, strlen(at->valuestring)); /* wipe before free */
-      rc = 0;
+      if (stored)
+         rc = 0;
+      else
+      {
+         snprintf(err, errlen, "could not store the GitHub token");
+         rc = -1;
+      }
    }
    else
    {
@@ -357,13 +369,21 @@ int git_oauth_github_poll(const char *principal, char *err, size_t errlen)
    int rc;
    if (cJSON_IsString(at) && at->valuestring[0])
    {
-      git_host_cred_set("github.com", at->valuestring);
+      /* Storing is part of completing, not a side effect of it — see the
+       * matching note in the web callback. */
+      int stored = git_host_cred_set("github.com", at->valuestring) == 0;
       /* Wipe the token from the parsed JSON before freeing it. */
       memset(at->valuestring, 0, strlen(at->valuestring));
       pthread_mutex_lock(&g_lock);
       g_device_code[0] = '\0';
       pthread_mutex_unlock(&g_lock);
-      rc = 1;
+      if (stored)
+         rc = 1;
+      else
+      {
+         snprintf(err, errlen, "could not store the GitHub token");
+         rc = -1;
+      }
    }
    else if (cJSON_IsString(e) && (strcmp(e->valuestring, "authorization_pending") == 0 ||
                                   strcmp(e->valuestring, "slow_down") == 0))

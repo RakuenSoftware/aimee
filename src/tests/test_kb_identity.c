@@ -67,6 +67,30 @@ static void test_identity_key(void)
    CHECK(strcmp(p.label, "server-7") == 0, "cert CN kept only as label");
 }
 
+static void test_identity_key_parse(void)
+{
+   static const char *valid[] = {"owner", "aimee", "oidc:https%3A//idp.example:sub%3A42",
+                                 "cert:CN=aimee-ca:a1b"};
+   for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); ++i)
+   {
+      kb_principal_t p;
+      char roundtrip[600];
+      CHECK(kb_principal_from_identity_key(valid[i], &p) == 0 && p.authenticated,
+            "canonical identity parses");
+      CHECK(kb_identity_key(&p, roundtrip, sizeof(roundtrip)) == 0 &&
+                strcmp(roundtrip, valid[i]) == 0,
+            "parsed identity round-trips exactly");
+   }
+   static const char *invalid[] = {"",           "uid:1000",   "webuser:alice", "oidc:x",
+                                   "oidc:a:b:c", "oidc:a:%2f", "cert:a:XYZ",    "owner:extra"};
+   for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+   {
+      kb_principal_t p;
+      CHECK(kb_principal_from_identity_key(invalid[i], &p) == -1 && !p.authenticated,
+            "non-canonical asserted identity rejected");
+   }
+}
+
 static void test_unauthenticated_rejected(void)
 {
    /* A zero-initialized principal is unauthenticated and must never yield a key. */
@@ -138,6 +162,7 @@ int main(void)
 {
    test_serial_normalize();
    test_identity_key();
+   test_identity_key_parse();
    test_unauthenticated_rejected();
    test_no_collision();
    test_overlong_rejected();

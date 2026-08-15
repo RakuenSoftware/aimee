@@ -130,7 +130,10 @@ static int forge_workspace_for_cwd(const char *cwd, int provider_kind, int *runs
       found = 1;
    }
    cJSON_Delete(reply);
-   return found ? 0 : -1;
+   /* 0 owned, 1 reached the stage and nothing owns this cwd. Distinct from the
+    * -1 returns above, which mean the stage could not be reached or parsed at
+    * all: same lost credential, completely different thing to go and fix. */
+   return found ? 0 : 1;
 }
 
 char *mcp_git_run(const char *cmd, int *exit_code)
@@ -190,7 +193,17 @@ char *mcp_git_run(const char *cmd, int *exit_code)
        * and said nothing; that was noise this instrumentation introduced. The
        * real anomaly, and all this now reports, is a cwd that exists and that
        * no registered workspace claims. */
-      if (have_ws != 0 && cwd && cwd[0])
+      /* Say WHICH of the two it is. Both lose the credential, but one is fixed
+       * by registering a workspace and the other by getting the credential
+       * stage running again — and reporting the first when it is really the
+       * second sends the reader off registering workspaces that are already
+       * registered, watching the message not change. */
+      if (have_ws < 0 && cwd && cwd[0])
+         LOG_WARN("git",
+                  "the credential-resolve stage could not be reached for cwd \"%s\": git will run "
+                  "with no forge credential (this is not a workspace-registration problem)",
+                  cwd);
+      else if (have_ws > 0 && cwd && cwd[0])
          LOG_WARN("git",
                   "no registered workspace owns cwd \"%s\": git will run with no forge credential",
                   cwd);

@@ -50,7 +50,7 @@ extern "C"
 
    /* Pre-send: under the aggressive-tier live mutation, resolve the session key from the thread-
     * local request identity; if the session is not disabled, snapshot container[key],
-    * run the compress-only economizer, and — when gw_should_apply passes — replace
+    * run the compress-only economizer, and — when the module's verdict allows — replace
     * container[key] with the reduced array (marking provenance) so the provider body
     * is built from it. On any bypass/disable/no-key the container is left byte-intact.
     * Records the mutate/hard_bypass/session-blocked counters. No-op (dark) when the

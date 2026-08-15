@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PROPOSALS = ROOT / "docs/proposals"
 MANIFEST_RE = re.compile(r"^PENDING_AUDIT_\d{4}-\d{2}-\d{2}\.tsv$")
-ALLOWED = {"complete", "partial_archived", "pending_accurate", "pending_regressed"}
+ALLOWED = {"complete", "partial_archived", "rejected", "pending_accurate", "pending_regressed"}
 
 
 def fail(message: str) -> None:
@@ -65,6 +65,9 @@ def main() -> int:
                 or "archiv" not in text.lower()
             ):
                 fail(f"{name}: archived proposal lacks done state/archive notice")
+        elif disposition == "rejected":
+            if final.parent.name != "rejected" or "**state:** rejected" not in text.lower():
+                fail(f"{name}: rejected proposal lacks rejected state/folder")
         else:
             if final.parent.name != "pending":
                 fail(f"{name}: live proposal is not in pending")
@@ -75,14 +78,17 @@ def main() -> int:
         residual_value = row["residual_path"]
         if disposition == "partial_archived":
             residual = ROOT / residual_value
-            if not residual.is_file() or residual.parent.name != "pending":
-                fail(f"{name}: residual does not exist in pending")
+            if not residual.is_file() or residual.parent.name not in {"pending", "rejected"}:
+                fail(f"{name}: residual does not exist in pending or rejected")
             residual_text = residual.read_text(encoding="utf-8")
-            if "**state:** pending" not in residual_text.lower() or name not in residual_text:
-                fail(f"{name}: residual lacks pending state or archived-parent link")
+            residual_state = residual.parent.name
+            has_state = f"**state:** {residual_state}" in residual_text.lower()
+            if not has_state or name not in residual_text:
+                fail(f"{name}: residual lacks {residual_state} state or archived-parent link")
             if residual.name not in text:
                 fail(f"{name}: archive lacks reciprocal residual link")
-            expected_pending.add(residual.name)
+            if residual_state == "pending":
+                expected_pending.add(residual.name)
         elif residual_value != "-":
             fail(f"{name}: non-partial disposition has a residual")
 

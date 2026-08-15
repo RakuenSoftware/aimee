@@ -101,6 +101,10 @@ BEGIN
   -- the runtime role only, never PUBLIC (N4).
   REVOKE ALL ON FUNCTION set_tenant_context(TEXT, BIGINT) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION set_tenant_context(TEXT, BIGINT) TO aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION set_maintenance_context(TEXT, TEXT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION set_maintenance_context(TEXT, TEXT) TO aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION kb_content_project_attribute(TEXT, BIGINT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION kb_content_project_attribute(TEXT, BIGINT) TO aimee_kb_runtime;
 
   -- P5-A authoritative registry: runtime reaches state only through audited,
   -- bounded definer APIs; direct reads and writes are unavailable.
@@ -108,6 +112,7 @@ BEGIN
   GRANT EXECUTE ON FUNCTION kb_server_registry_pending(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_server_registry_finalize(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_server_registry_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_server_registry_client_match(TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_server_registry_list(BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_server_registry_snapshot(BIGINT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;

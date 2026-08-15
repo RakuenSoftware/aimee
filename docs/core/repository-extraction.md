@@ -26,3 +26,16 @@ versions, exact commits, stable principal identities, and source digests.
 mirror drifts from its external repository pin. The vendored mirrors remain in
 the main repository during behavioral migration so existing builds do not
 silently switch implementations.
+
+The pins bind on `main` only. They describe a release: which published
+repository commit each vendored mirror was cut from. So the check runs in the
+`c-repository-pins` workflow for pushes to `main` and for pull requests into
+`main`, and nowhere else. `testing` and the branches feeding it are the
+integration tip: their vendored source is expected to run ahead of any published
+repository commit, and enforcing the lock there would only demand a refresh
+after every edit under `src/core/**` or `src/modules/**`. For that reason
+`repository-lock-check` is not part of `make lint` or `make verify-local`; run
+`make repository-lock-check` when you want it. Refresh the pins with
+`python3 scripts/export_c_repositories.py --refresh-lock-root <repository-set>`
+as part of cutting a release, before opening the `testing` → `main` pull
+request.

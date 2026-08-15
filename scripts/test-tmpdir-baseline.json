@@ -58,7 +58,7 @@
     "src/tests/test_kb_client_docs.c": 4,
     "src/tests/test_kb_enroll.c": 7,
     "src/tests/test_kb_http_identity_login.c": 1,
-    "src/tests/test_kb_http_routes.c": 24,
+    "src/tests/test_kb_http_routes.c": 23,
     "src/tests/test_kb_lab.c": 1,
     "src/tests/test_kb_management_runtime.c": 5,
     "src/tests/test_kb_pki.c": 3,

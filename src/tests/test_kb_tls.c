@@ -6,6 +6,7 @@
 #include "kb_tls.h"
 
 #include <openssl/ssl.h>
+#include <openssl/pem.h>
 
 #include <assert.h>
 #include <pthread.h>
@@ -21,6 +22,52 @@ typedef struct
    int ok;
    char peer_cn[128];
 } srv_arg_t;
+
+static int cert_keys_equal(const char *a_pem, const char *b_pem)
+{
+   BIO *a_bio = BIO_new_mem_buf(a_pem, -1);
+   BIO *b_bio = BIO_new_mem_buf(b_pem, -1);
+   X509 *a = a_bio ? PEM_read_bio_X509(a_bio, NULL, NULL, NULL) : NULL;
+   X509 *b = b_bio ? PEM_read_bio_X509(b_bio, NULL, NULL, NULL) : NULL;
+   EVP_PKEY *a_key = a ? X509_get_pubkey(a) : NULL;
+   EVP_PKEY *b_key = b ? X509_get_pubkey(b) : NULL;
+   int equal = a_key && b_key && EVP_PKEY_eq(a_key, b_key) == 1;
+   EVP_PKEY_free(a_key);
+   EVP_PKEY_free(b_key);
+   X509_free(a);
+   X509_free(b);
+   BIO_free(a_bio);
+   BIO_free(b_bio);
+   return equal;
+}
+
+static void without_eku(const char *cert_pem, const char *key_pem, char *out, size_t cap)
+{
+   BIO *in = BIO_new_mem_buf(cert_pem, -1);
+   X509 *cert = in ? PEM_read_bio_X509(in, NULL, NULL, NULL) : NULL;
+   BIO_free(in);
+   assert(cert);
+   int pos = X509_get_ext_by_NID(cert, NID_ext_key_usage, -1);
+   assert(pos >= 0);
+   X509_EXTENSION *removed = X509_delete_ext(cert, pos);
+   assert(removed);
+   X509_EXTENSION_free(removed);
+   BIO *key_wire = BIO_new_mem_buf(key_pem, -1);
+   EVP_PKEY *key = key_wire ? PEM_read_bio_PrivateKey(key_wire, NULL, NULL, NULL) : NULL;
+   BIO_free(key_wire);
+   /* Re-sign to invalidate OpenSSL's cached DER after deleting the extension.
+    * Chain validity is irrelevant to the exact-role predicate exercised here. */
+   assert(key && X509_sign(cert, key, EVP_sha256()) > 0);
+   EVP_PKEY_free(key);
+   BIO *wire = BIO_new(BIO_s_mem());
+   BUF_MEM *memory = NULL;
+   assert(wire && PEM_write_bio_X509(wire, cert) == 1 && BIO_get_mem_ptr(wire, &memory) > 0 &&
+          memory && memory->length + 1 <= cap);
+   memcpy(out, memory->data, memory->length);
+   out[memory->length] = '\0';
+   BIO_free(wire);
+   X509_free(cert);
+}
 
 static void *server_thread(void *a)
 {
@@ -84,6 +131,24 @@ int main(void)
    char ccert[KB_PKI_CERT_PEM_MAX], ckey[KB_PKI_KEY_PEM_MAX];
    assert(kb_pki_issue_client_cert(&ca, "project:alpha", 3600, ccert, sizeof(ccert), ckey,
                                    sizeof(ckey)) == 0);
+   assert(!cert_keys_equal(scert, ccert));
+
+   /* Pair roles are exact. A serverAuth leaf cannot be loaded as this hop's
+    * client identity, and a clientAuth leaf cannot be loaded as its server. */
+   assert(kb_tls_server_ctx(ca.cert_pem, ccert, ckey) == NULL);
+   assert(kb_tls_client_ctx(ca.cert_pem, scert, skey) == NULL);
+   assert(kb_tls_cert_has_exact_role(scert, 1));
+   assert(kb_tls_cert_has_exact_role(ccert, 0));
+
+   /* Legacy/broad leaves with no EKU are not accepted as either role. Test the
+    * production role predicate directly, then the two context builders. */
+   char no_server_eku[KB_PKI_CERT_PEM_MAX], no_client_eku[KB_PKI_CERT_PEM_MAX];
+   without_eku(scert, skey, no_server_eku, sizeof(no_server_eku));
+   without_eku(ccert, ckey, no_client_eku, sizeof(no_client_eku));
+   assert(!kb_tls_cert_has_exact_role(no_server_eku, 1));
+   assert(!kb_tls_cert_has_exact_role(no_client_eku, 0));
+   assert(kb_tls_server_ctx(ca.cert_pem, no_server_eku, skey) == NULL);
+   assert(kb_tls_client_ctx(ca.cert_pem, no_client_eku, ckey) == NULL);
 
    SSL_CTX *server_ctx = kb_tls_server_ctx(ca.cert_pem, scert, skey);
    SSL_CTX *client_ctx = kb_tls_client_ctx(ca.cert_pem, ccert, ckey);
@@ -94,6 +159,22 @@ int main(void)
    assert(handshake(server_ctx, client_ctx, cn, sizeof(cn)) == 1);
    assert(strcmp(cn, "project:alpha") == 0);
    printf("  mutual_auth: ok\n");
+
+   /* A fresh pair issues distinct pair-specific material for both roles. */
+   char scert2[KB_PKI_CERT_PEM_MAX], skey2[KB_PKI_KEY_PEM_MAX];
+   char ccert2[KB_PKI_CERT_PEM_MAX], ckey2[KB_PKI_KEY_PEM_MAX];
+   assert(kb_pki_issue_server_cert(&ca, "kb.local", 3600, scert2, sizeof(scert2), skey2,
+                                   sizeof(skey2)) == 0);
+   assert(kb_pki_issue_client_cert(&ca, "project:alpha", 3600, ccert2, sizeof(ccert2), ckey2,
+                                   sizeof(ckey2)) == 0);
+   assert(strcmp(scert, scert2) != 0 && strcmp(ccert, ccert2) != 0);
+   assert(!cert_keys_equal(scert2, ccert2));
+   SSL_CTX *server_ctx2 = kb_tls_server_ctx(ca.cert_pem, scert2, skey2);
+   SSL_CTX *client_ctx2 = kb_tls_client_ctx(ca.cert_pem, ccert2, ckey2);
+   assert(server_ctx2 && client_ctx2 && handshake(server_ctx2, client_ctx2, NULL, 0) == 1);
+   SSL_CTX_free(server_ctx2);
+   SSL_CTX_free(client_ctx2);
+   printf("  fresh_pair_material: ok\n");
 
    /* 2. A client whose cert is from a FOREIGN CA is rejected by the server. */
    {

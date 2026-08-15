@@ -50,13 +50,14 @@ extern "C"
  * matched by the kb_enrollments / kb_server_registry SQL. Two literals drifting
  * apart would silently unregister a live server.
  *
- * It is a `service` scope, so at the mTLS seam the certificate CN yields
- * scope:service:aimee-server and the router treats the server as a data-plane
- * caller: any project or workspace, refused by every administrative gate. It
- * used to be the bare word "p5-server-client", which has no ':' and therefore
- * made the certificate UNSCOPED — the install owner, past every gate. Nothing
- * required that breadth; two proxied owner-only routes did (write-tier grants
- * and repo trust), and both are gone.
+ * It is a `service` scope. At the mTLS seam the certificate CN must match the
+ * independently verified bearer's derived scope, and that bearer reaches the
+ * router as a data-plane caller: any project or workspace, refused by every
+ * administrative gate. It used to be the bare word "p5-server-client", which
+ * has no ':' and therefore made the certificate-derived synthetic credential
+ * UNSCOPED — the install owner, past every gate. Synthetic credentials are no
+ * longer accepted; two proxied owner-only routes that once needed that breadth
+ * (write-tier grants and repo trust) are also gone.
  *
  * kb_enrollments rows and the SQL that matches them carry this string, so
  * changing it is schema-visible: a certificate issued under the old CN no longer

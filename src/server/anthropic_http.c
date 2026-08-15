@@ -569,6 +569,22 @@ static int messages_buffered(const char *body, char *resp, int cap)
    http_status = agent_http_post_bytes(url, auth, wire_body.data, wire_body.len, &response,
                                        ag->timeout_ms, extra[0] ? extra : NULL);
 
+   /* THE GATEWAY SAFETY NET. Until now nothing called this, so a reduced payload
+    * the provider rejected tripped no breaker and repeated on every later turn.
+    * The module decides and disables; the restore happens here because the body
+    * is ours.
+    *
+    * A 4xx also asks for ONE resend of this turn with the restored body, which
+    * this path cannot honour yet: the wire body is built once above and rebuilding
+    * it needs that block made re-runnable. The breaker still trips, so the failure
+    * stops repeating from the next turn -- the recovery of THIS turn is what is
+    * still missing. */
+   if (gw_buffered_after_status(req, "messages", http_status, &gwmc) == GW_POST_RESEND)
+      aimee_log(LOG_INFO, "economizer.gateway",
+                "seam=gateway upstream=%d restored to pristine and breaker tripped; the "
+                "single resend of this turn is not wired yet",
+                http_status);
+
    if (http_status != 200 || !response)
    {
       /* Exact parity: relay the upstream status + Anthropic error body verbatim

@@ -69,6 +69,24 @@ static int cert_key_match(const char *cert_pem, const char *key_pem)
    return match;
 }
 
+static int cert_public_keys_distinct(const char *a_pem, const char *b_pem)
+{
+   BIO *a_bio = a_pem ? BIO_new_mem_buf(a_pem, -1) : NULL;
+   BIO *b_bio = b_pem ? BIO_new_mem_buf(b_pem, -1) : NULL;
+   X509 *a = a_bio ? PEM_read_bio_X509(a_bio, NULL, NULL, NULL) : NULL;
+   X509 *b = b_bio ? PEM_read_bio_X509(b_bio, NULL, NULL, NULL) : NULL;
+   EVP_PKEY *a_key = a ? X509_get_pubkey(a) : NULL;
+   EVP_PKEY *b_key = b ? X509_get_pubkey(b) : NULL;
+   int distinct = a_key && b_key && EVP_PKEY_eq(a_key, b_key) == 0;
+   EVP_PKEY_free(a_key);
+   EVP_PKEY_free(b_key);
+   X509_free(a);
+   X509_free(b);
+   BIO_free(a_bio);
+   BIO_free(b_bio);
+   return distinct;
+}
+
 int kb_managed_server_identity_validate(const kb_managed_server_identity_t *identity)
 {
    if (!identity || identity->version != 2 ||
@@ -96,7 +114,8 @@ int kb_managed_server_identity_validate(const kb_managed_server_identity_t *iden
           kb_pki_verify_client_cert(identity->ca, identity->client_cert) == 1 &&
           kb_pki_verify_client_cert(identity->ca, identity->management_cert) == 1 &&
           cert_key_match(identity->client_cert, identity->client_key) &&
-          cert_key_match(identity->management_cert, identity->management_key);
+          cert_key_match(identity->management_cert, identity->management_key) &&
+          cert_public_keys_distinct(identity->client_cert, identity->management_cert);
 }
 
 int kb_managed_server_identity_generate(const kb_pki_ca_t *ca, const char *host, int port,

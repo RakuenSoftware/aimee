@@ -1,11 +1,10 @@
-/* gateway_mutate.c: see gateway_mutate.h. Pure decision + snapshot/replace helpers
- * for the gateway-mutation path. */
-#include "aimee.h" /* base typedefs (MAX_PATH_LEN etc.) required by agent_protocol.h */
+/* gateway_mutate.c: see gateway_mutate.h. Verdict marshalling plus the
+ * snapshot/replace helpers for the gateway-mutation path. The apply/bypass
+ * decision itself lives in the Go economizer module. */
 #include "gateway_mutate.h"
 
 #include <string.h>
 
-#include "agent_protocol.h"  /* message_history_repair */
 #include "session_compact.h" /* session_compact_estimate_tokens */
 
 const char *gw_bypass_reason_str(gw_bypass_reason_t reason)
@@ -59,39 +58,6 @@ int gw_snapshot_token_count(cJSON *messages)
    if (!messages)
       return 0;
    return session_compact_estimate_tokens(messages);
-}
-
-/* Map the reducer's internal-error class to a gateway bypass reason. */
-
-gw_bypass_reason_t gw_should_apply(int reduce_rc, const gw_reduce_report_t *res)
-{
-   if (reduce_rc != 0 || !res)
-      return GW_BYPASS_REDUCE_INTERNAL_ASSERTION;
-
-   /* A genuine, applied reduction is the only thing worth mutating for: a new array,
-    * marked mutated, with REASON_REDUCED. measure-only / already / skip / not-array
-    * all land here as no-ops. */
-   if (!res->messages || !res->mutated || res->reason != GW_REDUCE_REASON_REDUCED)
-      return GW_BYPASS_NO_OP;
-
-   /* Net shrink: a reduce that did not actually shrink is not worth the blast radius. */
-   if (res->reduced_tokens >= res->baseline_tokens)
-      return GW_BYPASS_NO_OP;
-
-   /* Structural check (defense in depth): the reduced view must have no orphaned
-    * tool_use/tool_result pair. Run repair on a COPY so `res` is not mutated; any
-    * repair the copy needed means the reduced view was structurally broken. */
-   cJSON *probe = cJSON_Duplicate(res->messages, 1);
-   if (!probe)
-      return GW_BYPASS_SNAPSHOT_OOM; /* cannot verify -> never send un-verifiable */
-   int repairs = message_history_repair(probe);
-   cJSON_Delete(probe);
-   /* != 0 (not > 0): any non-zero result — a repair count OR a hypothetical negative
-    * error code — means the reduced view was not structurally clean, so bypass. */
-   if (repairs != 0)
-      return GW_BYPASS_STRUCTURAL_VIOLATION;
-
-   return GW_BYPASS_NONE;
 }
 
 int gw_replace_messages(cJSON *container, const char *key, cJSON *reduced)

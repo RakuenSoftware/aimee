@@ -1,10 +1,25 @@
 # Proposal: make the eval temp store openable, or retire it
 
-- **State:** PENDING — tech debt writeup, no design commitment. Records why the two
-  standalone eval drivers were deleted and what has to be decided before any
-  scratch-store harness can run again. Nothing here blocks shipping; the live
-  benchmark path (`memory.benchmark` through `aimee-server`) is unaffected and
-  works.
+- **State:** REJECTED — archived 2026-08-14 under the Go-or-rejected policy.
+
+## Decision
+
+This proposal is rejected under the current implementation policy: pending proposal work must be
+implemented in Go or moved to `rejected/`. Every recorded delivery option changes the C-owned
+`db2_eval_open_temp_store_pg` path and its SQL schema assumptions, or deletes the remaining C
+scratch-store APIs and callers. Reimplementing that internal DB2/benchmark boundary in Go would
+create a second storage owner rather than complete this proposal.
+
+This is a scope and ownership rejection, not a claim that the shadow-schema conflict is fixed. The
+related [dataset-driven direct benchmark](dataset-benchmark-direct-track.md) was also rejected;
+reviving it would require a new Go-owned design that avoids the C scratch store. The live
+`memory.benchmark` path and shipping benchmark gates remain unaffected, as recorded below.
+
+## Archived technical record
+
+This tech debt writeup records why the two standalone eval drivers were deleted and what has to be
+decided before any scratch-store harness can run again. Nothing here blocks shipping; the live
+benchmark path (`memory.benchmark` through `aimee-server`) is unaffected and works.
 
 ## What was removed, and why
 
