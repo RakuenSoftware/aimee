@@ -10,7 +10,6 @@
 
 #include "cJSON.h"
 #include "gateway_mutate_wire.h"
-#include "gw_mutate_stats.h"
 #include "msg_session_disable.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -89,7 +88,6 @@ static void make_mutated(cJSON **container, gw_mutate_ctx_t *ctx, const char *sk
  * than leaving the failed turn exactly as dispatched. */
 static void test_post_status_is_inert_without_a_module(void)
 {
-   gw_stat_reset();
    cJSON *c;
    gw_mutate_ctx_t ctx;
    make_mutated(&c, &ctx, "0011223344556677");
@@ -97,8 +95,9 @@ static void test_post_status_is_inert_without_a_module(void)
    assert(gw_buffered_after_status(c, "messages", 413, &ctx) == GW_POST_NONE);
    assert(strcmp(first_content(c), "reduced") == 0); /* body left as dispatched */
    assert(ctx.mutated == 1);                         /* the turn was not consumed */
-   assert(gw_stat_get(GW_STAT_4XX_RESTORE_RESEND) == 0);
-   assert(gw_stat_get(GW_STAT_5XX_DISABLE) == 0);
+   /* Nothing to assert about counters here any more: C holds none. That the
+      module recorded nothing is proven where the counters live, by it never
+      being called. */
    gw_mutate_ctx_free(&ctx);
    cJSON_Delete(c);
 
@@ -108,7 +107,6 @@ static void test_post_status_is_inert_without_a_module(void)
    make_mutated(&c2, &ctx2, "8899aabbccddeeff");
    assert(gw_buffered_after_status(c2, "messages", 503, &ctx2) == GW_POST_NONE);
    gw_stream_disable(&ctx2, "stream_invalid_request");
-   assert(gw_stat_get(GW_STAT_STREAM_ERROR_DISABLE) == 0);
    assert(ctx2.mutated == 1);
    gw_mutate_ctx_free(&ctx2);
    cJSON_Delete(c2);
@@ -119,7 +117,6 @@ static void test_post_status_is_inert_without_a_module(void)
  * default-off + identity-less passthrough is what we pin here.) */
 static void test_dark_default_and_identityless(void)
 {
-   gw_stat_reset();
    cJSON *c = container_with("orig");
    gw_mutate_ctx_t ctx;
 
@@ -173,28 +170,6 @@ static void test_stream_error_classify(void)
    assert(gw_status_is_invalid_request(200) == 0);
 }
 
-static void test_token_delta_sampling(void)
-{
-   gw_stat_reset();
-   /* 1-in-100 deterministic sample: the 1st call (n=0) is sampled; the next 99 are not. */
-   gw_stat_record_token_delta(1000, 500);
-   assert(gw_stat_token_sample_count() == 1);
-   assert(gw_stat_token_baseline_sum() == 1000);
-   assert(gw_stat_token_reduced_sum() == 500);
-   for (int i = 0; i < 99; i++)
-      gw_stat_record_token_delta(2000, 1900);
-   assert(gw_stat_token_sample_count() == 1); /* none of n=1..99 sampled */
-   gw_stat_record_token_delta(4000, 1000);    /* n=100 -> sampled */
-   assert(gw_stat_token_sample_count() == 2);
-   assert(gw_stat_token_baseline_sum() == 5000);
-   assert(gw_stat_token_reduced_sum() == 1500);
-   /* the §6 monotone-reduction property: sampled reduced sum < baseline sum */
-   assert(gw_stat_token_reduced_sum() < gw_stat_token_baseline_sum());
-   /* negatives ignored */
-   gw_stat_record_token_delta(-1, 5);
-   assert(gw_stat_token_baseline_sum() == 5000);
-}
-
 static void test_no_behavior_change_when_off(void)
 {
    /* With gateway mutation off (economizer tier safe, the default in this test's HOME), the
@@ -227,31 +202,6 @@ static void test_upstream_provider_gate(void)
    assert(gw_mutate_upstream_ok(1) == 0);                      /* including Anthropic */
 }
 
-/* gw_stat_to_json: the JSON the /v1/economizer/stats endpoint serves reflects the
- * live counters — flat counters, the sampled token_delta (+ derived pct_reduced), and
- * the {group:{reason:count}} breakdown. */
-static void test_stat_json(void)
-{
-   gw_stat_reset();
-   gw_stat_inc(GW_STAT_MUTATE_ATTEMPTED);
-   gw_stat_inc(GW_STAT_MUTATE_APPLIED);
-   gw_stat_inc_reason("session_disabled_set", "4xx");
-   gw_stat_record_token_delta(1000, 600); /* n=0 is sampled */
-
-   cJSON *o = cJSON_CreateObject();
-   gw_stat_to_json(o);
-   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(o, "gateway_mutate_attempted")) == 1);
-   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(o, "gateway_mutate_applied")) == 1);
-   cJSON *td = cJSON_GetObjectItem(o, "token_delta");
-   assert(td);
-   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(td, "baseline_sum")) == 1000);
-   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(td, "reduced_sum")) == 600);
-   assert(cJSON_GetNumberValue(cJSON_GetObjectItem(td, "pct_reduced")) == 40.0);
-   cJSON *sds = cJSON_GetObjectItem(cJSON_GetObjectItem(o, "reasons"), "session_disabled_set");
-   assert(sds && (int)cJSON_GetNumberValue(cJSON_GetObjectItem(sds, "4xx")) == 1);
-   cJSON_Delete(o);
-}
-
 int main(void)
 {
    printf("gateway_mutate_wire: ");
@@ -268,10 +218,8 @@ int main(void)
    test_post_status_is_inert_without_a_module();
    test_dark_default_and_identityless();
    test_stream_error_classify();
-   test_token_delta_sampling();
    test_no_behavior_change_when_off();
    test_upstream_provider_gate();
-   test_stat_json();
    printf("ok\n");
    return 0;
 }

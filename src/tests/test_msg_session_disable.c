@@ -7,7 +7,6 @@
 #include <string.h>
 #include <time.h>
 
-#include "gw_mutate_stats.h"
 #include "harness_memory_common.h"
 #include "msg_session_disable.h"
 
