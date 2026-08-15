@@ -10,7 +10,7 @@
 #include "agent_protocol.h" /* message_history_repair */
 #include "config.h"
 #include "gateway_mutate.h"
-#include "gw_mutate_stats.h"
+#include <aimee/audit/obs_bus.h> /* obs_bus_module_available */
 #include "log.h"
 #include "token_tracker.h" /* token_estimate_cost_ex, for the freeze guardrail */
 
@@ -181,6 +181,20 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
       return; /* dark unless the economizer tier is aggressive (OpenAI-family egress only) */
    econ_preset_t ep;
    econ_preset_current(&ep);
+   /* NOBODY HOME, NOTHING TO DO. If no process is serving the reduce stage the
+    * answer is already known -- the IR goes as it is -- so ask before paying for
+    * a question that cannot be answered. Everything between here and the call is
+    * work spent on that request: a SHA-256 key derivation, a print of the first
+    * message to fingerprint the conversation, a DB1 read for the reducer state,
+    * and a dozen config lookups. Cheap once; per request, on a deployment with
+    * the economizer detached, it is all waste.
+    *
+    * Availability is a local registration check with no I/O of its own, and it
+    * is only an optimisation: the call underneath still refuses when the module
+    * disappears between this check and it. */
+   if (!obs_bus_module_available(AIMEE_ECONOMIZER_EVENT_REDUCE))
+      return;
+
    ctx->mutate_on = 1;
    ctx->ttl_ms = ep.gateway_session_disable_ttl_ms;
 
