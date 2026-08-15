@@ -1,12 +1,12 @@
 # Per-user content scope: a project you cannot see returns nothing
 
 - **State:** REJECTED — unresolved slices require SQL/C owners, not Go; archived 2026-08-15.
-- **Owner:** KB tenancy and content scope.
+- **Scope:** KB tenancy and content visibility.
 
 > **Rejected under the Go-only implementation constraint.** The already-landed project referent,
-> visibility predicate, and document/file-index policies remain in place. The broader proposal cannot
-> be completed in Go without creating a parallel authorization owner outside PostgreSQL and the C
-> workspace boundary.
+> visibility predicate, document/file-index policies, and vector/structured-document policies remain
+> in place. The remaining proposal cannot be completed in Go without creating a parallel
+> authorization owner outside PostgreSQL and the C workspace boundary.
 
 ## Problem and boundary
 
@@ -119,7 +119,10 @@ Prefer the first. The second is only worth it if a deployment cannot tolerate a 
    before the backfill is proved, because no policy reads them yet.
 2. Policies on `kb_documents` and `kb_file_index` (the search surfaces a user notices first),
    enabled with the backfill in the same change.
-3. `kb_embeddings`, `kb_pdf_embeddings`, `kb_doc_regions` (the last inherits through `chunk_id`).
+3. `kb_embeddings`, `kb_pdf_embeddings`, and the structured-document descendants. Regions inherit
+   through `chunk_id`; table cells inherit through `region_id`; document assets bind their project
+   and document key back to the authoritative chunk. The latter two tables post-date the original
+   proposal and are included so they cannot remain bypasses beside protected regions.
 4. The code index: `files` through `projects`, including what `projects.workspace` means for
    attribution.
 5. `ws_scope_project_path` membership check, so the filesystem and the database agree.
@@ -140,16 +143,17 @@ Prefer the first. The second is only worth it if a deployment cannot tolerate a 
 
 Rejected 2026-08-15 under the requirement to implement pending proposals in Go or reject them.
 
-- Slices 1 and 2 are partially delivered: `projects.kb_project`, `kb_project_visible()`, and the
-  `kb_documents`/`kb_file_index` policies remain authoritative in `src/db2/schema.sql`.
-- Slices 3, 4, and 6 require PostgreSQL schema, RLS policy, migration, and data-model changes for
-  embeddings, document regions, code-index files, and memories. A Go wrapper cannot enforce reads
-  performed by other database callers.
+- Slices 1 through 3 are delivered: `projects.kb_project`, `kb_project_visible()`, the
+  document/file-index policies, and the vector/structured-document ownership policies remain
+  authoritative in `src/db2/schema.sql`. Applying the schema still enables nothing; the operator
+  must complete the documented preflight and call `kb_content_scope_enable()`.
+- Slice 4 requires PostgreSQL schema, RLS policy, migration, and attribution changes for code-index
+  files. A Go wrapper cannot enforce reads performed by other database callers.
 - Slice 5 belongs to the C `ws_scope_project_path()` owner in
   `src/modules/workspace/workspace_scope.c`; it currently validates paths but does not resolve KB
   membership. Reimplementing that decision in Go would duplicate rather than fix the owner.
-- The memory scope dimension remains an unresolved product choice, so slice 6 has no complete
-  acceptance contract to implement.
+- Slice 6 requires a PostgreSQL data-model and policy change after its still-unresolved memory-scope
+  product choice, so it has neither a complete acceptance contract nor a Go owner.
 
 The partial controls are retained, but the broader cross-owner proposal cannot satisfy its own
 acceptance checks within the permitted implementation language and is therefore closed as rejected.
