@@ -100,7 +100,10 @@ check "explicit AIMEE_MODULE_RUNTIME_WEB=1 overrides the UI switch" "runtime-web
 unset AIMEE_RUNTIME_WEB_ENABLED AIMEE_MODULE_RUNTIME_WEB
 
 # 8. kb placement gates its own set, and does not accept a server-only module.
-kb="$tmp/kb.modules"
+# Keep the read-only-style input distinct from apply_optional_modules' fixed
+# "$tmp/kb.modules" output so each intent is tested from the same shipped
+# manifest instead of the first case becoming the second case's input.
+kb="$tmp/kb-shipped.modules"
 {
     printf 'control-web\t/usr/local/libexec/aimee-modules/aimee-module-control-web\n'
     printf 'postgres\t/usr/local/libexec/aimee-modules/aimee-module-postgres\n'
