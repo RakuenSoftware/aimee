@@ -3,8 +3,9 @@
 - **State:** DONE — delivered scope archived 2026-07-26.
 
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
-> specification for work already delivered. Remaining work is tracked in
-> [`persona-authored-outputs-residual.md`](../pending/persona-authored-outputs-residual.md).
+> specification for work already delivered. The former mixed-owner umbrella for remaining work was
+> [`rejected`](../rejected/persona-authored-outputs-residual.md); future work must be proposed by its
+> owning Go module.
 
 ## Why
 
