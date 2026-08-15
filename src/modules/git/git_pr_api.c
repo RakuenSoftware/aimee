@@ -181,7 +181,17 @@ static int gh_ctx_resolve(const char *principal, const char *repo_dir, gh_ctx_t 
       snprintf(err, errlen, "requires a github.com origin");
       return -1;
    }
-   if (git_cred_inject_resolve_token(principal, NULL, repo_dir, NULL, cx->token,
+   /* Pass the origin we just read, not NULL. THE MIRROR CONDITION applies here
+    * exactly as it does to push (see test_git_host_resolve.c): for a mirror or
+    * served workspace the checkout the client named does not exist on this host,
+    * so making the per-host step re-derive the origin from repo_dir finds no
+    * remote and returns "no host". Upstream that is indistinguishable from "no
+    * credential", so the per-host token — the one the setup wizard stores and
+    * the one `git clone` authenticates with, since clone is handed its URL and
+    * never derives one — was skipped entirely, and this reported a missing
+    * credential while that credential was present and working. We already have
+    * the origin in hand for the slug; hand it over. */
+   if (git_cred_inject_resolve_token(principal, origin, repo_dir, NULL, cx->token,
                                      sizeof(cx->token)) != 1 ||
        !cx->token[0])
    {
