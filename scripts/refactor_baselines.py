@@ -30,7 +30,7 @@ SURFACES = {
         "src/modules/*/include/**/*.h",
     ),
     "database-schemas": (
-        "src/db1/*.sql",
+        "src/modules/db1/*.sql",
         "src/db2/*.sql",
         "deploy/migrations/*.sql",
     ),
