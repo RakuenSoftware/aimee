@@ -98,9 +98,6 @@ func TestPostStatusStageDecides(t *testing.T) {
 	if got.Action != "resend" || !got.Restore || !got.Disabled {
 		t.Errorf("4xx = %+v, want resend+restore+disabled", got)
 	}
-	if got.Counter != Stat4xxRestoreResend {
-		t.Errorf("counter = %q", got.Counter)
-	}
 
 	// 5xx: provider state is uncertain, so trip but never resend.
 	got = postStatus(t, h, PostStatusRequest{

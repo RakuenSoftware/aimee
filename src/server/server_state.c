@@ -3,7 +3,6 @@
 #include "aimee.h"
 #include <aimee/ir/aimee_ir_metrics.h>
 #include "shadow_mirror.h"
-#include "gw_mutate_stats.h"          /* gw_stat_to_json — gateway-mutation economizer counters */
 #include "economizer_module_client.h" /* Go-owned tool-output condense savings */
 #include "token_audit.h"              /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
 #include "embedder_catalog.h"
@@ -1508,9 +1507,15 @@ int handle_economizer_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON *resp = jo_ok();
 
-   cJSON *gw = cJSON_AddObjectToObject(resp, "gateway");
-   if (gw)
-      gw_stat_to_json(gw);
+   /* The gateway counters live in the economizer module; this endpoint is only
+    * the surface that publishes them. An unreachable module leaves the object
+    * empty rather than reporting zeros, so "no data" cannot be misread as "the
+    * lever ran and did nothing". */
+   cJSON *gw_stats = econ_module_stats_snapshot();
+   if (gw_stats)
+      cJSON_AddItemToObject(resp, "gateway", gw_stats);
+   else
+      cJSON_AddObjectToObject(resp, "gateway");
 
    cJSON *tc = cJSON_AddObjectToObject(resp, "tool_condense");
    if (tc)

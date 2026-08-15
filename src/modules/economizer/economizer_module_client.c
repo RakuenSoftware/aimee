@@ -504,3 +504,34 @@ int econ_module_post_status(const char *session_key, int http_status, int mutate
    cJSON_Delete(reply);
    return 0;
 }
+
+static cJSON *econ_stats_call(const char *op, const char *counter, const char *group,
+                              const char *reason)
+{
+   cJSON *payload = cJSON_CreateObject();
+   if (!payload)
+      return NULL;
+   cJSON_AddStringToObject(payload, "op", op);
+   if (counter)
+      cJSON_AddStringToObject(payload, "counter", counter);
+   if (group)
+      cJSON_AddStringToObject(payload, "group", group);
+   if (reason)
+      cJSON_AddStringToObject(payload, "reason", reason);
+   return aimee_module_json_call(AIMEE_ECONOMIZER_EVENT_STATS, AIMEE_ECONOMIZER_STAGE_STATS,
+                                 payload, ECON_MODULE_CALL_MAX_BODY, ECON_MODULE_CALL_TIMEOUT_MS,
+                                 NULL);
+}
+
+void econ_module_stat_reason(const char *group, const char *reason)
+{
+   if (!group || !group[0])
+      return;
+   cJSON *reply = econ_stats_call("inc_reason", NULL, group, reason);
+   cJSON_Delete(reply); /* the snapshot comes back too; this caller wants none of it */
+}
+
+cJSON *econ_module_stats_snapshot(void)
+{
+   return econ_stats_call("snapshot", NULL, NULL, NULL);
+}

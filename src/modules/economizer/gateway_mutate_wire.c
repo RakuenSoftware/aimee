@@ -200,13 +200,11 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
    if (!cJSON_IsArray(msgs))
       return;
 
-   gw_stat_inc(GW_STAT_MUTATE_ATTEMPTED);
-
    /* Snapshot FIRST: never send a reduced payload we cannot restore. */
    ctx->pristine = gw_snapshot_messages(msgs);
    if (!ctx->pristine)
    {
-      gw_stat_inc_reason("hard_bypass", "snapshot_oom");
+      econ_module_stat_reason("hard_bypass", "snapshot_oom");
       return;
    }
 
@@ -314,13 +312,7 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
    const char *bypass = gw_module_bypass(rrc, mres.bypass);
    if (strcmp(bypass, gw_bypass_reason_str(GW_BYPASS_NONE)) != 0)
    {
-      /* A breaker block is its own counter, not a hard bypass: it is the lever
-       * working as designed, and folding it into hard_bypass would make a healthy
-       * tripped session look like a reduction fault. */
-      if (strcmp(bypass, "session_disabled") == 0)
-         gw_stat_inc(GW_STAT_SESSION_DISABLED_BLOCKS);
-      else
-         gw_stat_inc_reason("hard_bypass", bypass);
+      /* The module counted this verdict already, on the call that made it. */
       gw_provenance_clear(&ctx->st);
       cJSON_Delete(reduced);
       econ_module_result_free(&mres);
@@ -330,7 +322,7 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
 
    if (gw_replace_messages(container, key, reduced) != 0)
    {
-      gw_stat_inc_reason("hard_bypass", "replace_failed");
+      econ_module_stat_reason("hard_bypass", "replace_failed");
       gw_provenance_clear(&ctx->st);
       cJSON_Delete(reduced);
       econ_module_result_free(&mres);
@@ -342,44 +334,8 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
 
    gw_provenance_mark_reduced(&ctx->st); /* mark ONLY after replace succeeds */
    ctx->mutated = 1;
-   gw_stat_inc(GW_STAT_MUTATE_APPLIED);
-   gw_stat_record_token_delta(baseline_tok, reduced_tok); /* sampled §4 */
-}
-
-/* Map the module's counter label onto the local enum.
- *
- * The module names the counter rather than the caller inferring it, so the
- * decision and the thing it is recorded as cannot drift apart. An unrecognised
- * label is DROPPED rather than guessed: a miscounted lever is worse than an
- * uncounted one, and the label set is pinned on both sides by tests. */
-static int gw_stat_by_name(const char *name, gw_stat_t *out)
-{
-   static const struct
-   {
-      const char *name;
-      gw_stat_t stat;
-   } table[] = {
-       {"4xx_restore_resend", GW_STAT_4XX_RESTORE_RESEND},
-       {"5xx_disable", GW_STAT_5XX_DISABLE},
-       {"stream_error_disable", GW_STAT_STREAM_ERROR_DISABLE},
-       {"session_disabled_blocks", GW_STAT_SESSION_DISABLED_BLOCKS},
-   };
-   if (!name || !name[0] || !out)
-      return 1;
-   for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++)
-      if (strcmp(name, table[i].name) == 0)
-      {
-         *out = table[i].stat;
-         return 0;
-      }
-   return 1;
-}
-
-static void gw_stat_inc_name(const char *name)
-{
-   gw_stat_t which;
-   if (gw_stat_by_name(name, &which) == 0)
-      gw_stat_inc(which);
+   (void)baseline_tok;
+   (void)reduced_tok;
 }
 
 gw_post_action_t gw_buffered_after_status(cJSON *container, const char *key, int http_status,
@@ -409,8 +365,6 @@ gw_post_action_t gw_buffered_after_status(cJSON *container, const char *key, int
       }
    }
    gw_provenance_clear(&ctx->st);
-   if (d.counter[0])
-      gw_stat_inc_name(d.counter);
    ctx->mutated = 0; /* handled; never twice */
    return d.resend ? GW_POST_RESEND : GW_POST_NONE;
 }
@@ -426,8 +380,6 @@ void gw_stream_disable(gw_mutate_ctx_t *ctx, const char *reason)
    if (!d.disabled && !d.counter[0])
       return;
    gw_provenance_clear(&ctx->st);
-   if (d.counter[0])
-      gw_stat_inc_name(d.counter);
    ctx->mutated = 0; /* one disable per turn; a later frame no-ops */
 }
 
