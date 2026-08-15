@@ -3,16 +3,13 @@
 This incremental reconciliation carries forward the exhaustive 2026-08-04 manifest and records the
 delegate and WFE panel residuals changed since that snapshot by subsequent work.
 
-## Closed residual
+## Corrected residual lifecycle — 2026-08-15
 
-`delegate-limit-diagnostics-residual.md` moved from `pending/` to `rejected/`. Its partial-result
-acceptance test requires driving the delegate agent loop, but the Go delegates module currently has
-no provider or agent-loop producer: its plane client only forwards the cap and consumes an HTTP
-terminal status. The producer remains in `src/server/server_compute.c` and
-`src/server/agent_runtime.c`. A Go client test could therefore only replay a preconstructed result,
-while a new C executor test would deepen the ownership violation under active removal. The
-requirement is preserved on `delegate-execution-into-the-module.md`, where the producer can be
-implemented and proved in Go.
+PR #2634 moved `delegate-limit-diagnostics-residual.md` from `pending/` to `rejected/` because the
+producer was then C-owned. The Go producer later landed, and the rejection rule was itself corrected
+by [`REJECTION_AUDIT_2026-08-15.md`](REJECTION_AUDIT_2026-08-15.md): stale C implementation context
+does not invalidate a live objective. The residual is restored to pending and rewritten around the
+Go executor's typed failed result; it does not revive the retired C `partial` terminal state.
 
 ## Subsequent WFE panel completion — 2026-08-14
 
@@ -30,11 +27,11 @@ manifest, with `delegate-execution-into-the-module.md` as its live residual path
 carried forward unchanged from the prior exhaustive audit; proposals drafted after that snapshot
 remain valid unlisted additions under the manifest checker's dated-snapshot contract.
 
-## Subsequent completion
+## Subsequent producer completion
 
-PR #2645 moved delegate execution, budget exhaustion, and partial-result production into the Go
-delegates module. The successor is now archived in `done/`, so the parent manifest row is complete
-and no longer carries a pending residual.
+PR #2645 moved delegate execution and turn-cap enforcement into the Go delegates module. That
+completed the producer prerequisite, not the grouped diagnostic and real producer-exhaustion proof.
+The parent manifest row therefore remains partial with the restored diagnostics residual.
 
 ## Validation
 
