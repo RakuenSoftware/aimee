@@ -23,6 +23,7 @@ import (
 	kbsynthesis "github.com/JBailes/aimee/server-go/modules/kb-synthesis"
 	"github.com/JBailes/aimee/server-go/modules/learning"
 	"github.com/JBailes/aimee/server-go/modules/memory"
+	"github.com/JBailes/aimee/server-go/modules/postgres"
 	responsecomposition "github.com/JBailes/aimee/server-go/modules/response-composition"
 	"github.com/JBailes/aimee/server-go/modules/roundtable"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
@@ -266,6 +267,11 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// Stateless: per-conversation reducer state travels with each request, so
 		// there is no store to open and no failure mode before serving.
 		config.Handler = economizer.NewHandler()
+	case "postgres":
+		config.ModuleName = name
+		config.PrincipalRef = 28
+		config.Stages = []bus.ModuleStage{{EventKind: postgres.EventHealth, StageID: postgres.StageHealth}}
+		config.Handler = postgres.Handle
 	case "benchmarks":
 		config.ModuleName = name
 		config.PrincipalRef = 25

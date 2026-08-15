@@ -9,6 +9,7 @@
 #include <aimee/control-web/module_api.h>
 #include <aimee/core/event_bus/module_protocol.h>
 #include <aimee/kb-synthesis/module_api.h>
+#include <aimee/postgres/module_api.h>
 
 #include <stdatomic.h>
 #include <stdint.h>
@@ -71,6 +72,22 @@ static int control_web_authorize(const char *method, const char *path, int *allo
                    sizeof(request), response, sizeof(response), &response_len) != 0)
       return -1;
    return aimee_control_web_response_decode(response, response_len, allowed);
+}
+
+int kb_module_postgres_health_probe(int *schema_ok, int *have_pg_trgm)
+{
+   uint8_t request[AIMEE_POSTGRES_REQUEST_LEN];
+   uint8_t response[AIMEE_POSTGRES_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (schema_ok)
+      *schema_ok = 0;
+   if (have_pg_trgm)
+      *have_pg_trgm = 0;
+   if (aimee_postgres_health_request_encode(request, sizeof(request)) != 0 ||
+       call_module(AIMEE_POSTGRES_EVENT_HEALTH, AIMEE_POSTGRES_STAGE_HEALTH, request,
+                   sizeof(request), response, sizeof(response), &response_len) != 0)
+      return -1;
+   return aimee_postgres_health_response_decode(response, response_len, schema_ok, have_pg_trgm);
 }
 
 void kb_module_stage_adapters_configure(void)

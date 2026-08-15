@@ -41,7 +41,7 @@
 optional_modules_for_placement() {
     case "$1" in
         server) echo "governance roundtable benchmarks sandbox runtime-web economizer" ;;
-        kb)     echo "kb-synthesis control-web benchmarks" ;;
+        kb)     echo "kb-synthesis control-web benchmarks postgres" ;;
         *)      echo "" ;;
     esac
 }

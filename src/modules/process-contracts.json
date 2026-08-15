@@ -608,6 +608,22 @@
           "event_kind": 11015
         }
       ]
+    },
+    {
+      "id": "postgres",
+      "execution": "process",
+      "runtime": "go",
+      "principal_ref": 28,
+      "placements": [
+        "kb"
+      ],
+      "stages": [
+        {
+          "id": 1,
+          "name": "postgres-health",
+          "event_kind": 11265
+        }
+      ]
     }
   ],
   "clients": [
