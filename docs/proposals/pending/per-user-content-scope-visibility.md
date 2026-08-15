@@ -1,5 +1,7 @@
 # Per-user content scope: a project you cannot see returns nothing
 
+- **State:** IN FLIGHT — slices 1–2 are delivered; slice 3 is the current implementation.
+
 ## Problem and boundary
 
 A user who is not a member of a project can still read that project's content.
@@ -111,7 +113,10 @@ Prefer the first. The second is only worth it if a deployment cannot tolerate a 
    before the backfill is proved, because no policy reads them yet.
 2. Policies on `kb_documents` and `kb_file_index` (the search surfaces a user notices first),
    enabled with the backfill in the same change.
-3. `kb_embeddings`, `kb_pdf_embeddings`, `kb_doc_regions` (the last inherits through `chunk_id`).
+3. `kb_embeddings`, `kb_pdf_embeddings`, and the structured-document descendants. Regions inherit
+   through `chunk_id`; table cells inherit through `region_id`; document assets bind their project
+   and document key back to the authoritative chunk. The latter two tables post-date the original
+   proposal and are included so they cannot remain bypasses beside protected regions.
 4. The code index: `files` through `projects`, including what `projects.workspace` means for
    attribution.
 5. `ws_scope_project_path` membership check, so the filesystem and the database agree.
@@ -130,8 +135,12 @@ Prefer the first. The second is only worth it if a deployment cannot tolerate a 
 
 ## Status
 
-Pending. Amended after reading the ingest path: the content-to-tenancy link is one column on
-`projects`, not a change to each content table, and resolving it by project NAME is unsafe because
-`kb_project` names are unique only within a team. Evidence gathered on the merged state of #2632 (all counts and column facts above are read
-from `src/db2/schema.sql` at that commit). Slice 5 blocked on the memory-scope decision; slices 1 to
-4 blocked only on choosing a migration option.
+In flight. Slices 1 and 2 are delivered: `projects.kb_project`, the shared visibility predicate,
+documents/file-index policies, the explicit operator switch, caller propagation, exact-project
+maintenance, and live two-reader isolation are on `testing`. Slice 3 extends that same switch to
+general/PDF embeddings and every structured-document descendant, including the table-cell and asset
+surfaces added after this proposal was written. Applying the schema still enables nothing; the
+operator must complete the documented attribution preflight and call `kb_content_scope_enable()`.
+
+Slices 4 and 5 (code index and filesystem agreement) remain. Slice 6 remains blocked on the explicit
+memory-scope product decision above; this proposal does not silently choose one.
