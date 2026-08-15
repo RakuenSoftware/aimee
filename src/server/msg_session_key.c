@@ -1,4 +1,4 @@
-/* msg_session_disable.c: see msg_session_disable.h. Derives the per-identity
+/* msg_session_key.c: see msg_session_key.h. Derives the per-identity
  * session key the gateway seam is keyed by.
  *
  * The circuit breaker this file is named after has MOVED: it is state, so it now
@@ -7,7 +7,7 @@
  * the bus. What remains is the key derivation, which is not state -- it is a pure
  * function of the request's identity material. The file keeps the old name for
  * now; renaming it is a separate, mechanical change. */
-#include "msg_session_disable.h"
+#include "msg_session_key.h"
 
 #include <ctype.h>
 #include <stdio.h> /* snprintf — do not rely on a transitive include */

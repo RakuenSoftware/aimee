@@ -11,7 +11,7 @@
 #define DEC_GATEWAY_MUTATE_WIRE_H 1
 
 #include "gateway_mutate.h"
-#include "msg_session_disable.h"
+#include "msg_session_key.h"
 #include <cJSON.h>
 
 #ifdef __cplusplus
