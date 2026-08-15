@@ -133,4 +133,5 @@ thinclient/MCP identity convergence, and caller-scoped reads; #2658 and #2661 su
 background maintenance; the final slice adds live two-user/two-team ordinary-search RLS coverage.
 Schema application records `content_scope_reader_ready = '1'` but does not enable content RLS. The
 operator must finish attribution and call `kb_content_scope_enable()`; incomplete attribution still
-fails closed. The companion identity map records why no additional proof mechanism is required.
+fails closed. The [archived companion identity map](../done/per-user-content-scope-identity-map.md)
+records why no additional proof mechanism is required.
