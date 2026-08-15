@@ -7,7 +7,7 @@
 > maintenance authority, readiness gate, and live reader-isolation proof are present on `testing`.
 > Content RLS remains operator-enabled after attribution, exactly as this record requires.
 
-Amends [`per-user-content-scope-reader-identity.md`](../pending/per-user-content-scope-reader-identity.md).
+Amends [`per-user-content-scope-reader-identity.md`](per-user-content-scope-reader-identity.md).
 The earlier framing treated every ingress surface
 as if it connected to aimee-kb and therefore needed to carry independently verifiable proof to it.
 That is the wrong boundary: CLI, web and MCP terminate at aimee-server. Only aimee-server connects to
