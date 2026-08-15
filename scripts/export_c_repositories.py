@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import re
 import shutil
 import subprocess
@@ -30,6 +31,14 @@ CORE_VERSION_FILE = ROOT / "src/core/VERSION"
 REMOTE_ROOT = "https://github.com/RakuenSoftware"
 HOSTED_BY_EXECUTABLE = {"wfe": "/usr/local/bin/aimee-wfe"}
 PRINCIPAL_CLASS = 1
+C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
+BUILD_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
+CMAKE_TARGET_PACKAGES = {
+    "OpenSSL::Crypto": "OpenSSL",
+    "OpenSSL::SSL": "OpenSSL",
+    "Threads::Threads": "Threads",
+    "ZLIB::ZLIB": "ZLIB",
+}
 
 
 class ExportError(RuntimeError):
@@ -259,6 +268,96 @@ int main(int argc, char **argv)
 """
 
 
+def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
+        list[str], list[str], list[str], list[str]]:
+    """Return validated C sources, include roots, pkg-config deps, and link items."""
+    sources = descriptor.get("sources")
+    if not isinstance(sources, list) or not sources or not all(isinstance(item, str) for item in sources):
+        raise ExportError(f"{module_id}: C process must declare descriptor-owned sources")
+    c_sources = [item for item in sources if PurePosixPath(item).suffix == ".c"]
+    if len(c_sources) != len(sources):
+        raise ExportError(f"{module_id}: C process sources must all be .c files")
+    if c_sources != sorted(set(c_sources)):
+        raise ExportError(f"{module_id}: C process sources must be sorted and unique")
+    build = descriptor.get("c_build")
+    if not isinstance(build, dict) or set(build) != C_BUILD_KEYS:
+        raise ExportError(f"{module_id}: C process must declare exact c_build fields")
+
+    parsed: dict[str, list[str]] = {}
+    for field in sorted(C_BUILD_KEYS):
+        entries = build[field]
+        if not isinstance(entries, list) or not all(isinstance(item, str) for item in entries):
+            raise ExportError(f"{module_id}: c_build.{field} must be a string array")
+        if entries != sorted(set(entries)):
+            raise ExportError(f"{module_id}: c_build.{field} must be sorted and unique")
+        if field == "include_roots" and not entries:
+            raise ExportError(f"{module_id}: c_build.include_roots must not be empty")
+        for entry in entries:
+            if field == "include_roots":
+                pure = PurePosixPath(entry)
+                if (not entry or "\\" in entry or pure.is_absolute() or "." in pure.parts or
+                        ".." in pure.parts or pure.as_posix() != entry):
+                    raise ExportError(f"{module_id}: unsafe include root {entry!r}")
+            elif not BUILD_TOKEN.fullmatch(entry):
+                raise ExportError(f"{module_id}: unsafe c_build.{field} token {entry!r}")
+            elif field == "system_libraries" and "::" in entry and entry not in CMAKE_TARGET_PACKAGES:
+                raise ExportError(f"{module_id}: unsupported imported CMake target {entry!r}")
+        parsed[field] = entries
+    return c_sources, parsed["include_roots"], parsed["pkg_config"], parsed["system_libraries"]
+
+
+def c_process_cmake(module_id: str, binary: str, version: str,
+                    descriptor: dict[str, object]) -> str:
+    """Generate the standalone build for a descriptor-owned C process."""
+    sources, include_roots, pkg_config, libraries = c_process_build(module_id, descriptor)
+    source_lines = "\n".join(f"    {source}" for source in sources)
+    include_lines = "\n".join(
+        f"    ${{CMAKE_CURRENT_SOURCE_DIR}}/{root}" for root in include_roots
+    )
+    package_names = sorted({
+        CMAKE_TARGET_PACKAGES[library]
+        for library in libraries
+        if library in CMAKE_TARGET_PACKAGES
+    })
+    discovery: list[str] = [f"find_package({package} REQUIRED)" for package in package_names]
+    link_items = ["aimee::aimee-core-event-bus-client"]
+    if pkg_config:
+        discovery.extend([
+            "find_package(PkgConfig REQUIRED)",
+            f"pkg_check_modules(MODULE_PKG REQUIRED IMPORTED_TARGET {' '.join(pkg_config)})",
+        ])
+        link_items.append("PkgConfig::MODULE_PKG")
+    link_items.extend(libraries)
+    discovery_text = "\n".join(discovery)
+    if discovery_text:
+        discovery_text += "\n"
+    link_lines = "\n".join(f"    {item}" for item in link_items)
+    return f"""cmake_minimum_required(VERSION 3.16)
+project(aimee_module_{module_id.replace('-', '_')} VERSION {version} LANGUAGES C)
+
+include(GNUInstallDirs)
+find_package(aimee-core {version} EXACT CONFIG REQUIRED)
+{discovery_text}if(NOT TARGET aimee::aimee-core-event-bus-client)
+    message(FATAL_ERROR "{binary} requires the Linux event-bus client")
+endif()
+add_executable({binary}
+    runtime/main.c
+{source_lines}
+)
+target_compile_features({binary} PRIVATE c_std_11)
+target_include_directories({binary} PRIVATE
+{include_lines}
+)
+target_link_libraries({binary} PRIVATE
+{link_lines}
+)
+configure_file(grants/module.grant.in ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant @ONLY)
+install(TARGETS {binary} RUNTIME DESTINATION ${{CMAKE_INSTALL_BINDIR}})
+install(FILES ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant
+        DESTINATION ${{CMAKE_INSTALL_DATADIR}}/aimee/module-grants)
+"""
+
+
 def go_module_main(module_id: str, principal_ref: int,
                    stages: list[dict[str, object]]) -> str:
     """Generate one independently buildable Go process entry point."""
@@ -418,23 +517,7 @@ serve={serve}
             )
             write_text(
                 repository / "CMakeLists.txt",
-                f"""cmake_minimum_required(VERSION 3.16)
-project(aimee_module_{module_id.replace('-', '_')} VERSION {version} LANGUAGES C)
-
-include(GNUInstallDirs)
-find_package(aimee-core {version} EXACT CONFIG REQUIRED)
-if(NOT TARGET aimee::aimee-core-event-bus-client)
-    message(FATAL_ERROR "{binary} requires the Linux event-bus client")
-endif()
-add_executable({binary} runtime/main.c{f' {adapter_source}' if has_handler else ''})
-target_compile_features({binary} PRIVATE c_std_11)
-target_include_directories({binary} PRIVATE src/modules/{module_id}/include)
-target_link_libraries({binary} PRIVATE aimee::aimee-core-event-bus-client)
-configure_file(grants/module.grant.in ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant @ONLY)
-install(TARGETS {binary} RUNTIME DESTINATION ${{CMAKE_INSTALL_BINDIR}})
-install(FILES ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant
-        DESTINATION ${{CMAKE_INSTALL_DATADIR}}/aimee/module-grants)
-""",
+                c_process_cmake(module_id, binary, version, descriptor),
             )
             handler_text = (
                 "Its repository-owned handler implements the declared stage contract."

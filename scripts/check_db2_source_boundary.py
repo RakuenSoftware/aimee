@@ -1,0 +1,396 @@
+#!/usr/bin/env python3
+"""Freeze DB2's source boundary and classify every outside include consumer.
+
+The phase-one DB2 process migration needs two different kinds of evidence:
+
+* the implementation unit being moved (C, header, and SQL files); and
+* every direct include that must eventually become a generated client or remain
+  a private implementation test.
+
+The checked-in manifest is exact for boundary files. Outside includes are
+shrink-only: removing an include is progress, while adding a consumer, header,
+or duplicate directive fails until the reviewed manifest is deliberately
+regenerated. This checker does not claim that an include is already a wire
+operation; the operation catalog and codecs are the next migration slice.
+"""
+
+from __future__ import annotations
+
+import argparse
+from collections import Counter
+import hashlib
+import json
+from pathlib import Path, PurePosixPath
+import re
+import subprocess
+import sys
+from typing import NoReturn
+
+
+ROOT = Path(__file__).resolve().parent.parent
+BASELINE = Path("tests/baselines/db2/source-boundary-v1.json")
+BOUNDARY = PurePosixPath("src/db2")
+CONTRACTS = Path("src/modules/process-contracts.json")
+SCHEMA_VERSION = 1
+SOURCE_KINDS = {"c": ".c", "headers": ".h", "sql": ".sql"}
+INCLUDE = re.compile(r'^\s*#\s*include\s*[<"]([^">]+)[">]')
+DB2_BASENAME = re.compile(r"db2[^/]*\.h$")
+REVISION = re.compile(r"^[0-9a-f]{40}$")
+
+
+class BoundaryError(ValueError):
+    """A fail-closed inventory error with a stable rule name."""
+
+
+def fail(rule: str, message: str) -> NoReturn:
+    raise BoundaryError(f"rule={rule}: {message}")
+
+
+def _loads(raw: bytes, label: str) -> object:
+    def no_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        value: dict[str, object] = {}
+        for key, item in pairs:
+            if key in value:
+                fail("json-duplicate-key", f"{label}: duplicate key {key!r}")
+            value[key] = item
+        return value
+
+    if raw.startswith(b"\xef\xbb\xbf"):
+        fail("json-bom", f"{label} begins with a UTF-8 BOM")
+    try:
+        return json.loads(raw.decode("utf-8", "strict"), object_pairs_hook=no_duplicates)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        fail("json-parse", f"cannot parse {label}: {exc}")
+
+
+def _load(path: Path) -> object:
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        fail("input", f"cannot read {path}: {exc}")
+    return _loads(raw, str(path))
+
+
+def _repo_path(root: Path, relative: PurePosixPath | Path) -> Path:
+    candidate = root.joinpath(*PurePosixPath(relative).parts)
+    try:
+        candidate.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        fail("path-containment", f"{relative} escapes the repository root")
+    return candidate
+
+
+def _source_files(root: Path) -> dict[str, list[str]]:
+    boundary = _repo_path(root, BOUNDARY)
+    if not boundary.is_dir() or boundary.is_symlink():
+        fail("boundary", f"{BOUNDARY} must be a real directory")
+    result: dict[str, list[str]] = {}
+    for kind, suffix in SOURCE_KINDS.items():
+        result[kind] = sorted(
+            path.relative_to(root).as_posix()
+            for path in boundary.iterdir()
+            if path.is_file() and not path.is_symlink() and path.suffix == suffix
+        )
+    return result
+
+
+def _process_placements(root: Path) -> dict[str, set[str]]:
+    value = _load(_repo_path(root, CONTRACTS))
+    if not isinstance(value, dict) or not isinstance(value.get("components"), list):
+        fail("process-contracts", f"{CONTRACTS} has no components array")
+    result: dict[str, set[str]] = {}
+    for index, component in enumerate(value["components"]):
+        if not isinstance(component, dict):
+            fail("process-contracts", f"component {index} is not an object")
+        identifier, placements = component.get("id"), component.get("placements")
+        if (not isinstance(identifier, str) or not isinstance(placements, list) or
+                not all(item in {"server", "kb"} for item in placements)):
+            fail("process-contracts", f"component {index} has invalid id/placements")
+        result[identifier] = set(placements)
+    return result
+
+
+def _is_db2_include(target: str) -> bool:
+    path = PurePosixPath(target)
+    parts = path.parts
+    return "db2" in parts[:-1] or bool(DB2_BASENAME.search(path.name))
+
+
+def _classification(path: PurePosixPath, placements: dict[str, set[str]]) -> str:
+    parts = path.parts
+    if len(parts) >= 2 and parts[:2] == ("src", "tests"):
+        return "private-implementation-test"
+    if len(parts) >= 2 and parts[:2] == ("src", "server"):
+        return "server-kb-contract"
+    if len(parts) >= 3 and parts[:2] == ("src", "modules"):
+        module_id = parts[2]
+        if module_id not in placements:
+            # Some legacy source directories (currently guardrails and roadmap)
+            # predate descriptor ownership. Keeping them visible as an explicit
+            # audit class is safer than guessing a bus placement from a path.
+            return "module-placement-audit"
+        if "kb" in placements[module_id]:
+            return "kb-generated-client"
+        return "module-kb-contract"
+    if len(parts) >= 2 and parts[:2] == ("src", "kb"):
+        return "kb-generated-client"
+    return "host-generated-client"
+
+
+def _consumers(root: Path) -> list[dict[str, object]]:
+    source_root = _repo_path(root, Path("src"))
+    placements = _process_placements(root)
+    rows: list[dict[str, object]] = []
+    for path in sorted(source_root.rglob("*")):
+        if (not path.is_file() or path.is_symlink() or path.suffix not in {".c", ".h"} or
+                path.is_relative_to(_repo_path(root, BOUNDARY))):
+            continue
+        counts: Counter[str] = Counter()
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError) as exc:
+            fail("source-input", f"cannot read {path.relative_to(root)}: {exc}")
+        for line in lines:
+            match = INCLUDE.match(line)
+            if match and _is_db2_include(match.group(1)):
+                counts[match.group(1)] += 1
+        if not counts:
+            continue
+        relative = PurePosixPath(path.relative_to(root).as_posix())
+        rows.append({
+            "path": relative.as_posix(),
+            "classification": _classification(relative, placements),
+            "includes": [
+                {"header": header, "count": count}
+                for header, count in sorted(counts.items())
+            ],
+        })
+    return rows
+
+
+def _payload_fingerprint(source_files: object, consumers: object) -> str:
+    canonical = json.dumps(
+        {"source_files": source_files, "consumers": consumers},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _summary(source_files: dict[str, list[str]], consumers: list[dict[str, object]]) -> dict[str, int]:
+    include_count = sum(
+        include["count"]
+        for row in consumers
+        for include in row["includes"]  # type: ignore[index]
+    )
+    test_count = sum(
+        row["classification"] == "private-implementation-test" for row in consumers
+    )
+    return {
+        "c_files": len(source_files["c"]),
+        "headers": len(source_files["headers"]),
+        "sql_files": len(source_files["sql"]),
+        "consumer_files": len(consumers),
+        "production_consumers": len(consumers) - test_count,
+        "test_consumers": test_count,
+        "include_directives": include_count,
+    }
+
+
+def build_inventory(root: Path, source_revision: str) -> dict[str, object]:
+    if not REVISION.fullmatch(source_revision):
+        fail("source-revision", "source revision must be a full lowercase SHA-1")
+    source_files = _source_files(root)
+    consumers = _consumers(root)
+    summary = _summary(source_files, consumers)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "source_revision": source_revision,
+        "source_boundary": BOUNDARY.as_posix(),
+        "summary": summary,
+        "source_files": source_files,
+        "consumers": consumers,
+        "fingerprint": _payload_fingerprint(source_files, consumers),
+    }
+
+
+def _baseline_rows(value: object) -> dict[tuple[str, str], tuple[int, str]]:
+    if not isinstance(value, list):
+        fail("baseline-shape", "consumers must be an array")
+    result: dict[tuple[str, str], tuple[int, str]] = {}
+    previous_path = ""
+    for index, row in enumerate(value):
+        if not isinstance(row, dict) or set(row) != {"path", "classification", "includes"}:
+            fail("baseline-shape", f"consumer {index} has invalid keys")
+        path, classification, includes = row["path"], row["classification"], row["includes"]
+        if (not isinstance(path, str) or path <= previous_path or
+                not isinstance(classification, str) or not isinstance(includes, list)):
+            fail("baseline-order", f"consumer {index} is invalid or not path-sorted")
+        previous_path = path
+        previous_header = ""
+        for include in includes:
+            if not isinstance(include, dict) or set(include) != {"header", "count"}:
+                fail("baseline-shape", f"{path}: invalid include row")
+            header, count = include["header"], include["count"]
+            if (not isinstance(header, str) or header <= previous_header or
+                    type(count) is not int or count < 1):
+                fail("baseline-order", f"{path}: includes are invalid or not sorted")
+            previous_header = header
+            key = (path, header)
+            if key in result:
+                fail("baseline-duplicate", f"duplicate consumer/include pair {key}")
+            result[key] = (count, classification)
+    return result
+
+
+def enforce_shrink_only(previous: object, current: object) -> None:
+    """Reject compatibility-include allowlist growth across a reviewed PR."""
+    if not isinstance(previous, dict) or not isinstance(current, dict):
+        fail("baseline-shape", "previous/current manifests must be objects")
+    previous_rows = _baseline_rows(previous.get("consumers"))
+    current_rows = _baseline_rows(current.get("consumers"))
+    for key, (count, classification) in current_rows.items():
+        prior = previous_rows.get(key)
+        if prior is None:
+            fail("baseline-growth", f"new allowlist entry {key[1]!r} in {key[0]}")
+        if count > prior[0]:
+            fail(
+                "baseline-growth",
+                f"allowlist entry {key[1]!r} in {key[0]} grew from {prior[0]} to {count}",
+            )
+        if classification != prior[1]:
+            fail(
+                "baseline-classification",
+                f"allowlist entry {key[1]!r} in {key[0]} changed from "
+                f"{prior[1]} to {classification}",
+            )
+
+
+def check_previous_ref(root: Path, baseline_path: Path, previous_ref: str) -> bool:
+    """Compare the checked manifest with a Git base; return false for first seed."""
+    verify = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{previous_ref}^{{commit}}"], cwd=root,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if verify.returncode != 0:
+        fail("previous-ref", f"cannot resolve {previous_ref!r} as a commit")
+    relative = PurePosixPath(baseline_path)
+    if relative.is_absolute() or ".." in relative.parts:
+        fail("path-containment", f"{baseline_path} is not repository-relative")
+    prior = subprocess.run(
+        ["git", "show", f"{previous_ref}:{relative.as_posix()}"], cwd=root,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if prior.returncode != 0:
+        # The merge that introduces the v1 manifest has no previous payload.
+        # Every later base contains it, so this exception cannot be reused to
+        # expand an established allowlist.
+        return False
+    previous = _loads(prior.stdout, f"{previous_ref}:{relative.as_posix()}")
+    current = _load(_repo_path(root, baseline_path))
+    enforce_shrink_only(previous, current)
+    return True
+
+
+def check(root: Path, baseline_path: Path = BASELINE) -> dict[str, int]:
+    raw = _load(_repo_path(root, baseline_path))
+    if not isinstance(raw, dict) or set(raw) != {
+        "schema_version", "source_revision", "source_boundary", "summary",
+        "source_files", "consumers", "fingerprint",
+    }:
+        fail("baseline-shape", "top-level keys differ from source-boundary v1")
+    if raw["schema_version"] != SCHEMA_VERSION or raw["source_boundary"] != BOUNDARY.as_posix():
+        fail("baseline-version", "schema version or source boundary differs from v1")
+    if not isinstance(raw["source_revision"], str) or not REVISION.fullmatch(raw["source_revision"]):
+        fail("source-revision", "baseline source revision is not a full lowercase SHA-1")
+    if raw["fingerprint"] != _payload_fingerprint(raw["source_files"], raw["consumers"]):
+        fail("baseline-fingerprint", "baseline payload fingerprint does not match")
+    if not isinstance(raw["source_files"], dict) or set(raw["source_files"]) != set(SOURCE_KINDS):
+        fail("baseline-shape", "source_files keys differ from v1")
+    baseline_source_files: dict[str, list[str]] = {}
+    for kind in SOURCE_KINDS:
+        values = raw["source_files"].get(kind)
+        if (not isinstance(values, list) or not all(isinstance(item, str) for item in values) or
+                values != sorted(set(values))):
+            fail("baseline-order", f"source_files.{kind} must be a sorted unique string array")
+        baseline_source_files[kind] = values
+    baseline_consumers = raw["consumers"]
+    _baseline_rows(baseline_consumers)
+    if raw["summary"] != _summary(baseline_source_files, baseline_consumers):
+        fail("summary-drift", "baseline summary differs from its payload")
+    actual_sources = _source_files(root)
+    if raw["source_files"] != actual_sources:
+        fail("source-drift", "DB2 C/header/SQL file inventory differs from the baseline")
+    baseline_rows = _baseline_rows(raw["consumers"])
+    actual_consumers = _consumers(root)
+    actual_rows = _baseline_rows(actual_consumers)
+    for key, (count, classification) in actual_rows.items():
+        expected = baseline_rows.get(key)
+        if expected is None:
+            fail("include-growth", f"new DB2 include {key[1]!r} in {key[0]}")
+        expected_count, expected_classification = expected
+        if count > expected_count:
+            fail(
+                "include-growth",
+                f"{key[0]} includes {key[1]!r} {count} times; baseline permits {expected_count}",
+            )
+        if classification != expected_classification:
+            fail(
+                "consumer-classification",
+                f"{key[0]} changed from {expected_classification} to {classification}",
+            )
+    return {
+        "source_files": sum(len(items) for items in actual_sources.values()),
+        "consumer_files": len(actual_consumers),
+        "include_directives": sum(count for count, _ in actual_rows.values()),
+    }
+
+
+def _head_revision(root: Path) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    revision = result.stdout.strip()
+    if result.returncode != 0 or not REVISION.fullmatch(revision):
+        fail("source-revision", result.stderr.strip() or "cannot resolve HEAD")
+    return revision
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config-root", type=Path, default=ROOT)
+    parser.add_argument("--baseline", type=Path, default=BASELINE)
+    parser.add_argument("--previous-ref")
+    parser.add_argument("--write", action="store_true")
+    args = parser.parse_args()
+    root = args.config_root.resolve()
+    try:
+        if args.write:
+            inventory = build_inventory(root, _head_revision(root))
+            target = _repo_path(root, args.baseline)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(inventory, indent=2) + "\n", encoding="utf-8")
+            print(f"check_db2_source_boundary: wrote {args.baseline}")
+        else:
+            result = check(root, args.baseline)
+            if args.previous_ref:
+                compared = check_previous_ref(root, args.baseline, args.previous_ref)
+                suffix = "previous allowlist compared" if compared else "initial allowlist seeded"
+            else:
+                suffix = "current manifest checked"
+            print(
+                "check_db2_source_boundary: ok "
+                f"({result['source_files']} boundary files, "
+                f"{result['consumer_files']} consumers, "
+                f"{result['include_directives']} includes remain; {suffix})"
+            )
+    except (OSError, BoundaryError) as exc:
+        print(f"check_db2_source_boundary: error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
