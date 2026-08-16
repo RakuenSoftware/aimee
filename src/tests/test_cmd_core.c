@@ -166,6 +166,11 @@ static void test_handle_git_pr_create_missing_title(void)
 
    cJSON *args = cJSON_CreateObject();
    cJSON_AddStringToObject(args, "action", "create");
+   /* An explicit base keeps this about the TITLE. With none, create resolves the
+    * session's feature branch first -- it has to, because deriving a title means
+    * reading the commits the base does not have -- and this fixture has no registry
+    * row, so it would fail on the base before reaching the title path. */
+   cJSON_AddStringToObject(args, "base", "master");
    cJSON *resp = handle_git_pr(args);
    char *text = get_mcp_text(resp);
    assert(text != NULL);

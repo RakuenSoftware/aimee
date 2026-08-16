@@ -107,6 +107,59 @@ int db1_git_ownership_get_branch_for_session(const char *repo_path, const char *
    return found;
 }
 
+int db1_session_feature_branch_upsert(const char *repo_path, const char *session_id,
+                                      const char *feature_branch)
+{
+   if (!repo_path || !session_id || !feature_branch)
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+
+   sqlite3_stmt *stmt = NULL;
+   static const char *sql =
+       "INSERT INTO session_feature_branch (repo_path, session_id, feature_branch)"
+       " VALUES (?, ?, ?)"
+       " ON CONFLICT(repo_path, session_id) DO UPDATE SET feature_branch = excluded.feature_branch";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(stmt, 1, repo_path, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 2, session_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 3, feature_branch, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(stmt);
+   sqlite3_finalize(stmt);
+   return rc == SQLITE_DONE ? 0 : -1;
+}
+
+int db1_session_feature_branch_get(const char *repo_path, const char *session_id, char *branch_out,
+                                   size_t branch_len)
+{
+   if (!repo_path || !session_id || !branch_out || branch_len == 0)
+      return -1;
+   branch_out[0] = '\0';
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+
+   sqlite3_stmt *stmt = NULL;
+   static const char *sql = "SELECT feature_branch FROM session_feature_branch"
+                            " WHERE repo_path = ? AND session_id = ? LIMIT 1";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(stmt, 1, repo_path, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 2, session_id, -1, SQLITE_TRANSIENT);
+
+   int found = 1; /* 1 = nothing recorded for this session */
+   if (sqlite3_step(stmt) == SQLITE_ROW)
+   {
+      const unsigned char *name = sqlite3_column_text(stmt, 0);
+      snprintf(branch_out, branch_len, "%s", name ? (const char *)name : "");
+      found = branch_out[0] ? 0 : 1;
+   }
+   sqlite3_finalize(stmt);
+   return found;
+}
+
 int db1_git_ownership_find_session_by_prefix(const char *session_prefix, char *session_out,
                                              size_t session_len)
 {

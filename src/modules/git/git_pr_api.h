@@ -156,6 +156,7 @@ typedef struct
    int number;
    char state[16];  /* OPEN / CLOSED / MERGED, gh's spelling */
    char head[128];  /* head.ref */
+   char base[128];  /* base.ref — which branch this PR would merge INTO */
    char title[512]; /* PR title */
 } git_pr_list_item_t;
 

@@ -40,6 +40,257 @@ static cJSON *mcp_error(const char *fmt, const char *detail)
    return mcp_text(buf);
 }
 
+/* --- the base a PR targets when the caller named none ------------------------
+ *
+ * Default: the session's durable feature branch (aimee/feat/<slug>), NOT the
+ * repository's default branch. A feature's slices then accumulate on one branch and
+ * reach the default branch through a SINGLE reviewed PR, instead of every slice
+ * opening its own PR against the trunk. pr_base_mode=default_branch restores the old
+ * behaviour, and an explicit `base` always wins over both. */
+
+static int get_origin_repo_slug(char *buf, size_t len); /* defined below, with the git helpers */
+
+static void pr_capture_line(const char *cmd, char *out, size_t out_len)
+{
+   out[0] = '\0';
+   int rc = 0;
+   char *o = mcp_git_run(cmd, &rc);
+   if (rc == 0 && o)
+   {
+      snprintf(out, out_len, "%s", o);
+      out[strcspn(out, "\r\n")] = '\0';
+   }
+   free(o);
+}
+
+/* The repository's real default branch (origin/HEAD -> "main"). Returns 0 with `out`
+ * filled, -1 when it cannot be resolved -- there is no "main" guess, because opening a
+ * PR against the wrong trunk is worse than surfacing the failure. */
+static int pr_repo_default_branch(char *out, size_t out_len)
+{
+   char head_ref[256];
+   pr_capture_line("git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null", head_ref,
+                   sizeof(head_ref));
+   if (!head_ref[0])
+      return -1;
+   const char *name = strncmp(head_ref, "origin/", 7) == 0 ? head_ref + 7 : head_ref;
+   if (!name[0])
+      return -1;
+   snprintf(out, out_len, "%s", name);
+   return 0;
+}
+
+/* Create the feature branch on the remote when it is not there yet, so a PR has
+ * something to target. It is cut from the repo's default branch by pushing that ref
+ * straight to the new name -- no checkout, no working-tree change, so this is safe to
+ * run from a session sitting on its own branch. Already-exists is success. */
+static int pr_ensure_feature_branch(const char *feat, char *err, size_t err_len)
+{
+   char *esc = shell_escape(feat);
+   if (!esc)
+      return -1;
+   char cmd[768];
+   int rc = 0;
+
+   snprintf(cmd, sizeof(cmd), "git ls-remote --exit-code --heads origin '%s' 2>/dev/null", esc);
+   char *out = mcp_git_run(cmd, &rc);
+   free(out);
+   if (rc == 0)
+   {
+      free(esc);
+      return 0; /* already published */
+   }
+
+   char def[256];
+   if (pr_repo_default_branch(def, sizeof(def)) != 0)
+   {
+      free(esc);
+      snprintf(err, err_len,
+               "cannot resolve the repository default branch to cut the feature branch from");
+      return -1;
+   }
+   char *esc_def = shell_escape(def);
+   if (!esc_def)
+   {
+      free(esc);
+      return -1;
+   }
+
+   /* Fetch first: cutting the feature branch from a stale local copy of the trunk would
+    * silently start the feature behind. */
+   snprintf(cmd, sizeof(cmd), "git fetch origin '%s' 2>&1", esc_def);
+   out = mcp_git_run(cmd, &rc);
+   free(out);
+   if (rc != 0)
+   {
+      snprintf(err, err_len, "cannot fetch origin/%s to cut the feature branch from", def);
+      free(esc);
+      free(esc_def);
+      return -1;
+   }
+
+   /* CREATE-ONLY. `--force-with-lease=<ref>:` with an empty expected value requires the
+    * remote ref NOT to exist, which closes the window between the ls-remote above and
+    * this push: a concurrent session that created the feature branch first keeps its
+    * commits instead of having the branch yanked back to the trunk. Losing that race is
+    * success, not failure -- the branch we needed exists either way -- so a rejection
+    * here is re-checked rather than reported. */
+   snprintf(cmd, sizeof(cmd),
+            "git push --force-with-lease='refs/heads/%s:' origin "
+            "'refs/remotes/origin/%s:refs/heads/%s' 2>&1",
+            esc, esc_def, esc);
+   out = mcp_git_run(cmd, &rc);
+   if (rc != 0)
+   {
+      free(out);
+      snprintf(cmd, sizeof(cmd), "git ls-remote --exit-code --heads origin '%s' 2>/dev/null", esc);
+      out = mcp_git_run(cmd, &rc);
+      free(out);
+      free(esc);
+      free(esc_def);
+      if (rc == 0)
+         return 0; /* someone else created it first: the branch is there, which is all we need */
+      snprintf(err, err_len, "cannot create feature branch %s", feat);
+      return -1;
+   }
+   free(out);
+   free(esc);
+   free(esc_def);
+   return rc == 0 ? 0 : -1;
+}
+
+/* --- promotion: the feature branch -> the repository's default branch -----------
+ *
+ * A feature branch is COMPLETE when nothing is still queued to land on it: every PR
+ * that targeted it has merged (or closed) and none is open. At that point the feature
+ * is what wants review as a whole, so it gets ONE PR into the default branch. Opened as
+ * a DRAFT, matching the existing rule that a protected base is never targeted by a PR
+ * that looks ready to merge itself.
+ *
+ * This runs off the merge that made the branch complete rather than off a poll: the
+ * merge is the event, and polling would either lag or hammer the forge. */
+
+/* 1 iff no OPEN PR still targets `feature`. Returns -1 when the listing failed -- the
+ * caller must treat that as "cannot tell" and NOT promote, because promoting a feature
+ * whose slices are still in flight publishes an incomplete change for review. */
+static int pr_feature_is_complete(const char *principal, const char *slug, const char *feature)
+{
+   git_pr_list_item_t rows[100];
+   int n = 0;
+   char err[512];
+   err[0] = '\0';
+   if (git_pr_list_open_via_api_slug(principal, slug, (int)(sizeof(rows) / sizeof(rows[0])), rows,
+                                     &n, err, sizeof(err)) != 0)
+      return -1;
+   for (int i = 0; i < n; i++)
+      if (strcmp(rows[i].base, feature) == 0)
+         return 0; /* something is still queued to land on the feature */
+   return 1;
+}
+
+/* Open the feature -> default-branch PR when the feature has just become complete.
+ * Best-effort by design: it reports what it did into `note` and never turns a
+ * successful merge into a failure. */
+static void pr_promote_feature(const char *principal, const char *slug, const char *feature,
+                               char *note, size_t note_len)
+{
+   note[0] = '\0';
+   if (!config_feature_auto_promote())
+      return;
+   if (!feature || strncmp(feature, "aimee/feat/", 11) != 0)
+      return; /* only aimee-managed feature branches promote */
+
+   int complete = pr_feature_is_complete(principal, slug, feature);
+   if (complete != 1)
+   {
+      if (complete < 0)
+         snprintf(note, note_len,
+                  "\npromote: skipped — could not list open PRs, so whether %s is complete is "
+                  "unknown", feature);
+      return;
+   }
+
+   char def[256];
+   if (pr_repo_default_branch(def, sizeof(def)) != 0)
+   {
+      snprintf(note, note_len,
+               "\npromote: skipped — %s is complete but the repository default branch could not "
+               "be resolved", feature);
+      return;
+   }
+
+   char url[1024], err[512];
+   url[0] = '\0';
+   err[0] = '\0';
+   int existing = 0;
+   if (git_pr_find_open_via_api_slug(principal, slug, feature, def, url, sizeof(url), &existing,
+                                     err, sizeof(err)) == 1)
+   {
+      snprintf(note, note_len, "\npromote: %s -> %s already open: %s", feature, def, url);
+      return;
+   }
+
+   char title[512];
+   snprintf(title, sizeof(title), "%s", feature + 11); /* the slug reads as the feature name */
+   char body[512];
+   snprintf(body, sizeof(body),
+            "Every PR targeting `%s` has landed, so the feature is up for review as a whole "
+            "against `%s`.\n\nOpened as a draft: mark it ready when the feature is done.\n",
+            feature, def);
+
+   if (git_pr_create_via_api_slug(principal, slug, feature, def, title, body, 1, url, sizeof(url),
+                                  err, sizeof(err)) != 0)
+      snprintf(note, note_len, "\npromote: %s is complete but the PR into %s could not be "
+                               "opened: %.200s", feature, def, err[0] ? err : "unknown");
+   else
+      snprintf(note, note_len, "\npromote: %s is complete — opened draft PR into %s: %s", feature,
+               def, url);
+}
+
+/* Resolve the base for this session's PR and make sure it exists on the remote.
+ * Returns 0 with `out` filled, -1 with `err` filled. */
+static int pr_resolve_base(char *out, size_t out_len, char *err, size_t err_len)
+{
+   err[0] = '\0';
+
+   /* No github origin means no PR at all, and create's own refusal names that clearly.
+    * Report it here rather than a feature-branch failure that would only be the
+    * symptom -- a checkout with no forge has no base to resolve either. */
+   char slug[264];
+   if (get_origin_repo_slug(slug, sizeof(slug)) != 0)
+   {
+      snprintf(err, err_len, "cannot resolve a github.com origin for this checkout");
+      return -1;
+   }
+
+   /* The feature branch is read from db1 (keyed repo+session), NOT from a file under
+    * the checkout: this runs on aimee-server, which for a detached or mirrored
+    * workspace cannot see the checkout's directory at all. */
+   char feat[256];
+   if (strcmp(config_pr_base_mode(), "default_branch") != 0 &&
+       feature_branch_for_session(feat, sizeof(feat)) == 0 && feat[0])
+   {
+      if (pr_ensure_feature_branch(feat, err, err_len) != 0)
+         return -1;
+      snprintf(out, out_len, "%s", feat);
+      return 0;
+   }
+
+   /* No feature branch for this session -> the repository's default branch, which is
+    * what every PR targeted before feature targeting existed. Deliberately NOT a
+    * refusal: a session that never named a feature must still be able to open a PR,
+    * and failing closed here would break every caller that worked yesterday. Name one
+    * with base=aimee/feat/<slug> (or answer the prompt `aimee git pr` shows on a
+    * terminal) and it sticks for the rest of the session. */
+   if (pr_repo_default_branch(out, out_len) != 0)
+   {
+      snprintf(err, err_len,
+               "cannot resolve the repository default branch (pass base explicitly)");
+      return -1;
+   }
+   return 0;
+}
+
 /* Write a PR title and body from the commits this branch has that `base` does
  * not. Returns 0, or -1 when the branch has no such commits (nothing to open).
  *
@@ -331,6 +582,19 @@ static cJSON *pr_ready(cJSON *args)
 {
    cJSON *jbase = cJSON_GetObjectItemCaseSensitive(args, "base");
    const char *base = (cJSON_IsString(jbase) && jbase->valuestring[0]) ? jbase->valuestring : NULL;
+
+   /* Resolve the base ONCE, up front, and use it for the sync as well as the PR. The
+    * sync has to rebase onto the branch the PR will target: rebasing a slice onto the
+    * trunk while opening it against its feature branch produces a diff full of commits
+    * the feature branch does not have yet. */
+   char resolved_base[256];
+   if (!base)
+   {
+      char berr[512];
+      if (pr_resolve_base(resolved_base, sizeof(resolved_base), berr, sizeof(berr)) != 0)
+         return mcp_error("error: %s", berr);
+      base = resolved_base;
+   }
 
    char report[4096];
    int pos = 0;
@@ -809,6 +1073,25 @@ cJSON *handle_git_pr(cJSON *args)
             cJSON_AddBoolToObject(res, "conflict", 1);
          else if (rc == 2)
             cJSON_AddBoolToObject(res, "retryable", 1);
+
+         /* A merge into a feature branch may have been the LAST one that feature was
+          * waiting on. If so the feature is ready for review as a whole, so promote it
+          * to a draft PR against the default branch. Best-effort: a promotion failure
+          * is reported, never allowed to mask the merge that did succeed. */
+         if (rc == 0 || rc == 1)
+         {
+            git_pr_info_t merged_info;
+            char ierr[512];
+            ierr[0] = '\0';
+            if (git_pr_info_via_api_slug(principal, merge_slug, pr_num, &merged_info, ierr,
+                                         sizeof(ierr)) == 0)
+            {
+               char note[1024];
+               pr_promote_feature(principal, merge_slug, merged_info.base, note, sizeof(note));
+               if (note[0])
+                  cJSON_AddStringToObject(res, "promote", note + 1); /* drop the lead newline */
+            }
+         }
       }
       char *s = cJSON_PrintUnformatted(res);
       cJSON_Delete(res);
@@ -971,7 +1254,28 @@ cJSON *handle_git_pr(cJSON *args)
       cJSON *jbody = cJSON_GetObjectItemCaseSensitive(args, "body");
       cJSON *jbase = cJSON_GetObjectItemCaseSensitive(args, "base");
 
-      const char *base = cJSON_IsString(jbase) ? jbase->valuestring : "main";
+      /* An explicit base wins; otherwise this session's feature branch (created on the
+       * remote if this is its first PR), or the repo default under
+       * pr_base_mode=default_branch. Never a hardcoded "main" -- that opened every PR
+       * against a branch the repo may not even have as its trunk. */
+      char resolved_base[256];
+      const char *base;
+      if (cJSON_IsString(jbase) && jbase->valuestring[0])
+      {
+         base = jbase->valuestring;
+         /* An explicitly named feature branch becomes this session's feature: the
+          * operator (or the terminal prompt) says it once and the rest of the
+          * session's PRs inherit it, which is the whole point of a feature branch. */
+         if (strncmp(base, "aimee/feat/", 11) == 0)
+            (void)feature_branch_set(base);
+      }
+      else
+      {
+         char berr[512];
+         if (pr_resolve_base(resolved_base, sizeof(resolved_base), berr, sizeof(berr)) != 0)
+            return mcp_error("error: %s", berr);
+         base = resolved_base;
+      }
 
       /* Refuse to open a PR that cannot be merged.
        *

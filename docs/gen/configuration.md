@@ -123,7 +123,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 
 > **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `aimee_synthesis_model`
 
-### Advanced tuning keys (81)
+### Advanced tuning keys (83)
 
 Expert scalars with sensible defaults; settable in the config file but off the everyday surface.
 
@@ -140,6 +140,7 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `code_surprising_precision_floor` | float | §4 self-suppress: when the LLM-judge-sampled precision of surprising-link candidates falls below this floor, an unjudged /v1/code/graph/surprising request returns no candidates (default 0 = disabled). |
 | `cost_reward_lambda_pct` | int | Cost-penalty weight (percent) in the reward. |
 | `delegates_enabled` | bool | n/a |
+| `feature_auto_promote` | bool | When every PR on a feature branch has merged, automatically open the feature -> default-branch PR as a draft (default on). Off leaves promotion to an explicit action. |
 | `guardrails_semantic_block_threshold` | float | Semantic score threshold to block. |
 | `guardrails_semantic_prompt_threshold` | float | Semantic score threshold for prompt-level flags. |
 | `guardrails_semantic_warn_threshold` | float | Semantic score threshold to warn. |
@@ -206,6 +207,7 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `memory_semantic_floor_scale` | float | Multiplier on the semantic-recall cosine floors (0 = auto-scale by the active embedder dimension; >0 pins it). |
 | `memory_semantic_weight` | float | Semantic (vector) weight in hybrid recall. |
 | `memory_window_radius` | int | Neighbour radius for memory-window expansion. |
+| `pr_base_mode` | string | What a PR opened from a session targets. feature (default): the session's durable feature branch aimee/feat/<slug>, so a feature's slices accumulate on one branch and reach the default branch through a single reviewed PR. default_branch: every PR aims at the repo's default branch. Any other value fails closed rather than guessing a base. |
 | `prompt_manager_block_enabled` | bool | n/a |
 | `prompt_manager_review_enabled` | bool | n/a |
 | `session_worktree_base` | string | What a new primary session's branch+worktree is cut from. Order: configured -> remote default -> main -> master. Values: remote_default (default), local_default, current (opt-in only, never a fallback), or an explicit ref. Env: AIMEE_SESSION_WORKTREE_BASE. |

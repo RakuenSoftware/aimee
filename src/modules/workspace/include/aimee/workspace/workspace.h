@@ -117,6 +117,18 @@ const char *worktree_for_cwd(const session_state_t *state, const char *cwd);
  * is resolvable -- callers must then refuse to create the worktree rather than guess. */
 int worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len);
 
+/* SUGGEST a feature branch name (aimee/feat/<slug>) for the session working in
+ * `wt_path`, derived from the work_name the launcher recorded in the worktree
+ * registry. `wt_path` is the worktree or any path inside it; the owning row is found
+ * by walking up, as the attention guard does. Returns 0 with `buf` filled, -1 when
+ * nothing usable can be derived.
+ *
+ * A SUGGESTION, not a lookup: this reads a file under the checkout, so only a caller
+ * running where the checkout is may use it (the CLI). The PR path runs on
+ * aimee-server, which cannot see a detached or mirrored workspace's directory, and
+ * must use feature_branch_for_session() (db1) instead. */
+int feature_branch_suggest(const char *wt_path, char *buf, size_t buf_len);
+
 /* Count active aimee-managed worktrees for git_root. */
 int count_active_worktrees_for_root(const char *git_root);
 

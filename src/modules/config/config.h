@@ -550,6 +550,20 @@ typedef struct config
     * refuses a worktree whose recorded base is neither the default branch nor a
     * registered parent, so loosening this does not disable that check. */
    char session_worktree_base[64];
+   /* pr_base_mode: what a PR opened from a session targets.
+    *   "feature" (DEFAULT) — the session's durable feature branch aimee/feat/<slug>,
+    *                     so a feature accumulates its slices on one branch and reaches
+    *                     the default branch through a SINGLE reviewed PR.
+    *   "default_branch"  — the pre-2026-08 behaviour: every PR aims at the repo's
+    *                     default branch (origin/HEAD).
+    * Any other value is an operator error and fails closed at the resolver rather than
+    * silently falling back -- opening a PR against a guessed base is the bug this key
+    * exists to fix. */
+   char pr_base_mode[32];
+   /* feature_auto_promote (default on): when every PR on a feature branch has merged,
+    * automatically open the feature -> default-branch PR (as a draft, matching the
+    * existing protected-base rail). Off leaves promotion to an explicit action. */
+   int feature_auto_promote;
    /* External-memory guard (default on): the PreToolUse attention-guard blocks
     * agent writes to external file-based agent-memory stores
     * (~/.claude/projects/<slug>/memory/...), redirecting durable memories into

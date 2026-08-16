@@ -293,6 +293,14 @@ CFG_KEY_DESC = {
                               "remote default -> main -> master. Values: remote_default (default), "
                               "local_default, current (opt-in only, never a fallback), or an explicit "
                               "ref. Env: AIMEE_SESSION_WORKTREE_BASE.",
+    "pr_base_mode": "What a PR opened from a session targets. feature (default): the session's "
+                    "durable feature branch aimee/feat/<slug>, so a feature's slices accumulate on "
+                    "one branch and reach the default branch through a single reviewed PR. "
+                    "default_branch: every PR aims at the repo's default branch. Any other value "
+                    "fails closed rather than guessing a base.",
+    "feature_auto_promote": "When every PR on a feature branch has merged, automatically open the "
+                            "feature -> default-branch PR as a draft (default on). Off leaves "
+                            "promotion to an explicit action.",
     "kb_fusion_static_alpha": "Lexical/dense blend weight (0-1) for the static_alpha fusion mode.",
     "kb_pdf_ingest_enabled": "Route PDF uploads through the structured geometry extractor "
     "(kb_doc_pdf) instead of plain pdftotext (default off).",

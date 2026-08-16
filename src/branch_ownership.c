@@ -157,6 +157,64 @@ int branch_own_get_session_branch(char *branch_out, size_t branch_len)
    return (lookup == 1) ? 0 : -1;
 }
 
+/* --- the feature branch this session's PRs target ---------------------------
+ *
+ * Recorded in db1 next to branch ownership, and for the same reason: this is read
+ * by whichever process opens the PR, which is aimee-server. A server serving a
+ * DETACHED or MIRROR workspace cannot see the checkout's own directory (that is
+ * #2386: server-side path access against a client-held checkout, which broke every
+ * pr create), so a file under the worktree is not a store the PR path can use.
+ * repo_path comes from get_repo_path(), which resolves worktrees to the shared
+ * --git-common-dir root, so every worktree of one repo agrees. */
+
+/* 1 iff `branch` is a well-formed feature branch: the aimee/feat/ prefix followed by a
+ * non-empty [a-z0-9-] slug, no leading or trailing dash, at most 40 chars. Validated
+ * HERE, at the writer, because what reaches this function is caller-supplied: a PR's
+ * `base` comes straight from an agent or an operator, and whatever is stored is what a
+ * later PR in this session will be opened against. The charset excludes '/', '.',
+ * whitespace and control characters, so a stored value cannot walk out of the
+ * aimee/feat/ namespace or smuggle anything into a ref name. */
+static int feature_branch_valid(const char *branch)
+{
+   static const char *PREFIX = "aimee/feat/";
+   if (!branch || strncmp(branch, PREFIX, strlen(PREFIX)) != 0)
+      return 0;
+   const char *slug = branch + strlen(PREFIX);
+   size_t len = strlen(slug);
+   if (len == 0 || len > 40)
+      return 0;
+   if (slug[0] == '-' || slug[len - 1] == '-')
+      return 0;
+   for (size_t i = 0; i < len; i++)
+   {
+      char c = slug[i];
+      if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'))
+         return 0;
+   }
+   return 1;
+}
+
+int feature_branch_set(const char *branch)
+{
+   if (!feature_branch_valid(branch))
+      return -1;
+   char repo[MAX_PATH_LEN];
+   if (get_repo_path(repo, sizeof(repo)) != 0)
+      return -1;
+   return db1_session_feature_branch_upsert(repo, session_id(), branch);
+}
+
+int feature_branch_for_session(char *branch_out, size_t branch_len)
+{
+   if (!branch_out || branch_len == 0)
+      return -1;
+   branch_out[0] = '\0';
+   char repo[MAX_PATH_LEN];
+   if (get_repo_path(repo, sizeof(repo)) != 0)
+      return -1;
+   return db1_session_feature_branch_get(repo, session_id(), branch_out, branch_len);
+}
+
 cJSON *branch_own_guard_for(const char *branch, const char *operation)
 {
    char owner[64];

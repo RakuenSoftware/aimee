@@ -776,6 +776,83 @@ static void test_worktree_detect_base_branch_remote_preference_scope(void)
    (void)system(cmd);
 }
 
+/* --- feature-branch targeting: a session's PRs base on aimee/feat/<slug> so a
+ * feature's slices accumulate on one branch instead of each aiming at the
+ * repository's default branch. */
+
+static void feature_fixture_registry(const char *root, const char *sid, const char *work_name,
+                                     char *wt_out, size_t wt_out_len)
+{
+   char dir[512], path[600], wt[600], cmd[700];
+   snprintf(dir, sizeof(dir), "%s/.aimee/worktrees", root);
+   snprintf(wt, sizeof(wt), "%s/%s/main", dir, sid);
+   snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", wt);
+   (void)system(cmd);
+   snprintf(path, sizeof(path), "%s/registry.tsv", dir);
+   FILE *f = fopen(path, "a");
+   assert(f != NULL);
+   /* repo, worktree, branch, sid, work_name, base */
+   fprintf(f, "%s\t%s\taimee/session/%s\t%s\t%s\torigin/main\n", root, wt, sid, sid,
+           work_name);
+   fclose(f);
+   if (wt_out && wt_out_len)
+      snprintf(wt_out, wt_out_len, "%s", wt);
+}
+
+static void test_feature_branch_suggest_from_work_name(void)
+{
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_feat_derive_XXXXXX", platform_tmpdir());
+   if (mkdtemp(tmpdir) == NULL)
+   {
+      fprintf(stderr, "test_feature_branch_suggest_from_work_name: mkdtemp failed, skipping\n");
+      return;
+   }
+
+   char branch[128], wt[600];
+   /* A path with no registry row -> no suggestion. The caller then leaves the base to
+    * the server rather than inventing one. */
+   assert(feature_branch_suggest(tmpdir, branch, sizeof(branch)) == -1);
+   assert(branch[0] == '\0');
+
+   feature_fixture_registry(tmpdir, "sid1", "Human Trigger Workflows", wt, sizeof(wt));
+   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/human-trigger-workflows") == 0);
+
+   /* Resolvable from a path INSIDE the worktree, not only its root -- that is what a
+    * tool's cwd actually looks like. */
+   char inner[700];
+   snprintf(inner, sizeof(inner), "%s/src/modules", wt);
+   assert(feature_branch_suggest(inner, branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/human-trigger-workflows") == 0);
+
+   /* Punctuation and repeated separators collapse to a single dash; case folds. */
+   feature_fixture_registry(tmpdir, "sid2", "Fix:  vault__audit (v2)!!", wt, sizeof(wt));
+   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/fix-vault-audit-v2") == 0);
+
+   /* Longer than the 40-char slug cap -> truncated, still a valid branch. */
+   feature_fixture_registry(tmpdir, "sid3", "an extremely long feature name that runs well past",
+                            wt, sizeof(wt));
+   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == 0);
+   assert(strncmp(branch, "aimee/feat/", 11) == 0);
+   assert(strlen(branch + 11) <= 40);
+   assert(branch[strlen(branch) - 1] != '-');
+
+   /* Nothing usable survives slugging -> unresolvable, NOT a branch named after
+    * the punctuation. */
+   feature_fixture_registry(tmpdir, "sid4", "!!! ---", wt, sizeof(wt));
+   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == -1);
+
+   /* Non-ASCII with no ASCII alnum: same rule, no guess. */
+   feature_fixture_registry(tmpdir, "sid5", "日本語", wt, sizeof(wt));
+   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == -1);
+
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
+   (void)system(cmd);
+}
+
 /* --- session_isolation_target: catches the regression where concurrent
  * claude sessions share a main checkout because the SessionStart hook
  * failed to create/point them at per-session managed worktrees. */
@@ -3809,6 +3886,7 @@ int main(void)
    test_worktree_detect_base_branch_main_precedes_master();
    test_worktree_detect_base_branch_configured_beats_remote();
    test_worktree_detect_base_branch_remote_preference_scope();
+   test_feature_branch_suggest_from_work_name();
    test_session_isolation_creates_and_returns_worktree();
    test_session_isolation_sanitizes_malicious_sid();
    test_session_isolation_skips_when_already_in_same_session_worktree();

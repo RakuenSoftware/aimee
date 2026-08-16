@@ -33,6 +33,15 @@ int mcp_git_branch_own_register(const char *repo_path, const char *branch);
  * Returns 0 and writes the branch name to branch_out if found, -1 otherwise. */
 int branch_own_get_session_branch(char *branch_out, size_t branch_len);
 
+/* Record / look up the feature branch this session's PRs target (aimee/feat/<slug>),
+ * so a feature's slices accumulate on one branch instead of each aiming at the
+ * repository's default branch. Stored in db1 alongside branch ownership because the
+ * PR path runs on aimee-server, which for a detached or mirrored workspace cannot
+ * read anything under the checkout itself. _set returns 0 on success, -1 otherwise;
+ * _for_session returns 0 when found, 1 when this session has none, -1 on error. */
+int feature_branch_set(const char *branch);
+int feature_branch_for_session(char *branch_out, size_t branch_len);
+
 /* Check branch ownership for the current branch. Returns NULL if allowed,
  * or an error cJSON response if blocked by another session's ownership. */
 cJSON *branch_own_guard(const char *operation);

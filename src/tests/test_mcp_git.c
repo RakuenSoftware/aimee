@@ -1021,10 +1021,14 @@ static void test_git_pr_create_missing_title(void)
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[512];
+   /* A github origin and an explicit base: this test is about the TITLE, and create
+    * now checks the cheap preconditions first (origin, then base), so a fixture missing
+    * either would fail before reaching the title path this test exists to pin. */
    snprintf(cmd, sizeof(cmd),
             "cd '%s' && git init -q && git config user.email test@test && "
             "git config user.name test && echo x > f.txt && "
-            "git add f.txt && git commit -q -m 'init'",
+            "git add f.txt && git commit -q -m 'init' && "
+            "git remote add origin https://github.com/example/repo.git",
             tmpdir);
    assert(system(cmd) == 0);
 
@@ -1034,6 +1038,7 @@ static void test_git_pr_create_missing_title(void)
 
    cJSON *args = cJSON_CreateObject();
    cJSON_AddStringToObject(args, "action", "create");
+   cJSON_AddStringToObject(args, "base", "master");
    cJSON *resp = handle_git_pr(args);
    char *text = get_mcp_text(resp);
    assert(text != NULL);
@@ -2281,6 +2286,70 @@ static void setup_ownership_db(void)
 static void teardown_ownership_db(void)
 {
    db1_shutdown();
+}
+
+/* The feature branch a session's PRs target lives in DB1, keyed repo+session, for one
+ * reason: the PR path runs on aimee-server, and a server serving a DETACHED or MIRROR
+ * workspace cannot read anything under the checkout (that is #2386 -- server-side path
+ * access against a client-held checkout, which broke every pr create). A file under
+ * the worktree would resolve here and nowhere that matters. */
+static void test_feature_branch_store_is_session_scoped(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+
+   char branch[256];
+   /* Nothing recorded yet: 1, not an error, and not a guessed branch. The PR path
+    * treats this as "use the repository default branch" rather than refusing. */
+   assert(feature_branch_for_session(branch, sizeof(branch)) == 1);
+   assert(branch[0] == '\0');
+
+   assert(feature_branch_set("aimee/feat/operator-choice") == 0);
+   assert(feature_branch_for_session(branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/operator-choice") == 0);
+
+   /* Re-naming the feature replaces it rather than accumulating. */
+   assert(feature_branch_set("aimee/feat/second-choice") == 0);
+   assert(feature_branch_for_session(branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/second-choice") == 0);
+
+   /* Another session in the same repo must not inherit it: two concurrent sessions on
+    * different features would otherwise aim their PRs at each other's branch. */
+   session_id_set_override("session-B");
+   assert(feature_branch_for_session(branch, sizeof(branch)) == 1);
+   assert(branch[0] == '\0');
+   assert(feature_branch_set("aimee/feat/other-feature") == 0);
+   assert(feature_branch_for_session(branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/other-feature") == 0);
+
+   session_id_set_override("session-A");
+   assert(feature_branch_for_session(branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/second-choice") == 0);
+
+   /* Anything outside aimee/feat/<slug> is refused. This is caller-supplied input -- a
+    * PR's `base` -- and whatever is stored is what a later PR in this session opens
+    * against, so a bad value here retargets real PRs. */
+   assert(feature_branch_set(NULL) == -1);
+   assert(feature_branch_set("") == -1);
+   assert(feature_branch_set("main") == -1);
+   assert(feature_branch_set("aimee/feat/") == -1);
+   assert(feature_branch_set("aimee/feat/../../main") == -1);
+   assert(feature_branch_set("aimee/feat/a/b") == -1);
+   assert(feature_branch_set("aimee/feat/Caps") == -1);
+   assert(feature_branch_set("aimee/feat/-lead") == -1);
+   assert(feature_branch_set("aimee/feat/trail-") == -1);
+   assert(feature_branch_set("aimee/feat/has space") == -1);
+   assert(feature_branch_set("aimee/feat/x\nmain") == -1);
+   assert(feature_branch_set("refs/heads/aimee/feat/x") == -1);
+
+   /* None of those may have displaced the real one. */
+   assert(feature_branch_for_session(branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/second-choice") == 0);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
 }
 
 static void test_branch_create_registers_ownership(void)
@@ -3864,6 +3933,7 @@ int main(void)
    test_verify_gate_enforced_with_enforce_true_and_stale_verify();
 
    /* Branch ownership tests */
+   test_feature_branch_store_is_session_scoped();
    test_branch_create_registers_ownership();
    test_commit_blocked_by_other_session_ownership();
    test_push_blocked_by_other_session_ownership();

@@ -252,6 +252,41 @@ int main(void)
    /* base-targeting: a top-level pr.open (no base param) targets the autonomous base. */
    assert(strcmp(g_open_base, wfe_autonomous_base()) == 0);
 
+   /* A1b: NO base param on a run that HAS a parent -> the parent's feature branch, not
+    *      the autonomous base. This is the default that stops every slice opening its
+    *      own PR against the shared integration branch; the feature reaches the trunk
+    *      through one base:trunk PR instead. The head/base pairing is the same one
+    *      base:"feature" produces, so no forge rail is relaxed to allow it. */
+   {
+      char id[80] = "", err[256] = "";
+      /* "ds" is the definition whose pr.open declares NO base param. */
+      assert(wfe_work_item_create("ds", "r", "default-base-child", "interactive", id, err,
+                                  sizeof err) == 0);
+      assert(db1_work_item_set_parent(id, "P9") == 0);
+      g_open_calls = 0;
+      g_open_base[0] = '\0';
+      unsetenv("AIMEE_PR_BASE_MODE");
+      assert(wfe_engine_run(id, err, sizeof err) == 0);
+      assert(g_open_calls == 1);
+      assert(strcmp(g_open_base, "aimee/feat/P9") == 0);
+   }
+
+   /* A1c: the same run under pr_base_mode=default_branch keeps the OLD default (the
+    *      autonomous base) -- the opt-out has to actually opt out. */
+   {
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("ds", "r", "default-base-optout", "interactive", id, err,
+                                  sizeof err) == 0);
+      assert(db1_work_item_set_parent(id, "P9") == 0);
+      g_open_calls = 0;
+      g_open_base[0] = '\0';
+      setenv("AIMEE_PR_BASE_MODE", "default_branch", 1);
+      assert(wfe_engine_run(id, err, sizeof err) == 0);
+      assert(g_open_calls == 1);
+      assert(strcmp(g_open_base, wfe_autonomous_base()) == 0);
+      unsetenv("AIMEE_PR_BASE_MODE");
+   }
+
    /* A2: base:feature -> a slice sub-PR targets the PARENT feature branch. The run is
     *     linked to parent "P1" (as foreach.workflow would), so pr.open must resolve
     *     the base to aimee/feat/P1 (derived from the DB parent linkage, not an env). */

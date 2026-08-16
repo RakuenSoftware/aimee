@@ -902,6 +902,11 @@ int config_save(const config_t *cfg)
     * value so an explicit opt-out survives save+reload. */
    if (!cfg->require_session_worktree)
       cJSON_AddBoolToObject(root, "require_session_worktree", 0);
+   /* Default "feature": persist only an explicit return to default-branch targeting. */
+   if (cfg->pr_base_mode[0] && strcmp(cfg->pr_base_mode, "feature") != 0)
+      cJSON_AddStringToObject(root, "pr_base_mode", cfg->pr_base_mode);
+   if (!cfg->feature_auto_promote) /* default-on: persist only the opt-out */
+      cJSON_AddBoolToObject(root, "feature_auto_promote", 0);
    if (!cfg->require_aimee_memory) /* default-on: persist only the opt-out */
       cJSON_AddBoolToObject(root, "require_aimee_memory", 0);
    if (!cfg->require_aimee_git) /* default-on: persist only the opt-out */

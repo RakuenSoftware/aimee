@@ -1223,6 +1223,12 @@ int git_pr_list_open_via_api_slug(const char *principal, const char *slug, int l
       }
       if (cJSON_IsString(headref) && headref->valuestring)
          snprintf(row->head, sizeof(row->head), "%s", headref->valuestring);
+      /* base.ref: "which branch would this merge into". Feature-branch promotion asks
+       * whether any open PR still targets a feature branch, which head alone cannot
+       * answer. The stage already emits it; this only stopped being dropped here. */
+      const cJSON *baseref = cJSON_GetObjectItem(item, "base");
+      if (cJSON_IsString(baseref) && baseref->valuestring)
+         snprintf(row->base, sizeof(row->base), "%s", baseref->valuestring);
       if (cJSON_IsString(title) && title->valuestring)
          snprintf(row->title, sizeof(row->title), "%s", title->valuestring);
       n++;

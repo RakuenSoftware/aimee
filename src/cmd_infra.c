@@ -372,6 +372,70 @@ static cJSON *git_sub_diff(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
    return handle_git_diff_summary(args);
 }
 
+/* Ask an interactive operator which feature branch this PR should target, and record
+ * the answer for the rest of the session.
+ *
+ * PRs default to the session's feature branch rather than the repository's default
+ * branch. A person at a terminal gets to name it -- they know what the feature is
+ * called, and the derived name is only a guess off the session's work name. Everything
+ * non-interactive (an agent, a hook, CI) falls through silently to that derivation,
+ * which happens server-side. Never blocks: a declined or unusable answer just leaves
+ * `base` unset, and the server resolves it. */
+static void pr_prompt_feature_base(cJSON *args)
+{
+   if (cJSON_GetObjectItemCaseSensitive(args, "base"))
+      return; /* explicit --base: nothing to ask */
+   if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
+      return;
+
+   char cwd[MAX_PATH_LEN];
+   if (!getcwd(cwd, sizeof(cwd)))
+      return;
+
+   if (strcmp(config_pr_base_mode(), "default_branch") == 0)
+      return; /* opted out: no feature branch is in play */
+
+   char derived[256];
+   int have_suggestion = (feature_branch_suggest(cwd, derived, sizeof(derived)) == 0);
+   if (have_suggestion)
+      printf("Feature branch for this PR [%s]: ", derived);
+   else
+      printf("Feature branch for this PR (aimee/feat/<name>, blank to skip): ");
+   fflush(stdout);
+
+   char line[256];
+   if (!fgets(line, sizeof(line), stdin))
+   {
+      printf("\n");
+      return;
+   }
+   line[strcspn(line, "\r\n")] = '\0';
+   const char *answer = line;
+   while (*answer == ' ' || *answer == '\t')
+      answer++;
+
+   /* Blank accepts the suggestion; with no suggestion it declines, and the request
+    * goes without a base for the server to resolve. */
+   char branch[300];
+   if (!answer[0])
+   {
+      if (!have_suggestion)
+         return;
+      snprintf(branch, sizeof(branch), "%s", derived);
+   }
+   /* A bare name is the common answer; qualify it so the operator does not have to
+    * remember the prefix. */
+   else if (strncmp(answer, "aimee/feat/", 11) == 0)
+      snprintf(branch, sizeof(branch), "%s", answer);
+   else
+      snprintf(branch, sizeof(branch), "aimee/feat/%s", answer);
+
+   /* Sent as an explicit base rather than written anywhere here: the server records it
+    * against this session (db1), so later PRs inherit it without asking again. Writing
+    * it on this side would put the answer on a filesystem the server may not share. */
+   cJSON_AddStringToObject(args, "base", branch);
+}
+
 static cJSON *git_sub_pr(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
 {
    if (argc < 1)
@@ -400,6 +464,7 @@ static cJSON *git_sub_pr(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
             cJSON_AddStringToObject(args, "body", body);
          if (base)
             cJSON_AddStringToObject(args, "base", base);
+         pr_prompt_feature_base(args);
       }
       else if (strcmp(action, "edit") == 0)
       {
@@ -460,6 +525,8 @@ static cJSON *git_sub_pr(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
             cJSON_AddBoolToObject(args, "wait", 1);
          }
       }
+      else if (strcmp(action, "ready") == 0)
+         pr_prompt_feature_base(args); /* ready opens a PR too, so it needs a base */
    }
    return handle_git_pr(args);
 }
