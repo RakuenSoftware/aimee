@@ -118,6 +118,42 @@ Both are closed as of the pull requests that follow this document. The counts
 above are kept as they were measured, because they are what justified the order
 below — not because either still blocks a call.
 
+## The unit that migrates is a source, not an operation
+
+Everything above counts operations, and that is the wrong unit for planning.
+The daemon swaps a whole `.c` out of its link and puts the generated client in
+its place, so a source keeps ALL of its operations in-process until EVERY one
+of them can cross — the client and the domain would otherwise both define the
+symbols that did move. `git_ownership` worked because all five of its functions
+moved together.
+
+Counted that way:
+
+| capability | whole sources ready | operations |
+| --- | --- | --- |
+| today | 7 of 48 | 22 |
+| + T2 | 14 of 48 | 41 |
+| + T3 | 48 of 48 | 281 |
+
+**240 of 281 operations sit in sources that need T3.** Per-operation readiness
+overstates what can be done by roughly six times, and the order below was
+written against that overstatement.
+
+Of the 22 that can move today, 9 are `delegations` — coupled to `agent_jobs` and
+blocked on idempotency, not on wire — and 2 are `secrets`. What is genuinely
+available is `diagnose` (4), `web_page_cache` (3), `fsnap` (2), `cost_fold` (1)
+and `decisions` (1): **eleven operations across five small sources.**
+
+That reframes the whole remainder. T2 doubles the ready sources but adds only
+nineteen operations; it is not the thing standing in the way. The migration is
+a T3 problem — structured payloads, struct and array out-parameters, malloc'd
+returns — and no amount of small additions changes that.
+
+A source could be split so its ready functions migrate alone. That is a real
+option and it is not free: it edits DB1's own layout, its descriptor, and the
+ownership rules that keep the catalog honest. Worth considering deliberately
+rather than reaching for once a cutover stalls.
+
 ## Recommended order
 
 1. ~~**Field sizing first.**~~ Done: requests are no longer capped. The frame is
@@ -133,12 +169,14 @@ below — not because either still blocks a call.
    that changes the generated code's shape, so doing it before more families
    migrate means fewer files regenerate later.
 2. **Optional fields.** 16 operations, a per-field flag, no frame change.
-3. **Migrate T0/T1 families**, largest ready-count first: `workflow` (60),
-   `delegation` (27, but see the ledger coupling below), `runtime` (22).
-4. **T2 only when a family actually needs it** — 18 operations do not justify a
-   frame change on their own.
-5. **T3 last**, designed against the real shapes: 109 operations spread across
-   struct arguments, struct and array out-parameters, and malloc'd returns.
+3. **Migrate whole ready SOURCES**, not families: `diagnose`, `web_page_cache`,
+   `fsnap`, `cost_fold`, `decisions`. Eleven operations, and the only ones the
+   wire can carry end to end today.
+4. **T3 next, not last.** It is what 240 of 281 operations are waiting on, and
+   the earlier order had it at the end because operations were counted where
+   sources should have been.
+5. **T2 when a source it completes is actually wanted** — it finishes seven more
+   sources, several of them in the coupled or auth-exposed families.
 
 Two constraints sit outside the wire and are unchanged by any of this:
 

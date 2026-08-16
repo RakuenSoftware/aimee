@@ -268,6 +268,22 @@ def report(operations: dict) -> None:
     print(f"    carrying a prompt/result/document  : {len(large)}"
           f"   (carried: requests are not capped)")
 
+    # The unit that can actually migrate is a whole DB1 source, not an
+    # operation: the daemon swaps a .c file out of its link, so a source with
+    # one operation the wire cannot express keeps ALL of its operations
+    # in-process -- the client and the domain would otherwise both define the
+    # symbols that did move. Per-operation readiness overstates the work that
+    # can be done by roughly six times.
+    per_source = collections.defaultdict(list)
+    for entry in operations.values():
+        per_source[entry["source"]].append(entry["tier"])
+    print("\n  whole sources ready to migrate (the unit that can actually move):")
+    for limit, label in ((1, "today"), (2, "with T2"), (3, "with T3")):
+        done = [s for s, tiers in per_source.items() if max(tiers) <= limit]
+        moved = sum(len(per_source[s]) for s in done)
+        print(f"    {label:9} {len(done):>2} of {len(per_source)} sources"
+              f"   {moved:>3} of {total} operations")
+
     print("\n  by family (ready / total):")
     families = collections.defaultdict(collections.Counter)
     for entry in operations.values():
