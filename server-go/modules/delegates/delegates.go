@@ -142,7 +142,11 @@ func NewHandler(executor Executor) bus.ModuleHandler {
 		}
 		result := executor.Execute(ctx, decoded)
 		if result.Version != delegatecontract.WireVersion ||
-			(result.Status != "done" && result.Status != "failed") {
+			(result.Status != "done" && result.Status != "failed") ||
+			(result.Status == "done" && result.Termination != nil) ||
+			(result.Termination != nil &&
+				(!delegatecontract.ValidTerminationDiagnostic(result.Termination) ||
+					result.Termination.ExecutionTimeoutMS != decoded.ExecutionTimeoutMS)) {
 			return nil, bus.ModuleStatusInternal
 		}
 		response, err := json.Marshal(result)

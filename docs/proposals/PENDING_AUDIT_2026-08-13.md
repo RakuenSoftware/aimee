@@ -8,8 +8,9 @@ delegate and WFE panel residuals changed since that snapshot by subsequent work.
 PR #2634 moved `delegate-limit-diagnostics-residual.md` from `pending/` to `rejected/` because the
 producer was then C-owned. The Go producer later landed, and the rejection rule was itself corrected
 by [`REJECTION_AUDIT_2026-08-15.md`](REJECTION_AUDIT_2026-08-15.md): stale C implementation context
-does not invalidate a live objective. The residual is restored to pending and rewritten around the
-Go executor's typed failed result; it does not revive the retired C `partial` terminal state.
+does not invalidate a live objective. The residual was restored, rewritten around the Go executor's
+typed failed result, and completed on 2026-08-16 with grouped diagnostics plus real Claude/Codex
+producer-exhaustion fixtures. It does not revive the retired C `partial` terminal state.
 
 ## Subsequent WFE panel completion — 2026-08-14
 

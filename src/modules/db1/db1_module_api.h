@@ -1,5 +1,9 @@
 /* Wire contract for the DB1 process's bounded stages.
  *
+ * GENERATED from src/modules/db1/eventcontract/operations.json by
+ * scripts/gen_db1_contract.py. Do not edit: add a family or an operation to the
+ * catalog and regenerate, so the numbering and the wire cannot drift apart.
+ *
  * DB1 is the server's SQLite store. It is becoming a module so that callers
  * reach it over the event bus instead of linking it, which is what the module
  * doctrine requires of state. The C implementation stays for now; only the
@@ -13,32 +17,31 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Stage 1: the economizer's per-conversation reducer state. Chosen as the first
- * stage because it has exactly one production caller, so it proves the boundary
- * without a wide cutover. */
+/* Family 1: the economizer's per-conversation reducer state. Chosen as the
+ * first family because it has exactly one production caller, so it proved the
+ * boundary without a wide cutover.
+ *
+ * Request:  op(u32) | key_len(u32) | key | json_len(u32) | json
+ * Response: status(u32) | json_len(u32) | json
+ * Lengths are little-endian, matching the rest of the bus surface. */
+
 #define AIMEE_DB1_EVENT_ECONOMIZER_STATE 11777u
 #define AIMEE_DB1_STAGE_ECONOMIZER_STATE 1u
 
-/* Request:  op(u32) | key_len(u32) | key | json_len(u32) | json
-   Response: status(u32) | json_len(u32) | json
-   Lengths are little-endian, matching the rest of the bus surface. */
 #define AIMEE_DB1_OP_STATE_LOAD 1u
 #define AIMEE_DB1_OP_STATE_SAVE 2u
 
-/* A reducer state blob is bounded by the caller's buffer today
-   (ECON_MODULE_STATE_MAX). The wire cap is stated here so the module can refuse
-   an over-long value rather than truncate one. */
-#define AIMEE_DB1_STATE_MAX 6144u
+/* Family 2: branch ownership for the MCP git flows. Rows say which session
+ * owns which branch, so concurrent local sessions do not stomp on each other.
+ *
+ * Request:  op(u32) | field_count(u32) | (len(u32) | bytes) * field_count
+ * Response: status(u32) | value_len(u32) | value
+ *
+ * The counted form is the one every family after the first uses. The first
+ * family fixed its request at exactly two fields, which suits a keyed blob and
+ * suits nothing with three, so the count is explicit here rather than implied
+ * by the op. */
 
-/* Family 2: branch ownership for the MCP git flows. Rows say which session owns
-   which branch, so concurrent local sessions do not stomp on each other.
-
-   Request:  op(u32) | field_count(u32) | (len(u32) | bytes) * field_count
-   Response: status(u32) | value_len(u32) | value
-
-   The counted form is the one every family after the first uses. Stage 1 fixed
-   its request at exactly two fields, which suited a keyed blob and suits nothing
-   with three, so the count is explicit here rather than implied by the op. */
 #define AIMEE_DB1_EVENT_GIT_OWNERSHIP 11778u
 #define AIMEE_DB1_STAGE_GIT_OWNERSHIP 2u
 
@@ -48,9 +51,10 @@
 #define AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION 4u
 #define AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX  5u
 
-/* Bounds the repo path, branch, session id and prefix a request may carry, and
-   the value a reply returns. Stated so the module refuses an over-long field
-   rather than truncating one into a different row. */
+/* Wire bounds, carried from the catalog's declared reply sizes and
+   request arities. Stated so the module refuses an over-long value rather
+   than truncating one into something that looks valid. */
+#define AIMEE_DB1_STATE_MAX  6144u
 #define AIMEE_DB1_FIELD_MAX  512u
 #define AIMEE_DB1_FIELDS_MAX 3u
 

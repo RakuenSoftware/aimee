@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
@@ -465,8 +466,8 @@ func executorArgv(agent agentEntry, request delegatecontract.Invocation) ([]stri
 }
 
 type limitedBuffer struct {
-	mu sync.Mutex
-	bytes.Buffer
+	mu        sync.Mutex
+	buffer    bytes.Buffer
 	remaining int
 }
 
@@ -480,7 +481,7 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 	if len(p) > b.remaining {
 		p = p[:b.remaining]
 	}
-	_, _ = b.Buffer.Write(p)
+	_, _ = b.buffer.Write(p)
 	b.remaining -= len(p)
 	return n, nil
 }
@@ -488,13 +489,13 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 func (b *limitedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.Buffer.String()
+	return b.buffer.String()
 }
 
 func (b *limitedBuffer) BytesCopy() []byte {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return append([]byte(nil), b.Buffer.Bytes()...)
+	return append([]byte(nil), b.buffer.Bytes()...)
 }
 
 // turnMonitor enforces MaxTurns from observable JSONL events. Claude emits one
@@ -509,6 +510,7 @@ type turnMonitor struct {
 	turns    int
 	pending  []byte
 	exceeded bool
+	trigger  string
 	cancel   context.CancelFunc
 	output   io.Writer
 }
@@ -563,6 +565,7 @@ func (m *turnMonitor) observe(line []byte) {
 	}
 	if m.turns > m.max {
 		m.exceeded = true
+		m.trigger = string(line)
 		m.cancel()
 	}
 }
@@ -571,6 +574,43 @@ func (m *turnMonitor) Exceeded() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.exceeded
+}
+
+func (m *turnMonitor) Turns() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.turns
+}
+
+func (m *turnMonitor) Detail() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.trigger
+}
+
+func boundedTerminationDetail(detail string) string {
+	detail = strings.ToValidUTF8(delegatecontract.SafeDiagnostic(strings.TrimSpace(detail)), "�")
+	if len(detail) <= delegatecontract.TerminationDetailMax {
+		return detail
+	}
+	end := delegatecontract.TerminationDetailMax
+	for end > 0 && !utf8.ValidString(detail[:end]) {
+		end--
+	}
+	return detail[:end]
+}
+
+func terminationDiagnostic(kind string, request delegatecontract.Invocation, elapsed time.Duration,
+	monitor *turnMonitor, detail string) *delegatecontract.TerminationDiagnostic {
+	diagnostic := &delegatecontract.TerminationDiagnostic{
+		Kind: kind, ExecutionTimeoutMS: request.ExecutionTimeoutMS,
+		ElapsedMS: elapsed.Milliseconds(), Detail: boundedTerminationDetail(detail),
+	}
+	if kind == delegatecontract.TerminationTurnCap {
+		diagnostic.MaxTurns = request.MaxTurns
+		diagnostic.ObservedTurns = monitor.Turns()
+	}
+	return diagnostic
 }
 
 func finalOutput(kind string, output []byte) string {
@@ -773,16 +813,29 @@ func (r *RegistryExecutor) Execute(ctx context.Context, request delegatecontract
 	if request.MaxTurns > 0 {
 		cmd.Stdout = monitor
 	}
+	started := time.Now()
 	if err := cmd.Run(); err != nil {
+		elapsed := time.Since(started)
 		if monitor.Exceeded() {
-			result.Error = fmt.Sprintf("delegate maximum turn count exceeded (%d)", request.MaxTurns)
+			result.Error = fmt.Sprintf("%s (configured=%d observed=%d)",
+				delegatecontract.ErrDelegateTurnCap, request.MaxTurns, monitor.Turns())
+			result.Termination = terminationDiagnostic(delegatecontract.TerminationTurnCap,
+				request, elapsed, monitor, monitor.Detail())
 			return result
 		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			result.Error = delegatecontract.ErrDelegateExecutionDeadline.Error()
-			if detail := strings.TrimSpace(output.String()); detail != "" {
-				result.Error += ": " + delegatecontract.SafeDiagnostic(detail)
+			if detail := boundedTerminationDetail(output.String()); detail != "" {
+				result.Error += ": " + detail
 			}
+			result.Termination = terminationDiagnostic(delegatecontract.TerminationExecutionDeadline,
+				request, elapsed, monitor, output.String())
+			return result
+		}
+		if errors.Is(ctx.Err(), context.Canceled) {
+			result.Error = context.Canceled.Error()
+			result.Termination = terminationDiagnostic(delegatecontract.TerminationCancelled,
+				request, elapsed, monitor, output.String())
 			return result
 		}
 		detail := strings.TrimSpace(output.String())

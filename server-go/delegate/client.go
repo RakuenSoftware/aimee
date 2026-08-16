@@ -19,12 +19,17 @@ import (
 )
 
 const (
-	EventKind       uint32 = 6657
-	StageInvoke     uint32 = 1
-	EventGroupPlan  uint32 = 6678
-	StageGroupPlan  uint32 = 22
-	WireVersion            = 2
-	DefaultDeadline        = 30 * time.Minute
+	EventKind            uint32 = 6657
+	StageInvoke          uint32 = 1
+	EventGroupPlan       uint32 = 6678
+	StageGroupPlan       uint32 = 22
+	WireVersion                 = 2
+	DefaultDeadline             = 30 * time.Minute
+	TerminationDetailMax        = 2048
+
+	TerminationTurnCap           = "turn_cap"
+	TerminationExecutionDeadline = "execution_deadline"
+	TerminationCancelled         = "cancelled"
 )
 
 type DelegateRequest struct {
@@ -84,13 +89,15 @@ var (
 	ErrDelegateCapacity             = errors.New("delegate capacity unavailable [aimee_err=concurrency_limit]")
 	ErrDelegateCapacityDeadline     = errors.New("delegate capacity wait deadline exceeded [aimee_err=capacity_deadline]")
 	ErrDelegateExecutionDeadline    = errors.New("delegate execution deadline exceeded [aimee_err=execution_deadline]")
+	ErrDelegateTurnCap              = errors.New("delegate maximum turn count exceeded [aimee_err=turn_cap]")
 )
 
 type DelegateExecutionError struct {
-	Err        error
-	Dispatched bool
-	CostKnown  bool
-	CostUSD    float64
+	Err         error
+	Dispatched  bool
+	CostKnown   bool
+	CostUSD     float64
+	Termination *TerminationDiagnostic
 }
 
 func (e *DelegateExecutionError) Error() string { return e.Err.Error() }
@@ -113,13 +120,43 @@ type Invocation struct {
 }
 
 type InvocationResult struct {
-	Version   int     `json:"version"`
-	Status    string  `json:"status"`
-	Response  string  `json:"response,omitempty"`
-	Agent     string  `json:"agent,omitempty"`
-	Error     string  `json:"error,omitempty"`
-	CostUSD   float64 `json:"cost_usd,omitempty"`
-	CostKnown bool    `json:"cost_known"`
+	Version     int                    `json:"version"`
+	Status      string                 `json:"status"`
+	Response    string                 `json:"response,omitempty"`
+	Agent       string                 `json:"agent,omitempty"`
+	Error       string                 `json:"error,omitempty"`
+	CostUSD     float64                `json:"cost_usd,omitempty"`
+	CostKnown   bool                   `json:"cost_known"`
+	Termination *TerminationDiagnostic `json:"termination,omitempty"`
+}
+
+// TerminationDiagnostic is the delegate producer's bounded, versioned account
+// of why an invocation stopped. Admission failures and ordinary CLI failures do
+// not fabricate one: only the Go producer owns these execution classifications.
+type TerminationDiagnostic struct {
+	Kind               string `json:"kind"`
+	MaxTurns           int    `json:"max_turns,omitempty"`
+	ObservedTurns      int    `json:"observed_turns,omitempty"`
+	ExecutionTimeoutMS int64  `json:"execution_timeout_ms,omitempty"`
+	ElapsedMS          int64  `json:"elapsed_ms"`
+	Detail             string `json:"detail,omitempty"`
+}
+
+func ValidTerminationDiagnostic(d *TerminationDiagnostic) bool {
+	if d == nil || d.ElapsedMS < 0 || d.ExecutionTimeoutMS < 0 ||
+		d.MaxTurns < 0 || d.ObservedTurns < 0 || len(d.Detail) > TerminationDetailMax {
+		return false
+	}
+	switch d.Kind {
+	case TerminationTurnCap:
+		return d.MaxTurns > 0 && d.ObservedTurns >= d.MaxTurns
+	case TerminationExecutionDeadline:
+		return d.ExecutionTimeoutMS > 0 && d.MaxTurns == 0 && d.ObservedTurns == 0
+	case TerminationCancelled:
+		return d.MaxTurns == 0 && d.ObservedTurns == 0
+	default:
+		return false
+	}
 }
 
 // GroupPlan carries only delegate-selection inputs. Participant continuity is
@@ -234,7 +271,10 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 		return DelegateResult{}, &DelegateExecutionError{Err: fmt.Errorf("decode delegate result: %w", err),
 			Dispatched: true, CostKnown: false}
 	}
-	if result.Version != WireVersion || (result.Status != "done" && result.Status != "failed") {
+	if result.Version != WireVersion || (result.Status != "done" && result.Status != "failed") ||
+		(result.Status == "done" && result.Termination != nil) ||
+		(result.Termination != nil && (!ValidTerminationDiagnostic(result.Termination) ||
+			result.Termination.ExecutionTimeoutMS != wire.ExecutionTimeoutMS)) {
 		return DelegateResult{}, &DelegateExecutionError{
 			Err:        errors.New("delegate module returned an invalid terminal result"),
 			Dispatched: true, CostKnown: false}
@@ -245,11 +285,25 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 			detail = ErrDelegateTerminal.Error()
 		}
 		failure := classifyDelegateError(errors.New(detail))
+		if result.Termination != nil {
+			switch result.Termination.Kind {
+			case TerminationTurnCap:
+				failure = errors.Join(ErrDelegateTurnCap, errors.New(detail))
+			case TerminationExecutionDeadline:
+				failure = errors.Join(ErrDelegateExecutionDeadline, context.DeadlineExceeded,
+					errors.New(detail))
+			case TerminationCancelled:
+				failure = errors.Join(context.Canceled, errors.New(detail))
+			}
+		}
 		if !IsCapacityBackpressure(failure) && !IsCapacityDeadline(failure) && !IsExecutionDeadline(failure) {
-			failure = fmt.Errorf("%w: %s", ErrDelegateTerminal, detail)
+			if result.Termination == nil {
+				failure = fmt.Errorf("%w: %s", ErrDelegateTerminal, detail)
+			}
 		}
 		return DelegateResult{}, &DelegateExecutionError{Err: failure,
-			Dispatched: true, CostKnown: result.CostKnown, CostUSD: result.CostUSD}
+			Dispatched: true, CostKnown: result.CostKnown, CostUSD: result.CostUSD,
+			Termination: result.Termination}
 	}
 	participant := request.Participant
 	if participant == "" {
