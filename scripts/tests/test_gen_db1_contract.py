@@ -286,7 +286,7 @@ class CatalogTests(unittest.TestCase):
                 "wire_format": "db1-fields-v1", "scope": "session",
                 "transaction": "single", "idempotency": "idempotent",
                 "results": ["ok", "invalid", "failed"],
-                "request": {"fields": [{"name": n, "type": "text"}
+                "request": {"fields": [{"name": n, "type": "text", "required": True}
                                        for n in ("key", "a", "b", "c")]},
                 "reply": {"payload": "none", "max_bytes": 0},
             })
@@ -400,8 +400,8 @@ class CatalogTests(unittest.TestCase):
             "c_name": "db1_probe_forget_if_job", "c_params": ["probe_id", "job_id"],
             "wire_format": "db1-fields-v1", "scope": "session", "transaction": "single",
             "idempotency": "idempotent", "results": ["ok", "invalid", "failed"],
-            "request": {"fields": [{"name": "key", "type": "text"},
-                                   {"name": "job", "type": "int"}]},
+            "request": {"fields": [{"name": "key", "type": "text", "required": True},
+                                   {"name": "job", "type": "int", "required": True}]},
             "reply": {"payload": "none", "max_bytes": 0},
         })
         self.write(root, catalog)
@@ -435,8 +435,9 @@ class CatalogTests(unittest.TestCase):
             self.assertIn("int db1_probe_forget_if_job(const char *probe_id, int job_id)", client)
             self.assertIn('snprintf(job_id_text, sizeof job_id_text, "%d", job_id);', client)
             self.assertIn("{probe_id, job_id_text}", client)
-            # An int has no null to guard, so only the text argument is checked.
-            self.assertIn("if (!probe_id)", client)
+            # An int has no null and no empty case, so only the text argument
+            # is checked -- and it is checked for both.
+            self.assertIn("if (!probe_id || !probe_id[0])", client)
             self.assertNotIn("!job_id", client)
 
             self.assertIn("parse_int(field[1], &parsed1)", stage)
@@ -471,6 +472,87 @@ class CatalogTests(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def optional_catalog(self, root: Path) -> dict:
+        """Activate a reserved family with one required/optional operation."""
+        catalog = self.catalog(root)
+        reserved = self.reserved(catalog)
+        reserved["active"] = True
+        catalog["operations"].append({
+            "family": reserved["name"], "id": 1, "name": "probe_status_set",
+            "c_name": "db1_probe_status_set",
+            "c_params": ["probe_id", "status", "pipeline_id", "error"],
+            "wire_format": "db1-fields-v1", "scope": "session", "transaction": "single",
+            "idempotency": "idempotent", "results": ["ok", "invalid", "failed"],
+            "request": {"fields": [
+                {"name": "key", "type": "text", "required": True},
+                {"name": "status", "type": "text", "required": True},
+                {"name": "pipeline", "type": "text", "required": False},
+                {"name": "error", "type": "text", "required": False}]},
+            "reply": {"payload": "none", "max_bytes": 0},
+        })
+        self.write(root, catalog)
+        path = root / contract.PROCESS_CONTRACTS
+        document = json.loads(path.read_text(encoding="utf-8"))
+        for component in document["components"]:
+            if component["id"] == "db1":
+                component["stages"].append({
+                    "id": reserved["id"],
+                    "name": "db1-" + reserved["name"].replace("_", "-"),
+                    "event_kind": reserved["event_kind"]})
+        path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        return reserved
+
+    def test_an_optional_field_is_carried_and_only_required_ones_guarded(self) -> None:
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            reserved = self.optional_catalog(root)
+            contract.run(root, write=True)
+            client = (root / contract.CLIENT_DIR / f"{reserved['name']}.c").read_text()
+            stage = (root / contract.SOURCE_DIR / f"{reserved['name']}_stage.c").read_text()
+
+            # Only the required arguments are refused locally.
+            self.assertIn("if (!probe_id || !probe_id[0] || !status || !status[0])", client)
+            self.assertNotIn("!pipeline_id[0]", client)
+            # An absent optional value travels as empty, which is how the
+            # domains already read NULL.
+            self.assertIn('pipeline_id ? pipeline_id : ""', client)
+            self.assertIn('error ? error : ""', client)
+            # The stage checks the required fields and lets the rest be blank.
+            self.assertIn("if (!field[0][0])", stage)
+            self.assertIn("if (!field[1][0])", stage)
+            self.assertNotIn("if (!field[2][0])", stage)
+        finally:
+            tmp.cleanup()
+
+    def test_arity_is_checked_before_any_field_is_read(self) -> None:
+        # Only `count` entries of field[] are initialised. Testing field[2] on a
+        # two-field frame reads uninitialised memory, so the arity check has to
+        # come first -- it did not, briefly, and this is what says so.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            reserved = self.optional_catalog(root)
+            contract.run(root, write=True)
+            stage = (root / contract.SOURCE_DIR / f"{reserved['name']}_stage.c").read_text()
+            case = stage[stage.index("case AIMEE_DB1_OP_PROBE_STATUS_SET"):]
+            case = case[:case.index("break;")]
+            self.assertLess(case.index("if (count != 4u)"), case.index("if (!field[0][0])"),
+                            "a field was read before the arity check")
+        finally:
+            tmp.cleanup()
+
+    def test_a_scoped_operation_cannot_make_its_key_optional(self) -> None:
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            catalog = self.catalog(root)
+            catalog["operations"][0]["request"]["fields"][0]["required"] = False
+            self.write(root, catalog)
+            self.assertRule(root, "field-required")
+        finally:
+            tmp.cleanup()
+
     def test_every_operation_is_keyed(self) -> None:
         # DB1 rows belong to a conversation or session; an unkeyed read would
         # cross that boundary.
@@ -479,7 +561,7 @@ class CatalogTests(unittest.TestCase):
             root = Path(tmp.name)
             catalog = self.catalog(root)
             catalog["operations"][0]["request"]["fields"] = [
-                {"name": "state", "type": "text"}]
+                {"name": "state", "type": "text", "required": True}]
             self.write(root, catalog)
             self.assertRule(root, "request-key")
         finally:

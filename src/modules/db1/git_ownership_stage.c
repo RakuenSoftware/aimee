@@ -31,7 +31,7 @@ static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, cha
       return 1;
    uint32_t n = aimee_db1_get_u32(body + *offset);
    *offset += 4u;
-   if (n > len || *offset + n > len || n == 0u)
+   if (n > len || *offset + n > len)
       return 1;
    if (memchr(body + *offset, 0, n) != NULL)
       return 1;
@@ -106,6 +106,21 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[2][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
       rc = db1_git_ownership_upsert(field[0], field[1], field[2]);
       break;
    case AIMEE_DB1_OP_OWNERSHIP_DELETE:
@@ -114,10 +129,30 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
       rc = db1_git_ownership_delete(field[0], field[1]);
       break;
    case AIMEE_DB1_OP_OWNERSHIP_OWNER_GET:
       if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
@@ -131,11 +166,26 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
       rc = db1_git_ownership_get_branch_for_session(field[0], field[1], value, sizeof value);
       reads = 1;
       break;
    case AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX:
       if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;

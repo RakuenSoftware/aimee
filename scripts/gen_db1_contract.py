@@ -240,7 +240,15 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
             fail("request-fields", f"{name} request must declare at least one field")
         fields = []
         for position, entry_field in enumerate(raw_fields):
-            declared = keys(entry_field, {"name", "type"}, f"{name}.request.fields[{position}]")
+            declared = keys(entry_field, {"name", "type", "required"},
+                            f"{name}.request.fields[{position}]")
+            if type(declared["required"]) is not bool:
+                fail("field-required",
+                     f"{name} field {declared['name']!r} required must be boolean")
+            # A scope key that may be absent is not a scope key.
+            if position == 0 and not declared["required"] and operation["scope"] != "global":
+                fail("field-required",
+                     f"{name} is scoped, so its first field cannot be optional")
             if declared["type"] not in FIELD_TYPES:
                 fail("field-type",
                      f"{name} field {declared['name']!r} type must be one of {list(FIELD_TYPES)}")
@@ -648,7 +656,10 @@ static int frame_size(const char *const *fields, uint32_t count, size_t *need_ou
    size_t need = 8u;
    for (uint32_t i = 0; i < count; ++i)
    {{
-      if (!fields[i] || !fields[i][0])
+      /* Empty is legal on the wire: an optional field the caller left out
+         travels as zero length. Which fields may be empty is the operation's
+         business, checked before the frame is built. */
+      if (!fields[i])
          return -1;
       size_t n = strlen(fields[i]);
       if (n > AIMEE_MODULE_MESSAGE_MAX_BODY - need - 4u)
@@ -787,14 +798,17 @@ def client_bytes(catalog: dict[str, object], family: dict[str, object],
         fields = [str(f["name"]) for f in request["fields"]]
         types = [str(f["type"]) for f in request["fields"]]
         reads = reply["payload"] != "none"
+        required = [bool(f["required"]) for f in request["fields"]]
         names = [str(n) for n in operation["c_params"]]
         inputs, outputs = names[:len(fields)], names[len(fields):]
         params = [(f"int {p}" if t == "int" else f"const char *{p}")
                   for p, t in zip(inputs, types)]
         if reads:
             params += [f"char *{outputs[0]}", f"size_t {outputs[1]}"]
-        # An int cannot be null and has no empty case, so only text is guarded.
-        guards = [f"!{p}" for p, t in zip(inputs, types) if t == "text"]
+        # An int cannot be null and has no empty case, so only text is guarded --
+        # and only where the operation says the value must be there.
+        guards = [f"!{p} || !{p}[0]" for p, t, need in zip(inputs, types, required)
+                  if t == "text" and need]
         if reads:
             guards += [f"!{outputs[0]}", f"{outputs[1]} == 0"]
 
@@ -805,7 +819,12 @@ def client_bytes(catalog: dict[str, object], family: dict[str, object],
         # Integers travel as decimal text: the frame carries counted bytes, and a
         # separate numeric type on the wire would buy nothing a printf does not.
         carried = []
-        for parameter, kind in zip(inputs, types):
+        for parameter, kind, need in zip(inputs, types, required):
+            if kind == "text" and not need:
+                # The domains already read NULL as empty; the wire says so too
+                # rather than refusing a caller that leaves a value out.
+                carried.append(f"{parameter} ? {parameter} : \"\"")
+                continue
             if kind == "int":
                 body.append(f"   char {parameter}_text[24];")
                 body.append(f'   snprintf({parameter}_text, sizeof {parameter}_text, "%d", '
@@ -894,7 +913,7 @@ static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, cha
       return 1;
    uint32_t n = aimee_db1_get_u32(body + *offset);
    *offset += 4u;
-   if (n > len || *offset + n > len || n == 0u)
+   if (n > len || *offset + n > len)
       return 1;
    if (memchr(body + *offset, 0, n) != NULL)
       return 1;
@@ -1053,6 +1072,13 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]]) 
                 + ("      reads = 1;\n" if reads else "")
                 + "      break;\n")
         head = f"   case AIMEE_DB1_OP_{str(operation['name']).upper()}:\n"
+        needs = "".join(
+            f"      if (!field[{i}][0])\n      {{\n         free(scratch);\n"
+            f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n      }}\n"
+            for i, f in enumerate(request["fields"]) if f["required"])
+        marker = "         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n      }\n"
+        cut = body.index(marker) + len(marker)
+        body = body[:cut] + needs + body[cut:]
         cases.append(head + (f"   {{\n{body}   }}\n" if parse else body))
     typed = any(f["type"] == "int" for o in operations for f in o["request"]["fields"])
     return STAGE_SCAFFOLD.format(stem=name, family=name.replace("_", " "),
