@@ -17,7 +17,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define DB2_REF        29u
+#define DB2_REF 29u
 /* Deliberately outside the canonical module/client range: these identities
  * exist only in this isolated provider-conformance runtime. */
 #define PROVIDER_A_REF 1001u
