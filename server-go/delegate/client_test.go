@@ -203,12 +203,74 @@ func TestDelegateResultPreservesCapacityWaitDeadline(t *testing.T) {
 
 func TestDelegateResultPreservesExecutionDeadline(t *testing.T) {
 	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed",
-		Error: ErrDelegateExecutionDeadline.Error()}}
+		Error: ErrDelegateExecutionDeadline.Error(), Termination: &TerminationDiagnostic{
+			Kind: TerminationExecutionDeadline, ExecutionTimeoutMS: 1000, ElapsedMS: 999,
+		}}}
 	client := &BusClient{caller: caller, deadline: time.Second}
 	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
 	if !errors.Is(err, ErrDelegateExecutionDeadline) || !errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, ErrDelegateCapacityDeadline) || errors.Is(err, ErrDelegateTerminal) {
 		t.Fatalf("execution deadline was collapsed into another failure: %v", err)
+	}
+	var execution *DelegateExecutionError
+	if !errors.As(err, &execution) || execution.Termination == nil ||
+		execution.Termination.Kind != TerminationExecutionDeadline {
+		t.Fatalf("execution deadline diagnostic was lost: %#v", err)
+	}
+}
+
+func TestDelegateResultPreservesTurnCapDiagnostic(t *testing.T) {
+	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed",
+		Error: ErrDelegateTurnCap.Error(), Termination: &TerminationDiagnostic{
+			Kind: TerminationTurnCap, MaxTurns: 2, ObservedTurns: 3,
+			ExecutionTimeoutMS: 1000, ElapsedMS: 1250, Detail: "bounded detail",
+		}}}
+	client := &BusClient{caller: caller, deadline: time.Second}
+	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+	if !errors.Is(err, ErrDelegateTurnCap) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) || errors.Is(err, ErrDelegateTerminal) {
+		t.Fatalf("turn cap was collapsed into another failure: %v", err)
+	}
+	var execution *DelegateExecutionError
+	if !errors.As(err, &execution) || execution.Termination == nil ||
+		execution.Termination.ObservedTurns != 3 {
+		t.Fatalf("turn-cap diagnostic was lost: %#v", err)
+	}
+}
+
+func TestDelegateResultPreservesProducerCancellation(t *testing.T) {
+	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed",
+		Error: context.Canceled.Error(), Termination: &TerminationDiagnostic{
+			Kind: TerminationCancelled, ExecutionTimeoutMS: 1000, ElapsedMS: 250,
+		}}}
+	client := &BusClient{caller: caller, deadline: time.Second}
+	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+	if !errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		IsCapacityDeadline(err) || IsExecutionDeadline(err) || errors.Is(err, ErrDelegateTerminal) {
+		t.Fatalf("producer cancellation was retyped: %v", err)
+	}
+}
+
+func TestDelegateResultRejectsMalformedTermination(t *testing.T) {
+	for name, termination := range map[string]*TerminationDiagnostic{
+		"turn count": {
+			Kind: TerminationTurnCap, MaxTurns: 2, ObservedTurns: 0,
+			ExecutionTimeoutMS: 1000,
+		},
+		"omitted execution cap": {
+			Kind: TerminationTurnCap, MaxTurns: 2, ObservedTurns: 2,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed",
+				Error: ErrDelegateTurnCap.Error(), Termination: termination}}
+			client := &BusClient{caller: caller, deadline: time.Second}
+			_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+			if err == nil || !strings.Contains(err.Error(), "invalid terminal result") ||
+				errors.Is(err, ErrDelegateTurnCap) {
+				t.Fatalf("malformed termination was accepted: %v", err)
+			}
+		})
 	}
 }
 

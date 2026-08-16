@@ -123,6 +123,119 @@ func (budgetExhaustedAgents) Delegate(ctx context.Context, request DelegateReque
 		"tool loop budget exhausted (elapsed=660258ms effective=720000ms configured=720000ms stage_remaining_cap=1500000ms)")
 }
 
+type typedLimitAgents struct{}
+
+type typedDeadlineAgents struct{}
+
+func testTurnCapExecutionError() error {
+	return &DelegateExecutionError{
+		Err: ErrDelegateTurnCap, Dispatched: true,
+		Termination: &TerminationDiagnostic{
+			Kind: terminationTurnCap, MaxTurns: 2, ObservedTurns: 3,
+			ExecutionTimeoutMS: 5000, ElapsedMS: 1250, Detail: "producer stopped",
+		},
+	}
+}
+
+func (typedLimitAgents) Delegate(context.Context, DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{}, testTurnCapExecutionError()
+}
+
+func (typedLimitAgents) DelegateGroup(_ context.Context, _ []DelegateRequest) []DelegateGroupResult {
+	return []DelegateGroupResult{
+		{Participant: "limited-seat", Err: testTurnCapExecutionError()},
+		{Participant: "healthy-seat", Response: "ok"},
+		{Participant: "failed-seat", Err: errors.New("independent failure")},
+	}
+}
+
+func testExecutionDeadlineError() error {
+	return &DelegateExecutionError{
+		Err: errors.Join(ErrDelegateExecutionDeadline, context.DeadlineExceeded), Dispatched: true,
+		Termination: &TerminationDiagnostic{
+			Kind: terminationExecutionDeadline, ExecutionTimeoutMS: 5000,
+			ElapsedMS: 1250, Detail: "producer deadline stopped",
+		},
+	}
+}
+
+func (typedDeadlineAgents) Delegate(context.Context, DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{}, testExecutionDeadlineError()
+}
+
+func (typedDeadlineAgents) DelegateGroup(_ context.Context, _ []DelegateRequest) []DelegateGroupResult {
+	return []DelegateGroupResult{
+		{Participant: "deadline-seat", Err: testExecutionDeadlineError()},
+		{Participant: "healthy-seat", Response: "ok"},
+	}
+}
+
+func TestDelegateGroupLimitDiagnostic(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	runner := &NativeRunner{agents: typedLimitAgents{}}
+	request := DelegateRequest{Role: "review", Persona: "qa"}
+	_, singleErr := runner.delegate(ctx, StepRequest{}, request)
+	var single *DelegateLimitError
+	if !errors.As(singleErr, &single) {
+		t.Fatalf("single error = %v, want typed limit diagnostic", singleErr)
+	}
+	results := runner.delegateGroup(ctx, StepRequest{}, []DelegateRequest{request, request, request})
+	if len(results) != 3 {
+		t.Fatalf("group results = %+v", results)
+	}
+	var grouped *DelegateLimitError
+	if !errors.As(results[0].Err, &grouped) {
+		t.Fatalf("group error = %v, want typed limit diagnostic", results[0].Err)
+	}
+	for name, diagnostic := range map[string]*DelegateLimitError{"single": single, "group": grouped} {
+		if diagnostic.FiringBound != terminationTurnCap || diagnostic.MaxTurns != 2 ||
+			diagnostic.ObservedTurns != 3 || diagnostic.ToolLoopCap != 5*time.Second ||
+			diagnostic.Elapsed != 1250*time.Millisecond || diagnostic.StageWallRemaining <= 0 {
+			t.Fatalf("%s diagnostic = %+v", name, diagnostic)
+		}
+		for _, field := range []string{"firing_bound=turn_cap", "max_turns=2",
+			"observed_turns=3", "elapsed=1.25s"} {
+			if !strings.Contains(diagnostic.Error(), field) {
+				t.Fatalf("%s diagnostic %q is missing %q", name, diagnostic, field)
+			}
+		}
+	}
+	if results[0].Participant != "limited-seat" || results[1].Participant != "healthy-seat" ||
+		results[1].Err != nil || results[1].Response != "ok" ||
+		results[2].Participant != "failed-seat" || results[2].Err == nil {
+		t.Fatalf("mixed group outcomes changed: %+v", results)
+	}
+	var unrelated *DelegateLimitError
+	if errors.As(results[2].Err, &unrelated) {
+		t.Fatalf("independent failure was decorated as a limit: %v", results[2].Err)
+	}
+
+	deadlineRunner := &NativeRunner{agents: typedDeadlineAgents{}}
+	_, singleDeadlineErr := deadlineRunner.delegate(ctx, StepRequest{}, request)
+	deadlineResults := deadlineRunner.delegateGroup(ctx, StepRequest{}, []DelegateRequest{request, request})
+	var singleDeadline, groupedDeadline *DelegateLimitError
+	if !errors.As(singleDeadlineErr, &singleDeadline) || len(deadlineResults) != 2 ||
+		!errors.As(deadlineResults[0].Err, &groupedDeadline) {
+		t.Fatalf("execution deadline diagnostics missing: single=%v group=%+v",
+			singleDeadlineErr, deadlineResults)
+	}
+	for name, diagnostic := range map[string]*DelegateLimitError{
+		"single deadline": singleDeadline, "group deadline": groupedDeadline,
+	} {
+		if diagnostic.FiringBound != terminationExecutionDeadline ||
+			diagnostic.ToolLoopCap != 5*time.Second || diagnostic.Elapsed != 1250*time.Millisecond ||
+			diagnostic.StageWallRemaining <= 0 || !errors.Is(diagnostic, context.DeadlineExceeded) {
+			t.Fatalf("%s diagnostic = %+v", name, diagnostic)
+		}
+	}
+	if deadlineResults[0].Participant != "deadline-seat" ||
+		deadlineResults[1].Participant != "healthy-seat" || deadlineResults[1].Err != nil ||
+		deadlineResults[1].Response != "ok" {
+		t.Fatalf("deadline mixed group outcomes changed: %+v", deadlineResults)
+	}
+}
+
 // Direction one: the stage wall cap is smaller than the delegate's budget, so
 // the stage deadline fires while the delegate is still working. The recorded
 // diagnostic must name both limits and the elapsed time, because "context
