@@ -448,6 +448,20 @@ class LinkClosureTest(unittest.TestCase):
             with self.assertRaisesRegex(checker.ClosureError, "support-descriptor"):
                 checker.descriptor_support_policy(REPO, descriptor)
 
+    def test_random_source_descriptor_omission_fails(self) -> None:
+        descriptor = json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))
+        descriptor["sources"].remove("src/modules/db2/support/random_primitives.c")
+        with mock.patch.object(checker, "SUPPORT_UNITS", self.production_support):
+            with self.assertRaisesRegex(checker.ClosureError, "support-descriptor"):
+                checker.descriptor_support_policy(REPO, descriptor)
+
+    def test_random_header_descriptor_omission_fails(self) -> None:
+        descriptor = json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))
+        descriptor["private_headers"].remove("src/modules/db2/support/db2_random.h")
+        with mock.patch.object(checker, "SUPPORT_UNITS", self.production_support):
+            with self.assertRaisesRegex(checker.ClosureError, "support-descriptor"):
+                checker.descriptor_support_policy(REPO, descriptor)
+
     def test_support_forbidden_include_fails(self) -> None:
         unit = self._support_row()
         path = self.root / str(unit["path"])
@@ -694,15 +708,22 @@ class LinkClosureTest(unittest.TestCase):
         with mock.patch.object(checker, "SUPPORT_UNITS", self.production_support):
             checker.check(REPO, run_probe=True)
 
-    def test_real_repository_eliminates_generated_input_debt(self) -> None:
+    def test_real_repository_reduces_owned_input_and_random_debt(self) -> None:
         contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
-        self.assertEqual(contract["summary"]["unresolved_symbols"], 313)
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 311)
         self.assertEqual(
             contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 0
         )
         self.assertEqual(contract["summary"]["dispositions"]["system-link"], 145)
+        self.assertEqual(
+            contract["summary"]["dispositions"]["portable-core-promotion"], 16
+        )
         self.assertFalse(any(
             row["symbol"].startswith("cJSON_") for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] in {"platform_random_bytes", "platform_random_hex"}
+            for row in contract["unresolved"]
         ))
         cjson = next(
             unit for unit in contract["descriptor_support_units"]
@@ -710,6 +731,14 @@ class LinkClosureTest(unittest.TestCase):
         )
         self.assertEqual(cjson["resolves"], sorted(checker.CJSON_BASE_REFERENCES))
         self.assertEqual(cjson["defines"], checker.CJSON_DEFINES)
+        random_support = next(
+            unit for unit in contract["descriptor_support_units"]
+            if unit["path"] == "src/modules/db2/support/random_primitives.c"
+        )
+        self.assertEqual(
+            random_support["defines"], ["platform_random_bytes", "platform_random_hex"]
+        )
+        self.assertEqual(random_support["resolves"], random_support["defines"])
 
 
 if __name__ == "__main__":
