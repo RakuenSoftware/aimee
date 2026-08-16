@@ -193,19 +193,52 @@ def validate_catalog(value: object) -> dict[str, object]:
         "top_k": 256,
     }:
         fail("limits", "DB3 v1 limits changed")
-    wire = _keys(catalog["wire"], {"search_request", "search_reply", "apply"}, "wire")
+    wire = _keys(
+        catalog["wire"],
+        {
+            "capabilities", "search_request", "search_reply", "apply", "apply_chunk",
+            "applied", "search_failure", "route_request", "route_reply",
+        },
+        "wire",
+    )
+    capabilities = _keys(wire["capabilities"], {"magic", "header_bytes"}, "wire.capabilities")
     request = _keys(wire["search_request"], {"magic", "header_bytes"}, "wire.search_request")
     reply = _keys(
         wire["search_reply"], {"magic", "header_bytes", "candidate_bytes"},
         "wire.search_reply",
     )
     apply = _keys(wire["apply"], {"magic", "header_bytes"}, "wire.apply")
+    apply_chunk = _keys(
+        wire["apply_chunk"], {"magic", "header_bytes"}, "wire.apply_chunk",
+    )
+    applied = _keys(wire["applied"], {"magic", "header_bytes"}, "wire.applied")
+    search_failure = _keys(
+        wire["search_failure"], {"magic", "header_bytes"}, "wire.search_failure",
+    )
+    route_request = _keys(
+        wire["route_request"], {"magic", "header_bytes"}, "wire.route_request",
+    )
+    route_reply = _keys(
+        wire["route_reply"], {"magic", "header_bytes"}, "wire.route_reply",
+    )
+    if capabilities != {"magic": 0x43334244, "header_bytes": 48}:
+        fail("capabilities-wire", "capabilities wire differs from DB3 v1")
     if request != {"magic": 0x53334244, "header_bytes": 36}:
         fail("search-request-wire", "search request wire differs from DB3 v1")
     if reply != {"magic": 0x52334244, "header_bytes": 28, "candidate_bytes": 16}:
         fail("search-reply-wire", "search reply wire differs from DB3 v1")
     if apply != {"magic": 0x41334244, "header_bytes": 36}:
         fail("apply-wire", "apply wire differs from DB3 v1")
+    if apply_chunk != {"magic": 0x4b334244, "header_bytes": 32}:
+        fail("apply-chunk-wire", "apply chunk wire differs from DB3 v1")
+    if applied != {"magic": 0x44334244, "header_bytes": 40}:
+        fail("applied-wire", "applied wire differs from DB3 v1")
+    if search_failure != {"magic": 0x45334244, "header_bytes": 24}:
+        fail("search-failure-wire", "search failure wire differs from DB3 v1")
+    if route_request != {"magic": 0x54334244, "header_bytes": 40}:
+        fail("route-request-wire", "route request wire differs from DB3 v1")
+    if route_reply != {"magic": 0x55334244, "header_bytes": 40}:
+        fail("route-reply-wire", "route reply wire differs from DB3 v1")
     return catalog
 
 
@@ -305,10 +338,22 @@ def header_bytes(catalog: dict[str, object], registry: dict[str, object],
 #define AIMEE_DB3_SEARCH_REQUEST_MAGIC  0x{wire['search_request']['magic']:08x}u
 #define AIMEE_DB3_SEARCH_REPLY_MAGIC    0x{wire['search_reply']['magic']:08x}u
 #define AIMEE_DB3_APPLY_MAGIC           0x{wire['apply']['magic']:08x}u
+#define AIMEE_DB3_CAPABILITIES_MAGIC    0x{wire['capabilities']['magic']:08x}u
+#define AIMEE_DB3_APPLY_CHUNK_MAGIC     0x{wire['apply_chunk']['magic']:08x}u
+#define AIMEE_DB3_APPLIED_MAGIC         0x{wire['applied']['magic']:08x}u
+#define AIMEE_DB3_SEARCH_FAILURE_MAGIC  0x{wire['search_failure']['magic']:08x}u
+#define AIMEE_DB3_ROUTE_REQUEST_MAGIC   0x{wire['route_request']['magic']:08x}u
+#define AIMEE_DB3_ROUTE_REPLY_MAGIC     0x{wire['route_reply']['magic']:08x}u
 #define AIMEE_DB3_SEARCH_REQUEST_HEADER {wire['search_request']['header_bytes']}u
 #define AIMEE_DB3_SEARCH_REPLY_HEADER   {wire['search_reply']['header_bytes']}u
 #define AIMEE_DB3_CANDIDATE_BYTES       {wire['search_reply']['candidate_bytes']}u
 #define AIMEE_DB3_APPLY_HEADER          {wire['apply']['header_bytes']}u
+#define AIMEE_DB3_CAPABILITIES_HEADER   {wire['capabilities']['header_bytes']}u
+#define AIMEE_DB3_APPLY_CHUNK_HEADER    {wire['apply_chunk']['header_bytes']}u
+#define AIMEE_DB3_APPLIED_HEADER        {wire['applied']['header_bytes']}u
+#define AIMEE_DB3_SEARCH_FAILURE_HEADER {wire['search_failure']['header_bytes']}u
+#define AIMEE_DB3_ROUTE_REQUEST_HEADER  {wire['route_request']['header_bytes']}u
+#define AIMEE_DB3_ROUTE_REPLY_HEADER    {wire['route_reply']['header_bytes']}u
 
 #endif /* AIMEE_DB2_DB3_CONTRACT_H */
 '''
@@ -354,10 +399,22 @@ const MaxTopK = {limits['top_k']}
 const searchRequestMagic uint32 = 0x{wire['search_request']['magic']:08x}
 const searchReplyMagic uint32 = 0x{wire['search_reply']['magic']:08x}
 const applyMagic uint32 = 0x{wire['apply']['magic']:08x}
+const capabilitiesMagic uint32 = 0x{wire['capabilities']['magic']:08x}
+const applyChunkMagic uint32 = 0x{wire['apply_chunk']['magic']:08x}
+const appliedMagic uint32 = 0x{wire['applied']['magic']:08x}
+const searchFailureMagic uint32 = 0x{wire['search_failure']['magic']:08x}
+const routeRequestMagic uint32 = 0x{wire['route_request']['magic']:08x}
+const routeReplyMagic uint32 = 0x{wire['route_reply']['magic']:08x}
 const searchRequestHeader = {wire['search_request']['header_bytes']}
 const searchReplyHeader = {wire['search_reply']['header_bytes']}
 const candidateBytes = {wire['search_reply']['candidate_bytes']}
 const applyHeader = {wire['apply']['header_bytes']}
+const capabilitiesHeader = {wire['capabilities']['header_bytes']}
+const applyChunkHeader = {wire['apply_chunk']['header_bytes']}
+const appliedHeader = {wire['applied']['header_bytes']}
+const searchFailureHeader = {wire['search_failure']['header_bytes']}
+const routeRequestHeader = {wire['route_request']['header_bytes']}
+const routeReplyHeader = {wire['route_reply']['header_bytes']}
 
 var ErrMalformed = errors.New("db3: malformed version-1 frame")
 
@@ -610,6 +667,9 @@ def _u64(value: int) -> bytes:
 def baseline_bytes(catalog: dict[str, object], registry: dict[str, object],
                    events: list[dict[str, object]]) -> bytes:
     import struct
+    capabilities = (_u32(0x43334244) + _u16(1) + _u16(48) + _u64(7) +
+                    _u32(3) + _u32(1) + _u32(0) + _u32(1) +
+                    _u32(4096) + _u32(64) + _u32(256) + _u32(0))
     request = (_u32(0x53334244) + _u16(1) + _u16(36) + _u64(77) + _u64(7) +
                _u16(11) + _u16(9) + _u16(6) + _u16(3) + _u16(2) + _u16(0) +
                b"workspace-a" + b"project-a" + b"memory" + struct.pack("<fff", .3, .2, .1))
@@ -617,14 +677,30 @@ def baseline_bytes(catalog: dict[str, object], registry: dict[str, object],
              _u64(41) + struct.pack("<d", .95) + _u64(42) + struct.pack("<d", .75))
     apply = (_u32(0x41334244) + _u16(1) + bytes((1, 0)) + _u64(1001) + _u64(7) + _u64(41) +
              _u16(6) + _u16(3) + b"memory" + struct.pack("<fff", .1, .2, .3))
+    apply_chunk = (_u32(0x4b334244) + _u16(1) + _u16(32) + _u64(1001) +
+                   _u32(len(apply)) + _u32(0) + _u32(len(apply)) + _u32(0) + apply)
+    applied = (_u32(0x44334244) + _u16(1) + _u16(40) + _u64(1001) + _u64(7) +
+               _u64(7) + _u32(0) + _u32(0))
+    search_failure = (_u32(0x45334244) + _u16(1) + _u16(24) + _u64(77) +
+                      _u32(2) + _u32(0))
+    route_request = (_u32(0x54334244) + _u16(1) + _u16(40) + _u64(91) +
+                     bytes((2, 1)) + _u16(0) + _u32(1001) + _u64(7) + _u64(0))
+    route_reply = (_u32(0x55334244) + _u16(1) + _u16(40) + _u64(91) + _u32(0) +
+                   _u32(1001) + _u32(1) + _u32(0) + _u64(7))
     value = {
         "schema_version": 1,
         "contract_sha256": fingerprint(catalog, registry),
         "protocol_id": 3,
         "events": events,
+        "capabilities_hex": capabilities.hex(),
         "search_request_hex": request.hex(),
         "search_reply_hex": reply.hex(),
         "apply_hex": apply.hex(),
+        "apply_chunk_hex": apply_chunk.hex(),
+        "applied_hex": applied.hex(),
+        "search_failure_hex": search_failure.hex(),
+        "route_request_hex": route_request.hex(),
+        "route_reply_hex": route_reply.hex(),
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
 

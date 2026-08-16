@@ -18,6 +18,12 @@ type wireBaseline struct {
 	SearchRequestHex string `json:"search_request_hex"`
 	SearchReplyHex   string `json:"search_reply_hex"`
 	ApplyHex         string `json:"apply_hex"`
+	CapabilitiesHex  string `json:"capabilities_hex"`
+	ApplyChunkHex    string `json:"apply_chunk_hex"`
+	AppliedHex       string `json:"applied_hex"`
+	SearchFailureHex string `json:"search_failure_hex"`
+	RouteRequestHex  string `json:"route_request_hex"`
+	RouteReplyHex    string `json:"route_reply_hex"`
 	Events           []struct {
 		ID        uint32 `json:"id"`
 		Name      string `json:"name"`

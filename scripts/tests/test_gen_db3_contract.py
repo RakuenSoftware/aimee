@@ -60,6 +60,13 @@ class ContractTests(unittest.TestCase):
                          [0x80030001, 0x80030002, 0x80030003, 0x80030004, 0x80030005])
         self.assertIn(b"AIMEE_DB3_EVENT_APPLY", header)
         self.assertIn(b"func DecodeSearchRequest", go_contract)
+        self.assertIn(b"AIMEE_DB3_CAPABILITIES_MAGIC", header)
+        self.assertIn(b"const capabilitiesMagic", go_contract)
+        for field in (
+            "capabilities_hex", "apply_chunk_hex", "applied_hex", "search_failure_hex",
+            "route_request_hex", "route_reply_hex",
+        ):
+            self.assertTrue(parsed[field], field)
         self.assertIn(parsed["contract_sha256"].encode(), header)
         self.assertIn(parsed["contract_sha256"].encode(), go_contract)
 
@@ -97,6 +104,18 @@ class ContractTests(unittest.TestCase):
             (lambda value: value["wire"]["search_reply"].__setitem__("candidate_bytes", 8),
              "search-reply-wire"),
             (lambda value: value["wire"]["apply"].__setitem__("magic", 1), "apply-wire"),
+            (lambda value: value["wire"]["capabilities"].__setitem__("header_bytes", 1),
+             "capabilities-wire"),
+            (lambda value: value["wire"]["apply_chunk"].__setitem__("magic", 1),
+             "apply-chunk-wire"),
+            (lambda value: value["wire"]["applied"].__setitem__("header_bytes", 1),
+             "applied-wire"),
+            (lambda value: value["wire"]["search_failure"].__setitem__("magic", 1),
+             "search-failure-wire"),
+            (lambda value: value["wire"]["route_request"].__setitem__("header_bytes", 1),
+             "route-request-wire"),
+            (lambda value: value["wire"]["route_reply"].__setitem__("magic", 1),
+             "route-reply-wire"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):
