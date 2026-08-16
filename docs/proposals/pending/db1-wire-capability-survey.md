@@ -43,10 +43,22 @@ to sit inside an active family without being served.
 
 | tier | needs | ops | cumulative |
 | --- | --- | --- | --- |
-| T0 | nothing — fits the wire today | 76 | 76 (27%) |
-| T1 | integer arguments | 78 | 154 (54%) |
-| T2 | a counted reply (integer or multi out-parameter) | 18 | 172 (61%) |
+| T0 | nothing — fits the wire today | 63 | 63 (22%) |
+| T1 | integer arguments | 75 | 138 (49%) |
+| T2 | a richer reply — counted, multi-value, or a status beyond ok/miss/fail | 34 | 172 (61%) |
 | T3 | structured payloads (struct in/out, arrays, malloc'd returns) | 109 | 281 (100%) |
+
+The first version of this table said 76/78/18 and put 154 in reach. It was
+wrong, and the way it was wrong is the more useful fact: it classified
+**parameters** and never the **return contract**. The wire answers a write with
+0 or -1 and a read with found, not-found or error, so an operation that returns
+a count, or a distinguished refusal like `db1_wfe_bind`'s -2 for a single-writer
+conflict, has nowhere to put the distinction it exists to make. Migrating one of
+those would have quietly reported a conflict as an error.
+
+Two mechanical cases were mis-tiered the same way: an operation taking no
+arguments cannot be framed at all, and one with two out buffers has one reply
+value to put them in. Sixteen operations were affected across the three.
 
 T1 shipped, which is what took reachability from 27% to 54%. T2 buys 18
 operations, which is a poor return for a frame change. T3 is the real remainder
@@ -56,16 +68,17 @@ Per family, ready means T0 + T1:
 
 | family | ready | total | behind T2 | behind T3 |
 | --- | --- | --- | --- | --- |
-| workflow | 60 | 91 | 6 | 25 |
-| delegation | 27 | 37 | 3 | 7 |
-| runtime | 22 | 35 | 2 | 11 |
-| agent_work | 16 | 38 | 3 | 19 |
+| workflow | 51 | 91 | 15 | 25 |
+| delegation | 26 | 37 | 4 | 7 |
+| runtime | 20 | 35 | 4 | 11 |
+| agent_work | 15 | 38 | 4 | 19 |
 | sessions | 8 | 22 | 0 | 14 |
-| conversation | 8 | 20 | 1 | 11 |
-| telemetry | 8 | 33 | 3 | 22 |
-| identity | 5 | 5 | 0 | 0 |
+| conversation | 7 | 20 | 2 | 11 |
+| telemetry | 7 | 33 | 4 | 22 |
+| identity | 4 | 5 | 1 | 0 |
 
-Only `identity` is fully reachable, and it is the one family that should go last
+No family is fully reachable now that return contracts count -- `identity` came
+closest at 4 of 5, and it is the one family that should go last
 rather than first: what is reachable in it is `db1_secret_*` and
 `db1_remote_client_*`, whose caller is `server_bearer_auth.c`.
 
