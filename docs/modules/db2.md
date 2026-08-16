@@ -86,9 +86,9 @@ Link-closure audit:
 `link-closure-v1.json` accounts for all 141 C translation units in the private DB2 boundary. The
 probe compiles each unit plus exact descriptor-owned support, combines only those objects with a
 relocatable link, supplies no archive, shared library, helper stub, or weak definition, and records
-the 345 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
+the 344 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
 disposition and rationale. The current ledger contains 144 explicit system-link dependencies, 25
-pinned vendored/generated inputs, 150 sibling or KB contracts to inject, and 26 support APIs to
+pinned vendored/generated inputs, 150 sibling or KB contracts to inject, and 25 support APIs to
 promote. The standalone-link exit condition requires zero entries in the latter three groups; a
 classified ledger alone is not enough.
 
@@ -111,6 +111,13 @@ controlled allocation-failure, and sanitizer parity tests run against the pre-ac
 The allocation-failure case also fixes both copies to preserve length, capacity, and content when
 growth fails. The legacy fixed-buffer string uses elsewhere are not aliases of this lifecycle and
 remain outside the admission.
+
+The third reduction promotes `text_sanitize_utf8`, the allocation-free in-place repair used by
+three DB2 units at five call sites. The descriptor pins its minimal `size_t (char *)` ABI, source
+and header hashes, sole include, empty import set, exact base references, and single export.
+Parity covers every non-NUL byte, valid boundary sequences, every truncated prefix, overlong
+forms, surrogates, values above U+10FFFF, mixed text, empty input, and NULL under both the normal
+and ASan/UBSan/FORTIFY builds.
 
 The gate rejects legacy source additions or omissions, support path escape, symlinks, content drift,
 new unresolved symbols, non-system reference growth, missing evidence, and any attempt to make the

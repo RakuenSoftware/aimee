@@ -80,6 +80,12 @@
       "test": "src/tests/test_db2_sketch_support.c"
     },
     {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_text_support.c"
+    },
+    {
       "ctest": true,
       "make": true,
       "module": "db2",

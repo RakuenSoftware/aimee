@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "9886a70761a92f0e6e32f97e4c4dfd904a7256e9",
-  "source_fingerprint": "12cc09b56341f9f0dbfbe05fd01ab8e41400f4c4a660469961530d00887f26a8",
+  "source_revision": "2770a84679f82f10c068b245abdb11ce04639f66",
+  "source_fingerprint": "d80b7ff5d0f81e9896efdbe6184cc1682587a2f734ffd180e640915d14164312",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
@@ -260,6 +260,34 @@
       },
       "provenance": "Definitions promoted from src/sketch.c and calls audited in src/modules/db2/c/sketch.c and src/modules/db2/c/kb_payload.c.",
       "evidence": "Seven deterministic, database-free sketch primitives with one allowed libc dependency (memset); no DB2, event-bus, provider, I/O, or heap dependency."
+    },
+    {
+      "path": "src/modules/db2/support/text_primitives.c",
+      "source_sha256": "2bbdb09370052759967f53557d0904398c55c118c964699a97a74a9abad02e78",
+      "header": "src/modules/db2/support/db2_text.h",
+      "header_sha256": "748a028371661444d450f1d365dca5e6988f0ba02730b38bfeb32078e67311b2",
+      "defines": [
+        "text_sanitize_utf8"
+      ],
+      "resolves": [
+        "text_sanitize_utf8"
+      ],
+      "allowed_includes": [
+        "db2_text.h"
+      ],
+      "allowed_header_includes": [
+        "stddef.h"
+      ],
+      "allowed_undefined": [],
+      "base_references": {
+        "text_sanitize_utf8": [
+          "src/modules/db2/c/canonical_index.c",
+          "src/modules/db2/c/code_index.c",
+          "src/modules/db2/c/kb_payload.c"
+        ]
+      },
+      "provenance": "Definition promoted from src/text.c; all DB2 calls audited in canonical_index.c, code_index.c, and kb_payload.c.",
+      "evidence": "Deterministic in-place UTF-8 repair with no imports, allocation, I/O, DB, event-bus, provider, or platform dependency; exhaustive parity tested."
     }
   ],
   "unresolved": [
@@ -3523,16 +3551,6 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "text_sanitize_utf8",
-      "references": [
-        "src/modules/db2/c/canonical_index.c",
-        "src/modules/db2/c/code_index.c",
-        "src/modules/db2/c/kb_payload.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
       "symbol": "time",
       "references": [
         "src/modules/db2/c/bandit.c",
@@ -3813,16 +3831,16 @@
   ],
   "summary": {
     "translation_units": 141,
-    "descriptor_support_units": 2,
-    "unresolved_symbols": 345,
+    "descriptor_support_units": 3,
+    "unresolved_symbols": 344,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 25,
       "injected-module-contract": 150,
-      "portable-core-promotion": 26,
+      "portable-core-promotion": 25,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 144
     }
   },
-  "fingerprint": "b59a0e14c6ce628b97fa9c57873f5f7e2b7209166c099358113638533cd383b4"
+  "fingerprint": "a6b6e2be90604ded69a4febf7c6fbed95eca724fe0667e5dc887523011429d8f"
 }
