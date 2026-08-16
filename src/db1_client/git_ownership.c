@@ -116,7 +116,7 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
       return -1;
    /* The reply is bounded by the caller's own buffer: it asked for at most
       value_len bytes, so there is no reason to hold more than that. */
-   size_t response_cap = 8u + (value_out ? value_len : 0u);
+   size_t response_cap = 12u + (value_out ? value_len : 0u);
    uint8_t *request = malloc(request_len);
    uint8_t *response = malloc(response_cap);
    if (!request || !response)
@@ -141,20 +141,37 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
    else
    {
       uint32_t status = aimee_db1_get_u32(response);
-      uint32_t payload_len = aimee_db1_get_u32(response + 4u);
-      /* A reply whose declared length disagrees with what arrived is not a
-         reply to read part of. */
-      if (payload_len == response_len - 8u)
+      uint32_t fields_in = aimee_db1_get_u32(response + 4u);
+      /* Read the reply's own count rather than assuming one value: a status
+         with no values is how a write answers, and a row is how a read will. */
+      result = (int)status;
+      if (fields_in == 0u)
       {
-         result = (int)status;
          if (value_out && value_len)
+            value_out[0] = '\0';
+      }
+      else
+      {
+         uint32_t at = 8u;
+         if (at + 4u > response_len)
+            result = -1;
+         else
          {
-            if (payload_len >= value_len)
+            uint32_t n = aimee_db1_get_u32(response + at);
+            at += 4u;
+            /* A reply whose declared length runs past what arrived is not a
+               reply to read part of. */
+            if (at + n > response_len)
                result = -1;
-            else
+            else if (value_out && value_len)
             {
-               memcpy(value_out, response + 8u, payload_len);
-               value_out[payload_len] = '\0';
+               if (n >= value_len)
+                  result = -1;
+               else
+               {
+                  memcpy(value_out, response + at, n);
+                  value_out[n] = '\0';
+               }
             }
          }
       }

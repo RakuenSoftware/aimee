@@ -283,12 +283,12 @@ class CatalogTests(unittest.TestCase):
             reserved["active"] = True
             catalog["operations"].append({
                 "family": reserved["name"], "id": 1, "name": "probe_touch",
-                "wire_format": "db1-fields-v1", "scope": "session",
+                "wire_format": "db1-fields-v2", "scope": "session",
                 "transaction": "single", "idempotency": "idempotent",
                 "results": ["ok", "invalid", "failed"],
                 "request": {"fields": [{"name": n, "type": "text", "required": True}
                                        for n in ("key", "a", "b", "c")]},
-                "reply": {"payload": "none", "max_bytes": 0},
+                "reply": {"fields": [], "max_bytes": 0},
             })
             self.write(root, catalog)
             # Activating a family without declaring its stage is refused, which
@@ -398,11 +398,11 @@ class CatalogTests(unittest.TestCase):
         catalog["operations"].append({
             "family": reserved["name"], "id": 1, "name": "probe_forget_if_job",
             "c_name": "db1_probe_forget_if_job", "c_params": ["probe_id", "job_id"],
-            "wire_format": "db1-fields-v1", "scope": "session", "transaction": "single",
+            "wire_format": "db1-fields-v2", "scope": "session", "transaction": "single",
             "idempotency": "idempotent", "results": ["ok", "invalid", "failed"],
             "request": {"fields": [{"name": "key", "type": "text", "required": True},
                                    {"name": "job", "type": "int", "required": True}]},
-            "reply": {"payload": "none", "max_bytes": 0},
+            "reply": {"fields": [], "max_bytes": 0},
         })
         self.write(root, catalog)
         path = root / contract.PROCESS_CONTRACTS
@@ -481,14 +481,14 @@ class CatalogTests(unittest.TestCase):
             "family": reserved["name"], "id": 1, "name": "probe_status_set",
             "c_name": "db1_probe_status_set",
             "c_params": ["probe_id", "status", "pipeline_id", "error"],
-            "wire_format": "db1-fields-v1", "scope": "session", "transaction": "single",
+            "wire_format": "db1-fields-v2", "scope": "session", "transaction": "single",
             "idempotency": "idempotent", "results": ["ok", "invalid", "failed"],
             "request": {"fields": [
                 {"name": "key", "type": "text", "required": True},
                 {"name": "status", "type": "text", "required": True},
                 {"name": "pipeline", "type": "text", "required": False},
                 {"name": "error", "type": "text", "required": False}]},
-            "reply": {"payload": "none", "max_bytes": 0},
+            "reply": {"fields": [], "max_bytes": 0},
         })
         self.write(root, catalog)
         path = root / contract.PROCESS_CONTRACTS
@@ -552,6 +552,21 @@ class CatalogTests(unittest.TestCase):
             self.assertRule(root, "field-required")
         finally:
             tmp.cleanup()
+
+    def test_a_reply_declares_its_fields_and_the_frame_counts_them(self) -> None:
+        # The reply counts for the same reason the request does: an operation
+        # answering with a row, or a list of them, has somewhere to put the
+        # values. A write sends count 0; a single value sends count 1.
+        catalog = self.catalog(REPO_ROOT)
+        for operation in catalog["operations"]:
+            reply = operation["reply"]
+            self.assertIn("fields", reply, f"{operation['name']} reply is not counted")
+            self.assertEqual(bool(reply["fields"]), reply["max_bytes"] > 0)
+        stage = (REPO_ROOT / contract.SOURCE_DIR / "git_ownership_stage.c").read_text()
+        client = (REPO_ROOT / contract.CLIENT_DIR / "git_ownership.c").read_text()
+        # Both sides speak count, not a single length.
+        self.assertIn("uint32_t count = value ? 1u : 0u;", stage)
+        self.assertIn("uint32_t fields_in = aimee_db1_get_u32(response + 4u);", client)
 
     def test_every_operation_is_keyed(self) -> None:
         # DB1 rows belong to a conversation or session; an unkeyed read would
