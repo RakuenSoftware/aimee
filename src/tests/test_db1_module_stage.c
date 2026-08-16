@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -352,6 +353,50 @@ static void test_git_ownership_store_failure_is_not_a_miss(void)
    printf("  PASS: test_git_ownership_store_failure_is_not_a_miss\n");
 }
 
+/* The serving side carries a large field too, and frees what it allocated to do
+   it. Built with -fsanitize=address this is also the leak check for the scratch
+   buffer the decoder now owns. */
+static void test_stage_carries_a_large_field(void)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-test-db1-big-%d.db", platform_tmpdir(), (int)getpid());
+   remove(path);
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   enum
+   {
+      BIG = 32u * 1024u
+   };
+   char *big = malloc(BIG + 1u);
+   assert(big != NULL);
+   memset(big, 'r', BIG);
+   big[BIG] = '\0';
+
+   uint8_t *req = malloc(BIG + 4096u);
+   uint8_t resp[4096];
+   uint32_t resp_len = 0;
+   assert(req != NULL);
+   const char *values[] = {big, "feature", "sess-big"};
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_UPSERT, values, 3);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+
+   /* And it round-trips: the long key is what the row was written under. */
+   const char *owner_get[] = {big, "feature"};
+   len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_OWNER_GET, owner_get, 2);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+
+   free(req);
+   free(big);
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_stage_carries_a_large_field\n");
+}
+
 int main(void)
 {
    printf("db1_module_stage:\n");
@@ -362,6 +407,7 @@ int main(void)
    test_git_ownership_round_trips();
    test_git_ownership_malformed_frames_are_refused();
    test_git_ownership_store_failure_is_not_a_miss();
+   test_stage_carries_a_large_field();
    printf("db1_module_stage: ok\n");
    return 0;
 }
