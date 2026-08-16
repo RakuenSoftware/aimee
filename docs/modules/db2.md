@@ -69,6 +69,18 @@ explicitly private and retained in DB2, lifecycle health is a reviewed retained-
 and 850 production-consumed declarations remain
 without a reviewed disposition.
 
+The separate `vector-portability.json` audit covers all 76 declared `pgvec_*` symbols, including
+internal and currently unconsumed surfaces. It distinguishes provider-neutral candidate searches,
+post-commit mutation fanout, provider-local control, necessarily retained DB2 authority, and deferred
+analytics. The provider-specific C names remain private DB2 implementation details; the audit records
+which logical effects may later receive DB3 operations without leaking those names onto the wire.
+See `docs/db3.md` for routing, admission, fallback, and revalidation invariants.
+
+The descriptor also owns the database-free C reference route and wire codecs for the first portable
+memory-candidate operation. Its internal pgvector, external provider, and authoritative candidate
+checks are injected, so the route can be exhaustively tested before the private DB2 source closure is
+linked. This is not a production cutover: the module remains disabled and no provider grant ships.
+
 A review transition binds the symbol and normalized-signature hash to one closed disposition,
 family, DB3 placement, and nonempty reason. Signature drift invalidates the review. Unsupported or
 ambiguous C declarations, malformed lexical input, stale review rows, premature completeness, and
@@ -109,6 +121,12 @@ comments/literals/directives, identical and conflicting duplicates, malformed ne
 limits, signature-bound review transitions, pgvector retention, output symlinks, reproducibility,
 and unchanged-output failure. Activation-gate mutation tests prove that an incomplete source list,
 weak backend, or remaining direct production caller prevents enablement.
+DB3-portability tests additionally prove exhaustive 76-symbol coverage, closed classification
+identities, fingerprint drift, duplicate/missing/extra detection, ordering, malformed JSON, resource
+limits, and copied-repository CLI behavior.
+Route and authenticated-bus tests cover default pgvector, selected external serving, unavailable and
+malformed providers, explicit fallback provenance, candidate revalidation, finite/bounded codecs,
+two-observer idempotent apply fanout, and one-server-only search.
 
 ## Operational diagnostics
 

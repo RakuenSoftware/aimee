@@ -726,7 +726,9 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening
 TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
 TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
-                $(TESTPREFIX)/unit-test-bus-db2-module
+                $(TESTPREFIX)/unit-test-bus-db2-module \
+                $(TESTPREFIX)/unit-test-db3-route \
+                $(TESTPREFIX)/unit-test-bus-db3
 
 MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/memory.o \
@@ -3259,6 +3261,36 @@ $(TESTPREFIX)/unit-test-bus-db2-module: \
 
 .PHONY: unit-test-bus-db2-module
 unit-test-bus-db2-module: $(TESTPREFIX)/unit-test-bus-db2-module
+	$<
+
+$(OBJDIR)/tests/test_db3_route.o: C_FLAGS += -Imodules/db2/include
+$(OBJDIR)/modules/db2/db3_route.o: C_FLAGS += -Imodules/db2/include
+$(TESTPREFIX)/unit-test-db3-route: $(OBJDIR)/tests/test_db3_route.o \
+                                      $(OBJDIR)/modules/db2/db3_route.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+.PHONY: unit-test-db3-route
+unit-test-db3-route: $(TESTPREFIX)/unit-test-db3-route
+	$<
+
+$(OBJDIR)/tests/test_bus_db3.o: C_FLAGS += -Icore/event_bus/include -Imodules/db2/include
+$(TESTPREFIX)/unit-test-bus-db3: $(OBJDIR)/tests/test_bus_db3.o \
+                                $(OBJDIR)/modules/db2/db3_route.o \
+                                $(OBJDIR)/core/event_bus/bus_runtime.o \
+                                $(OBJDIR)/core/event_bus/bus_endpoint.o \
+                                $(OBJDIR)/core/event_bus/bus_client.o \
+                                $(OBJDIR)/core/event_bus/bus_attach.o \
+                                $(OBJDIR)/core/event_bus/bus_host.o \
+                                $(OBJDIR)/core/event_bus/bus_route.o \
+                                $(OBJDIR)/core/event_bus/bus_region.o \
+                                $(OBJDIR)/core/event_bus/bus_region_host.o \
+                                $(OBJDIR)/core/event_bus/bus_ring.o \
+                                $(OBJDIR)/core/event_bus/bus_arena.o \
+                                $(OBJDIR)/core/event_bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lm
+
+.PHONY: unit-test-bus-db3
+unit-test-bus-db3: $(TESTPREFIX)/unit-test-bus-db3
 	$<
 
 # Event-bus conformance host harness (feature tree slice 10). A test binary that
