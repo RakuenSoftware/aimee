@@ -628,9 +628,72 @@ static void test_an_unassembled_context_is_a_miss(void)
    printf("  PASS: test_an_unassembled_context_is_a_miss\n");
 }
 
+/* A column crosses as one value per row. The reply's count is the row count
+   because the width is one, and the stage allocates the caller's fixed-width
+   rows rather than a struct array. */
+static void test_a_column_of_session_ids_crosses(void)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-test-db1-wmcol-%d.db", platform_tmpdir(), (int)getpid());
+   remove(path);
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   assert(db1_wm_set("sess-col-a", "k", "findable marker", "notes", 0) == 0);
+   assert(db1_wm_set("sess-col-b", "k", "findable marker", "notes", 0) == 0);
+   assert(db1_wm_set("sess-col-c", "k", "unrelated", "notes", 0) == 0);
+
+   uint8_t req[1024], resp[4096];
+   uint32_t resp_len = 0;
+   const char *args[] = {"findable", "16"};
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_WM_SEARCH_SESSION_IDS, args, 2);
+   assert(call_stage(AIMEE_DB1_STAGE_CONVERSATION, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+   /* Two sessions matched, one value each: width one means count is rows. */
+   assert(aimee_db1_get_u32(resp + 4u) == 2u);
+   uint32_t n = 0;
+   const char *first = reply_value(resp, resp_len, 0u, &n);
+   assert(n == strlen("sess-col-a") &&
+          (memcmp(first, "sess-col-a", n) == 0 || memcmp(first, "sess-col-b", n) == 0));
+
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_a_column_of_session_ids_crosses\n");
+}
+
+/* The bound is still an allocation, and still checked before anything is
+   allocated from it -- a column sizes an array of fixed-width rows. */
+static void test_a_column_bound_is_still_checked(void)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-test-db1-wmcolb-%d.db", platform_tmpdir(), (int)getpid());
+   remove(path);
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   uint8_t req[1024], resp[4096];
+   uint32_t resp_len = 0;
+   const char *too_many[] = {"needle", "65"};
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_WM_SEARCH_SESSION_IDS, too_many, 2);
+   assert(call_stage(AIMEE_DB1_STAGE_CONVERSATION, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   const char *none[] = {"needle", "0"};
+   len = fields_frame(req, AIMEE_DB1_OP_WM_SEARCH_SESSION_IDS, none, 2);
+   assert(call_stage(AIMEE_DB1_STAGE_CONVERSATION, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_a_column_bound_is_still_checked\n");
+}
+
 int main(void)
 {
    printf("db1_module_stage:\n");
+   test_a_column_of_session_ids_crosses();
+   test_a_column_bound_is_still_checked();
    test_assembled_context_crosses_and_is_released();
    test_an_unassembled_context_is_a_miss();
    test_malformed_frames_are_refused();

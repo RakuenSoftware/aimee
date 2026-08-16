@@ -370,4 +370,40 @@ int db1_payload_rewrite_record(const char *session_id, int deferred, int bytes_s
    return write_result(call_stage(AIMEE_DB1_OP_REWRITE_RECORD, fields, 6, NULL, NULL, 0, NULL));
 }
 
+int db1_wm_search_session_ids(const char *query, char (*out)[WM_SESSION_ID_LEN], int max)
+{
+   if (!query || !query[0] || !out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg1[24];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {query, arg1};
+   char **values = malloc((size_t)max * 1u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 1u * sizeof *caps);
+   if (!values || !caps)
+   {
+      free(values);
+      free(caps);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 1u + 0u] = out[row];
+      caps[row * 1u + 0u] = sizeof out[row];
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_WM_SEARCH_SESSION_IDS, fields, 2, values, caps,
+                           (uint32_t)(max * 1), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 1u != 0u)
+   {
+      return -1;
+   }
+   int rows = (int)(filled / 1u);
+   return rows;
+}
+
 /* clang-format on */

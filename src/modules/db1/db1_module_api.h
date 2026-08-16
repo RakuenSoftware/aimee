@@ -62,13 +62,14 @@
 #define AIMEE_DB1_EVENT_CONVERSATION 11779u
 #define AIMEE_DB1_STAGE_CONVERSATION 3u
 
-#define AIMEE_DB1_OP_REWRITE_STATE_GET   1u
-#define AIMEE_DB1_OP_REWRITE_STATE_SET   2u
-#define AIMEE_DB1_OP_WM_SET              3u
-#define AIMEE_DB1_OP_WM_GET              4u
-#define AIMEE_DB1_OP_WM_LIST             5u
-#define AIMEE_DB1_OP_WM_ASSEMBLE_CONTEXT 6u
-#define AIMEE_DB1_OP_REWRITE_RECORD      7u
+#define AIMEE_DB1_OP_REWRITE_STATE_GET     1u
+#define AIMEE_DB1_OP_REWRITE_STATE_SET     2u
+#define AIMEE_DB1_OP_WM_SET                3u
+#define AIMEE_DB1_OP_WM_GET                4u
+#define AIMEE_DB1_OP_WM_LIST               5u
+#define AIMEE_DB1_OP_WM_ASSEMBLE_CONTEXT   6u
+#define AIMEE_DB1_OP_REWRITE_RECORD        7u
+#define AIMEE_DB1_OP_WM_SEARCH_SESSION_IDS 8u
 
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
