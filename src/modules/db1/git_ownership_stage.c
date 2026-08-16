@@ -15,24 +15,30 @@
 #include "db1_module_api.h"
 #include "git_ownership.h"
 
+#include <stdlib.h>
 #include <string.h>
 
-/* Read one counted field, refusing anything that would run past the end or
-   carry an embedded NUL: every field here is spliced into a query parameter,
-   and a NUL would silently shorten it into a different row. */
-static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, char *out,
-                        size_t out_sz)
+/* Copy one counted field out of the frame, NUL-terminated.
+
+   The frame bounds the field, not a fixed cap: these carry prompts, results and
+   JSON documents, and an in-process caller has always passed them whole. An
+   embedded NUL is still refused -- every field is spliced into a query
+   parameter, and a NUL would silently shorten it into a different row. */
+static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, char **cursor,
+                        const char **out)
 {
    if (*offset + 4u > len)
       return 1;
    uint32_t n = aimee_db1_get_u32(body + *offset);
    *offset += 4u;
-   if (n > len || *offset + n > len || n == 0u || n >= out_sz)
+   if (n > len || *offset + n > len || n == 0u)
       return 1;
    if (memchr(body + *offset, 0, n) != NULL)
       return 1;
-   memcpy(out, body + *offset, n);
-   out[n] = '\0';
+   memcpy(*cursor, body + *offset, n);
+   (*cursor)[n] = '\0';
+   *out = *cursor;
+   *cursor += n + 1u;
    *offset += n;
    return 0;
 }
@@ -64,17 +70,30 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
    if (count == 0u || count > AIMEE_DB1_FIELDS_MAX)
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
 
-   char field[AIMEE_DB1_FIELDS_MAX][AIMEE_DB1_FIELD_MAX];
+   /* One allocation for every field, sized by the frame that carried them: the
+      fields plus a NUL each cannot exceed this. */
+   const char *field[AIMEE_DB1_FIELDS_MAX];
+   char *scratch = malloc((size_t)request_len + AIMEE_DB1_FIELDS_MAX);
+   if (!scratch)
+      return AIMEE_MODULE_STATUS_INTERNAL;
+   char *cursor = scratch;
+   aimee_module_status_t decoded = AIMEE_MODULE_STATUS_OK;
+
    uint32_t offset = 8u;
    for (uint32_t i = 0; i < count; ++i)
-      if (read_counted(request_body, request_len, &offset, field[i], sizeof field[i]) != 0)
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      if (read_counted(request_body, request_len, &offset, &cursor, &field[i]) != 0)
+         decoded = AIMEE_MODULE_STATUS_INVALID_REQUEST;
    /* Trailing bytes mean the caller and the module disagree about the op's
       arity, which is a contract mismatch rather than something to tolerate. */
    if (offset != request_len)
-      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      decoded = AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   if (decoded != AIMEE_MODULE_STATUS_OK)
+   {
+      free(scratch);
+      return decoded;
+   }
 
-   char value[AIMEE_DB1_FIELD_MAX];
+   char value[AIMEE_DB1_VALUE_MAX];
    value[0] = '\0';
    int rc = -1;
    int reads = 0;
@@ -83,35 +102,52 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
    {
    case AIMEE_DB1_OP_OWNERSHIP_UPSERT:
       if (count != 3u)
+      {
+         free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
       rc = db1_git_ownership_upsert(field[0], field[1], field[2]);
       break;
    case AIMEE_DB1_OP_OWNERSHIP_DELETE:
       if (count != 2u)
+      {
+         free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
       rc = db1_git_ownership_delete(field[0], field[1]);
       break;
    case AIMEE_DB1_OP_OWNERSHIP_OWNER_GET:
       if (count != 2u)
+      {
+         free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
       rc = db1_git_ownership_get_owner(field[0], field[1], value, sizeof value);
       reads = 1;
       break;
    case AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION:
       if (count != 2u)
+      {
+         free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
       rc = db1_git_ownership_get_branch_for_session(field[0], field[1], value, sizeof value);
       reads = 1;
       break;
    case AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX:
       if (count != 1u)
+      {
+         free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
       rc = db1_git_ownership_find_session_by_prefix(field[0], value, sizeof value);
       reads = 1;
       break;
    default:
+      free(scratch);
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    }
+   free(scratch);
 
    /* The two conventions must not be flattened. A read returns FOUND(1),
       not-found(0) or error(-1); a write returns 0 or -1. Mapping a read's -1

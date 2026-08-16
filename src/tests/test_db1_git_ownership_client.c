@@ -12,6 +12,7 @@
  * take one somebody else holds. */
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <aimee/core/event_bus/module_client.h>
@@ -27,6 +28,7 @@ static const char *stub_value = "";
 static int stub_calls;
 static uint8_t stub_request[1024];
 static uint32_t stub_request_len;
+static uint32_t stub_frame_len;
 /* When set, the reply declares a length that disagrees with what it carries. */
 static int stub_lie_about_length;
 
@@ -50,6 +52,9 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
    assert(deadline_ns != 0);
 
    stub_calls++;
+   /* Record the TRUE length even when the frame outgrows the capture buffer:
+      the point of the large-field test is how many bytes were sent. */
+   stub_frame_len = request_len;
    stub_request_len = request_len < sizeof stub_request ? request_len : 0;
    if (stub_request_len)
       memcpy(stub_request, request_body, stub_request_len);
@@ -75,6 +80,7 @@ static void reset(void)
    stub_value = "";
    stub_calls = 0;
    stub_request_len = 0;
+   stub_frame_len = 0;
    stub_lie_about_length = 0;
 }
 
@@ -175,14 +181,9 @@ static void test_a_malformed_reply_is_refused(void)
 static void test_bad_arguments_cost_no_round_trip(void)
 {
    char owner[128];
-   char over_long[AIMEE_DB1_FIELD_MAX + 8];
-   memset(over_long, 'x', sizeof over_long - 1);
-   over_long[sizeof over_long - 1] = '\0';
-
    reset();
    assert(db1_git_ownership_upsert(NULL, "feature", "sess") == -1);
    assert(db1_git_ownership_upsert("/repo", "", "sess") == -1);
-   assert(db1_git_ownership_upsert(over_long, "feature", "sess") == -1);
    assert(db1_git_ownership_get_owner("/repo", "feature", owner, 0) == -1);
    assert(stub_calls == 0);
    printf("  PASS: test_bad_arguments_cost_no_round_trip\n");
@@ -213,6 +214,30 @@ static void test_every_operation_uses_its_own_op_and_arity(void)
    printf("  PASS: test_every_operation_uses_its_own_op_and_arity\n");
 }
 
+/* A field far larger than any fixed cap is CARRIED, not refused. These fields
+   hold prompts, results and documents elsewhere in DB1, and an in-process
+   caller has always passed them whole -- refusing here would return the same -1
+   as a broken store, and would do it only on production-sized data. */
+static void test_a_large_field_is_carried_not_refused(void)
+{
+   enum
+   {
+      BIG = 64u * 1024u
+   };
+   char *big = malloc(BIG + 1u);
+   assert(big != NULL);
+   memset(big, 'x', BIG);
+   big[BIG] = '\0';
+
+   reset();
+   assert(db1_git_ownership_upsert(big, "feature", "sess-1") == 0);
+   assert(stub_calls == 1);
+   /* 8 header bytes, then each field as a 4-byte length plus its bytes. */
+   assert(stub_frame_len == 8u + (4u + BIG) + (4u + 7u) + (4u + 6u));
+   free(big);
+   printf("  PASS: test_a_large_field_is_carried_not_refused\n");
+}
+
 int main(void)
 {
    printf("db1_git_ownership_client:\n");
@@ -221,6 +246,7 @@ int main(void)
    test_an_unreachable_module_is_an_error_not_an_absence();
    test_a_malformed_reply_is_refused();
    test_bad_arguments_cost_no_round_trip();
+   test_a_large_field_is_carried_not_refused();
    test_every_operation_uses_its_own_op_and_arity();
    printf("db1_git_ownership_client: ok\n");
    return 0;
