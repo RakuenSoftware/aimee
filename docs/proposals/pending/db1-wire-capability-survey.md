@@ -172,7 +172,10 @@ rather than reaching for once a cutover stalls.
 3. **Migrate whole ready SOURCES**, not families: `diagnose`, `web_page_cache`,
    `fsnap`, `cost_fold`, `decisions`. Eleven operations, and the only ones the
    wire can carry end to end today.
-4. **T3 next, not last.** It is what 240 of 281 operations are waiting on, and
+4. **T3 next, not last** — designed in
+   `docs/proposals/pending/db1-structured-payloads.md`, where it turns out to be
+   a counted reply plus a rule that a struct is its members, rather than the
+   redesign the name suggests. It is what 240 of 281 operations are waiting on, and
    the earlier order had it at the end because operations were counted where
    sources should have been.
 5. **T2 when a source it completes is actually wanted** — it finishes seven more
