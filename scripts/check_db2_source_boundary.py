@@ -228,6 +228,22 @@ def _resolve_project_header(
         if resolved.is_file() and resolved.suffix == ".h":
             return resolved.relative_to(root).as_posix()
 
+    # The standalone DB2 process compiles its private C closure with the
+    # descriptor-owned support root ahead of repository-wide include roots.
+    # Mirror that exact lookup here so an owned copy such as cJSON.h wins over
+    # the same basename in src/vendor instead of becoming falsely ambiguous.
+    target_path = PurePosixPath(target)
+    if not target_path.is_absolute() and ".." not in target_path.parts:
+        support = root / "src/modules/db2/support" / target_path
+        try:
+            support_resolved = support.resolve(strict=True)
+            support_resolved.relative_to((root / "src/modules/db2/support").resolve())
+        except (OSError, ValueError):
+            pass
+        else:
+            if support_resolved.is_file() and support_resolved.suffix == ".h":
+                return support_resolved.relative_to(root).as_posix()
+
     # Historical DB2 sources use ../headers and ../kb spellings. Project
     # include roots made these resolve before the directory relocation, so
     # normalize only leading parent components and then consult the exact
@@ -514,6 +530,26 @@ def enforce_shrink_only(previous: object, current: object) -> None:
                 None,
             )
             if promoted is not None and count <= promoted[0]:
+                continue
+            # DB2 may internalize its pinned cJSON input under the exact
+            # descriptor support boundary. This is a directional ownership
+            # reduction, not dependency growth: require the same source/include
+            # spelling, exact old/new paths and classes, and no count increase.
+            localized = next(
+                (
+                    value
+                    for (old_source, old_header, old_resolved), value
+                    in previous_dependencies.items()
+                    if old_source == source
+                    and old_header == header == "cJSON.h"
+                    and old_resolved == "src/vendor/headers/cJSON.h"
+                    and resolved == "src/modules/db2/support/cJSON.h"
+                    and value[1] == "vendored-system-api"
+                    and classification == "module-private-api"
+                ),
+                None,
+            )
+            if localized is not None and count <= localized[0]:
                 continue
             fail(
                 "baseline-growth",

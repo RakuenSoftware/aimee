@@ -398,6 +398,29 @@ class BoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(checker.BoundaryError, "new outbound dependency"):
                 checker.enforce_shrink_only(private_to_public, promoted)
 
+            vendor_cjson = {
+                "consumers": [],
+                "outbound_dependencies": [{
+                    "source": "src/modules/db2/c/store.c",
+                    "header": "cJSON.h",
+                    "resolved": "src/vendor/headers/cJSON.h",
+                    "classification": "vendored-system-api",
+                    "count": 2,
+                }],
+            }
+            owned_cjson = json.loads(json.dumps(vendor_cjson))
+            owned_row = owned_cjson["outbound_dependencies"][0]
+            owned_row["resolved"] = "src/modules/db2/support/cJSON.h"
+            owned_row["classification"] = "module-private-api"
+            checker.enforce_shrink_only(vendor_cjson, owned_cjson)
+            owned_row["count"] += 1
+            with self.assertRaisesRegex(checker.BoundaryError, "new outbound dependency"):
+                checker.enforce_shrink_only(vendor_cjson, owned_cjson)
+            owned_row["count"] -= 1
+            owned_row["resolved"] = "src/modules/db2/support/other.h"
+            with self.assertRaisesRegex(checker.BoundaryError, "new outbound dependency"):
+                checker.enforce_shrink_only(vendor_cjson, owned_cjson)
+
             legacy_v1 = json.loads(json.dumps(previous))
             legacy_v1.pop("outbound_dependencies")
             checker.enforce_shrink_only(legacy_v1, previous)

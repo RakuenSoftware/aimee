@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "2b04d475ea2b4fbda86d659f0e48594b62e87aba",
-  "source_fingerprint": "38b6ac05600a5216e1da969e1ea2002e3735af191b8069c92d545be9cac3d652",
+  "source_revision": "8f90f495fe29d790fb15be8c8aab427885a810ad",
+  "source_fingerprint": "836d1c8436e9d8ae04bf3b83e29e67db6fef9a6db80cae664af5e4cebcd688aa",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
@@ -158,6 +158,363 @@
     "src/modules/db2/c/write_tier_grant.c"
   ],
   "descriptor_support_units": [
+    {
+      "path": "src/modules/db2/support/cjson.c",
+      "source_sha256": "c17f53aaa58dddb899f452b02dc313b98af9111c81d87797c72607c1f6d6b4d4",
+      "header": "src/modules/db2/support/cJSON.h",
+      "header_sha256": "b3e16fec5613b4150c1e6636f4576cb54e2d8641bce391c9470dd19aa346e15a",
+      "origin_source": "src/vendor/cJSON.c",
+      "origin_header": "src/vendor/headers/cJSON.h",
+      "defines": [
+        "cJSON_AddArrayToObject",
+        "cJSON_AddBoolToObject",
+        "cJSON_AddFalseToObject",
+        "cJSON_AddItemReferenceToArray",
+        "cJSON_AddItemReferenceToObject",
+        "cJSON_AddItemToArray",
+        "cJSON_AddItemToObject",
+        "cJSON_AddItemToObjectCS",
+        "cJSON_AddNullToObject",
+        "cJSON_AddNumberToObject",
+        "cJSON_AddObjectToObject",
+        "cJSON_AddRawToObject",
+        "cJSON_AddStringToObject",
+        "cJSON_AddTrueToObject",
+        "cJSON_Compare",
+        "cJSON_CreateArray",
+        "cJSON_CreateArrayReference",
+        "cJSON_CreateBool",
+        "cJSON_CreateDoubleArray",
+        "cJSON_CreateFalse",
+        "cJSON_CreateFloatArray",
+        "cJSON_CreateIntArray",
+        "cJSON_CreateNull",
+        "cJSON_CreateNumber",
+        "cJSON_CreateObject",
+        "cJSON_CreateObjectReference",
+        "cJSON_CreateRaw",
+        "cJSON_CreateString",
+        "cJSON_CreateStringArray",
+        "cJSON_CreateStringReference",
+        "cJSON_CreateTrue",
+        "cJSON_Delete",
+        "cJSON_DeleteItemFromArray",
+        "cJSON_DeleteItemFromObject",
+        "cJSON_DeleteItemFromObjectCaseSensitive",
+        "cJSON_DetachItemFromArray",
+        "cJSON_DetachItemFromObject",
+        "cJSON_DetachItemFromObjectCaseSensitive",
+        "cJSON_DetachItemViaPointer",
+        "cJSON_Duplicate",
+        "cJSON_Duplicate_rec",
+        "cJSON_GetArrayItem",
+        "cJSON_GetArraySize",
+        "cJSON_GetErrorPtr",
+        "cJSON_GetNumberValue",
+        "cJSON_GetObjectItem",
+        "cJSON_GetObjectItemCaseSensitive",
+        "cJSON_GetStringValue",
+        "cJSON_HasObjectItem",
+        "cJSON_InitHooks",
+        "cJSON_InsertItemInArray",
+        "cJSON_IsArray",
+        "cJSON_IsBool",
+        "cJSON_IsFalse",
+        "cJSON_IsInvalid",
+        "cJSON_IsNull",
+        "cJSON_IsNumber",
+        "cJSON_IsObject",
+        "cJSON_IsRaw",
+        "cJSON_IsString",
+        "cJSON_IsTrue",
+        "cJSON_Minify",
+        "cJSON_Parse",
+        "cJSON_ParseWithLength",
+        "cJSON_ParseWithLengthOpts",
+        "cJSON_ParseWithOpts",
+        "cJSON_Print",
+        "cJSON_PrintBuffered",
+        "cJSON_PrintPreallocated",
+        "cJSON_PrintUnformatted",
+        "cJSON_ReplaceItemInArray",
+        "cJSON_ReplaceItemInObject",
+        "cJSON_ReplaceItemInObjectCaseSensitive",
+        "cJSON_ReplaceItemViaPointer",
+        "cJSON_SetNumberHelper",
+        "cJSON_SetValuestring",
+        "cJSON_Version",
+        "cJSON_free",
+        "cJSON_malloc"
+      ],
+      "resolves": [
+        "cJSON_AddArrayToObject",
+        "cJSON_AddBoolToObject",
+        "cJSON_AddItemToArray",
+        "cJSON_AddItemToObject",
+        "cJSON_AddNumberToObject",
+        "cJSON_AddObjectToObject",
+        "cJSON_AddStringToObject",
+        "cJSON_CreateArray",
+        "cJSON_CreateNumber",
+        "cJSON_CreateObject",
+        "cJSON_CreateString",
+        "cJSON_Delete",
+        "cJSON_DeleteItemFromObjectCaseSensitive",
+        "cJSON_GetArrayItem",
+        "cJSON_GetArraySize",
+        "cJSON_GetObjectItemCaseSensitive",
+        "cJSON_IsArray",
+        "cJSON_IsBool",
+        "cJSON_IsNumber",
+        "cJSON_IsObject",
+        "cJSON_IsString",
+        "cJSON_IsTrue",
+        "cJSON_Parse",
+        "cJSON_ParseWithOpts",
+        "cJSON_PrintUnformatted"
+      ],
+      "allowed_includes": [
+        "string.h",
+        "stdio.h",
+        "math.h",
+        "stdlib.h",
+        "limits.h",
+        "ctype.h",
+        "float.h",
+        "locale.h",
+        "cJSON.h"
+      ],
+      "allowed_header_includes": [
+        "stddef.h"
+      ],
+      "allowed_undefined": [
+        "_GLOBAL_OFFSET_TABLE_",
+        "__ctype_tolower_loc",
+        "__isoc99_sscanf",
+        "free",
+        "malloc",
+        "realloc",
+        "sprintf",
+        "strcmp",
+        "strcpy",
+        "strlen",
+        "strncmp",
+        "strtod"
+      ],
+      "base_references": {
+        "cJSON_AddArrayToObject": [
+          "src/modules/db2/c/code_audit.c",
+          "src/modules/db2/c/collab_rules.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/kb_service_backend.c",
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/kb_service_backend_memory.c"
+        ],
+        "cJSON_AddBoolToObject": [
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/kb_service_backend_memory.c",
+          "src/modules/db2/c/vector_status.c"
+        ],
+        "cJSON_AddItemToArray": [
+          "src/modules/db2/c/code_audit.c",
+          "src/modules/db2/c/collab_rules.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/kb_service_backend.c",
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/kb_service_backend_export.c",
+          "src/modules/db2/c/kb_service_backend_ingest.c",
+          "src/modules/db2/c/kb_service_backend_memory.c",
+          "src/modules/db2/c/memory_payload.c"
+        ],
+        "cJSON_AddItemToObject": [
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/kb_service_backend.c",
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/kb_service_backend_export.c",
+          "src/modules/db2/c/kb_service_backend_memory.c",
+          "src/modules/db2/c/memory_payload.c"
+        ],
+        "cJSON_AddNumberToObject": [
+          "src/modules/db2/c/code_audit.c",
+          "src/modules/db2/c/collab_rules.c",
+          "src/modules/db2/c/corpus_structural.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/fidelity.c",
+          "src/modules/db2/c/kb_payload.c",
+          "src/modules/db2/c/kb_service_backend.c",
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/kb_service_backend_export.c",
+          "src/modules/db2/c/kb_service_backend_memory.c",
+          "src/modules/db2/c/memory_export.c",
+          "src/modules/db2/c/memory_payload.c",
+          "src/modules/db2/c/rules.c",
+          "src/modules/db2/c/vector_status.c"
+        ],
+        "cJSON_AddObjectToObject": [
+          "src/modules/db2/c/kb_service_backend_memory.c"
+        ],
+        "cJSON_AddStringToObject": [
+          "src/modules/db2/c/artifacts.c",
+          "src/modules/db2/c/code_audit.c",
+          "src/modules/db2/c/collab_rules.c",
+          "src/modules/db2/c/corpus_structural.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/fidelity.c",
+          "src/modules/db2/c/kb_payload.c",
+          "src/modules/db2/c/kb_service_backend.c",
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/kb_service_backend_export.c",
+          "src/modules/db2/c/kb_service_backend_ingest.c",
+          "src/modules/db2/c/kb_service_backend_memory.c",
+          "src/modules/db2/c/memory_export.c",
+          "src/modules/db2/c/memory_payload.c",
+          "src/modules/db2/c/rules.c",
+          "src/modules/db2/c/vector_status.c"
+        ],
+        "cJSON_CreateArray": [
+          "src/modules/db2/c/code_audit.c",
+          "src/modules/db2/c/collab_rules.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/kb_service_backend_export.c",
+          "src/modules/db2/c/kb_service_backend_ingest.c",
+          "src/modules/db2/c/memory_payload.c"
+        ],
+        "cJSON_CreateNumber": [
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/kb_service_backend_memory.c"
+        ],
+        "cJSON_CreateObject": [
+          "src/modules/db2/c/artifacts.c",
+          "src/modules/db2/c/code_audit.c",
+          "src/modules/db2/c/collab_rules.c",
+          "src/modules/db2/c/corpus_structural.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/fidelity.c",
+          "src/modules/db2/c/kb_payload.c",
+          "src/modules/db2/c/kb_service_backend.c",
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/kb_service_backend_export.c",
+          "src/modules/db2/c/kb_service_backend_ingest.c",
+          "src/modules/db2/c/kb_service_backend_memory.c",
+          "src/modules/db2/c/memory_export.c",
+          "src/modules/db2/c/memory_payload.c",
+          "src/modules/db2/c/rules.c",
+          "src/modules/db2/c/vector_status.c"
+        ],
+        "cJSON_CreateString": [
+          "src/modules/db2/c/code_audit.c",
+          "src/modules/db2/c/kb_service_backend_memory.c",
+          "src/modules/db2/c/memory_payload.c"
+        ],
+        "cJSON_Delete": [
+          "src/modules/db2/c/artifacts.c",
+          "src/modules/db2/c/calibration.c",
+          "src/modules/db2/c/code_audit.c",
+          "src/modules/db2/c/collab_rules.c",
+          "src/modules/db2/c/corpus_structural.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/fidelity.c",
+          "src/modules/db2/c/kb_payload.c",
+          "src/modules/db2/c/kb_service_backend.c",
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/kb_service_backend_export.c",
+          "src/modules/db2/c/kb_service_backend_memory.c",
+          "src/modules/db2/c/memory_export.c",
+          "src/modules/db2/c/memory_payload.c",
+          "src/modules/db2/c/org_model_catalog.c",
+          "src/modules/db2/c/pgvec_transport.c",
+          "src/modules/db2/c/rules.c"
+        ],
+        "cJSON_DeleteItemFromObjectCaseSensitive": [
+          "src/modules/db2/c/demotion.c"
+        ],
+        "cJSON_GetArrayItem": [
+          "src/modules/db2/c/calibration.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/org_model_catalog.c"
+        ],
+        "cJSON_GetArraySize": [
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/memory_payload.c",
+          "src/modules/db2/c/org_model_catalog.c"
+        ],
+        "cJSON_GetObjectItemCaseSensitive": [
+          "src/modules/db2/c/artifacts.c",
+          "src/modules/db2/c/calibration.c",
+          "src/modules/db2/c/code_audit.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/fidelity.c",
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/kb_service_backend_export.c",
+          "src/modules/db2/c/pgvec_transport.c"
+        ],
+        "cJSON_IsArray": [
+          "src/modules/db2/c/artifacts.c",
+          "src/modules/db2/c/calibration.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/kb_service_backend_export.c",
+          "src/modules/db2/c/kb_service_backend_memory.c",
+          "src/modules/db2/c/org_model_catalog.c"
+        ],
+        "cJSON_IsBool": [
+          "src/modules/db2/c/kb_service_backend_agent.c"
+        ],
+        "cJSON_IsNumber": [
+          "src/modules/db2/c/artifacts.c",
+          "src/modules/db2/c/calibration.c",
+          "src/modules/db2/c/code_audit.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/fidelity.c",
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/kb_service_backend_export.c"
+        ],
+        "cJSON_IsObject": [
+          "src/modules/db2/c/kb_service_backend_agent.c"
+        ],
+        "cJSON_IsString": [
+          "src/modules/db2/c/artifacts.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/fidelity.c",
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/kb_service_backend_export.c",
+          "src/modules/db2/c/kb_service_backend_memory.c",
+          "src/modules/db2/c/org_model_catalog.c",
+          "src/modules/db2/c/pgvec_transport.c"
+        ],
+        "cJSON_IsTrue": [
+          "src/modules/db2/c/kb_service_backend_agent.c"
+        ],
+        "cJSON_Parse": [
+          "src/modules/db2/c/artifacts.c",
+          "src/modules/db2/c/calibration.c",
+          "src/modules/db2/c/code_audit.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/fidelity.c",
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/pgvec_transport.c"
+        ],
+        "cJSON_ParseWithOpts": [
+          "src/modules/db2/c/org_model_catalog.c"
+        ],
+        "cJSON_PrintUnformatted": [
+          "src/modules/db2/c/artifacts.c",
+          "src/modules/db2/c/collab_rules.c",
+          "src/modules/db2/c/corpus_structural.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/fidelity.c",
+          "src/modules/db2/c/kb_payload.c",
+          "src/modules/db2/c/kb_service_backend_agent.c",
+          "src/modules/db2/c/kb_service_backend_memory.c",
+          "src/modules/db2/c/memory_export.c",
+          "src/modules/db2/c/memory_payload.c",
+          "src/modules/db2/c/rules.c"
+        ]
+      },
+      "provenance": "Exact descriptor-owned copies of src/vendor/cJSON.c and its public header; every DB2 reference is frozen in this policy and byte drift from the canonical vendored input fails closed.",
+      "evidence": "The pinned cJSON implementation resolves all 25 reviewed generated-input dependencies while exporting the complete canonical API and importing only its reviewed C runtime surface; it contains no DB2, bus, provider, or database code."
+    },
     {
       "path": "src/modules/db2/support/dstr_primitives.c",
       "source_sha256": "ae448e0ae6e0464922042536b77ab396ea230d5ba16ec977e003ecd614cf22ab",
@@ -934,7 +1291,8 @@
         "src/modules/db2/c/db_schema.c",
         "src/modules/db2/c/memory_scope_query.c",
         "src/modules/db2/c/memory_vectors.c",
-        "src/modules/db2/c/tool_registry.c"
+        "src/modules/db2/c/tool_registry.c",
+        "src/modules/db2/support/cjson.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -977,6 +1335,7 @@
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/notes.c",
         "src/modules/db2/c/prospective_memories.c",
+        "src/modules/db2/support/cjson.c",
         "src/modules/db2/support/rel_type_primitives.c"
       ],
       "disposition": "system-link",
@@ -1029,7 +1388,8 @@
         "src/modules/db2/c/canonical_index.c",
         "src/modules/db2/c/curiosity.c",
         "src/modules/db2/c/db2_reembed.c",
-        "src/modules/db2/c/entity_edges.c"
+        "src/modules/db2/c/entity_edges.c",
+        "src/modules/db2/support/cjson.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -1167,340 +1527,6 @@
       ],
       "disposition": "injected-module-contract",
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "cJSON_AddArrayToObject",
-      "references": [
-        "src/modules/db2/c/code_audit.c",
-        "src/modules/db2/c/collab_rules.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_AddBoolToObject",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
-        "src/modules/db2/c/vector_status.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_AddItemToArray",
-      "references": [
-        "src/modules/db2/c/code_audit.c",
-        "src/modules/db2/c/collab_rules.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
-        "src/modules/db2/c/kb_service_backend_ingest.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
-        "src/modules/db2/c/memory_payload.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_AddItemToObject",
-      "references": [
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
-        "src/modules/db2/c/memory_payload.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_AddNumberToObject",
-      "references": [
-        "src/modules/db2/c/code_audit.c",
-        "src/modules/db2/c/collab_rules.c",
-        "src/modules/db2/c/corpus_structural.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
-        "src/modules/db2/c/kb_payload.c",
-        "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
-        "src/modules/db2/c/memory_export.c",
-        "src/modules/db2/c/memory_payload.c",
-        "src/modules/db2/c/rules.c",
-        "src/modules/db2/c/vector_status.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_AddObjectToObject",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_AddStringToObject",
-      "references": [
-        "src/modules/db2/c/artifacts.c",
-        "src/modules/db2/c/code_audit.c",
-        "src/modules/db2/c/collab_rules.c",
-        "src/modules/db2/c/corpus_structural.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
-        "src/modules/db2/c/kb_payload.c",
-        "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
-        "src/modules/db2/c/kb_service_backend_ingest.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
-        "src/modules/db2/c/memory_export.c",
-        "src/modules/db2/c/memory_payload.c",
-        "src/modules/db2/c/rules.c",
-        "src/modules/db2/c/vector_status.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_CreateArray",
-      "references": [
-        "src/modules/db2/c/code_audit.c",
-        "src/modules/db2/c/collab_rules.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
-        "src/modules/db2/c/kb_service_backend_ingest.c",
-        "src/modules/db2/c/memory_payload.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_CreateNumber",
-      "references": [
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_CreateObject",
-      "references": [
-        "src/modules/db2/c/artifacts.c",
-        "src/modules/db2/c/code_audit.c",
-        "src/modules/db2/c/collab_rules.c",
-        "src/modules/db2/c/corpus_structural.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
-        "src/modules/db2/c/kb_payload.c",
-        "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
-        "src/modules/db2/c/kb_service_backend_ingest.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
-        "src/modules/db2/c/memory_export.c",
-        "src/modules/db2/c/memory_payload.c",
-        "src/modules/db2/c/rules.c",
-        "src/modules/db2/c/vector_status.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_CreateString",
-      "references": [
-        "src/modules/db2/c/code_audit.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
-        "src/modules/db2/c/memory_payload.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_Delete",
-      "references": [
-        "src/modules/db2/c/artifacts.c",
-        "src/modules/db2/c/calibration.c",
-        "src/modules/db2/c/code_audit.c",
-        "src/modules/db2/c/collab_rules.c",
-        "src/modules/db2/c/corpus_structural.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
-        "src/modules/db2/c/kb_payload.c",
-        "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
-        "src/modules/db2/c/memory_export.c",
-        "src/modules/db2/c/memory_payload.c",
-        "src/modules/db2/c/org_model_catalog.c",
-        "src/modules/db2/c/pgvec_transport.c",
-        "src/modules/db2/c/rules.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_DeleteItemFromObjectCaseSensitive",
-      "references": [
-        "src/modules/db2/c/demotion.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_GetArrayItem",
-      "references": [
-        "src/modules/db2/c/calibration.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/org_model_catalog.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_GetArraySize",
-      "references": [
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/memory_payload.c",
-        "src/modules/db2/c/org_model_catalog.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_GetObjectItemCaseSensitive",
-      "references": [
-        "src/modules/db2/c/artifacts.c",
-        "src/modules/db2/c/calibration.c",
-        "src/modules/db2/c/code_audit.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
-        "src/modules/db2/c/pgvec_transport.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_IsArray",
-      "references": [
-        "src/modules/db2/c/artifacts.c",
-        "src/modules/db2/c/calibration.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
-        "src/modules/db2/c/org_model_catalog.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_IsBool",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_IsNumber",
-      "references": [
-        "src/modules/db2/c/artifacts.c",
-        "src/modules/db2/c/calibration.c",
-        "src/modules/db2/c/code_audit.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_export.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_IsObject",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_IsString",
-      "references": [
-        "src/modules/db2/c/artifacts.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
-        "src/modules/db2/c/org_model_catalog.c",
-        "src/modules/db2/c/pgvec_transport.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_IsTrue",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_Parse",
-      "references": [
-        "src/modules/db2/c/artifacts.c",
-        "src/modules/db2/c/calibration.c",
-        "src/modules/db2/c/code_audit.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/pgvec_transport.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_ParseWithOpts",
-      "references": [
-        "src/modules/db2/c/org_model_catalog.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
-    },
-    {
-      "symbol": "cJSON_PrintUnformatted",
-      "references": [
-        "src/modules/db2/c/artifacts.c",
-        "src/modules/db2/c/collab_rules.c",
-        "src/modules/db2/c/corpus_structural.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
-        "src/modules/db2/c/kb_payload.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
-        "src/modules/db2/c/memory_export.c",
-        "src/modules/db2/c/memory_payload.c",
-        "src/modules/db2/c/rules.c"
-      ],
-      "disposition": "descriptor-owned-copy/generated-input",
-      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
     },
     {
       "symbol": "calloc",
@@ -1971,7 +1997,8 @@
         "src/modules/db2/c/rules.c",
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_operator_status_runtime.c",
-        "src/modules/db2/c/vault_pg.c"
+        "src/modules/db2/c/vault_pg.c",
+        "src/modules/db2/support/cjson.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2156,7 +2183,8 @@
         "src/modules/db2/c/memory_export.c",
         "src/modules/db2/c/pgvec_transport.c",
         "src/modules/db2/c/rules.c",
-        "src/modules/db2/c/vault_pg.c"
+        "src/modules/db2/c/vault_pg.c",
+        "src/modules/db2/support/cjson.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2968,6 +2996,7 @@
         "src/modules/db2/c/db_postgres.c",
         "src/modules/db2/c/memory_export.c",
         "src/modules/db2/c/memory_query.c",
+        "src/modules/db2/support/cjson.c",
         "src/modules/db2/support/dstr_primitives.c"
       ],
       "disposition": "system-link",
@@ -3177,6 +3206,14 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
+      "symbol": "sprintf",
+      "references": [
+        "src/modules/db2/support/cjson.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
       "symbol": "sqlite3_close",
       "references": [
         "src/modules/db2/c/db2_init.c",
@@ -3350,6 +3387,7 @@
         "src/modules/db2/c/vault_operator_status_runtime.c",
         "src/modules/db2/c/vault_pg.c",
         "src/modules/db2/c/write_tier_grant.c",
+        "src/modules/db2/support/cjson.c",
         "src/modules/db2/support/rel_type_primitives.c"
       ],
       "disposition": "system-link",
@@ -3379,7 +3417,8 @@
         "src/modules/db2/c/pgvec_verify.c",
         "src/modules/db2/c/rules.c",
         "src/modules/db2/c/shadow_delta.c",
-        "src/modules/db2/c/tasks.c"
+        "src/modules/db2/c/tasks.c",
+        "src/modules/db2/support/cjson.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3482,7 +3521,8 @@
         "src/modules/db2/c/server_registry.c",
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_operator_status_runtime.c",
-        "src/modules/db2/c/vault_pg.c"
+        "src/modules/db2/c/vault_pg.c",
+        "src/modules/db2/support/cjson.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3522,7 +3562,8 @@
         "src/modules/db2/c/org_model_catalog.c",
         "src/modules/db2/c/org_vault_rewrap.c",
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
-        "src/modules/db2/c/vault_pg.c"
+        "src/modules/db2/c/vault_pg.c",
+        "src/modules/db2/support/cjson.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3593,7 +3634,8 @@
     {
       "symbol": "strtod",
       "references": [
-        "src/modules/db2/c/db_postgres.c"
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/support/cjson.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3914,16 +3956,16 @@
   ],
   "summary": {
     "translation_units": 141,
-    "descriptor_support_units": 7,
-    "unresolved_symbols": 337,
+    "descriptor_support_units": 8,
+    "unresolved_symbols": 313,
     "dispositions": {
-      "descriptor-owned-copy/generated-input": 25,
+      "descriptor-owned-copy/generated-input": 0,
       "injected-module-contract": 150,
       "portable-core-promotion": 18,
       "private-implementation": 0,
       "remove/dead": 0,
-      "system-link": 144
+      "system-link": 145
     }
   },
-  "fingerprint": "aa7651598626967ea18b26e56c4ccaa972ec860ecdc18b4633848d6ef383dd44"
+  "fingerprint": "6be7e278d5d23401a014b9c64c003a06d956b76d1348272b34e716d8151781fd"
 }
