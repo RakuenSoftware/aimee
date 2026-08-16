@@ -45,9 +45,9 @@ them.
   unix socket to aimee-server, which holds all credentials and performs every
   external reach (`delegate-sandbox-aimee-sole-egress.md`); Aimee already has a
   hardened `web_read`/`web_search` egress policy.
-- **The capability vocabulary remains externally owned.** The rejected
-  [`capability-scoped-agent-execution.md`](../rejected/capability-scoped-agent-execution.md)
-  described only a C turn-local toolset snapshot and explicitly supplied neither posture tiers nor
+- **The capability vocabulary remains externally owned.** The pending
+  [`capability-scoped-agent-execution.md`](capability-scoped-agent-execution.md)
+  describes an immutable Go invocation capability set and explicitly supplies neither posture tiers nor
   admission. This module must consume those decisions from the pending
   [`governance-policy-surface-and-posture.md`](governance-policy-surface-and-posture.md) owner.
 

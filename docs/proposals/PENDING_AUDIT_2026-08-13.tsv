@@ -2,7 +2,7 @@ original	disposition	final_path	residual_path	stale_updated	evidence_anchor	revi
 agentic-supervised-swebench.md	pending_accurate	docs/proposals/pending/agentic-supervised-swebench.md	-	no	PENDING_AUDIT_2026-08-04.md	user-directed-audit-2026-08-04
 aimee-core-capability-contract.md	partial_archived	docs/proposals/done/aimee-core-capability-contract.md	docs/proposals/pending/aimee-core-cross-process-contract-residual.md	archive_notice	PENDING_AUDIT_2026-08-04.md	user-directed-audit-2026-08-04
 appliance-state-recovery-runbook.md	complete	docs/proposals/done/appliance-state-recovery-runbook.md	-	archive_notice	PENDING_AUDIT_2026-08-04.md	workflow-wi_36d92dad5082a081952bac50d0aaf4bb-pr-2329
-capability-scoped-agent-execution.md	rejected	docs/proposals/rejected/capability-scoped-agent-execution.md	-	archive_notice	PENDING_AUDIT_2026-08-04.md	roundtable-17d3390d4557f570353c675f
+capability-scoped-agent-execution.md	pending_accurate	docs/proposals/pending/capability-scoped-agent-execution.md	-	archive_notice	REJECTION_AUDIT_2026-08-15.md	roundtable-63c3bdcf141f50ede72fa2a7
 capability-thresholded-delegate-routing-residual.md	pending_accurate	docs/proposals/pending/capability-thresholded-delegate-routing-residual.md	-	no	PENDING_AUDIT_2026-08-04.md	user-directed-audit-2026-08-04
 code-graph-architecture-surface.md	partial_archived	docs/proposals/done/code-graph-architecture-surface.md	docs/proposals/pending/code-graph-route-storage-orientation-residual.md	archive_notice	PENDING_AUDIT_2026-08-04.md	user-directed-audit-2026-08-04
 code-intelligence-language-coverage.md	pending_accurate	docs/proposals/pending/code-intelligence-language-coverage.md	-	yes	PENDING_AUDIT_2026-08-04.md	user-directed-audit-2026-08-04
