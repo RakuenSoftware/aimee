@@ -17,6 +17,7 @@
     "src/modules/db1/clarify.c",
     "src/modules/db1/cognify_jobs.c",
     "src/modules/db1/conv_context.c",
+    "src/modules/db1/conversation_stage.c",
     "src/modules/db1/coord_jobs.c",
     "src/modules/db1/cost_fold.c",
     "src/modules/db1/db.c",

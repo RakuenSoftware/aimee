@@ -1,4 +1,4 @@
-/* db1_client/git_ownership.c: the git_ownership family, reached over the bus.
+/* db1_client/conversation.c: the conversation family, reached over the bus.
  *
  * GENERATED from src/modules/db1/eventcontract/operations.json by
  * scripts/gen_db1_contract.py. Do not edit.
@@ -11,17 +11,12 @@
  * .c beside it and compiles them into the DB1 process, so a client with these
  * names in that directory would be linked twice into the one binary that must
  * not have it -- once as the caller and once as the implementation.
-
  *
- * A failure returns -1, never "no owner". branch_own_check() reads a negative
- * as "no enforcement" and allows the operation, which is what it has always
- * done without a database, whereas a fabricated 0 would assert the branch is
- * unowned and let a caller take one somebody else holds. *
  * clang-format is off for the body below: its canonical form is whatever this
  * generator emits, and reflowing generated output would put the file and the
  * catalog permanently one reformat apart. */
 /* clang-format off */
-#include "git_ownership.h"
+#include "payload_rewrite_state.h"
 
 #include "db1_module_api.h"
 
@@ -36,7 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define DB1_GIT_OWNERSHIP_CALL_TIMEOUT_MS 2000
+#define DB1_CONVERSATION_CALL_TIMEOUT_MS 2000
 
 static void warn_unreachable(int reason)
 {
@@ -48,7 +43,7 @@ static void warn_unreachable(int reason)
       is quiet, without one line per call. The numeric
       aimee_module_call_result_t, not its name, so this does not pull the whole
       event-bus library in behind the client for one string. */
-   LOG_WARN("db1.git_ownership", "DB1 %s is unreachable (module call result %d)", "git ownership",
+   LOG_WARN("db1.conversation", "DB1 %s is unreachable (module call result %d)", "conversation",
             reason);
 }
 
@@ -110,7 +105,7 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
          values[i][0] = '\0';
    /* A local check, not a probe: with nothing serving the stage there is no
       call to make, and saying so beats waiting out a deadline. */
-   if (!obs_bus_module_available(AIMEE_DB1_EVENT_GIT_OWNERSHIP))
+   if (!obs_bus_module_available(AIMEE_DB1_EVENT_CONVERSATION))
    {
       warn_unreachable(AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
       return -1;
@@ -135,9 +130,9 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
    encode(request, op, fields, count);
 
    uint32_t response_len = 0;
-   uint64_t deadline = aimee_module_call_deadline_ns(DB1_GIT_OWNERSHIP_CALL_TIMEOUT_MS);
+   uint64_t deadline = aimee_module_call_deadline_ns(DB1_CONVERSATION_CALL_TIMEOUT_MS);
    aimee_module_call_result_t rc =
-       obs_bus_module_call(AIMEE_DB1_EVENT_GIT_OWNERSHIP, AIMEE_DB1_STAGE_GIT_OWNERSHIP, 0, deadline,
+       obs_bus_module_call(AIMEE_DB1_EVENT_CONVERSATION, AIMEE_DB1_STAGE_CONVERSATION, 0, deadline,
                            request, (uint32_t)request_len, response, (uint32_t)response_cap,
                            &response_len, NULL, NULL);
    free(request);
@@ -195,83 +190,51 @@ static int write_result(int status)
    return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
 }
 
-/* A read answers found(1) / not-found(0) / error(-1), which is what the direct
-   implementation returns and what its callers already branch on. */
-static int read_result(int status, const char *value_out)
+
+int db1_payload_rewrite_state_get(const char *session_id, payload_rewrite_state_t *out)
 {
-   if (status == (int)AIMEE_DB1_STATUS_OK)
-      return (value_out && value_out[0]) ? 1 : 0;
-   if (status == (int)AIMEE_DB1_STATUS_MISSING)
-      return 0;
-   return -1;
+   if (!session_id || !session_id[0] || !out)
+      return -1;
+   const char *fields[] = {session_id};
+   char slot1[24];
+   char slot2[24];
+   char slot4[24];
+   char slot6[24];
+   char slot7[24];
+   char slot8[24];
+   char *const values[] = {out->session_id, slot1, slot2, out->last_prefix_hash, slot4, out->last_rewrite_at, slot6, slot7, slot8, out->rewrite_reason, out->updated_at};
+   const size_t caps[] = {sizeof out->session_id, sizeof slot1, sizeof slot2, sizeof out->last_prefix_hash, sizeof slot4, sizeof out->last_rewrite_at, sizeof slot6, sizeof slot7, sizeof slot8, sizeof out->rewrite_reason, sizeof out->updated_at};
+   memset(out, 0, sizeof *out);
+   int status = call_stage(AIMEE_DB1_OP_REWRITE_STATE_GET, fields, 1, values, caps, 11);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   out->payload_epoch = (int64_t)strtoll(slot1, NULL, 10);
+   out->compaction_epoch = (int64_t)strtoll(slot2, NULL, 10);
+   out->last_payload_tokens = (int)strtol(slot4, NULL, 10);
+   out->deferred_rewrite_count = (int)strtol(slot6, NULL, 10);
+   out->consecutive_deferred_count = (int)strtol(slot7, NULL, 10);
+   out->bytes_saved_pending = (int)strtol(slot8, NULL, 10);
+   return 0;
 }
 
-int db1_git_ownership_upsert(const char *repo_path, const char *branch_name, const char *session_id)
+int db1_payload_rewrite_state_set(const payload_rewrite_state_t *state)
 {
-   if (!repo_path || !repo_path[0] || !branch_name || !branch_name[0] || !session_id || !session_id[0])
+   if (!state)
       return -1;
-   const char *fields[] = {repo_path, branch_name, session_id};
-   return write_result(call_stage(AIMEE_DB1_OP_OWNERSHIP_UPSERT, fields, 3, NULL, NULL, 0));
-}
-
-int db1_git_ownership_delete(const char *repo_path, const char *branch_name)
-{
-   if (!repo_path || !repo_path[0] || !branch_name || !branch_name[0])
-      return -1;
-   const char *fields[] = {repo_path, branch_name};
-   return write_result(call_stage(AIMEE_DB1_OP_OWNERSHIP_DELETE, fields, 2, NULL, NULL, 0));
-}
-
-int db1_git_ownership_get_owner(const char *repo_path, const char *branch_name, char *owner_out, size_t owner_len)
-{
-   if (!repo_path || !repo_path[0] || !branch_name || !branch_name[0] || !owner_out || owner_len == 0)
-      return -1;
-   const char *fields[] = {repo_path, branch_name};
-   char *const values[] = {owner_out};
-   const size_t caps[] = {owner_len};
-   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_OWNER_GET, fields, 2, values, caps, 1);
-   return read_result(status, owner_out);
-}
-
-int db1_git_ownership_get_branch_for_session(const char *repo_path, const char *session_id, char *branch_out, size_t branch_len)
-{
-   if (!repo_path || !repo_path[0] || !session_id || !session_id[0] || !branch_out || branch_len == 0)
-      return -1;
-   const char *fields[] = {repo_path, session_id};
-   char *const values[] = {branch_out};
-   const size_t caps[] = {branch_len};
-   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION, fields, 2, values, caps, 1);
-   return read_result(status, branch_out);
-}
-
-int db1_git_ownership_find_session_by_prefix(const char *session_prefix, char *session_out, size_t session_len)
-{
-   if (!session_prefix || !session_prefix[0] || !session_out || session_len == 0)
-      return -1;
-   const char *fields[] = {session_prefix};
-   char *const values[] = {session_out};
-   const size_t caps[] = {session_len};
-   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX, fields, 1, values, caps, 1);
-   return read_result(status, session_out);
-}
-
-int db1_session_feature_branch_upsert(const char *repo_path, const char *session_id, const char *feature_branch)
-{
-   if (!repo_path || !repo_path[0] || !session_id || !session_id[0] || !feature_branch || !feature_branch[0])
-      return -1;
-   const char *fields[] = {repo_path, session_id, feature_branch};
-   return write_result(call_stage(AIMEE_DB1_OP_FEATURE_BRANCH_UPSERT, fields, 3, NULL, NULL, 0));
-}
-
-int db1_session_feature_branch_get(const char *repo_path, const char *session_id, char *branch_out, size_t branch_len)
-{
-   if (!repo_path || !repo_path[0] || !session_id || !session_id[0] || !branch_out || branch_len == 0)
-      return -1;
-   const char *fields[] = {repo_path, session_id};
-   char *const values[] = {branch_out};
-   const size_t caps[] = {branch_len};
-   int status = call_stage(AIMEE_DB1_OP_FEATURE_BRANCH_GET, fields, 2, values, caps, 1);
-   return read_result(status, branch_out);
+   char arg1[24];
+   snprintf(arg1, sizeof arg1, "%lld", (long long)state->payload_epoch);
+   char arg2[24];
+   snprintf(arg2, sizeof arg2, "%lld", (long long)state->compaction_epoch);
+   char arg4[24];
+   snprintf(arg4, sizeof arg4, "%d", state->last_payload_tokens);
+   char arg6[24];
+   snprintf(arg6, sizeof arg6, "%d", state->deferred_rewrite_count);
+   char arg7[24];
+   snprintf(arg7, sizeof arg7, "%d", state->consecutive_deferred_count);
+   char arg8[24];
+   snprintf(arg8, sizeof arg8, "%d", state->bytes_saved_pending);
+   const char *fields[] = {state->session_id, arg1, arg2, state->last_prefix_hash, arg4, state->last_rewrite_at, arg6, arg7, arg8, state->rewrite_reason, state->updated_at};
+   return write_result(call_stage(AIMEE_DB1_OP_REWRITE_STATE_SET, fields, 11, NULL, NULL, 0));
 }
 
 /* clang-format on */

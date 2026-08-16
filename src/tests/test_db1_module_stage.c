@@ -287,7 +287,12 @@ static void test_git_ownership_malformed_frames_are_refused(void)
       per-op arity check still refuses this frame, so the result is unchanged
       even though the write already happened. Built with -fsanitize=address it
       reports a stack-buffer-overflow, which is what this frame is really for. */
-   const char *too_many[] = {"/repo", "main", "sess", "extra"};
+   /* Sized from the constant rather than written out: FIELDS_MAX is derived
+      from the widest request in the catalog, so a literal list silently stops
+      covering this case the moment a wider operation is declared. */
+   const char *too_many[AIMEE_DB1_FIELDS_MAX + 1u];
+   for (uint32_t i = 0; i < AIMEE_DB1_FIELDS_MAX + 1u; ++i)
+      too_many[i] = "x";
    len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_UPSERT, too_many, AIMEE_DB1_FIELDS_MAX + 1u);
    assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
           AIMEE_MODULE_STATUS_INVALID_REQUEST);

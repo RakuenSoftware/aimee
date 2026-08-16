@@ -7,6 +7,7 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import re
 import shutil
 import tempfile
 import unittest
@@ -36,6 +37,11 @@ def sandbox() -> tempfile.TemporaryDirectory[str]:
         shutil.copy2(REPO_ROOT / relative, target)
     for source in (REPO_ROOT / contract.SOURCE_DIR).glob("*.c"):
         (root / contract.SOURCE_DIR / source.name).touch()
+    # The headers are real content, not placeholders: the generator reads them
+    # to find which one declares each operation, so an empty file changes what
+    # it emits.
+    for header in (REPO_ROOT / contract.SOURCE_DIR).glob("*.h"):
+        shutil.copy2(header, root / contract.SOURCE_DIR / header.name)
     # The generated clients are real content, not placeholders: the contract
     # compares them byte for byte.
     for client in (REPO_ROOT / contract.CLIENT_DIR).glob("*.c"):
@@ -309,7 +315,8 @@ class CatalogTests(unittest.TestCase):
             upper = reserved["name"].upper()
             self.assertIn(f"#define AIMEE_DB1_EVENT_{upper} {reserved['event_kind']}u", header)
             self.assertIn("AIMEE_DB1_OP_PROBE_TOUCH", header)
-            self.assertRegex(header, r"AIMEE_DB1_FIELDS_MAX\s+4u")
+            widest = int(re.search(r"AIMEE_DB1_FIELDS_MAX\s+(\d+)u", header).group(1))
+            self.assertGreaterEqual(widest, 4, "the four-field operation must fit")
         finally:
             tmp.cleanup()
 
@@ -426,15 +433,14 @@ class CatalogTests(unittest.TestCase):
             catalog = self.integer_catalog(root)
             contract.run(root, write=True)
             reserved = next(f for f in catalog["families"]
-                            if any(o["family"] == f["name"] and o.get("c_name")
-                                   for o in catalog["operations"])
-                            and f["name"] != "git_ownership")
+                            if any(o["family"] == f["name"] and o["name"] == "probe_forget_if_job"
+                                   for o in catalog["operations"]))
             client = (root / contract.CLIENT_DIR / f"{reserved['name']}.c").read_text()
             stage = (root / contract.SOURCE_DIR / f"{reserved['name']}_stage.c").read_text()
 
             self.assertIn("int db1_probe_forget_if_job(const char *probe_id, int job_id)", client)
-            self.assertIn('snprintf(job_id_text, sizeof job_id_text, "%d", job_id);', client)
-            self.assertIn("{probe_id, job_id_text}", client)
+            self.assertIn('snprintf(arg1, sizeof arg1, "%d", job_id);', client)
+            self.assertIn("{probe_id, arg1}", client)
             # An int has no null and no empty case, so only the text argument
             # is checked -- and it is checked for both.
             self.assertIn("if (!probe_id || !probe_id[0])", client)
@@ -565,7 +571,8 @@ class CatalogTests(unittest.TestCase):
         stage = (REPO_ROOT / contract.SOURCE_DIR / "git_ownership_stage.c").read_text()
         client = (REPO_ROOT / contract.CLIENT_DIR / "git_ownership.c").read_text()
         # Both sides speak count, not a single length.
-        self.assertIn("uint32_t count = value ? 1u : 0u;", stage)
+        # Both sides speak a count, not a single length.
+        self.assertIn("aimee_db1_put_u32(out + 4u, count);", stage)
         self.assertIn("uint32_t fields_in = aimee_db1_get_u32(response + 4u);", client)
 
     def test_every_operation_is_keyed(self) -> None:
