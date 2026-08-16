@@ -1,11 +1,12 @@
 # Proposal: split Runtime and Control Plane governance, web modules, and config surfaces
 
 - **State:** DONE — archived 2026-08-04 as partially implemented. Runtime/control web ownership and
-  initial decision surfaces landed. The mixed-owner umbrella for product naming, separately hosted
-  processes, optional lifecycle, and truthful effective-config parity was rejected in
-  [`runtime-control-product-boundary-residual.md`](../rejected/runtime-control-product-boundary-residual.md);
-  remaining work requires owner-specific Go proposals after the corresponding boundaries have Go
-  owners.
+  initial decision surfaces landed. Product naming, separately hosted processes, optional lifecycle,
+  truthful effective-config parity, transport, and packaging remain in the restored
+  [Go-owned residual](../pending/runtime-control-product-boundary-residual.md).
+- **Re-promotion:** restored 2026-08-16 after `runtime-web`, `control-web`, and
+  `server-go/internal/config` provided Go owners for the remaining policy decisions; retained C,
+  build, packaging, and deployment surfaces are mechanical consumers.
 - **Historical state:** roundtable-approved 2026-07-20; awaiting project acceptance
 - **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md)
 - **Owns:** product roles/names, Runtime and Control web lifecycles, dashboards, and advertised
