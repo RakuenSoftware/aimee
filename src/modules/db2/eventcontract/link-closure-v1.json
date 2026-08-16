@@ -1,14 +1,18 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "module": "db2",
-  "source_revision": "bb3de1cdb04fbfdcdb2a146f0dcd802ee41af3f5",
-  "source_fingerprint": "c6486704635e400898dc14c7cdc41060e81e88beb0392f777e3d10bb98a3fb55",
+  "source_revision": "45b864b8a8d5b1b3ef2d752e5c2f44bd02bc7540",
+  "source_fingerprint": "fb050d2d8987e57dec8df4a9dfb0422d3a64b09f6f3737abcb824fe59903bfe7",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
     "link_mode": "relocatable-no-libraries",
     "helper_objects": [],
-    "libraries": []
+    "libraries": [],
+    "support_compile_flags": "-std=c11 -Os -Wall -Wextra -Werror -fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
+    "support_include_roots": [
+      "src/modules/db2/support"
+    ]
   },
   "translation_units": [
     "src/modules/db2/c/admin_grant.c",
@@ -152,6 +156,69 @@
     "src/modules/db2/c/vector_status.c",
     "src/modules/db2/c/workflow_patterns.c",
     "src/modules/db2/c/write_tier_grant.c"
+  ],
+  "descriptor_support_units": [
+    {
+      "path": "src/modules/db2/support/sketch_primitives.c",
+      "source_sha256": "20318d4f9c92894892ef9475f95c1542602f3a7d2b4d9fe6df2b8d63b4986280",
+      "header": "src/modules/db2/support/sketch.h",
+      "header_sha256": "bab2cf2066fc50e583d4490c109a79496ef0f19a430b28cbb850e2b2a74b647d",
+      "defines": [
+        "sketch_bloom_init",
+        "sketch_count_min_init",
+        "sketch_fnv1a",
+        "sketch_hll_add_hash",
+        "sketch_hll_init",
+        "sketch_lsh_band_hash",
+        "sketch_minhash_init"
+      ],
+      "resolves": [
+        "sketch_bloom_init",
+        "sketch_count_min_init",
+        "sketch_fnv1a",
+        "sketch_hll_add_hash",
+        "sketch_hll_init",
+        "sketch_lsh_band_hash",
+        "sketch_minhash_init"
+      ],
+      "allowed_includes": [
+        "sketch.h",
+        "string.h"
+      ],
+      "allowed_header_includes": [
+        "stddef.h",
+        "stdint.h"
+      ],
+      "allowed_undefined": [
+        "memset"
+      ],
+      "base_references": {
+        "sketch_bloom_init": [
+          "src/modules/db2/c/sketch.c"
+        ],
+        "sketch_count_min_init": [
+          "src/modules/db2/c/sketch.c"
+        ],
+        "sketch_fnv1a": [
+          "src/modules/db2/c/kb_payload.c"
+        ],
+        "sketch_hll_add_hash": [
+          "src/modules/db2/c/kb_payload.c"
+        ],
+        "sketch_hll_init": [
+          "src/modules/db2/c/kb_payload.c",
+          "src/modules/db2/c/sketch.c"
+        ],
+        "sketch_lsh_band_hash": [
+          "src/modules/db2/c/sketch.c"
+        ],
+        "sketch_minhash_init": [
+          "src/modules/db2/c/sketch.c"
+        ]
+      },
+      "provenance": "Definitions promoted from src/sketch.c and calls audited in src/modules/db2/c/sketch.c and src/modules/db2/c/kb_payload.c.",
+      "evidence": "Seven deterministic, database-free sketch primitives with one allowed libc dependency (memset); no DB2, event-bus, provider, I/O, or heap dependency."
+    }
   ],
   "unresolved": [
     {
@@ -2854,63 +2921,6 @@
       "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
     },
     {
-      "symbol": "sketch_bloom_init",
-      "references": [
-        "src/modules/db2/c/sketch.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "sketch_count_min_init",
-      "references": [
-        "src/modules/db2/c/sketch.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "sketch_fnv1a",
-      "references": [
-        "src/modules/db2/c/kb_payload.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "sketch_hll_add_hash",
-      "references": [
-        "src/modules/db2/c/kb_payload.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "sketch_hll_init",
-      "references": [
-        "src/modules/db2/c/kb_payload.c",
-        "src/modules/db2/c/sketch.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "sketch_lsh_band_hash",
-      "references": [
-        "src/modules/db2/c/sketch.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "sketch_minhash_init",
-      "references": [
-        "src/modules/db2/c/sketch.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
       "symbol": "sleep",
       "references": [
         "src/modules/db2/c/db2_pool.c"
@@ -3783,15 +3793,16 @@
   ],
   "summary": {
     "translation_units": 141,
-    "unresolved_symbols": 355,
+    "descriptor_support_units": 1,
+    "unresolved_symbols": 348,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 25,
       "injected-module-contract": 150,
-      "portable-core-promotion": 36,
+      "portable-core-promotion": 29,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 144
     }
   },
-  "fingerprint": "c7a14b0dbfbf6daadce77a14cea0df0052716f66239e6161fb0de8112671ac77"
+  "fingerprint": "d92a1385034247a19ff75052595ce82a8b42baf44f02016839a9ce85b5849563"
 }

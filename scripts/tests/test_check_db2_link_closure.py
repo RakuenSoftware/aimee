@@ -24,6 +24,8 @@ SPEC.loader.exec_module(checker)
 
 class LinkClosureTest(unittest.TestCase):
     def setUp(self) -> None:
+        self.production_support = checker.SUPPORT_UNITS
+        checker.SUPPORT_UNITS = []
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         (self.root / "src/modules/db2/c").mkdir(parents=True)
@@ -35,12 +37,13 @@ class LinkClosureTest(unittest.TestCase):
         self._write_all()
 
     def tearDown(self) -> None:
+        checker.SUPPORT_UNITS = self.production_support
         self.temp.cleanup()
 
     def _contract(self) -> dict[str, object]:
         sources = ["src/modules/db2/c/a.c"]
         result: dict[str, object] = {
-            "schema_version": 1,
+            "schema_version": checker.SCHEMA_VERSION,
             "module": "db2",
             "source_revision": "a" * 40,
             "source_fingerprint": checker.source_fingerprint(self.root, sources),
@@ -50,8 +53,11 @@ class LinkClosureTest(unittest.TestCase):
                 "link_mode": "relocatable-no-libraries",
                 "helper_objects": [],
                 "libraries": [],
+                "support_compile_flags": checker.SUPPORT_COMPILE_FLAGS,
+                "support_include_roots": checker.SUPPORT_INCLUDE_ROOTS,
             },
             "translation_units": sources,
+            "descriptor_support_units": [],
             "unresolved": [{
                 "symbol": "outside",
                 "references": sources,
@@ -60,6 +66,7 @@ class LinkClosureTest(unittest.TestCase):
             }],
             "summary": {
                 "translation_units": 1,
+                "descriptor_support_units": 0,
                 "unresolved_symbols": 1,
                 "dispositions": {
                     name: int(name == "portable-core-promotion")
@@ -77,7 +84,7 @@ class LinkClosureTest(unittest.TestCase):
         value["fingerprint"] = hashlib.sha256(encoded).hexdigest()
 
     def _write_all(self) -> None:
-        descriptor = {"contracts": [checker.CONTRACT.as_posix()]}
+        descriptor = {"contracts": [checker.CONTRACT.as_posix()], "sources": []}
         (self.root / checker.DESCRIPTOR).write_text(json.dumps(descriptor), encoding="utf-8")
         (self.root / checker.CONTRACT).write_text(json.dumps(self.contract), encoding="utf-8")
 
@@ -92,10 +99,54 @@ class LinkClosureTest(unittest.TestCase):
             counts[row["disposition"]] += 1
         value["summary"] = {
             "translation_units": len(value["translation_units"]),  # type: ignore[arg-type]
+            "descriptor_support_units": len(value["descriptor_support_units"]),  # type: ignore[arg-type]
             "unresolved_symbols": len(rows),  # type: ignore[arg-type]
             "dispositions": counts,
         }
         self._fingerprint(value)
+
+    def _support_row(self) -> dict[str, object]:
+        support = self.root / "src/modules/db2/support"
+        support.mkdir(parents=True, exist_ok=True)
+        (support / "fixture.c").write_text(
+            '#include "sketch.h"\nint outside(void) { return 7; }\n', encoding="utf-8"
+        )
+        (support / "sketch.h").write_text(
+            "#include <stddef.h>\n#include <stdint.h>\n", encoding="utf-8"
+        )
+        return {
+            "path": "src/modules/db2/support/fixture.c",
+            "header": "src/modules/db2/support/sketch.h",
+            "source_sha256": hashlib.sha256(
+                (support / "fixture.c").read_bytes()
+            ).hexdigest(),
+            "header_sha256": hashlib.sha256(
+                (support / "sketch.h").read_bytes()
+            ).hexdigest(),
+            "defines": ["outside"],
+            "resolves": ["outside"],
+            "allowed_includes": ["sketch.h"],
+            "allowed_header_includes": ["stddef.h", "stdint.h"],
+            "allowed_undefined": ["memset"],
+            "base_references": {"outside": ["src/modules/db2/c/a.c"]},
+            "provenance": "Fixture definition and DB2 call site are pinned exactly.",
+            "evidence": "Deterministic fixture support with no private dependency.",
+        }
+
+    def _support_comparison(self) -> tuple[dict[str, object], dict[str, object]]:
+        previous = copy.deepcopy(self.contract)
+        previous["unresolved"].append({  # type: ignore[union-attr]
+            "symbol": "z_remaining",
+            "references": ["src/modules/db2/c/a.c"],
+            "disposition": "system-link",
+            "evidence": "A fixture system dependency that remains unresolved.",
+        })
+        self._refresh_summary(previous)
+        current = copy.deepcopy(previous)
+        current["descriptor_support_units"] = [self._support_row()]
+        current["unresolved"] = [current["unresolved"][1]]  # type: ignore[index]
+        self._refresh_summary(current)
+        return previous, current
 
     def test_valid_metadata(self) -> None:
         checker.check(self.root, run_probe=False)
@@ -212,6 +263,15 @@ class LinkClosureTest(unittest.TestCase):
         with self.assertRaisesRegex(checker.ClosureError, "previous-source-growth"):
             checker.compare_contracts(self.root, previous, current)
 
+    def test_previous_contract_rejects_removed_translation_unit(self) -> None:
+        previous = copy.deepcopy(self.contract)
+        previous["translation_units"] = [
+            "src/modules/db2/c/a.c", "src/modules/db2/c/b.c",
+        ]
+        self._refresh_summary(previous)
+        with self.assertRaisesRegex(checker.ClosureError, "previous-source-removal"):
+            checker.compare_contracts(self.root, previous, self.contract)
+
     def test_previous_contract_allows_reviewed_symbol_removal(self) -> None:
         previous = copy.deepcopy(self.contract)
         previous["unresolved"].append({  # type: ignore[union-attr]
@@ -238,6 +298,204 @@ class LinkClosureTest(unittest.TestCase):
         self._refresh_summary(current)
         with self.assertRaisesRegex(checker.ClosureError, "previous-reference-growth"):
             checker.compare_contracts(self.root, previous, current)
+
+    def test_previous_contract_allows_exact_support_shrink(self) -> None:
+        previous, current = self._support_comparison()
+        checker.compare_contracts(self.root, previous, current)
+
+    def test_support_admission_requires_portable_base_disposition(self) -> None:
+        previous, current = self._support_comparison()
+        previous["unresolved"][0]["disposition"] = "injected-module-contract"  # type: ignore[index]
+        self._refresh_summary(previous)
+        with self.assertRaisesRegex(checker.ClosureError, "previous-support-admission"):
+            checker.compare_contracts(self.root, previous, current)
+
+    def test_support_admission_requires_declared_resolution(self) -> None:
+        previous, current = self._support_comparison()
+        current["unresolved"].insert(0, previous["unresolved"][0])  # type: ignore[union-attr,index]
+        self._refresh_summary(current)
+        with self.assertRaisesRegex(checker.ClosureError, "previous-support-resolution"):
+            checker.compare_contracts(self.root, previous, current)
+
+    def test_support_admission_rejects_non_system_reference_growth(self) -> None:
+        previous, current = self._support_comparison()
+        current["unresolved"][0]["references"].append(  # type: ignore[index,union-attr]
+            "src/modules/db2/support/fixture.c"
+        )
+        self._refresh_summary(current)
+        with self.assertRaisesRegex(checker.ClosureError, "previous-reference-growth"):
+            checker.compare_contracts(self.root, previous, current)
+
+    def test_reviewed_support_policy_cannot_be_relabelled(self) -> None:
+        _, previous = self._support_comparison()
+        current = copy.deepcopy(previous)
+        current["descriptor_support_units"][0]["evidence"] += " Changed."  # type: ignore[index]
+        self._refresh_summary(current)
+        with self.assertRaisesRegex(checker.ClosureError, "previous-support-change"):
+            checker.compare_contracts(self.root, previous, current)
+
+    def test_support_path_escape_fails(self) -> None:
+        unit = self._support_row()
+        unit["path"] = "../fixture.c"
+        with self.assertRaisesRegex(checker.ClosureError, "source-path"):
+            checker._validate_support_units(
+                self.root, [unit], ["src/modules/db2/c/a.c"], check_files=True
+            )
+
+    def test_support_descriptor_omission_fails(self) -> None:
+        descriptor = json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))
+        descriptor["sources"].remove("src/modules/db2/support/sketch_primitives.c")
+        with mock.patch.object(checker, "SUPPORT_UNITS", self.production_support):
+            with self.assertRaisesRegex(checker.ClosureError, "support-descriptor"):
+                checker.descriptor_support_policy(REPO, descriptor)
+
+    def test_support_header_descriptor_omission_fails(self) -> None:
+        descriptor = json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))
+        descriptor["private_headers"].remove("src/modules/db2/support/sketch.h")
+        with mock.patch.object(checker, "SUPPORT_UNITS", self.production_support):
+            with self.assertRaisesRegex(checker.ClosureError, "support-descriptor"):
+                checker.descriptor_support_policy(REPO, descriptor)
+
+    def test_support_forbidden_include_fails(self) -> None:
+        unit = self._support_row()
+        path = self.root / str(unit["path"])
+        path.write_text('#include <stdio.h>\n#include "sketch.h"\n', encoding="utf-8")
+        unit["source_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        descriptor = {
+            "sources": [unit["path"]],
+            "private_headers": [unit["header"]],
+            "c_build": {"include_roots": checker.SUPPORT_INCLUDE_ROOTS},
+        }
+        with mock.patch.object(checker, "SUPPORT_UNITS", [unit]):
+            with self.assertRaisesRegex(checker.ClosureError, "support-include"):
+                checker.descriptor_support_policy(self.root, descriptor)
+
+    def test_support_include_policy_must_be_canonical(self) -> None:
+        unit = self._support_row()
+        unit["allowed_includes"] = ["sketch.h", "sketch.h"]
+        with self.assertRaisesRegex(checker.ClosureError, "contract-order"):
+            checker._validate_support_units(
+                self.root, [unit], ["src/modules/db2/c/a.c"], check_files=True
+            )
+
+    def test_reviewed_support_source_hash_is_required(self) -> None:
+        unit = self._support_row()
+        path = self.root / str(unit["path"])
+        path.write_text("int outside(void) { return 8; }\n", encoding="utf-8")
+        descriptor = {
+            "sources": [unit["path"]],
+            "private_headers": [unit["header"]],
+            "c_build": {"include_roots": checker.SUPPORT_INCLUDE_ROOTS},
+        }
+        with mock.patch.object(checker, "SUPPORT_UNITS", [unit]):
+            with self.assertRaisesRegex(checker.ClosureError, "support-source-hash"):
+                checker.descriptor_support_policy(self.root, descriptor)
+
+    def test_reviewed_support_header_hash_is_required(self) -> None:
+        unit = self._support_row()
+        path = self.root / str(unit["header"])
+        path.write_text("#include <stdint.h>\n", encoding="utf-8")
+        descriptor = {
+            "sources": [unit["path"]],
+            "private_headers": [unit["header"]],
+            "c_build": {"include_roots": checker.SUPPORT_INCLUDE_ROOTS},
+        }
+        with mock.patch.object(checker, "SUPPORT_UNITS", [unit]):
+            with self.assertRaisesRegex(checker.ClosureError, "support-header-hash"):
+                checker.descriptor_support_policy(self.root, descriptor)
+
+    def test_support_forbidden_header_include_fails(self) -> None:
+        unit = self._support_row()
+        path = self.root / str(unit["header"])
+        path.write_text(
+            "#include <stddef.h>\n#include <stdint.h>\n#include <stdio.h>\n",
+            encoding="utf-8",
+        )
+        unit["header_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        descriptor = {
+            "sources": [unit["path"]],
+            "private_headers": [unit["header"]],
+            "c_build": {"include_roots": checker.SUPPORT_INCLUDE_ROOTS},
+        }
+        with mock.patch.object(checker, "SUPPORT_UNITS", [unit]):
+            with self.assertRaisesRegex(checker.ClosureError, "support-header-include"):
+                checker.descriptor_support_policy(self.root, descriptor)
+
+    def test_undeclared_support_source_fails(self) -> None:
+        unit = self._support_row()
+        (self.root / "src/modules/db2/support/other.c").write_text(
+            "int other(void) { return 1; }\n", encoding="utf-8"
+        )
+        descriptor = {
+            "sources": [unit["path"]],
+            "private_headers": [unit["header"]],
+            "c_build": {"include_roots": checker.SUPPORT_INCLUDE_ROOTS},
+        }
+        with mock.patch.object(checker, "SUPPORT_UNITS", [unit]):
+            with self.assertRaisesRegex(checker.ClosureError, "support-source-closure"):
+                checker.descriptor_support_policy(self.root, descriptor)
+
+    def test_undeclared_support_header_fails(self) -> None:
+        unit = self._support_row()
+        (self.root / "src/modules/db2/support/other.h").write_text(
+            "#pragma once\n", encoding="utf-8"
+        )
+        descriptor = {
+            "sources": [unit["path"]],
+            "private_headers": [unit["header"]],
+            "c_build": {"include_roots": checker.SUPPORT_INCLUDE_ROOTS},
+        }
+        with mock.patch.object(checker, "SUPPORT_UNITS", [unit]):
+            with self.assertRaisesRegex(checker.ClosureError, "support-header-closure"):
+                checker.descriptor_support_policy(self.root, descriptor)
+
+    def test_support_build_include_root_is_required(self) -> None:
+        unit = self._support_row()
+        descriptor = {
+            "sources": [unit["path"]],
+            "private_headers": [unit["header"]],
+            "c_build": {"include_roots": []},
+        }
+        with mock.patch.object(checker, "SUPPORT_UNITS", [unit]):
+            with self.assertRaisesRegex(checker.ClosureError, "support-build"):
+                checker.descriptor_support_policy(self.root, descriptor)
+
+    def _probe_support(self, source_text: str, defines: list[str]) -> None:
+        support = self.root / "src/modules/db2/support"
+        support.mkdir(parents=True, exist_ok=True)
+        (support / "fixture.c").write_text(source_text, encoding="utf-8")
+        (self.root / "src/Makefile").write_text(
+            "$(OBJDIR)/db2/%.o: modules/db2/c/%.c\n"
+            "\t@mkdir -p $(dir $@)\n"
+            "\t$(CC) -c $(EXTRA_C_FLAGS) -o $@ $<\n",
+            encoding="utf-8",
+        )
+        unit = {
+            "path": "src/modules/db2/support/fixture.c",
+            "defines": defines,
+            "allowed_undefined": ["memset"],
+        }
+        checker.probe(self.root, checker.discover_sources(self.root), [unit])
+
+    def test_support_extra_export_fails(self) -> None:
+        with self.assertRaisesRegex(checker.ClosureError, "support-exports"):
+            self._probe_support(
+                "int wanted(void) { return 1; } int extra(void) { return 2; }\n",
+                ["wanted"],
+            )
+
+    def test_support_new_undefined_symbol_fails(self) -> None:
+        with self.assertRaisesRegex(checker.ClosureError, "support-undefined"):
+            self._probe_support(
+                "extern int forbidden(void); int wanted(void) { return forbidden(); }\n",
+                ["wanted"],
+            )
+
+    def test_support_weak_export_fails(self) -> None:
+        with self.assertRaisesRegex(checker.ClosureError, "support-weak"):
+            self._probe_support(
+                "__attribute__((weak)) int wanted(void) { return 1; }\n", ["wanted"]
+            )
 
     def test_previous_ref_rejects_option_injection(self) -> None:
         with self.assertRaisesRegex(checker.ClosureError, "previous-ref"):
@@ -299,8 +557,9 @@ class LinkClosureTest(unittest.TestCase):
         ], check=True)
         subprocess.run([str(output)], check=True)
 
-    def test_real_repository_contract_metadata(self) -> None:
-        checker.check(REPO, run_probe=False)
+    def test_real_repository_contract_and_probe(self) -> None:
+        with mock.patch.object(checker, "SUPPORT_UNITS", self.production_support):
+            checker.check(REPO, run_probe=True)
 
 
 if __name__ == "__main__":

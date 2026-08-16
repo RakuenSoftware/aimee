@@ -394,6 +394,15 @@ baseline update. This is a migration ledger, not standalone-readiness evidence: 
 the complete source set links through declared system dependencies and bounded injected contracts
 without the monolithic core.
 
+Closure support lands outside the frozen legacy `c/` tree and is admitted by exact executable
+policy, not an author-assigned label. The first unit promotes seven deterministic sketch primitives:
+its global definitions must exactly match the seven reviewed `portable-core-promotion` rows, its
+base call sites are frozen, its only allowed headers are `sketch.h` and `string.h`, and its only
+possible unresolved ABI import is `memset`. It must strictly shrink the aggregate closure without a
+new symbol or non-system reference edge, and fixed-vector plus sanitizer parity runs against the
+pre-activation monolith. This pattern permits bounded process-owned portability code without
+reopening the legacy DB2 feature surface.
+
 ### 4.3 Supervision and atomic activation
 
 Development may land the exporter, catalog, module binary, and adapters in reviewable commits, but
