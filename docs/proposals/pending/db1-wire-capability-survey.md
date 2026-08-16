@@ -103,7 +103,11 @@ shape of the generated wire rather than to a number in it.**
 
 ## Recommended order
 
-1. **Field sizing first.** It blocks 33 already-reachable operations and is the
+1. ~~**Field sizing first.**~~ Done: requests are no longer capped. The frame is
+   sized from the arguments and the decoder allocates from the frame, so a
+   prompt or a document crosses whole, as it always has in-process.
+   `AIMEE_DB1_VALUE_MAX` now bounds only the reply a stage builds.
+1. **Superseded — kept for the reasoning.** It blocks 33 already-reachable operations and is the
    only gap whose failure mode is invisible until production. It is also the one
    that changes the generated code's shape, so doing it before more families
    migrate means fewer files regenerate later.
