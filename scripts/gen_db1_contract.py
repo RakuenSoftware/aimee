@@ -31,6 +31,10 @@ ROOT = Path(__file__).resolve().parent.parent
 CATALOG = Path("src/modules/db1/eventcontract/operations.json")
 HEADER = Path("src/modules/db1/db1_module_api.h")
 PROCESS_CONTRACTS = Path("src/modules/process-contracts.json")
+MAKEFILE = Path("src/Makefile")
+SOURCE_DIR = Path("src/modules/db1")
+# Served by the module process alone; the daemon never links it.
+MODULE_ONLY_SOURCES = frozenset({"module_adapter.c"})
 
 # DB1's principal ref. Event kinds are carved 4096 + ref*256 + stage, and a
 # family's id IS its future stage id, so the arithmetic is fixed here too.
@@ -102,8 +106,8 @@ def validate_families(raw: object) -> dict[str, dict[str, object]]:
         fail("families", "families must be a nonempty array")
     families: dict[str, dict[str, object]] = {}
     for index, entry in enumerate(raw, start=1):
-        family = keys(entry, {"id", "name", "event_kind", "active", "covers"},
-                      f"families[{index-1}]")
+        family = keys(entry, {"id", "name", "event_kind", "active", "covers",
+                              "retired_sources"}, f"families[{index-1}]")
         # Dense from one, because a family id is its future stage id and stage
         # IDs must be dense from one in the process contract.
         if integer(family["id"], f"families[{index-1}].id", 1, 255) != index:
@@ -120,8 +124,21 @@ def validate_families(raw: object) -> dict[str, dict[str, object]]:
         if type(family["active"]) is not bool:
             fail("family-active-type", f"{name}.active must be boolean")
         # A reservation states what it will cover, so the remaining migration is
-        # countable from the catalog instead of rediscovered each time.
+        # countable from the catalog instead of rediscovered each time. This is
+        # a PLAN, in file names, and it is deliberately not machine-checked: a
+        # source can hold more than one domain, so "covers" over-states what a
+        # family has actually taken. retired_sources is the checked half.
         text(family["covers"], f"{name}.covers", 512)
+        retired = family["retired_sources"]
+        if not isinstance(retired, list) or retired != sorted(set(retired)):
+            fail("retired-sources", f"{name}.retired_sources must be sorted and unique")
+        for entry_name in retired:
+            if not isinstance(entry_name, str) or not entry_name.endswith(".c") or \
+                    "/" in entry_name or not NAME.fullmatch(entry_name[:-2]):
+                fail("retired-source-name", f"{name} names invalid source {entry_name!r}")
+        if retired and not family["active"]:
+            fail("retired-reserved",
+                 f"reserved family {name!r} claims retired sources, but nothing serves it")
         families[name] = family
     if not any(family["active"] for family in families.values()):
         fail("family-active", "at least one family must be active")
@@ -243,6 +260,52 @@ def validate_catalog(value: object) -> dict[str, object]:
     return catalog
 
 
+def validate_retired_sources(root: Path, catalog: dict[str, object]) -> None:
+    """A source the daemon stopped linking must be claimed by an active family.
+
+    "covers" is a plan and can over-state: a DB1 source often holds more than one
+    domain, and family 1 took the economizer's reducer state out of checkpoints.c
+    while the rest of that file still serves callers in-process. So the claim
+    that is actually enforced is the narrow one -- this source is no longer
+    linked into the daemon, because its callers reach it over the bus.
+
+    Checked in both directions on purpose. A family cannot claim a source the
+    daemon still links, and a source cannot quietly leave the daemon's link
+    without a family owning it. Without the second half, a migration could drop
+    a domain out of the binary and leave nothing saying where it went.
+    """
+    try:
+        makefile = (root / MAKEFILE).read_text(encoding="utf-8")
+    except OSError as exc:
+        fail("unreadable", f"cannot read {MAKEFILE}: {exc}")
+    try:
+        on_disk = {path.name for path in (root / SOURCE_DIR).glob("*.c")}
+    except OSError as exc:
+        fail("unreadable", f"cannot list {SOURCE_DIR}: {exc}")
+
+    linked = {name for name in on_disk if f"modules/db1/{name}" in makefile}
+    families = catalog["families"]
+    assert isinstance(families, dict)
+
+    claimed: dict[str, str] = {}
+    for name, family in families.items():
+        for source in family["retired_sources"]:
+            if source not in on_disk:
+                fail("retired-missing", f"{name} retires {source!r}, which is not in {SOURCE_DIR}")
+            if source in linked:
+                fail("retired-still-linked",
+                     f"{name} retires {source!r}, but {MAKEFILE} still links it")
+            if source in claimed:
+                fail("retired-duplicate",
+                     f"{source!r} is retired by both {claimed[source]!r} and {name!r}")
+            claimed[source] = name
+
+    unlinked = on_disk - linked - set(MODULE_ONLY_SOURCES)
+    for source in sorted(unlinked - set(claimed)):
+        fail("retired-unclaimed",
+             f"{source!r} is no longer linked into the daemon but no family retires it")
+
+
 def header_constants(root: Path) -> dict[str, int]:
     try:
         text_value = (root / HEADER).read_text(encoding="utf-8")
@@ -329,12 +392,14 @@ def run(root: Path) -> None:
     catalog = validate_catalog(load_json(root / CATALOG))
     validate_header(root, catalog)
     validate_process_contract(root, catalog)
+    validate_retired_sources(root, catalog)
     families = catalog["families"]
     operations = catalog["operations"]
     assert isinstance(families, dict) and isinstance(operations, list)
     active = sum(1 for family in families.values() if family["active"])
+    retired = sum(len(family["retired_sources"]) for family in families.values())
     print(f"gen_db1_contract: ok ({len(families)} famil(ies), {active} active, "
-          f"{len(operations)} operation(s))")
+          f"{len(operations)} operation(s), {retired} source(s) off the daemon)")
 
 
 def main(argv: list[str] | None = None) -> int:

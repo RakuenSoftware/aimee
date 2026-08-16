@@ -46,6 +46,15 @@ family owns one event kind and its operations dispatch on an op id inside the
 payload, so DB1 needs one stage per domain rather than one per call -- roughly
 sixty domains against a ceiling of 255.
 
+Each family also records which DB1 sources the daemon has stopped linking, and
+that half IS machine-checked. The plan and the proof are separate on purpose: a
+DB1 source usually holds more than one domain, so "covers" over-states -- family
+1 took the economizer's reducer state out of `checkpoints.c` while the rest of
+that file still serves callers in-process. The narrow claim, "this source is no
+longer in the daemon", is exact, and it is checked in both directions: a family
+cannot claim a source the build still links, and a source cannot leave the
+daemon's link without a family owning it.
+
 Reserving the kinds up front is what keeps the numbering stable: a family
 activated later answers the kind it was always going to answer, so a migration
 that has already shipped cannot be renumbered by one that follows. Each
