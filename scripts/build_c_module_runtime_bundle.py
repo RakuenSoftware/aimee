@@ -202,16 +202,17 @@ def compiler_command(module: dict[str, object], root: Path, bundle: Path, output
         IMPORTED_TARGET_FLAGS.get(library, f"-l{library}") for library in libraries
     ]
     binary = output / module["binary"]
-    # The dialect tracks the tree's own (CMakeLists.txt: _GNU_SOURCE, and
-    # -Wno-format-truncation): a bundle that compiles the same sources under
-    # different flags does not prove those sources build. _GNU_SOURCE is defined
-    # empty because the event-bus sources define it that way themselves, and an
-    # implicit =1 would be a -Werror redefinition.
+    # The dialect tracks the tree that owns these sources: src/Makefile:107 and
+    # CMakeLists.txt:12,156-158 already build them with _GNU_SOURCE, section
+    # splitting, and -Wno-format-truncation. A bundle that compiles the same
+    # sources under different flags does not prove those sources build.
+    # _GNU_SOURCE is defined empty because the event-bus sources define it that
+    # way themselves, and an implicit =1 would be a -Werror redefinition.
     #
-    # --gc-sections is load-bearing, not an optimization. A module process serves
-    # a few stages, not its module's whole surface; without per-function sections
-    # db1 has to satisfy every symbol its 62 sources mention, which drags in
-    # another module's config.c and the yaml parser behind it.
+    # --gc-sections is load-bearing here, not an optimization. A module process
+    # serves a few stages, not its module's whole surface; without per-function
+    # sections db1 has to satisfy every symbol its 62 sources mention, which
+    # drags in another module's config.c and the yaml parser behind it.
     return [
         cc, "-std=c11", "-D_GNU_SOURCE=", "-O2", "-Wall", "-Wextra", "-Werror",
         "-Wno-format-truncation", "-ffunction-sections", "-fdata-sections",
