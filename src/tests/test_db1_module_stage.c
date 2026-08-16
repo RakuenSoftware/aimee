@@ -18,6 +18,7 @@
 #include "db1.h"
 #include "git_ownership.h"
 #include "platform_test_util.h"
+#include "wm.h"
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
                                            const uint8_t *request_body, uint32_t request_len,
@@ -406,6 +407,167 @@ static void test_stage_carries_a_large_field(void)
    printf("  PASS: test_stage_carries_a_large_field\n");
 }
 
+/* Read one counted value out of a reply, by index. */
+static const char *reply_value(const uint8_t *resp, uint32_t resp_len, uint32_t index,
+                               uint32_t *len_out)
+{
+   uint32_t at = 8u;
+   for (uint32_t i = 0; i < aimee_db1_get_u32(resp + 4u); ++i)
+   {
+      assert(at + 4u <= resp_len);
+      uint32_t n = aimee_db1_get_u32(resp + at);
+      at += 4u;
+      assert(at + n <= resp_len);
+      if (i == index)
+      {
+         *len_out = n;
+         return (const char *)resp + at;
+      }
+      at += n;
+   }
+   assert(0 && "reply has no such value");
+   return NULL;
+}
+
+/* A list crosses as its rows flattened member by member, and the reply's own
+   value count is what tells the caller how many rows arrived -- an operation
+   knows how wide its rows are, so the width is never sent. */
+static void test_wm_list_returns_every_member_of_every_row(void)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-test-db1-wmlist-%d.db", platform_tmpdir(), (int)getpid());
+   remove(path);
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   assert(db1_wm_set("sess-1", "alpha", "first", "notes", 0) == 0);
+   assert(db1_wm_set("sess-1", "beta", "second", "notes", 0) == 0);
+   /* Another session's entry must not appear in this session's list. */
+   assert(db1_wm_set("sess-2", "gamma", "third", "notes", 0) == 0);
+
+   uint8_t req[1024], resp[8192];
+   uint32_t resp_len = 0;
+   const char *list[] = {"sess-1", "", "16"};
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_WM_LIST, list, 3);
+   assert(call_stage(AIMEE_DB1_STAGE_CONVERSATION, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+   /* Two rows of eight members: the count is rows times width, not a row
+      count, because the width is the operation's own contract. */
+   assert(aimee_db1_get_u32(resp + 4u) == 16u);
+
+   /* The key member of each row, at member offset 2 of 8. */
+   uint32_t n = 0;
+   const char *first = reply_value(resp, resp_len, 2u, &n);
+   assert(n == strlen("alpha") && memcmp(first, "alpha", n) == 0);
+   const char *second = reply_value(resp, resp_len, 8u + 2u, &n);
+   assert(n == strlen("beta") && memcmp(second, "beta", n) == 0);
+   /* The int64 id member travels as decimal text like every other integer. */
+   const char *id = reply_value(resp, resp_len, 0u, &n);
+   assert(n > 0 && id[0] >= '0' && id[0] <= '9');
+
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_wm_list_returns_every_member_of_every_row\n");
+}
+
+/* An empty list is an answer, not an absence. The stage must not borrow the
+   read convention here: a read with nothing to say returns one empty value and
+   MISSING, and a list saying "there are none" would then be indistinguishable
+   from a row whose every member is blank. */
+static void test_wm_list_finds_nothing_and_says_so(void)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-test-db1-wmnone-%d.db", platform_tmpdir(), (int)getpid());
+   remove(path);
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   uint8_t req[1024], resp[8192];
+   uint32_t resp_len = 0;
+   const char *list[] = {"sess-empty", "", "16"};
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_WM_LIST, list, 3);
+   assert(call_stage(AIMEE_DB1_STAGE_CONVERSATION, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+   assert(aimee_db1_get_u32(resp + 4u) == 0u);
+
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_wm_list_finds_nothing_and_says_so\n");
+}
+
+/* The bound is an allocation. A stage that took the caller's word for it would
+   size an array from the wire, so it is checked against the ceiling the catalog
+   declares before anything is allocated from it. */
+static void test_wm_list_refuses_a_bound_it_will_not_allocate(void)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-test-db1-wmcap-%d.db", platform_tmpdir(), (int)getpid());
+   remove(path);
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   uint8_t req[1024], resp[8192];
+   uint32_t resp_len = 0;
+   const char *too_many[] = {"sess-1", "", "65"};
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_WM_LIST, too_many, 3);
+   assert(call_stage(AIMEE_DB1_STAGE_CONVERSATION, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   const char *none[] = {"sess-1", "", "0"};
+   len = fields_frame(req, AIMEE_DB1_OP_WM_LIST, none, 3);
+   assert(call_stage(AIMEE_DB1_STAGE_CONVERSATION, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   const char *negative[] = {"sess-1", "", "-4"};
+   len = fields_frame(req, AIMEE_DB1_OP_WM_LIST, negative, 3);
+   assert(call_stage(AIMEE_DB1_STAGE_CONVERSATION, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   /* Not a number at all is refused by the same parse every integer uses. */
+   const char *nonsense[] = {"sess-1", "", "sixteen"};
+   len = fields_frame(req, AIMEE_DB1_OP_WM_LIST, nonsense, 3);
+   assert(call_stage(AIMEE_DB1_STAGE_CONVERSATION, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_wm_list_refuses_a_bound_it_will_not_allocate\n");
+}
+
+/* A bound smaller than what is stored is honoured: the caller's array is the
+   limit, and returning more rows than it asked for would write past its end. */
+static void test_wm_list_stops_at_the_bound_it_was_given(void)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-test-db1-wmbound-%d.db", platform_tmpdir(),
+            (int)getpid());
+   remove(path);
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   for (int i = 0; i < 5; ++i)
+   {
+      char key[32];
+      snprintf(key, sizeof key, "key-%d", i);
+      assert(db1_wm_set("sess-1", key, "value", "notes", 0) == 0);
+   }
+
+   uint8_t req[1024], resp[8192];
+   uint32_t resp_len = 0;
+   const char *list[] = {"sess-1", "", "2"};
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_WM_LIST, list, 3);
+   assert(call_stage(AIMEE_DB1_STAGE_CONVERSATION, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+   assert(aimee_db1_get_u32(resp + 4u) == 16u); /* two rows, not five */
+
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_wm_list_stops_at_the_bound_it_was_given\n");
+}
+
 int main(void)
 {
    printf("db1_module_stage:\n");
@@ -417,6 +579,10 @@ int main(void)
    test_git_ownership_malformed_frames_are_refused();
    test_git_ownership_store_failure_is_not_a_miss();
    test_stage_carries_a_large_field();
+   test_wm_list_returns_every_member_of_every_row();
+   test_wm_list_finds_nothing_and_says_so();
+   test_wm_list_refuses_a_bound_it_will_not_allocate();
+   test_wm_list_stops_at_the_bound_it_was_given();
    printf("db1_module_stage: ok\n");
    return 0;
 }

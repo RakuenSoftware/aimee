@@ -134,6 +134,9 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
    case AIMEE_DB1_STAGE_GIT_OWNERSHIP:
       return aimee_db1_stage_git_ownership(request_body, request_len, response_body,
                                            response_capacity, response_len);
+   case AIMEE_DB1_STAGE_CONVERSATION:
+      return aimee_db1_stage_conversation(request_body, request_len, response_body,
+                                          response_capacity, response_len);
    default:
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    }

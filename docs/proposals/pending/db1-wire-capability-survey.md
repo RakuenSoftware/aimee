@@ -223,6 +223,14 @@ per-operation status contract (6) and json (3).
 to 39 — 146 more operations — where alloc and json add one source each and
 status adds three. That is the whole argument for doing it next.
 
+Rows then shipped, and the measurement above held: **260 of 284 operations fit
+the wire and 35 of 49 sources are ready**, with `agent_work` and `delegation`
+complete. What is left is small and independent — `alloc` (10 operations),
+`status` (6), `column` (5) and `json` (3). None of them unlocks more than four
+sources, and all four together unlock fourteen.
+
+The migration is no longer waiting on the wire. It is waiting on cutovers.
+
 ## How to reproduce
 
 `scripts/survey_db1_wire.py` produces every number above. It is a measurement,

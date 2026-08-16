@@ -17,6 +17,7 @@
  * catalog permanently one reformat apart. */
 /* clang-format off */
 #include "payload_rewrite_state.h"
+#include "wm.h"
 
 #include "db1_module_api.h"
 
@@ -96,10 +97,17 @@ static void encode(uint8_t *out, uint32_t op, const char *const *fields, uint32_
 /* Returns the module's status, or -1 when the call never produced one. */
 /* Fills up to `slots` reply values, each into the buffer and capacity the
    caller supplied. A write passes none; a read passes one; a row passes one per
-   member. */
+   member; a list passes one per member per row it is willing to accept.
+
+   `filled_out` reports how many values the reply actually carried, which is how
+   a list learns its length: the rows are not counted separately on the wire
+   because an operation already knows how wide its rows are. Callers that expect
+   a fixed shape pass NULL. */
 static int call_stage(uint32_t op, const char *const *fields, uint32_t count, char *const *values,
-                      const size_t *caps, uint32_t slots)
+                      const size_t *caps, uint32_t slots, uint32_t *filled_out)
 {
+   if (filled_out)
+      *filled_out = 0u;
    for (uint32_t i = 0; i < slots; ++i)
       if (values[i] && caps[i])
          values[i][0] = '\0';
@@ -148,6 +156,13 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
          no values is how a write answers, one value is a read, and a member
          apiece is a row. */
       result = (int)status;
+      /* More values than the caller has room for is a contract mismatch, not
+         something to read the first few of: the caller asked for at most this
+         many rows, and a stage answering with more is not answering this call. */
+      if (fields_in > slots)
+         result = -1;
+      else if (filled_out)
+         *filled_out = fields_in;
       uint32_t at = 8u;
       for (uint32_t i = 0; i < fields_in && result != -1; ++i)
       {
@@ -205,7 +220,7 @@ int db1_payload_rewrite_state_get(const char *session_id, payload_rewrite_state_
    char *const values[] = {out->session_id, slot1, slot2, out->last_prefix_hash, slot4, out->last_rewrite_at, slot6, slot7, slot8, out->rewrite_reason, out->updated_at};
    const size_t caps[] = {sizeof out->session_id, sizeof slot1, sizeof slot2, sizeof out->last_prefix_hash, sizeof slot4, sizeof out->last_rewrite_at, sizeof slot6, sizeof slot7, sizeof slot8, sizeof out->rewrite_reason, sizeof out->updated_at};
    memset(out, 0, sizeof *out);
-   int status = call_stage(AIMEE_DB1_OP_REWRITE_STATE_GET, fields, 1, values, caps, 11);
+   int status = call_stage(AIMEE_DB1_OP_REWRITE_STATE_GET, fields, 1, values, caps, 11, NULL);
    if (status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    out->payload_epoch = (int64_t)strtoll(slot1, NULL, 10);
@@ -234,7 +249,91 @@ int db1_payload_rewrite_state_set(const payload_rewrite_state_t *state)
    char arg8[24];
    snprintf(arg8, sizeof arg8, "%d", state->bytes_saved_pending);
    const char *fields[] = {state->session_id, arg1, arg2, state->last_prefix_hash, arg4, state->last_rewrite_at, arg6, arg7, arg8, state->rewrite_reason, state->updated_at};
-   return write_result(call_stage(AIMEE_DB1_OP_REWRITE_STATE_SET, fields, 11, NULL, NULL, 0));
+   return write_result(call_stage(AIMEE_DB1_OP_REWRITE_STATE_SET, fields, 11, NULL, NULL, 0, NULL));
+}
+
+int db1_wm_set(const char *session_id, const char *key, const char *value, const char *category, int ttl_seconds)
+{
+   if (!session_id || !session_id[0] || !key || !key[0] || !value || !value[0])
+      return -1;
+   char arg4[24];
+   snprintf(arg4, sizeof arg4, "%d", ttl_seconds);
+   const char *fields[] = {session_id, key, value, category ? category : "", arg4};
+   return write_result(call_stage(AIMEE_DB1_OP_WM_SET, fields, 5, NULL, NULL, 0, NULL));
+}
+
+int db1_wm_get(const char *session_id, const char *key, wm_entry_t *out)
+{
+   if (!session_id || !session_id[0] || !key || !key[0] || !out)
+      return -1;
+   const char *fields[] = {session_id, key};
+   char slot0[24];
+   char *const values[] = {slot0, out->session_id, out->key, out->value, out->category, out->created_at, out->updated_at, out->expires_at};
+   const size_t caps[] = {sizeof slot0, sizeof out->session_id, sizeof out->key, sizeof out->value, sizeof out->category, sizeof out->created_at, sizeof out->updated_at, sizeof out->expires_at};
+   memset(out, 0, sizeof *out);
+   int status = call_stage(AIMEE_DB1_OP_WM_GET, fields, 2, values, caps, 8, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   out->id = (int64_t)strtoll(slot0, NULL, 10);
+   return 0;
+}
+
+int db1_wm_list(const char *session_id, const char *category, wm_entry_t *out, int max)
+{
+   if (!session_id || !session_id[0] || !out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg2[24];
+   snprintf(arg2, sizeof arg2, "%d", max);
+   const char *fields[] = {session_id, category ? category : "", arg2};
+   char **values = malloc((size_t)max * 8u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 8u * sizeof *caps);
+   char (*scratch)[24] = malloc((size_t)max * 1u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 8u + 0u] = scratch[row * 1u + 0u];
+      caps[row * 8u + 0u] = sizeof scratch[row * 1u + 0u];
+      values[row * 8u + 1u] = out[row].session_id;
+      caps[row * 8u + 1u] = sizeof out[row].session_id;
+      values[row * 8u + 2u] = out[row].key;
+      caps[row * 8u + 2u] = sizeof out[row].key;
+      values[row * 8u + 3u] = out[row].value;
+      caps[row * 8u + 3u] = sizeof out[row].value;
+      values[row * 8u + 4u] = out[row].category;
+      caps[row * 8u + 4u] = sizeof out[row].category;
+      values[row * 8u + 5u] = out[row].created_at;
+      caps[row * 8u + 5u] = sizeof out[row].created_at;
+      values[row * 8u + 6u] = out[row].updated_at;
+      caps[row * 8u + 6u] = sizeof out[row].updated_at;
+      values[row * 8u + 7u] = out[row].expires_at;
+      caps[row * 8u + 7u] = sizeof out[row].expires_at;
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_WM_LIST, fields, 3, values, caps,
+                           (uint32_t)(max * 8), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 8u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 8u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].id = (int64_t)strtoll(scratch[row * 1u + 0u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
 }
 
 /* clang-format on */

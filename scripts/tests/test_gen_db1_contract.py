@@ -53,6 +53,10 @@ def sandbox() -> tempfile.TemporaryDirectory[str]:
     for generated in list((REPO_ROOT / contract.SOURCE_DIR).glob("*_stage.c")) + \
             [REPO_ROOT / contract.STAGES_HEADER]:
         shutil.copy2(generated, root / contract.SOURCE_DIR / generated.name)
+    # The adapter is real content too: it is where the dispatch rule reads which
+    # stages are actually routed, and an empty file reads as none of them.
+    shutil.copy2(REPO_ROOT / contract.SOURCE_DIR / "module_adapter.c",
+                 root / contract.SOURCE_DIR / "module_adapter.c")
     return tmp
 
 
@@ -75,6 +79,21 @@ class CatalogTests(unittest.TestCase):
             if not family["active"]:
                 return family
         self.skipTest("no reserved family remains to exercise")
+
+    def route(self, root: Path, family: dict) -> None:
+        """Route a newly activated family's stage in the sandbox adapter.
+
+        Activating a family in the catalog is only half of it: the adapter's
+        switch is what makes the stage reachable, and the dispatch rule holds
+        the two together. These tests activate a family to exercise something
+        else, so they have to do the other half too.
+        """
+        adapter = root / contract.SOURCE_DIR / "module_adapter.c"
+        label = f"case AIMEE_DB1_STAGE_{family['name'].upper()}:"
+        adapter.write_text(
+            adapter.read_text(encoding="utf-8").replace(
+                "   default:", f"   {label}\n      break;\n   default:", 1),
+            encoding="utf-8")
 
     def assertRule(self, root: Path, rule: str) -> None:
         with self.assertRaises(contract.ContractError) as caught:
@@ -287,6 +306,7 @@ class CatalogTests(unittest.TestCase):
             catalog = self.catalog(root)
             reserved = self.reserved(catalog)
             reserved["active"] = True
+            self.route(root, reserved)
             catalog["operations"].append({
                 "family": reserved["name"], "id": 1, "name": "probe_touch",
                 "wire_format": "db1-fields-v2", "scope": "session",
@@ -402,6 +422,7 @@ class CatalogTests(unittest.TestCase):
         catalog = self.catalog(root)
         reserved = self.reserved(catalog)
         reserved["active"] = True
+        self.route(root, reserved)
         catalog["operations"].append({
             "family": reserved["name"], "id": 1, "name": "probe_forget_if_job",
             "c_name": "db1_probe_forget_if_job", "c_params": ["probe_id", "job_id"],
@@ -483,6 +504,7 @@ class CatalogTests(unittest.TestCase):
         catalog = self.catalog(root)
         reserved = self.reserved(catalog)
         reserved["active"] = True
+        self.route(root, reserved)
         catalog["operations"].append({
             "family": reserved["name"], "id": 1, "name": "probe_status_set",
             "c_name": "db1_probe_status_set",
@@ -622,6 +644,93 @@ class CatalogTests(unittest.TestCase):
         for family in catalog["families"]:
             self.assertTrue(family["covers"].strip(),
                             f"{family['name']} reserves a kind but names no sources")
+
+
+    def test_an_active_family_must_have_its_stage_dispatched(self) -> None:
+        # A generated stage that nothing routes to compiles, links and passes
+        # its own tests while being unreachable. That is what happened to the
+        # conversation family: the adapter's switch is hand-written, because the
+        # first family answers a different wire format, and nothing tied the two
+        # together until this rule.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            adapter = root / contract.SOURCE_DIR / "module_adapter.c"
+            adapter.write_text(
+                adapter.read_text(encoding="utf-8").replace(
+                    "case AIMEE_DB1_STAGE_CONVERSATION:", "case 999999:"),
+                encoding="utf-8")
+            self.assertRule(root, "stage-undispatched")
+        finally:
+            tmp.cleanup()
+
+    def listing(self, catalog: dict) -> dict:
+        for operation in catalog["operations"]:
+            if "list" in operation["reply"]:
+                return operation
+        self.skipTest("no list operation to exercise")
+
+    def test_a_list_names_the_parameter_that_receives_the_rows(self) -> None:
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            catalog = self.catalog(root)
+            self.listing(catalog)["reply"]["list"]["out"] = "not_a_parameter"
+            self.write(root, catalog)
+            self.assertRule(root, "reply-list")
+        finally:
+            tmp.cleanup()
+
+    def test_a_list_bound_must_be_an_integer_field(self) -> None:
+        # The bound is the allocation on both sides. Pointing it at a text field
+        # would make the stage size an array from a string.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            catalog = self.catalog(root)
+            operation = self.listing(catalog)
+            operation["reply"]["list"]["bound"] = operation["c_params"][0]
+            self.write(root, catalog)
+            self.assertRule(root, "reply-list")
+        finally:
+            tmp.cleanup()
+
+    def test_a_list_ceiling_is_bounded(self) -> None:
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            catalog = self.catalog(root)
+            self.listing(catalog)["reply"]["list"]["max_rows"] = 1 << 20
+            self.write(root, catalog)
+            self.assertRule(root, "integer")
+        finally:
+            tmp.cleanup()
+
+    def test_a_list_must_declare_the_row_it_repeats(self) -> None:
+        # A list is a struct repeated. Without the struct there is no row type
+        # to write the members back into.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            catalog = self.catalog(root)
+            del self.listing(catalog)["reply"]["struct"]
+            self.write(root, catalog)
+            self.assertRule(root, "reply-list")
+        finally:
+            tmp.cleanup()
+
+    def test_the_generated_list_client_divides_the_reply_by_the_row_width(self) -> None:
+        # The width is never sent: an operation knows how wide its rows are, so
+        # the reply's own value count is what carries the length.
+        client = (REPO_ROOT / contract.CLIENT_DIR / "conversation.c").read_text(encoding="utf-8")
+        self.assertIn("int rows = (int)(filled / 8u);", client)
+        self.assertIn("filled % 8u != 0u", client)
+
+    def test_the_generated_list_stage_bounds_what_it_allocates(self) -> None:
+        stage = (REPO_ROOT / contract.SOURCE_DIR / "conversation_stage.c").read_text(
+            encoding="utf-8")
+        self.assertIn("if (parsed2 <= 0 || parsed2 > 64)", stage)
+        self.assertIn("calloc((size_t)parsed2, sizeof *found)", stage)
 
 
 if __name__ == "__main__":

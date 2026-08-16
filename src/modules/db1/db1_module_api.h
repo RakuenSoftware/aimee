@@ -64,6 +64,9 @@
 
 #define AIMEE_DB1_OP_REWRITE_STATE_GET 1u
 #define AIMEE_DB1_OP_REWRITE_STATE_SET 2u
+#define AIMEE_DB1_OP_WM_SET            3u
+#define AIMEE_DB1_OP_WM_GET            4u
+#define AIMEE_DB1_OP_WM_LIST           5u
 
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
@@ -71,7 +74,7 @@
    prompts and documents, an in-process caller passes those whole, and the
    frame already bounds what arrived. */
 #define AIMEE_DB1_STATE_MAX  6144u
-#define AIMEE_DB1_VALUE_MAX  512u
+#define AIMEE_DB1_VALUE_MAX  8192u
 #define AIMEE_DB1_FIELDS_MAX 11u
 
 #define AIMEE_DB1_STATUS_OK       0u
