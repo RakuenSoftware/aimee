@@ -231,6 +231,38 @@ sources, and all four together unlock fourteen.
 
 The migration is no longer waiting on the wire. It is waiting on cutovers.
 
+## The first cutover failed, and it was worth failing
+
+`wm` measured ready, so it was cut over: dropped from `DB1_SRCS`, with the
+generated client linked in its place. The link failed on two symbols, and both
+were the survey's fault rather than the wire's.
+
+`db1_payload_rewrite_record` was simply never declared in the catalog — an
+undeclared symbol in a source whose other operations had migrated.
+
+`db1_wm_assemble_context` was worse. It is declared `char *db1_wm_...`, with
+the star bound to the name, and the survey's declaration pattern demanded
+whitespace after the return type. So it matched no such function anywhere, and
+those are precisely the malloc-returning ones. **The survey reported 10 `alloc`
+operations when there were 24**, and called sources ready that could not link.
+Corrected, the picture changes materially: 260 of 298 operations fit the wire
+and **28 of 50 sources are ready**, not 35. `alloc` is now the largest single
+unlock at 11 sources and 50 operations.
+
+### The unit that migrates is a source; the unit that LINKS is a family
+
+This is the structural finding, and no amount of measuring gets around it. The
+generator emits one client per family, and a `.c` links whole. So a source can
+only leave the daemon when **every symbol its family's client defines** has
+left too — and when no symbol its own source defines is still called by
+something linked.
+
+`payload_rewrite_state` is ready on its own and still cannot move, because it
+shares a family client with `wm`, and `wm` has an operation needing `alloc`.
+Generating one client per source rather than per family would decouple them.
+That is a real option and not a large one; it is worth doing before the next
+cutover attempt rather than after the next surprise.
+
 ## How to reproduce
 
 `scripts/survey_db1_wire.py` produces every number above. It is a measurement,

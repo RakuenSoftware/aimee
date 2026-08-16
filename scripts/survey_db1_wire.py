@@ -21,7 +21,7 @@ call sites, so its numbers move when any of those move -- which is the point.
 docs/proposals/pending/db1-wire-capability-survey.md records what it said on the
 day it was written; re-run this before trusting those numbers again.
 
-Three counting mistakes are deliberately designed out, because all three were
+Four counting mistakes are deliberately designed out, because all four were
 made, and every one of them flattered the migration:
 
   * Signatures are read from the HEADERS with line joins collapsed. Reading
@@ -33,6 +33,17 @@ made, and every one of them flattered the migration:
     family goes active to reserve its event kind and let its operations be
     declared; that moves no source out of the daemon. Treating activation as
     cutover hid seven sources and 23 operations in three active families.
+  * A pointer return is matched without demanding whitespace after the type.
+    "char *db1_wm_assemble_context(...)" binds the star to the name, and the
+    old pattern skipped every declaration written that way -- which is to say
+    most of the malloc-returning ones, the exact category it then reported as
+    small. It found 24 alloc operations where it had claimed 10, and a source
+    the survey had called ready failed to link.
+
+A caveat this cannot design out: readiness is measured per SOURCE, but the
+generated client is per FAMILY and links as one object. A source whose family
+has any undeclared symbol still in the daemon cannot cut over alone, because
+the client would define symbols the domain also defines. See the survey doc.
 """
 
 from __future__ import annotations
@@ -49,9 +60,16 @@ CATALOG = Path("src/modules/db1/eventcontract/operations.json")
 SOURCE_DIR = Path("src/modules/db1")
 MAKEFILE = Path("src/Makefile")
 
+# A pointer return binds its star to the NAME as often as to the type --
+# "char *db1_wm_assemble_context(...)" -- so a pattern demanding whitespace
+# after the return type misses every one written that way. Which is precisely
+# the malloc-returning functions, the category the survey then under-reports.
+# Split so a value return still requires the space that separates it from the
+# name, and a pointer return does not.
 DECL = re.compile(
-    r"\b(int|void|int64_t|double|size_t|char\s*\*|const\s+char\s*\*)\s+"
-    r"([a-z][a-z0-9_]{3,})\s*\(([^;{]*)\)\s*;", re.S)
+    r"\b(?:(?P<value>int|void|int64_t|double|size_t)\s+"
+    r"|(?P<pointer>char\s*\*|const\s+char\s*\*)\s*)"
+    r"(?P<name>[a-z][a-z0-9_]{3,})\s*\((?P<params>[^;{]*)\)\s*;", re.S)
 CALL = re.compile(r"\b([a-z][a-z0-9_]{2,})\s*\(")
 
 TEXT = re.compile(r"const char \s*\*\s*\w+$")
@@ -161,12 +179,13 @@ def declarations(root: Path, families: dict[str, str]) -> dict[str, dict]:
                 documented[named.group(1)] = pair.group(1)
         text = re.sub(r"/\*.*?\*/", "", raw, flags=re.S)
         for match in DECL.finditer(text):
-            found[match.group(2)] = {
+            returns = match.group("value") or match.group("pointer")
+            found[match.group("name")] = {
                 "family": families[header.stem],
                 "source": header.stem,
-                "returns": " ".join(match.group(1).split()),
-                "params": " ".join(match.group(3).split()),
-                "contract": " ".join(documented.get(match.group(2), "").split()),
+                "returns": " ".join(returns.split()),
+                "params": " ".join(match.group("params").split()),
+                "contract": " ".join(documented.get(match.group("name"), "").split()),
             }
     return found
 
