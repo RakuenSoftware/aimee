@@ -659,6 +659,11 @@
           "id": 2,
           "name": "db1-git-ownership",
           "event_kind": 11778
+        },
+        {
+          "id": 3,
+          "name": "db1-conversation",
+          "event_kind": 11779
         }
       ]
     }

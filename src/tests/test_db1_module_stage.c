@@ -213,18 +213,20 @@ static void test_git_ownership_round_trips(void)
    assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
           AIMEE_MODULE_STATUS_OK);
    assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
-   uint32_t value_len = aimee_db1_get_u32(resp + 4);
+   assert(aimee_db1_get_u32(resp + 4) == 1u); /* one value in the reply */
+   uint32_t value_len = aimee_db1_get_u32(resp + 8);
    assert(value_len == strlen("sess-abc123"));
-   assert(memcmp(resp + 8, "sess-abc123", value_len) == 0);
+   assert(memcmp(resp + 12, "sess-abc123", value_len) == 0);
 
    const char *by_session[] = {"/repo/one", "sess-abc123"};
    len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION, by_session, 2);
    assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
           AIMEE_MODULE_STATUS_OK);
    assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
-   value_len = aimee_db1_get_u32(resp + 4);
+   assert(aimee_db1_get_u32(resp + 4) == 1u);
+   value_len = aimee_db1_get_u32(resp + 8);
    assert(value_len == strlen("feature"));
-   assert(memcmp(resp + 8, "feature", value_len) == 0);
+   assert(memcmp(resp + 12, "feature", value_len) == 0);
 
    /* A row nobody wrote is MISSING, not a failure: no owner is a real answer. */
    const char *absent[] = {"/repo/one", "other"};
@@ -232,7 +234,9 @@ static void test_git_ownership_round_trips(void)
    assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
           AIMEE_MODULE_STATUS_OK);
    assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_MISSING);
-   assert(aimee_db1_get_u32(resp + 4) == 0u);
+   /* A read answers with its value slot present and empty, not absent. */
+   assert(aimee_db1_get_u32(resp + 4) == 1u);
+   assert(aimee_db1_get_u32(resp + 8) == 0u);
 
    const char *del[] = {"/repo/one", "feature"};
    len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_DELETE, del, 2);
@@ -283,7 +287,12 @@ static void test_git_ownership_malformed_frames_are_refused(void)
       per-op arity check still refuses this frame, so the result is unchanged
       even though the write already happened. Built with -fsanitize=address it
       reports a stack-buffer-overflow, which is what this frame is really for. */
-   const char *too_many[] = {"/repo", "main", "sess", "extra"};
+   /* Sized from the constant rather than written out: FIELDS_MAX is derived
+      from the widest request in the catalog, so a literal list silently stops
+      covering this case the moment a wider operation is declared. */
+   const char *too_many[AIMEE_DB1_FIELDS_MAX + 1u];
+   for (uint32_t i = 0; i < AIMEE_DB1_FIELDS_MAX + 1u; ++i)
+      too_many[i] = "x";
    len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_UPSERT, too_many, AIMEE_DB1_FIELDS_MAX + 1u);
    assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
           AIMEE_MODULE_STATUS_INVALID_REQUEST);

@@ -61,14 +61,33 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
    if (stub_result != AIMEE_MODULE_CALL_OK)
       return stub_result;
 
+   /* status | field_count | (len | bytes) * count.
+
+      A write answers with no values, exactly as the real stage does. The client
+      sizes its reply buffer from what it asked for, so a stub that always sent
+      a value would be asking for room the caller never requested. */
+   uint32_t op = request_len >= 4u ? aimee_db1_get_u32((const uint8_t *)request_body) : 0u;
+   int answers_with_a_value =
+       (op == AIMEE_DB1_OP_OWNERSHIP_OWNER_GET || op == AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION ||
+        op == AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX);
    uint32_t value_len = (uint32_t)strlen(stub_value);
-   if (response_capacity < 8u + value_len)
-      return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
    uint8_t *out = (uint8_t *)response_body;
+   if (!answers_with_a_value)
+   {
+      if (response_capacity < 8u)
+         return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+      aimee_db1_put_u32(out, stub_status);
+      aimee_db1_put_u32(out + 4u, 0u);
+      *response_len = 8u;
+      return AIMEE_MODULE_CALL_OK;
+   }
+   if (response_capacity < 12u + value_len)
+      return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
    aimee_db1_put_u32(out, stub_status);
-   aimee_db1_put_u32(out + 4u, stub_lie_about_length ? value_len + 7u : value_len);
-   memcpy(out + 8u, stub_value, value_len);
-   *response_len = 8u + value_len;
+   aimee_db1_put_u32(out + 4u, 1u);
+   aimee_db1_put_u32(out + 8u, stub_lie_about_length ? value_len + 7u : value_len);
+   memcpy(out + 12u, stub_value, value_len);
+   *response_len = 12u + value_len;
    return AIMEE_MODULE_CALL_OK;
 }
 
@@ -238,6 +257,26 @@ static void test_a_large_field_is_carried_not_refused(void)
    printf("  PASS: test_a_large_field_is_carried_not_refused\n");
 }
 
+/* A value that exactly fills the caller's buffer leaves no room for the NUL, so
+   it is refused rather than terminated one byte past the end. Built with
+   -fsanitize=address this is the check that says so. */
+static void test_a_value_that_fills_the_buffer_is_refused(void)
+{
+   char owner[8];
+   reset();
+   stub_status = AIMEE_DB1_STATUS_OK;
+   stub_value = "12345678"; /* exactly sizeof owner, so the NUL would not fit */
+   assert(db1_git_ownership_get_owner("/repo", "feature", owner, sizeof owner) == -1);
+
+   /* One shorter still fits, terminator included. */
+   reset();
+   stub_status = AIMEE_DB1_STATUS_OK;
+   stub_value = "1234567";
+   assert(db1_git_ownership_get_owner("/repo", "feature", owner, sizeof owner) == 1);
+   assert(strcmp(owner, "1234567") == 0);
+   printf("  PASS: test_a_value_that_fills_the_buffer_is_refused\n");
+}
+
 int main(void)
 {
    printf("db1_git_ownership_client:\n");
@@ -245,6 +284,7 @@ int main(void)
    test_reads_report_found_missing_and_error_apart();
    test_an_unreachable_module_is_an_error_not_an_absence();
    test_a_malformed_reply_is_refused();
+   test_a_value_that_fills_the_buffer_is_refused();
    test_bad_arguments_cost_no_round_trip();
    test_a_large_field_is_carried_not_refused();
    test_every_operation_uses_its_own_op_and_arity();

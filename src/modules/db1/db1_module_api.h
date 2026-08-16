@@ -35,12 +35,16 @@
  * owns which branch, so concurrent local sessions do not stomp on each other.
  *
  * Request:  op(u32) | field_count(u32) | (len(u32) | bytes) * field_count
- * Response: status(u32) | value_len(u32) | value
+ * Response: status(u32) | field_count(u32) | (len(u32) | bytes) * field_count
  *
- * The counted form is the one every family after the first uses. The first
- * family fixed its request at exactly two fields, which suits a keyed blob and
- * suits nothing with three, so the count is explicit here rather than implied
- * by the op. */
+ * Counted in both directions. The first family fixed its request at exactly two
+ * fields, which suits a keyed blob and suits nothing with three, so the count is
+ * explicit here rather than implied by the op.
+ *
+ * The reply counts for the same reason the request does: an operation that
+ * answers with a row, or with a list of them, has somewhere to put the values.
+ * A reply carrying nothing sends a count of zero, and one carrying a single
+ * value sends a count of one -- the shape does not change with the arity. */
 
 #define AIMEE_DB1_EVENT_GIT_OWNERSHIP 11778u
 #define AIMEE_DB1_STAGE_GIT_OWNERSHIP 2u
@@ -53,6 +57,14 @@
 #define AIMEE_DB1_OP_FEATURE_BRANCH_UPSERT        6u
 #define AIMEE_DB1_OP_FEATURE_BRANCH_GET           7u
 
+/* Family 3: per-conversation context, clarifications and working memory. */
+
+#define AIMEE_DB1_EVENT_CONVERSATION 11779u
+#define AIMEE_DB1_STAGE_CONVERSATION 3u
+
+#define AIMEE_DB1_OP_REWRITE_STATE_GET 1u
+#define AIMEE_DB1_OP_REWRITE_STATE_SET 2u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry
@@ -60,7 +72,7 @@
    frame already bounds what arrived. */
 #define AIMEE_DB1_STATE_MAX  6144u
 #define AIMEE_DB1_VALUE_MAX  512u
-#define AIMEE_DB1_FIELDS_MAX 3u
+#define AIMEE_DB1_FIELDS_MAX 11u
 
 #define AIMEE_DB1_STATUS_OK       0u
 #define AIMEE_DB1_STATUS_MISSING  1u

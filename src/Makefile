@@ -486,7 +486,14 @@ CMD_OBJS = $(CMD_SRCS:%.c=$(OBJDIR)/%.o)
 # panel_roster.c has had no build rule since it landed in #1845; panel_provider.c
 # is reached only by unit-test-panel-provider. Compiled here so they cannot rot
 # unnoticed the way four CMD_SRCS files did.
-ORPHAN_SRCS = 
+#
+# Generated DB1 clients are here for a different reason: the generator emits one
+# as soon as a family activates, but the daemon only links it at cutover, when
+# the whole domain source moves. Between those two points nothing would compile
+# it, and the generator's newest output is exactly the code least exercised
+# elsewhere. Every client under db1_client/ is therefore either linked
+# (DB1_CLIENT_SRCS) or compiled here -- there is no third state.
+ORPHAN_SRCS = $(filter-out $(DB1_CLIENT_SRCS),$(wildcard db1_client/*.c))
 ORPHAN_OBJS = $(ORPHAN_SRCS:%.c=$(OBJDIR)/%.o)
 
 # CMD_SRCS is linked into NO shipping binary and no test target, so nothing ever

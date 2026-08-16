@@ -52,19 +52,19 @@
     },
     {
       "id": 3,
-      "name": "sessions",
+      "name": "conversation",
       "event_kind": 11779,
-      "active": false,
-      "doc": "server and webchat session rows.",
+      "active": true,
+      "doc": "per-conversation context, clarifications and working memory.",
       "client_doc": "",
-      "covers": "server_sessions, primary_sessions, session_state, session_paths, webchat_claude_sessions, webchat_live",
+      "covers": "conv_context, clarify, payload_rewrite_state, user_memory, wm, windows",
       "sources": [
-        "primary_sessions",
-        "server_sessions",
-        "session_paths",
-        "session_state",
-        "webchat_claude_sessions",
-        "webchat_live"
+        "clarify",
+        "conv_context",
+        "payload_rewrite_state",
+        "user_memory",
+        "windows",
+        "wm"
       ],
       "retired_sources": []
     },
@@ -123,19 +123,19 @@
     },
     {
       "id": 7,
-      "name": "conversation",
+      "name": "sessions",
       "event_kind": 11783,
       "active": false,
-      "doc": "per-conversation context, clarifications and working memory.",
+      "doc": "server and webchat session rows.",
       "client_doc": "",
-      "covers": "conv_context, clarify, payload_rewrite_state, user_memory, wm, windows",
+      "covers": "server_sessions, primary_sessions, session_state, session_paths, webchat_claude_sessions, webchat_live",
       "sources": [
-        "clarify",
-        "conv_context",
-        "payload_rewrite_state",
-        "user_memory",
-        "windows",
-        "wm"
+        "primary_sessions",
+        "server_sessions",
+        "session_paths",
+        "session_state",
+        "webchat_claude_sessions",
+        "webchat_live"
       ],
       "retired_sources": []
     },
@@ -234,7 +234,12 @@
         ]
       },
       "reply": {
-        "payload": "state",
+        "fields": [
+          {
+            "name": "state",
+            "type": "state"
+          }
+        ],
         "max_bytes": 6144
       }
     },
@@ -267,7 +272,7 @@
         ]
       },
       "reply": {
-        "payload": "none",
+        "fields": [],
         "max_bytes": 0
       }
     },
@@ -281,7 +286,7 @@
         "branch_name",
         "session_id"
       ],
-      "wire_format": "db1-fields-v1",
+      "wire_format": "db1-fields-v2",
       "scope": "repository",
       "transaction": "single",
       "idempotency": "idempotent",
@@ -310,7 +315,7 @@
         ]
       },
       "reply": {
-        "payload": "none",
+        "fields": [],
         "max_bytes": 0
       }
     },
@@ -323,7 +328,7 @@
         "repo_path",
         "branch_name"
       ],
-      "wire_format": "db1-fields-v1",
+      "wire_format": "db1-fields-v2",
       "scope": "repository",
       "transaction": "single",
       "idempotency": "idempotent",
@@ -347,7 +352,7 @@
         ]
       },
       "reply": {
-        "payload": "none",
+        "fields": [],
         "max_bytes": 0
       }
     },
@@ -362,7 +367,7 @@
         "owner_out",
         "owner_len"
       ],
-      "wire_format": "db1-fields-v1",
+      "wire_format": "db1-fields-v2",
       "scope": "repository",
       "transaction": "none",
       "idempotency": "safe",
@@ -387,7 +392,12 @@
         ]
       },
       "reply": {
-        "payload": "text",
+        "fields": [
+          {
+            "name": "value",
+            "type": "text"
+          }
+        ],
         "max_bytes": 512
       }
     },
@@ -402,7 +412,7 @@
         "branch_out",
         "branch_len"
       ],
-      "wire_format": "db1-fields-v1",
+      "wire_format": "db1-fields-v2",
       "scope": "repository",
       "transaction": "none",
       "idempotency": "safe",
@@ -427,7 +437,12 @@
         ]
       },
       "reply": {
-        "payload": "text",
+        "fields": [
+          {
+            "name": "value",
+            "type": "text"
+          }
+        ],
         "max_bytes": 512
       }
     },
@@ -441,7 +456,7 @@
         "session_out",
         "session_len"
       ],
-      "wire_format": "db1-fields-v1",
+      "wire_format": "db1-fields-v2",
       "scope": "global",
       "transaction": "none",
       "idempotency": "safe",
@@ -461,7 +476,12 @@
         ]
       },
       "reply": {
-        "payload": "text",
+        "fields": [
+          {
+            "name": "value",
+            "type": "text"
+          }
+        ],
         "max_bytes": 512
       }
     },
@@ -475,7 +495,7 @@
         "session_id",
         "feature_branch"
       ],
-      "wire_format": "db1-fields-v1",
+      "wire_format": "db1-fields-v2",
       "scope": "repository",
       "transaction": "single",
       "idempotency": "idempotent",
@@ -504,7 +524,7 @@
         ]
       },
       "reply": {
-        "payload": "none",
+        "fields": [],
         "max_bytes": 0
       }
     },
@@ -519,7 +539,7 @@
         "branch_out",
         "branch_len"
       ],
-      "wire_format": "db1-fields-v1",
+      "wire_format": "db1-fields-v2",
       "scope": "repository",
       "transaction": "none",
       "idempotency": "safe",
@@ -544,8 +564,174 @@
         ]
       },
       "reply": {
-        "payload": "text",
+        "fields": [
+          {
+            "name": "value",
+            "type": "text"
+          }
+        ],
         "max_bytes": 512
+      }
+    },
+    {
+      "family": "conversation",
+      "id": 1,
+      "name": "rewrite_state_get",
+      "c_name": "db1_payload_rewrite_state_get",
+      "c_params": [
+        "session_id",
+        "out"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "session",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "key",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "struct": "payload_rewrite_state_t",
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text"
+          },
+          {
+            "name": "payload_epoch",
+            "type": "int64"
+          },
+          {
+            "name": "compaction_epoch",
+            "type": "int64"
+          },
+          {
+            "name": "last_prefix_hash",
+            "type": "text"
+          },
+          {
+            "name": "last_payload_tokens",
+            "type": "int"
+          },
+          {
+            "name": "last_rewrite_at",
+            "type": "text"
+          },
+          {
+            "name": "deferred_rewrite_count",
+            "type": "int"
+          },
+          {
+            "name": "consecutive_deferred_count",
+            "type": "int"
+          },
+          {
+            "name": "bytes_saved_pending",
+            "type": "int"
+          },
+          {
+            "name": "rewrite_reason",
+            "type": "text"
+          },
+          {
+            "name": "updated_at",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 512
+      }
+    },
+    {
+      "family": "conversation",
+      "id": 2,
+      "name": "rewrite_state_set",
+      "c_name": "db1_payload_rewrite_state_set",
+      "c_params": [
+        "state"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "session",
+      "transaction": "single",
+      "idempotency": "idempotent",
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "struct": "payload_rewrite_state_t",
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "payload_epoch",
+            "type": "int64",
+            "required": false
+          },
+          {
+            "name": "compaction_epoch",
+            "type": "int64",
+            "required": false
+          },
+          {
+            "name": "last_prefix_hash",
+            "type": "text",
+            "required": false
+          },
+          {
+            "name": "last_payload_tokens",
+            "type": "int",
+            "required": false
+          },
+          {
+            "name": "last_rewrite_at",
+            "type": "text",
+            "required": false
+          },
+          {
+            "name": "deferred_rewrite_count",
+            "type": "int",
+            "required": false
+          },
+          {
+            "name": "consecutive_deferred_count",
+            "type": "int",
+            "required": false
+          },
+          {
+            "name": "bytes_saved_pending",
+            "type": "int",
+            "required": false
+          },
+          {
+            "name": "rewrite_reason",
+            "type": "text",
+            "required": false
+          },
+          {
+            "name": "updated_at",
+            "type": "text",
+            "required": false
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 0
       }
     }
   ]

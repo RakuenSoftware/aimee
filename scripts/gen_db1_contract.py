@@ -49,9 +49,9 @@ RESULT_CODES = ("ok", "missing", "invalid", "too_long", "failed")
 SCOPES = ("none", "conversation", "session", "repository", "global")
 TRANSACTIONS = ("none", "single")
 IDEMPOTENCY = ("safe", "idempotent", "unsafe")
-WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v1")
-PAYLOADS = ("none", "state", "text")
-FIELD_TYPES = ("text", "int")
+WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v2")
+PAYLOADS = ("none", "state", "text", "int", "int64")
+FIELD_TYPES = ("text", "int", "int64")
 
 
 class ContractError(ValueError):
@@ -155,6 +155,17 @@ def validate_families(raw: object) -> dict[str, dict[str, object]]:
         families[name] = family
     if not any(family["active"] for family in families.values()):
         fail("family-active", "at least one family must be active")
+    # Active families must be a DENSE PREFIX, because the process contract
+    # assigns a stage its event kind from its POSITION in the stages array
+    # (4096 + ref*256 + ordinal) and requires those ordinals dense from one.
+    # Reserving a kind per family therefore only holds if families activate in
+    # id order: activating family 7 while 3 is reserved would hand family 7 the
+    # kind reserved for family 3, silently.
+    active = [family["id"] for family in families.values() if family["active"]]
+    if sorted(active) != list(range(1, len(active) + 1)):
+        fail("family-order",
+             f"active families must be 1..N with no gaps, got {sorted(active)}; "
+             f"renumber the family being activated, which is free while reserved")
     return families
 
 
@@ -184,8 +195,16 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
             # by rule -- so the C signature carries its own names rather than
             # exporting "key" into a header that has always said repo_path.
             parameters = operation["c_params"]
-            reads = operation["reply"]["payload"] != "none"
-            expected = len(operation["request"]["fields"]) + (2 if reads else 0)
+            reply_shape = operation["reply"]
+            request_shape = operation["request"]
+            inbound = 1 if "struct" in request_shape else len(request_shape["fields"])
+            if "struct" in reply_shape:
+                outbound = 1                      # T *out
+            elif reply_shape["fields"]:
+                outbound = 2                      # char *buf, size_t cap
+            else:
+                outbound = 0
+            expected = inbound + outbound
             if not isinstance(parameters, list) or len(parameters) != expected or \
                     len(set(parameters)) != expected:
                 fail("c-params",
@@ -234,7 +253,10 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
         if results != sorted(results, key=RESULT_CODES.index):
             fail("results-order", f"{name} results must follow the declared result order")
 
-        request = keys(operation["request"], {"fields"}, f"{name}.request")
+        request_keys = {"fields", "struct"} if "struct" in operation["request"] else {"fields"}
+        request = keys(operation["request"], request_keys, f"{name}.request")
+        if "struct" in request and not re.fullmatch(r"[a-z][a-z0-9_]*_t", str(request["struct"])):
+            fail("request-struct", f"{name} request struct must be a _t type name")
         raw_fields = request["fields"]
         if not isinstance(raw_fields, list) or not raw_fields:
             fail("request-fields", f"{name} request must declare at least one field")
@@ -263,7 +285,13 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
         # as scoped, the catalog makes it say "global" out loud. The declaration
         # is the audit trail: unscoped access is visible in review instead of
         # hidden behind a field that is only conventionally a key.
-        if operation["scope"] == "global":
+        # A struct request takes its member names from the C type, so the scope
+        # key is identified by position rather than by being spelled "key".
+        # The rule is the same either way: a scoped operation carries its key
+        # first, and reviewing that is reading which member comes first.
+        if "struct" in request:
+            pass
+        elif operation["scope"] == "global":
             if fields[0] == "key":
                 fail("request-global",
                      f"{name} is declared global but takes a key; scope it instead")
@@ -275,11 +303,24 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
         if len(set(fields)) != len(fields):
             fail("request-field-duplicate", f"{name} repeats a request field")
 
-        reply = keys(operation["reply"], {"payload", "max_bytes"}, f"{name}.reply")
-        if reply["payload"] not in PAYLOADS:
-            fail("reply-payload", f"{name} reply payload must be one of {list(PAYLOADS)}")
+        reply_keys = {"fields", "max_bytes"}
+        if "struct" in operation["reply"]:
+            reply_keys = reply_keys | {"struct"}
+        reply = keys(operation["reply"], reply_keys, f"{name}.reply")
+        if "struct" in reply and not re.fullmatch(r"[a-z][a-z0-9_]*_t", str(reply["struct"])):
+            fail("reply-struct", f"{name} reply struct must be a _t type name")
+        reply_fields = reply["fields"]
+        if not isinstance(reply_fields, list):
+            fail("reply-fields", f"{name} reply fields must be an array")
+        for position, declared in enumerate(reply_fields):
+            shape = keys(declared, {"name", "type"}, f"{name}.reply.fields[{position}]")
+            if shape["type"] not in PAYLOADS or shape["type"] == "none":
+                fail("reply-payload",
+                     f"{name} reply field type must be one of {[p for p in PAYLOADS if p != 'none']}")
+            if not NAME.fullmatch(str(shape["name"])):
+                fail("reply-field-name", f"{name} invalid reply field {shape['name']!r}")
         max_bytes = integer(reply["max_bytes"], f"{name}.reply.max_bytes", 0, 1 << 20)
-        if (reply["payload"] == "none") != (max_bytes == 0):
+        if (not reply_fields) != (max_bytes == 0):
             fail("reply-bytes", f"{name} reply max_bytes must be zero exactly when it carries nothing")
         operations.append(operation)
     return operations
@@ -465,13 +506,17 @@ WIRE_FORMAT_DOC = {
     "db1-keyed-blob-v1": """   Request:  op(u32) | key_len(u32) | key | json_len(u32) | json
    Response: status(u32) | json_len(u32) | json
    Lengths are little-endian, matching the rest of the bus surface.""",
-    "db1-fields-v1": """   Request:  op(u32) | field_count(u32) | (len(u32) | bytes) * field_count
-   Response: status(u32) | value_len(u32) | value
+    "db1-fields-v2": """   Request:  op(u32) | field_count(u32) | (len(u32) | bytes) * field_count
+   Response: status(u32) | field_count(u32) | (len(u32) | bytes) * field_count
 
-   The counted form is the one every family after the first uses. The first
-   family fixed its request at exactly two fields, which suits a keyed blob and
-   suits nothing with three, so the count is explicit here rather than implied
-   by the op.""",
+   Counted in both directions. The first family fixed its request at exactly two
+   fields, which suits a keyed blob and suits nothing with three, so the count is
+   explicit here rather than implied by the op.
+
+   The reply counts for the same reason the request does: an operation that
+   answers with a row, or with a list of them, has somewhere to put the values.
+   A reply carrying nothing sends a count of zero, and one carrying a single
+   value sends a count of one -- the shape does not change with the arity.""",
 }
 
 HELPERS = """static inline void aimee_db1_put_u32(uint8_t *p, uint32_t value)
@@ -565,11 +610,12 @@ def header_bytes(catalog: dict[str, object]) -> str:
             reply = operation["reply"]
             request = operation["request"]
             assert isinstance(reply, dict) and isinstance(request, dict)
-            if reply["payload"] == "state":
+            kinds = {str(f["type"]) for f in reply["fields"]}
+            if "state" in kinds:
                 state_max = max(state_max, int(reply["max_bytes"]))
-            if reply["payload"] == "text":
+            if "text" in kinds:
                 field_max = max(field_max, int(reply["max_bytes"]))
-            if operation["wire_format"] == "db1-fields-v1":
+            if operation["wire_format"] == "db1-fields-v2":
                 fields_max = max(fields_max, len(request["fields"]))
 
     limits: list[tuple[str, str]] = []
@@ -612,7 +658,7 @@ CLIENT_SCAFFOLD = """/* db1_client/{stem}.c: the {stem} family, reached over the
  * generator emits, and reflowing generated output would put the file and the
  * catalog permanently one reformat apart. */
 /* clang-format off */
-#include "{header}"
+{header}
 
 #include "db1_module_api.h"
 
@@ -622,6 +668,7 @@ CLIENT_SCAFFOLD = """/* db1_client/{stem}.c: the {stem} family, reached over the
 #include "log.h"
 #include "module_json_call.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -689,11 +736,15 @@ static void encode(uint8_t *out, uint32_t op, const char *const *fields, uint32_
 }}
 
 /* Returns the module's status, or -1 when the call never produced one. */
-static int call_stage(uint32_t op, const char *const *fields, uint32_t count, char *value_out,
-                      size_t value_len)
+/* Fills up to `slots` reply values, each into the buffer and capacity the
+   caller supplied. A write passes none; a read passes one; a row passes one per
+   member. */
+static int call_stage(uint32_t op, const char *const *fields, uint32_t count, char *const *values,
+                      const size_t *caps, uint32_t slots)
 {{
-   if (value_out && value_len)
-      value_out[0] = '\\0';
+   for (uint32_t i = 0; i < slots; ++i)
+      if (values[i] && caps[i])
+         values[i][0] = '\\0';
    /* A local check, not a probe: with nothing serving the stage there is no
       call to make, and saying so beats waiting out a deadline. */
    if (!obs_bus_module_available(AIMEE_DB1_EVENT_{upper}))
@@ -707,7 +758,9 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
       return -1;
    /* The reply is bounded by the caller's own buffer: it asked for at most
       value_len bytes, so there is no reason to hold more than that. */
-   size_t response_cap = 8u + (value_out ? value_len : 0u);
+   size_t response_cap = 8u;
+   for (uint32_t i = 0; i < slots; ++i)
+      response_cap += 4u + caps[i];
    uint8_t *request = malloc(request_len);
    uint8_t *response = malloc(response_cap);
    if (!request || !response)
@@ -732,22 +785,41 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
    else
    {{
       uint32_t status = aimee_db1_get_u32(response);
-      uint32_t payload_len = aimee_db1_get_u32(response + 4u);
-      /* A reply whose declared length disagrees with what arrived is not a
-         reply to read part of. */
-      if (payload_len == response_len - 8u)
+      uint32_t fields_in = aimee_db1_get_u32(response + 4u);
+      /* Read the reply's own count rather than assuming an arity: a status with
+         no values is how a write answers, one value is a read, and a member
+         apiece is a row. */
+      result = (int)status;
+      uint32_t at = 8u;
+      for (uint32_t i = 0; i < fields_in && result != -1; ++i)
       {{
-         result = (int)status;
-         if (value_out && value_len)
+         if (at + 4u > response_len)
          {{
-            if (payload_len >= value_len)
+            result = -1;
+            break;
+         }}
+         uint32_t n = aimee_db1_get_u32(response + at);
+         at += 4u;
+         /* A reply whose declared length runs past what arrived is not a reply
+            to read part of. */
+         if (at + n > response_len)
+         {{
+            result = -1;
+            break;
+         }}
+         if (i < slots && values[i] && caps[i])
+         {{
+            /* No room for the terminator is no room: writing it would land one
+               byte past the buffer the caller owns. */
+            if (n >= caps[i])
                result = -1;
             else
             {{
-               memcpy(value_out, response + 8u, payload_len);
-               value_out[payload_len] = '\\0';
+               memcpy(values[i], response + at, n);
+               values[i][n] = '\\0';
             }}
          }}
+         at += n;
       }}
    }}
    free(response);
@@ -760,21 +832,28 @@ static int write_result(int status)
    return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
 }}
 
-/* A read answers found(1) / not-found(0) / error(-1), which is what the direct
-   implementation returns and what its callers already branch on. */
-static int read_result(int status, char *value_out)
-{{
-   if (status == (int)AIMEE_DB1_STATUS_OK)
-      return (value_out && value_out[0]) ? 1 : 0;
-   if (status == (int)AIMEE_DB1_STATUS_MISSING)
-      return 0;
-   return -1;
-}}
-"""
+{read_result}"""
+
+
+def domain_headers(root: Path, operations: list[dict[str, object]]) -> list[str]:
+    """The DB1 headers that declare these operations.
+
+    Derived rather than declared: the family name and the source name coincided
+    for the first family and do not in general, so a header named after the
+    family is a header that does not exist.
+    """
+    found: set[str] = set()
+    for header in sorted((root / SOURCE_DIR).glob("*.h")):
+        text = header.read_text(errors="ignore")
+        for operation in operations:
+            symbol = str(operation.get("c_name", ""))
+            if symbol and re.search(r"\b" + re.escape(symbol) + r"\s*\(", text):
+                found.add(header.name)
+    return sorted(found)
 
 
 def client_bytes(catalog: dict[str, object], family: dict[str, object],
-                 operations: list[dict[str, object]]) -> str:
+                 operations: list[dict[str, object]], headers: list[str]) -> str:
     """Render one family's C client.
 
     Every body is the same three steps -- reject unusable arguments, name the
@@ -787,9 +866,24 @@ def client_bytes(catalog: dict[str, object], family: dict[str, object],
     prose = ""
     if doc:
         prose = "\n *\n" + "\n".join(wrap(doc, " * ", " * "))
+    includes = "\n".join(f'#include "{h}"' for h in headers)
+    # Emitted only where something reads a single value: a family of writes and
+    # rows has no use for it, and an unused static is a -Werror failure.
+    plain_read = any("struct" not in o["reply"] and o["reply"]["fields"] for o in operations)
+    reader = ("""/* A read answers found(1) / not-found(0) / error(-1), which is what the direct
+   implementation returns and what its callers already branch on. */
+static int read_result(int status, const char *value_out)
+{
+   if (status == (int)AIMEE_DB1_STATUS_OK)
+      return (value_out && value_out[0]) ? 1 : 0;
+   if (status == (int)AIMEE_DB1_STATUS_MISSING)
+      return 0;
+   return -1;
+}
+""" if plain_read else "")
     out = [CLIENT_SCAFFOLD.format(
         stem=name, family=name.replace("_", " "), upper=upper,
-        header=f"{name}.h", client_doc=prose)]
+        header=includes, client_doc=prose, read_result=reader)]
 
     for operation in operations:
         request = operation["request"]
@@ -797,21 +891,31 @@ def client_bytes(catalog: dict[str, object], family: dict[str, object],
         assert isinstance(request, dict) and isinstance(reply, dict)
         fields = [str(f["name"]) for f in request["fields"]]
         types = [str(f["type"]) for f in request["fields"]]
-        reads = reply["payload"] != "none"
-        required = [bool(f["required"]) for f in request["fields"]]
+        reads = bool(reply["fields"])
+        required = [bool(f.get("required", True)) for f in request["fields"]]
         names = [str(n) for n in operation["c_params"]]
-        inputs, outputs = names[:len(fields)], names[len(fields):]
-        params = [(f"int {p}" if t == "int" else f"const char *{p}")
-                  for p, t in zip(inputs, types)]
-        if reads:
-            params += [f"char *{outputs[0]}", f"size_t {outputs[1]}"]
-        # An int cannot be null and has no empty case, so only text is guarded --
-        # and only where the operation says the value must be there.
-        guards = [f"!{p} || !{p}[0]" for p, t, need in zip(inputs, types, required)
-                  if t == "text" and need]
-        if reads:
-            guards += [f"!{outputs[0]}", f"{outputs[1]} == 0"]
+        in_struct = str(request["struct"]) if "struct" in request else ""
+        out_struct = str(reply["struct"]) if "struct" in reply else ""
+        split = 1 if in_struct else len(fields)
+        inputs, outputs = names[:split], names[split:]
 
+        if in_struct:
+            # The struct is the argument; its members are the frame.
+            params = [f"const {in_struct} *{inputs[0]}"]
+            guards = [f"!{inputs[0]}"]
+        else:
+            params = [(f"int {p}" if t in ("int", "int64") else f"const char *{p}")
+                      for p, t in zip(inputs, types)]
+            # An int cannot be null and has no empty case, so only text is
+            # guarded -- and only where the operation says it must be there.
+            guards = [f"!{p} || !{p}[0]" for p, t, need in zip(inputs, types, required)
+                      if t == "text" and need]
+        if out_struct:
+            params += [f"{out_struct} *{outputs[0]}"]
+            guards += [f"!{outputs[0]}"]
+        elif reads:
+            params += [f"char *{outputs[0]}", f"size_t {outputs[1]}"]
+            guards += [f"!{outputs[0]}", f"{outputs[1]} == 0"]
         signature = f"int {operation['c_name']}({', '.join(params)})"
         body = [signature, "{"]
         if guards:
@@ -819,28 +923,64 @@ def client_bytes(catalog: dict[str, object], family: dict[str, object],
         # Integers travel as decimal text: the frame carries counted bytes, and a
         # separate numeric type on the wire would buy nothing a printf does not.
         carried = []
-        for parameter, kind, need in zip(inputs, types, required):
-            if kind == "text" and not need:
+        sources = ([f"{inputs[0]}->{f}" for f in fields] if in_struct else list(inputs))
+        for position, (source, kind, need) in enumerate(zip(sources, types, required)):
+            local = f"arg{position}"
+            if kind == "text" and not need and not in_struct:
                 # The domains already read NULL as empty; the wire says so too
                 # rather than refusing a caller that leaves a value out.
-                carried.append(f"{parameter} ? {parameter} : \"\"")
+                carried.append(f"{source} ? {source} : \"\"")
                 continue
-            if kind == "int":
-                body.append(f"   char {parameter}_text[24];")
-                body.append(f'   snprintf({parameter}_text, sizeof {parameter}_text, "%d", '
-                            f"{parameter});")
-                carried.append(f"{parameter}_text")
+            if kind in ("int", "int64"):
+                spec = "%lld" if kind == "int64" else "%d"
+                cast = "(long long)" if kind == "int64" else ""
+                body.append(f"   char {local}[24];")
+                body.append(f'   snprintf({local}, sizeof {local}, "{spec}", {cast}{source});')
+                carried.append(local)
             else:
-                carried.append(parameter)
+                carried.append(source)
         body.append(f"   const char *fields[] = {{{', '.join(carried)}}};")
         op_symbol = f"AIMEE_DB1_OP_{str(operation['name']).upper()}"
-        if reads:
-            body.append(f"   int status = call_stage({op_symbol}, fields, "
-                        f"{len(fields)}, {outputs[0]}, {outputs[1]});")
+        arity = len(fields)
+        if out_struct:
+            members = [(str(f["name"]), str(f["type"])) for f in reply["fields"]]
+            target = outputs[0]
+            # A numeric member is read as text and converted, the same way it was
+            # sent: the frame carries bytes, and a row is only its members.
+            for index, (member, kind) in enumerate(members):
+                if kind in ("int", "int64"):
+                    body.append(f"   char slot{index}[24];")
+            slots = ", ".join(
+                f"slot{index}" if kind in ("int", "int64") else f"{target}->{member}"
+                for index, (member, kind) in enumerate(members))
+            caps = ", ".join(
+                f"sizeof slot{index}" if kind in ("int", "int64")
+                else f"sizeof {target}->{member}"
+                for index, (member, kind) in enumerate(members))
+            body.append(f"   char *const values[] = {{{slots}}};")
+            body.append(f"   const size_t caps[] = {{{caps}}};")
+            body.append(f"   memset({target}, 0, sizeof *{target});")
+            body.append(f"   int status = call_stage({op_symbol}, fields, {arity}, values, caps, "
+                        f"{len(members)});")
+            # The domain answers 0 or -1 here: a miss and a failure are the
+            # same answer to its callers, and the wire does not invent a
+            # distinction the contract never had.
+            body.append("   if (status != (int)AIMEE_DB1_STATUS_OK)")
+            body.append("      return -1;")
+            for index, (member, kind) in enumerate(members):
+                if kind == "int":
+                    body.append(f"   {target}->{member} = (int)strtol(slot{index}, NULL, 10);")
+                elif kind == "int64":
+                    body.append(f"   {target}->{member} = (int64_t)strtoll(slot{index}, NULL, 10);")
+            body.append("   return 0;")
+        elif reads:
+            body.append(f"   char *const values[] = {{{outputs[0]}}};")
+            body.append(f"   const size_t caps[] = {{{outputs[1]}}};")
+            body.append(f"   int status = call_stage({op_symbol}, fields, {arity}, values, caps, 1);")
             body.append(f"   return read_result(status, {outputs[0]});")
         else:
-            body.append(f"   return write_result(call_stage({op_symbol}, fields, "
-                        f"{len(fields)}, NULL, 0));")
+            body.append(f"   return write_result(call_stage({op_symbol}, fields, {arity}, "
+                        f"NULL, NULL, 0));")
         body.append("}")
         out.append("\n" + "\n".join(body) + "\n")
     out.append("\n/* clang-format on */\n")
@@ -866,7 +1006,8 @@ def client_families(catalog: dict[str, object]) -> list[tuple[dict, list]]:
 def validate_clients(root: Path, catalog: dict[str, object], write: bool) -> None:
     for family, operations in client_families(catalog):
         path = root / CLIENT_DIR / f"{family['name']}.c"
-        expected = client_bytes(catalog, family, operations)
+        expected = client_bytes(catalog, family, operations,
+                                domain_headers(root, operations))
         if write:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(expected, encoding="utf-8")
@@ -895,9 +1036,10 @@ STAGE_SCAFFOLD = """/* modules/db1/{stem}_stage.c: the {family} stage handler.
 #include "db1_stages.h"
 
 #include "db1_module_api.h"
-#include "{stem}.h"
+{headers}
 
-{int_includes}#include <stdlib.h>
+{int_includes}#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Copy one counted field out of the frame, NUL-terminated.
@@ -925,17 +1067,28 @@ static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, cha
    return 0;
 }}
 
-{parse_int}static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
-                            const char *value)
+{parse_int}{parse_int64}/* status(u32) | field_count(u32) | (len(u32) | bytes) * count. A write answers
+   with no values, a read with one, a row with a value per member. */
+static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
+                            const char *const *values, uint32_t count)
 {{
-   uint32_t value_len = (uint32_t)strlen(value);
-   if (cap < 8u + value_len)
+   uint32_t at = 8u;
+   for (uint32_t i = 0; i < count; ++i)
+   {{
+      uint32_t n = (uint32_t)strlen(values[i]);
+      if (cap < at + 4u + n)
+         return AIMEE_DB1_STATUS_FAILED;
+      aimee_db1_put_u32(out + at, n);
+      at += 4u;
+      if (n)
+         memcpy(out + at, values[i], n);
+      at += n;
+   }}
+   if (cap < 8u)
       return AIMEE_DB1_STATUS_FAILED;
    aimee_db1_put_u32(out, status);
-   aimee_db1_put_u32(out + 4u, value_len);
-   if (value_len)
-      memcpy(out + 8u, value, value_len);
-   *out_len = 8u + value_len;
+   aimee_db1_put_u32(out + 4u, count);
+   *out_len = at;
    return status;
 }}
 
@@ -979,6 +1132,9 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
    value[0] = '\\0';
    int rc = -1;
    int reads = 0;
+   /* A row answers with a value per member; a plain read answers with one. */
+   const char *const *rows = NULL;
+   uint32_t row_count = 0u;
 
    switch (op)
    {{
@@ -993,7 +1149,11 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
       onto MISSING would report a broken store as "nothing recorded", and the
       caller would act on an absence that was never established. */
    uint32_t status;
-   if (reads)
+   if (rows)
+      /* A row-returning domain answers 0 or -1: there is no found/not-found
+         distinction to preserve, so neither is invented. */
+      status = (rc == 0) ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_FAILED;
+   else if (reads)
    {{
       if (rc < 0)
          status = AIMEE_DB1_STATUS_FAILED;
@@ -1005,8 +1165,15 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
    else
       status = (rc == 0) ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_FAILED;
 
-   write_reply(response_body, response_capacity, response_len,
-               status, (status == AIMEE_DB1_STATUS_OK && reads) ? value : "");
+   {{
+      const char *one = (status == AIMEE_DB1_STATUS_OK) ? value : "";
+      const char *const single[] = {{one}};
+      const char *const *out_values = rows ? rows : (reads ? single : NULL);
+      uint32_t out_count = rows ? row_count : (reads ? 1u : 0u);
+      if (status != AIMEE_DB1_STATUS_OK && rows)
+         out_count = 0u; /* nothing to report but the status */
+      write_reply(response_body, response_capacity, response_len, status, out_values, out_count);
+   }}
    return AIMEE_MODULE_STATUS_OK;
 }}
 /* clang-format on */
@@ -1030,12 +1197,30 @@ static int parse_int(const char *text, int *out)
 }}
 """
 
+PARSE_INT64 = """/* The same, for a member the catalog declared as a 64-bit integer. */
+static int parse_int64(const char *text, int64_t *out)
+{
+   if (!text || !text[0])
+      return 1;
+   char *end = NULL;
+   errno = 0;
+   long long value = strtoll(text, &end, 10);
+   if (errno != 0 || !end || *end != '\\0')
+      return 1;
+   *out = (int64_t)value;
+   return 0;
+}
+
+"""
+
 INT_INCLUDES = """#include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 """
 
 
-def stage_bytes(family: dict[str, object], operations: list[dict[str, object]]) -> str:
+def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
+                headers: list[str]) -> str:
     name = str(family["name"])
     cases = []
     for operation in operations:
@@ -1044,20 +1229,58 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]]) 
         assert isinstance(request, dict) and isinstance(reply, dict)
         arity = len(request["fields"])
         types = [str(f["type"]) for f in request["fields"]]
-        reads = reply["payload"] != "none"
-        parse, args = [], []
-        for position, kind in enumerate(types):
-            if kind == "int":
-                args.append(f"parsed{position}")
-                parse.append(f"      int parsed{position};\n"
-                             f"      if (parse_int(field[{position}], &parsed{position}) != 0)\n"
-                             f"      {{\n"
-                             f"         free(scratch);\n"
-                             f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
-                             f"      }}\n")
-            else:
-                args.append(f"field[{position}]")
-        if reads:
+        names = [str(f["name"]) for f in request["fields"]]
+        reads = bool(reply["fields"])
+        in_struct = str(request["struct"]) if "struct" in request else ""
+        out_struct = str(reply["struct"]) if "struct" in reply else ""
+        parse, args, tail = [], [], []
+
+        if in_struct:
+            # Rebuild the row the caller flattened, then hand the domain the
+            # struct it has always taken.
+            parse.append(f"      {in_struct} row;\n      memset(&row, 0, sizeof row);\n")
+            for position, (member, kind) in enumerate(zip(names, types)):
+                if kind in ("int", "int64"):
+                    conv = "parse_int" if kind == "int" else "parse_int64"
+                    parse.append(f"      if ({conv}(field[{position}], &row.{member}) != 0)\n"
+                                 f"      {{\n         free(scratch);\n"
+                                 f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
+                                 f"      }}\n")
+                else:
+                    parse.append(f"      snprintf(row.{member}, sizeof row.{member}, \"%s\", "
+                                 f"field[{position}]);\n")
+            args.append("&row")
+        else:
+            for position, kind in enumerate(types):
+                if kind in ("int", "int64"):
+                    conv = "parse_int" if kind == "int" else "parse_int64"
+                    ctype = "int" if kind == "int" else "int64_t"
+                    args.append(f"parsed{position}")
+                    parse.append(f"      {ctype} parsed{position};\n"
+                                 f"      if ({conv}(field[{position}], &parsed{position}) != 0)\n"
+                                 f"      {{\n"
+                                 f"         free(scratch);\n"
+                                 f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
+                                 f"      }}\n")
+                else:
+                    args.append(f"field[{position}]")
+
+        if out_struct:
+            members = [(str(f["name"]), str(f["type"])) for f in reply["fields"]]
+            parse.append(f"      {out_struct} out;\n      memset(&out, 0, sizeof out);\n")
+            args.append("&out")
+            for index, (member, kind) in enumerate(members):
+                if kind in ("int", "int64"):
+                    spec = "%lld" if kind == "int64" else "%d"
+                    cast = "(long long)" if kind == "int64" else ""
+                    tail.append(f"      char text{index}[24];\n"
+                                f"      snprintf(text{index}, sizeof text{index}, \"{spec}\", "
+                                f"{cast}out.{member});\n")
+            emitted = ", ".join(f"text{index}" if kind in ("int", "int64") else f"out.{member}"
+                                for index, (member, kind) in enumerate(members))
+            tail.append(f"      const char *const row_values[] = {{{emitted}}};\n")
+            tail.append(f"      rows = row_values;\n      row_count = {len(members)}u;\n")
+        elif reads:
             args += ["value", "sizeof value"]
         # Braced only when a parsed integer needs scoping: an empty block around
         # every other case would be noise, and would move files that have not
@@ -1069,6 +1292,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]]) 
                 f"      }}\n"
                 + "".join(parse)
                 + f"      rc = {operation['c_name']}({', '.join(args)});\n"
+                + "".join(tail)
                 + ("      reads = 1;\n" if reads else "")
                 + "      break;\n")
         head = f"   case AIMEE_DB1_OP_{str(operation['name']).upper()}:\n"
@@ -1080,10 +1304,13 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]]) 
         cut = body.index(marker) + len(marker)
         body = body[:cut] + needs + body[cut:]
         cases.append(head + (f"   {{\n{body}   }}\n" if parse else body))
-    typed = any(f["type"] == "int" for o in operations for f in o["request"]["fields"])
+    used = {str(f["type"]) for o in operations for f in o["request"]["fields"]}
+    typed = bool(used & {"int", "int64"})
     return STAGE_SCAFFOLD.format(stem=name, family=name.replace("_", " "),
+                                 headers="\n".join(f'#include "{h}"' for h in headers),
                                  cases="".join(cases),
-                                 parse_int=PARSE_INT if typed else "",
+                                 parse_int=PARSE_INT if "int" in used else "",
+                                 parse_int64=PARSE_INT64 if "int64" in used else "",
                                  int_includes=INT_INCLUDES if typed else "")
 
 
@@ -1119,7 +1346,8 @@ def stages_header_bytes(catalog: dict[str, object]) -> str:
 
 
 def validate_stages(root: Path, catalog: dict[str, object], write: bool) -> None:
-    wanted = {(root / SOURCE_DIR / f"{family['name']}_stage.c"): stage_bytes(family, operations)
+    wanted = {(root / SOURCE_DIR / f"{family['name']}_stage.c"):
+              stage_bytes(family, operations, domain_headers(root, operations))
               for family, operations in client_families(catalog)}
     wanted[root / STAGES_HEADER] = stages_header_bytes(catalog)
     for path, expected in wanted.items():
