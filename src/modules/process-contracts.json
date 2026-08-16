@@ -683,6 +683,17 @@
         6657,
         6678
       ]
+    },
+    {
+      "id": "economizer-db1",
+      "principal_ref": 66,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-economizer",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        11777
+      ]
     }
   ]
 }

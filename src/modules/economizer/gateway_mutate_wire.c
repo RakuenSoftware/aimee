@@ -14,12 +14,6 @@
 #include "log.h"
 #include "token_tracker.h" /* token_estimate_cost_ex, for the freeze guardrail */
 
-/* Declared rather than including db1.h, the same way agent_runtime.c does: this
- * seam needs exactly two calls, and pulling the whole db1 surface into an
- * economizer translation unit would widen the module's dependencies for nothing. */
-int db1_economizer_state_save(const char *session_id, const char *json);
-int db1_economizer_state_load(const char *session_id, char *out, size_t out_sz);
-
 /* The gateway's reducer state is keyed by session key AND a conversation
  * fingerprint, in its own namespace.
  *
@@ -61,24 +55,6 @@ static void gw_state_key(const char *skey, cJSON *msgs, char *out, size_t out_sz
       }
    }
    snprintf(out, out_sz, "gw:%s:%016llx", skey ? skey : "", (unsigned long long)fp);
-}
-
-/* The module overwrites its loaded state's turn with the request's, so the seam
- * has to supply an increasing one. The gateway has no turn counter of its own,
- * so read it back out of the state we persisted last time. Turn drives only the
- * recall page-table TTL, so a restart resetting it to 0 costs recall freshness
- * for one session, never correctness. */
-static int gw_state_next_turn(const char *state_json)
-{
-   if (!state_json || !state_json[0])
-      return 0;
-   cJSON *root = cJSON_Parse(state_json);
-   if (!root)
-      return 0;
-   cJSON *turn = cJSON_GetObjectItemCaseSensitive(root, "turn");
-   int next = cJSON_IsNumber(turn) ? turn->valueint + 1 : 0;
-   cJSON_Delete(root);
-   return next;
 }
 
 int gw_economizer_measure(cJSON *messages, const char *system_prompt, const char *model,
@@ -226,11 +202,8 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
     * between requests in the same place the delegate seam keeps its own. Without
     * this the gateway could never fold for ANY provider, so the biggest context
     * consumer aimee has was reachable only through its own agent loop. */
-   char state_blob[ECON_MODULE_STATE_MAX];
-   state_blob[0] = '\0';
    char skey_ns[MSG_SESSION_KEY_LEN + 24];
    gw_state_key(ctx->skey, msgs, skey_ns, sizeof skey_ns);
-   (void)db1_economizer_state_load(skey_ns, state_blob, sizeof state_blob);
 
    econ_module_request_t mreq;
    memset(&mreq, 0, sizeof mreq);
@@ -248,8 +221,7 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
    mreq.recall_enabled = config_fold_recall_enabled();
    mreq.recall_ttl_turns = config_fold_recall_ttl_turns();
    mreq.recall_inject = config_fold_recall_inject();
-   mreq.state = state_blob[0] ? state_blob : NULL;
-   mreq.turn = gw_state_next_turn(state_blob);
+   mreq.state_key = skey_ns;     /* the module keeps its reducer state under this */
    mreq.session_key = ctx->skey; /* the module reads its breaker off this */
 
    char closet_denylist[CONFIG_COPY_MAX];
@@ -281,14 +253,6 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
    econ_module_result_t mres;
    int rrc =
        econ_module_reduce(msgs, system_prompt, ECON_MODULE_SEAM_GATEWAY, &mreq, &reduced, &mres);
-
-   /* Persist BEFORE the apply decision, and regardless of it. The freeze boundary
-    * has to advance on every turn the module saw, not only the ones that shipped a
-    * reduced payload: drop it on a bypass and the next turn re-folds from cold,
-    * which moves the prefix and costs the cache read the freeze exists to keep.
-    * Mirrors the delegate seam, which persists on the same unconditional terms. */
-   if (mres.state && mres.state[0])
-      (void)db1_economizer_state_save(skey_ns, mres.state);
 
    /* One line per gateway reduction, because until now this seam was invisible:
     * its telemetry goes to the obs bus, nothing reached server.log, and proving

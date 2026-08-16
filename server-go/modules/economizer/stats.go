@@ -25,6 +25,10 @@ var statPublishedName = map[string]string{
 	Stat5xxDisable:            "gateway_5xx_disable",
 	StatStreamErrorDisable:    "gateway_stream_error_disable",
 	StatSessionDisabledBlocks: "gateway_session_disabled_blocks",
+	// Not gateway_-prefixed: reducer state backs both seams, so a failure to
+	// reach it is not a gateway fact.
+	StatStateUnavailable: "economizer_state_unavailable",
+	StatStateSaveFailed:  "economizer_state_save_failed",
 }
 
 const (
