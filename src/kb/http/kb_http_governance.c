@@ -4,8 +4,8 @@
 #include "kb_http_governance.h"
 
 #include "cJSON.h"
-#include "db2/artifacts.h"    /* db2_audit_event_* */
-#include "db2/decision_log.h" /* db2_decision_log_* */
+#include "modules/db2/c/artifacts.h"    /* db2_audit_event_* */
+#include "modules/db2/c/decision_log.h" /* db2_decision_log_* */
 #include "log.h"
 
 #include <stdio.h>

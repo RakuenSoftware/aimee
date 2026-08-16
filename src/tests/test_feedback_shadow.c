@@ -9,12 +9,12 @@
 #include "aimee.h"
 #include "db.h"
 #include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "platform_test_util.h"
 #include "memory.h"
 #include "modules/memory/memory_graph_fusion.h"
-#include "../db2/shadow_delta.h"
+#include "../modules/db2/c/shadow_delta.h"
 
 static char g_db_path[512];
 

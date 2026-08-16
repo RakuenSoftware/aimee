@@ -161,11 +161,10 @@ static void build_schema_path(char *buf, size_t buf_len, char tier, int sqlite_v
    APPEND_CH('r');
    APPEND_CH('c');
    APPEND_CH('/');
-   /* DB1 lives under src/modules/db1 now that it is a module; DB2 has not moved.
-      The INPUT still matches the legacy src/db1/ spelling, because that is what
-      proposals written before the move say and canonicalizing them is the whole
-      point of this function. Only the target moved. */
-   if (tier == '1')
+   /* The INPUT still matches the legacy src/dbN/ spelling, because that is what
+      proposals written before the moves say and canonicalizing them is the whole
+      point of this function. DB2's preserved C tree has one extra c/ segment. */
+   if (tier == '1' || tier == '2')
    {
       APPEND_CH('m');
       APPEND_CH('o');
@@ -180,6 +179,11 @@ static void build_schema_path(char *buf, size_t buf_len, char tier, int sqlite_v
    APPEND_CH('b');
    APPEND_CH(tier);
    APPEND_CH('/');
+   if (tier == '2')
+   {
+      APPEND_CH('c');
+      APPEND_CH('/');
+   }
    APPEND_CH('s');
    APPEND_CH('c');
    APPEND_CH('h');

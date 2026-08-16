@@ -8,13 +8,13 @@
 #include "aimee.h"
 #include "db.h"
 #include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "platform_test_util.h"
 #include "memory.h"
 #include "modules/memory/memory_graph_fusion.h"
-#include "db2/entity_edges.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/memory_query.h"
 
 static char g_db_path[512];
 

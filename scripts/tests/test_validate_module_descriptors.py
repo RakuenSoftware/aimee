@@ -30,9 +30,10 @@ def production_repo() -> tempfile.TemporaryDirectory[str]:
     inventory = repo / validator.INVENTORY_PATH
     inventory.parent.mkdir(parents=True)
     shutil.copy2(REPO_ROOT / validator.INVENTORY_PATH, inventory)
+    include_roots: set[str] = set()
     for source in (REPO_ROOT / "src/modules").glob("*/module.yaml"):
         target = repo / "src/modules" / source.parent.name / "module.yaml"
-        target.parent.mkdir(parents=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         descriptor = json.loads(source.read_text(encoding="utf-8"))
         for field in validator.OWNERSHIP_FIELDS:
@@ -40,6 +41,16 @@ def production_repo() -> tempfile.TemporaryDirectory[str]:
                 owned_target = repo / relative
                 owned_target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(REPO_ROOT / relative, owned_target)
+        build = descriptor.get("c_build")
+        if isinstance(build, dict):
+            include_roots.update(build.get("include_roots", []))
+    # The validator requires every c_build include root to be a real directory.
+    # Only roots that happen to hold a descriptor-owned file appear from the
+    # copies above, so materialize the rest: a module may legitimately include
+    # from a root it owns no file in. Deferred until every descriptor is copied
+    # so that creating one module's root cannot race another module's own dir.
+    for root in sorted(include_roots):
+        (repo / root).mkdir(parents=True, exist_ok=True)
     return tmp
 
 
@@ -307,8 +318,52 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(
             {field: len(report["ownership"][field]) for field in validator.OWNERSHIP_FIELDS},
             {"sources": 1, "private_headers": 0, "public_headers": 1, "tests": 1,
-             "docs": 1, "go_sources": 0, "go_tests": 0},
+             "contracts": 0, "docs": 1, "go_sources": 0, "go_tests": 0},
         )
+
+    def test_contract_ownership_is_scoped_and_complete(self) -> None:
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            relative = "src/modules/module-runtime/eventcontract/example.json"
+            contract = repo / relative
+            contract.parent.mkdir(parents=True)
+            contract.write_text('{"schema_version":1}\n', encoding="utf-8")
+            self.mutate_descriptor(
+                repo,
+                "module-runtime",
+                lambda value: value.__setitem__("contracts", [relative]),
+            )
+            validator.validate_roots(repo, [Path("src/modules")])
+
+            self.mutate_descriptor(
+                repo,
+                "module-runtime",
+                lambda value: value.__setitem__("contracts", []),
+            )
+            with self.assertRaisesRegex(
+                validator.DescriptorError,
+                r"rule=ownership-complete pointer=/contracts.*example.json",
+            ):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
+
+    def test_contract_ownership_rejects_wrong_boundary_and_extension(self) -> None:
+        descriptor = json.loads(
+            (REPO_ROOT / "src/modules/module-runtime/module.yaml").read_text(encoding="utf-8")
+        )
+        cases = (
+            ("src/modules/module-runtime/example.json", "ownership-role-boundary"),
+            ("src/modules/module-runtime/eventcontract/example.yaml", "ownership-role"),
+        )
+        for relative, rule in cases:
+            mutated = copy.deepcopy(descriptor)
+            mutated["contracts"] = [relative]
+            with self.subTest(relative=relative), self.assertRaisesRegex(
+                validator.DescriptorError, rf"rule={rule} pointer=/contracts/0"
+            ):
+                validator.validate_ownership(REPO_ROOT, "module-runtime", mutated)
 
     def test_production_complete_ownership_mutations(self) -> None:
         cases = (

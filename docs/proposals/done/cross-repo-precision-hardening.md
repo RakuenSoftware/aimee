@@ -48,8 +48,8 @@
 ## Charter roles
 Same as the parent: Recall + Rank-Fuse (graph layer) + the cross-repo **resolution** pass. This
 proposal modifies the resolution/classification stage
-(`src/db2/cross_repo_resolver.c`, `src/db2/cross_repo_classify.c`,
-`src/db2/cross_repo_stats.c`, `src/db2/cross_repo_deps.c`), adds index-time metadata to the kb
+(`src/modules/db2/c/cross_repo_resolver.c`, `src/modules/db2/c/cross_repo_classify.c`,
+`src/modules/db2/c/cross_repo_stats.c`, `src/modules/db2/c/cross_repo_deps.c`), adds index-time metadata to the kb
 ingest/projection path, and replaces the frequency-only `blocked_symbols` model with corpus IDF; the
 schema gains metadata columns + an inter-repo import-route index but the HTTP/CLI surface (S5–S7) and
 review queue are unchanged.

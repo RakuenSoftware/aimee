@@ -4,8 +4,8 @@
 
 #include "cJSON.h"
 #include "pam_auth.h" /* pam_check_credentials — the one PAM policy, shared with the dashboard */
-#include "db2/management_identity_journal.h"
-#include "db2/management_intent_fields.h" /* db2_intent_bare_username (header-only) */
+#include "modules/db2/c/management_identity_journal.h"
+#include "modules/db2/c/management_intent_fields.h" /* db2_intent_bare_username (header-only) */
 #include "kb_auth_oidc.h"
 #include "kb/kb_login_throttle.h" /* the pre-auth brute-force budget */
 #include "kb_oidc_login.h"

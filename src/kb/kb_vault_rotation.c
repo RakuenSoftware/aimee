@@ -1,7 +1,7 @@
 #include "kb_vault_rotation.h"
 
 #include "org_vault_rotation.h"
-#include "db2_tenant.h"
+#include "modules/db2/c/db2_tenant.h"
 #include "vault_server_key.h"
 
 #include <limits.h>

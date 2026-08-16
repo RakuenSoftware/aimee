@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "../kb_reasoning.h"
 #include "config.h"
 #include "config_learning.h"

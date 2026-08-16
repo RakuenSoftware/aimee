@@ -11,7 +11,7 @@ int kb_neardup_propose(const char *project, const char *file_path, const char *m
    return 0;
 }
 #else
-#include "db2/artifacts.h"
+#include "modules/db2/c/artifacts.h"
 #include "log.h"
 #include "cJSON.h"
 

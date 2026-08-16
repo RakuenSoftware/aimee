@@ -1,12 +1,12 @@
 /* test_fact_lifecycle.c: typed-fact §5 confidence classes + §4 correction/
  * retraction, against the sqlite shim. P3. */
 #include "../headers/aimee.h"
-#include "../db2/fact_lifecycle.h"
-#include "../db2/rel_types_store.h"
-#include "../db2/entity_edges.h"
-#include "../db2/db2_test_shim.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
+#include "../modules/db2/c/fact_lifecycle.h"
+#include "../modules/db2/c/rel_types_store.h"
+#include "../modules/db2/c/entity_edges.h"
+#include "../modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
 #include "modules/memory/memory_ontology.h"
 #include "modules/memory/memory_fact_gate.h"
 #include <assert.h>

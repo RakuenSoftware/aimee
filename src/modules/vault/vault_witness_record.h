@@ -12,7 +12,7 @@
  * so a copy retained off-host can be compared byte-for-byte against the local
  * store. A bug in encoding or digesting produces evidence that looks well-formed
  * locally yet is worthless for comparison, so the format is fixed here, matched
- * by the SQL side (`src/db2/schema.sql`), and pinned by stored test vectors.
+ * by the SQL side (`src/modules/db2/c/schema.sql`), and pinned by stored test vectors.
  *
  * This module is pure and production-uninvoked in E1: it has no database, no I/O,
  * and is not reachable from admission, the reseal orchestrator, or any route.

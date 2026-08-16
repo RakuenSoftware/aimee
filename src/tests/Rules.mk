@@ -658,6 +658,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-tool-schema-sanitizer \
                $(TESTPREFIX)/unit-test-toolset \
                $(TESTPREFIX)/unit-test-db1-cost-fold \
+               $(TESTPREFIX)/unit-test-db1-module-stage \
                $(TESTPREFIX)/unit-test-db1-roundtable-pipeline \
                $(TESTPREFIX)/unit-test-roundtable-pipeline-eval \
                $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk \
@@ -725,6 +726,11 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-server-mgmt-jwks-cache
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening
 TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
+TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
+                $(TESTPREFIX)/unit-test-bus-db2-module \
+                $(TESTPREFIX)/unit-test-db2-sketch-support \
+                $(TESTPREFIX)/unit-test-db3-route \
+                $(TESTPREFIX)/unit-test-bus-db3
 
 MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/memory.o \
@@ -792,6 +798,11 @@ $(TESTPREFIX)/unit-test-communication: $(OBJDIR)/tests/test_communication.o \
 UNIT_TEST_SHARD_COUNT ?= 1
 UNIT_TEST_SHARD_INDEX ?= 0
 UNIT_TEST_SKIP_P1 ?= 0
+ifeq ($(UNIT_TEST_SHARD_INDEX),0)
+UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize
+else
+UNIT_TEST_AUX_TARGETS =
+endif
 ifeq ($(UNIT_TEST_SHARD_COUNT),1)
 UNIT_TEST_TARGETS := $(TEST_TARGETS)
 else
@@ -811,7 +822,8 @@ endif
 # verify gate brings the real module up on a real bus
 # (tests/support/git_module_fixture.c). Build it here and name it in the
 # environment, so no suite has to grow an argv contract to find it.
-unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(OBJDIR)/aimee-module $(UNIT_TEST_TARGETS)
+unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(OBJDIR)/aimee-module \
+            $(UNIT_TEST_TARGETS) $(UNIT_TEST_AUX_TARGETS)
 	@if ! printf '%s:%s\n' "$(UNIT_TEST_SHARD_COUNT)" "$(UNIT_TEST_SHARD_INDEX)" | \
 	     awk -F: '$$1 ~ /^[0-9]+$$/ && $$2 ~ /^[0-9]+$$/ && $$1 > 0 && $$2 < $$1 { ok=1 } END { exit !ok }'; then \
 	  echo "invalid unit-test shard $(UNIT_TEST_SHARD_INDEX)/$(UNIT_TEST_SHARD_COUNT)" >&2; \
@@ -886,6 +898,10 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(OBJDIR)/aimee-module $(UNIT_TEST_
 	    exit 1; \
 	  fi; \
 	fi
+	@for t in $(UNIT_TEST_AUX_TARGETS); do \
+	  echo "  $$t"; \
+	  "./$$t"; \
+	done
 	@echo "All tests passed."
 
 $(TESTPREFIX)/unit-test-util: $(OBJDIR)/tests/test_util.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
@@ -1784,7 +1800,7 @@ $(TESTPREFIX)/unit-test-working-memory: $(OBJDIR)/tests/test_working_memory.o \
 # Mock-pattern demonstrator: exercises the same wm.h contract using the
 # in-memory implementation. Same test source, different backing.
 $(TESTPREFIX)/unit-test-working-memory-mock: $(OBJDIR)/tests/test_working_memory.o \
-                               $(OBJDIR)/modules/db1/db1_init_mock.o $(OBJDIR)/modules/db1/wm_mock.o
+                               $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/tests/support/wm_mock.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-local-resolution: $(OBJDIR)/tests/test_local_resolution.o \
@@ -3213,6 +3229,80 @@ $(TESTPREFIX)/unit-test-routing-module: $(OBJDIR)/tests/test_routing_module.o \
 
 .PHONY: unit-test-routing-module
 unit-test-routing-module: $(TESTPREFIX)/unit-test-routing-module
+	$<
+
+$(OBJDIR)/tests/test_db2_module_contract.o: C_FLAGS += -Icore/event_bus/include \
+                                                        -Imodules/db2 \
+                                                        -Imodules/db2/include
+$(OBJDIR)/modules/db2/module_adapter.o: C_FLAGS += -Icore/event_bus/include \
+                                                   -Imodules/db2/include
+$(TESTPREFIX)/unit-test-db2-module-contract: \
+                                        $(OBJDIR)/tests/test_db2_module_contract.o \
+                                        $(OBJDIR)/modules/db2/client/generated.o \
+                                        $(OBJDIR)/modules/db2/module_adapter.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+.PHONY: unit-test-db2-module-contract
+unit-test-db2-module-contract: $(TESTPREFIX)/unit-test-db2-module-contract
+	$<
+
+$(OBJDIR)/tests/test_bus_db2_module.o: C_FLAGS += -Icore/event_bus/include \
+                                                   -Imodules/db2 \
+                                                   -Imodules/db2/include
+$(OBJDIR)/modules/db2/client/generated.o: C_FLAGS += -Icore/event_bus/include \
+                                                        -Imodules/db2/include
+$(TESTPREFIX)/unit-test-bus-db2-module: \
+                                        $(OBJDIR)/tests/test_bus_db2_module.o \
+                                        $(OBJDIR)/modules/db2/client/generated.o \
+                                        $(OBJDIR)/modules/db2/module_adapter.o \
+                                        $(OBJDIR)/core/event_bus/module_client.o \
+                                        $(OBJDIR)/core/event_bus/module_runtime.o \
+                                        $(OBJDIR)/core/event_bus/module_protocol.o \
+                                        $(OBJDIR)/core/event_bus/bus_runtime.o \
+                                        $(OBJDIR)/core/event_bus/bus_endpoint.o \
+                                        $(OBJDIR)/core/event_bus/bus_client.o \
+                                        $(OBJDIR)/core/event_bus/bus_attach.o \
+                                        $(OBJDIR)/core/event_bus/bus_host.o \
+                                        $(OBJDIR)/core/event_bus/bus_route.o \
+                                        $(OBJDIR)/core/event_bus/bus_region.o \
+                                        $(OBJDIR)/core/event_bus/bus_region_host.o \
+                                        $(OBJDIR)/core/event_bus/bus_ring.o \
+                                        $(OBJDIR)/core/event_bus/bus_arena.o \
+                                        $(OBJDIR)/core/event_bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-db2-module
+unit-test-bus-db2-module: $(TESTPREFIX)/unit-test-bus-db2-module
+	$<
+
+$(OBJDIR)/tests/test_db3_route.o: C_FLAGS += -Imodules/db2/include
+$(OBJDIR)/modules/db2/db3_route.o: C_FLAGS += -Imodules/db2/include
+$(TESTPREFIX)/unit-test-db3-route: $(OBJDIR)/tests/test_db3_route.o \
+                                      $(OBJDIR)/modules/db2/db3_route.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+.PHONY: unit-test-db3-route
+unit-test-db3-route: $(TESTPREFIX)/unit-test-db3-route
+	$<
+
+$(OBJDIR)/tests/test_bus_db3.o: C_FLAGS += -Icore/event_bus/include -Imodules/db2/include
+$(TESTPREFIX)/unit-test-bus-db3: $(OBJDIR)/tests/test_bus_db3.o \
+                                $(OBJDIR)/modules/db2/db3_route.o \
+                                $(OBJDIR)/core/event_bus/bus_runtime.o \
+                                $(OBJDIR)/core/event_bus/bus_endpoint.o \
+                                $(OBJDIR)/core/event_bus/bus_client.o \
+                                $(OBJDIR)/core/event_bus/bus_attach.o \
+                                $(OBJDIR)/core/event_bus/bus_host.o \
+                                $(OBJDIR)/core/event_bus/bus_route.o \
+                                $(OBJDIR)/core/event_bus/bus_region.o \
+                                $(OBJDIR)/core/event_bus/bus_region_host.o \
+                                $(OBJDIR)/core/event_bus/bus_ring.o \
+                                $(OBJDIR)/core/event_bus/bus_arena.o \
+                                $(OBJDIR)/core/event_bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lm
+
+.PHONY: unit-test-bus-db3
+unit-test-bus-db3: $(TESTPREFIX)/unit-test-bus-db3
 	$<
 
 # Event-bus conformance host harness (feature tree slice 10). A test binary that
@@ -4844,6 +4934,25 @@ $(TESTPREFIX)/unit-test-toolset: \
                                        $(OBJDIR)/tests/test_toolset.o \
                                        $(OBJDIR)/toolset.o \
                                        $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# The module adapter carries the stage handler; the bus objects come with
+# module_runtime.h's declarations. db1_init/db_schema/checkpoints give it a real
+# store to round-trip through, because a handler that only parses proves nothing
+# about what a caller gets back.
+$(TESTPREFIX)/unit-test-db1-module-stage: \
+                                       $(OBJDIR)/tests/test_db1_module_stage.o \
+                                       $(OBJDIR)/modules/db1/module_adapter.o \
+                                       $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
+                                       $(OBJDIR)/modules/db1/checkpoints.o \
+                                       $(OBJDIR)/core/event_bus/module_runtime.o \
+                                       $(OBJDIR)/core/event_bus/module_protocol.o \
+                                       $(OBJDIR)/core/event_bus/bus_attach.o \
+                                       $(OBJDIR)/core/event_bus/bus_client.o \
+                                       $(OBJDIR)/core/event_bus/bus_endpoint.o \
+                                       $(OBJDIR)/core/event_bus/bus_region.o \
+                                       $(OBJDIR)/core/event_bus/bus_ring.o \
+                                       $(OBJDIR)/core/event_bus/bus_wire.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-db1-cost-fold: \
@@ -6503,6 +6612,57 @@ $(TESTPREFIX)/unit-test-sketch: $(OBJDIR)/tests/test_sketch.o \
                      $(OBJDIR)/sketch.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
+
+DB2_SKETCH_SUPPORT_RENAMES = \
+   -Dsketch_bloom_init=db2_support_sketch_bloom_init \
+   -Dsketch_count_min_init=db2_support_sketch_count_min_init \
+   -Dsketch_fnv1a=db2_support_sketch_fnv1a \
+   -Dsketch_hll_add_hash=db2_support_sketch_hll_add_hash \
+   -Dsketch_hll_init=db2_support_sketch_hll_init \
+   -Dsketch_lsh_band_hash=db2_support_sketch_lsh_band_hash \
+   -Dsketch_minhash_init=db2_support_sketch_minhash_init
+
+$(OBJDIR)/tests/db2_sketch_support_impl.o: modules/db2/support/sketch_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SKETCH_SUPPORT_RENAMES) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-sketch-support: \
+                     $(OBJDIR)/tests/test_db2_sketch_support.o \
+                     $(OBJDIR)/tests/db2_sketch_support_impl.o \
+                     $(OBJDIR)/sketch.o
+	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS) -lm
+
+DB2_SKETCH_SANITIZE_DIR = $(OBJDIR)/tests/db2-sketch-support-sanitize
+DB2_SKETCH_SANITIZE_FLAGS = -O1 -g -fno-lto -fsanitize=address,undefined \
+                            -fno-omit-frame-pointer -U_FORTIFY_SOURCE \
+                            -D_FORTIFY_SOURCE=3
+
+$(DB2_SKETCH_SANITIZE_DIR)/test.o: tests/test_db2_sketch_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SKETCH_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_SKETCH_SANITIZE_DIR)/support.o: modules/db2/support/sketch_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SKETCH_SUPPORT_RENAMES) \
+	      $(DB2_SKETCH_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_SKETCH_SANITIZE_DIR)/monolith.o: sketch.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SKETCH_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-sketch-support-sanitize: \
+                     $(DB2_SKETCH_SANITIZE_DIR)/test.o \
+                     $(DB2_SKETCH_SANITIZE_DIR)/support.o \
+                     $(DB2_SKETCH_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SKETCH_SANITIZE_FLAGS) -o $@ $^ -lm
+
+.PHONY: unit-test-db2-sketch-support
+unit-test-db2-sketch-support: $(TESTPREFIX)/unit-test-db2-sketch-support
+	$<
+
+.PHONY: unit-test-db2-sketch-support-sanitize
+unit-test-db2-sketch-support-sanitize: $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize
+	$<
 
 $(TESTPREFIX)/unit-test-kb-lab: $(OBJDIR)/tests/test_kb_lab.o \
                      $(OBJDIR)/kb/kb_lab.o \

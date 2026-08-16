@@ -13,8 +13,8 @@
  */
 #include "subject_corpus.h"
 
-#include "db2/management_intent_fields.h"
-#include "kb/kb_mgmt_token_authority.h"
+#include "modules/db2/c/management_intent_fields.h"
+#include "kb_mgmt_token_authority.h"
 #include "server_identity_token.h"
 
 #include <assert.h>

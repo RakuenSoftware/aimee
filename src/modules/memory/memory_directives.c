@@ -11,8 +11,8 @@
 #include "util.h"
 #include "cJSON.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db2/epistemic_directives.h"
-#include "db2/failed_queries.h"
+#include "modules/db2/c/epistemic_directives.h"
+#include "modules/db2/c/failed_queries.h"
 #include "log.h"
 #endif
 #include "memory.h"

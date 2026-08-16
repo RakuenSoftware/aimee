@@ -29,11 +29,11 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "db2.h"
-#include "db2/db2_internal.h"
-#include "db2/db2_witness_checkpoint.h"
-#include "db2/db2_witness_emit.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db2_witness_checkpoint.h"
+#include "modules/db2/c/db2_witness_emit.h"
+#include "modules/db2/c/db_postgres.h"
 #include "kb/kb_vault_policy.h"
 #include "kb/kb_witness_cadence.h"
 #include "modules/vault/vault_witness_offline.h"

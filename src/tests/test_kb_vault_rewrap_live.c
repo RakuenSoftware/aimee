@@ -4,10 +4,10 @@
  * scratch vault on real Postgres and drives the owner-only whole-vault staging API.
  * It models custody with two in-memory KEKs, but every DEK and verifier re-wrap is
  * the production RFC 3394 AES-KW implementation. */
-#include "db2.h"
-#include "db2/db2_internal.h"
-#include "db2/db_postgres.h"
-#include "db2/org_vault_rewrap.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/org_vault_rewrap.h"
 #include "modules/vault/vault_crypto.h"
 
 #include <assert.h>

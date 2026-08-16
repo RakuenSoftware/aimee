@@ -33,7 +33,7 @@ composition, listeners, lifecycle, and generic dispatch. `src/base`, `src/platfo
 code remain deliberately small and may not absorb feature logic.
 
 The migration removes feature implementation from `src/`, `src/server/`, `src/kb/`, `src/db1/`,
-`src/db2/`, and `src/headers/`. Database files move by owning capability, not by database number.
+`src/modules/db2/c/`, and `src/headers/`. Database files move by owning capability, not by database number.
 Temporary forwarding headers and root allowlists have owners, expiries, and may only shrink.
 
 **Language boundary (2026-07-23 amendment).** Under the suite amendment, the communication core is C

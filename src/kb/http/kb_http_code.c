@@ -4,26 +4,26 @@
 #include "config.h"
 #include "kb_curator_queue.h"
 #include "cJSON.h"
-#include "db2/canonical_index.h"
-#include "db2/cross_repo_classify.h" /* xrepo_tier_name */
-#include "db2/cross_repo_deps.h"     /* canonical_index_cross_repo_deps */
-#include "db2/cross_repo_review.h"   /* db2_cross_repo_review_list */
-#include "db2/cross_repo_stats.h"    /* db2_cross_repo_set_trust, recompute_blocked_symbols */
-#include "db2/kb_service_backend.h"  /* db2_kb_ingest_queue_enqueue */
-#include "db2/lifecycle.h"
-#include "db2/memory_query.h"
-#include "db2/code_projection.h"
-#include "db2/code_project_lifecycle.h"
-#include "db2/code_index.h"
-#include "db2/pgvec_transport.h"
-#include "db2/entity_edges.h"     /* §6 memory-fusion leg: knowledge-graph edges */
-#include "db2/entity_nodes.h"     /* db2_entity_node_get -> file_path */
-#include "code_collect.h"         /* §6 live: git_resolve_default_sha + change gate */
-#include "db2/kb_runtime_state.h" /* stored last-indexed default-branch SHA */
+#include "modules/db2/c/canonical_index.h"
+#include "modules/db2/c/cross_repo_classify.h" /* xrepo_tier_name */
+#include "modules/db2/c/cross_repo_deps.h"     /* canonical_index_cross_repo_deps */
+#include "modules/db2/c/cross_repo_review.h"   /* db2_cross_repo_review_list */
+#include "modules/db2/c/cross_repo_stats.h" /* db2_cross_repo_set_trust, recompute_blocked_symbols */
+#include "modules/db2/c/kb_service_backend.h" /* db2_kb_ingest_queue_enqueue */
+#include "modules/db2/c/lifecycle.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/code_projection.h"
+#include "modules/db2/c/code_project_lifecycle.h"
+#include "modules/db2/c/code_index.h"
+#include "modules/db2/c/pgvec_transport.h"
+#include "modules/db2/c/entity_edges.h"     /* §6 memory-fusion leg: knowledge-graph edges */
+#include "modules/db2/c/entity_nodes.h"     /* db2_entity_node_get -> file_path */
+#include "code_collect.h"                   /* §6 live: git_resolve_default_sha + change gate */
+#include "modules/db2/c/kb_runtime_state.h" /* stored last-indexed default-branch SHA */
 #include "memory.h"
 #include "kb_rrf.h"
-#include "db2/lessons.h"        /* §3 actuation: earned-trust tie-break */
-#include "kb/lessons_reflect.h" /* reflect the ledger into per-node trust */
+#include "modules/db2/c/lessons.h" /* §3 actuation: earned-trust tie-break */
+#include "kb/lessons_reflect.h"    /* reflect the ledger into per-node trust */
 #include "kb_reqctx.h"
 #include <time.h>
 #include "kb/kb_graph_analytics.h"

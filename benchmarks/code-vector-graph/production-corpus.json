@@ -28,7 +28,7 @@
       "expected_ids": []
     },
     {
-      "query": "src/db2/entity_edges.c utility bump",
+      "query": "src/modules/db2/c/entity_edges.c utility bump",
       "category": "code_file",
       "code_shaped": true,
       "expected_ids": []

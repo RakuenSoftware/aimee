@@ -6,8 +6,8 @@
  * built with cJSON so escaping is handled for us. */
 
 #include "kb_http_search.h"
-#include "db2/artifacts.h"
-#include "db2/kb_releases.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/kb_releases.h"
 #include "cJSON.h"
 
 #include <stdio.h>

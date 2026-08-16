@@ -4,8 +4,8 @@
 #include "aimee.h"
 #include "cJSON.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db2/memory_conflicts.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/memory_conflicts.h"
+#include "modules/db2/c/memory_query.h"
 #endif
 #include "kb.h"
 #include "log.h"

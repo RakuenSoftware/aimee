@@ -9,14 +9,14 @@
 #define _GNU_SOURCE
 #endif
 
-#include "db2/db2.h"
-#include "db2/db2_tenant.h"
-#include "db2/decision_log.h"        /* db2_decision_log_mark_revisit_due (P1) */
-#include "db2/cross_repo_identity.h" /* db2_cross_repo_rebuild_identities (H0c) */
-#include "db2/cross_repo_route.h"    /* db2_cross_repo_rebuild_routes (H0d) */
-#include "db2/cross_repo_build.h"    /* db2_cross_repo_rebuild_build_deps (recall R2) */
-#include "db2/cross_repo_stats.h"    /* db2_cross_repo_recompute_blocked_symbols */
-#include "db2/ontology_evolution.h"  /* db2_ontology_eval_candidates/_approve (§7.2 auto-promote) */
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_tenant.h"
+#include "modules/db2/c/decision_log.h"        /* db2_decision_log_mark_revisit_due (P1) */
+#include "modules/db2/c/cross_repo_identity.h" /* db2_cross_repo_rebuild_identities (H0c) */
+#include "modules/db2/c/cross_repo_route.h"    /* db2_cross_repo_rebuild_routes (H0d) */
+#include "modules/db2/c/cross_repo_build.h"    /* db2_cross_repo_rebuild_build_deps (recall R2) */
+#include "modules/db2/c/cross_repo_stats.h"    /* db2_cross_repo_recompute_blocked_symbols */
+#include "modules/db2/c/ontology_evolution.h" /* db2_ontology_eval_candidates/_approve (§7.2 auto-promote) */
 #include "kb_curator_drain.h"
 #include "kb_curator_extract.h"
 #include "kb_curator_resolve_entities.h"

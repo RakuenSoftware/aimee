@@ -6,8 +6,8 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "db2_test_shim.h"
-#include "db2/kb_payload.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "modules/db2/c/kb_payload.h"
 
 static int scalar(sqlite3 *db, const char *sql)
 {

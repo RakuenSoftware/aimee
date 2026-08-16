@@ -22,9 +22,9 @@
 #include "headers/util.h"
 #include "headers/agent_config.h"
 #include "headers/agent_exec.h"
-#include "db2/artifacts.h"
-#include "db2/db_postgres.h"
-#include "db2/db2_internal.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/db2_internal.h"
 #include "cJSON.h"
 
 /* Maximum bytes captured from a verification command. */

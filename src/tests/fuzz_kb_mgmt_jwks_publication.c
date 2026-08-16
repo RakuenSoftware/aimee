@@ -1,4 +1,4 @@
-#include "kb/kb_mgmt_jwks_publication.h"
+#include "kb_mgmt_jwks_publication.h"
 
 #include <assert.h>
 #include <openssl/crypto.h>

@@ -36,11 +36,11 @@ address findings → PR → merge to `testing`. Slices are independently shippab
   `stale_edit`:1845, `subagent_blocked`:1615, `antipattern_blocked`:1673); allow terminal is
   `return 0` (:1999). Verdict contract `0/1/2` (`src/headers/guardrails.h:134`).
 - `hmac_sha256()` + `wfe_sha256_raw()` (`src/workflow/wfe_approval.c:90`) — reuse for `args_hash`.
-- `decision_log` table (`src/db2/schema.sql:29`) + full API `db2_decision_log_insert/get/
-  set_outcome/list` + `db2_decision_log_row_t` (`src/db2/decision_log.h`) + client wrappers
+- `decision_log` table (`src/modules/db2/c/schema.sql:29`) + full API `db2_decision_log_insert/get/
+  set_outcome/list` + `db2_decision_log_row_t` (`src/modules/db2/c/decision_log.h`) + client wrappers
   (`kb_client_decision_log_*`). Extend additively.
 - `rel_types` table (`schema.sql:1067`) + `db2_rel_types_stage_provisional()`
-  (`src/db2/rel_types_store.c:132`) — runtime `INSERT`, no migration.
+  (`src/modules/db2/c/rel_types_store.c:132`) — runtime `INSERT`, no migration.
 - Recall expiry sweep — `memory_directive_sweep_expired()` in `recall_fill_reminders()`
   (`src/memory_context.c:920`); client wrapper `kb_client_memory_directive_sweep_expired_json()`.
   Periodic drain — `kb_curator_drain.c` `drain_thread_main` (`DRAIN_POLL_SECS=5`).

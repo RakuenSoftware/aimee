@@ -1,0 +1,3808 @@
+{
+  "schema_version": 2,
+  "module": "db2",
+  "source_revision": "45b864b8a8d5b1b3ef2d752e5c2f44bd02bc7540",
+  "source_fingerprint": "fb050d2d8987e57dec8df4a9dfb0422d3a64b09f6f3737abcb824fe59903bfe7",
+  "probe": {
+    "compile_driver": "src/Makefile",
+    "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
+    "link_mode": "relocatable-no-libraries",
+    "helper_objects": [],
+    "libraries": [],
+    "support_compile_flags": "-std=c11 -Os -Wall -Wextra -Werror -fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
+    "support_include_roots": [
+      "src/modules/db2/support"
+    ]
+  },
+  "translation_units": [
+    "src/modules/db2/c/admin_grant.c",
+    "src/modules/db2/c/agent_hints.c",
+    "src/modules/db2/c/agent_outcomes.c",
+    "src/modules/db2/c/anti_patterns.c",
+    "src/modules/db2/c/artifacts.c",
+    "src/modules/db2/c/bandit.c",
+    "src/modules/db2/c/calibration.c",
+    "src/modules/db2/c/canonical_index.c",
+    "src/modules/db2/c/code_audit.c",
+    "src/modules/db2/c/code_index.c",
+    "src/modules/db2/c/code_index_ops.c",
+    "src/modules/db2/c/code_project_lifecycle.c",
+    "src/modules/db2/c/code_projection.c",
+    "src/modules/db2/c/collab_rules.c",
+    "src/modules/db2/c/corpus_jobs.c",
+    "src/modules/db2/c/corpus_structural.c",
+    "src/modules/db2/c/cross_repo_build.c",
+    "src/modules/db2/c/cross_repo_classify.c",
+    "src/modules/db2/c/cross_repo_deps.c",
+    "src/modules/db2/c/cross_repo_identity.c",
+    "src/modules/db2/c/cross_repo_resolver.c",
+    "src/modules/db2/c/cross_repo_review.c",
+    "src/modules/db2/c/cross_repo_route.c",
+    "src/modules/db2/c/cross_repo_stats.c",
+    "src/modules/db2/c/css_graph.c",
+    "src/modules/db2/c/css_insights.c",
+    "src/modules/db2/c/css_migration.c",
+    "src/modules/db2/c/css_render.c",
+    "src/modules/db2/c/curator_gaps.c",
+    "src/modules/db2/c/curator_terms.c",
+    "src/modules/db2/c/curiosity.c",
+    "src/modules/db2/c/db2_hardening.c",
+    "src/modules/db2/c/db2_init.c",
+    "src/modules/db2/c/db2_pool.c",
+    "src/modules/db2/c/db2_reembed.c",
+    "src/modules/db2/c/db2_tenant.c",
+    "src/modules/db2/c/db2_test_shim.c",
+    "src/modules/db2/c/db2_witness_checkpoint.c",
+    "src/modules/db2/c/db2_witness_emit.c",
+    "src/modules/db2/c/db_postgres.c",
+    "src/modules/db2/c/db_schema.c",
+    "src/modules/db2/c/decision_log.c",
+    "src/modules/db2/c/demotion.c",
+    "src/modules/db2/c/enrollments.c",
+    "src/modules/db2/c/entity_edges.c",
+    "src/modules/db2/c/entity_nodes.c",
+    "src/modules/db2/c/entity_profiles.c",
+    "src/modules/db2/c/entity_registry.c",
+    "src/modules/db2/c/epistemic_directives.c",
+    "src/modules/db2/c/evidence_vectors.c",
+    "src/modules/db2/c/fact_ingest.c",
+    "src/modules/db2/c/fact_lifecycle.c",
+    "src/modules/db2/c/fact_recall.c",
+    "src/modules/db2/c/failed_queries.c",
+    "src/modules/db2/c/feature_rows.c",
+    "src/modules/db2/c/feedback.c",
+    "src/modules/db2/c/fidelity.c",
+    "src/modules/db2/c/kb_audit_worm.c",
+    "src/modules/db2/c/kb_docs.c",
+    "src/modules/db2/c/kb_maintenance.c",
+    "src/modules/db2/c/kb_payload.c",
+    "src/modules/db2/c/kb_releases.c",
+    "src/modules/db2/c/kb_runtime_state.c",
+    "src/modules/db2/c/kb_service_backend.c",
+    "src/modules/db2/c/kb_service_backend_agent.c",
+    "src/modules/db2/c/kb_service_backend_export.c",
+    "src/modules/db2/c/kb_service_backend_ingest.c",
+    "src/modules/db2/c/kb_service_backend_memory.c",
+    "src/modules/db2/c/kb_vectors.c",
+    "src/modules/db2/c/kind_lifecycle.c",
+    "src/modules/db2/c/learning.c",
+    "src/modules/db2/c/learning_synth_ops.c",
+    "src/modules/db2/c/lessons.c",
+    "src/modules/db2/c/management_action_journal.c",
+    "src/modules/db2/c/management_client_instance.c",
+    "src/modules/db2/c/management_identity_journal.c",
+    "src/modules/db2/c/management_jwks_publication.c",
+    "src/modules/db2/c/management_jwks_runtime.c",
+    "src/modules/db2/c/management_read_journal.c",
+    "src/modules/db2/c/management_status_key.c",
+    "src/modules/db2/c/management_status_provision.c",
+    "src/modules/db2/c/management_status_runtime.c",
+    "src/modules/db2/c/management_token_authority.c",
+    "src/modules/db2/c/management_token_roots.c",
+    "src/modules/db2/c/membership.c",
+    "src/modules/db2/c/memory_briefing.c",
+    "src/modules/db2/c/memory_conflicts.c",
+    "src/modules/db2/c/memory_entity_graph.c",
+    "src/modules/db2/c/memory_export.c",
+    "src/modules/db2/c/memory_health.c",
+    "src/modules/db2/c/memory_lifecycle.c",
+    "src/modules/db2/c/memory_lint.c",
+    "src/modules/db2/c/memory_payload.c",
+    "src/modules/db2/c/memory_promotion.c",
+    "src/modules/db2/c/memory_query.c",
+    "src/modules/db2/c/memory_query_bookkeeping.c",
+    "src/modules/db2/c/memory_relations.c",
+    "src/modules/db2/c/memory_row_mapper_pg.c",
+    "src/modules/db2/c/memory_scenes.c",
+    "src/modules/db2/c/memory_scope_query.c",
+    "src/modules/db2/c/memory_score_fields.c",
+    "src/modules/db2/c/memory_vectors.c",
+    "src/modules/db2/c/mining.c",
+    "src/modules/db2/c/notes.c",
+    "src/modules/db2/c/oidc_jwks.c",
+    "src/modules/db2/c/ontology_evolution.c",
+    "src/modules/db2/c/org_budget.c",
+    "src/modules/db2/c/org_egress.c",
+    "src/modules/db2/c/org_model_catalog.c",
+    "src/modules/db2/c/org_rate.c",
+    "src/modules/db2/c/org_spend.c",
+    "src/modules/db2/c/org_telemetry.c",
+    "src/modules/db2/c/org_telemetry_fmt.c",
+    "src/modules/db2/c/org_token_audit.c",
+    "src/modules/db2/c/org_vault_key_use.c",
+    "src/modules/db2/c/org_vault_rewrap.c",
+    "src/modules/db2/c/org_vault_rotation.c",
+    "src/modules/db2/c/pgvec_kb_service.c",
+    "src/modules/db2/c/pgvec_transport.c",
+    "src/modules/db2/c/pgvec_verify.c",
+    "src/modules/db2/c/project.c",
+    "src/modules/db2/c/prospective_memories.c",
+    "src/modules/db2/c/rel_types_store.c",
+    "src/modules/db2/c/report_enrichments.c",
+    "src/modules/db2/c/rules.c",
+    "src/modules/db2/c/server_registry.c",
+    "src/modules/db2/c/shadow_delta.c",
+    "src/modules/db2/c/sketch.c",
+    "src/modules/db2/c/stopwords.c",
+    "src/modules/db2/c/tasks.c",
+    "src/modules/db2/c/team.c",
+    "src/modules/db2/c/tool_registry.c",
+    "src/modules/db2/c/trace_mining.c",
+    "src/modules/db2/c/typed_facts.c",
+    "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+    "src/modules/db2/c/vault_operator_status_runtime.c",
+    "src/modules/db2/c/vault_pg.c",
+    "src/modules/db2/c/vector_index_ops.c",
+    "src/modules/db2/c/vector_status.c",
+    "src/modules/db2/c/workflow_patterns.c",
+    "src/modules/db2/c/write_tier_grant.c"
+  ],
+  "descriptor_support_units": [
+    {
+      "path": "src/modules/db2/support/sketch_primitives.c",
+      "source_sha256": "20318d4f9c92894892ef9475f95c1542602f3a7d2b4d9fe6df2b8d63b4986280",
+      "header": "src/modules/db2/support/sketch.h",
+      "header_sha256": "bab2cf2066fc50e583d4490c109a79496ef0f19a430b28cbb850e2b2a74b647d",
+      "defines": [
+        "sketch_bloom_init",
+        "sketch_count_min_init",
+        "sketch_fnv1a",
+        "sketch_hll_add_hash",
+        "sketch_hll_init",
+        "sketch_lsh_band_hash",
+        "sketch_minhash_init"
+      ],
+      "resolves": [
+        "sketch_bloom_init",
+        "sketch_count_min_init",
+        "sketch_fnv1a",
+        "sketch_hll_add_hash",
+        "sketch_hll_init",
+        "sketch_lsh_band_hash",
+        "sketch_minhash_init"
+      ],
+      "allowed_includes": [
+        "sketch.h",
+        "string.h"
+      ],
+      "allowed_header_includes": [
+        "stddef.h",
+        "stdint.h"
+      ],
+      "allowed_undefined": [
+        "memset"
+      ],
+      "base_references": {
+        "sketch_bloom_init": [
+          "src/modules/db2/c/sketch.c"
+        ],
+        "sketch_count_min_init": [
+          "src/modules/db2/c/sketch.c"
+        ],
+        "sketch_fnv1a": [
+          "src/modules/db2/c/kb_payload.c"
+        ],
+        "sketch_hll_add_hash": [
+          "src/modules/db2/c/kb_payload.c"
+        ],
+        "sketch_hll_init": [
+          "src/modules/db2/c/kb_payload.c",
+          "src/modules/db2/c/sketch.c"
+        ],
+        "sketch_lsh_band_hash": [
+          "src/modules/db2/c/sketch.c"
+        ],
+        "sketch_minhash_init": [
+          "src/modules/db2/c/sketch.c"
+        ]
+      },
+      "provenance": "Definitions promoted from src/sketch.c and calls audited in src/modules/db2/c/sketch.c and src/modules/db2/c/kb_payload.c.",
+      "evidence": "Seven deterministic, database-free sketch primitives with one allowed libc dependency (memset); no DB2, event-bus, provider, I/O, or heap dependency."
+    }
+  ],
+  "unresolved": [
+    {
+      "symbol": "CRYPTO_memcmp",
+      "references": [
+        "src/modules/db2/c/management_client_instance.c",
+        "src/modules/db2/c/management_jwks_publication.c",
+        "src/modules/db2/c/management_token_authority.c",
+        "src/modules/db2/c/org_vault_rewrap.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "EVP_Digest",
+      "references": [
+        "src/modules/db2/c/management_jwks_publication.c",
+        "src/modules/db2/c/management_jwks_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "EVP_DigestFinal_ex",
+      "references": [
+        "src/modules/db2/c/code_project_lifecycle.c",
+        "src/modules/db2/c/management_client_instance.c",
+        "src/modules/db2/c/management_status_provision.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "EVP_DigestInit_ex",
+      "references": [
+        "src/modules/db2/c/code_project_lifecycle.c",
+        "src/modules/db2/c/management_client_instance.c",
+        "src/modules/db2/c/management_status_provision.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "EVP_DigestUpdate",
+      "references": [
+        "src/modules/db2/c/code_project_lifecycle.c",
+        "src/modules/db2/c/management_client_instance.c",
+        "src/modules/db2/c/management_status_provision.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "EVP_MD_CTX_free",
+      "references": [
+        "src/modules/db2/c/code_project_lifecycle.c",
+        "src/modules/db2/c/management_client_instance.c",
+        "src/modules/db2/c/management_status_provision.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "EVP_MD_CTX_new",
+      "references": [
+        "src/modules/db2/c/code_project_lifecycle.c",
+        "src/modules/db2/c/management_client_instance.c",
+        "src/modules/db2/c/management_status_provision.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "EVP_sha256",
+      "references": [
+        "src/modules/db2/c/code_project_lifecycle.c",
+        "src/modules/db2/c/management_client_instance.c",
+        "src/modules/db2/c/management_jwks_publication.c",
+        "src/modules/db2/c/management_jwks_runtime.c",
+        "src/modules/db2/c/management_status_provision.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "OPENSSL_cleanse",
+      "references": [
+        "src/modules/db2/c/db2_witness_checkpoint.c",
+        "src/modules/db2/c/management_client_instance.c",
+        "src/modules/db2/c/management_jwks_publication.c",
+        "src/modules/db2/c/management_token_authority.c",
+        "src/modules/db2/c/org_vault_rewrap.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQcancelCreate",
+      "references": [
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQcancelFinish",
+      "references": [
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQcancelPoll",
+      "references": [
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQcancelSocket",
+      "references": [
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQcancelStart",
+      "references": [
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQclear",
+      "references": [
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQcmdTuples",
+      "references": [
+        "src/modules/db2/c/db_postgres.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQconnectPoll",
+      "references": [
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQconnectStartParams",
+      "references": [
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQconnectdb",
+      "references": [
+        "src/modules/db2/c/db_postgres.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQconninfoFree",
+      "references": [
+        "src/modules/db2/c/db2_hardening.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQconninfoParse",
+      "references": [
+        "src/modules/db2/c/db2_hardening.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQconsumeInput",
+      "references": [
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQerrorMessage",
+      "references": [
+        "src/modules/db2/c/db_postgres.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQescapeByteaConn",
+      "references": [
+        "src/modules/db2/c/db_postgres.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQexec",
+      "references": [
+        "src/modules/db2/c/db_postgres.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQexecParams",
+      "references": [
+        "src/modules/db2/c/db_postgres.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQfinish",
+      "references": [
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQflush",
+      "references": [
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQfname",
+      "references": [
+        "src/modules/db2/c/db_postgres.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQfreemem",
+      "references": [
+        "src/modules/db2/c/db2_hardening.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQftype",
+      "references": [
+        "src/modules/db2/c/db_postgres.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQgetResult",
+      "references": [
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQgetisnull",
+      "references": [
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQgetlength",
+      "references": [
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQgetvalue",
+      "references": [
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQisBusy",
+      "references": [
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQnfields",
+      "references": [
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQntuples",
+      "references": [
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQresetPoll",
+      "references": [
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQresetStart",
+      "references": [
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQresultErrorField",
+      "references": [
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQresultErrorMessage",
+      "references": [
+        "src/modules/db2/c/db_postgres.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQresultStatus",
+      "references": [
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQsendQuery",
+      "references": [
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQsendQueryParams",
+      "references": [
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQsetnonblocking",
+      "references": [
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQsocket",
+      "references": [
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQsslInUse",
+      "references": [
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQstatus",
+      "references": [
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQtransactionStatus",
+      "references": [
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "PQunescapeBytea",
+      "references": [
+        "src/modules/db2/c/db_postgres.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "RAND_bytes",
+      "references": [
+        "src/modules/db2/c/enrollments.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "SHA256",
+      "references": [
+        "src/modules/db2/c/db2_witness_checkpoint.c",
+        "src/modules/db2/c/entity_nodes.c",
+        "src/modules/db2/c/management_token_authority.c",
+        "src/modules/db2/c/org_telemetry_fmt.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "_GLOBAL_OFFSET_TABLE_",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_pool.c",
+        "src/modules/db2/c/db2_reembed.c",
+        "src/modules/db2/c/db2_tenant.c",
+        "src/modules/db2/c/db2_test_shim.c",
+        "src/modules/db2/c/db_schema.c",
+        "src/modules/db2/c/memory_scope_query.c",
+        "src/modules/db2/c/memory_vectors.c",
+        "src/modules/db2/c/tool_registry.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "__assert_fail",
+      "references": [
+        "src/modules/db2/c/db2_test_shim.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "__ctype_b_loc",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/cross_repo_build.c",
+        "src/modules/db2/c/css_insights.c",
+        "src/modules/db2/c/curator_terms.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/entity_registry.c",
+        "src/modules/db2/c/epistemic_directives.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/notes.c",
+        "src/modules/db2/c/prospective_memories.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "__ctype_tolower_loc",
+      "references": [
+        "src/modules/db2/c/anti_patterns.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/css_insights.c",
+        "src/modules/db2/c/entity_registry.c",
+        "src/modules/db2/c/epistemic_directives.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/notes.c",
+        "src/modules/db2/c/prospective_memories.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "__ctype_toupper_loc",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "__errno_location",
+      "references": [
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/management_action_journal.c",
+        "src/modules/db2/c/management_client_instance.c",
+        "src/modules/db2/c/management_identity_journal.c",
+        "src/modules/db2/c/management_read_journal.c",
+        "src/modules/db2/c/management_token_authority.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c",
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "__isoc23_sscanf",
+      "references": [
+        "src/modules/db2/c/memory_query.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "__isoc23_strtoll",
+      "references": [
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "__isoc99_sscanf",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/curiosity.c",
+        "src/modules/db2/c/db2_reembed.c",
+        "src/modules/db2/c/entity_edges.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "__tls_get_addr",
+      "references": [
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_tenant.c",
+        "src/modules/db2/c/memory_scope_query.c",
+        "src/modules/db2/c/memory_vectors.c",
+        "src/modules/db2/c/tool_registry.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "_exit",
+      "references": [
+        "src/modules/db2/c/db2_pool.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "aimee_log",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_index.c",
+        "src/modules/db2/c/cross_repo_build.c",
+        "src/modules/db2/c/cross_repo_deps.c",
+        "src/modules/db2/c/cross_repo_identity.c",
+        "src/modules/db2/c/cross_repo_review.c",
+        "src/modules/db2/c/cross_repo_route.c",
+        "src/modules/db2/c/cross_repo_stats.c",
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_reembed.c",
+        "src/modules/db2/c/db2_tenant.c",
+        "src/modules/db2/c/enrollments.c",
+        "src/modules/db2/c/fact_ingest.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/learning.c",
+        "src/modules/db2/c/pgvec_transport.c",
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "anti_pattern_escalate",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "anti_pattern_extract_from_failures",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "anti_pattern_extract_from_feedback",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "api_dashboard_directives",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "api_dashboard_recall",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "api_dashboard_reminders",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "api_logs",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "api_memory_stats",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "atoi",
+      "references": [
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/pgvec_transport.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "atoll",
+      "references": [
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_releases.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "audit_worm_row_hash",
+      "references": [
+        "src/modules/db2/c/kb_audit_worm.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "cJSON_AddArrayToObject",
+      "references": [
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_AddBoolToObject",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/vector_status.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_AddItemToArray",
+      "references": [
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_ingest.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_payload.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_AddItemToObject",
+      "references": [
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_payload.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_AddNumberToObject",
+      "references": [
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/memory_payload.c",
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/c/vector_status.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_AddObjectToObject",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_AddStringToObject",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_ingest.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/memory_payload.c",
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/c/vector_status.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_CreateArray",
+      "references": [
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_ingest.c",
+        "src/modules/db2/c/memory_payload.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_CreateNumber",
+      "references": [
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_CreateObject",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_ingest.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/memory_payload.c",
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/c/vector_status.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_CreateString",
+      "references": [
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_payload.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_Delete",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/memory_payload.c",
+        "src/modules/db2/c/org_model_catalog.c",
+        "src/modules/db2/c/pgvec_transport.c",
+        "src/modules/db2/c/rules.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_DeleteItemFromObjectCaseSensitive",
+      "references": [
+        "src/modules/db2/c/demotion.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_GetArrayItem",
+      "references": [
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/org_model_catalog.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_GetArraySize",
+      "references": [
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/memory_payload.c",
+        "src/modules/db2/c/org_model_catalog.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_GetObjectItemCaseSensitive",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/pgvec_transport.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_IsArray",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/org_model_catalog.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_IsBool",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_IsNumber",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_IsObject",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_IsString",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/org_model_catalog.c",
+        "src/modules/db2/c/pgvec_transport.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_IsTrue",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_Parse",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/pgvec_transport.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_ParseWithOpts",
+      "references": [
+        "src/modules/db2/c/org_model_catalog.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "cJSON_PrintUnformatted",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/memory_payload.c",
+        "src/modules/db2/c/rules.c"
+      ],
+      "disposition": "descriptor-owned-copy/generated-input",
+      "evidence": "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned vendored source rather than inherit a monolithic-core object."
+    },
+    {
+      "symbol": "calloc",
+      "references": [
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/cross_repo_deps.c",
+        "src/modules/db2/c/curiosity.c",
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_reembed.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/org_vault_rewrap.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c",
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "clock_gettime",
+      "references": [
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_pool.c",
+        "src/modules/db2/c/kb_maintenance.c",
+        "src/modules/db2/c/pgvec_transport.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "cochange_is_hex_sha",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "cochange_pairs_for_commit",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "code_audit_dead_exports",
+      "references": [
+        "src/modules/db2/c/code_audit.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "code_audit_find_cycles",
+      "references": [
+        "src/modules/db2/c/code_audit.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "code_import_identity",
+      "references": [
+        "src/modules/db2/c/code_index.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "code_import_resolves_path",
+      "references": [
+        "src/modules/db2/c/code_index.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "code_match_line",
+      "references": [
+        "src/modules/db2/c/code_index.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_audit_worm_enabled",
+      "references": [
+        "src/modules/db2/c/kb_audit_worm.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_cache_disabled",
+      "references": [
+        "src/modules/db2/c/rules.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_code_cochange_git_enabled",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_css_style_graph_enabled",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/css_migration.c",
+        "src/modules/db2/c/css_render.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_embedder_command_current",
+      "references": [
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_kb_curator_cross_repo_caller_collision_c",
+      "references": [
+        "src/modules/db2/c/cross_repo_deps.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_kb_curator_cross_repo_distinctiveness_v",
+      "references": [
+        "src/modules/db2/c/cross_repo_deps.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_kb_curator_cross_repo_graph_enabled",
+      "references": [
+        "src/modules/db2/c/cross_repo_deps.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_kb_curator_cross_repo_k",
+      "references": [
+        "src/modules/db2/c/cross_repo_deps.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_kb_curator_cross_repo_len_min",
+      "references": [
+        "src/modules/db2/c/cross_repo_deps.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_kb_curator_cross_repo_m",
+      "references": [
+        "src/modules/db2/c/cross_repo_deps.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_kb_curator_cross_repo_max_candidates",
+      "references": [
+        "src/modules/db2/c/cross_repo_deps.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_kb_curator_cross_repo_p_pct",
+      "references": [
+        "src/modules/db2/c/cross_repo_deps.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_kb_curator_cross_repo_review_queue_max",
+      "references": [
+        "src/modules/db2/c/cross_repo_deps.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_kb_pdf_vector_enabled",
+      "references": [
+        "src/modules/db2/c/kb_payload.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_kb_purge_fence_ttl_s",
+      "references": [
+        "src/modules/db2/c/kb_runtime_state.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_present",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "config_typed_facts_enabled",
+      "references": [
+        "src/modules/db2/c/css_migration.c",
+        "src/modules/db2/c/fact_ingest.c",
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "correction_behavior_to_text",
+      "references": [
+        "src/modules/db2/c/rel_types_store.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "css_analyze",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "css_extract_class_tokens",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "css_render_oracle_compare",
+      "references": [
+        "src/modules/db2/c/css_render.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "css_render_result_free",
+      "references": [
+        "src/modules/db2/c/css_render.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "css_render_snapshot_free",
+      "references": [
+        "src/modules/db2/c/css_render.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "css_render_snapshot_parse",
+      "references": [
+        "src/modules/db2/c/css_render.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "css_stylesheet_free",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "db1_stmt_cache_clear_for_sqlite",
+      "references": [
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_test_shim.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "difftime",
+      "references": [
+        "src/modules/db2/c/curiosity.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/entity_edges.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "dstr_appendf",
+      "references": [
+        "src/modules/db2/c/collab_rules.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "dstr_init",
+      "references": [
+        "src/modules/db2/c/collab_rules.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "dstr_steal",
+      "references": [
+        "src/modules/db2/c/collab_rules.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "exp",
+      "references": [
+        "src/modules/db2/c/curiosity.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/entity_edges.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "extract_calls",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "extract_definitions",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "extract_exports",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "extract_imports_sys",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "extract_routes",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "fclose",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/entity_edges.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/rules.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "fflush",
+      "references": [
+        "src/modules/db2/c/db2_pool.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "fgets",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "fopen",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/entity_edges.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/rules.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "fprintf",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_pool.c",
+        "src/modules/db2/c/entity_edges.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/rules.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "fputs",
+      "references": [
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_pool.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "fread",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "free",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/code_index.c",
+        "src/modules/db2/c/code_projection.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/cross_repo_deps.c",
+        "src/modules/db2/c/css_insights.c",
+        "src/modules/db2/c/css_migration.c",
+        "src/modules/db2/c/css_render.c",
+        "src/modules/db2/c/curiosity.c",
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_reembed.c",
+        "src/modules/db2/c/db2_witness_checkpoint.c",
+        "src/modules/db2/c/db2_witness_emit.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/db_schema.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/memory_query.c",
+        "src/modules/db2/c/org_vault_rewrap.c",
+        "src/modules/db2/c/pgvec_transport.c",
+        "src/modules/db2/c/pgvec_verify.c",
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c",
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "fseek",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "ftell",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "getenv",
+      "references": [
+        "src/modules/db2/c/db2_hardening.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/pgvec_transport.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "gmtime",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_export.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "gmtime_r",
+      "references": [
+        "src/modules/db2/c/bandit.c",
+        "src/modules/db2/c/code_project_lifecycle.c",
+        "src/modules/db2/c/cross_repo_review.c",
+        "src/modules/db2/c/curiosity.c",
+        "src/modules/db2/c/entity_edges.c",
+        "src/modules/db2/c/entity_profiles.c",
+        "src/modules/db2/c/fact_lifecycle.c",
+        "src/modules/db2/c/kb_audit_worm.c",
+        "src/modules/db2/c/memory_conflicts.c",
+        "src/modules/db2/c/memory_health.c",
+        "src/modules/db2/c/memory_relations.c",
+        "src/modules/db2/c/ontology_evolution.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "inet_pton",
+      "references": [
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "kb_cert_serial_normalize",
+      "references": [
+        "src/modules/db2/c/enrollments.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "kb_identity_key",
+      "references": [
+        "src/modules/db2/c/db2_tenant.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "kb_identity_token_authority_record_valid",
+      "references": [
+        "src/modules/db2/c/management_token_authority.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "kb_mdl_score",
+      "references": [
+        "src/modules/db2/c/artifacts.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "kb_mgmt_token_authority_record_valid",
+      "references": [
+        "src/modules/db2/c/management_token_authority.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "kb_models_endpoint_valid",
+      "references": [
+        "src/modules/db2/c/org_model_catalog.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "kb_models_name_clean",
+      "references": [
+        "src/modules/db2/c/org_model_catalog.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "kb_models_wire_valid",
+      "references": [
+        "src/modules/db2/c/org_model_catalog.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "learning_dispatch_result_to_json",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "learning_evidence_write_event",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "learning_implicit_record_correction",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "learning_router_record_signal",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "log10",
+      "references": [
+        "src/modules/db2/c/curiosity.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "malloc",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_projection.c",
+        "src/modules/db2/c/css_migration.c",
+        "src/modules/db2/c/db2_witness_emit.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/db_schema.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/pgvec_transport.c",
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "memchr",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/management_jwks_runtime.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "memcmp",
+      "references": [
+        "src/modules/db2/c/anti_patterns.c",
+        "src/modules/db2/c/db2_witness_checkpoint.c",
+        "src/modules/db2/c/db2_witness_emit.c",
+        "src/modules/db2/c/management_action_journal.c",
+        "src/modules/db2/c/management_jwks_runtime.c",
+        "src/modules/db2/c/org_vault_rewrap.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "memmove",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_index.c",
+        "src/modules/db2/c/cross_repo_deps.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "memory_alerts",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_answer_evidence_decision_str",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_answer_evidence_reason_str",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_ask_query",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_ask_query_scoped",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_assemble_context",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_briefing",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_check_drift",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_collect_scopes",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_compact_windows",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_delete",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_diagnose_scoped",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_effectiveness_stats",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_embed_text",
+      "references": [
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_episode_card_generate",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_explain_match",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_extract_patterns",
+      "references": [
+        "src/modules/db2/c/fact_ingest.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_fact_gate_check",
+      "references": [
+        "src/modules/db2/c/rel_types_store.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_fact_history",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_find_facts",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_find_facts_scoped",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_find_facts_visible",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_find_facts_visible_ex",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_fold_session",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_get",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_get_context_block",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_get_entity_edges",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_get_entity_profile",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_get_episode",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_get_provenance",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_insert_ex",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_learn_style",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_link_create",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_link_delete",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_link_query",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_list",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_list_conflicts",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_maintenance_run",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_maintenance_summary_to_json",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_ontology_node_kind_to_text",
+      "references": [
+        "src/modules/db2/c/rel_types_store.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_pattern_scan_turn",
+      "references": [
+        "src/modules/db2/c/fact_ingest.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_pii_rel_sensitivity",
+      "references": [
+        "src/modules/db2/c/rel_types_store.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_pii_rel_sensitivity_batch",
+      "references": [
+        "src/modules/db2/c/fact_recall.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_pii_should_inject",
+      "references": [
+        "src/modules/db2/c/fact_recall.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_pii_turn_requests_sensitive",
+      "references": [
+        "src/modules/db2/c/fact_ingest.c",
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_primary_scope",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_prospective_complete",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_prospective_create",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_prospective_list",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_prospective_mark_triggered",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_prospective_match",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_prospective_sweep_expired",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_query_edges",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_query_health",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_recall",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_reject",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_scan_conversations",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_agent.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_scope_level_name",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_scope_visibility_rank",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_search",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_search_graph",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_search_graph_as_of",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_stats",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_supersede",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_tag_scope",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_tag_workspace",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_touch",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_update_content",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_upsert_workflow",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "mktime",
+      "references": [
+        "src/modules/db2/c/entity_edges.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "nanosleep",
+      "references": [
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "now_utc",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/bandit.c",
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_index.c",
+        "src/modules/db2/c/code_index_ops.c",
+        "src/modules/db2/c/code_project_lifecycle.c",
+        "src/modules/db2/c/corpus_jobs.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/feature_rows.c",
+        "src/modules/db2/c/feedback.c",
+        "src/modules/db2/c/kb_docs.c",
+        "src/modules/db2/c/kb_releases.c",
+        "src/modules/db2/c/report_enrichments.c",
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/c/tasks.c",
+        "src/modules/db2/c/vector_index_ops.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "parse_utc_ts",
+      "references": [
+        "src/modules/db2/c/code_index.c",
+        "src/modules/db2/c/demotion.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "platform_get_exe_path",
+      "references": [
+        "src/modules/db2/c/kb_service_backend.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "platform_random_bytes",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/management_action_journal.c",
+        "src/modules/db2/c/management_identity_journal.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "platform_random_hex",
+      "references": [
+        "src/modules/db2/c/management_read_journal.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "platform_spawn_daemon",
+      "references": [
+        "src/modules/db2/c/kb_service_backend.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "poll",
+      "references": [
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_cond_signal",
+      "references": [
+        "src/modules/db2/c/db2_pool.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_cond_timedwait",
+      "references": [
+        "src/modules/db2/c/db2_pool.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_create",
+      "references": [
+        "src/modules/db2/c/db2_pool.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_equal",
+      "references": [
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/org_vault_rewrap.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_getspecific",
+      "references": [
+        "src/modules/db2/c/db2_init.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_join",
+      "references": [
+        "src/modules/db2/c/db2_pool.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_key_create",
+      "references": [
+        "src/modules/db2/c/db2_init.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_mutex_destroy",
+      "references": [
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_mutex_init",
+      "references": [
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_mutex_lock",
+      "references": [
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_pool.c",
+        "src/modules/db2/c/enrollments.c",
+        "src/modules/db2/c/pgvec_transport.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_mutex_trylock",
+      "references": [
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_mutex_unlock",
+      "references": [
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_pool.c",
+        "src/modules/db2/c/enrollments.c",
+        "src/modules/db2/c/pgvec_transport.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_once",
+      "references": [
+        "src/modules/db2/c/db2_init.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_self",
+      "references": [
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_pool.c",
+        "src/modules/db2/c/org_vault_rewrap.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pthread_setspecific",
+      "references": [
+        "src/modules/db2/c/db2_init.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "qsort",
+      "references": [
+        "src/modules/db2/c/css_insights.c",
+        "src/modules/db2/c/db2_witness_checkpoint.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "realloc",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/cross_repo_deps.c",
+        "src/modules/db2/c/css_insights.c",
+        "src/modules/db2/c/curiosity.c",
+        "src/modules/db2/c/db2_reembed.c",
+        "src/modules/db2/c/db2_witness_checkpoint.c",
+        "src/modules/db2/c/db2_witness_emit.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/memory_query.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "realpath",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "rel_sensitivity_to_text",
+      "references": [
+        "src/modules/db2/c/rel_types_store.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "rel_type_is_functional",
+      "references": [
+        "src/modules/db2/c/entity_edges.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "rel_type_normalize",
+      "references": [
+        "src/modules/db2/c/fact_lifecycle.c",
+        "src/modules/db2/c/ontology_evolution.c",
+        "src/modules/db2/c/rel_types_store.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "rel_types_seed_at",
+      "references": [
+        "src/modules/db2/c/rel_types_store.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "rel_types_seed_count",
+      "references": [
+        "src/modules/db2/c/rel_types_store.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "rel_types_seed_lookup",
+      "references": [
+        "src/modules/db2/c/entity_edges.c",
+        "src/modules/db2/c/fact_lifecycle.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "run_cmd",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "server_mgmt_read_selector_name",
+      "references": [
+        "src/modules/db2/c/management_read_journal.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "session_briefing_render_commitments",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "session_briefing_render_directives",
+      "references": [
+        "src/modules/db2/c/kb_service_backend_memory.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "session_id",
+      "references": [
+        "src/modules/db2/c/kb_service_backend.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "shell_escape",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "sleep",
+      "references": [
+        "src/modules/db2/c/db2_pool.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "snprintf",
+      "references": [
+        "src/modules/db2/c/admin_grant.c",
+        "src/modules/db2/c/agent_outcomes.c",
+        "src/modules/db2/c/anti_patterns.c",
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/bandit.c",
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/code_index.c",
+        "src/modules/db2/c/code_index_ops.c",
+        "src/modules/db2/c/code_project_lifecycle.c",
+        "src/modules/db2/c/code_projection.c",
+        "src/modules/db2/c/corpus_jobs.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/cross_repo_build.c",
+        "src/modules/db2/c/cross_repo_deps.c",
+        "src/modules/db2/c/cross_repo_identity.c",
+        "src/modules/db2/c/cross_repo_review.c",
+        "src/modules/db2/c/cross_repo_stats.c",
+        "src/modules/db2/c/css_graph.c",
+        "src/modules/db2/c/css_insights.c",
+        "src/modules/db2/c/css_migration.c",
+        "src/modules/db2/c/css_render.c",
+        "src/modules/db2/c/curator_gaps.c",
+        "src/modules/db2/c/curator_terms.c",
+        "src/modules/db2/c/curiosity.c",
+        "src/modules/db2/c/db2_hardening.c",
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_pool.c",
+        "src/modules/db2/c/db2_reembed.c",
+        "src/modules/db2/c/db2_witness_checkpoint.c",
+        "src/modules/db2/c/db2_witness_emit.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/db_schema.c",
+        "src/modules/db2/c/decision_log.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/enrollments.c",
+        "src/modules/db2/c/entity_edges.c",
+        "src/modules/db2/c/entity_nodes.c",
+        "src/modules/db2/c/entity_profiles.c",
+        "src/modules/db2/c/entity_registry.c",
+        "src/modules/db2/c/epistemic_directives.c",
+        "src/modules/db2/c/evidence_vectors.c",
+        "src/modules/db2/c/fact_lifecycle.c",
+        "src/modules/db2/c/fact_recall.c",
+        "src/modules/db2/c/feature_rows.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_audit_worm.c",
+        "src/modules/db2/c/kb_docs.c",
+        "src/modules/db2/c/kb_maintenance.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_releases.c",
+        "src/modules/db2/c/kb_runtime_state.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_ingest.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/learning.c",
+        "src/modules/db2/c/learning_synth_ops.c",
+        "src/modules/db2/c/lessons.c",
+        "src/modules/db2/c/management_client_instance.c",
+        "src/modules/db2/c/management_identity_journal.c",
+        "src/modules/db2/c/management_jwks_publication.c",
+        "src/modules/db2/c/management_status_provision.c",
+        "src/modules/db2/c/management_status_runtime.c",
+        "src/modules/db2/c/management_token_roots.c",
+        "src/modules/db2/c/membership.c",
+        "src/modules/db2/c/memory_briefing.c",
+        "src/modules/db2/c/memory_conflicts.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/memory_health.c",
+        "src/modules/db2/c/memory_lifecycle.c",
+        "src/modules/db2/c/memory_lint.c",
+        "src/modules/db2/c/memory_payload.c",
+        "src/modules/db2/c/memory_promotion.c",
+        "src/modules/db2/c/memory_query.c",
+        "src/modules/db2/c/memory_query_bookkeeping.c",
+        "src/modules/db2/c/memory_relations.c",
+        "src/modules/db2/c/memory_row_mapper_pg.c",
+        "src/modules/db2/c/memory_scenes.c",
+        "src/modules/db2/c/memory_scope_query.c",
+        "src/modules/db2/c/memory_score_fields.c",
+        "src/modules/db2/c/memory_vectors.c",
+        "src/modules/db2/c/mining.c",
+        "src/modules/db2/c/notes.c",
+        "src/modules/db2/c/oidc_jwks.c",
+        "src/modules/db2/c/ontology_evolution.c",
+        "src/modules/db2/c/org_budget.c",
+        "src/modules/db2/c/org_model_catalog.c",
+        "src/modules/db2/c/org_rate.c",
+        "src/modules/db2/c/org_spend.c",
+        "src/modules/db2/c/org_telemetry.c",
+        "src/modules/db2/c/org_telemetry_fmt.c",
+        "src/modules/db2/c/org_vault_rotation.c",
+        "src/modules/db2/c/pgvec_transport.c",
+        "src/modules/db2/c/project.c",
+        "src/modules/db2/c/prospective_memories.c",
+        "src/modules/db2/c/rel_types_store.c",
+        "src/modules/db2/c/report_enrichments.c",
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/c/server_registry.c",
+        "src/modules/db2/c/shadow_delta.c",
+        "src/modules/db2/c/sketch.c",
+        "src/modules/db2/c/stopwords.c",
+        "src/modules/db2/c/tasks.c",
+        "src/modules/db2/c/team.c",
+        "src/modules/db2/c/tool_registry.c",
+        "src/modules/db2/c/typed_facts.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c",
+        "src/modules/db2/c/vault_pg.c",
+        "src/modules/db2/c/vector_index_ops.c",
+        "src/modules/db2/c/workflow_patterns.c",
+        "src/modules/db2/c/write_tier_grant.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "sqlite3_close",
+      "references": [
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_test_shim.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "sqlite3_errmsg",
+      "references": [
+        "src/modules/db2/c/db_schema.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "sqlite3_exec",
+      "references": [
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_test_shim.c",
+        "src/modules/db2/c/db_schema.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "sqlite3_free",
+      "references": [
+        "src/modules/db2/c/db_schema.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "sqlite3_open",
+      "references": [
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_test_shim.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "stat",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "stderr",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_pool.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strcasecmp",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/corpus_structural.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strcasestr",
+      "references": [
+        "src/modules/db2/c/corpus_structural.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strchr",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/cross_repo_build.c",
+        "src/modules/db2/c/cross_repo_deps.c",
+        "src/modules/db2/c/cross_repo_resolver.c",
+        "src/modules/db2/c/css_insights.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/kb_runtime_state.c",
+        "src/modules/db2/c/management_action_journal.c",
+        "src/modules/db2/c/management_identity_journal.c",
+        "src/modules/db2/c/org_model_catalog.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strcmp",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/code_index.c",
+        "src/modules/db2/c/code_project_lifecycle.c",
+        "src/modules/db2/c/code_projection.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/corpus_jobs.c",
+        "src/modules/db2/c/cross_repo_build.c",
+        "src/modules/db2/c/cross_repo_classify.c",
+        "src/modules/db2/c/cross_repo_deps.c",
+        "src/modules/db2/c/cross_repo_identity.c",
+        "src/modules/db2/c/cross_repo_resolver.c",
+        "src/modules/db2/c/cross_repo_review.c",
+        "src/modules/db2/c/cross_repo_stats.c",
+        "src/modules/db2/c/css_insights.c",
+        "src/modules/db2/c/css_render.c",
+        "src/modules/db2/c/curiosity.c",
+        "src/modules/db2/c/db2_hardening.c",
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db2_pool.c",
+        "src/modules/db2/c/db2_reembed.c",
+        "src/modules/db2/c/db2_witness_checkpoint.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/db_schema.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/enrollments.c",
+        "src/modules/db2/c/entity_registry.c",
+        "src/modules/db2/c/epistemic_directives.c",
+        "src/modules/db2/c/fact_recall.c",
+        "src/modules/db2/c/feedback.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_audit_worm.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_releases.c",
+        "src/modules/db2/c/kb_runtime_state.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_ingest.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/lessons.c",
+        "src/modules/db2/c/management_action_journal.c",
+        "src/modules/db2/c/management_client_instance.c",
+        "src/modules/db2/c/management_identity_journal.c",
+        "src/modules/db2/c/management_jwks_publication.c",
+        "src/modules/db2/c/management_jwks_runtime.c",
+        "src/modules/db2/c/management_read_journal.c",
+        "src/modules/db2/c/management_status_provision.c",
+        "src/modules/db2/c/management_status_runtime.c",
+        "src/modules/db2/c/management_token_authority.c",
+        "src/modules/db2/c/management_token_roots.c",
+        "src/modules/db2/c/memory_health.c",
+        "src/modules/db2/c/memory_lifecycle.c",
+        "src/modules/db2/c/memory_query.c",
+        "src/modules/db2/c/memory_query_bookkeeping.c",
+        "src/modules/db2/c/ontology_evolution.c",
+        "src/modules/db2/c/org_budget.c",
+        "src/modules/db2/c/org_egress.c",
+        "src/modules/db2/c/org_model_catalog.c",
+        "src/modules/db2/c/org_telemetry_fmt.c",
+        "src/modules/db2/c/org_vault_rewrap.c",
+        "src/modules/db2/c/pgvec_transport.c",
+        "src/modules/db2/c/prospective_memories.c",
+        "src/modules/db2/c/report_enrichments.c",
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/c/sketch.c",
+        "src/modules/db2/c/typed_facts.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c",
+        "src/modules/db2/c/vault_pg.c",
+        "src/modules/db2/c/write_tier_grant.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strcpy",
+      "references": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_index.c",
+        "src/modules/db2/c/code_project_lifecycle.c",
+        "src/modules/db2/c/corpus_jobs.c",
+        "src/modules/db2/c/cross_repo_deps.c",
+        "src/modules/db2/c/cross_repo_identity.c",
+        "src/modules/db2/c/css_render.c",
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/decision_log.c",
+        "src/modules/db2/c/entity_nodes.c",
+        "src/modules/db2/c/kb_audit_worm.c",
+        "src/modules/db2/c/kb_maintenance.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/memory_lint.c",
+        "src/modules/db2/c/memory_query.c",
+        "src/modules/db2/c/pgvec_transport.c",
+        "src/modules/db2/c/pgvec_verify.c",
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/c/shadow_delta.c",
+        "src/modules/db2/c/tasks.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strcspn",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strdup",
+      "references": [
+        "src/modules/db2/c/agent_hints.c",
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/code_index.c",
+        "src/modules/db2/c/cross_repo_deps.c",
+        "src/modules/db2/c/css_render.c",
+        "src/modules/db2/c/curiosity.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend_ingest.c",
+        "src/modules/db2/c/memory_query.c",
+        "src/modules/db2/c/pgvec_verify.c",
+        "src/modules/db2/c/rules.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strftime",
+      "references": [
+        "src/modules/db2/c/bandit.c",
+        "src/modules/db2/c/code_project_lifecycle.c",
+        "src/modules/db2/c/cross_repo_review.c",
+        "src/modules/db2/c/curiosity.c",
+        "src/modules/db2/c/entity_edges.c",
+        "src/modules/db2/c/entity_profiles.c",
+        "src/modules/db2/c/fact_lifecycle.c",
+        "src/modules/db2/c/kb_audit_worm.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/memory_conflicts.c",
+        "src/modules/db2/c/memory_health.c",
+        "src/modules/db2/c/memory_relations.c",
+        "src/modules/db2/c/ontology_evolution.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strlen",
+      "references": [
+        "src/modules/db2/c/anti_patterns.c",
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/bandit.c",
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_index.c",
+        "src/modules/db2/c/code_project_lifecycle.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/cross_repo_build.c",
+        "src/modules/db2/c/cross_repo_deps.c",
+        "src/modules/db2/c/cross_repo_identity.c",
+        "src/modules/db2/c/cross_repo_resolver.c",
+        "src/modules/db2/c/db2_reembed.c",
+        "src/modules/db2/c/db2_tenant.c",
+        "src/modules/db2/c/db2_witness_checkpoint.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/db_schema.c",
+        "src/modules/db2/c/enrollments.c",
+        "src/modules/db2/c/entity_nodes.c",
+        "src/modules/db2/c/epistemic_directives.c",
+        "src/modules/db2/c/fact_recall.c",
+        "src/modules/db2/c/kb_audit_worm.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/management_action_journal.c",
+        "src/modules/db2/c/management_client_instance.c",
+        "src/modules/db2/c/management_identity_journal.c",
+        "src/modules/db2/c/management_jwks_publication.c",
+        "src/modules/db2/c/management_status_key.c",
+        "src/modules/db2/c/management_status_provision.c",
+        "src/modules/db2/c/management_token_roots.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/org_egress.c",
+        "src/modules/db2/c/org_model_catalog.c",
+        "src/modules/db2/c/org_telemetry_fmt.c",
+        "src/modules/db2/c/org_vault_key_use.c",
+        "src/modules/db2/c/org_vault_rewrap.c",
+        "src/modules/db2/c/org_vault_rotation.c",
+        "src/modules/db2/c/pgvec_transport.c",
+        "src/modules/db2/c/project.c",
+        "src/modules/db2/c/prospective_memories.c",
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/c/server_registry.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c",
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strncasecmp",
+      "references": [
+        "src/modules/db2/c/cross_repo_build.c",
+        "src/modules/db2/c/cross_repo_identity.c",
+        "src/modules/db2/c/css_insights.c",
+        "src/modules/db2/c/db_postgres.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strncat",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_index.c",
+        "src/modules/db2/c/corpus_structural.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strncmp",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/cross_repo_deps.c",
+        "src/modules/db2/c/cross_repo_resolver.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/db_schema.c",
+        "src/modules/db2/c/management_action_journal.c",
+        "src/modules/db2/c/management_identity_journal.c",
+        "src/modules/db2/c/org_model_catalog.c",
+        "src/modules/db2/c/org_vault_rewrap.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strncpy",
+      "references": [
+        "src/modules/db2/c/curator_terms.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strnlen",
+      "references": [
+        "src/modules/db2/c/management_action_journal.c",
+        "src/modules/db2/c/management_client_instance.c",
+        "src/modules/db2/c/management_identity_journal.c",
+        "src/modules/db2/c/management_jwks_runtime.c",
+        "src/modules/db2/c/management_read_journal.c",
+        "src/modules/db2/c/management_status_runtime.c",
+        "src/modules/db2/c/management_token_authority.c",
+        "src/modules/db2/c/org_model_catalog.c",
+        "src/modules/db2/c/org_telemetry_fmt.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strrchr",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_index.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/cross_repo_build.c",
+        "src/modules/db2/c/cross_repo_deps.c",
+        "src/modules/db2/c/cross_repo_identity.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strstr",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_index.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/cross_repo_build.c",
+        "src/modules/db2/c/cross_repo_deps.c",
+        "src/modules/db2/c/css_insights.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/db_schema.c",
+        "src/modules/db2/c/management_jwks_publication.c",
+        "src/modules/db2/c/management_status_key.c",
+        "src/modules/db2/c/management_token_authority.c",
+        "src/modules/db2/c/management_token_roots.c",
+        "src/modules/db2/c/org_budget.c",
+        "src/modules/db2/c/org_model_catalog.c",
+        "src/modules/db2/c/org_rate.c",
+        "src/modules/db2/c/org_spend.c",
+        "src/modules/db2/c/org_telemetry.c",
+        "src/modules/db2/c/org_vault_key_use.c",
+        "src/modules/db2/c/vault_operator_status_runtime.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strtod",
+      "references": [
+        "src/modules/db2/c/db_postgres.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strtok_r",
+      "references": [
+        "src/modules/db2/c/canonical_index.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strtol",
+      "references": [
+        "src/modules/db2/c/db2_init.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/db_schema.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "strtoll",
+      "references": [
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/management_action_journal.c",
+        "src/modules/db2/c/management_client_instance.c",
+        "src/modules/db2/c/management_identity_journal.c",
+        "src/modules/db2/c/management_read_journal.c",
+        "src/modules/db2/c/management_token_authority.c",
+        "src/modules/db2/c/memory_query_bookkeeping.c",
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "text_sanitize_utf8",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_index.c",
+        "src/modules/db2/c/kb_payload.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "time",
+      "references": [
+        "src/modules/db2/c/bandit.c",
+        "src/modules/db2/c/code_project_lifecycle.c",
+        "src/modules/db2/c/cross_repo_review.c",
+        "src/modules/db2/c/curiosity.c",
+        "src/modules/db2/c/db2_reembed.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/enrollments.c",
+        "src/modules/db2/c/entity_edges.c",
+        "src/modules/db2/c/entity_profiles.c",
+        "src/modules/db2/c/fact_lifecycle.c",
+        "src/modules/db2/c/kb_audit_worm.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/memory_conflicts.c",
+        "src/modules/db2/c/memory_health.c",
+        "src/modules/db2/c/memory_relations.c",
+        "src/modules/db2/c/ontology_evolution.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "timegm",
+      "references": [
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/curiosity.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "tolower",
+      "references": [
+        "src/modules/db2/c/curator_terms.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "usleep",
+      "references": [
+        "src/modules/db2/c/kb_service_backend.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "vault_aad_build_v1_safe",
+      "references": [
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_aad_build_v2",
+      "references": [
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_crypto_random",
+      "references": [
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_dek_unwrap",
+      "references": [
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_dek_wrap",
+      "references": [
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_kek_check_verify",
+      "references": [
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_kek_check_wrap",
+      "references": [
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_mutation_budget_current",
+      "references": [
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_mutation_budget_deadline_ms",
+      "references": [
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_reseal_operation_id_from_hex",
+      "references": [
+        "src/modules/db2/c/org_vault_rewrap.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_reseal_operation_id_to_hex",
+      "references": [
+        "src/modules/db2/c/org_vault_rewrap.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_reseal_receipt_decode",
+      "references": [
+        "src/modules/db2/c/org_vault_rewrap.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_reseal_receipt_digest",
+      "references": [
+        "src/modules/db2/c/org_vault_rewrap.c",
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_secret_decrypt",
+      "references": [
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_secret_encrypt",
+      "references": [
+        "src/modules/db2/c/vault_pg.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_witness_checkpoint_digest",
+      "references": [
+        "src/modules/db2/c/db2_witness_checkpoint.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_witness_checkpoint_encode",
+      "references": [
+        "src/modules/db2/c/db2_witness_emit.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_witness_checkpoint_sign",
+      "references": [
+        "src/modules/db2/c/db2_witness_checkpoint.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_witness_checkpoint_verify",
+      "references": [
+        "src/modules/db2/c/db2_witness_checkpoint.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_witness_export_frame",
+      "references": [
+        "src/modules/db2/c/db2_witness_emit.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_witness_leaf_hash",
+      "references": [
+        "src/modules/db2/c/db2_witness_checkpoint.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_witness_merkle_root",
+      "references": [
+        "src/modules/db2/c/db2_witness_checkpoint.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_witness_record_digest",
+      "references": [
+        "src/modules/db2/c/db2_witness_emit.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_witness_record_encode",
+      "references": [
+        "src/modules/db2/c/db2_witness_emit.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_witness_shard_key_hash",
+      "references": [
+        "src/modules/db2/c/db2_witness_checkpoint.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_witness_signer_identity",
+      "references": [
+        "src/modules/db2/c/db2_witness_checkpoint.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vault_witness_verify_checkpoint_run",
+      "references": [
+        "src/modules/db2/c/db2_witness_checkpoint.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "vsnprintf",
+      "references": [
+        "src/modules/db2/c/db2_reembed.c"
+      ],
+      "disposition": "system-link",
+      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    }
+  ],
+  "summary": {
+    "translation_units": 141,
+    "descriptor_support_units": 1,
+    "unresolved_symbols": 348,
+    "dispositions": {
+      "descriptor-owned-copy/generated-input": 25,
+      "injected-module-contract": 150,
+      "portable-core-promotion": 29,
+      "private-implementation": 0,
+      "remove/dead": 0,
+      "system-link": 144
+    }
+  },
+  "fingerprint": "d92a1385034247a19ff75052595ce82a8b42baf44f02016839a9ce85b5849563"
+}

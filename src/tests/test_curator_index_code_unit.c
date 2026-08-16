@@ -9,7 +9,7 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "kb_curator_index_code_unit.h"
 
 /* Stub the heavy embed + vector deps the handler references but this test never

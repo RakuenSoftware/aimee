@@ -97,7 +97,7 @@ harness exist) · **⬜ needed** (must be authored).
   edit; advisory and fail-open.
 - **Corpus:** [`blast_radius_corpus.json`](blast_radius_corpus.json) — 4 fixtures / 6 cases, each a
   small code graph (files with exports + imports) with the ground-truth `(edited file → expected
-  dependents + dependencies)`. Faithful to `db2_code_index_blast_radius` (src/db2/code_index.c):
+  dependents + dependencies)`. Faithful to `db2_code_index_blast_radius` (src/modules/db2/c/code_index.c):
   covers the basic importer set, the `has_exports` gate (no exports ⇒ no dependents), the hub
   threshold, and direct-vs-transitive (only direct importers advised).
 - **A/B / metric:** it either lists the true dependent set or not; **precision/recall of the

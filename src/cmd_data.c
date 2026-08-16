@@ -1,8 +1,8 @@
 /* cmd_data.c: data management commands (db, export, import, config) */
 #include "aimee.h"
 #include "db1.h"
-#include "db2/memory_payload.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/memory_query.h"
 #include "kb_client.h"
 #include "lifecycle.h"
 #include "log.h"

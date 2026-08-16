@@ -1,0 +1,171 @@
+{
+  "catalog_sha256": "e8744f638842c3a8fa783b206fb702c3ed1efba069770d314701b63a2f4961dc",
+  "families": [
+    {
+      "active": true,
+      "event_kind": 11521,
+      "id": 1,
+      "name": "lifecycle"
+    },
+    {
+      "active": false,
+      "event_kind": 11522,
+      "id": 2,
+      "name": "tenancy"
+    },
+    {
+      "active": false,
+      "event_kind": 11523,
+      "id": 3,
+      "name": "memory"
+    },
+    {
+      "active": false,
+      "event_kind": 11524,
+      "id": 4,
+      "name": "index"
+    },
+    {
+      "active": false,
+      "event_kind": 11525,
+      "id": 5,
+      "name": "learning"
+    },
+    {
+      "active": false,
+      "event_kind": 11526,
+      "id": 6,
+      "name": "organization"
+    },
+    {
+      "active": false,
+      "event_kind": 11527,
+      "id": 7,
+      "name": "custody"
+    },
+    {
+      "active": false,
+      "event_kind": 11528,
+      "id": 8,
+      "name": "maintenance"
+    }
+  ],
+  "operations": [
+    {
+      "family": "lifecycle",
+      "id": 1,
+      "name": "health",
+      "reply": {
+        "negative": [
+          {
+            "hex": "45324852010000000000000000000000",
+            "mutation": "bad_magic"
+          },
+          {
+            "hex": "44324852000000000000000000000000",
+            "mutation": "bad_version"
+          },
+          {
+            "hex": "44324852010000000800000000000000",
+            "mutation": "unknown_flags"
+          },
+          {
+            "hex": "44324852010000000000000001000000",
+            "mutation": "reserved"
+          },
+          {
+            "hex": "443248520100000000000000000000",
+            "mutation": "short"
+          },
+          {
+            "hex": "4432485201000000000000000000000000",
+            "mutation": "long"
+          }
+        ],
+        "positive": [
+          {
+            "flags": 0,
+            "hex": "44324852010000000000000000000000"
+          },
+          {
+            "flags": 1,
+            "hex": "44324852010000000100000000000000"
+          },
+          {
+            "flags": 2,
+            "hex": "44324852010000000200000000000000"
+          },
+          {
+            "flags": 3,
+            "hex": "44324852010000000300000000000000"
+          },
+          {
+            "flags": 4,
+            "hex": "44324852010000000400000000000000"
+          },
+          {
+            "flags": 5,
+            "hex": "44324852010000000500000000000000"
+          },
+          {
+            "flags": 6,
+            "hex": "44324852010000000600000000000000"
+          },
+          {
+            "flags": 7,
+            "hex": "44324852010000000700000000000000"
+          }
+        ]
+      },
+      "request": {
+        "negative": [
+          {
+            "hex": "4532485101000000",
+            "mutation": "bad_magic"
+          },
+          {
+            "hex": "4432485100000000",
+            "mutation": "bad_version"
+          },
+          {
+            "hex": "44324851010000",
+            "mutation": "short"
+          },
+          {
+            "hex": "443248510100000000",
+            "mutation": "long"
+          }
+        ],
+        "positive": "4432485101000000"
+      }
+    }
+  ],
+  "result_codes": [
+    {
+      "id": 0,
+      "name": "ok"
+    },
+    {
+      "id": 1,
+      "name": "not_found"
+    },
+    {
+      "id": 2,
+      "name": "conflict"
+    },
+    {
+      "id": 3,
+      "name": "denied"
+    },
+    {
+      "id": 4,
+      "name": "retryable"
+    },
+    {
+      "id": 5,
+      "name": "invalid_state"
+    }
+  ],
+  "schema_version": 1,
+  "wire_version": 1
+}

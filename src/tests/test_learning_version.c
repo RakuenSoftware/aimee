@@ -15,7 +15,7 @@
 #include "artifacts.h"
 #include "evidence_vectors.h"
 #include "learning_synth_ops.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "../kb/kb_learning_version.h"
 
 static void open_db(void)

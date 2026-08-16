@@ -2,10 +2,10 @@
  * SQLite shim. Verifies append/chain/count, WORM triggers, tamper detection, and
  * that the row hash is BYTE-IDENTICAL to the aimee-server store (shared
  * audit_worm_chain — the cross-engine vector). */
-#include "../db2/db2_test_shim.h"
+#include "../modules/db2/c/db2_test_shim.h"
 #include "artifacts.h" /* db2_audit_event_write — the central kb audit seam */
 #include <aimee/audit/audit_worm_chain.h>
-#include "db2_internal.h"
+#include "modules/db2/c/db2_internal.h"
 #include "db_postgres.h"
 #include "kb_audit_worm.h"
 

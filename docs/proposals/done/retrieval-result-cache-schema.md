@@ -51,7 +51,7 @@ constrain any real design:
 
 - **`feature_rows` has no `target_surface` column.** Its columns are
   `subject_id, subject_kind, scope_kind, scope_id, feature_set_version,
-  features, computed_at` (`src/db2/schema.sql:584-593`), with primary key
+  features, computed_at` (`src/modules/db2/c/schema.sql:584-593`), with primary key
   `(subject_id, subject_kind, feature_set_version)`. Surface lives on the
   artifact and audit-event tables, not here. Reusing `feature_rows` for caching
   would silently drop the surface dimension.

@@ -1,5 +1,5 @@
-#include "db2/management_status_runtime.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/management_status_runtime.h"
+#include "modules/db2/c/db_postgres.h"
 
 #include <assert.h>
 #include <stdio.h>

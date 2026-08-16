@@ -22,7 +22,7 @@ Already present and tested:
 | layer | what exists |
 | --- | --- |
 | SQL | `kb_write_tier_grant_set(server,team,subject,tier,granted_by)` and `kb_write_tier_grant_revoke(server,team,subject)` — SECURITY DEFINER, admin-or-team-lead authorization, WORM audit via `kb_audit_worm_append`, tier validation, and an idempotent upsert that already clears `revoked_at` |
-| C | `db2_write_tier_grant_set` / `_revoke` / `_lookup` / `_list` (`src/db2/write_tier_grant.c`) |
+| C | `db2_write_tier_grant_set` / `_revoke` / `_lookup` / `_list` (`src/modules/db2/c/write_tier_grant.c`) |
 | tests | `scripts/per-user-write-tier-rls-test.sql`, exercising admin and lead authority, the team boundary, revocation retaining the row, and the audit rows |
 
 I discovered this the worst possible way: I wrote a fresh

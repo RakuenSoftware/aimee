@@ -27,13 +27,15 @@ BASE_KEYS = {"descriptor_version", "id", "dependencies", "runtime_toggle"}
 C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
 BUILD_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
 OWNERSHIP_FIELDS = (
-    "sources", "private_headers", "public_headers", "tests", "docs", "go_sources", "go_tests",
+    "sources", "private_headers", "public_headers", "contracts", "tests", "docs", "go_sources",
+    "go_tests",
 )
 DEFAULT_ON = {"runtime-web", "control-web", "sandbox", "postgres"}
 ROLE_EXTENSIONS = {
     "sources": {".c", ".cpp", ".S", ".s"},
     "private_headers": {".h", ".hpp"},
     "public_headers": {".h", ".hpp"},
+    "contracts": {".json"},
     "tests": {".c", ".cpp", ".py", ".sh"},
     "docs": {".md"},
     "go_sources": {".go"},
@@ -352,6 +354,7 @@ def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
         "sources": PurePosixPath("src/modules") / identifier,
         "private_headers": PurePosixPath("src/modules") / identifier,
         "public_headers": PurePosixPath("src/modules") / identifier / "include/aimee" / identifier,
+        "contracts": PurePosixPath("src/modules") / identifier / "eventcontract",
         "tests": PurePosixPath("src/tests"),
         "docs": PurePosixPath("docs/modules"),
         "go_sources": PurePosixPath("server-go/modules") / identifier,
@@ -376,6 +379,7 @@ def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
         "sources": module_root,
         "private_headers": module_root,
         "public_headers": _resolve_owned(module_root / "include/aimee" / identifier, pointer),
+        "contracts": _resolve_owned(module_root / "eventcontract", pointer),
         "tests": _resolve_owned(resolved_repo / "src/tests", pointer),
         "docs": _resolve_owned(resolved_repo / "docs/modules", pointer),
         "go_sources": _resolve_owned(resolved_repo / "server-go/modules" / identifier, pointer),
@@ -446,6 +450,25 @@ def validate_complete_ownership(repo: Path, identifier: str,
                 f"missing={missing}, extra={extra}",
                 f"/{role}",
             )
+    contract_root = module_root / "eventcontract"
+    actual_contracts: set[str] = set()
+    if contract_root.is_dir():
+        for path in contract_root.rglob("*.json"):
+            relative = path.relative_to(repo).as_posix()
+            if path.is_symlink() or not path.is_file():
+                fail("ownership-complete-file",
+                     f"{identifier} contracts path is not a regular file: {relative}",
+                     "/contracts")
+            actual_contracts.add(relative)
+    found["contracts"] = actual_contracts
+    declared_contracts = set(value.get("contracts", []))
+    missing_contracts = sorted(actual_contracts - declared_contracts)
+    extra_contracts = sorted(declared_contracts - actual_contracts)
+    if missing_contracts or extra_contracts:
+        fail("ownership-complete",
+             f"{identifier} contracts mismatch for JSON files; "
+             f"missing={missing_contracts}, extra={extra_contracts}",
+             "/contracts")
     go_root = repo / "server-go/modules" / identifier
     for role, is_test in (("go_sources", False), ("go_tests", True)):
         actual: set[str] = set()
@@ -467,7 +490,8 @@ def validate_complete_ownership(repo: Path, identifier: str,
             fail("ownership-complete",
                  f"{identifier} {role} mismatch for Go files; missing={missing}, extra={extra}",
                  f"/{role}")
-    if not any(found.values()):
+    implementation_roles = ("sources", "private_headers", "go_sources", "go_tests")
+    if not any(found.get(role) for role in implementation_roles):
         # An empty module root satisfies set equality vacuously, so the latch would
         # assert completeness for a module whose implementation has never been moved
         # under src/modules/<id>. That is migration debt, not completion. Keep this

@@ -38,6 +38,13 @@
       ],
       "type": "object"
     },
+    "contracts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
     "dependencies": {
       "items": {
         "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",

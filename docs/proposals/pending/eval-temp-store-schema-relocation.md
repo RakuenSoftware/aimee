@@ -138,7 +138,8 @@ each caller migration; completion requires it to be empty.
 ### 4. Delete the broken scratch-store implementation
 
 After the zero-caller check passes, delete the declarations and implementations in
-`agent_eval_internal.h`, `agent_eval_memory_support.c`, `db2/eval_support.h`, and `db2/db2_init.c`.
+`agent_eval_internal.h`, `agent_eval_memory_support.c`, `modules/db2/c/eval_support.h`, and
+`modules/db2/c/db2_init.c`.
 Remove the private-schema name, `search_path` manipulation, eval connection takeover, eval-specific
 schema application, and obsolete Makefile commentary.
 

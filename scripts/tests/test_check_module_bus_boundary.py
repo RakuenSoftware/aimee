@@ -234,14 +234,26 @@ class ModuleBusBoundaryTests(unittest.TestCase):
         )
 
     def test_lower_layers_are_not_peers(self) -> None:
-        """db1/, db2/ and bare filenames name no module and are none of our business."""
-        for include in ('"db1/user_memory.h"', '"db2/artifacts.h"', '"local_helper.h"',
-                        '<stdio.h>', '"headers/util.h"'):
+        """Lower storage layers and bare filenames do not name peer modules."""
+        for include in ('"db1/user_memory.h"', '"db2/artifacts.h"',
+                        '"modules/db2/c/artifacts.h"', '"local_helper.h"', '<stdio.h>',
+                        '"headers/util.h"'):
             with self.subTest(include=include):
                 self.assert_fixture(
                     self.append("src/modules/workspace/workspace.c", f"#include {include}\n"),
                     None,
                 )
+
+    def test_db2_c_boundary_is_not_checked_as_a_peer_until_bus_cutover(self) -> None:
+        def add_db2_source(root: Path) -> None:
+            target = root / "src/modules/db2/c/store.c"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text('#include "config/config.h"\n', encoding="utf-8")
+
+        self.assert_fixture(
+            add_db2_source,
+            None,
+        )
 
     def test_every_declared_crossing_is_classified_exactly_once(self) -> None:
         groups = (checker.IR_SHARED_TYPE, checker.PENDING_BUS_MIGRATION,

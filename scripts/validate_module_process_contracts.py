@@ -19,6 +19,11 @@ CORE = {
 PROCESS_REQUIRED = {
     "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
     "skills", "response-composition",
+    # db1 is the server's store. Required because a deployment without it is not
+    # a smaller deployment, and a process because state belongs behind the bus.
+    # It is deliberately absent from GO_PROCESSES below: its implementation is
+    # still C, which the contract permits and which no other process is yet.
+    "db1",
 }
 GO_PROCESSES = {
     "memory", "learning", "routing", "delegates", "tools", "workspace", "git",

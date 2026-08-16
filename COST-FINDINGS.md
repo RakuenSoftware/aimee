@@ -1026,9 +1026,9 @@ which is why every arm that loosened the condition failed.
 
 The capability was ALREADY THERE, unused by that path:
 
-    src/db2/db2_pool.h:103   void db2_pool_note_lease_site(void *conn, const char *site);
-    src/db2/db2_pool.c:426   implementation
-    src/db2/db2_init.c:534   already records g_lease_site on every lease
+    src/modules/db2/c/db2_pool.h:103   void db2_pool_note_lease_site(void *conn, const char *site);
+    src/modules/db2/c/db2_pool.c:426   implementation
+    src/modules/db2/c/db2_init.c:534   already records g_lease_site on every lease
     src/tests/test_db2_pool.c:393  a pristine test already exercises it
 
 The pool already knows who took every lease. The starvation message just never

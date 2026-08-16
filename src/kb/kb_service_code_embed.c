@@ -6,13 +6,13 @@
 
 #include "kb_service_code_embed.h"
 #include "aimee.h" /* EMBED_MAX_DIM */
-#include "db2/code_index_ops.h"
-#include "db2/kb_runtime_state.h" /* db2_kb_runtime_state_get/set — change short-circuit */
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
-#include "../db2/entity_nodes.h"
-#include "../db2/pgvec_kb_service.h"
-#include "../db2/lifecycle.h"
+#include "modules/db2/c/code_index_ops.h"
+#include "modules/db2/c/kb_runtime_state.h" /* db2_kb_runtime_state_get/set — change short-circuit */
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/entity_nodes.h"
+#include "../modules/db2/c/pgvec_kb_service.h"
+#include "../modules/db2/c/lifecycle.h"
 #include "config.h"
 #include "memory.h"
 

@@ -14,8 +14,8 @@
 #include "aimee.h"
 #include "db.h"
 #include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 
 static int g_db_ready = 0;
 

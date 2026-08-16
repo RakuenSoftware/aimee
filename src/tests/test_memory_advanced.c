@@ -9,14 +9,14 @@
 #include "cJSON.h"
 #include "db.h"
 #include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
-#include "db2/memory_lifecycle.h" /* db2_memory_valid_at */
-#include "db2/memory_query.h"     /* db2_memory_count_orphaned_l0 */
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "modules/db2/c/memory_lifecycle.h" /* db2_memory_valid_at */
+#include "modules/db2/c/memory_query.h"     /* db2_memory_count_orphaned_l0 */
 #include "modules/memory/memory_ontology.h"
-#include "../db2/bandit.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
+#include "../modules/db2/c/bandit.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
 
 static void reset_db(void)
 {

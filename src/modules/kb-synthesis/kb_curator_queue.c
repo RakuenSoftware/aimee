@@ -14,10 +14,10 @@
 #include "config_database.h" /* config_synth_chat_endpoint_current — the one resolver */
 #include "index.h"           /* index_list_projects, project_info_t */
 #include "log.h"
-#include "db2/kb_payload.h"
-#include "db2/db2_internal.h"
-#include "db2/db2_tenant.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/kb_payload.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db2_tenant.h"
+#include "modules/db2/c/db_postgres.h"
 
 #include <stdint.h>
 #include <stdio.h>

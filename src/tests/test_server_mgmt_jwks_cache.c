@@ -1,7 +1,7 @@
 #include "db1.h"
 #include "modules/db1/db1_internal.h"
-#include "kb/kb_mgmt_jwks_publication.h"
-#include "kb/kb_mgmt_token_roots_provision.h"
+#include "kb_mgmt_jwks_publication.h"
+#include "kb_mgmt_token_roots_provision.h"
 #include "server/server_mgmt_jwks_cache.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 

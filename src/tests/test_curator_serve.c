@@ -8,7 +8,7 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "../kb_curator_serve.h"
 
 static void seed(sqlite3 *db, const char *sql)

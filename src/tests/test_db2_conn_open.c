@@ -17,7 +17,7 @@
  */
 #include "db_postgres.h"
 
-#include "db2_pool.h" /* DB2_POOL_HOLD_CEILING_MS */
+#include "modules/db2/c/db2_pool.h" /* DB2_POOL_HOLD_CEILING_MS */
 
 #include <libpq-fe.h>
 #include <stdio.h>

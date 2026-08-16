@@ -11,7 +11,7 @@
 
 #include "admin_grant.h"
 #include "cJSON.h"
-#include "db2_tenant.h"
+#include "modules/db2/c/db2_tenant.h"
 #include "kb_reqctx.h"
 #include "membership.h"
 #include "project.h"

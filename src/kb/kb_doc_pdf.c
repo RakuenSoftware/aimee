@@ -6,7 +6,7 @@
 
 #include "cJSON.h"
 #include "config.h"
-#include "db2/kb_payload.h"
+#include "modules/db2/c/kb_payload.h"
 #include "kb_blob_store.h"
 #include "kb_doc_hash.h"
 #include "kb_ocr_sidecar.h"

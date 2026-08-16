@@ -100,7 +100,7 @@ def scan_dir(path):
 def load_anti_patterns(path):
     """Optional runtime signal. Expects a JSON array of anti-pattern rows with at
     least {pattern, hit_count|bumps, last_seen?}. Never-bumped = removal candidate.
-    Shape matches src/db2/anti_patterns.h (db2_anti_pattern_list output).
+    Shape matches src/modules/db2/c/anti_patterns.h (db2_anti_pattern_list output).
 
     Returns None on any load error (unreadable, bad JSON, not a JSON array) so the
     caller can fail loudly rather than silently fall back to static-only. A row that

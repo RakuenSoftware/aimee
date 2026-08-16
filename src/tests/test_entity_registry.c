@@ -1,8 +1,8 @@
 /* test_entity_registry.c: surrogate-id entity canonicalization (typed-fact §3 /
  * P2a), against the sqlite shim. */
 #include "../headers/aimee.h"
-#include "../db2/entity_registry.h"
-#include "../db2/db2_test_shim.h"
+#include "../modules/db2/c/entity_registry.h"
+#include "../modules/db2/c/db2_test_shim.h"
 #include "modules/memory/memory_ontology.h"
 #include <assert.h>
 #include <stdio.h>

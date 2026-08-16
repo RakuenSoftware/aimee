@@ -5,11 +5,11 @@
 #include "cJSON.h"
 #include "db1_optional.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db2/entity_edges.h"
-#include "db2/feedback.h"
-#include "db2/memory_payload.h"
-#include "db2/memory_query.h"
-#include "db2/memory_relations.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/feedback.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/memory_relations.h"
 #endif
 #include "log.h"
 #include "memory.h"

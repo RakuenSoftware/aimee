@@ -36,11 +36,11 @@ so a human request arrives already resolved to `user → team(s)`.
   closest existing analog to multi-tenancy; P1 promotes `kind:id` into a
   first-class team/project entity rather than leaving it as an ad-hoc string.
 - **Enrollment identities** — `cert:CN` principals from the mTLS CA
-  (`src/db2/enrollments.h` carries `scope[128]`).
+  (`src/modules/db2/c/enrollments.h` carries `scope[128]`).
 
 ## §1 Team/project entities (DB2, kb-owned)
 
-Add `team` and `project` tables in `src/db2/` (behind the KB service — server and
+Add `team` and `project` tables in `src/modules/db2/c/` (behind the KB service — server and
 CLI must not touch DB2 directly, per the storage boundary). **P1 also establishes
 the Postgres hardening baseline (invariant #10)** that every later DB2-adding packet
 extends: kb↔Postgres `verify-full` TLS (incl. replicas), separate migration vs.

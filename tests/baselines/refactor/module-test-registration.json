@@ -50,6 +50,36 @@
       "test": "src/tests/test_config_surface.c"
     },
     {
+      "ctest": true,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_bus_db2_module.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_bus_db3.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_module_contract.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_sketch_support.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db3_route.c"
+    },
+    {
       "ctest": false,
       "make": true,
       "module": "delegates",

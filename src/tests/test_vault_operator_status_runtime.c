@@ -1,4 +1,4 @@
-#include "db2/vault_operator_status_runtime.h"
+#include "modules/db2/c/vault_operator_status_runtime.h"
 
 #include <assert.h>
 #include <stdio.h>

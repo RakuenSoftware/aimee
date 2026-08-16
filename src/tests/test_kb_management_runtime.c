@@ -5,7 +5,7 @@
 #include "kb/kb_workload_helper_posix.h"
 #include "kb_workload_provider.h"
 #include "kb_mgmt_status.h"
-#include "db2/management_read_journal.h"
+#include "modules/db2/c/management_read_journal.h"
 #include "management_read.h"
 
 #include <assert.h>

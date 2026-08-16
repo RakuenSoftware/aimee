@@ -9,8 +9,8 @@
 #include <string.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "memory.h"
 #include "session_briefing.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */

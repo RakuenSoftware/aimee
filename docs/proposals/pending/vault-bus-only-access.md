@@ -34,7 +34,7 @@ Non-core modules calling `vault_service_*`:
 
 Callers reaching **below** the service layer, straight to `vault_store_*`:
 
-`src/db2/vault_pg.c`, `src/kb/kb_main.c`, `src/kb/kb_vault_rewrap.c`,
+`src/modules/db2/c/vault_pg.c`, `src/kb/kb_main.c`, `src/kb/kb_vault_rewrap.c`,
 `src/kb/kb_mgmt_status_provision_main.c`, `src/modules/git/git_host_cred.c`,
 `src/server/server_vault.c`, `src/server/server_vault_bootstrap.c`,
 `src/server/server_vault_agent_migration.c`.

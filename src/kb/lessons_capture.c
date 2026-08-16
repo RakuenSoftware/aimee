@@ -1,6 +1,6 @@
 /* lessons_capture.c: see lessons_capture.h. The cite-emit hook substrate. */
 #include "lessons_capture.h"
-#include "db2/lessons.h"
+#include "modules/db2/c/lessons.h"
 
 int lessons_capture_turn(lessons_cite_tracker_t *tracker, const char *session_id,
                          const char *turn_id, int turn, const char *project_id,

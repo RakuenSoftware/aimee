@@ -1,9 +1,9 @@
 /* test_ontology_evolution.c: typed-fact §2 self-extending ontology promotion
  * pipeline, against the sqlite shim. P4. */
 #include "../headers/aimee.h"
-#include "../db2/ontology_evolution.h"
-#include "../db2/rel_types_store.h"
-#include "../db2/db2_test_shim.h"
+#include "../modules/db2/c/ontology_evolution.h"
+#include "../modules/db2/c/rel_types_store.h"
+#include "../modules/db2/c/db2_test_shim.h"
 #include "modules/memory/memory_ontology.h"
 #include <assert.h>
 #include <stdio.h>

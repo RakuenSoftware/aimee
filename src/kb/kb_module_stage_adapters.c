@@ -8,6 +8,7 @@
 #include <aimee/audit/obs_bus.h>
 #include <aimee/control-web/module_api.h>
 #include <aimee/core/event_bus/module_protocol.h>
+#include <aimee/db2/client.h>
 #include <aimee/kb-synthesis/module_api.h>
 #include <aimee/postgres/module_api.h>
 
@@ -42,6 +43,18 @@ static int call_module(uint32_t event_kind, uint32_t stage_id, const void *reque
                               NULL) == AIMEE_MODULE_CALL_OK
               ? 0
               : -1;
+}
+
+static aimee_module_call_result_t
+call_db2(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_id,
+         uint64_t deadline_ns, const void *request_body, uint32_t request_len, void *response_body,
+         uint32_t response_capacity, uint32_t *response_len, aimee_module_cancelled_fn cancelled,
+         void *cancel_context)
+{
+   (void)context;
+   return obs_bus_module_call(event_kind, stage_id, trace_id, deadline_ns, request_body,
+                              request_len, response_body, response_capacity, response_len,
+                              cancelled, cancel_context);
 }
 
 static int grounding_decide(aimee_kb_synthesis_claim_kind_t claim_kind, const char *const *claims,
@@ -91,6 +104,20 @@ int kb_module_postgres_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_t
       return -1;
    return aimee_postgres_health_response_decode(response, response_len, schema_ok, have_pg_trgm,
                                                 kb_tables_ok);
+}
+
+int kb_module_db2_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_tables_ok)
+{
+   uint64_t now = monotonic_ns();
+   if (!now)
+      return -1;
+   uint64_t trace = atomic_fetch_add_explicit(&next_trace, 1, memory_order_relaxed);
+   if (trace == 0)
+      trace = atomic_fetch_add_explicit(&next_trace, 1, memory_order_relaxed);
+   return aimee_db2_health_call(call_db2, NULL, trace, now + KB_MODULE_STAGE_DEADLINE_NS, schema_ok,
+                                have_pg_trgm, kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_OK
+              ? 0
+              : -1;
 }
 
 void kb_module_stage_adapters_configure(void)

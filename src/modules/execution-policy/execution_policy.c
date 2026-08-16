@@ -12,7 +12,7 @@
 #endif
 #include "aimee.h"
 #include "db1.h"
-#include "db2/tool_registry.h"
+#include "modules/db2/c/tool_registry.h"
 #include "agent.h"
 #include "kb_client.h"
 #include "headers/memory.h"

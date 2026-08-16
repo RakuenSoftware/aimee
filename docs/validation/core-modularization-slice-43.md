@@ -36,7 +36,7 @@ and `learning_version` tests are KB tests, not module tests; and the CMake omiss
 adds only the completeness assertion on the already-reviewed declarations.
 
 Completeness is a file-ownership statement about the module root as it stands. It does not assert that
-the DB2 persistence (`src/db2/db2_learning.h`, `src/db2/learning_synth_ops.c`) or the KB synthesis lane
+the DB2 persistence (`src/modules/db2/c/db2_learning.h`, `src/modules/db2/c/learning_synth_ops.c`) or the KB synthesis lane
 have been moved into the module — they remain physical-ownership debt the document records — and it does
 not resolve the `learning.h` layout question, which a separate header-layout slice owns.
 

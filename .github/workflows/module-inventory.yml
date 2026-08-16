@@ -85,6 +85,29 @@ jobs:
           python3 -I -S scripts/check_db2_source_boundary.py --previous-ref FETCH_HEAD
       - name: Test DB2 source-boundary failure modes
         run: python3 -I scripts/tests/test_check_db2_source_boundary.py -v
+      - name: Enforce generated DB2 operation contract
+        run: python3 -I -S scripts/gen_db2_contract.py
+      - name: Test DB2 operation-contract failure modes
+        run: python3 -I scripts/tests/test_gen_db2_contract.py -v
+      - name: Enforce generated DB2 declaration ledger
+        run: python3 -I -S scripts/gen_db2_declaration_ledger.py
+      - name: Test DB2 declaration-ledger failure modes
+        run: python3 -I scripts/tests/test_gen_db2_declaration_ledger.py -v
+      - name: Enforce exhaustive DB3 portability decisions
+        run: python3 -I -S scripts/check_db3_portability.py
+      - name: Test DB3 portability-audit failure modes
+        run: python3 -I scripts/tests/test_check_db3_portability.py -v
+      - name: Measure DB2 C link closure
+        run: python3 -I -S scripts/check_db2_link_closure.py
+      - name: Refuse DB2 C link-closure debt growth
+        if: github.event_name == 'pull_request'
+        run: python3 -I -S scripts/check_db2_link_closure.py --no-probe --previous-ref FETCH_HEAD
+      - name: Test DB2 C link-closure failure modes
+        run: python3 -I scripts/tests/test_check_db2_link_closure.py -v
+      - name: Refuse premature DB2 process activation
+        run: python3 -I -S scripts/check_db2_activation.py
+      - name: Test DB2 activation-gate failure modes
+        run: python3 -I scripts/tests/test_check_db2_activation.py -v
       - name: Enforce module bus boundary
         run: python3 -I -S scripts/check_module_bus_boundary.py
       - name: Test module bus-boundary failure modes
@@ -223,6 +246,8 @@ jobs:
         run: python3 -I scripts/tests/test_validate_module_descriptors.py -v
       - name: Test exhaustive standalone C-process export generation
         run: python3 -I scripts/tests/test_export_c_process_build.py -v
+      - name: Test exhaustive C-process runtime-bundle builds
+        run: python3 -I scripts/tests/test_build_c_module_runtime_bundle.py -v
       - name: Enforce canonical module public-header layout
         run: python3 -I -S scripts/check_module_header_layout.py
       - name: Test module public-header layout failure modes

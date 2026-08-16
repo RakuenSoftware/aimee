@@ -24,21 +24,21 @@ ALLOWED_TRANSPORT_SHIMS = {
 
 ALLOWED_AGENT_NAMED_SOURCES = {
     "kb_service_agent.c",
-    "db2/agent_hints.c",
-    "db2/agent_outcomes.c",
-    "db2/kb_service_backend_agent.c",
-    "db2/server_registry.c",
+    "modules/db2/c/agent_hints.c",
+    "modules/db2/c/agent_outcomes.c",
+    "modules/db2/c/kb_service_backend_agent.c",
+    "modules/db2/c/server_registry.c",
 }
 
 STATUS_AUTHORITY_ONLINE_PRIVATE_SOURCES = {
     "kb/kb_mgmt_status_custody.c",
-    "db2/management_status_key.c",
-    "db2/management_status_runtime.c",
+    "modules/db2/c/management_status_key.c",
+    "modules/db2/c/management_status_runtime.c",
 }
 
 STATUS_PROVISIONER_PRIVATE_SOURCES = {
     "kb/kb_mgmt_status_provision.c",
-    "db2/management_status_provision.c",
+    "modules/db2/c/management_status_provision.c",
 }
 
 STATUS_AUTHORITY_PRIVATE_SOURCES = (

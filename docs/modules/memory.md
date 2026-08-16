@@ -5,7 +5,7 @@
 Memory is required core: it recalls, ranks, assembles, stores, and maintains information that makes
 Aimee useful across turns and repositories. It includes code intelligence, embedding, and reranking;
 `kb-synthesis` is not part of this module. Current ownership is split between `src/modules/memory`,
-`src/db2`, KB services, clients, and root command files, which is migration debt rather than a second
+`src/modules/db2/c`, KB services, clients, and root command files, which is migration debt rather than a second
 memory subsystem.
 
 ### Go process stage
@@ -53,7 +53,7 @@ bypass the module by leaving confidence unset.
 
 The current C contract is principally `src/headers/memory.h`, with platform seams in
 `src/modules/memory/memory_platform.h` and provider seams in
-`src/modules/memory/memory_provider.h`. Code-index operations in `src/db2/code_index_ops.c`, vector
+`src/modules/memory/memory_provider.h`. Code-index operations in `src/modules/db2/c/code_index_ops.c`, vector
 search, `memory_assemble`, and `gw_stage_memory` are one required capability family even though their
 physical paths have not all reached the module directory.
 
@@ -109,7 +109,7 @@ evidence are recalled from the same required knowledge capability.
 ## Data and migrations
 
 Durable state spans DB1 memory records and DB2/PostgreSQL memory, embedding, code-index, graph, and
-artifact relations; their concrete schemas live under `src/db1` and `src/db2`. Embedding dimension and
+artifact relations; their concrete schemas live under `src/db1` and `src/modules/db2/c`. Embedding dimension and
 model-version migrations must keep text, vector rows, provenance, and active-version metadata coherent;
 deleting vectors is safe only where the source records are demonstrably regenerable.
 
@@ -162,6 +162,6 @@ baseline decision.
 ## Extension and removal
 
 New recall sources must enter through the shared candidate, ranking, scope, and evidence contracts, not
-an independent store-and-inject path. The root and `src/db2` implementation inventory is a relocation
+an independent store-and-inject path. The root and `src/modules/db2/c` implementation inventory is a relocation
 queue; each move must prove consumers and delete duplicate glue. Removing `memory`, embedding, reranking,
 or code intelligence would break the core product and is not an allowed optional profile.

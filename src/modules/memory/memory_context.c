@@ -3,9 +3,9 @@
 #include "aimee.h"
 #include "db1_optional.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db2/memory_query.h"
-#include "db2/memory_relations.h"
-#include "db2/rules.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/memory_relations.h"
+#include "modules/db2/c/rules.h"
 #endif
 #include "modules/learning/learning_evidence.h"
 #include "memory.h"

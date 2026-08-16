@@ -1,11 +1,16 @@
 # Proposal: put DB2 behind a module boundary, then port it to Go
 
-- **State:** PENDING — scoped migration; no production DB2 operation has moved under this
-  proposal yet.
+- **State:** PENDING — the C source boundary and separately buildable C process shell are registered;
+  the descriptor owns the generated health contract, typed C client, and declaration-review source;
+  all 1,351 external C declarations are mechanically inventoried, lifecycle health is reviewed as a
+  retained-DB2 wire operation, and provider-specific pgvector declarations are explicitly
+  retained/private. The typed client/handler path passes through the real event bus, but production
+  remains on direct calls until the standalone C backend is complete.
 - **Date:** 2026-08-15.
 - **Charter roles:** Constrain-Verify / Gate-Promote.
-- **Thesis:** `src/db2` was created as a portable source boundary. Preserve its behavior by
-  moving the existing C implementation intact into a KB-local module process first. Once
+- **Thesis:** DB2 was created as a portable source boundary and now resides intact at
+  `src/modules/db2/c`. Preserve its behavior by putting that C implementation behind a KB-local
+  module process first. Once
   `aimee-kb` has no direct DB2 linkage, replace that module's internals with pure Go without
   changing its event contract.
 
@@ -13,7 +18,7 @@
 
 DB2 moves in two ownership transfers:
 
-1. **C library to C module.** The existing `src/db2` implementation becomes the private
+1. **C library to C module.** The relocated `src/modules/db2/c` implementation becomes the private
    implementation of a separately supervised `aimee-module-db2` process placed with
    `aimee-kb`. The C code, schema, SQL, transaction behavior, pool, and tests move together.
    `aimee-kb` reaches the process only through typed, versioned bus events and no longer links
@@ -38,7 +43,8 @@ the public KB HTTP/CLI contracts keep their meanings.
 
 ## 2. Why the existing boundary is portable
 
-The C implementation already hides its PostgreSQL handle inside `src/db2`. Callers use typed
+The C implementation already hid its PostgreSQL handle inside the former `src/db2` boundary. That
+tree has been relocated intact to `src/modules/db2/c`; callers use typed
 headers; code outside the boundary is not supposed to receive a libpq handle or issue SQL.
 Schema, lifecycle, pooling, tenant transactions, query implementations, and pgvector transport
 are all present under the same directory. That is the unit to package behind the process
@@ -48,35 +54,49 @@ Measured on `origin/testing` at `0916c09472`:
 
 | Measure | Count |
 | --- | ---: |
-| C translation units under `src/db2` | 141 |
-| Headers under `src/db2` | 137 |
-| SQL files under `src/db2` | 6 |
+| C translation units under `src/modules/db2/c` | 141 |
+| Headers under `src/modules/db2/c` | 137 |
+| SQL files under `src/modules/db2/c` | 6 |
 | C, header, and SQL lines | 92,852 |
-| Files outside `src/db2` that include a DB2 header | 297 |
+| Files outside `src/modules/db2/c` that include a DB2 header | 297 |
 | — production files | 147 |
 | — test files | 150 |
 | Direct DB2-header include directives outside the boundary | 967 |
 | — production directives | 532 |
 | Lines across the six SQL files | 16,349 |
 
+The physical move also exposed the other side of the source boundary. At the relocation merge,
+DB2's C and header files contain 187 project or vendored-header include directives that resolve
+outside `src/modules/db2/c`: 122 host APIs, 45 private APIs from other modules, 17 vendored cJSON
+includes, two public module APIs, and the generated schema header. The initial process-boundary
+slice promoted the three shared management-authority contracts and their token-public dependency
+out of private `src/kb` ownership;
+the boundary now rejects any direct DB2 import from that private tree. A
+directory boundary therefore exists, but the process build is not yet a standalone dependency
+closure. `tests/baselines/db2/source-boundary-v2.json` accounts for every one of these imports and
+the boundary gate rejects growth. Phase one must remove, invert, relocate, or explicitly replace
+them with portable core/system dependencies before the standalone C process can activate; linking
+the monolithic core into the DB2 executable does not satisfy the boundary.
+
 The inventory is reproducible from the cited revision with these bounded commands (the include
 pattern is intentionally the same for file and directive counts):
 
 ```sh
 git checkout 0916c09472
-rg --files src/db2 -g '*.c' | wc -l
-rg --files src/db2 -g '*.h' | wc -l
-rg --files src/db2 -g '*.sql' | wc -l
-wc -l src/db2/*.[ch] src/db2/*.sql | tail -1
+rg --files src/modules/db2/c -g '*.c' | wc -l
+rg --files src/modules/db2/c -g '*.h' | wc -l
+rg --files src/modules/db2/c -g '*.sql' | wc -l
+wc -l src/modules/db2/c/*.[ch] src/modules/db2/c/*.sql | tail -1
 rg -l '#include [<"](?:\.\./)?db2/|#include [<"][^">]*db2[^">]*\.h' \
-  src --glob '!src/db2/**' | wc -l
+  src --glob '!src/modules/db2/c/**' | wc -l
 rg -n '^#include [<"](?:\.\./)?db2/|^#include [<"][^">]*db2[^">]*\.h' \
-  src --glob '!src/db2/**' | wc -l
+  src --glob '!src/modules/db2/c/**' | wc -l
 ```
 
-These planning-time counts are evidence, not a frozen migration manifest. The first implementation
-commit reruns the commands at its merge base and checks in the generated catalog; completeness gates
-use that current catalog rather than the numbers above.
+These planning-time counts are evidence, not a frozen migration manifest. The S2 declaration-audit
+slice reruns the commands at its merge base and accounts for the full surface before
+`catalog_complete` can become true; completeness gates use that current ledger rather than the
+numbers above.
 
 The include count is the client-adapter inventory, not a reason to repartition DB2. Those
 consumers already meet a typed source boundary. Phase one preserves their operation semantics
@@ -135,6 +155,22 @@ never reused. The descriptor owns that file and the contract generator emits:
 - `tests/baselines/modules/db2-wire-v1.json`, containing the contract fingerprint and positive
   and negative vectors.
 
+The catalog bootstrap owns and generates the already-registered lifecycle-health operation first.
+It reserves family IDs and event kinds `11521` through `11528`, but only lifecycle kind `11521` is
+active in `process-contracts.json`; reserved inactive kinds are not grants. `catalog_complete` stays
+false until the declaration and consumer audit accounts for the complete DB2 call surface. CI
+rejects generated-header or vector-baseline drift and rejects a premature completeness claim.
+
+The declaration gate is separate from codec generation. A checked-in review binds a symbol and its
+normalized-signature hash to a closed disposition, family, DB3 placement, and reason. The generated
+ledger cross-references the exact frozen consumer set, records harmless identical declarations, and
+rejects conflicting signatures or unsupported C constructs rather than silently omitting them.
+Test-only and unconsumed declarations do not become wire operations. The 61 currently externally
+referenced `pgvec_*` declarations are explicitly `private-db2`/`retained-db2`; this prevents provider
+names and PostgreSQL mechanics from leaking into the later DB3 contract without claiming that their
+provider-neutral logical operations are ineligible. `catalog_complete` cannot pass while the ledger
+contains an `audit-pending` production declaration.
+
 The bus already carries event kind, correlation, deadline, cancellation, and fragmentation.
 The DB2 request body therefore has only a 24-byte little-endian header followed by the declared
 payload: `magic:u32`, `version:u16`, `header_len:u16`, `operation:u32`, `flags:u32`,
@@ -180,55 +216,57 @@ the authoritative scope, lifecycle, quarantine, and classification checks before
 
 ### 3.3 DB3 observer contract and routing
 
-DB2 is the sole publisher of DB3 mutation and search events. DB3 implementations are multiple
-authorized observers of the same logical module contract:
+DB2 and admitted providers use a single logical DB3 contract. DB2 publishes committed mutations and
+requests portable reads; providers publish readiness and acknowledgements. DB3 implementations may
+be multiple authorized observers of the write side of that contract:
 
 - `db3.capabilities`: metric, maximum dimension/batch/top-K, supported filter nodes, and provider
   generation;
 - `db3.apply`: idempotent committed upsert/delete/tombstone batches with operation and generation IDs;
 - `db3.applied`: per-observer acknowledgement, durable watermark, lag, and typed failure;
-- `db3.search`: query ID, collection, vector, metric, typed filter, top-K, bounded relative timeout,
-  and required provider generation; and
-- `db3.results`: query ID, generation, status, and bounded point IDs, distances, and ranks, with
-  provider identity bound from bus admission rather than trusted from the body.
+- `db3.search`: request/reply carrying query ID, collection, vector, metric, typed filter, top-K,
+  bounded relative timeout, required provider generation, then bounded point IDs, distances, and
+  ranks; and
+- `db3.route`: observable selected-provider, default-pgvector, or explicit-fallback decisions.
 
-The proposed version 1 assigns notification kinds `11777` through `11781` in that order. Each DB3
-notification uses a 40-byte bounded chunk envelope above the event body because valid vectors and
-result batches can exceed one negotiated inline bus slot, while the core bus fragments only correlated
-request/reply streams. The envelope binds wire kind, stream ID, total length, chunk count/index, and
-offset. Reassembly is keyed by the host-stamped provider principal, kind, and stream ID; it rejects
-out-of-order, duplicate, cross-provider, oversized, and noncanonical chunks. DB3 kinds retain the
-bus's default blocking overflow policy so a fan-out never produces a silently partial message.
+The proposed version 1 assigns kinds `11777` through `11781` in that order. Notifications use a
+bounded chunk envelope when a valid apply batch exceeds one negotiated inline bus slot. Correlated
+search uses the bus request/reply stream directly and therefore inherits its fragmentation,
+cancellation, and deadline semantics. Notification reassembly is keyed by the host-stamped provider
+principal, kind, and stream ID; it rejects out-of-order, duplicate, cross-provider, oversized, and
+noncanonical chunks. DB3 kinds retain the bus's default blocking overflow policy so a fan-out never
+produces a silently partial message.
 
 Mutation events use the bus's observer fan-out directly. Each admitted DB3 instance applies the same
-committed outbox operation and publishes its own acknowledgement. Search is correlated scatter/gather:
-DB2 snapshots the configured ready observers, publishes one query, accepts at most one result per
-admission-bound provider identity until the deadline, and records missing/late observers explicitly.
-The provider identity comes from module admission, not a self-asserted payload string.
-The route snapshot, expected-observer set, and overall deadline remain DB2 correlation state. A
-bounded relative timeout in each search body limits provider work because notification fan-out has
-no request/reply cancellation stream; providers cannot rewrite that budget in a result body.
+committed outbox operation and publishes its own acknowledgement. Search is never notification
+fan-out: DB2 sends one correlated request to the exactly one admitted, ready, explicitly selected
+server for the search kind. A second process cannot serve that kind under the same route. The
+provider identity comes from the authenticated serving grant and DB2 route snapshot, not a
+self-asserted payload string. The selected server inherits the overall bus deadline and cancellation;
+it cannot rewrite either in its reply.
 
-The logical `db3` module owns the result event kinds even when several admitted implementations
-publish them; instances have distinct provider identities and executable attestations under that
-module contract. A provider cannot observe a tenant or collection unless its grant and DB2 route both
-allow it. All observers of a routed event are therefore authorized to see its vector and bounded
-filter metadata.
+The logical `db3` module owns the protocol. Its canonical contract-owner principal is allocated only
+when the executable router and first served stage land: the current process-contract schema correctly
+forbids principal reservations without a real process. Provider instances have distinct strict
+principals and executable attestations; only the selected instance receives the search-serve grant,
+while every routed instance may receive the apply-subscribe grant. No provider process or production
+grant activates until a concrete provider ships. A provider cannot observe a tenant or collection
+unless its grant and DB2 route both allow it.
 
 Default routing is deterministic:
 
 1. with no selected ready DB3 observer, portable operations use DB2 pgvector;
-2. with exactly one selected observer, portable writes fan out to it and portable searches use it;
-3. with several observers, writes fan out to all, while search requires an explicit `primary`,
-   `compare`, or `federated` policy; and
+2. with exactly one selected observer, portable searches use it while committed writes still fan out
+   to every admitted write observer;
+3. with several observers, committed writes may fan out to every routed observer, while search uses
+   exactly one explicitly selected primary; and
 4. an unavailable selected DB3 uses pgvector only when the declared route permits fallback. Fallback
    is never silent: readiness, trace evidence, and result provenance identify it.
 
-`compare` is a migration/verification mode: pgvector remains the served result while DB3 rankings are
-measured. `primary` serves one DB3 and keeps the others warm. `federated` uses rank fusion over
-provider ranks (not incomparable raw scores), then DB2 rehydrates and rechecks every candidate.
-Changing the serving provider requires matching model, dimension, metric, collection content hash,
-and acknowledged generation; otherwise the route remains on pgvector.
+Multiple installed observers do not imply score fusion, comparison, or multi-provider reads. Those
+would be separate product contracts. Changing the selected serving provider requires matching model,
+dimension, metric, collection content hash, and acknowledged generation; otherwise the route remains
+on pgvector.
 
 DB3 runtime work cannot activate before the phase-one C DB2 process owns the real serving path. The
 provider-neutral package, descriptors, and observer runners land only with a C DB2 adapter that
@@ -239,6 +277,47 @@ headline deliverable ahead of its owner.
 The DB3 contract is stable across the C-to-Go DB2 port. Provider endpoints and secrets stay inside
 their DB3 processes. Adding a DB3 implementation changes its provider artifact/descriptor and the
 conformance matrix, not the KB route, DB2 public stage, or caller grant.
+
+### 3.4 Ordered implementation slices
+
+The migration lands in independently testable slices, but activation remains atomic:
+
+1. **S1 — boundary and process shell.** Relocate the C tree, inventory both sides of the source
+   boundary, register principal 29/event 11521, compile a standalone C runtime bundle, freeze the
+   lifecycle-health codec, and return `capability_absent` until the real backend closure is linked.
+   Exit: the bundle builds, malformed wire vectors fail closed, and DB2 imports no private KB header.
+2. **S2 — catalog and C closure.** Classify every external C declaration and consumer, generate the
+   eight family dispatch surfaces, freeze an exhaustive disposition for every vector declaration,
+   add database-free reference routing/codecs for the first portable candidate operation, and remove
+   or promote every dependency that prevents the complete descriptor-owned C source set from linking
+   standalone. Exit: exhaustive catalogs and no monolithic core link.
+3. **S3 — replayable C process.** Package schema, DSN, pool, tenancy, and every catalog handler in the
+   disabled C process; add reference-vs-process replay, schema, concurrency, cancellation, and fault
+   fixtures. Exit: byte and database-effect parity while the KB still serves local calls.
+4. **S4 — atomic C activation.** Start DB2 before consumers, move the DSN and every caller to generated
+   bus clients, remove DB2/libpq from the KB link, and make failed DB2 readiness fail closed. Exit:
+   only `aimee-module-db2` owns DB2 in the image.
+5. **S5 — DB3 contract and providers.** Connect the provider-neutral reference contract to the
+   pgvector default adapter, deterministic selection/fallback, committed outbox fan-out, and real DB2
+   candidate revalidation; run conformance tests for fake and optional external providers. Exit: one
+   selected external provider can replace every eligible operation without moving retained
+   PostgreSQL-coupled work.
+6. **S6 — pure-Go parity.** Implement the frozen DB2 catalog in `server-go/modules/db2`, embed the same
+   SQL, and pass C-vs-Go replay, schema, tenant, concurrency, vector, DB3, durability, and performance
+   gates. Exit: a descriptor/runtime switch selects Go without caller or wire changes.
+7. **S7 — C retirement.** Deploy only the Go provider, remove the C tree and C-only shims after the
+   compatibility window, and prove no C DB2 object, stale grant, or fallback executable ships.
+
+This implementation is intentionally split across those ordered PRs. The current S2 owner PR adds
+the exact C link-closure audit and does not claim the C cutover, Go port, or complete DB3 runtime.
+Subsequent autonomous S2 PRs own elimination of each audited dependency cluster. S3 and S4 own the
+replayable C process and atomic ownership switch; S5 owns the deployable provider-neutral DB3
+descriptor, grants, pgvector adapter, and external-provider conformance; S6 owns the aimee-kb Go
+implementation and parity switch. Pulling any of those later owners into this audit PR would violate
+the required C-first ordering and activate an unproven partial closure.
+
+Material changes to operation ownership, fallback semantics, observer selection, or the activation
+boundary return to roundtable review. Mechanical catalog additions follow the frozen rules above.
 
 ## 4. Phase one: put the existing C boundary behind the module
 
@@ -256,7 +335,7 @@ src/modules/db2/
   include/aimee/db2/module_api.h
   client/{client.c,client.h,generated.c}
   runtime/{main.c,module_adapter.c,generated_dispatch.c}
-  c/                         # the current src/db2 tree, paths preserved below this point
+  c/                         # the current src/modules/db2/c tree, paths preserved below this point
 docs/modules/db2.md
 tests/db2/{replay.c,fixtures/,schema_inventory.sql}
 server-go/modules/db2/       # created in phase two; absent from the phase-one runtime closure
@@ -305,6 +384,24 @@ Audit the 297 consumers by runtime placement before conversion:
 The compatibility headers keep existing typed function signatures only while a consumer group is
 being converted. They contain codecs, never SQL or connection access. A generated manifest accounts
 for all 967 old include directives and fails on an unclassified or newly introduced one.
+
+Before changing dependency clusters, a descriptor-owned link-closure contract freezes every DB2 C
+translation unit and the external symbols left after a no-library relocatable link. The probe may
+resolve DB2-to-DB2 references only; helper objects, weak definitions, archives, shared libraries, and
+transitive core links are forbidden. Every remaining symbol records its referencing units, reviewed
+disposition, and rationale. New debt fails immediately, while resolved debt requires an explicit
+baseline update. This is a migration ledger, not standalone-readiness evidence: S2 exits only when
+the complete source set links through declared system dependencies and bounded injected contracts
+without the monolithic core.
+
+Closure support lands outside the frozen legacy `c/` tree and is admitted by exact executable
+policy, not an author-assigned label. The first unit promotes seven deterministic sketch primitives:
+its global definitions must exactly match the seven reviewed `portable-core-promotion` rows, its
+base call sites are frozen, its only allowed headers are `sketch.h` and `string.h`, and its only
+possible unresolved ABI import is `memset`. It must strictly shrink the aggregate closure without a
+new symbol or non-system reference edge, and fixed-vector plus sanitizer parity runs against the
+pre-activation monolith. This pattern permits bounded process-owned portability code without
+reopening the legacy DB2 feature surface.
 
 ### 4.3 Supervision and atomic activation
 
@@ -392,7 +489,7 @@ against both module implementations:
 - **Vector compatibility:** preserve halfvec dimensions, distance operators, index choices, model
   identity, re-embedding locks, and source/vector version coherence. Run the provider-neutral
   conformance corpus against pgvector, a deterministic fake, and every optional provider; verify
-  external-provider outbox lag, tombstones, backfill, comparison, and cutover behavior.
+  external-provider outbox lag, tombstones, backfill, behavioral parity, and cutover behavior.
 - **Concurrency:** run multi-replica startup, schema locking, pool saturation, retry, shutdown, and
   cancellation tests against the supported PostgreSQL versions.
 - **Durability:** inject failures before statement execution, before commit, after ambiguous commit,
@@ -416,8 +513,8 @@ The concrete CI surface is `db2-contract` (catalog/codegen/fingerprint and negat
 `db2-boundary` (include, DSN-reader allowlist, ELF/import, SQL-location, and runtime-bundle scans), `db2-schema`
 (clean apply plus catalog comparison), `db2-replay` (behavior/tenant/durability vectors),
 `db2-concurrency` (multi-replica and pool reuse), `db2-vector` (dimension/operator/plan fixtures),
-`db3-conformance` (provider contract, multiple-observer fan-out, scope recheck, outbox, generation,
-scatter/gather, routing, and fallback fixtures), and
+`db3-conformance` (provider contract, multiple-observer write fan-out, single-primary reads, scope
+recheck, outbox, generation, routing, and fallback fixtures), and
 `db2-performance` (recorded in-process, C-process, and Go-process budgets). These are new deliverables
 of this proposal and become named Make targets before activation; CI invokes the same targets.
 

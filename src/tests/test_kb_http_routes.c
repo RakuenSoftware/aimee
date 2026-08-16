@@ -12,10 +12,10 @@
 #include "kb_http.h"
 #include "kb_route_acl.h"
 #include "kb_scope.h"
-#include "td_search_render.h"       /* consumer side of the /v1/search contract test */
-#include "kb/kb_surprising_judge.h" /* §4 judge stub seam (kb_surprising_verdict_t) */
-#include "db2/lifecycle.h"          /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
-#include "db2/code_project_lifecycle.h"
+#include "td_search_render.h"        /* consumer side of the /v1/search contract test */
+#include "kb/kb_surprising_judge.h"  /* §4 judge stub seam (kb_surprising_verdict_t) */
+#include "modules/db2/c/lifecycle.h" /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
+#include "modules/db2/c/code_project_lifecycle.h"
 #include "rel_types.h"        /* REL_TYPE_NAME_MAX for the db2_ontology_* stubs below */
 #include "config_fields.h"    /* config_field_t for the pipeline-console stubs below */
 #include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
@@ -2109,7 +2109,7 @@ static void test_capabilities(void)
 /* ── db2_enrollment_* stubs (satisfy refs from kb_http.o + kb_http_accounts.o +
  *    kb_tls_serve.o) with a single canned row so the accounts routes can be
  *    exercised without a live DB2. ─────────────────────────────────────────── */
-#include "db2/enrollments.h"
+#include "modules/db2/c/enrollments.h"
 #include "kb_identity.h"
 static int g_stub_revoked_calls = 0;
 static char g_stub_enrollment_expires_at[32];
@@ -2223,7 +2223,7 @@ const char *config_default_dir(void)
  * Note: we do NOT include db2/artifacts.h (it re-declares db2_artifact_* which
  * this file already stubs with different signatures). Mirror just the audit row
  * struct — layout must match db2/artifacts.h. */
-#include "db2/decision_log.h"
+#include "modules/db2/c/decision_log.h"
 typedef struct
 {
    char id[64];

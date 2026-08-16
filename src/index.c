@@ -3,10 +3,10 @@
 #if !defined(AIMEE_DB2_DISABLED)
 #include "config.h"
 #include "css_analyze.h"
-#include "db2/code_index.h"
-#include "db2/css_graph.h"
-#include "db2/entity_edges.h"
-#include "db2/kb_runtime_state.h"           /* co-change backfill idempotency marker */
+#include "modules/db2/c/code_index.h"
+#include "modules/db2/c/css_graph.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/kb_runtime_state.h" /* co-change backfill idempotency marker */
 #include "modules/memory/memory_ontology.h" /* REL_CO_EDITED / NODE_FILE */
 #include <ctype.h>
 #include <dirent.h>

@@ -32,7 +32,7 @@ awk '
     skip=0; next
   }
   !skip { print }
-' "$repo_dir/src/db2/schema.sql" >"$legacy_schema"
+' "$repo_dir/src/modules/db2/c/schema.sql" >"$legacy_schema"
 sed -i 's/fencing_token    BIGINT NOT NULL DEFAULT 1 CHECK (fencing_token > 0)/fencing_token    BIGINT NOT NULL DEFAULT 0 CHECK (fencing_token >= 0)/' "$legacy_schema"
 sed -i 's/__EMBED_DIM__/1024/g' "$legacy_schema"
 if grep -q 'org_vault_rewrap_operator_status\|last_opened_rewrap_fence' "$legacy_schema"; then
@@ -45,7 +45,7 @@ create_db() {
   databases+=("$db")
   "$psql_bin" "$base_url" -X -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$db\"" >/dev/null
   "$psql_bin" "$url_prefix/$db" -X -v ON_ERROR_STOP=1 \
-    -f "$repo_dir/src/db2/schema_roles.sql" >/dev/null
+    -f "$repo_dir/src/modules/db2/c/schema_roles.sql" >/dev/null
   "$psql_bin" "$url_prefix/$db" -X -v ON_ERROR_STOP=1 -f "$legacy_schema" >/dev/null
 }
 
@@ -154,7 +154,7 @@ for case_name in open_completed open_recovery terminal_fence_gap terminal_epoch_
   seed_case "$db" "$case_name"
   before=$(schema_fingerprint "$db")
   error_file=$(mktemp)
-  if sed 's/__EMBED_DIM__/1024/g' "$repo_dir/src/db2/schema.sql" | \
+  if sed 's/__EMBED_DIM__/1024/g' "$repo_dir/src/modules/db2/c/schema.sql" | \
        "$psql_bin" "$url_prefix/$db" -X -v ON_ERROR_STOP=1 -f - \
        >/dev/null 2>"$error_file"; then
     echo "$case_name: migration unexpectedly succeeded" >&2
@@ -174,7 +174,7 @@ expect_upgrade_failure() {
   local db=$1 expected=$2
   local error_file
   error_file=$(mktemp)
-  if sed 's/__EMBED_DIM__/1024/g' "$repo_dir/src/db2/schema.sql" | \
+  if sed 's/__EMBED_DIM__/1024/g' "$repo_dir/src/modules/db2/c/schema.sql" | \
        "$psql_bin" "$url_prefix/$db" -X -v ON_ERROR_STOP=1 -f - \
        >/dev/null 2>"$error_file"; then
     echo "$db: upgrade unexpectedly succeeded" >&2
@@ -217,7 +217,7 @@ UPDATE public.kb_vault_control SET last_opened_rewrap_fence=0;
 CREATE UNIQUE INDEX idx_kb_vault_rewrap_fencing_token
   ON public.kb_vault_rewrap_operation(fencing_token);
 SQL
-sed 's/__EMBED_DIM__/1024/g' "$repo_dir/src/db2/schema.sql" | \
+sed 's/__EMBED_DIM__/1024/g' "$repo_dir/src/modules/db2/c/schema.sql" | \
   "$psql_bin" "$url_prefix/$resume_db" -X -v ON_ERROR_STOP=1 -f - >/dev/null
 resume_shape=$("$psql_bin" "$url_prefix/$resume_db" -X -Atq -v ON_ERROR_STOP=1 <<'SQL'
 SELECT format('%s:%s:%s:%s',a.atttypid='bigint'::regtype,a.attnotnull,
@@ -239,11 +239,11 @@ success_db="p7d3a_success_${run_tag}"
 databases+=("$success_db")
 "$psql_bin" "$base_url" -X -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$success_db\"" >/dev/null
 "$psql_bin" "$url_prefix/$success_db" -X -v ON_ERROR_STOP=1 \
-  -f "$repo_dir/src/db2/schema_roles.sql" >/dev/null
-sed 's/__EMBED_DIM__/1024/g' "$repo_dir/src/db2/schema.sql" | \
+  -f "$repo_dir/src/modules/db2/c/schema_roles.sql" >/dev/null
+sed 's/__EMBED_DIM__/1024/g' "$repo_dir/src/modules/db2/c/schema.sql" | \
   "$psql_bin" "$url_prefix/$success_db" -X -v ON_ERROR_STOP=1 -f - >/dev/null
 "$psql_bin" "$url_prefix/$success_db" -X -v ON_ERROR_STOP=1 \
-  -f "$repo_dir/src/db2/schema_grants.sql" >/dev/null
+  -f "$repo_dir/src/modules/db2/c/schema_grants.sql" >/dev/null
 # Plant both classes of grant drift caught in branch review, then prove that a
 # grants re-apply repairs them before the runtime assertions execute.
 "$psql_bin" "$url_prefix/$success_db" -X -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
@@ -274,7 +274,7 @@ ALTER DATABASE :DBNAME OWNER TO aimee_kb_vault_orchestrator;
 GRANT aimee_kb_vault_orchestrator TO aimee_kb_runtime;
 SQL
 "$psql_bin" "$url_prefix/$success_db" -X -v ON_ERROR_STOP=1 \
-  -f "$repo_dir/src/db2/schema_grants.sql" >/dev/null
+  -f "$repo_dir/src/modules/db2/c/schema_grants.sql" >/dev/null
 "$psql_bin" "$url_prefix/$success_db" -X -v ON_ERROR_STOP=1 \
   -f "$repo_dir/src/tests/test_p7_d3a_schema.sql" >/dev/null
 

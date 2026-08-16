@@ -41,7 +41,7 @@ Destination is **DB1** — aimee-server's own SQLite database
 (`~/.config/aimee/aimee.db`, `src/db1/`), opened by the server at
 `src/server/server.c:1616` via `db1_init` (`src/db1/db1_init.c:54`). **Explicitly not**
 the kb's db2/Postgres, where the existing `memory.store` RPC lands
-(`src/kb/kb_service_memory.c:1418` → `src/db2/kb_service_backend_memory.c:1171`). This is
+(`src/kb/kb_service_memory.c:1418` → `src/modules/db2/c/kb_service_backend_memory.c:1171`). This is
 a new, parallel store; the kb memory path is untouched.
 
 ## §0 What already exists (so we don't rebuild it)

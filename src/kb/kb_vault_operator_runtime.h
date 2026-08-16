@@ -1,7 +1,7 @@
 #ifndef AIMEE_KB_VAULT_OPERATOR_RUNTIME_H
 #define AIMEE_KB_VAULT_OPERATOR_RUNTIME_H
 
-#include "db2/vault_operator_rewrap_runtime.h"
+#include "modules/db2/c/vault_operator_rewrap_runtime.h"
 #include "kb_vault_activation_latch.h"
 #include "kb_vault_operator_mutation.h"
 #include "kb_vault_tpm_runtime_lock.h"

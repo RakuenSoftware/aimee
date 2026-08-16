@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the DB2 source-boundary and shrink-only consumer manifest."""
+"""Tests for DB2's source boundary and shrink-only dependency manifest."""
 
 from __future__ import annotations
 
@@ -27,13 +27,14 @@ class BoundaryTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         root = Path(tmp.name)
         files = {
-            "src/db2/store.c": '#include "store.h"\n',
-            "src/db2/store.h": "int db2_store(void);\n",
-            "src/db2/schema.sql": "CREATE TABLE sample(id integer);\n",
-            "src/kb/consumer.c": '#include "db2/store.h"\n',
-            "src/server/consumer.c": '#include "../db2/store.h"\n',
-            "src/tests/test_store.c": '#include "db2/store.h"\n',
-            "src/modules/memory/consumer.c": '#include "db2/store.h"\n',
+            "src/modules/db2/c/store.c": '#include "store.h"\n#include "aimee.h"\n',
+            "src/modules/db2/c/store.h": "int db2_store(void);\n",
+            "src/modules/db2/c/schema.sql": "CREATE TABLE sample(id integer);\n",
+            "src/headers/aimee.h": "int aimee_runtime(void);\n",
+            "src/kb/consumer.c": '#include "modules/db2/c/store.h"\n',
+            "src/server/consumer.c": '#include "../modules/db2/c/store.h"\n',
+            "src/tests/test_store.c": '#include "modules/db2/c/store.h"\n',
+            "src/modules/memory/consumer.c": '#include "modules/db2/c/store.h"\n',
         }
         for relative, content in files.items():
             path = root / relative
@@ -78,6 +79,46 @@ class BoundaryTests(unittest.TestCase):
             self.assertEqual(classes["src/server/consumer.c"], "server-kb-contract")
             self.assertEqual(classes["src/tests/test_store.c"], "private-implementation-test")
             self.assertEqual(classes["src/modules/memory/consumer.c"], "module-kb-contract")
+            self.assertEqual(first["outbound_dependencies"], [{
+                "source": "src/modules/db2/c/store.c",
+                "header": "aimee.h",
+                "resolved": "src/headers/aimee.h",
+                "classification": "host-api",
+                "count": 1,
+            }])
+        finally:
+            tmp.cleanup()
+
+    def test_module_owned_adapter_is_not_an_outside_consumer(self) -> None:
+        tmp = self.repo()
+        try:
+            root = Path(tmp.name)
+            adapter = root / "src/modules/db2/module_adapter.c"
+            adapter.write_text(
+                '#include <aimee/db2/module_api.h>\n', encoding="utf-8"
+            )
+            inventory = checker.build_inventory(root, self.revision)
+            self.assertNotIn(
+                adapter.relative_to(root).as_posix(),
+                {row["path"] for row in inventory["consumers"]},
+            )
+            checker.check(root)
+        finally:
+            tmp.cleanup()
+
+    def test_public_generated_client_is_not_a_private_boundary_consumer(self) -> None:
+        tmp = self.repo()
+        try:
+            root = Path(tmp.name)
+            (root / "src/kb/consumer.c").write_text(
+                '#include <aimee/db2/client.h>\n', encoding="utf-8"
+            )
+            inventory = checker.build_inventory(root, self.revision)
+            self.assertNotIn(
+                "src/kb/consumer.c",
+                {row["path"] for row in inventory["consumers"]},
+            )
+            checker.check(root)
         finally:
             tmp.cleanup()
 
@@ -96,7 +137,9 @@ class BoundaryTests(unittest.TestCase):
         tmp = self.repo()
         try:
             root = Path(tmp.name)
-            (root / "src/kb/new.c").write_text('#include "db2/store.h"\n', encoding="utf-8")
+            (root / "src/kb/new.c").write_text(
+                '#include "modules/db2/c/store.h"\n', encoding="utf-8"
+            )
             with self.assertRaisesRegex(checker.BoundaryError, "rule=include-growth"):
                 checker.check(root)
         finally:
@@ -107,10 +150,130 @@ class BoundaryTests(unittest.TestCase):
         try:
             root = Path(tmp.name)
             (root / "src/kb/consumer.c").write_text(
-                '#include "db2/store.h"\n#include "db2/store.h"\n', encoding="utf-8"
+                '#include "modules/db2/c/store.h"\n'
+                '#include "modules/db2/c/store.h"\n', encoding="utf-8"
             )
             with self.assertRaisesRegex(checker.BoundaryError, "baseline permits 1"):
                 checker.check(root)
+        finally:
+            tmp.cleanup()
+
+    def test_new_outbound_dependency_is_rejected(self) -> None:
+        tmp = self.repo()
+        try:
+            root = Path(tmp.name)
+            (root / "src/headers/config.h").write_text(
+                "int config_value(void);\n", encoding="utf-8"
+            )
+            (root / "src/modules/db2/c/store.c").write_text(
+                '#include "store.h"\n#include "aimee.h"\n#include "config.h"\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(checker.BoundaryError, "rule=dependency-growth"):
+                checker.check(root)
+        finally:
+            tmp.cleanup()
+
+    def test_duplicate_outbound_dependency_growth_is_rejected(self) -> None:
+        tmp = self.repo()
+        try:
+            root = Path(tmp.name)
+            (root / "src/modules/db2/c/store.c").write_text(
+                '#include "store.h"\n#include "aimee.h"\n#include "aimee.h"\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(checker.BoundaryError, "baseline permits 1"):
+                checker.check(root)
+        finally:
+            tmp.cleanup()
+
+    def test_unresolved_quoted_include_is_rejected(self) -> None:
+        tmp = self.repo()
+        try:
+            root = Path(tmp.name)
+            (root / "src/modules/db2/c/store.c").write_text(
+                '#include "store.h"\n#include "aimee.h"\n#include "missing_authority.h"\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                checker.BoundaryError, "unresolved:missing_authority.h"
+            ):
+                checker.check(root)
+        finally:
+            tmp.cleanup()
+
+    def test_outbound_dependency_classes_are_explicit(self) -> None:
+        tmp = self.repo()
+        try:
+            root = Path(tmp.name)
+            headers = {
+                "src/core/include/aimee/core/portable.h": "int core_api(void);\n",
+                "src/modules/audit/include/aimee/audit/public.h": "int audit_api(void);\n",
+                "src/modules/memory/private.h": "int memory_private(void);\n",
+                "src/vendor/headers/vendor_api.h": "int vendor_api(void);\n",
+                "src/kb/private.h": "int kb_private(void);\n",
+            }
+            for relative, content in headers.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            (root / "src/modules/db2/c/store.c").write_text(
+                '#include "store.h"\n'
+                '#include "aimee.h"\n'
+                '#include "aimee/core/portable.h"\n'
+                '#include "aimee/audit/public.h"\n'
+                '#include "modules/memory/private.h"\n'
+                '#include "vendor_api.h"\n'
+                '#include "kb/private.h"\n'
+                '#include "schema_data.h"\n',
+                encoding="utf-8",
+            )
+            rows = checker.build_inventory(root, self.revision)["outbound_dependencies"]
+            classes = {row["resolved"]: row["classification"] for row in rows}
+            self.assertEqual(classes["src/core/include/aimee/core/portable.h"],
+                             "portable-core-api")
+            self.assertEqual(classes["src/modules/audit/include/aimee/audit/public.h"],
+                             "module-public-api")
+            self.assertEqual(classes["src/modules/memory/private.h"], "module-private-api")
+            self.assertEqual(classes["src/vendor/headers/vendor_api.h"], "vendored-system-api")
+            self.assertEqual(classes["src/kb/private.h"], "kb-authority-leak")
+            self.assertEqual(classes["src/schema_data.h"], "generated-schema-input")
+        finally:
+            tmp.cleanup()
+
+    def test_private_kb_import_is_forbidden_even_when_baselined(self) -> None:
+        tmp = self.repo()
+        try:
+            root = Path(tmp.name)
+            private = root / "src/kb/private.h"
+            private.write_text("int kb_private(void);\n", encoding="utf-8")
+            source = root / "src/modules/db2/c/store.c"
+            source.write_text(
+                source.read_text(encoding="utf-8") + '#include "kb/private.h"\n',
+                encoding="utf-8",
+            )
+            self.write_baseline(root)
+            with self.assertRaisesRegex(checker.BoundaryError, "rule=kb-authority-import"):
+                checker.check(root)
+        finally:
+            tmp.cleanup()
+
+    def test_outbound_baseline_paths_and_classes_fail_closed(self) -> None:
+        tmp = self.repo()
+        try:
+            root = Path(tmp.name)
+            value = json.loads((root / checker.BASELINE).read_text(encoding="utf-8"))
+            for field, replacement, rule in (
+                ("source", "../escape.c", "baseline-path"),
+                ("resolved", "../../escape.h", "baseline-path"),
+                ("classification", "trusted-by-assertion", "baseline-classification"),
+            ):
+                tampered = json.loads(json.dumps(value))
+                tampered["outbound_dependencies"][0][field] = replacement
+                with self.subTest(field=field), self.assertRaisesRegex(
+                    checker.BoundaryError, f"rule={rule}"
+                ):
+                    checker._dependency_rows(tampered["outbound_dependencies"])
         finally:
             tmp.cleanup()
 
@@ -118,8 +281,20 @@ class BoundaryTests(unittest.TestCase):
         tmp = self.repo()
         try:
             root = Path(tmp.name)
-            (root / "src/db2/new.c").write_text("int new_db2_file;\n", encoding="utf-8")
+            (root / "src/modules/db2/c/new.c").write_text("int new_db2_file;\n", encoding="utf-8")
             with self.assertRaisesRegex(checker.BoundaryError, "rule=source-drift"):
+                checker.check(root)
+        finally:
+            tmp.cleanup()
+
+    def test_legacy_boundary_is_rejected(self) -> None:
+        tmp = self.repo()
+        try:
+            root = Path(tmp.name)
+            legacy = root / "src/db2/stray.h"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text("int stray;\n", encoding="utf-8")
+            with self.assertRaisesRegex(checker.BoundaryError, "rule=legacy-boundary"):
                 checker.check(root)
         finally:
             tmp.cleanup()
@@ -177,7 +352,7 @@ class BoundaryTests(unittest.TestCase):
             added["consumers"].append({
                 "path": "src/zz_new.c",
                 "classification": "host-generated-client",
-                "includes": [{"header": "db2/store.h", "count": 1}],
+                "includes": [{"header": "modules/db2/c/store.h", "count": 1}],
             })
             with self.assertRaisesRegex(checker.BoundaryError, "new allowlist entry"):
                 checker.enforce_shrink_only(previous, added)
@@ -188,6 +363,48 @@ class BoundaryTests(unittest.TestCase):
                 checker.BoundaryError, "rule=baseline-classification"
             ):
                 checker.enforce_shrink_only(previous, reclassified)
+
+            dependency_removed = json.loads(json.dumps(previous))
+            dependency_removed["outbound_dependencies"] = []
+            checker.enforce_shrink_only(previous, dependency_removed)
+
+            dependency_grown = json.loads(json.dumps(previous))
+            dependency_grown["outbound_dependencies"][0]["count"] += 1
+            with self.assertRaisesRegex(checker.BoundaryError, "rule=baseline-growth"):
+                checker.enforce_shrink_only(previous, dependency_grown)
+
+            dependency_added = json.loads(json.dumps(previous))
+            dependency_added["outbound_dependencies"].append({
+                "source": "src/modules/db2/c/store.c",
+                "header": "config.h",
+                "resolved": "src/headers/config.h",
+                "classification": "host-api",
+                "count": 1,
+            })
+            with self.assertRaisesRegex(checker.BoundaryError, "new outbound dependency"):
+                checker.enforce_shrink_only(previous, dependency_added)
+
+            private_to_public = json.loads(json.dumps(previous))
+            row = private_to_public["outbound_dependencies"][0]
+            row["header"] = "kb_mgmt_contract.h"
+            row["resolved"] = "src/kb/kb_mgmt_contract.h"
+            row["classification"] = "kb-authority-leak"
+            promoted = json.loads(json.dumps(private_to_public))
+            promoted_row = promoted["outbound_dependencies"][0]
+            promoted_row["resolved"] = "src/headers/kb_mgmt_contract.h"
+            promoted_row["classification"] = "host-api"
+            checker.enforce_shrink_only(private_to_public, promoted)
+            promoted_row["count"] += 1
+            with self.assertRaisesRegex(checker.BoundaryError, "new outbound dependency"):
+                checker.enforce_shrink_only(private_to_public, promoted)
+
+            legacy_v1 = json.loads(json.dumps(previous))
+            legacy_v1.pop("outbound_dependencies")
+            checker.enforce_shrink_only(legacy_v1, previous)
+            legacy_growth = json.loads(json.dumps(previous))
+            legacy_growth["consumers"][0]["includes"][0]["count"] += 1
+            with self.assertRaisesRegex(checker.BoundaryError, "rule=baseline-growth"):
+                checker.enforce_shrink_only(legacy_v1, legacy_growth)
         finally:
             tmp.cleanup()
 

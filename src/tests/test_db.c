@@ -9,7 +9,7 @@
 #include "db1.h"
 #include "db_schema.h"
 #include "db1_cron_jobs.h"
-#include "../db2/db_schema.h"
+#include "../modules/db2/c/db_schema.h"
 #include "platform_test_util.h"
 #include "model_registry.h" /* MODEL_CAP_* for the catalog round-trip */
 

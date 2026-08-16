@@ -16,11 +16,11 @@
  * scripts/p10_vault_rls_test.sql. */
 #include "vault_store.h"
 #include "vault_crypto.h"
-#include "vault_internal.h"   /* vault_store_set_backend */
-#include "db2/vault_pg.h"     /* vault_pg_backend */
-#include "db2.h"              /* db2_init / db2_shutdown */
-#include "db2/db2_internal.h" /* db2_conn (direct version-pointer assertion) */
-#include "db2/db_postgres.h"  /* aimee_pg_* */
+#include "vault_internal.h"             /* vault_store_set_backend */
+#include "modules/db2/c/vault_pg.h"     /* vault_pg_backend */
+#include "modules/db2/c/db2.h"          /* db2_init / db2_shutdown */
+#include "modules/db2/c/db2_internal.h" /* db2_conn (direct version-pointer assertion) */
+#include "modules/db2/c/db_postgres.h"  /* aimee_pg_* */
 
 #include <assert.h>
 #include <stdio.h>

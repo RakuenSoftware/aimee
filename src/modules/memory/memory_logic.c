@@ -12,11 +12,11 @@
 #include "aimee.h"
 #include "db1_optional.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db2/artifacts.h"
-#include "db2/calibration.h"
-#include "db2/kind_lifecycle.h"
-#include "db2/memory_payload.h"
-#include "db2/memory_promotion.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/calibration.h"
+#include "modules/db2/c/kind_lifecycle.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/memory_promotion.h"
 #endif
 #include "config.h"
 #include "kb.h"

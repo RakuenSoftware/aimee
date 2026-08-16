@@ -9,21 +9,21 @@
 #include "config_database.h" /* config_embedder_dims_current — the one width declaration */
 #include "db.h"
 #include "db1.h"
-#include "db2.h"
+#include "modules/db2/c/db2.h"
 #include "db_postgres.h"
 #include "artifacts.h"
 #include "calibration.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "kind_lifecycle.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include <aimee/workspace/workspace.h>
-#include "../db2/db2_internal.h"
-#include "../db2/lifecycle.h" /* db2_set_embedding_dim (embedder-aware semantic recall) */
-#include "../db2/entity_edges.h"
-#include "../db2/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
-#include "../db2/demotion.h"       /* retrieval_event write/read (auditable-correctness P2) */
-#include "../db2/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5) */
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/lifecycle.h" /* db2_set_embedding_dim (embedder-aware semantic recall) */
+#include "../modules/db2/c/entity_edges.h"
+#include "../modules/db2/c/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
+#include "../modules/db2/c/demotion.h" /* retrieval_event write/read (auditable-correctness P2) */
+#include "../modules/db2/c/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5) */
 #include "support/mock_agent_http.h"
 
 int memory_demote_from_failures(void);

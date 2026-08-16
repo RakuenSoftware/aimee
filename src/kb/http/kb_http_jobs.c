@@ -1,5 +1,5 @@
 #include "kb_http_jobs.h"
-#include "db2/kb_service_backend.h"
+#include "modules/db2/c/kb_service_backend.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -4,8 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "db2/db2_witness_checkpoint.h"
-#include "db2/db2_witness_emit.h"
+#include "modules/db2/c/db2_witness_checkpoint.h"
+#include "modules/db2/c/db2_witness_emit.h"
 #include "kb/kb_vault_policy.h"
 #include "kb/kb_witness_gate_state.h"
 #include "log.h"

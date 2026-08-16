@@ -239,7 +239,7 @@ relitigated:
   while its sibling `web_read` marks every span (`src/posix/web_read.c:377`,
   `:559`, `:615`). **Dropped** because the draft admitted it had not traced the
   downstream path from tool return to prompt assembly, nor the memory-recall
-  (`src/cmd_hooks.c`, `src/db2/memory_query.c`) or repo-file-content ingress
+  (`src/cmd_hooks.c`, `src/modules/db2/c/memory_query.c`) or repo-file-content ingress
   paths. Without that trace the premise — that nothing marks the content
   downstream — is unestablished, and the proposed cross-tool invariant test had
   no machine-readable notion of "returns external content" to test against. To

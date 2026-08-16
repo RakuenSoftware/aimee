@@ -6,9 +6,9 @@
 
 #include "aimee.h"
 #include "css_analyze.h"
-#include "db2_test_shim.h"
-#include "../db2/code_index.h"
-#include "../db2/css_graph.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/code_index.h"
+#include "../modules/db2/c/css_graph.h"
 
 static int count_rule_hits(const char *selector)
 {

@@ -13,7 +13,7 @@
 #include "kb_http_telemetry.h"
 
 #include "cJSON.h"
-#include "db2_tenant.h"
+#include "modules/db2/c/db2_tenant.h"
 #include "kb_identity.h"
 #include "kb_reqctx.h"
 #include "kb_verifier.h"

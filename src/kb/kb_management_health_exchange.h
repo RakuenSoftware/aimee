@@ -5,7 +5,7 @@
 #include "kb_management_cert_lifecycle.h"
 #include "kb_identity.h"
 #include "kb_mgmt_status.h"
-#include "db2/server_registry.h"
+#include "modules/db2/c/server_registry.h"
 #include "kb_mgmt_client.h"
 
 #include <stddef.h>

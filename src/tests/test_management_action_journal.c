@@ -1,6 +1,6 @@
-#include "db2/management_action_journal.h"
-#include "db2/db2_tenant.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/management_action_journal.h"
+#include "modules/db2/c/db2_tenant.h"
+#include "modules/db2/c/db_postgres.h"
 
 #include <assert.h>
 #include <stdio.h>

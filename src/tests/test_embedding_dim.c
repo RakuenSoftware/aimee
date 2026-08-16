@@ -5,11 +5,11 @@
  * Note: db2_test_shim_open() already applies the schema, which records the shim's
  * default dim — so the test first clears the row to exercise the fresh-record path
  * deterministically. */
-#include "../db2/db_schema.h"
-#include "../db2/db2_test_shim.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
-#include "../db2/lifecycle.h" /* db2_effective_dim */
+#include "../modules/db2/c/db_schema.h"
+#include "../modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/lifecycle.h" /* db2_effective_dim */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

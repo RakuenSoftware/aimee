@@ -3,10 +3,10 @@
 
 #include "kb_demote.h"
 #include "aimee.h"
-#include "db2/artifacts.h"
-#include "db2/demotion.h"
-#include "db2/memory_promotion.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/demotion.h"
+#include "modules/db2/c/memory_promotion.h"
+#include "modules/db2/c/memory_query.h"
 #include "log.h"
 
 #include <cJSON.h>

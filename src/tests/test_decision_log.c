@@ -1,6 +1,6 @@
 /* test_decision_log.c: the S5 governance decision write path + the
  * one-active-per-scope invariant, exercised against the DB2 sqlite shim. */
-#include "../db2/db2_test_shim.h"
+#include "../modules/db2/c/db2_test_shim.h"
 #include "decision_log.h"
 
 #include <assert.h>
