@@ -1,7 +1,7 @@
 # Validation: per-user content scope, slices 1 and 2 prototyped
 
 Proves the design in the
-[`per-user-content-scope-visibility` record](../proposals/rejected/per-user-content-scope-visibility.md)
+[`per-user-content-scope-visibility` record](../proposals/pending/per-user-content-scope-visibility.md)
 against the real schema on a real Postgres, including the failure it warns about.
 
 ## Environment
