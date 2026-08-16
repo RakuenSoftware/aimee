@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "source_revision": "a596eaba2b74160e1d7d8709aaf58d0554a1802c",
+  "source_revision": "8f90f495fe29d790fb15be8c8aab427885a810ad",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 141,
@@ -5975,8 +5975,8 @@
     {
       "source": "src/modules/db2/c/artifacts.c",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6010,8 +6010,8 @@
     {
       "source": "src/modules/db2/c/calibration.c",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6073,8 +6073,8 @@
     {
       "source": "src/modules/db2/c/code_audit.c",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6143,8 +6143,8 @@
     {
       "source": "src/modules/db2/c/collab_rules.c",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6171,8 +6171,8 @@
     {
       "source": "src/modules/db2/c/corpus_structural.c",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6479,8 +6479,8 @@
     {
       "source": "src/modules/db2/c/demotion.c",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6612,8 +6612,8 @@
     {
       "source": "src/modules/db2/c/fidelity.c",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6654,8 +6654,8 @@
     {
       "source": "src/modules/db2/c/kb_payload.c",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6710,8 +6710,8 @@
     {
       "source": "src/modules/db2/c/kb_service_backend.h",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6780,15 +6780,15 @@
     {
       "source": "src/modules/db2/c/kb_service_backend_export.c",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
       "source": "src/modules/db2/c/kb_service_backend_export.h",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6948,8 +6948,8 @@
     {
       "source": "src/modules/db2/c/memory_export.c",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6969,8 +6969,8 @@
     {
       "source": "src/modules/db2/c/memory_payload.c",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -7039,8 +7039,8 @@
     {
       "source": "src/modules/db2/c/org_model_catalog.c",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -7067,8 +7067,8 @@
     {
       "source": "src/modules/db2/c/pgvec_transport.c",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -7151,8 +7151,8 @@
     {
       "source": "src/modules/db2/c/rules.c",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -7256,8 +7256,8 @@
     {
       "source": "src/modules/db2/c/vector_status.h",
       "header": "cJSON.h",
-      "resolved": "src/vendor/headers/cJSON.h",
-      "classification": "vendored-system-api",
+      "resolved": "src/modules/db2/support/cJSON.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -7268,5 +7268,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "c5cfc391db118cb48753b79338a308fff193fc56516f762f169611fd0581b5f3"
+  "fingerprint": "94266215a3bb170f94e7e0e7a9c0d320f0a872b9fbddb002a91d3bbe156464da"
 }

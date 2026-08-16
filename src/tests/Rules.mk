@@ -729,6 +729,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
 TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-bus-db2-module \
+                $(TESTPREFIX)/unit-test-db2-cjson-support \
                 $(TESTPREFIX)/unit-test-db2-dstr-support \
                 $(TESTPREFIX)/unit-test-db2-management-read-support \
                 $(TESTPREFIX)/unit-test-db2-rel-enum-text-support \
@@ -807,6 +808,7 @@ UNIT_TEST_SHARD_INDEX ?= 0
 UNIT_TEST_SKIP_P1 ?= 0
 ifeq ($(UNIT_TEST_SHARD_INDEX),0)
 UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-cjson-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-type-support-sanitize \
@@ -6656,6 +6658,49 @@ $(TESTPREFIX)/unit-test-sketch: $(OBJDIR)/tests/test_sketch.o \
                      $(OBJDIR)/sketch.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
+
+DB2_CJSON_TEST_FLAGS = -Imodules/db2/support
+
+$(OBJDIR)/tests/test_db2_cjson_support.o: tests/test_db2_cjson_support.c \
+                                           modules/db2/support/cJSON.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CJSON_TEST_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_cjson_support_impl.o: modules/db2/support/cjson.c \
+                                          modules/db2/support/cJSON.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CJSON_TEST_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-cjson-support: \
+                     $(OBJDIR)/tests/test_db2_cjson_support.o \
+                     $(OBJDIR)/tests/db2_cjson_support_impl.o
+	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS) -lm
+
+DB2_CJSON_SANITIZE_DIR = $(OBJDIR)/tests/db2-cjson-support-sanitize
+
+$(DB2_CJSON_SANITIZE_DIR)/test.o: tests/test_db2_cjson_support.c \
+                                        modules/db2/support/cJSON.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CJSON_TEST_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      -c -o $@ $<
+
+$(DB2_CJSON_SANITIZE_DIR)/support.o: modules/db2/support/cjson.c \
+                                           modules/db2/support/cJSON.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CJSON_TEST_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-cjson-support-sanitize: \
+                     $(DB2_CJSON_SANITIZE_DIR)/test.o \
+                     $(DB2_CJSON_SANITIZE_DIR)/support.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -o $@ $^ -lm
+
+.PHONY: unit-test-db2-cjson-support unit-test-db2-cjson-support-sanitize
+unit-test-db2-cjson-support: $(TESTPREFIX)/unit-test-db2-cjson-support
+	$<
+
+unit-test-db2-cjson-support-sanitize: $(TESTPREFIX)/unit-test-db2-cjson-support-sanitize
+	$<
 
 DB2_DSTR_SUPPORT_RENAMES = \
    -Ddstr_appendf=db2_support_dstr_appendf \
