@@ -286,7 +286,8 @@ class CatalogTests(unittest.TestCase):
                 "wire_format": "db1-fields-v1", "scope": "session",
                 "transaction": "single", "idempotency": "idempotent",
                 "results": ["ok", "invalid", "failed"],
-                "request": {"fields": ["key", "a", "b", "c"]},
+                "request": {"fields": [{"name": n, "type": "text"}
+                                       for n in ("key", "a", "b", "c")]},
                 "reply": {"payload": "none", "max_bytes": 0},
             })
             self.write(root, catalog)
@@ -389,6 +390,87 @@ class CatalogTests(unittest.TestCase):
             self.assertTrue(group["reason"].strip(),
                             "a coupling with no reason cannot be reviewed")
 
+    def integer_catalog(self, root: Path) -> dict:
+        """Activate a reserved family with one text-and-integer operation."""
+        catalog = self.catalog(root)
+        reserved = self.reserved(catalog)
+        reserved["active"] = True
+        catalog["operations"].append({
+            "family": reserved["name"], "id": 1, "name": "probe_forget_if_job",
+            "c_name": "db1_probe_forget_if_job", "c_params": ["probe_id", "job_id"],
+            "wire_format": "db1-fields-v1", "scope": "session", "transaction": "single",
+            "idempotency": "idempotent", "results": ["ok", "invalid", "failed"],
+            "request": {"fields": [{"name": "key", "type": "text"},
+                                   {"name": "job", "type": "int"}]},
+            "reply": {"payload": "none", "max_bytes": 0},
+        })
+        self.write(root, catalog)
+        path = root / contract.PROCESS_CONTRACTS
+        document = json.loads(path.read_text(encoding="utf-8"))
+        for component in document["components"]:
+            if component["id"] == "db1":
+                component["stages"].append({
+                    "id": reserved["id"],
+                    "name": "db1-" + reserved["name"].replace("_", "-"),
+                    "event_kind": reserved["event_kind"]})
+        path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        return catalog
+
+    def test_an_integer_argument_is_converted_on_both_sides(self) -> None:
+        # Integers travel as decimal text, so the client prints and the stage
+        # parses. Half of that is a silent corruption: a client that sent an int
+        # raw would be read as whatever those bytes spell.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            catalog = self.integer_catalog(root)
+            contract.run(root, write=True)
+            reserved = next(f for f in catalog["families"]
+                            if any(o["family"] == f["name"] and o.get("c_name")
+                                   for o in catalog["operations"])
+                            and f["name"] != "git_ownership")
+            client = (root / contract.CLIENT_DIR / f"{reserved['name']}.c").read_text()
+            stage = (root / contract.SOURCE_DIR / f"{reserved['name']}_stage.c").read_text()
+
+            self.assertIn("int db1_probe_forget_if_job(const char *probe_id, int job_id)", client)
+            self.assertIn('snprintf(job_id_text, sizeof job_id_text, "%d", job_id);', client)
+            self.assertIn("{probe_id, job_id_text}", client)
+            # An int has no null to guard, so only the text argument is checked.
+            self.assertIn("if (!probe_id)", client)
+            self.assertNotIn("!job_id", client)
+
+            self.assertIn("parse_int(field[1], &parsed1)", stage)
+            self.assertIn("rc = db1_probe_forget_if_job(field[0], parsed1);", stage)
+        finally:
+            tmp.cleanup()
+
+    def test_a_partial_integer_is_refused_rather_than_truncated(self) -> None:
+        # "12abc" must not become 12: the module would act on a value the caller
+        # never sent. The generated parser checks the whole field.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            self.integer_catalog(root)
+            contract.run(root, write=True)
+            stage = next((root / contract.SOURCE_DIR).glob("*_stage.c"))
+            text = stage.read_text(encoding="utf-8")
+            self.assertIn("*end != '\\0'", text)
+            self.assertIn("errno != 0", text)
+            self.assertIn("value < INT_MIN || value > INT_MAX", text)
+        finally:
+            tmp.cleanup()
+
+    def test_field_types_are_closed(self) -> None:
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            catalog = self.catalog(root)
+            catalog["operations"][0]["request"]["fields"][0]["type"] = "float"
+            self.write(root, catalog)
+            self.assertRule(root, "field-type")
+        finally:
+            tmp.cleanup()
+
     def test_every_operation_is_keyed(self) -> None:
         # DB1 rows belong to a conversation or session; an unkeyed read would
         # cross that boundary.
@@ -396,7 +478,8 @@ class CatalogTests(unittest.TestCase):
         try:
             root = Path(tmp.name)
             catalog = self.catalog(root)
-            catalog["operations"][0]["request"]["fields"] = ["state"]
+            catalog["operations"][0]["request"]["fields"] = [
+                {"name": "state", "type": "text"}]
             self.write(root, catalog)
             self.assertRule(root, "request-key")
         finally:

@@ -51,6 +51,7 @@ TRANSACTIONS = ("none", "single")
 IDEMPOTENCY = ("safe", "idempotent", "unsafe")
 WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v1")
 PAYLOADS = ("none", "state", "text")
+FIELD_TYPES = ("text", "int")
 
 
 class ContractError(ValueError):
@@ -167,6 +168,7 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
     for index, entry in enumerate(raw):
         allowed = {"family", "id", "name", "wire_format", "scope", "transaction",
                    "idempotency", "results", "request", "reply"}
+        entry.pop("_field_types", None)
         if not isinstance(entry, dict) or not set(entry) <= allowed | {"c_name", "c_params"} or \
                 not allowed <= set(entry):
             fail("keys", f"operations[{index}] keys differ from version 1")
@@ -233,9 +235,17 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
             fail("results-order", f"{name} results must follow the declared result order")
 
         request = keys(operation["request"], {"fields"}, f"{name}.request")
-        fields = request["fields"]
-        if not isinstance(fields, list) or not fields:
+        raw_fields = request["fields"]
+        if not isinstance(raw_fields, list) or not raw_fields:
             fail("request-fields", f"{name} request must declare at least one field")
+        fields = []
+        for position, entry_field in enumerate(raw_fields):
+            declared = keys(entry_field, {"name", "type"}, f"{name}.request.fields[{position}]")
+            if declared["type"] not in FIELD_TYPES:
+                fail("field-type",
+                     f"{name} field {declared['name']!r} type must be one of {list(FIELD_TYPES)}")
+            fields.append(str(declared["name"]))
+        operation["_field_types"] = [str(f["type"]) for f in raw_fields]
         # A scoped operation must take its scoping key FIRST, because that key is
         # the boundary: DB1 rows belong to a conversation, session or repository,
         # and reading without one crosses it.
@@ -747,21 +757,36 @@ def client_bytes(catalog: dict[str, object], family: dict[str, object],
         request = operation["request"]
         reply = operation["reply"]
         assert isinstance(request, dict) and isinstance(reply, dict)
-        fields = [str(f) for f in request["fields"]]
+        fields = [str(f["name"]) for f in request["fields"]]
+        types = [str(f["type"]) for f in request["fields"]]
         reads = reply["payload"] != "none"
         names = [str(n) for n in operation["c_params"]]
         inputs, outputs = names[:len(fields)], names[len(fields):]
-        params = [f"const char *{parameter}" for parameter in inputs]
+        params = [(f"int {p}" if t == "int" else f"const char *{p}")
+                  for p, t in zip(inputs, types)]
         if reads:
             params += [f"char *{outputs[0]}", f"size_t {outputs[1]}"]
-        guards = [f"!{parameter}" for parameter in inputs]
+        # An int cannot be null and has no empty case, so only text is guarded.
+        guards = [f"!{p}" for p, t in zip(inputs, types) if t == "text"]
         if reads:
             guards += [f"!{outputs[0]}", f"{outputs[1]} == 0"]
 
         signature = f"int {operation['c_name']}({', '.join(params)})"
-        body = [signature, "{",
-                f"   if ({' || '.join(guards)})", "      return -1;",
-                f"   const char *fields[] = {{{', '.join(inputs)}}};"]
+        body = [signature, "{"]
+        if guards:
+            body += [f"   if ({' || '.join(guards)})", "      return -1;"]
+        # Integers travel as decimal text: the frame carries counted bytes, and a
+        # separate numeric type on the wire would buy nothing a printf does not.
+        carried = []
+        for parameter, kind in zip(inputs, types):
+            if kind == "int":
+                body.append(f"   char {parameter}_text[24];")
+                body.append(f'   snprintf({parameter}_text, sizeof {parameter}_text, "%d", '
+                            f"{parameter});")
+                carried.append(f"{parameter}_text")
+            else:
+                carried.append(parameter)
+        body.append(f"   const char *fields[] = {{{', '.join(carried)}}};")
         op_symbol = f"AIMEE_DB1_OP_{str(operation['name']).upper()}"
         if reads:
             body.append(f"   int status = call_stage({op_symbol}, fields, "
@@ -826,7 +851,7 @@ STAGE_SCAFFOLD = """/* modules/db1/{stem}_stage.c: the {family} stage handler.
 #include "db1_module_api.h"
 #include "{stem}.h"
 
-#include <string.h>
+{int_includes}#include <string.h>
 
 /* Read one counted field, refusing anything that would run past the end or
    carry an embedded NUL: every field here is spliced into a query parameter,
@@ -848,7 +873,7 @@ static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, cha
    return 0;
 }}
 
-static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
+{parse_int}static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
                             const char *value)
 {{
    uint32_t value_len = (uint32_t)strlen(value);
@@ -921,6 +946,29 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
 """
 
 
+PARSE_INT = """/* Parse a field the catalog declared as an integer. Refuses anything that is
+   not exactly a number: a partial parse would turn "12abc" into 12 and act on a
+   value the caller never sent. */
+static int parse_int(const char *text, int *out)
+{{
+   if (!text || !text[0])
+      return 1;
+   char *end = NULL;
+   errno = 0;
+   long value = strtol(text, &end, 10);
+   if (errno != 0 || !end || *end != '\\0' || value < INT_MIN || value > INT_MAX)
+      return 1;
+   *out = (int)value;
+   return 0;
+}}
+"""
+
+INT_INCLUDES = """#include <errno.h>
+#include <limits.h>
+#include <stdlib.h>
+"""
+
+
 def stage_bytes(family: dict[str, object], operations: list[dict[str, object]]) -> str:
     name = str(family["name"])
     cases = []
@@ -929,19 +977,35 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]]) 
         reply = operation["reply"]
         assert isinstance(request, dict) and isinstance(reply, dict)
         arity = len(request["fields"])
+        types = [str(f["type"]) for f in request["fields"]]
         reads = reply["payload"] != "none"
-        args = [f"field[{i}]" for i in range(arity)]
+        parse, args = [], []
+        for position, kind in enumerate(types):
+            if kind == "int":
+                args.append(f"parsed{position}")
+                parse.append(f"      int parsed{position};\n"
+                             f"      if (parse_int(field[{position}], &parsed{position}) != 0)\n"
+                             f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n")
+            else:
+                args.append(f"field[{position}]")
         if reads:
             args += ["value", "sizeof value"]
-        cases.append(
-            f"   case AIMEE_DB1_OP_{str(operation['name']).upper()}:\n"
-            f"      if (count != {arity}u)\n"
-            f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
-            f"      rc = {operation['c_name']}({', '.join(args)});\n"
-            + ("      reads = 1;\n" if reads else "")
-            + "      break;\n")
+        # Braced only when a parsed integer needs scoping: an empty block around
+        # every other case would be noise, and would move files that have not
+        # changed.
+        body = (f"      if (count != {arity}u)\n"
+                f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
+                + "".join(parse)
+                + f"      rc = {operation['c_name']}({', '.join(args)});\n"
+                + ("      reads = 1;\n" if reads else "")
+                + "      break;\n")
+        head = f"   case AIMEE_DB1_OP_{str(operation['name']).upper()}:\n"
+        cases.append(head + (f"   {{\n{body}   }}\n" if parse else body))
+    typed = any(f["type"] == "int" for o in operations for f in o["request"]["fields"])
     return STAGE_SCAFFOLD.format(stem=name, family=name.replace("_", " "),
-                                 cases="".join(cases))
+                                 cases="".join(cases),
+                                 parse_int=PARSE_INT if typed else "",
+                                 int_includes=INT_INCLUDES if typed else "")
 
 
 def stages_header_bytes(catalog: dict[str, object]) -> str:

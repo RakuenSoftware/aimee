@@ -226,7 +226,10 @@
       ],
       "request": {
         "fields": [
-          "key"
+          {
+            "name": "key",
+            "type": "text"
+          }
         ]
       },
       "reply": {
@@ -250,8 +253,14 @@
       ],
       "request": {
         "fields": [
-          "key",
-          "state"
+          {
+            "name": "key",
+            "type": "text"
+          },
+          {
+            "name": "state",
+            "type": "text"
+          }
         ]
       },
       "reply": {
@@ -280,9 +289,18 @@
       ],
       "request": {
         "fields": [
-          "key",
-          "branch",
-          "session"
+          {
+            "name": "key",
+            "type": "text"
+          },
+          {
+            "name": "branch",
+            "type": "text"
+          },
+          {
+            "name": "session",
+            "type": "text"
+          }
         ]
       },
       "reply": {
@@ -310,8 +328,14 @@
       ],
       "request": {
         "fields": [
-          "key",
-          "branch"
+          {
+            "name": "key",
+            "type": "text"
+          },
+          {
+            "name": "branch",
+            "type": "text"
+          }
         ]
       },
       "reply": {
@@ -342,8 +366,14 @@
       ],
       "request": {
         "fields": [
-          "key",
-          "branch"
+          {
+            "name": "key",
+            "type": "text"
+          },
+          {
+            "name": "branch",
+            "type": "text"
+          }
         ]
       },
       "reply": {
@@ -374,8 +404,14 @@
       ],
       "request": {
         "fields": [
-          "key",
-          "session"
+          {
+            "name": "key",
+            "type": "text"
+          },
+          {
+            "name": "session",
+            "type": "text"
+          }
         ]
       },
       "reply": {
@@ -405,7 +441,10 @@
       ],
       "request": {
         "fields": [
-          "prefix"
+          {
+            "name": "prefix",
+            "type": "text"
+          }
         ]
       },
       "reply": {
