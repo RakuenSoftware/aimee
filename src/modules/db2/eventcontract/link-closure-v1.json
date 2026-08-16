@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "2770a84679f82f10c068b245abdb11ce04639f66",
-  "source_fingerprint": "d80b7ff5d0f81e9896efdbe6184cc1682587a2f734ffd180e640915d14164312",
+  "source_revision": "2c24b6b5fc57b4d49fdcfed41b79bf5989ba5fd5",
+  "source_fingerprint": "2ca57bc66939d7021a9b23dba8ead15adf1e9ae0d30f6fbefe546eefb131c1a8",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
@@ -199,6 +199,30 @@
       },
       "provenance": "Definitions and required static helpers promoted from src/dstr.c; all DB2 calls audited in src/modules/db2/c/collab_rules.c.",
       "evidence": "Three deterministic dynamic-string lifecycle functions with only realloc and vsnprintf imports; no DB2, event-bus, provider, I/O, or platform dependency."
+    },
+    {
+      "path": "src/modules/db2/support/management_read_primitives.c",
+      "source_sha256": "2b1799442b2d57c6088eaa8fbcff744d6422bd3011b816bf78f3faefde4b8058",
+      "header": "src/modules/db2/support/db2_management_read.h",
+      "header_sha256": "b95b4714b891a71689bc2ad95bae3f693d6694cde83a3fef481d7212c4c2f318",
+      "defines": [
+        "server_mgmt_read_selector_name"
+      ],
+      "resolves": [
+        "server_mgmt_read_selector_name"
+      ],
+      "allowed_includes": [
+        "db2_management_read.h"
+      ],
+      "allowed_header_includes": [],
+      "allowed_undefined": [],
+      "base_references": {
+        "server_mgmt_read_selector_name": [
+          "src/modules/db2/c/management_read_journal.c"
+        ]
+      },
+      "provenance": "Definition promoted from src/shared/management_read.c; the sole DB2 call was audited in management_read_journal.c.",
+      "evidence": "Deterministic two-value selector mapping with no imports, allocation, I/O, DB, event-bus, provider, platform, pgvector, or DB3 dependency; ABI parity tested."
     },
     {
       "path": "src/modules/db2/support/sketch_primitives.c",
@@ -2928,14 +2952,6 @@
       "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
     },
     {
-      "symbol": "server_mgmt_read_selector_name",
-      "references": [
-        "src/modules/db2/c/management_read_journal.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
       "symbol": "session_briefing_render_commitments",
       "references": [
         "src/modules/db2/c/kb_service_backend_memory.c"
@@ -3831,16 +3847,16 @@
   ],
   "summary": {
     "translation_units": 141,
-    "descriptor_support_units": 3,
-    "unresolved_symbols": 344,
+    "descriptor_support_units": 4,
+    "unresolved_symbols": 343,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 25,
       "injected-module-contract": 150,
-      "portable-core-promotion": 25,
+      "portable-core-promotion": 24,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 144
     }
   },
-  "fingerprint": "a6b6e2be90604ded69a4febf7c6fbed95eca724fe0667e5dc887523011429d8f"
+  "fingerprint": "e08843d09c6978ccd06174372e57aa9c8499d47548a28a577fc97bff1c17bad7"
 }

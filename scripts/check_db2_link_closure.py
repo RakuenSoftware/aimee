@@ -67,6 +67,25 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
     "evidence": "Three deterministic dynamic-string lifecycle functions with only realloc and "
                 "vsnprintf imports; no DB2, event-bus, provider, I/O, or platform dependency.",
 }, {
+    "path": "src/modules/db2/support/management_read_primitives.c",
+    "source_sha256": "2b1799442b2d57c6088eaa8fbcff744d6422bd3011b816bf78f3faefde4b8058",
+    "header": "src/modules/db2/support/db2_management_read.h",
+    "header_sha256": "b95b4714b891a71689bc2ad95bae3f693d6694cde83a3fef481d7212c4c2f318",
+    "defines": ["server_mgmt_read_selector_name"],
+    "resolves": ["server_mgmt_read_selector_name"],
+    "allowed_includes": ["db2_management_read.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": [],
+    "base_references": {
+        "server_mgmt_read_selector_name": [
+            "src/modules/db2/c/management_read_journal.c",
+        ],
+    },
+    "provenance": "Definition promoted from src/shared/management_read.c; the sole DB2 call was "
+                  "audited in management_read_journal.c.",
+    "evidence": "Deterministic two-value selector mapping with no imports, allocation, I/O, DB, "
+                "event-bus, provider, platform, pgvector, or DB3 dependency; ABI parity tested.",
+}, {
     "path": "src/modules/db2/support/sketch_primitives.c",
     "source_sha256": "20318d4f9c92894892ef9475f95c1542602f3a7d2b4d9fe6df2b8d63b4986280",
     "header": "src/modules/db2/support/sketch.h",

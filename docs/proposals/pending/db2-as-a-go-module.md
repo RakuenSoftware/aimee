@@ -415,6 +415,19 @@ in-place repair with no imports and five legacy calls across three DB2 units. Ad
 minimal header, source envelope, export, and base references; exhaustive byte-class, Unicode
 boundary, truncation, mixed-input, NULL, and sanitizer parity protects the monolith contract.
 
+The fourth admitted unit owns only `server_mgmt_read_selector_name`, the deterministic two-value
+mapping used by `c/management_read_journal.c`. Its private header records the process-side numeric
+ABI without importing the broad legacy management-read surface. Compile-time checks bind both
+values and the int-sized calling convention to `management_read.h`; normal and hardened parity
+exercise every signed 16-bit value and the remaining int boundary classes. Its empty import set and
+single base reference prove that this slice neither moves pgvector out of DB2 nor couples DB2 to a
+DB3 provider. The DB3 route and multi-observer event contracts are unchanged.
+
+The next support candidates stay explicitly deferred by ownership shape: UTC formatting/parsing
+combines clock nondeterminism with non-standard `timegm`; relation vocabulary moves the semantic
+seed table and its struct/enum ABI; language extractors bring a broad parser/helper closure. Each
+requires its own coherent admission and parity slice rather than being folded into this helper.
+
 ### 4.3 Supervision and atomic activation
 
 Development may land the exporter, catalog, module binary, and adapters in reviewable commits, but

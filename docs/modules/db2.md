@@ -86,9 +86,9 @@ Link-closure audit:
 `link-closure-v1.json` accounts for all 141 C translation units in the private DB2 boundary. The
 probe compiles each unit plus exact descriptor-owned support, combines only those objects with a
 relocatable link, supplies no archive, shared library, helper stub, or weak definition, and records
-the 344 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
+the 343 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
 disposition and rationale. The current ledger contains 144 explicit system-link dependencies, 25
-pinned vendored/generated inputs, 150 sibling or KB contracts to inject, and 25 support APIs to
+pinned vendored/generated inputs, 150 sibling or KB contracts to inject, and 24 support APIs to
 promote. The standalone-link exit condition requires zero entries in the latter three groups; a
 classified ledger alone is not enough.
 
@@ -118,6 +118,13 @@ and header hashes, sole include, empty import set, exact base references, and si
 Parity covers every non-NUL byte, valid boundary sequences, every truncated prefix, overlong
 forms, surrogates, values above U+10FFFF, mixed text, empty input, and NULL under both the normal
 and ASan/UBSan/FORTIFY builds.
+
+The fourth reduction promotes `server_mgmt_read_selector_name`, used by only the DB2 management-read
+journal. Its descriptor-private header pins the existing two numeric selector values and int-sized C
+calling convention while the parity test compile-time checks both against the authoritative legacy
+enum. Normal and ASan/UBSan/FORTIFY tests cover the complete signed 16-bit selector domain plus
+full-width integer boundaries. The helper has no imports and no pgvector, DB3, provider, database,
+event-bus, allocation, I/O, or platform edge, so it cannot alter either vector ownership boundary.
 
 The gate rejects legacy source additions or omissions, support path escape, symlinks, content drift,
 new unresolved symbols, non-system reference growth, missing evidence, and any attempt to make the

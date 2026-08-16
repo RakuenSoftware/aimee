@@ -68,6 +68,12 @@
       "test": "src/tests/test_db2_dstr_support.c"
     },
     {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_management_read_support.c"
+    },
+    {
       "ctest": true,
       "make": true,
       "module": "db2",

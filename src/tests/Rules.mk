@@ -729,6 +729,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
 TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-bus-db2-module \
                 $(TESTPREFIX)/unit-test-db2-dstr-support \
+                $(TESTPREFIX)/unit-test-db2-management-read-support \
                 $(TESTPREFIX)/unit-test-db2-sketch-support \
                 $(TESTPREFIX)/unit-test-db2-text-support \
                 $(TESTPREFIX)/unit-test-db3-route \
@@ -802,6 +803,7 @@ UNIT_TEST_SHARD_INDEX ?= 0
 UNIT_TEST_SKIP_P1 ?= 0
 ifeq ($(UNIT_TEST_SHARD_INDEX),0)
 UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-text-support-sanitize
 else
@@ -6665,6 +6667,58 @@ unit-test-db2-dstr-support: $(TESTPREFIX)/unit-test-db2-dstr-support
 	$<
 
 unit-test-db2-dstr-support-sanitize: $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize
+	$<
+
+DB2_MGMT_READ_SUPPORT_RENAMES = \
+   -Dserver_mgmt_read_selector_name=db2_support_server_mgmt_read_selector_name
+DB2_MGMT_READ_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_management_read_support_impl.o: \
+                     modules/db2/support/management_read_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_MGMT_READ_SUPPORT_RENAMES) \
+	      $(DB2_MGMT_READ_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_management_read_monolith.o: shared/management_read.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_MGMT_READ_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-management-read-support: \
+                     $(OBJDIR)/tests/test_db2_management_read_support.o \
+                     $(OBJDIR)/tests/db2_management_read_support_impl.o \
+                     $(OBJDIR)/tests/db2_management_read_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_MGMT_READ_SANITIZE_DIR = $(OBJDIR)/tests/db2-management-read-support-sanitize
+
+$(DB2_MGMT_READ_SANITIZE_DIR)/test.o: tests/test_db2_management_read_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_MGMT_READ_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/management_read_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_MGMT_READ_SUPPORT_RENAMES) \
+	      $(DB2_MGMT_READ_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_MGMT_READ_SANITIZE_DIR)/monolith.o: shared/management_read.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_MGMT_READ_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-management-read-support-sanitize: \
+                     $(DB2_MGMT_READ_SANITIZE_DIR)/test.o \
+                     $(DB2_MGMT_READ_SANITIZE_DIR)/support.o \
+                     $(DB2_MGMT_READ_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-management-read-support \
+        unit-test-db2-management-read-support-sanitize
+unit-test-db2-management-read-support: $(TESTPREFIX)/unit-test-db2-management-read-support
+	$<
+
+unit-test-db2-management-read-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize
 	$<
 
 DB2_TEXT_SUPPORT_RENAMES = -Dtext_sanitize_utf8=db2_support_text_sanitize_utf8
