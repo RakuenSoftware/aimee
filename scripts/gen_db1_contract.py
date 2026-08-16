@@ -106,8 +106,8 @@ def validate_families(raw: object) -> dict[str, dict[str, object]]:
         fail("families", "families must be a nonempty array")
     families: dict[str, dict[str, object]] = {}
     for index, entry in enumerate(raw, start=1):
-        family = keys(entry, {"id", "name", "event_kind", "active", "covers",
-                              "retired_sources"}, f"families[{index-1}]")
+        family = keys(entry, {"id", "name", "event_kind", "active", "doc",
+                              "covers", "retired_sources"}, f"families[{index-1}]")
         # Dense from one, because a family id is its future stage id and stage
         # IDs must be dense from one in the process contract.
         if integer(family["id"], f"families[{index-1}].id", 1, 255) != index:
@@ -128,6 +128,7 @@ def validate_families(raw: object) -> dict[str, dict[str, object]]:
         # a PLAN, in file names, and it is deliberately not machine-checked: a
         # source can hold more than one domain, so "covers" over-states what a
         # family has actually taken. retired_sources is the checked half.
+        text(family["doc"], f"{name}.doc", 512)
         text(family["covers"], f"{name}.covers", 512)
         retired = family["retired_sources"]
         if not isinstance(retired, list) or retired != sorted(set(retired)):
@@ -306,51 +307,174 @@ def validate_retired_sources(root: Path, catalog: dict[str, object]) -> None:
              f"{source!r} is no longer linked into the daemon but no family retires it")
 
 
-def header_constants(root: Path) -> dict[str, int]:
-    try:
-        text_value = (root / HEADER).read_text(encoding="utf-8")
-    except OSError as exc:
-        fail("unreadable", f"cannot read {HEADER}: {exc}")
-    found: dict[str, int] = {}
-    for match in re.finditer(r"^#define\s+(AIMEE_DB1_[A-Z0-9_]+)\s+(\d+)u?\s*$",
-                             text_value, re.M):
-        found[match.group(1)] = int(match.group(2))
-    return found
+PREAMBLE = """/* Wire contract for the DB1 process's bounded stages.
+ *
+ * GENERATED from src/modules/db1/eventcontract/operations.json by
+ * scripts/gen_db1_contract.py. Do not edit: add a family or an operation to the
+ * catalog and regenerate, so the numbering and the wire cannot drift apart.
+ *
+ * DB1 is the server's SQLite store. It is becoming a module so that callers
+ * reach it over the event bus instead of linking it, which is what the module
+ * doctrine requires of state. The C implementation stays for now; only the
+ * boundary is new. See docs/proposals/pending/db1-as-a-go-module.md.
+ *
+ * Event kinds are fixed by the process contract at 4096 + ref*256 + stage. DB1
+ * declares principal ref {ref}, so these are not a free choice. */
+#ifndef AIMEE_DB1_MODULE_API_H
+#define AIMEE_DB1_MODULE_API_H 1
+
+#include <stddef.h>
+#include <stdint.h>
+"""
+
+# One paragraph per wire format, emitted the first time a family uses it.
+WIRE_FORMAT_DOC = {
+    "db1-keyed-blob-v1": """   Request:  op(u32) | key_len(u32) | key | json_len(u32) | json
+   Response: status(u32) | json_len(u32) | json
+   Lengths are little-endian, matching the rest of the bus surface.""",
+    "db1-fields-v1": """   Request:  op(u32) | field_count(u32) | (len(u32) | bytes) * field_count
+   Response: status(u32) | value_len(u32) | value
+
+   The counted form is the one every family after the first uses. The first
+   family fixed its request at exactly two fields, which suits a keyed blob and
+   suits nothing with three, so the count is explicit here rather than implied
+   by the op.""",
+}
+
+HELPERS = """static inline void aimee_db1_put_u32(uint8_t *p, uint32_t value)
+{
+   for (unsigned i = 0; i < 4; ++i)
+      p[i] = (uint8_t)(value >> (i * 8u));
+}
+
+static inline uint32_t aimee_db1_get_u32(const uint8_t *p)
+{
+   uint32_t value = 0;
+   for (unsigned i = 0; i < 4; ++i)
+      value |= (uint32_t)p[i] << (i * 8u);
+   return value;
+}
+
+#endif /* AIMEE_DB1_MODULE_API_H */
+"""
+
+
+def wrap(prose: str, first: str, rest: str, width: int = 79) -> list[str]:
+    """Reflow a catalog sentence into a C comment, deterministically."""
+    words, lines, current = prose.split(), [], first
+    for word in words:
+        # The prefix already carries its own trailing space, so the first word on
+        # a line is appended bare -- otherwise every comment opens "/*  Family".
+        candidate = f"{current}{word}" if current in (first, rest) else f"{current} {word}"
+        if len(candidate) > width and current not in (first, rest):
+            lines.append(current.rstrip())
+            current = f"{rest}{word}"
+        else:
+            current = candidate
+    if current.strip():
+        lines.append(current.rstrip())
+    return lines
+
+
+def define_block(pairs: list[tuple[str, str]]) -> list[str]:
+    """#defines with their values aligned, the way the tree writes them."""
+    if not pairs:
+        return []
+    width = max(len(name) for name, _ in pairs)
+    return [f"#define {name.ljust(width)} {value}" for name, value in pairs]
+
+
+def header_bytes(catalog: dict[str, object]) -> str:
+    families = catalog["families"]
+    operations = catalog["operations"]
+    assert isinstance(families, dict) and isinstance(operations, list)
+    by_family: dict[str, list[dict[str, object]]] = {}
+    for operation in operations:
+        by_family.setdefault(str(operation["family"]), []).append(operation)
+
+    out = [PREAMBLE.replace("{ref}", str(PRINCIPAL_REF))]
+    seen_formats: set[str] = set()
+    field_max = 0
+    fields_max = 0
+    state_max = 0
+
+    for family in sorted(families.values(), key=lambda f: int(f["id"])):
+        if not family["active"]:
+            # A constant for a family nothing serves would invite a caller to
+            # speak an event with no listener.
+            continue
+        name = str(family["name"])
+        upper = name.upper()
+        own = by_family.get(name, [])
+        block = [""]
+        block.extend(wrap(f"Family {family['id']}: {family['doc']}", "/* ", " * "))
+        wire = str(own[0]["wire_format"]) if own else ""
+        if wire and wire not in seen_formats:
+            # Described once, beside the first family that speaks it.
+            seen_formats.add(wire)
+            block.append(" *")
+            for line in WIRE_FORMAT_DOC[wire].rstrip().split("\n"):
+                block.append((" * " + line.strip()).rstrip() if line.strip() else " *")
+        block[-1] += " */"
+        block.append("")
+        block.extend(define_block([
+            (f"AIMEE_DB1_EVENT_{upper}", f"{family['event_kind']}u"),
+            (f"AIMEE_DB1_STAGE_{upper}", f"{family['id']}u"),
+        ]))
+        if own:
+            block.append("")
+            block.extend(define_block([
+                (f"AIMEE_DB1_OP_{str(o['name']).upper()}", f"{o['id']}u") for o in own
+            ]))
+        out.append("\n".join(block) + "\n")
+
+        for operation in own:
+            reply = operation["reply"]
+            request = operation["request"]
+            assert isinstance(reply, dict) and isinstance(request, dict)
+            if reply["payload"] == "state":
+                state_max = max(state_max, int(reply["max_bytes"]))
+            if reply["payload"] == "text":
+                field_max = max(field_max, int(reply["max_bytes"]))
+            if operation["wire_format"] == "db1-fields-v1":
+                fields_max = max(fields_max, len(request["fields"]))
+
+    limits: list[tuple[str, str]] = []
+    if state_max:
+        limits.append(("AIMEE_DB1_STATE_MAX", f"{state_max}u"))
+    if field_max:
+        limits.append(("AIMEE_DB1_FIELD_MAX", f"{field_max}u"))
+    if fields_max:
+        limits.append(("AIMEE_DB1_FIELDS_MAX", f"{fields_max}u"))
+    if limits:
+        out.append("\n/* Wire bounds, carried from the catalog's declared reply sizes and\n"
+                   "   request arities. Stated so the module refuses an over-long value rather\n"
+                   "   than truncating one into something that looks valid. */\n"
+                   + "\n".join(define_block(limits)) + "\n")
+
+    out.append("\n" + "\n".join(define_block(
+        [(f"AIMEE_DB1_STATUS_{code.upper()}", f"{index}u")
+         for index, code in enumerate(RESULT_CODES)])) + "\n")
+    out.append("\n" + HELPERS)
+    return "".join(out)
 
 
 def validate_header(root: Path, catalog: dict[str, object]) -> None:
-    """The hand-written wire header must agree with the catalog, in both directions."""
-    constants = header_constants(root)
-    families = catalog["families"]
-    assert isinstance(families, dict)
-    for name, family in families.items():
-        if not family["active"]:
-            # A reserved family must NOT have wire constants yet: a constant is
-            # a promise to callers, and nothing serves this one.
-            leaked = [key for key in constants if name.upper() in key]
-            if leaked:
-                fail("header-reserved",
-                     f"reserved family {name!r} already has wire constants {leaked}")
-            continue
-        event = f"AIMEE_DB1_EVENT_{name.upper()}"
-        stage = f"AIMEE_DB1_STAGE_{name.upper()}"
-        if constants.get(event) != family["event_kind"]:
-            fail("header-event",
-                 f"{HEADER} must define {event} as {family['event_kind']}")
-        if constants.get(stage) != family["id"]:
-            fail("header-stage", f"{HEADER} must define {stage} as {family['id']}")
+    """The header must be exactly what the catalog generates.
 
-    operations = catalog["operations"]
-    assert isinstance(operations, list)
-    for operation in operations:
-        symbol = f"AIMEE_DB1_OP_{str(operation['name']).upper()}"
-        if constants.get(symbol) != operation["id"]:
-            fail("header-op", f"{HEADER} must define {symbol} as {operation['id']}")
-
-    for index, code in enumerate(RESULT_CODES):
-        symbol = f"AIMEE_DB1_STATUS_{code.upper()}"
-        if constants.get(symbol) != index:
-            fail("header-status", f"{HEADER} must define {symbol} as {index}")
+    A whole-file comparison rather than a constant-by-constant one: it also
+    catches a constant for a family nothing serves, a stale limit, and hand
+    edits that the per-symbol checks would have walked straight past.
+    """
+    expected = header_bytes(catalog)
+    try:
+        actual = (root / HEADER).read_text(encoding="utf-8")
+    except OSError as exc:
+        fail("unreadable", f"cannot read {HEADER}: {exc}")
+    if actual != expected:
+        fail("header-stale",
+             f"{HEADER} is not what the catalog generates; run "
+             f"scripts/gen_db1_contract.py --write")
 
 
 def validate_process_contract(root: Path, catalog: dict[str, object]) -> None:
@@ -388,8 +512,10 @@ def validate_process_contract(root: Path, catalog: dict[str, object]) -> None:
                  f"stage {name!r} must carry id {family['id']} and kind {family['event_kind']}")
 
 
-def run(root: Path) -> None:
+def run(root: Path, write: bool = False) -> None:
     catalog = validate_catalog(load_json(root / CATALOG))
+    if write:
+        (root / HEADER).write_text(header_bytes(catalog), encoding="utf-8")
     validate_header(root, catalog)
     validate_process_contract(root, catalog)
     validate_retired_sources(root, catalog)
@@ -405,9 +531,11 @@ def run(root: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
+    parser.add_argument("--write", action="store_true",
+                        help="regenerate the wire header from the catalog")
     args = parser.parse_args(argv)
     try:
-        run(args.root.resolve())
+        run(args.root.resolve(), args.write)
     except ContractError as exc:
         print(f"gen_db1_contract: error: {exc}", file=sys.stderr)
         return 1

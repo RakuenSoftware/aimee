@@ -61,8 +61,13 @@ that has already shipped cannot be renumbered by one that follows. Each
 reservation names the sources it will cover, which makes the outstanding work
 countable from the catalog instead of rediscovered each time. Regrouping or
 renaming a RESERVED family is free; an active one is a contract callers already
-speak. `scripts/gen_db1_contract.py` enforces all of that, and refuses wire
-constants for a family nothing serves yet.
+speak. `scripts/gen_db1_contract.py` GENERATES `db1_module_api.h` from the catalog and
+fails when the file on disk is not what the catalog produces, so the numbering
+and the wire cannot drift apart. Add a family or an operation to the catalog and
+run it with `--write`; never edit the header by hand. A reserved family emits
+nothing, and the wire bounds -- the widest reply and the widest request arity --
+are derived rather than remembered, which is what stops a new family from
+overrunning the decoder's fixed array.
 
 | Family | Event kind | State |
 | --- | --- | --- |

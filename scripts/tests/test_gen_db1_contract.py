@@ -128,18 +128,20 @@ class CatalogTests(unittest.TestCase):
                     f"#define {symbol} {reserved['event_kind']}u\n"
                     "#endif /* AIMEE_DB1_MODULE_API_H */"),
                 encoding="utf-8")
-            self.assertRule(root, "header-reserved")
+            # Subsumed by the whole-file check: a constant for a family nothing
+            # serves is simply not what the catalog generates.
+            self.assertRule(root, "header-stale")
         finally:
             tmp.cleanup()
 
     def test_header_drift_is_caught_in_every_direction(self) -> None:
         for original, replacement, rule in (
             ("AIMEE_DB1_EVENT_ECONOMIZER_STATE 11777u",
-             "AIMEE_DB1_EVENT_ECONOMIZER_STATE 11778u", "header-event"),
+             "AIMEE_DB1_EVENT_ECONOMIZER_STATE 11778u", "header-stale"),
             ("AIMEE_DB1_STAGE_ECONOMIZER_STATE 1u",
-             "AIMEE_DB1_STAGE_ECONOMIZER_STATE 2u", "header-stage"),
-            ("AIMEE_DB1_OP_STATE_SAVE 2u", "AIMEE_DB1_OP_STATE_SAVE 3u", "header-op"),
-            ("AIMEE_DB1_STATUS_TOO_LONG 3u", "AIMEE_DB1_STATUS_TOO_LONG 9u", "header-status"),
+             "AIMEE_DB1_STAGE_ECONOMIZER_STATE 2u", "header-stale"),
+            ("AIMEE_DB1_OP_STATE_SAVE 2u", "AIMEE_DB1_OP_STATE_SAVE 3u", "header-stale"),
+            ("AIMEE_DB1_STATUS_TOO_LONG 3u", "AIMEE_DB1_STATUS_TOO_LONG 9u", "header-stale"),
         ):
             with self.subTest(rule=rule):
                 tmp = sandbox()
@@ -242,6 +244,71 @@ class CatalogTests(unittest.TestCase):
         for family in catalog["families"]:
             self.assertNotIn("module_adapter.c", family["retired_sources"])
         contract.run(REPO_ROOT)
+
+    def test_generation_is_deterministic(self) -> None:
+        catalog = contract.validate_catalog(contract.load_json(REPO_ROOT / contract.CATALOG))
+        self.assertEqual(contract.header_bytes(catalog), contract.header_bytes(catalog))
+
+    def test_writing_the_header_is_idempotent(self) -> None:
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            contract.run(root, write=True)
+            once = (root / contract.HEADER).read_text(encoding="utf-8")
+            contract.run(root, write=True)
+            self.assertEqual(once, (root / contract.HEADER).read_text(encoding="utf-8"))
+        finally:
+            tmp.cleanup()
+
+    def test_a_new_family_brings_its_constants_and_widens_the_bounds(self) -> None:
+        # The reason to generate at all: adding a family should not require
+        # remembering that the decoder's fixed array is sized by the widest
+        # request in the catalog. Getting that wrong was a stack overflow once.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            catalog = self.catalog(root)
+            reserved = self.reserved(catalog)
+            reserved["active"] = True
+            catalog["operations"].append({
+                "family": reserved["name"], "id": 1, "name": "probe_touch",
+                "wire_format": "db1-fields-v1", "scope": "session",
+                "transaction": "single", "idempotency": "idempotent",
+                "results": ["ok", "invalid", "failed"],
+                "request": {"fields": ["key", "a", "b", "c"]},
+                "reply": {"payload": "none", "max_bytes": 0},
+            })
+            self.write(root, catalog)
+            # Activating a family without declaring its stage is refused, which
+            # is the cross-check doing its job -- so declare it.
+            path = root / contract.PROCESS_CONTRACTS
+            document = json.loads(path.read_text(encoding="utf-8"))
+            for component in document["components"]:
+                if component["id"] == "db1":
+                    component["stages"].append({
+                        "id": reserved["id"],
+                        "name": "db1-" + reserved["name"].replace("_", "-"),
+                        "event_kind": reserved["event_kind"],
+                    })
+            path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+            contract.run(root, write=True)
+            header = (root / contract.HEADER).read_text(encoding="utf-8")
+            upper = reserved["name"].upper()
+            self.assertIn(f"#define AIMEE_DB1_EVENT_{upper} {reserved['event_kind']}u", header)
+            self.assertIn("AIMEE_DB1_OP_PROBE_TOUCH", header)
+            self.assertRegex(header, r"AIMEE_DB1_FIELDS_MAX\s+4u")
+        finally:
+            tmp.cleanup()
+
+    def test_a_reserved_family_emits_nothing(self) -> None:
+        catalog = contract.validate_catalog(contract.load_json(REPO_ROOT / contract.CATALOG))
+        header = contract.header_bytes(catalog)
+        families = catalog["families"]
+        for name, family in families.items():
+            if not family["active"]:
+                self.assertNotIn(name.upper(), header,
+                                 f"reserved family {name} leaked into the wire header")
 
     def test_every_operation_is_keyed(self) -> None:
         # DB1 rows belong to a conversation or session; an unkeyed read would
