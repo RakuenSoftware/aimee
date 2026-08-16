@@ -46,6 +46,12 @@ family owns one event kind and its operations dispatch on an op id inside the
 payload, so DB1 needs one stage per domain rather than one per call -- roughly
 sixty domains against a ceiling of 255.
 
+Both halves of the boundary are generated: the client the daemon calls and the
+stage handler the module serves. `module_adapter.c` still dispatches by stage
+by hand, because family 1 speaks a different wire and has no C caller at all;
+everything it dispatches TO is emitted. The domains themselves are untouched --
+only the wire around them is generated.
+
 The C client is generated too. There are 347 operations still to move, and
 `git_ownership` showed what one costs by hand -- five of them filled a pull
 request. Every client body is the same three steps (reject unusable arguments,

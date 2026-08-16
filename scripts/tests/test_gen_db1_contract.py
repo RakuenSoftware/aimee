@@ -42,6 +42,11 @@ def sandbox() -> tempfile.TemporaryDirectory[str]:
         target = root / contract.CLIENT_DIR / client.name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(client, target)
+    # The generated stage handlers and their declarations are compared byte for
+    # byte too, so they are copied rather than touched.
+    for generated in list((REPO_ROOT / contract.SOURCE_DIR).glob("*_stage.c")) + \
+            [REPO_ROOT / contract.STAGES_HEADER]:
+        shutil.copy2(generated, root / contract.SOURCE_DIR / generated.name)
     return tmp
 
 
@@ -330,7 +335,12 @@ class CatalogTests(unittest.TestCase):
             self.assertNotIn(source, owner, f"{source} is infrastructure and claimed")
             owner[source] = "(infrastructure)"
         on_disk = {path.stem for path in (REPO_ROOT / contract.SOURCE_DIR).glob("*.c")}
-        self.assertEqual(set(owner), on_disk)
+        # Generated stage handlers are wire, not domains, so no family claims
+        # them -- the same exemption the validator applies.
+        generated = {f"{family['name']}_stage" for family in catalog["families"]
+                     if any(o.get("c_name") and o["family"] == family["name"]
+                            for o in catalog["operations"])}
+        self.assertEqual(set(owner), on_disk - generated)
 
     def test_an_unclaimed_or_duplicated_source_is_refused(self) -> None:
         for mutate, rule in (
