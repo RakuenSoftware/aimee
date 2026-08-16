@@ -190,6 +190,31 @@ Two constraints sit outside the wire and are unchanged by any of this:
   wire format.
 - `identity` puts DB1 on the auth path.
 
+## What it says now, and why the ladder is gone
+
+Everything above is the measurement as taken. Re-run after struct flattening,
+the instrument disagreed with itself: it still counted a struct as blocked, and
+its T0..T3 ladder had three rungs that had shipped. Worse, the ladder asserted a
+dependency that does not exist — rows and callee-allocated out-parameters are
+independent, and neither waits on the other.
+
+It now reports a **set** of missing capabilities per operation, unioned per
+source, because a source is ready exactly when that union is empty. Retiering
+also dissolved the "unknown" bucket, which had been hiding four distinct
+answers behind one word: `char (*out)[N]` is rows of one text column, an enum
+passed by value is an integer, `long long *` is an out-integer the pattern
+simply missed, and `cJSON *` is a document. Three of the four were already
+reachable and were being counted as blocked.
+
+As measured on the day this section was written: **203 of 261 operations fit the
+wire, and 18 of 43 sources are ready** — against 7 of 48 when the body of this
+document was written. What remains is rows (40 operations), alloc (10), a
+per-operation status contract (6) and json (2).
+
+**Rows is the next step and it is not close.** It alone takes 18 ready sources
+to 34 — 134 more operations — where alloc adds one source and status adds
+three. That is the whole argument for doing it next.
+
 ## How to reproduce
 
 `scripts/survey_db1_wire.py` produces every number above. It is a measurement,
