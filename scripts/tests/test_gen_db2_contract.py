@@ -42,6 +42,7 @@ class ContractTests(unittest.TestCase):
             generator.HEADER,
             generator.CLIENT_HEADER,
             generator.CLIENT_SOURCE,
+            generator.GO_CONTRACT,
             generator.BASELINE,
             generator.DECLARATION_REVIEW,
             generator.DECLARATION_LEDGER,
@@ -54,16 +55,23 @@ class ContractTests(unittest.TestCase):
     def test_production_catalog_and_generated_outputs_match(self) -> None:
         generator.run(REPO_ROOT, False)
         catalog = generator.validate_catalog(generator.load_json(REPO_ROOT / generator.CATALOG))
-        header, client_header, client_source, baseline = generator.generated(REPO_ROOT)
+        header, client_header, client_source, go_contract, baseline = generator.generated(REPO_ROOT)
         self.assertEqual(header, (REPO_ROOT / generator.HEADER).read_bytes())
         self.assertEqual(client_header, (REPO_ROOT / generator.CLIENT_HEADER).read_bytes())
         self.assertEqual(client_source, (REPO_ROOT / generator.CLIENT_SOURCE).read_bytes())
+        self.assertEqual(go_contract, (REPO_ROOT / generator.GO_CONTRACT).read_bytes())
         self.assertEqual(baseline, (REPO_ROOT / generator.BASELINE).read_bytes())
         fingerprint = generator.catalog_fingerprint(catalog)
         self.assertIn(fingerprint.encode(), header)
         self.assertIn(b"#define AIMEE_DB2_RESULT_INVALID_STATE 5u", header)
         self.assertIn(b"aimee_db2_health_call", client_header)
         self.assertIn(b"AIMEE_MODULE_CALL_PROTOCOL", client_source)
+        self.assertIn(fingerprint.encode(), go_contract)
+        self.assertIn(b"func DecodeHealthResponse", go_contract)
+        self.assertIn(b"ErrMalformedHealth", go_contract)
+        self.assertIn(b"ResultOK", go_contract)
+        self.assertIn(b"HealthFlagPGTrgm", go_contract)
+        self.assertIn(b"HealthFlagKBTables", go_contract)
         self.assertEqual(json.loads(baseline)["catalog_sha256"], fingerprint)
         self.assertEqual(
             json.loads(baseline)["result_codes"],
@@ -235,10 +243,15 @@ class ContractTests(unittest.TestCase):
             (root / generator.HEADER).unlink()
             (root / generator.CLIENT_HEADER).unlink()
             (root / generator.CLIENT_SOURCE).unlink()
+            (root / generator.GO_CONTRACT).unlink()
             (root / generator.BASELINE).unlink()
             generator.run(root, True)
             generator.run(root, False)
             (root / generator.HEADER).write_text("drift\n", encoding="utf-8")
+            with self.assertRaisesRegex(generator.ContractError, "rule=generated-drift"):
+                generator.run(root, False)
+            generator.run(root, True)
+            (root / generator.GO_CONTRACT).write_text("package drift\n", encoding="utf-8")
             with self.assertRaisesRegex(generator.ContractError, "rule=generated-drift"):
                 generator.run(root, False)
         finally:
