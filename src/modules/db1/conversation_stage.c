@@ -1,4 +1,4 @@
-/* modules/db1/git_ownership_stage.c: the git ownership stage handler.
+/* modules/db1/conversation_stage.c: the conversation stage handler.
  *
  * GENERATED from src/modules/db1/eventcontract/operations.json by
  * scripts/gen_db1_contract.py. Do not edit.
@@ -13,8 +13,11 @@
 #include "db1_stages.h"
 
 #include "db1_module_api.h"
-#include "git_ownership.h"
+#include "payload_rewrite_state.h"
 
+#include <errno.h>
+#include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +47,35 @@ static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, cha
    return 0;
 }
 
+/* Parse a field the catalog declared as an integer. Refuses anything that is
+   not exactly a number: a partial parse would turn "12abc" into 12 and act on a
+   value the caller never sent. */
+static int parse_int(const char *text, int *out)
+{{
+   if (!text || !text[0])
+      return 1;
+   char *end = NULL;
+   errno = 0;
+   long value = strtol(text, &end, 10);
+   if (errno != 0 || !end || *end != '\0' || value < INT_MIN || value > INT_MAX)
+      return 1;
+   *out = (int)value;
+   return 0;
+}}
+/* The same, for a member the catalog declared as a 64-bit integer. */
+static int parse_int64(const char *text, int64_t *out)
+{
+   if (!text || !text[0])
+      return 1;
+   char *end = NULL;
+   errno = 0;
+   long long value = strtoll(text, &end, 10);
+   if (errno != 0 || !end || *end != '\0')
+      return 1;
+   *out = (int64_t)value;
+   return 0;
+}
+
 /* status(u32) | field_count(u32) | (len(u32) | bytes) * count. A write answers
    with no values, a read with one, a row with a value per member. */
 static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
@@ -69,7 +101,7 @@ static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint3
    return status;
 }
 
-aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body, uint32_t request_len,
+aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, uint32_t request_len,
                                              uint8_t *response_body, uint32_t response_capacity,
                                              uint32_t *response_len)
 {
@@ -115,86 +147,8 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
 
    switch (op)
    {
-   case AIMEE_DB1_OP_OWNERSHIP_UPSERT:
-      if (count != 3u)
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[0][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[1][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[2][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      rc = db1_git_ownership_upsert(field[0], field[1], field[2]);
-      break;
-   case AIMEE_DB1_OP_OWNERSHIP_DELETE:
-      if (count != 2u)
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[0][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[1][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      rc = db1_git_ownership_delete(field[0], field[1]);
-      break;
-   case AIMEE_DB1_OP_OWNERSHIP_OWNER_GET:
-      if (count != 2u)
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[0][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[1][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      rc = db1_git_ownership_get_owner(field[0], field[1], value, sizeof value);
-      reads = 1;
-      break;
-   case AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION:
-      if (count != 2u)
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[0][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[1][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      rc = db1_git_ownership_get_branch_for_session(field[0], field[1], value, sizeof value);
-      reads = 1;
-      break;
-   case AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX:
+   case AIMEE_DB1_OP_REWRITE_STATE_GET:
+   {
       if (count != 1u)
       {
          free(scratch);
@@ -205,11 +159,30 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      rc = db1_git_ownership_find_session_by_prefix(field[0], value, sizeof value);
+      payload_rewrite_state_t out;
+      memset(&out, 0, sizeof out);
+      rc = db1_payload_rewrite_state_get(field[0], &out);
+      char text1[24];
+      snprintf(text1, sizeof text1, "%lld", (long long)out.payload_epoch);
+      char text2[24];
+      snprintf(text2, sizeof text2, "%lld", (long long)out.compaction_epoch);
+      char text4[24];
+      snprintf(text4, sizeof text4, "%d", out.last_payload_tokens);
+      char text6[24];
+      snprintf(text6, sizeof text6, "%d", out.deferred_rewrite_count);
+      char text7[24];
+      snprintf(text7, sizeof text7, "%d", out.consecutive_deferred_count);
+      char text8[24];
+      snprintf(text8, sizeof text8, "%d", out.bytes_saved_pending);
+      const char *const row_values[] = {out.session_id, text1, text2, out.last_prefix_hash, text4, out.last_rewrite_at, text6, text7, text8, out.rewrite_reason, out.updated_at};
+      rows = row_values;
+      row_count = 11u;
       reads = 1;
       break;
-   case AIMEE_DB1_OP_FEATURE_BRANCH_UPSERT:
-      if (count != 3u)
+   }
+   case AIMEE_DB1_OP_REWRITE_STATE_SET:
+   {
+      if (count != 11u)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
@@ -219,37 +192,46 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (!field[1][0])
+      payload_rewrite_state_t row;
+      memset(&row, 0, sizeof row);
+      snprintf(row.session_id, sizeof row.session_id, "%s", field[0]);
+      if (parse_int64(field[1], &row.payload_epoch) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (!field[2][0])
+      if (parse_int64(field[2], &row.compaction_epoch) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      rc = db1_session_feature_branch_upsert(field[0], field[1], field[2]);
+      snprintf(row.last_prefix_hash, sizeof row.last_prefix_hash, "%s", field[3]);
+      if (parse_int(field[4], &row.last_payload_tokens) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      snprintf(row.last_rewrite_at, sizeof row.last_rewrite_at, "%s", field[5]);
+      if (parse_int(field[6], &row.deferred_rewrite_count) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parse_int(field[7], &row.consecutive_deferred_count) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parse_int(field[8], &row.bytes_saved_pending) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      snprintf(row.rewrite_reason, sizeof row.rewrite_reason, "%s", field[9]);
+      snprintf(row.updated_at, sizeof row.updated_at, "%s", field[10]);
+      rc = db1_payload_rewrite_state_set(&row);
       break;
-   case AIMEE_DB1_OP_FEATURE_BRANCH_GET:
-      if (count != 2u)
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[0][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[1][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      rc = db1_session_feature_branch_get(field[0], field[1], value, sizeof value);
-      reads = 1;
-      break;
+   }
    default:
       free(scratch);
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

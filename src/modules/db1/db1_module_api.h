@@ -57,6 +57,14 @@
 #define AIMEE_DB1_OP_FEATURE_BRANCH_UPSERT        6u
 #define AIMEE_DB1_OP_FEATURE_BRANCH_GET           7u
 
+/* Family 3: per-conversation context, clarifications and working memory. */
+
+#define AIMEE_DB1_EVENT_CONVERSATION 11779u
+#define AIMEE_DB1_STAGE_CONVERSATION 3u
+
+#define AIMEE_DB1_OP_REWRITE_STATE_GET 1u
+#define AIMEE_DB1_OP_REWRITE_STATE_SET 2u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry
@@ -64,7 +72,7 @@
    frame already bounds what arrived. */
 #define AIMEE_DB1_STATE_MAX  6144u
 #define AIMEE_DB1_VALUE_MAX  512u
-#define AIMEE_DB1_FIELDS_MAX 3u
+#define AIMEE_DB1_FIELDS_MAX 11u
 
 #define AIMEE_DB1_STATUS_OK       0u
 #define AIMEE_DB1_STATUS_MISSING  1u

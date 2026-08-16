@@ -4969,6 +4969,8 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/checkpoints.o \
                                        $(OBJDIR)/modules/db1/git_ownership.o \
                                        $(OBJDIR)/modules/db1/git_ownership_stage.o \
+                                       $(OBJDIR)/modules/db1/conversation_stage.o \
+                                       $(OBJDIR)/modules/db1/payload_rewrite_state.o \
                                        $(OBJDIR)/core/event_bus/module_runtime.o \
                                        $(OBJDIR)/core/event_bus/module_protocol.o \
                                        $(OBJDIR)/core/event_bus/bus_attach.o \
