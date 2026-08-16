@@ -234,7 +234,12 @@
         ]
       },
       "reply": {
-        "payload": "state",
+        "fields": [
+          {
+            "name": "state",
+            "type": "state"
+          }
+        ],
         "max_bytes": 6144
       }
     },
@@ -267,7 +272,7 @@
         ]
       },
       "reply": {
-        "payload": "none",
+        "fields": [],
         "max_bytes": 0
       }
     },
@@ -281,7 +286,7 @@
         "branch_name",
         "session_id"
       ],
-      "wire_format": "db1-fields-v1",
+      "wire_format": "db1-fields-v2",
       "scope": "repository",
       "transaction": "single",
       "idempotency": "idempotent",
@@ -310,7 +315,7 @@
         ]
       },
       "reply": {
-        "payload": "none",
+        "fields": [],
         "max_bytes": 0
       }
     },
@@ -323,7 +328,7 @@
         "repo_path",
         "branch_name"
       ],
-      "wire_format": "db1-fields-v1",
+      "wire_format": "db1-fields-v2",
       "scope": "repository",
       "transaction": "single",
       "idempotency": "idempotent",
@@ -347,7 +352,7 @@
         ]
       },
       "reply": {
-        "payload": "none",
+        "fields": [],
         "max_bytes": 0
       }
     },
@@ -362,7 +367,7 @@
         "owner_out",
         "owner_len"
       ],
-      "wire_format": "db1-fields-v1",
+      "wire_format": "db1-fields-v2",
       "scope": "repository",
       "transaction": "none",
       "idempotency": "safe",
@@ -387,7 +392,12 @@
         ]
       },
       "reply": {
-        "payload": "text",
+        "fields": [
+          {
+            "name": "value",
+            "type": "text"
+          }
+        ],
         "max_bytes": 512
       }
     },
@@ -402,7 +412,7 @@
         "branch_out",
         "branch_len"
       ],
-      "wire_format": "db1-fields-v1",
+      "wire_format": "db1-fields-v2",
       "scope": "repository",
       "transaction": "none",
       "idempotency": "safe",
@@ -427,7 +437,12 @@
         ]
       },
       "reply": {
-        "payload": "text",
+        "fields": [
+          {
+            "name": "value",
+            "type": "text"
+          }
+        ],
         "max_bytes": 512
       }
     },
@@ -441,7 +456,7 @@
         "session_out",
         "session_len"
       ],
-      "wire_format": "db1-fields-v1",
+      "wire_format": "db1-fields-v2",
       "scope": "global",
       "transaction": "none",
       "idempotency": "safe",
@@ -461,7 +476,12 @@
         ]
       },
       "reply": {
-        "payload": "text",
+        "fields": [
+          {
+            "name": "value",
+            "type": "text"
+          }
+        ],
         "max_bytes": 512
       }
     },
@@ -475,7 +495,7 @@
         "session_id",
         "feature_branch"
       ],
-      "wire_format": "db1-fields-v1",
+      "wire_format": "db1-fields-v2",
       "scope": "repository",
       "transaction": "single",
       "idempotency": "idempotent",
@@ -504,7 +524,7 @@
         ]
       },
       "reply": {
-        "payload": "none",
+        "fields": [],
         "max_bytes": 0
       }
     },
@@ -519,7 +539,7 @@
         "branch_out",
         "branch_len"
       ],
-      "wire_format": "db1-fields-v1",
+      "wire_format": "db1-fields-v2",
       "scope": "repository",
       "transaction": "none",
       "idempotency": "safe",
@@ -544,7 +564,12 @@
         ]
       },
       "reply": {
-        "payload": "text",
+        "fields": [
+          {
+            "name": "value",
+            "type": "text"
+          }
+        ],
         "max_bytes": 512
       }
     }

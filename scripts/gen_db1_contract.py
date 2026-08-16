@@ -49,7 +49,7 @@ RESULT_CODES = ("ok", "missing", "invalid", "too_long", "failed")
 SCOPES = ("none", "conversation", "session", "repository", "global")
 TRANSACTIONS = ("none", "single")
 IDEMPOTENCY = ("safe", "idempotent", "unsafe")
-WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v1")
+WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v2")
 PAYLOADS = ("none", "state", "text")
 FIELD_TYPES = ("text", "int")
 
@@ -184,7 +184,7 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
             # by rule -- so the C signature carries its own names rather than
             # exporting "key" into a header that has always said repo_path.
             parameters = operation["c_params"]
-            reads = operation["reply"]["payload"] != "none"
+            reads = bool(operation["reply"]["fields"])
             expected = len(operation["request"]["fields"]) + (2 if reads else 0)
             if not isinstance(parameters, list) or len(parameters) != expected or \
                     len(set(parameters)) != expected:
@@ -275,11 +275,19 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
         if len(set(fields)) != len(fields):
             fail("request-field-duplicate", f"{name} repeats a request field")
 
-        reply = keys(operation["reply"], {"payload", "max_bytes"}, f"{name}.reply")
-        if reply["payload"] not in PAYLOADS:
-            fail("reply-payload", f"{name} reply payload must be one of {list(PAYLOADS)}")
+        reply = keys(operation["reply"], {"fields", "max_bytes"}, f"{name}.reply")
+        reply_fields = reply["fields"]
+        if not isinstance(reply_fields, list):
+            fail("reply-fields", f"{name} reply fields must be an array")
+        for position, declared in enumerate(reply_fields):
+            shape = keys(declared, {"name", "type"}, f"{name}.reply.fields[{position}]")
+            if shape["type"] not in PAYLOADS or shape["type"] == "none":
+                fail("reply-payload",
+                     f"{name} reply field type must be one of {[p for p in PAYLOADS if p != 'none']}")
+            if not NAME.fullmatch(str(shape["name"])):
+                fail("reply-field-name", f"{name} invalid reply field {shape['name']!r}")
         max_bytes = integer(reply["max_bytes"], f"{name}.reply.max_bytes", 0, 1 << 20)
-        if (reply["payload"] == "none") != (max_bytes == 0):
+        if (not reply_fields) != (max_bytes == 0):
             fail("reply-bytes", f"{name} reply max_bytes must be zero exactly when it carries nothing")
         operations.append(operation)
     return operations
@@ -465,13 +473,17 @@ WIRE_FORMAT_DOC = {
     "db1-keyed-blob-v1": """   Request:  op(u32) | key_len(u32) | key | json_len(u32) | json
    Response: status(u32) | json_len(u32) | json
    Lengths are little-endian, matching the rest of the bus surface.""",
-    "db1-fields-v1": """   Request:  op(u32) | field_count(u32) | (len(u32) | bytes) * field_count
-   Response: status(u32) | value_len(u32) | value
+    "db1-fields-v2": """   Request:  op(u32) | field_count(u32) | (len(u32) | bytes) * field_count
+   Response: status(u32) | field_count(u32) | (len(u32) | bytes) * field_count
 
-   The counted form is the one every family after the first uses. The first
-   family fixed its request at exactly two fields, which suits a keyed blob and
-   suits nothing with three, so the count is explicit here rather than implied
-   by the op.""",
+   Counted in both directions. The first family fixed its request at exactly two
+   fields, which suits a keyed blob and suits nothing with three, so the count is
+   explicit here rather than implied by the op.
+
+   The reply counts for the same reason the request does: an operation that
+   answers with a row, or with a list of them, has somewhere to put the values.
+   A reply carrying nothing sends a count of zero, and one carrying a single
+   value sends a count of one -- the shape does not change with the arity.""",
 }
 
 HELPERS = """static inline void aimee_db1_put_u32(uint8_t *p, uint32_t value)
@@ -565,11 +577,12 @@ def header_bytes(catalog: dict[str, object]) -> str:
             reply = operation["reply"]
             request = operation["request"]
             assert isinstance(reply, dict) and isinstance(request, dict)
-            if reply["payload"] == "state":
+            kinds = {str(f["type"]) for f in reply["fields"]}
+            if "state" in kinds:
                 state_max = max(state_max, int(reply["max_bytes"]))
-            if reply["payload"] == "text":
+            if "text" in kinds:
                 field_max = max(field_max, int(reply["max_bytes"]))
-            if operation["wire_format"] == "db1-fields-v1":
+            if operation["wire_format"] == "db1-fields-v2":
                 fields_max = max(fields_max, len(request["fields"]))
 
     limits: list[tuple[str, str]] = []
@@ -707,7 +720,7 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
       return -1;
    /* The reply is bounded by the caller's own buffer: it asked for at most
       value_len bytes, so there is no reason to hold more than that. */
-   size_t response_cap = 8u + (value_out ? value_len : 0u);
+   size_t response_cap = 12u + (value_out ? value_len : 0u);
    uint8_t *request = malloc(request_len);
    uint8_t *response = malloc(response_cap);
    if (!request || !response)
@@ -732,20 +745,37 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
    else
    {{
       uint32_t status = aimee_db1_get_u32(response);
-      uint32_t payload_len = aimee_db1_get_u32(response + 4u);
-      /* A reply whose declared length disagrees with what arrived is not a
-         reply to read part of. */
-      if (payload_len == response_len - 8u)
+      uint32_t fields_in = aimee_db1_get_u32(response + 4u);
+      /* Read the reply's own count rather than assuming one value: a status
+         with no values is how a write answers, and a row is how a read will. */
+      result = (int)status;
+      if (fields_in == 0u)
       {{
-         result = (int)status;
          if (value_out && value_len)
+            value_out[0] = '\\0';
+      }}
+      else
+      {{
+         uint32_t at = 8u;
+         if (at + 4u > response_len)
+            result = -1;
+         else
          {{
-            if (payload_len >= value_len)
+            uint32_t n = aimee_db1_get_u32(response + at);
+            at += 4u;
+            /* A reply whose declared length runs past what arrived is not a
+               reply to read part of. */
+            if (at + n > response_len)
                result = -1;
-            else
+            else if (value_out && value_len)
             {{
-               memcpy(value_out, response + 8u, payload_len);
-               value_out[payload_len] = '\\0';
+               if (n >= value_len)
+                  result = -1;
+               else
+               {{
+                  memcpy(value_out, response + at, n);
+                  value_out[n] = '\\0';
+               }}
             }}
          }}
       }}
@@ -797,7 +827,7 @@ def client_bytes(catalog: dict[str, object], family: dict[str, object],
         assert isinstance(request, dict) and isinstance(reply, dict)
         fields = [str(f["name"]) for f in request["fields"]]
         types = [str(f["type"]) for f in request["fields"]]
-        reads = reply["payload"] != "none"
+        reads = bool(reply["fields"])
         required = [bool(f["required"]) for f in request["fields"]]
         names = [str(n) for n in operation["c_params"]]
         inputs, outputs = names[:len(fields)], names[len(fields):]
@@ -925,17 +955,25 @@ static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, cha
    return 0;
 }}
 
-{parse_int}static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
+{parse_int}/* status(u32) | field_count(u32) | (len(u32) | bytes) * count. A write answers
+   with no values, a read with one; the shape is the same either way. */
+static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
                             const char *value)
 {{
-   uint32_t value_len = (uint32_t)strlen(value);
-   if (cap < 8u + value_len)
+   uint32_t count = value ? 1u : 0u;
+   uint32_t value_len = value ? (uint32_t)strlen(value) : 0u;
+   if (cap < 8u + (count ? 4u + value_len : 0u))
       return AIMEE_DB1_STATUS_FAILED;
    aimee_db1_put_u32(out, status);
-   aimee_db1_put_u32(out + 4u, value_len);
-   if (value_len)
-      memcpy(out + 8u, value, value_len);
-   *out_len = 8u + value_len;
+   aimee_db1_put_u32(out + 4u, count);
+   *out_len = 8u;
+   if (count)
+   {{
+      aimee_db1_put_u32(out + 8u, value_len);
+      if (value_len)
+         memcpy(out + 12u, value, value_len);
+      *out_len = 12u + value_len;
+   }}
    return status;
 }}
 
@@ -1005,8 +1043,8 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
    else
       status = (rc == 0) ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_FAILED;
 
-   write_reply(response_body, response_capacity, response_len,
-               status, (status == AIMEE_DB1_STATUS_OK && reads) ? value : "");
+   write_reply(response_body, response_capacity, response_len, status,
+               reads ? ((status == AIMEE_DB1_STATUS_OK) ? value : "") : NULL);
    return AIMEE_MODULE_STATUS_OK;
 }}
 /* clang-format on */
@@ -1044,7 +1082,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]]) 
         assert isinstance(request, dict) and isinstance(reply, dict)
         arity = len(request["fields"])
         types = [str(f["type"]) for f in request["fields"]]
-        reads = reply["payload"] != "none"
+        reads = bool(reply["fields"])
         parse, args = [], []
         for position, kind in enumerate(types):
             if kind == "int":
