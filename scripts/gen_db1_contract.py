@@ -184,7 +184,8 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
         allowed = {"family", "id", "name", "wire_format", "scope", "transaction",
                    "idempotency", "results", "request", "reply"}
         entry.pop("_field_types", None)
-        if not isinstance(entry, dict) or not set(entry) <= allowed | {"c_name", "c_params"} or \
+        if not isinstance(entry, dict) or \
+                not set(entry) <= allowed | {"c_name", "c_params", "c_returns"} or \
                 not allowed <= set(entry):
             fail("keys", f"operations[{index}] keys differ from version 1")
         operation = entry
@@ -194,6 +195,11 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
                 fail("c-name", f"operations[{index}] c_name {symbol!r} must be a db1_ symbol")
         if ("c_params" in operation) != ("c_name" in operation):
             fail("c-params", f"operations[{index}] must name c_params exactly with c_name")
+        if operation.get("c_returns", "int") not in ("int", "text"):
+            fail("c-returns",
+                 f"operations[{index}] c_returns must be \"int\" or \"text\"")
+        if "c_returns" in operation and "c_name" not in operation:
+            fail("c-returns", f"operations[{index}] names a return but no C symbol")
         if "c_params" in operation:
             # The wire field names stay as they are -- the first is the scope key
             # by rule -- so the C signature carries its own names rather than
@@ -202,7 +208,11 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
             reply_shape = operation["reply"]
             request_shape = operation["request"]
             inbound = 1 if "struct" in request_shape else len(request_shape["fields"])
-            if "list" in reply_shape:
+            if operation.get("c_returns") == "text":
+                # The value comes back as the return, so there is no out
+                # parameter to name -- the caller frees what it is handed.
+                outbound = 0
+            elif "list" in reply_shape:
                 outbound = 1                      # T *out, however wide the rows
             elif "struct" in reply_shape:
                 outbound = 1                      # T *out
@@ -357,6 +367,15 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
                      f"{name} reply field type must be one of {[p for p in PAYLOADS if p != 'none']}")
             if not NAME.fullmatch(str(shape["name"])):
                 fail("reply-field-name", f"{name} invalid reply field {shape['name']!r}")
+        if operation.get("c_returns") == "text":
+            # The reply is the return value, so there is exactly one of it and
+            # its declared size is what the client allocates before it calls.
+            if "struct" in reply or "list" in reply:
+                fail("c-returns", f"{name} returns a string, so its reply is one value")
+            if len(reply_fields) != 1 or str(reply_fields[0]["type"]) != "text":
+                fail("c-returns",
+                     f"{name} returns a string, so its reply must declare exactly one "
+                     f"text field")
         max_bytes = integer(reply["max_bytes"], f"{name}.reply.max_bytes", 0, 1 << 20)
         if (not reply_fields) != (max_bytes == 0):
             fail("reply-bytes", f"{name} reply max_bytes must be zero exactly when it carries nothing")
@@ -651,7 +670,7 @@ def header_bytes(catalog: dict[str, object]) -> str:
             kinds = {str(f["type"]) for f in reply["fields"]}
             if "state" in kinds:
                 state_max = max(state_max, int(reply["max_bytes"]))
-            if "text" in kinds:
+            if "text" in kinds and operation.get("c_returns") != "text":
                 field_max = max(field_max, int(reply["max_bytes"]))
             if operation["wire_format"] == "db1-fields-v2":
                 fields_max = max(fields_max, len(request["fields"]))
@@ -921,7 +940,11 @@ def client_bytes(catalog: dict[str, object], family: dict[str, object],
     includes = "\n".join(f'#include "{h}"' for h in headers)
     # Emitted only where something reads a single value: a family of writes and
     # rows has no use for it, and an unused static is a -Werror failure.
-    plain_read = any("struct" not in o["reply"] and o["reply"]["fields"] for o in operations)
+    # A returned string maps its own miss (NULL) and never goes through this,
+    # so a family of writes, rows and returned strings has no use for it -- and
+    # an unused static is a -Werror failure.
+    plain_read = any("struct" not in o["reply"] and o["reply"]["fields"]
+                     and o.get("c_returns") != "text" for o in operations)
     reader = ("""/* A read answers found(1) / not-found(0) / error(-1), which is what the direct
    implementation returns and what its callers already branch on. */
 static int read_result(int status, const char *value_out)
@@ -949,7 +972,10 @@ static int read_result(int status, const char *value_out)
         in_struct = str(request["struct"]) if "struct" in request else ""
         out_struct = str(reply["struct"]) if "struct" in reply else ""
         listed = reply.get("list")
-        if listed:
+        returns_text = operation.get("c_returns") == "text"
+        if returns_text:
+            inputs, outputs = list(names), []
+        elif listed:
             # The rows parameter can sit anywhere in the signature -- some
             # domains put it first -- so the C order is read from c_params and
             # only the remaining parameters map onto the fields, in order.
@@ -972,7 +998,9 @@ static int read_result(int status, const char *value_out)
             # guarded -- and only where the operation says it must be there.
             guards = [f"!{p} || !{p}[0]" for p, t, need in zip(inputs, types, required)
                       if t == "text" and need]
-        if listed:
+        if returns_text:
+            pass  # the value is the return; there is no out parameter
+        elif listed:
             # Re-order to the C signature: the declarations above are in field
             # order, which is the same order minus the rows parameter.
             declared = dict(zip(inputs, params))
@@ -985,10 +1013,12 @@ static int read_result(int status, const char *value_out)
         elif reads:
             params += [f"char *{outputs[0]}", f"size_t {outputs[1]}"]
             guards += [f"!{outputs[0]}", f"{outputs[1]} == 0"]
-        signature = f"int {operation['c_name']}({', '.join(params)})"
+        kind = "char *" if returns_text else "int "
+        signature = f"{kind}{operation['c_name']}({', '.join(params)})"
         body = [signature, "{"]
+        empty = "NULL" if returns_text else "-1"
         if guards:
-            body += [f"   if ({' || '.join(guards)})", "      return -1;"]
+            body += [f"   if ({' || '.join(guards)})", f"      return {empty};"]
         if listed:
             # Clamped rather than refused, because the domain clamps too: this
             # ceiling is the one the implementation already enforces, so a
@@ -1020,7 +1050,30 @@ static int read_result(int status, const char *value_out)
         body.append(f"   const char *fields[] = {{{', '.join(carried)}}};")
         op_symbol = f"AIMEE_DB1_OP_{str(operation['name']).upper()}"
         arity = len(fields)
-        if listed:
+        if returns_text:
+            cap = int(reply["max_bytes"])
+            # Allocated at the declared maximum because the size is not known
+            # until the reply arrives, then shrunk to what came back. The
+            # caller frees it, which is the contract the domain already had --
+            # the memory simply comes from here now.
+            body.append(f"   char *value = malloc({cap}u);")
+            body.append("   if (!value)")
+            body.append("      return NULL;")
+            body.append("   char *const values[] = {value};")
+            body.append(f"   const size_t caps[] = {{{cap}u}};")
+            body.append(f"   int status = call_stage({op_symbol}, fields, {arity}, values, caps, "
+                        "1, NULL);")
+            # An empty value is the miss the domain signalled with NULL, and the
+            # two must stay the same answer: a caller that treats "" as content
+            # would render an empty context rather than skipping it.
+            body.append("   if (status != (int)AIMEE_DB1_STATUS_OK || !value[0])")
+            body.append("   {")
+            body.append("      free(value);")
+            body.append("      return NULL;")
+            body.append("   }")
+            body.append("   char *shrunk = realloc(value, strlen(value) + 1u);")
+            body.append("   return shrunk ? shrunk : value;")
+        elif listed:
             members = [(str(f["name"]), str(f["type"])) for f in reply["fields"]]
             width = len(members)
             numeric = [i for i, (_, k) in enumerate(members) if k in ("int", "int64")]
@@ -1279,6 +1332,10 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
       them. Declared unconditionally so this stays one readable flow -- unlike
       the static helpers above, an unused local costs nothing. */
    int listed = 0;
+   /* A domain that returns a string hands over the allocation with it. The
+      reply is written straight out of it rather than copied into value: the
+      stack buffer is sized for identifiers and these carry documents. */
+   char *text_owned = NULL;
    void *domain_rows = NULL;
    void *cells_owned = NULL;
    void *numeric_owned = NULL;
@@ -1309,7 +1366,7 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
    {{
       if (rc < 0)
          status = AIMEE_DB1_STATUS_FAILED;
-      else if (rc == 0 || !value[0])
+      else if (rc == 0 || !(text_owned ? text_owned : value)[0])
          status = AIMEE_DB1_STATUS_MISSING;
       else
          status = AIMEE_DB1_STATUS_OK;
@@ -1318,7 +1375,8 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
       status = (rc == 0) ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_FAILED;
 
    {{
-      const char *one = (status == AIMEE_DB1_STATUS_OK) ? value : "";
+      const char *held = text_owned ? text_owned : value;
+      const char *one = (status == AIMEE_DB1_STATUS_OK) ? held : "";
       const char *const single[] = {{one}};
       const char *const *out_values = rows ? rows : (reads ? single : NULL);
       uint32_t out_count = rows ? row_count : (reads ? 1u : 0u);
@@ -1329,6 +1387,7 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
    free(cells_owned);
    free(numeric_owned);
    free(domain_rows);
+   free(text_owned);
    return AIMEE_MODULE_STATUS_OK;
 }}
 /* clang-format on */
@@ -1421,6 +1480,13 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                     args.append(f"field[{position}]")
 
         listed = reply.get("list")
+        returns_text = operation.get("c_returns") == "text"
+        if returns_text:
+            # The domain hands back memory. The stage owns it from here: copy it
+            # into the reply and free it, and refuse rather than truncate when it
+            # will not fit -- a half a context is not a shorter context, it is a
+            # different one, and the caller cannot tell.
+            tail.append("      text_owned = produced;\n")
         if listed:
             members = [(str(f["name"]), str(f["type"])) for f in reply["fields"]]
             width = len(members)
@@ -1504,7 +1570,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                                 for index, (member, kind) in enumerate(members))
             tail.append(f"      const char *const row_values[] = {{{emitted}}};\n")
             tail.append(f"      rows = row_values;\n      row_count = {len(members)}u;\n")
-        elif reads:
+        elif reads and not returns_text:
             args += ["value", "sizeof value"]
         # Braced only when a parsed integer needs scoping: an empty block around
         # every other case would be noise, and would move files that have not
@@ -1515,7 +1581,9 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
                 f"      }}\n"
                 + "".join(parse)
-                + f"      rc = {operation['c_name']}({', '.join(args)});\n"
+                + (f"      char *produced = {operation['c_name']}({', '.join(args)});\n"
+                   "      rc = produced ? 1 : 0;\n" if returns_text
+                   else f"      rc = {operation['c_name']}({', '.join(args)});\n")
                 + "".join(tail)
                 # Not for a list: it declares member fields like a row does, but
                 # an empty list must answer with no values, where a read answers
@@ -1531,7 +1599,9 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         marker = "         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n      }\n"
         cut = body.index(marker) + len(marker)
         body = body[:cut] + needs + body[cut:]
-        cases.append(head + (f"   {{\n{body}   }}\n" if parse else body))
+        # Braced when anything declares a local: a declaration straight after a
+        # case label is not portable C, and the returned string is one.
+        cases.append(head + (f"   {{\n{body}   }}\n" if parse or returns_text else body))
     used = {str(f["type"]) for o in operations for f in o["request"]["fields"]}
     typed = bool(used & {"int", "int64"})
     return STAGE_SCAFFOLD.format(stem=name, family=name.replace("_", " "),

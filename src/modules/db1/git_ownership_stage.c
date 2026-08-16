@@ -120,6 +120,10 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
       them. Declared unconditionally so this stays one readable flow -- unlike
       the static helpers above, an unused local costs nothing. */
    int listed = 0;
+   /* A domain that returns a string hands over the allocation with it. The
+      reply is written straight out of it rather than copied into value: the
+      stack buffer is sized for identifiers and these carry documents. */
+   char *text_owned = NULL;
    void *domain_rows = NULL;
    void *cells_owned = NULL;
    void *numeric_owned = NULL;
@@ -285,7 +289,7 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
    {
       if (rc < 0)
          status = AIMEE_DB1_STATUS_FAILED;
-      else if (rc == 0 || !value[0])
+      else if (rc == 0 || !(text_owned ? text_owned : value)[0])
          status = AIMEE_DB1_STATUS_MISSING;
       else
          status = AIMEE_DB1_STATUS_OK;
@@ -294,7 +298,8 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
       status = (rc == 0) ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_FAILED;
 
    {
-      const char *one = (status == AIMEE_DB1_STATUS_OK) ? value : "";
+      const char *held = text_owned ? text_owned : value;
+      const char *one = (status == AIMEE_DB1_STATUS_OK) ? held : "";
       const char *const single[] = {one};
       const char *const *out_values = rows ? rows : (reads ? single : NULL);
       uint32_t out_count = rows ? row_count : (reads ? 1u : 0u);
@@ -305,6 +310,7 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
    free(cells_owned);
    free(numeric_owned);
    free(domain_rows);
+   free(text_owned);
    return AIMEE_MODULE_STATUS_OK;
 }
 /* clang-format on */
