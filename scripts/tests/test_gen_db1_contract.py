@@ -310,6 +310,69 @@ class CatalogTests(unittest.TestCase):
                 self.assertNotIn(name.upper(), header,
                                  f"reserved family {name} leaked into the wire header")
 
+    def test_every_db1_source_is_claimed_exactly_once(self) -> None:
+        # The property that makes the catalog a map: an unclaimed domain is one
+        # nobody is planning to move, and a twice-claimed one is two families
+        # expecting to own the same rows.
+        catalog = self.catalog(REPO_ROOT)
+        owner: dict[str, str] = {}
+        for family in catalog["families"]:
+            for source in family["sources"]:
+                self.assertNotIn(source, owner, f"{source} claimed twice")
+                owner[source] = family["name"]
+        for source in catalog["infrastructure_sources"]:
+            self.assertNotIn(source, owner, f"{source} is infrastructure and claimed")
+            owner[source] = "(infrastructure)"
+        on_disk = {path.stem for path in (REPO_ROOT / contract.SOURCE_DIR).glob("*.c")}
+        self.assertEqual(set(owner), on_disk)
+
+    def test_an_unclaimed_or_duplicated_source_is_refused(self) -> None:
+        for mutate, rule in (
+            (lambda c: c["families"][2]["sources"].pop(), "source-unclaimed"),
+            (lambda c: c["families"][2]["sources"].append(c["families"][3]["sources"][0]),
+             "source-duplicate"),
+            (lambda c: c["infrastructure_sources"].append("ghost_domain"), "source-absent"),
+        ):
+            with self.subTest(rule=rule):
+                tmp = sandbox()
+                try:
+                    root = Path(tmp.name)
+                    catalog = self.catalog(root)
+                    mutate(catalog)
+                    catalog["families"][2]["sources"].sort()
+                    catalog["infrastructure_sources"].sort()
+                    self.write(root, catalog)
+                    self.assertRule(root, rule)
+                finally:
+                    tmp.cleanup()
+
+    def test_a_coupled_ledger_cannot_be_split_across_families(self) -> None:
+        # This one is not hygiene. server_compute.c records that separating the
+        # reservation ledger from the launch left paid-for jobs nothing could
+        # replay, and a family is the unit that activates -- so two halves in
+        # two families is a plan to separate them again.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            catalog = self.catalog(root)
+            group = catalog["coupled_sources"][0]["sources"]
+            holder = next(f for f in catalog["families"] if group[0] in f["sources"])
+            other = next(f for f in catalog["families"] if f["name"] != holder["name"])
+            holder["sources"] = sorted(s for s in holder["sources"] if s != group[0])
+            other["sources"] = sorted(other["sources"] + [group[0]])
+            self.write(root, catalog)
+            self.assertRule(root, "coupled-split")
+        finally:
+            tmp.cleanup()
+
+    def test_the_shipped_coupling_names_a_reason(self) -> None:
+        catalog = self.catalog(REPO_ROOT)
+        self.assertTrue(catalog["coupled_sources"])
+        for group in catalog["coupled_sources"]:
+            self.assertGreaterEqual(len(group["sources"]), 2)
+            self.assertTrue(group["reason"].strip(),
+                            "a coupling with no reason cannot be reviewed")
+
     def test_every_operation_is_keyed(self) -> None:
         # DB1 rows belong to a conversation or session; an unkeyed read would
         # cross that boundary.

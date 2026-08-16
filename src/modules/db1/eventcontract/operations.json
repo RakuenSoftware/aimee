@@ -3,6 +3,24 @@
   "module": "db1",
   "wire_version": 1,
   "catalog_complete": false,
+  "infrastructure_sources": [
+    "db",
+    "db1_init",
+    "db1_write",
+    "db_schema",
+    "module_adapter"
+  ],
+  "coupled_sources": [
+    {
+      "sources": [
+        "agent_jobs",
+        "delegate_reservation",
+        "delegation_checkpoint",
+        "delegations"
+      ],
+      "reason": "a reservation resolves to a job id, and server_compute.c records that the ledger and the launch were co-located after a ledger across a boundary from the launch left paid-for jobs that nothing could replay"
+    }
+  ],
   "families": [
     {
       "id": 1,
@@ -11,6 +29,9 @@
       "active": true,
       "doc": "the economizer's per-conversation reducer state. Chosen as the first family because it has exactly one production caller, so it proved the boundary without a wide cutover.",
       "covers": "checkpoints (the economizer's reducer state only)",
+      "sources": [
+        "checkpoints"
+      ],
       "retired_sources": []
     },
     {
@@ -20,6 +41,9 @@
       "active": true,
       "doc": "branch ownership for the MCP git flows. Rows say which session owns which branch, so concurrent local sessions do not stomp on each other.",
       "covers": "git_ownership",
+      "sources": [
+        "git_ownership"
+      ],
       "retired_sources": [
         "git_ownership.c"
       ]
@@ -31,6 +55,14 @@
       "active": false,
       "doc": "server and webchat session rows.",
       "covers": "server_sessions, primary_sessions, session_state, session_paths, webchat_claude_sessions, webchat_live",
+      "sources": [
+        "primary_sessions",
+        "server_sessions",
+        "session_paths",
+        "session_state",
+        "webchat_claude_sessions",
+        "webchat_live"
+      ],
       "retired_sources": []
     },
     {
@@ -38,8 +70,15 @@
       "name": "agent_work",
       "event_kind": 11780,
       "active": false,
-      "doc": "queued agent work: jobs, logs and the cron that drives them.",
-      "covers": "agent_jobs, agent_log, coord_jobs, cognify_jobs, db1_cron_jobs, db1_trigger",
+      "doc": "queued agent work: logs, coordination jobs and the cron that drives them.",
+      "covers": "agent_log, coord_jobs, cognify_jobs, db1_cron_jobs, db1_trigger",
+      "sources": [
+        "agent_log",
+        "cognify_jobs",
+        "coord_jobs",
+        "db1_cron_jobs",
+        "db1_trigger"
+      ],
       "retired_sources": []
     },
     {
@@ -47,8 +86,15 @@
       "name": "delegation",
       "event_kind": 11781,
       "active": false,
-      "doc": "delegation spawns, reservations and their checkpoints.",
-      "covers": "delegations, delegate_reservation, delegate_learning, delegation_checkpoint",
+      "doc": "delegation spawns, reservations, checkpoints and the agent_jobs ledger they reserve against. These move as ONE unit: a reservation resolves to a job id, and server_compute.c records that the ledger and the launch were deliberately co-located because a ledger across a boundary from the launch left paid-for jobs that nothing could replay. Splitting them across families would restore exactly that topology one migration at a time.",
+      "covers": "delegations, delegate_reservation, delegate_learning, delegation_checkpoint, agent_jobs",
+      "sources": [
+        "agent_jobs",
+        "delegate_learning",
+        "delegate_reservation",
+        "delegation_checkpoint",
+        "delegations"
+      ],
       "retired_sources": []
     },
     {
@@ -58,6 +104,15 @@
       "active": false,
       "doc": "the workflow engine's stores, plans and traces.",
       "covers": "wfe_store, wfe_binding, execution_plans, execution_trace, pipelines, roadmap_runtime, roundtable_pipeline",
+      "sources": [
+        "execution_plans",
+        "execution_trace",
+        "pipelines",
+        "roadmap_runtime",
+        "roundtable_pipeline",
+        "wfe_binding",
+        "wfe_store"
+      ],
       "retired_sources": []
     },
     {
@@ -67,6 +122,14 @@
       "active": false,
       "doc": "per-conversation context, clarifications and working memory.",
       "covers": "conv_context, clarify, payload_rewrite_state, user_memory, wm, windows",
+      "sources": [
+        "clarify",
+        "conv_context",
+        "payload_rewrite_state",
+        "user_memory",
+        "windows",
+        "wm"
+      ],
       "retired_sources": []
     },
     {
@@ -76,6 +139,12 @@
       "active": false,
       "doc": "secrets and the replay stores behind token consumption.",
       "covers": "secrets, server_identity_jti, server_management_jti, remote_client_grant",
+      "sources": [
+        "remote_client_grant",
+        "secrets",
+        "server_identity_jti",
+        "server_management_jti"
+      ],
       "retired_sources": []
     },
     {
@@ -85,6 +154,16 @@
       "active": false,
       "doc": "token accounting, evaluations and recorded events.",
       "covers": "token_audit, cost_fold, interaction_events, guardrail_events, eval, ensemble, diagnose, diagnostics",
+      "sources": [
+        "cost_fold",
+        "diagnose",
+        "diagnostics",
+        "ensemble",
+        "eval",
+        "guardrail_events",
+        "interaction_events",
+        "token_audit"
+      ],
       "retired_sources": []
     },
     {
@@ -94,6 +173,22 @@
       "active": false,
       "doc": "local runtime resolution, caches and model metadata.",
       "covers": "runtime_state, project_clones, local_operator, env, model_catalog, model_pricing, working_profile_local, tool_local_availability, caches, web_page_cache, fsnap, decisions, maintenance, mcp_osv_cache",
+      "sources": [
+        "caches",
+        "decisions",
+        "env",
+        "fsnap",
+        "local_operator",
+        "maintenance",
+        "mcp_osv_cache",
+        "model_catalog",
+        "model_pricing",
+        "project_clones",
+        "runtime_state",
+        "tool_local_availability",
+        "web_page_cache",
+        "working_profile_local"
+      ],
       "retired_sources": []
     }
   ],
