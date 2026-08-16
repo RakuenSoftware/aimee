@@ -91,8 +91,10 @@ Three things stay outside the wire, and none of them are payload shapes:
 1. **Superseded — kept for the sequence.** One frame change, both generated sides, family 1's keyed
    blob untouched. Unlocks the seven sources the survey attributed to T2, and is
    prerequisite for everything below.
-2. **Struct flattening.** Member lists in the catalog; marshalling in the
-   generator. No frame change.
+2. ~~**Struct flattening.**~~ Done: a struct parameter contributes its members
+   to the frame and the generated code marshals them at the boundary. The
+   catalog carries the member list; the domain still sees its struct. No frame
+   change, as predicted.
 3. **Rows.** A list is a struct repeated, once one row can cross.
 4. **Migrate**, now by whole source, since that is the unit that can move.
 
