@@ -95,7 +95,17 @@ Three things stay outside the wire, and none of them are payload shapes:
    to the frame and the generated code marshals them at the boundary. The
    catalog carries the member list; the domain still sees its struct. No frame
    change, as predicted.
-3. **Rows.** A list is a struct repeated, once one row can cross.
+3. ~~**Rows.**~~ Done, and it was a struct repeated as predicted: the reply's
+   own value count divided by the row width is the row count, so nothing new
+   is sent. The bound travels as a request field because it is an allocation
+   on both sides, and the catalog declares a ceiling for it.
+
+   One thing this design did not anticipate: a list whose row is a *single
+   value* rather than a struct — `int64_t *out, int max`, or
+   `char (*out)[N], int max`. Same shape, width one, but the generator builds a
+   row from a declared member list and a bare scalar has no members to declare.
+   Five operations across four sources; the survey now counts it separately as
+   `column`.
 4. **Migrate**, now by whole source, since that is the unit that can move.
 
 Steps 1 and 2 are each a day's work of the kind already done twice — the integer

@@ -23,6 +23,7 @@
     "src/modules/db1/db.c",
     "src/modules/db1/db1_cron_jobs.c",
     "src/modules/db1/db1_init.c",
+    "src/modules/db1/db1_time.c",
     "src/modules/db1/db1_trigger.c",
     "src/modules/db1/db1_write.c",
     "src/modules/db1/db_schema.c",

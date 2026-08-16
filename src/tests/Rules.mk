@@ -660,6 +660,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-db1-cost-fold \
                $(TESTPREFIX)/unit-test-db1-module-stage \
                $(TESTPREFIX)/unit-test-db1-git-ownership-client \
+               $(TESTPREFIX)/unit-test-db1-conversation-client \
                $(TESTPREFIX)/unit-test-db1-roundtable-pipeline \
                $(TESTPREFIX)/unit-test-roundtable-pipeline-eval \
                $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk \
@@ -4984,6 +4985,12 @@ $(TESTPREFIX)/unit-test-db1-git-ownership-client: \
                                        $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
+$(TESTPREFIX)/unit-test-db1-conversation-client: \
+                                       $(OBJDIR)/tests/test_db1_conversation_client.o \
+                                       $(OBJDIR)/db1_client/conversation.o \
+                                       $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
 $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/tests/test_db1_module_stage.o \
                                        $(OBJDIR)/modules/db1/module_adapter.o \
@@ -4993,6 +5000,7 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/git_ownership_stage.o \
                                        $(OBJDIR)/modules/db1/conversation_stage.o \
                                        $(OBJDIR)/modules/db1/payload_rewrite_state.o \
+                                       $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/util.o \
                                        $(OBJDIR)/core/event_bus/module_runtime.o \
                                        $(OBJDIR)/core/event_bus/module_protocol.o \
                                        $(OBJDIR)/core/event_bus/bus_attach.o \

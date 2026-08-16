@@ -101,10 +101,17 @@ static void encode(uint8_t *out, uint32_t op, const char *const *fields, uint32_
 /* Returns the module's status, or -1 when the call never produced one. */
 /* Fills up to `slots` reply values, each into the buffer and capacity the
    caller supplied. A write passes none; a read passes one; a row passes one per
-   member. */
+   member; a list passes one per member per row it is willing to accept.
+
+   `filled_out` reports how many values the reply actually carried, which is how
+   a list learns its length: the rows are not counted separately on the wire
+   because an operation already knows how wide its rows are. Callers that expect
+   a fixed shape pass NULL. */
 static int call_stage(uint32_t op, const char *const *fields, uint32_t count, char *const *values,
-                      const size_t *caps, uint32_t slots)
+                      const size_t *caps, uint32_t slots, uint32_t *filled_out)
 {
+   if (filled_out)
+      *filled_out = 0u;
    for (uint32_t i = 0; i < slots; ++i)
       if (values[i] && caps[i])
          values[i][0] = '\0';
@@ -153,6 +160,13 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
          no values is how a write answers, one value is a read, and a member
          apiece is a row. */
       result = (int)status;
+      /* More values than the caller has room for is a contract mismatch, not
+         something to read the first few of: the caller asked for at most this
+         many rows, and a stage answering with more is not answering this call. */
+      if (fields_in > slots)
+         result = -1;
+      else if (filled_out)
+         *filled_out = fields_in;
       uint32_t at = 8u;
       for (uint32_t i = 0; i < fields_in && result != -1; ++i)
       {
@@ -211,7 +225,7 @@ int db1_git_ownership_upsert(const char *repo_path, const char *branch_name, con
    if (!repo_path || !repo_path[0] || !branch_name || !branch_name[0] || !session_id || !session_id[0])
       return -1;
    const char *fields[] = {repo_path, branch_name, session_id};
-   return write_result(call_stage(AIMEE_DB1_OP_OWNERSHIP_UPSERT, fields, 3, NULL, NULL, 0));
+   return write_result(call_stage(AIMEE_DB1_OP_OWNERSHIP_UPSERT, fields, 3, NULL, NULL, 0, NULL));
 }
 
 int db1_git_ownership_delete(const char *repo_path, const char *branch_name)
@@ -219,7 +233,7 @@ int db1_git_ownership_delete(const char *repo_path, const char *branch_name)
    if (!repo_path || !repo_path[0] || !branch_name || !branch_name[0])
       return -1;
    const char *fields[] = {repo_path, branch_name};
-   return write_result(call_stage(AIMEE_DB1_OP_OWNERSHIP_DELETE, fields, 2, NULL, NULL, 0));
+   return write_result(call_stage(AIMEE_DB1_OP_OWNERSHIP_DELETE, fields, 2, NULL, NULL, 0, NULL));
 }
 
 int db1_git_ownership_get_owner(const char *repo_path, const char *branch_name, char *owner_out, size_t owner_len)
@@ -229,7 +243,7 @@ int db1_git_ownership_get_owner(const char *repo_path, const char *branch_name, 
    const char *fields[] = {repo_path, branch_name};
    char *const values[] = {owner_out};
    const size_t caps[] = {owner_len};
-   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_OWNER_GET, fields, 2, values, caps, 1);
+   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_OWNER_GET, fields, 2, values, caps, 1, NULL);
    return read_result(status, owner_out);
 }
 
@@ -240,7 +254,7 @@ int db1_git_ownership_get_branch_for_session(const char *repo_path, const char *
    const char *fields[] = {repo_path, session_id};
    char *const values[] = {branch_out};
    const size_t caps[] = {branch_len};
-   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION, fields, 2, values, caps, 1);
+   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION, fields, 2, values, caps, 1, NULL);
    return read_result(status, branch_out);
 }
 
@@ -251,7 +265,7 @@ int db1_git_ownership_find_session_by_prefix(const char *session_prefix, char *s
    const char *fields[] = {session_prefix};
    char *const values[] = {session_out};
    const size_t caps[] = {session_len};
-   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX, fields, 1, values, caps, 1);
+   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX, fields, 1, values, caps, 1, NULL);
    return read_result(status, session_out);
 }
 
@@ -260,7 +274,7 @@ int db1_session_feature_branch_upsert(const char *repo_path, const char *session
    if (!repo_path || !repo_path[0] || !session_id || !session_id[0] || !feature_branch || !feature_branch[0])
       return -1;
    const char *fields[] = {repo_path, session_id, feature_branch};
-   return write_result(call_stage(AIMEE_DB1_OP_FEATURE_BRANCH_UPSERT, fields, 3, NULL, NULL, 0));
+   return write_result(call_stage(AIMEE_DB1_OP_FEATURE_BRANCH_UPSERT, fields, 3, NULL, NULL, 0, NULL));
 }
 
 int db1_session_feature_branch_get(const char *repo_path, const char *session_id, char *branch_out, size_t branch_len)
@@ -270,7 +284,7 @@ int db1_session_feature_branch_get(const char *repo_path, const char *session_id
    const char *fields[] = {repo_path, session_id};
    char *const values[] = {branch_out};
    const size_t caps[] = {branch_len};
-   int status = call_stage(AIMEE_DB1_OP_FEATURE_BRANCH_GET, fields, 2, values, caps, 1);
+   int status = call_stage(AIMEE_DB1_OP_FEATURE_BRANCH_GET, fields, 2, values, caps, 1, NULL);
    return read_result(status, branch_out);
 }
 

@@ -8,8 +8,8 @@ The T0..T3 ladder this script used to print has been retired, because three of
 its four rungs shipped: integer arguments, the counted reply (which carried
 multi-value replies and zero-argument requests with it), and struct flattening.
 A ladder also modelled the remainder as if each rung sat on the one below, and
-it does not -- rows and callee-allocated out-parameters are independent, and
-neither waits on the other.
+it does not -- a callee-allocated out-parameter and a richer return contract
+are independent, and neither waits on the other.
 
 What replaced it is a SET of missing capabilities per operation, unioned per
 source. That matches how migration actually works: the unit that moves is a
@@ -71,7 +71,9 @@ CAP = re.compile(r"size_t \w+$")
 OUT_NUM = re.compile(r"(int|int64_t|double|size_t|long|long long"
                      r"|unsigned long long) \s*\*\s*\w+$")
 STRUCT_IN = re.compile(r"const [a-z_0-9]+_t \s*\*\s*\w+$")
-STRUCT_OUT = re.compile(r"[a-z_0-9]+_t \s*\*\s*\w+$")
+STRUCT_OUT = re.compile(r"([a-z_0-9]+_t) \s*\*\s*\w+$")
+# Types whose "_t" is a scalar rather than a row.
+SCALAR_TYPES = frozenset({"int64_t", "uint64_t", "int32_t", "size_t", "time_t"})
 ARRAY_LEN = re.compile(r"(int|size_t) (max|n|count|cap|limit)\w*$")
 # A callee-allocated out-parameter: the double star is the whole tell, and it is
 # why these fall through STRUCT_OUT/OUT_TEXT, whose \w+$ cannot match a second *.
@@ -83,14 +85,18 @@ LARGE = re.compile(r"(json|metadata|content|prompt|body|payload|text|summary|blo
 # What a tag still needs from the wire. A tag absent from this map needs
 # nothing: text, int, out_text, out_num, struct_in and struct_out all cross
 # today, the last two since struct flattening.
+# Rows of a struct cross today. Rows of a single value do not: the generator
+# builds a row out of a declared member list, and a bare int64_t or a
+# char (*)[N] has no members to declare. Same shape, width one -- but it is
+# generator work that has not been done, so it is counted as missing.
 NEEDS = {
-    "out_array": "rows",
+    "out_column": "column",
     "alloc_out": "alloc",
     "json_in": "json",
     "other": "unknown",
 }
 CAPABILITY = {
-    "rows": "rows -- a list of rows, which is a struct repeated",
+    "column": "column -- a list whose row is one value rather than a struct",
     "alloc": "alloc -- a callee-allocated out-parameter (generator, not frame)",
     "json": "json -- a cJSON tree, which the wire carries but the client must build",
     "status": "status -- a return contract beyond ok/miss/fail, per operation",
@@ -184,15 +190,18 @@ def classify(params: str, enums: frozenset[str] = frozenset()) -> list[str]:
             index += 2
             continue
         if following and STRUCT_OUT.search(current) and ARRAY_LEN.search(following):
-            tags.append("out_array")
+            # int64_t matches the _t pattern too, so a column of integers would
+            # otherwise be counted as a struct it has no members for.
+            row = STRUCT_OUT.search(current).group(1)
+            tags.append("out_column" if row in SCALAR_TYPES else "out_rows")
             index += 2
             continue
         if following and OUT_TEXT_ROWS.search(current) and ARRAY_LEN.search(following):
-            tags.append("out_array")
+            tags.append("out_column")
             index += 2
             continue
         if OUT_TEXT_ROWS.search(current):
-            tags.append("out_array")
+            tags.append("out_column")
         elif JSON_IN.search(current):
             tags.append("json_in")
         elif ALLOC_OUT.search(current):
@@ -366,7 +375,7 @@ def report(operations: dict) -> None:
             continue
         print(f"    + {need:9} {len(gained):>2} more sources"
               f"   {sum(source_ops[s] for s in gained):>3} operations")
-    for combo in ("rows alloc", "rows alloc json status"):
+    for combo in ("column alloc", "column alloc json status"):
         allowed = set(combo.split())
         gained = [s for s, n in per_source.items() if n and n <= allowed]
         print(f"    + {combo:17} {len(gained):>2} more sources"

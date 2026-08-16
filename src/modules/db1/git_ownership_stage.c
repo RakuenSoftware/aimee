@@ -109,9 +109,20 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
    value[0] = '\0';
    int rc = -1;
    int reads = 0;
-   /* A row answers with a value per member; a plain read answers with one. */
+   /* A row answers with a value per member; a plain read answers with one; a
+      list answers with a value per member per row. */
    const char *const *rows = NULL;
    uint32_t row_count = 0u;
+   /* A list returns its length in rc, where a read returns found/not-found, so
+      the two cannot share a status mapping. The three owned blocks below hold
+      the domain's rows, the cell pointers into them and the text for numeric
+      members: all three must outlive write_reply, because that is what reads
+      them. Declared unconditionally so this stays one readable flow -- unlike
+      the static helpers above, an unused local costs nothing. */
+   int listed = 0;
+   void *domain_rows = NULL;
+   void *cells_owned = NULL;
+   void *numeric_owned = NULL;
 
    switch (op)
    {
@@ -261,7 +272,12 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
       onto MISSING would report a broken store as "nothing recorded", and the
       caller would act on an absence that was never established. */
    uint32_t status;
-   if (rows)
+   if (listed)
+      /* A list answers with how many rows it found, so any count is success and
+         only a negative return is a failure. Zero rows is an empty list, not a
+         miss: the caller asked what was there and the answer was nothing. */
+      status = (rc >= 0) ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_FAILED;
+   else if (rows)
       /* A row-returning domain answers 0 or -1: there is no found/not-found
          distinction to preserve, so neither is invented. */
       status = (rc == 0) ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_FAILED;
@@ -286,6 +302,9 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
          out_count = 0u; /* nothing to report but the status */
       write_reply(response_body, response_capacity, response_len, status, out_values, out_count);
    }
+   free(cells_owned);
+   free(numeric_owned);
+   free(domain_rows);
    return AIMEE_MODULE_STATUS_OK;
 }
 /* clang-format on */
