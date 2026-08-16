@@ -242,6 +242,10 @@ jobs:
             --check-schema src/modules
       - name: Validate core/process carving, placement, and event contracts
         run: python3 -I -S scripts/validate_module_process_contracts.py
+      - name: Enforce the DB1 operation catalog
+        run: python3 -I -S scripts/gen_db1_contract.py
+      - name: Test DB1 operation-catalog failure modes
+        run: python3 -I scripts/tests/test_gen_db1_contract.py -v
       - name: Test descriptor failure modes and taxonomy convergence
         run: python3 -I scripts/tests/test_validate_module_descriptors.py -v
       - name: Test exhaustive standalone C-process export generation
