@@ -1,0 +1,227 @@
+/* test_db1_git_ownership_client.c: the bus client the daemon now links.
+ *
+ * This is the production path for branch ownership, so the bytes it emits and
+ * the way it reads a reply are the contract. The bus is stubbed rather than
+ * run: what matters here is the framing and the result mapping, and the module
+ * that answers these frames is covered by unit-test-db1-module-stage.
+ *
+ * The mapping is the part with teeth. A failure must surface as -1 and never as
+ * "no owner": branch_own_check() treats a negative as "no enforcement" and
+ * allows the operation, which is what it has always done without a database,
+ * whereas a fabricated 0 asserts the branch is unowned and would let a caller
+ * take one somebody else holds. */
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+
+#include <aimee/core/event_bus/module_client.h>
+#include "db1_module_api.h"
+#include "git_ownership.h"
+
+/* --- the stubbed bus ------------------------------------------------------ */
+
+static int stub_available = 1;
+static aimee_module_call_result_t stub_result = AIMEE_MODULE_CALL_OK;
+static uint32_t stub_status = AIMEE_DB1_STATUS_OK;
+static const char *stub_value = "";
+static int stub_calls;
+static uint8_t stub_request[1024];
+static uint32_t stub_request_len;
+/* When set, the reply declares a length that disagrees with what it carries. */
+static int stub_lie_about_length;
+
+int obs_bus_module_available(uint32_t event_kind)
+{
+   assert(event_kind == AIMEE_DB1_EVENT_GIT_OWNERSHIP);
+   return stub_available;
+}
+
+aimee_module_call_result_t
+obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+                    const void *request_body, uint32_t request_len, void *response_body,
+                    uint32_t response_capacity, uint32_t *response_len,
+                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   (void)trace_id;
+   (void)cancelled;
+   (void)cancel_context;
+   assert(event_kind == AIMEE_DB1_EVENT_GIT_OWNERSHIP);
+   assert(stage_id == AIMEE_DB1_STAGE_GIT_OWNERSHIP);
+   assert(deadline_ns != 0);
+
+   stub_calls++;
+   stub_request_len = request_len < sizeof stub_request ? request_len : 0;
+   if (stub_request_len)
+      memcpy(stub_request, request_body, stub_request_len);
+   if (stub_result != AIMEE_MODULE_CALL_OK)
+      return stub_result;
+
+   uint32_t value_len = (uint32_t)strlen(stub_value);
+   if (response_capacity < 8u + value_len)
+      return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+   uint8_t *out = (uint8_t *)response_body;
+   aimee_db1_put_u32(out, stub_status);
+   aimee_db1_put_u32(out + 4u, stub_lie_about_length ? value_len + 7u : value_len);
+   memcpy(out + 8u, stub_value, value_len);
+   *response_len = 8u + value_len;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+static void reset(void)
+{
+   stub_available = 1;
+   stub_result = AIMEE_MODULE_CALL_OK;
+   stub_status = AIMEE_DB1_STATUS_OK;
+   stub_value = "";
+   stub_calls = 0;
+   stub_request_len = 0;
+   stub_lie_about_length = 0;
+}
+
+/* --- reading back the frame the client emitted ---------------------------- */
+
+static uint32_t frame_op(void)
+{
+   return aimee_db1_get_u32(stub_request);
+}
+static uint32_t frame_count(void)
+{
+   return aimee_db1_get_u32(stub_request + 4u);
+}
+
+static int frame_field_is(uint32_t index, const char *expected)
+{
+   uint32_t at = 8u;
+   for (uint32_t i = 0; i < index; ++i)
+   {
+      uint32_t n = aimee_db1_get_u32(stub_request + at);
+      at += 4u + n;
+   }
+   uint32_t len = aimee_db1_get_u32(stub_request + at);
+   return len == strlen(expected) && memcmp(stub_request + at + 4u, expected, len) == 0;
+}
+
+static void test_upsert_emits_the_declared_frame(void)
+{
+   reset();
+   assert(db1_git_ownership_upsert("/repo", "feature", "sess-1") == 0);
+   assert(stub_calls == 1);
+   assert(frame_op() == AIMEE_DB1_OP_OWNERSHIP_UPSERT);
+   assert(frame_count() == 3u);
+   assert(frame_field_is(0, "/repo"));
+   assert(frame_field_is(1, "feature"));
+   assert(frame_field_is(2, "sess-1"));
+   /* The frame is exactly its fields: nothing padded, nothing trailing. */
+   assert(stub_request_len == 8u + (4u + 5u) + (4u + 7u) + (4u + 6u));
+   printf("  PASS: test_upsert_emits_the_declared_frame\n");
+}
+
+static void test_reads_report_found_missing_and_error_apart(void)
+{
+   char owner[128];
+
+   reset();
+   stub_status = AIMEE_DB1_STATUS_OK;
+   stub_value = "sess-9";
+   assert(db1_git_ownership_get_owner("/repo", "feature", owner, sizeof owner) == 1);
+   assert(strcmp(owner, "sess-9") == 0);
+
+   reset();
+   stub_status = AIMEE_DB1_STATUS_MISSING;
+   assert(db1_git_ownership_get_owner("/repo", "feature", owner, sizeof owner) == 0);
+   assert(owner[0] == '\0');
+
+   /* A store that failed is NOT an unowned branch. */
+   reset();
+   stub_status = AIMEE_DB1_STATUS_FAILED;
+   assert(db1_git_ownership_get_owner("/repo", "feature", owner, sizeof owner) == -1);
+
+   printf("  PASS: test_reads_report_found_missing_and_error_apart\n");
+}
+
+static void test_an_unreachable_module_is_an_error_not_an_absence(void)
+{
+   char owner[128];
+
+   /* Nothing serving the stage. */
+   reset();
+   stub_available = 0;
+   assert(db1_git_ownership_get_owner("/repo", "feature", owner, sizeof owner) == -1);
+   assert(stub_calls == 0); /* and no call was attempted */
+
+   /* Serving, but the call did not complete. */
+   for (int i = 0; i < 3; ++i)
+   {
+      reset();
+      stub_result = (i == 0)   ? AIMEE_MODULE_CALL_DEADLINE_EXCEEDED
+                    : (i == 1) ? AIMEE_MODULE_CALL_CAPABILITY_DENIED
+                               : AIMEE_MODULE_CALL_INTERNAL;
+      assert(db1_git_ownership_get_owner("/repo", "feature", owner, sizeof owner) == -1);
+      assert(db1_git_ownership_upsert("/repo", "feature", "sess-1") == -1);
+   }
+   printf("  PASS: test_an_unreachable_module_is_an_error_not_an_absence\n");
+}
+
+static void test_a_malformed_reply_is_refused(void)
+{
+   char owner[128];
+   reset();
+   stub_lie_about_length = 1;
+   stub_value = "sess-9";
+   assert(db1_git_ownership_get_owner("/repo", "feature", owner, sizeof owner) == -1);
+   printf("  PASS: test_a_malformed_reply_is_refused\n");
+}
+
+static void test_bad_arguments_cost_no_round_trip(void)
+{
+   char owner[128];
+   char over_long[AIMEE_DB1_FIELD_MAX + 8];
+   memset(over_long, 'x', sizeof over_long - 1);
+   over_long[sizeof over_long - 1] = '\0';
+
+   reset();
+   assert(db1_git_ownership_upsert(NULL, "feature", "sess") == -1);
+   assert(db1_git_ownership_upsert("/repo", "", "sess") == -1);
+   assert(db1_git_ownership_upsert(over_long, "feature", "sess") == -1);
+   assert(db1_git_ownership_get_owner("/repo", "feature", owner, 0) == -1);
+   assert(stub_calls == 0);
+   printf("  PASS: test_bad_arguments_cost_no_round_trip\n");
+}
+
+static void test_every_operation_uses_its_own_op_and_arity(void)
+{
+   char out[128];
+
+   reset();
+   assert(db1_git_ownership_delete("/repo", "feature") == 0);
+   assert(frame_op() == AIMEE_DB1_OP_OWNERSHIP_DELETE && frame_count() == 2u);
+
+   reset();
+   stub_value = "feature";
+   assert(db1_git_ownership_get_branch_for_session("/repo", "sess-1", out, sizeof out) == 1);
+   assert(frame_op() == AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION && frame_count() == 2u);
+   assert(frame_field_is(1, "sess-1"));
+
+   /* The global lookup carries only its prefix: there is no repository to scope
+      a session-prefix search by. */
+   reset();
+   stub_value = "sess-abc";
+   assert(db1_git_ownership_find_session_by_prefix("sess-a", out, sizeof out) == 1);
+   assert(frame_op() == AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX && frame_count() == 1u);
+   assert(frame_field_is(0, "sess-a"));
+
+   printf("  PASS: test_every_operation_uses_its_own_op_and_arity\n");
+}
+
+int main(void)
+{
+   printf("db1_git_ownership_client:\n");
+   test_upsert_emits_the_declared_frame();
+   test_reads_report_found_missing_and_error_apart();
+   test_an_unreachable_module_is_an_error_not_an_absence();
+   test_a_malformed_reply_is_refused();
+   test_bad_arguments_cost_no_round_trip();
+   test_every_operation_uses_its_own_op_and_arity();
+   printf("db1_git_ownership_client: ok\n");
+   return 0;
+}

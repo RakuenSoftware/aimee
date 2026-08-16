@@ -229,3 +229,6 @@ scratchpad/
 .synctmp/
 src/.testlogs/
 benchmarks/compaction-quality/.cache-ab/
+
+# transient build/test logs written by local verification runs
+.*.log
