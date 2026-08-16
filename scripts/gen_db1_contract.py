@@ -31,6 +31,12 @@ ROOT = Path(__file__).resolve().parent.parent
 CATALOG = Path("src/modules/db1/eventcontract/operations.json")
 HEADER = Path("src/modules/db1/db1_module_api.h")
 PROCESS_CONTRACTS = Path("src/modules/process-contracts.json")
+MAKEFILE = Path("src/Makefile")
+SOURCE_DIR = Path("src/modules/db1")
+CLIENT_DIR = Path("src/db1_client")
+STAGES_HEADER = Path("src/modules/db1/db1_stages.h")
+# Served by the module process alone; the daemon never links it.
+MODULE_ONLY_SOURCES = frozenset({"module_adapter.c"})
 
 # DB1's principal ref. Event kinds are carved 4096 + ref*256 + stage, and a
 # family's id IS its future stage id, so the arithmetic is fixed here too.
@@ -45,6 +51,7 @@ TRANSACTIONS = ("none", "single")
 IDEMPOTENCY = ("safe", "idempotent", "unsafe")
 WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v1")
 PAYLOADS = ("none", "state", "text")
+FIELD_TYPES = ("text", "int")
 
 
 class ContractError(ValueError):
@@ -102,7 +109,8 @@ def validate_families(raw: object) -> dict[str, dict[str, object]]:
         fail("families", "families must be a nonempty array")
     families: dict[str, dict[str, object]] = {}
     for index, entry in enumerate(raw, start=1):
-        family = keys(entry, {"id", "name", "event_kind", "active", "covers"},
+        family = keys(entry, {"id", "name", "event_kind", "active", "doc",
+                              "client_doc", "covers", "sources", "retired_sources"},
                       f"families[{index-1}]")
         # Dense from one, because a family id is its future stage id and stage
         # IDs must be dense from one in the process contract.
@@ -120,8 +128,30 @@ def validate_families(raw: object) -> dict[str, dict[str, object]]:
         if type(family["active"]) is not bool:
             fail("family-active-type", f"{name}.active must be boolean")
         # A reservation states what it will cover, so the remaining migration is
-        # countable from the catalog instead of rediscovered each time.
+        # countable from the catalog instead of rediscovered each time. This is
+        # a PLAN, in file names, and it is deliberately not machine-checked: a
+        # source can hold more than one domain, so "covers" over-states what a
+        # family has actually taken. retired_sources is the checked half.
+        text(family["doc"], f"{name}.doc", 512)
+        if not isinstance(family["client_doc"], str) or len(family["client_doc"]) > 512:
+            fail("client-doc", f"{name}.client_doc must be a string of at most 512 chars")
         text(family["covers"], f"{name}.covers", 512)
+        sources = family["sources"]
+        if not isinstance(sources, list) or not sources or sources != sorted(set(sources)):
+            fail("family-sources", f"{name}.sources must be sorted, unique and nonempty")
+        for source in sources:
+            if not isinstance(source, str) or not NAME.fullmatch(source):
+                fail("family-source-name", f"{name} names invalid source {source!r}")
+        retired = family["retired_sources"]
+        if not isinstance(retired, list) or retired != sorted(set(retired)):
+            fail("retired-sources", f"{name}.retired_sources must be sorted and unique")
+        for entry_name in retired:
+            if not isinstance(entry_name, str) or not entry_name.endswith(".c") or \
+                    "/" in entry_name or not NAME.fullmatch(entry_name[:-2]):
+                fail("retired-source-name", f"{name} names invalid source {entry_name!r}")
+        if retired and not family["active"]:
+            fail("retired-reserved",
+                 f"reserved family {name!r} claims retired sources, but nothing serves it")
         families[name] = family
     if not any(family["active"] for family in families.values()):
         fail("family-active", "at least one family must be active")
@@ -136,10 +166,33 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
     order: list[tuple[int, int]] = []
     operations: list[dict[str, object]] = []
     for index, entry in enumerate(raw):
-        operation = keys(entry, {
-            "family", "id", "name", "wire_format", "scope", "transaction",
-            "idempotency", "results", "request", "reply",
-        }, f"operations[{index}]")
+        allowed = {"family", "id", "name", "wire_format", "scope", "transaction",
+                   "idempotency", "results", "request", "reply"}
+        entry.pop("_field_types", None)
+        if not isinstance(entry, dict) or not set(entry) <= allowed | {"c_name", "c_params"} or \
+                not allowed <= set(entry):
+            fail("keys", f"operations[{index}] keys differ from version 1")
+        operation = entry
+        if "c_name" in operation:
+            symbol = text(operation["c_name"], f"operations[{index}].c_name", 96)
+            if not NAME.fullmatch(symbol) or not symbol.startswith("db1_"):
+                fail("c-name", f"operations[{index}] c_name {symbol!r} must be a db1_ symbol")
+        if ("c_params" in operation) != ("c_name" in operation):
+            fail("c-params", f"operations[{index}] must name c_params exactly with c_name")
+        if "c_params" in operation:
+            # The wire field names stay as they are -- the first is the scope key
+            # by rule -- so the C signature carries its own names rather than
+            # exporting "key" into a header that has always said repo_path.
+            parameters = operation["c_params"]
+            reads = operation["reply"]["payload"] != "none"
+            expected = len(operation["request"]["fields"]) + (2 if reads else 0)
+            if not isinstance(parameters, list) or len(parameters) != expected or \
+                    len(set(parameters)) != expected:
+                fail("c-params",
+                     f"operations[{index}] c_params must name {expected} distinct parameters")
+            for parameter in parameters:
+                if not isinstance(parameter, str) or not NAME.fullmatch(parameter):
+                    fail("c-params", f"operations[{index}] invalid parameter {parameter!r}")
         family_name = operation["family"]
         if not isinstance(family_name, str) or family_name not in families:
             fail("operation-family", f"operations[{index}] names unknown family {family_name!r}")
@@ -182,9 +235,17 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
             fail("results-order", f"{name} results must follow the declared result order")
 
         request = keys(operation["request"], {"fields"}, f"{name}.request")
-        fields = request["fields"]
-        if not isinstance(fields, list) or not fields:
+        raw_fields = request["fields"]
+        if not isinstance(raw_fields, list) or not raw_fields:
             fail("request-fields", f"{name} request must declare at least one field")
+        fields = []
+        for position, entry_field in enumerate(raw_fields):
+            declared = keys(entry_field, {"name", "type"}, f"{name}.request.fields[{position}]")
+            if declared["type"] not in FIELD_TYPES:
+                fail("field-type",
+                     f"{name} field {declared['name']!r} type must be one of {list(FIELD_TYPES)}")
+            fields.append(str(declared["name"]))
+        operation["_field_types"] = [str(f["type"]) for f in raw_fields]
         # A scoped operation must take its scoping key FIRST, because that key is
         # the boundary: DB1 rows belong to a conversation, session or repository,
         # and reading without one crosses it.
@@ -218,8 +279,9 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
 
 def validate_catalog(value: object) -> dict[str, object]:
     catalog = keys(value, {
-        "schema_version", "module", "wire_version", "catalog_complete", "families",
-        "result_codes", "operations",
+        "schema_version", "module", "wire_version", "catalog_complete",
+        "infrastructure_sources", "coupled_sources", "families", "result_codes",
+        "operations",
     }, "catalog")
     if catalog["schema_version"] != 1:
         fail("schema-version", "schema_version must equal 1")
@@ -243,51 +305,774 @@ def validate_catalog(value: object) -> dict[str, object]:
     return catalog
 
 
-def header_constants(root: Path) -> dict[str, int]:
+def validate_source_map(root: Path, catalog: dict[str, object]) -> None:
+    """Every DB1 source belongs to exactly one family, or to infrastructure.
+
+    This is what makes the catalog a map rather than a wish list: a domain
+    nobody claimed is a domain nobody is planning to move, and a domain claimed
+    twice is two families expecting to own the same rows.
+
+    Infrastructure is named separately because it has no callers to migrate --
+    the connection, the schema, the write path and the module's own handler.
+    """
     try:
-        text_value = (root / HEADER).read_text(encoding="utf-8")
+        on_disk = {path.stem for path in (root / SOURCE_DIR).glob("*.c")}
     except OSError as exc:
-        fail("unreadable", f"cannot read {HEADER}: {exc}")
-    found: dict[str, int] = {}
-    for match in re.finditer(r"^#define\s+(AIMEE_DB1_[A-Z0-9_]+)\s+(\d+)u?\s*$",
-                             text_value, re.M):
-        found[match.group(1)] = int(match.group(2))
-    return found
+        fail("unreadable", f"cannot list {SOURCE_DIR}: {exc}")
+
+    # Generated wire is not a domain, so no family claims it -- but only the
+    # files this generator actually emits are exempt, so a stray *_stage.c is
+    # still an unclaimed source rather than a name that happens to look derived.
+    on_disk -= {f"{family['name']}_stage" for family, _ in client_families(catalog)}
+
+    infrastructure = catalog["infrastructure_sources"]
+    if not isinstance(infrastructure, list) or infrastructure != sorted(set(infrastructure)):
+        fail("infrastructure", "infrastructure_sources must be sorted and unique")
+
+    families = catalog["families"]
+    assert isinstance(families, dict)
+    owner: dict[str, str] = {}
+    for name, family in families.items():
+        for source in family["sources"]:
+            if source in owner:
+                fail("source-duplicate",
+                     f"{source!r} is claimed by both {owner[source]!r} and {name!r}")
+            owner[source] = name
+    for source in infrastructure:
+        if source in owner:
+            fail("source-duplicate",
+                 f"{source!r} is both infrastructure and claimed by {owner[source]!r}")
+        owner[source] = "(infrastructure)"
+
+    for source in sorted(set(owner) - on_disk):
+        fail("source-absent", f"{source!r} is claimed but is not in {SOURCE_DIR}")
+    for source in sorted(on_disk - set(owner)):
+        fail("source-unclaimed",
+             f"{source!r} is in {SOURCE_DIR} but no family or infrastructure claims it")
+
+
+def validate_coupled_sources(catalog: dict[str, object]) -> None:
+    """Sources that must migrate together must sit in one family.
+
+    A family is the unit that activates, so two halves of one ledger in two
+    families is a plan to split them -- and the coupling here exists because
+    splitting this particular ledger already cost paid-for work that could not
+    be replayed.
+    """
+    groups = catalog["coupled_sources"]
+    if not isinstance(groups, list):
+        fail("coupled", "coupled_sources must be an array")
+    families = catalog["families"]
+    assert isinstance(families, dict)
+    owner = {source: name for name, family in families.items() for source in family["sources"]}
+    for index, group in enumerate(groups):
+        entry = keys(group, {"sources", "reason"}, f"coupled_sources[{index}]")
+        sources = entry["sources"]
+        if not isinstance(sources, list) or len(sources) < 2 or sources != sorted(set(sources)):
+            fail("coupled-sources",
+                 f"coupled_sources[{index}].sources must be sorted, unique and hold at least two")
+        text(entry["reason"], f"coupled_sources[{index}].reason", 512)
+        holders = {owner.get(source) for source in sources}
+        if None in holders:
+            missing = sorted(s for s in sources if s not in owner)
+            fail("coupled-unclaimed",
+                 f"coupled_sources[{index}] names unclaimed source(s) {missing}")
+        if len(holders) != 1:
+            fail("coupled-split",
+                 f"coupled_sources[{index}] is split across families {sorted(holders)}: "
+                 f"{entry['reason']}")
+
+
+def validate_retired_sources(root: Path, catalog: dict[str, object]) -> None:
+    """A source the daemon stopped linking must be claimed by an active family.
+
+    "covers" is a plan and can over-state: a DB1 source often holds more than one
+    domain, and family 1 took the economizer's reducer state out of checkpoints.c
+    while the rest of that file still serves callers in-process. So the claim
+    that is actually enforced is the narrow one -- this source is no longer
+    linked into the daemon, because its callers reach it over the bus.
+
+    Checked in both directions on purpose. A family cannot claim a source the
+    daemon still links, and a source cannot quietly leave the daemon's link
+    without a family owning it. Without the second half, a migration could drop
+    a domain out of the binary and leave nothing saying where it went.
+    """
+    try:
+        makefile = (root / MAKEFILE).read_text(encoding="utf-8")
+    except OSError as exc:
+        fail("unreadable", f"cannot read {MAKEFILE}: {exc}")
+    try:
+        on_disk = {path.name for path in (root / SOURCE_DIR).glob("*.c")}
+    except OSError as exc:
+        fail("unreadable", f"cannot list {SOURCE_DIR}: {exc}")
+
+    linked = {name for name in on_disk if f"modules/db1/{name}" in makefile}
+    families = catalog["families"]
+    assert isinstance(families, dict)
+
+    claimed: dict[str, str] = {}
+    for name, family in families.items():
+        for source in family["retired_sources"]:
+            if source not in on_disk:
+                fail("retired-missing", f"{name} retires {source!r}, which is not in {SOURCE_DIR}")
+            if source in linked:
+                fail("retired-still-linked",
+                     f"{name} retires {source!r}, but {MAKEFILE} still links it")
+            if source in claimed:
+                fail("retired-duplicate",
+                     f"{source!r} is retired by both {claimed[source]!r} and {name!r}")
+            claimed[source] = name
+
+    # Generated stage handlers serve the module and were never in the daemon, so
+    # their absence from the link is not evidence of a migration.
+    generated = {f"{family['name']}_stage.c" for family, _ in client_families(catalog)}
+    unlinked = on_disk - linked - set(MODULE_ONLY_SOURCES) - generated
+    for source in sorted(unlinked - set(claimed)):
+        fail("retired-unclaimed",
+             f"{source!r} is no longer linked into the daemon but no family retires it")
+
+
+PREAMBLE = """/* Wire contract for the DB1 process's bounded stages.
+ *
+ * GENERATED from src/modules/db1/eventcontract/operations.json by
+ * scripts/gen_db1_contract.py. Do not edit: add a family or an operation to the
+ * catalog and regenerate, so the numbering and the wire cannot drift apart.
+ *
+ * DB1 is the server's SQLite store. It is becoming a module so that callers
+ * reach it over the event bus instead of linking it, which is what the module
+ * doctrine requires of state. The C implementation stays for now; only the
+ * boundary is new. See docs/proposals/pending/db1-as-a-go-module.md.
+ *
+ * Event kinds are fixed by the process contract at 4096 + ref*256 + stage. DB1
+ * declares principal ref {ref}, so these are not a free choice. */
+#ifndef AIMEE_DB1_MODULE_API_H
+#define AIMEE_DB1_MODULE_API_H 1
+
+#include <stddef.h>
+#include <stdint.h>
+"""
+
+# One paragraph per wire format, emitted the first time a family uses it.
+WIRE_FORMAT_DOC = {
+    "db1-keyed-blob-v1": """   Request:  op(u32) | key_len(u32) | key | json_len(u32) | json
+   Response: status(u32) | json_len(u32) | json
+   Lengths are little-endian, matching the rest of the bus surface.""",
+    "db1-fields-v1": """   Request:  op(u32) | field_count(u32) | (len(u32) | bytes) * field_count
+   Response: status(u32) | value_len(u32) | value
+
+   The counted form is the one every family after the first uses. The first
+   family fixed its request at exactly two fields, which suits a keyed blob and
+   suits nothing with three, so the count is explicit here rather than implied
+   by the op.""",
+}
+
+HELPERS = """static inline void aimee_db1_put_u32(uint8_t *p, uint32_t value)
+{
+   for (unsigned i = 0; i < 4; ++i)
+      p[i] = (uint8_t)(value >> (i * 8u));
+}
+
+static inline uint32_t aimee_db1_get_u32(const uint8_t *p)
+{
+   uint32_t value = 0;
+   for (unsigned i = 0; i < 4; ++i)
+      value |= (uint32_t)p[i] << (i * 8u);
+   return value;
+}
+
+#endif /* AIMEE_DB1_MODULE_API_H */
+"""
+
+
+def wrap(prose: str, first: str, rest: str, width: int = 79) -> list[str]:
+    """Reflow a catalog sentence into a C comment, deterministically."""
+    words, lines, current = prose.split(), [], first
+    for word in words:
+        # The prefix already carries its own trailing space, so the first word on
+        # a line is appended bare -- otherwise every comment opens "/*  Family".
+        candidate = f"{current}{word}" if current in (first, rest) else f"{current} {word}"
+        if len(candidate) > width and current not in (first, rest):
+            lines.append(current.rstrip())
+            current = f"{rest}{word}"
+        else:
+            current = candidate
+    if current.strip():
+        lines.append(current.rstrip())
+    return lines
+
+
+def define_block(pairs: list[tuple[str, str]]) -> list[str]:
+    """#defines with their values aligned, the way the tree writes them."""
+    if not pairs:
+        return []
+    width = max(len(name) for name, _ in pairs)
+    return [f"#define {name.ljust(width)} {value}" for name, value in pairs]
+
+
+def header_bytes(catalog: dict[str, object]) -> str:
+    families = catalog["families"]
+    operations = catalog["operations"]
+    assert isinstance(families, dict) and isinstance(operations, list)
+    by_family: dict[str, list[dict[str, object]]] = {}
+    for operation in operations:
+        by_family.setdefault(str(operation["family"]), []).append(operation)
+
+    out = [PREAMBLE.replace("{ref}", str(PRINCIPAL_REF))]
+    seen_formats: set[str] = set()
+    field_max = 0
+    fields_max = 0
+    state_max = 0
+
+    for family in sorted(families.values(), key=lambda f: int(f["id"])):
+        if not family["active"]:
+            # A constant for a family nothing serves would invite a caller to
+            # speak an event with no listener.
+            continue
+        name = str(family["name"])
+        upper = name.upper()
+        own = by_family.get(name, [])
+        block = [""]
+        block.extend(wrap(f"Family {family['id']}: {family['doc']}", "/* ", " * "))
+        wire = str(own[0]["wire_format"]) if own else ""
+        if wire and wire not in seen_formats:
+            # Described once, beside the first family that speaks it.
+            seen_formats.add(wire)
+            block.append(" *")
+            for line in WIRE_FORMAT_DOC[wire].rstrip().split("\n"):
+                block.append((" * " + line.strip()).rstrip() if line.strip() else " *")
+        block[-1] += " */"
+        block.append("")
+        block.extend(define_block([
+            (f"AIMEE_DB1_EVENT_{upper}", f"{family['event_kind']}u"),
+            (f"AIMEE_DB1_STAGE_{upper}", f"{family['id']}u"),
+        ]))
+        if own:
+            block.append("")
+            block.extend(define_block([
+                (f"AIMEE_DB1_OP_{str(o['name']).upper()}", f"{o['id']}u") for o in own
+            ]))
+        out.append("\n".join(block) + "\n")
+
+        for operation in own:
+            reply = operation["reply"]
+            request = operation["request"]
+            assert isinstance(reply, dict) and isinstance(request, dict)
+            if reply["payload"] == "state":
+                state_max = max(state_max, int(reply["max_bytes"]))
+            if reply["payload"] == "text":
+                field_max = max(field_max, int(reply["max_bytes"]))
+            if operation["wire_format"] == "db1-fields-v1":
+                fields_max = max(fields_max, len(request["fields"]))
+
+    limits: list[tuple[str, str]] = []
+    if state_max:
+        limits.append(("AIMEE_DB1_STATE_MAX", f"{state_max}u"))
+    if field_max:
+        limits.append(("AIMEE_DB1_FIELD_MAX", f"{field_max}u"))
+    if fields_max:
+        limits.append(("AIMEE_DB1_FIELDS_MAX", f"{fields_max}u"))
+    if limits:
+        out.append("\n/* Wire bounds, carried from the catalog's declared reply sizes and\n"
+                   "   request arities. Stated so the module refuses an over-long value rather\n"
+                   "   than truncating one into something that looks valid. */\n"
+                   + "\n".join(define_block(limits)) + "\n")
+
+    out.append("\n" + "\n".join(define_block(
+        [(f"AIMEE_DB1_STATUS_{code.upper()}", f"{index}u")
+         for index, code in enumerate(RESULT_CODES)])) + "\n")
+    out.append("\n" + HELPERS)
+    return "".join(out)
+
+
+CLIENT_SCAFFOLD = """/* db1_client/{stem}.c: the {stem} family, reached over the bus.
+ *
+ * GENERATED from src/modules/db1/eventcontract/operations.json by
+ * scripts/gen_db1_contract.py. Do not edit.
+ *
+ * Same functions, same contract, different side of the boundary: the daemon
+ * links this instead of the DB1 domain, so nothing that calls these had to
+ * change.
+ *
+ * It lives OUTSIDE modules/db1 deliberately. The module's descriptor owns every
+ * .c beside it and compiles them into the DB1 process, so a client with these
+ * names in that directory would be linked twice into the one binary that must
+ * not have it -- once as the caller and once as the implementation.
+{client_doc} *
+ * clang-format is off for the body below: its canonical form is whatever this
+ * generator emits, and reflowing generated output would put the file and the
+ * catalog permanently one reformat apart. */
+/* clang-format off */
+#include "{header}"
+
+#include "db1_module_api.h"
+
+#include <aimee/audit/obs_bus.h>
+#include <aimee/core/event_bus/module_client.h>
+#include "log.h"
+#include "module_json_call.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#define DB1_{upper}_CALL_TIMEOUT_MS 2000
+
+static void warn_unreachable(int reason)
+{{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   /* Said once per process: enough to tell a store that is down from one that
+      is quiet, without one line per call. The numeric
+      aimee_module_call_result_t, not its name, so this does not pull the whole
+      event-bus library in behind the client for one string. */
+   LOG_WARN("db1.{stem}", "DB1 %s is unreachable (module call result %d)", "{family}",
+            reason);
+}}
+
+/* op(u32) | field_count(u32) | (len(u32) | bytes) * count, per db1_module_api.h. */
+static int encode(uint8_t *out, size_t out_sz, uint32_t op, const char *const *fields,
+                  uint32_t count, uint32_t *len_out)
+{{
+   if (count == 0u || count > AIMEE_DB1_FIELDS_MAX)
+      return -1;
+   size_t need = 8u;
+   for (uint32_t i = 0; i < count; ++i)
+   {{
+      if (!fields[i] || !fields[i][0])
+         return -1;
+      size_t n = strlen(fields[i]);
+      /* Refuse here rather than let the module refuse: an over-long field is a
+         caller bug, and the round trip would only rename it. */
+      if (n >= AIMEE_DB1_FIELD_MAX)
+         return -1;
+      need += 4u + n;
+   }}
+   if (need > out_sz)
+      return -1;
+
+   uint32_t at = 0;
+   aimee_db1_put_u32(out + at, op);
+   at += 4u;
+   aimee_db1_put_u32(out + at, count);
+   at += 4u;
+   for (uint32_t i = 0; i < count; ++i)
+   {{
+      uint32_t n = (uint32_t)strlen(fields[i]);
+      aimee_db1_put_u32(out + at, n);
+      at += 4u;
+      memcpy(out + at, fields[i], n);
+      at += n;
+   }}
+   *len_out = at;
+   return 0;
+}}
+
+/* Returns the module's status, or -1 when the call never produced one. */
+static int call_stage(uint32_t op, const char *const *fields, uint32_t count, char *value_out,
+                      size_t value_len)
+{{
+   if (value_out && value_len)
+      value_out[0] = '\\0';
+   /* A local check, not a probe: with nothing serving the stage there is no
+      call to make, and saying so beats waiting out a deadline. */
+   if (!obs_bus_module_available(AIMEE_DB1_EVENT_{upper}))
+   {{
+      warn_unreachable(AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+      return -1;
+   }}
+
+   uint8_t request[8u + AIMEE_DB1_FIELDS_MAX * (4u + AIMEE_DB1_FIELD_MAX)];
+   uint32_t request_len = 0;
+   if (encode(request, sizeof request, op, fields, count, &request_len) != 0)
+      return -1;
+
+   uint8_t response[8u + AIMEE_DB1_FIELD_MAX];
+   uint32_t response_len = 0;
+   uint64_t deadline = aimee_module_call_deadline_ns(DB1_{upper}_CALL_TIMEOUT_MS);
+   aimee_module_call_result_t rc =
+       obs_bus_module_call(AIMEE_DB1_EVENT_{upper}, AIMEE_DB1_STAGE_{upper}, 0, deadline,
+                           request, request_len, response, (uint32_t)sizeof response,
+                           &response_len, NULL, NULL);
+   if (rc != AIMEE_MODULE_CALL_OK || response_len < 8u)
+   {{
+      warn_unreachable((int)rc);
+      return -1;
+   }}
+
+   uint32_t status = aimee_db1_get_u32(response);
+   uint32_t payload_len = aimee_db1_get_u32(response + 4u);
+   /* A reply whose declared length disagrees with what arrived is not a reply
+      to read part of. */
+   if (payload_len != response_len - 8u)
+      return -1;
+   if (value_out && value_len)
+   {{
+      if (payload_len >= value_len)
+         return -1;
+      memcpy(value_out, response + 8u, payload_len);
+      value_out[payload_len] = '\\0';
+   }}
+   return (int)status;
+}}
+
+/* A write answers 0 or -1; the store either took it or it did not. */
+static int write_result(int status)
+{{
+   return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
+}}
+
+/* A read answers found(1) / not-found(0) / error(-1), which is what the direct
+   implementation returns and what its callers already branch on. */
+static int read_result(int status, char *value_out)
+{{
+   if (status == (int)AIMEE_DB1_STATUS_OK)
+      return (value_out && value_out[0]) ? 1 : 0;
+   if (status == (int)AIMEE_DB1_STATUS_MISSING)
+      return 0;
+   return -1;
+}}
+"""
+
+
+def client_bytes(catalog: dict[str, object], family: dict[str, object],
+                 operations: list[dict[str, object]]) -> str:
+    """Render one family's C client.
+
+    Every body is the same three steps -- reject unusable arguments, name the
+    fields, map the status -- which is exactly why writing 347 of them by hand
+    was never the plan.
+    """
+    name = str(family["name"])
+    upper = name.upper()
+    doc = str(family["client_doc"]).strip()
+    prose = ""
+    if doc:
+        prose = "\n *\n" + "\n".join(wrap(doc, " * ", " * "))
+    out = [CLIENT_SCAFFOLD.format(
+        stem=name, family=name.replace("_", " "), upper=upper,
+        header=f"{name}.h", client_doc=prose)]
+
+    for operation in operations:
+        request = operation["request"]
+        reply = operation["reply"]
+        assert isinstance(request, dict) and isinstance(reply, dict)
+        fields = [str(f["name"]) for f in request["fields"]]
+        types = [str(f["type"]) for f in request["fields"]]
+        reads = reply["payload"] != "none"
+        names = [str(n) for n in operation["c_params"]]
+        inputs, outputs = names[:len(fields)], names[len(fields):]
+        params = [(f"int {p}" if t == "int" else f"const char *{p}")
+                  for p, t in zip(inputs, types)]
+        if reads:
+            params += [f"char *{outputs[0]}", f"size_t {outputs[1]}"]
+        # An int cannot be null and has no empty case, so only text is guarded.
+        guards = [f"!{p}" for p, t in zip(inputs, types) if t == "text"]
+        if reads:
+            guards += [f"!{outputs[0]}", f"{outputs[1]} == 0"]
+
+        signature = f"int {operation['c_name']}({', '.join(params)})"
+        body = [signature, "{"]
+        if guards:
+            body += [f"   if ({' || '.join(guards)})", "      return -1;"]
+        # Integers travel as decimal text: the frame carries counted bytes, and a
+        # separate numeric type on the wire would buy nothing a printf does not.
+        carried = []
+        for parameter, kind in zip(inputs, types):
+            if kind == "int":
+                body.append(f"   char {parameter}_text[24];")
+                body.append(f'   snprintf({parameter}_text, sizeof {parameter}_text, "%d", '
+                            f"{parameter});")
+                carried.append(f"{parameter}_text")
+            else:
+                carried.append(parameter)
+        body.append(f"   const char *fields[] = {{{', '.join(carried)}}};")
+        op_symbol = f"AIMEE_DB1_OP_{str(operation['name']).upper()}"
+        if reads:
+            body.append(f"   int status = call_stage({op_symbol}, fields, "
+                        f"{len(fields)}, {outputs[0]}, {outputs[1]});")
+            body.append(f"   return read_result(status, {outputs[0]});")
+        else:
+            body.append(f"   return write_result(call_stage({op_symbol}, fields, "
+                        f"{len(fields)}, NULL, 0));")
+        body.append("}")
+        out.append("\n" + "\n".join(body) + "\n")
+    out.append("\n/* clang-format on */\n")
+    return "".join(out)
+
+
+def client_families(catalog: dict[str, object]) -> list[tuple[dict, list]]:
+    """Families whose whole operation set names a C symbol, in id order."""
+    families = catalog["families"]
+    operations = catalog["operations"]
+    assert isinstance(families, dict) and isinstance(operations, list)
+    result = []
+    for family in sorted(families.values(), key=lambda f: int(f["id"])):
+        own = [o for o in operations if o["family"] == family["name"]]
+        if own and all("c_name" in o for o in own):
+            result.append((family, own))
+        elif any("c_name" in o for o in own):
+            fail("client-partial",
+                 f"{family['name']} names a C symbol for some operations but not all")
+    return result
+
+
+def validate_clients(root: Path, catalog: dict[str, object], write: bool) -> None:
+    for family, operations in client_families(catalog):
+        path = root / CLIENT_DIR / f"{family['name']}.c"
+        expected = client_bytes(catalog, family, operations)
+        if write:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(expected, encoding="utf-8")
+        try:
+            actual = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            fail("client-missing", f"cannot read {path}: {exc}")
+        if actual != expected:
+            fail("client-stale",
+                 f"{path} is not what the catalog generates; run "
+                 f"scripts/gen_db1_contract.py --write")
+
+
+STAGE_SCAFFOLD = """/* modules/db1/{stem}_stage.c: the {family} stage handler.
+ *
+ * GENERATED from src/modules/db1/eventcontract/operations.json by
+ * scripts/gen_db1_contract.py. Do not edit.
+ *
+ * The serving half of the boundary: decode the frame the client encoded, call
+ * the domain, and answer. The domain itself is hand-written and untouched --
+ * only the wire around it is generated.
+ *
+ * clang-format is off for the body below: its canonical form is whatever this
+ * generator emits. */
+/* clang-format off */
+#include "db1_stages.h"
+
+#include "db1_module_api.h"
+#include "{stem}.h"
+
+{int_includes}#include <string.h>
+
+/* Read one counted field, refusing anything that would run past the end or
+   carry an embedded NUL: every field here is spliced into a query parameter,
+   and a NUL would silently shorten it into a different row. */
+static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, char *out,
+                        size_t out_sz)
+{{
+   if (*offset + 4u > len)
+      return 1;
+   uint32_t n = aimee_db1_get_u32(body + *offset);
+   *offset += 4u;
+   if (n > len || *offset + n > len || n == 0u || n >= out_sz)
+      return 1;
+   if (memchr(body + *offset, 0, n) != NULL)
+      return 1;
+   memcpy(out, body + *offset, n);
+   out[n] = '\\0';
+   *offset += n;
+   return 0;
+}}
+
+{parse_int}static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
+                            const char *value)
+{{
+   uint32_t value_len = (uint32_t)strlen(value);
+   if (cap < 8u + value_len)
+      return AIMEE_DB1_STATUS_FAILED;
+   aimee_db1_put_u32(out, status);
+   aimee_db1_put_u32(out + 4u, value_len);
+   if (value_len)
+      memcpy(out + 8u, value, value_len);
+   *out_len = 8u + value_len;
+   return status;
+}}
+
+aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32_t request_len,
+                                             uint8_t *response_body, uint32_t response_capacity,
+                                             uint32_t *response_len)
+{{
+   if (request_len < 8u)
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   uint32_t op = aimee_db1_get_u32(request_body);
+   uint32_t count = aimee_db1_get_u32(request_body + 4u);
+   /* Bounds the fixed array below. Without it a well-formed frame declaring
+      more fields than any operation takes writes past it. */
+   if (count == 0u || count > AIMEE_DB1_FIELDS_MAX)
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+
+   char field[AIMEE_DB1_FIELDS_MAX][AIMEE_DB1_FIELD_MAX];
+   uint32_t offset = 8u;
+   for (uint32_t i = 0; i < count; ++i)
+      if (read_counted(request_body, request_len, &offset, field[i], sizeof field[i]) != 0)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   /* Trailing bytes mean the caller and the module disagree about the op's
+      arity, which is a contract mismatch rather than something to tolerate. */
+   if (offset != request_len)
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+
+   char value[AIMEE_DB1_FIELD_MAX];
+   value[0] = '\\0';
+   int rc = -1;
+   int reads = 0;
+
+   switch (op)
+   {{
+{cases}   default:
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   }}
+
+   /* The two conventions must not be flattened. A read returns FOUND(1),
+      not-found(0) or error(-1); a write returns 0 or -1. Mapping a read's -1
+      onto MISSING would report a broken store as "nothing recorded", and the
+      caller would act on an absence that was never established. */
+   uint32_t status;
+   if (reads)
+   {{
+      if (rc < 0)
+         status = AIMEE_DB1_STATUS_FAILED;
+      else if (rc == 0 || !value[0])
+         status = AIMEE_DB1_STATUS_MISSING;
+      else
+         status = AIMEE_DB1_STATUS_OK;
+   }}
+   else
+      status = (rc == 0) ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_FAILED;
+
+   write_reply(response_body, response_capacity, response_len,
+               status, (status == AIMEE_DB1_STATUS_OK && reads) ? value : "");
+   return AIMEE_MODULE_STATUS_OK;
+}}
+/* clang-format on */
+"""
+
+
+PARSE_INT = """/* Parse a field the catalog declared as an integer. Refuses anything that is
+   not exactly a number: a partial parse would turn "12abc" into 12 and act on a
+   value the caller never sent. */
+static int parse_int(const char *text, int *out)
+{{
+   if (!text || !text[0])
+      return 1;
+   char *end = NULL;
+   errno = 0;
+   long value = strtol(text, &end, 10);
+   if (errno != 0 || !end || *end != '\\0' || value < INT_MIN || value > INT_MAX)
+      return 1;
+   *out = (int)value;
+   return 0;
+}}
+"""
+
+INT_INCLUDES = """#include <errno.h>
+#include <limits.h>
+#include <stdlib.h>
+"""
+
+
+def stage_bytes(family: dict[str, object], operations: list[dict[str, object]]) -> str:
+    name = str(family["name"])
+    cases = []
+    for operation in operations:
+        request = operation["request"]
+        reply = operation["reply"]
+        assert isinstance(request, dict) and isinstance(reply, dict)
+        arity = len(request["fields"])
+        types = [str(f["type"]) for f in request["fields"]]
+        reads = reply["payload"] != "none"
+        parse, args = [], []
+        for position, kind in enumerate(types):
+            if kind == "int":
+                args.append(f"parsed{position}")
+                parse.append(f"      int parsed{position};\n"
+                             f"      if (parse_int(field[{position}], &parsed{position}) != 0)\n"
+                             f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n")
+            else:
+                args.append(f"field[{position}]")
+        if reads:
+            args += ["value", "sizeof value"]
+        # Braced only when a parsed integer needs scoping: an empty block around
+        # every other case would be noise, and would move files that have not
+        # changed.
+        body = (f"      if (count != {arity}u)\n"
+                f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
+                + "".join(parse)
+                + f"      rc = {operation['c_name']}({', '.join(args)});\n"
+                + ("      reads = 1;\n" if reads else "")
+                + "      break;\n")
+        head = f"   case AIMEE_DB1_OP_{str(operation['name']).upper()}:\n"
+        cases.append(head + (f"   {{\n{body}   }}\n" if parse else body))
+    typed = any(f["type"] == "int" for o in operations for f in o["request"]["fields"])
+    return STAGE_SCAFFOLD.format(stem=name, family=name.replace("_", " "),
+                                 cases="".join(cases),
+                                 parse_int=PARSE_INT if typed else "",
+                                 int_includes=INT_INCLUDES if typed else "")
+
+
+def stages_header_bytes(catalog: dict[str, object]) -> str:
+    """Declarations for every generated stage handler, for the adapter to call."""
+    lines = ["""/* Entry points for the generated DB1 stage handlers.
+ *
+ * GENERATED from src/modules/db1/eventcontract/operations.json by
+ * scripts/gen_db1_contract.py. Do not edit.
+ *
+ * module_adapter.c dispatches by stage and calls these; each is emitted beside
+ * the domain it serves.
+ *
+ * clang-format is off below: the canonical form is whatever this emits. */
+/* clang-format off */
+#ifndef AIMEE_DB1_STAGES_H
+#define AIMEE_DB1_STAGES_H 1
+
+#include <aimee/core/event_bus/module_runtime.h>
+
+#include <stdint.h>
+"""]
+    for family, _ in client_families(catalog):
+        name = str(family["name"])
+        lines.append(
+            f"\naimee_module_status_t aimee_db1_stage_{name}("
+            "const uint8_t *request_body, uint32_t request_len,\n"
+            f"{' ' * (len(name) + 30)}uint8_t *response_body,\n"
+            f"{' ' * (len(name) + 30)}uint32_t response_capacity,\n"
+            f"{' ' * (len(name) + 30)}uint32_t *response_len);\n")
+    lines.append("\n#endif /* AIMEE_DB1_STAGES_H */\n/* clang-format on */\n")
+    return "".join(lines)
+
+
+def validate_stages(root: Path, catalog: dict[str, object], write: bool) -> None:
+    wanted = {(root / SOURCE_DIR / f"{family['name']}_stage.c"): stage_bytes(family, operations)
+              for family, operations in client_families(catalog)}
+    wanted[root / STAGES_HEADER] = stages_header_bytes(catalog)
+    for path, expected in wanted.items():
+        if write:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(expected, encoding="utf-8")
+        try:
+            actual = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            fail("stage-missing", f"cannot read {path}: {exc}")
+        if actual != expected:
+            fail("stage-stale",
+                 f"{path} is not what the catalog generates; run "
+                 f"scripts/gen_db1_contract.py --write")
 
 
 def validate_header(root: Path, catalog: dict[str, object]) -> None:
-    """The hand-written wire header must agree with the catalog, in both directions."""
-    constants = header_constants(root)
-    families = catalog["families"]
-    assert isinstance(families, dict)
-    for name, family in families.items():
-        if not family["active"]:
-            # A reserved family must NOT have wire constants yet: a constant is
-            # a promise to callers, and nothing serves this one.
-            leaked = [key for key in constants if name.upper() in key]
-            if leaked:
-                fail("header-reserved",
-                     f"reserved family {name!r} already has wire constants {leaked}")
-            continue
-        event = f"AIMEE_DB1_EVENT_{name.upper()}"
-        stage = f"AIMEE_DB1_STAGE_{name.upper()}"
-        if constants.get(event) != family["event_kind"]:
-            fail("header-event",
-                 f"{HEADER} must define {event} as {family['event_kind']}")
-        if constants.get(stage) != family["id"]:
-            fail("header-stage", f"{HEADER} must define {stage} as {family['id']}")
+    """The header must be exactly what the catalog generates.
 
-    operations = catalog["operations"]
-    assert isinstance(operations, list)
-    for operation in operations:
-        symbol = f"AIMEE_DB1_OP_{str(operation['name']).upper()}"
-        if constants.get(symbol) != operation["id"]:
-            fail("header-op", f"{HEADER} must define {symbol} as {operation['id']}")
-
-    for index, code in enumerate(RESULT_CODES):
-        symbol = f"AIMEE_DB1_STATUS_{code.upper()}"
-        if constants.get(symbol) != index:
-            fail("header-status", f"{HEADER} must define {symbol} as {index}")
+    A whole-file comparison rather than a constant-by-constant one: it also
+    catches a constant for a family nothing serves, a stale limit, and hand
+    edits that the per-symbol checks would have walked straight past.
+    """
+    expected = header_bytes(catalog)
+    try:
+        actual = (root / HEADER).read_text(encoding="utf-8")
+    except OSError as exc:
+        fail("unreadable", f"cannot read {HEADER}: {exc}")
+    if actual != expected:
+        fail("header-stale",
+             f"{HEADER} is not what the catalog generates; run "
+             f"scripts/gen_db1_contract.py --write")
 
 
 def validate_process_contract(root: Path, catalog: dict[str, object]) -> None:
@@ -325,24 +1110,34 @@ def validate_process_contract(root: Path, catalog: dict[str, object]) -> None:
                  f"stage {name!r} must carry id {family['id']} and kind {family['event_kind']}")
 
 
-def run(root: Path) -> None:
+def run(root: Path, write: bool = False) -> None:
     catalog = validate_catalog(load_json(root / CATALOG))
+    if write:
+        (root / HEADER).write_text(header_bytes(catalog), encoding="utf-8")
     validate_header(root, catalog)
+    validate_clients(root, catalog, write)
+    validate_stages(root, catalog, write)
     validate_process_contract(root, catalog)
+    validate_source_map(root, catalog)
+    validate_coupled_sources(catalog)
+    validate_retired_sources(root, catalog)
     families = catalog["families"]
     operations = catalog["operations"]
     assert isinstance(families, dict) and isinstance(operations, list)
     active = sum(1 for family in families.values() if family["active"])
+    retired = sum(len(family["retired_sources"]) for family in families.values())
     print(f"gen_db1_contract: ok ({len(families)} famil(ies), {active} active, "
-          f"{len(operations)} operation(s))")
+          f"{len(operations)} operation(s), {retired} source(s) off the daemon)")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
+    parser.add_argument("--write", action="store_true",
+                        help="regenerate the wire header from the catalog")
     args = parser.parse_args(argv)
     try:
-        run(args.root.resolve())
+        run(args.root.resolve(), args.write)
     except ContractError as exc:
         print(f"gen_db1_contract: error: {exc}", file=sys.stderr)
         return 1

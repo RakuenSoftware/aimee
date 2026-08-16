@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -18,11 +19,45 @@ import (
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 )
 
+const (
+	testDelegateCLIArgument = "__aimee_test_delegate_cli"
+	testDelegateCLIKindEnv  = "AIMEE_TEST_DELEGATE_CLI_KIND"
+	testDelegateCLIPIDsEnv  = "AIMEE_TEST_DELEGATE_CLI_PIDS"
+)
+
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == testDelegateCLIArgument {
+		os.Exit(runTestDelegateCLI())
+	}
 	if handled, code := RunWatchdog(os.Args); handled {
 		os.Exit(code)
 	}
 	os.Exit(m.Run())
+}
+
+func runTestDelegateCLI() int {
+	child := exec.Command("sleep", "30")
+	if err := child.Start(); err != nil {
+		return 71
+	}
+	if err := os.WriteFile(os.Getenv(testDelegateCLIPIDsEnv),
+		[]byte(fmt.Sprintf("%d %d", os.Getpid(), child.Process.Pid)), 0o600); err != nil {
+		_ = child.Process.Kill()
+		return 72
+	}
+	time.Sleep(20 * time.Millisecond)
+	switch os.Getenv(testDelegateCLIKindEnv) {
+	case "claude":
+		fmt.Fprintln(os.Stdout, `{"type":"assistant","token":"stub-secret"}`)
+		fmt.Fprintln(os.Stdout, `{"type":"assistant","token":"stub-secret"}`)
+	case "codex":
+		fmt.Fprintln(os.Stdout, `{"type":"item.completed","item":{"type":"command_execution"},"token":"stub-secret"}`)
+	default:
+		_ = child.Process.Kill()
+		return 73
+	}
+	_ = child.Wait()
+	return 0
 }
 
 type fixedExecutor struct {
@@ -87,6 +122,34 @@ func TestExecutionStageAppliesProducerDeadline(t *testing.T) {
 	if json.Unmarshal(reply, &result) != nil || result.Status != "failed" ||
 		!strings.Contains(result.Error, "deadline exceeded") {
 		t.Fatalf("result = %s", reply)
+	}
+}
+
+func TestExecutionStageRejectsMalformedTermination(t *testing.T) {
+	executor := &fixedExecutor{result: delegatecontract.InvocationResult{
+		Version: delegatecontract.WireVersion, Status: "failed", Error: "bad termination",
+		Termination: &delegatecontract.TerminationDiagnostic{
+			Kind: delegatecontract.TerminationTurnCap, MaxTurns: 2,
+		},
+	}}
+	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion,
+		Role: "review", Persona: "reviewer", Prompt: "inspect"})
+	if reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request); status != bus.ModuleStatusInternal || reply != nil {
+		t.Fatalf("malformed termination crossed the wire: status=%d reply=%s", status, reply)
+	}
+}
+
+func TestExecutionStageRejectsTerminationWithMismatchedExecutionCap(t *testing.T) {
+	executor := &fixedExecutor{result: delegatecontract.InvocationResult{
+		Version: delegatecontract.WireVersion, Status: "failed", Error: "bad termination",
+		Termination: &delegatecontract.TerminationDiagnostic{
+			Kind: delegatecontract.TerminationTurnCap, MaxTurns: 2, ObservedTurns: 2,
+		},
+	}}
+	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion,
+		Role: "review", Persona: "reviewer", Prompt: "inspect", ExecutionTimeoutMS: 1000})
+	if reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request); status != bus.ModuleStatusInternal || reply != nil {
+		t.Fatalf("termination with a mismatched execution cap crossed the wire: status=%d reply=%s", status, reply)
 	}
 }
 
@@ -496,6 +559,113 @@ func TestTurnMonitorCancelsAtTheConfiguredCap(t *testing.T) {
 	}
 }
 
+func turnCapExecutorFixture(t *testing.T, kind string) (*RegistryExecutor, string) {
+	t.Helper()
+	home := t.TempDir()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pidFile := filepath.Join(home, "delegate-pids")
+	t.Setenv(testDelegateCLIKindEnv, kind)
+	t.Setenv(testDelegateCLIPIDsEnv, pidFile)
+	registry := map[string]any{"agents": []map[string]any{{
+		"name": "turn-cap-" + kind, "cli_kind": kind,
+		"cli_cmd": executable + " " + testDelegateCLIArgument,
+		"roles":   []string{"review"},
+	}}}
+	body, _ := json.Marshal(registry)
+	if err := os.WriteFile(filepath.Join(home, "models.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executor, err := NewRegistryExecutor(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return executor, pidFile
+}
+
+func assertTurnCapResult(t *testing.T, result delegatecontract.InvocationResult) {
+	t.Helper()
+	if result.Status != "failed" || !strings.Contains(result.Error, "aimee_err=turn_cap") ||
+		result.Termination == nil {
+		t.Fatalf("turn-cap result = %+v", result)
+	}
+	diagnostic := result.Termination
+	if diagnostic.Kind != delegatecontract.TerminationTurnCap || diagnostic.MaxTurns != 1 ||
+		diagnostic.ObservedTurns != 2 || diagnostic.ExecutionTimeoutMS != 5000 ||
+		diagnostic.ElapsedMS <= 0 {
+		t.Fatalf("turn-cap diagnostic = %+v", diagnostic)
+	}
+	if len(diagnostic.Detail) > delegatecontract.TerminationDetailMax ||
+		strings.Contains(diagnostic.Detail, "stub-secret") ||
+		!strings.Contains(diagnostic.Detail, "[REDACTED]") {
+		t.Fatalf("unsafe or unbounded diagnostic detail = %q", diagnostic.Detail)
+	}
+}
+
+func assertFixtureProcessesGone(t *testing.T, pidFile string) {
+	t.Helper()
+	body, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var leader, child int
+	if _, err := fmt.Sscanf(string(body), "%d %d", &leader, &child); err != nil ||
+		leader <= 0 || child <= 0 || leader == child {
+		t.Fatalf("invalid fixture process tree %q: %v", body, err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for _, pid := range []int{leader, child} {
+		for {
+			err := syscall.Kill(pid, 0)
+			if errors.Is(err, syscall.ESRCH) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("delegate fixture process %d survived turn-cap termination: %v", pid, err)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+func TestRegistryExecutorTurnCap(t *testing.T) {
+	for _, kind := range []string{"claude", "codex"} {
+		t.Run(kind, func(t *testing.T) {
+			executor, pidFile := turnCapExecutorFixture(t, kind)
+			result := executor.Execute(t.Context(), delegatecontract.Invocation{
+				Version: delegatecontract.WireVersion, Role: "review", Persona: "qa",
+				Prompt: "exceed the cap", Tools: true, MaxTurns: 1, ExecutionTimeoutMS: 5000,
+			})
+			assertTurnCapResult(t, result)
+			assertFixtureProcessesGone(t, pidFile)
+		})
+	}
+}
+
+func TestExecutionStageTurnCapWire(t *testing.T) {
+	for _, kind := range []string{"claude", "codex"} {
+		t.Run(kind, func(t *testing.T) {
+			executor, pidFile := turnCapExecutorFixture(t, kind)
+			request, _ := json.Marshal(delegatecontract.Invocation{
+				Version: delegatecontract.WireVersion, Role: "review", Persona: "qa",
+				Prompt: "cross the wire", Tools: true, MaxTurns: 1, ExecutionTimeoutMS: 5000,
+			})
+			reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request)
+			if status != bus.ModuleStatusOK {
+				t.Fatalf("wire status = %d", status)
+			}
+			var result delegatecontract.InvocationResult
+			if err := json.Unmarshal(reply, &result); err != nil {
+				t.Fatal(err)
+			}
+			assertTurnCapResult(t, result)
+			assertFixtureProcessesGone(t, pidFile)
+		})
+	}
+}
+
 func TestWatchdogKillsAndReapsDeepProcessTreeWhenProducerDies(t *testing.T) {
 	controlRead, controlWrite, err := os.Pipe()
 	if err != nil {
@@ -582,7 +752,9 @@ func TestExecutorCancellationTerminatesDelegateProcessGroup(t *testing.T) {
 	cancel()
 	select {
 	case result := <-done:
-		if result.Status != "failed" || strings.TrimSpace(result.Error) == "" {
+		if result.Status != "failed" || strings.TrimSpace(result.Error) == "" ||
+			result.Termination == nil ||
+			result.Termination.Kind != delegatecontract.TerminationCancelled {
 			t.Fatalf("cancelled result = %+v", result)
 		}
 	case <-time.After(3 * time.Second):
@@ -591,4 +763,45 @@ func TestExecutorCancellationTerminatesDelegateProcessGroup(t *testing.T) {
 	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("delegate process %d survived module cancellation: %v", pid, err)
 	}
+}
+
+func TestRegistryExecutorExecutionDeadlineDiagnostic(t *testing.T) {
+	home := t.TempDir()
+	workdir := filepath.Join(home, "worktree")
+	if err := os.MkdirAll(filepath.Join(workdir, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pidFile := filepath.Join(home, "deadline-pids")
+	script := filepath.Join(home, "deadline-helper")
+	scriptBody := "#!/bin/sh\nsleep 30 & child=$!\nprintf '%s %s' \"$$\" \"$child\" > '" +
+		pidFile + "'\nprintf '%s\\n' '{\"token\":\"deadline-secret\"}'\nwait\n"
+	if err := os.WriteFile(script, []byte(scriptBody), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	registry := map[string]any{"agents": []map[string]any{{
+		"name": "deadline", "cli_kind": "generic", "cli_cmd": script,
+		"roles": []string{"code"},
+	}}}
+	body, _ := json.Marshal(registry)
+	if err := os.WriteFile(filepath.Join(home, "models.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executor, err := NewRegistryExecutor(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 75*time.Millisecond)
+	defer cancel()
+	result := executor.Execute(ctx, delegatecontract.Invocation{
+		Version: delegatecontract.WireVersion, Role: "code", Persona: "engineer",
+		Prompt: "wait", Workdir: workdir, Tools: true, ExecutionTimeoutMS: 75,
+	})
+	if result.Status != "failed" || result.Termination == nil ||
+		result.Termination.Kind != delegatecontract.TerminationExecutionDeadline ||
+		result.Termination.ExecutionTimeoutMS != 75 || result.Termination.ElapsedMS <= 0 ||
+		!strings.Contains(result.Error, "aimee_err=execution_deadline") ||
+		strings.Contains(result.Termination.Detail, "deadline-secret") {
+		t.Fatalf("execution deadline result = %+v", result)
+	}
+	assertFixtureProcessesGone(t, pidFile)
 }

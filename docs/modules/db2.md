@@ -12,9 +12,11 @@ carved out of the KB link.
 
 The C process owns principal 29 and event `11521`. Its descriptor owns
 `eventcontract/operations.json`, which generates the public C codec, transport-agnostic typed C
-client, and fingerprinted positive and negative wire vectors. The client accepts a bus-call
-function rather than depending on a daemon global, so `aimee-kb` and parity harnesses exercise the
-same bytes. The fixed eight-byte request carries only magic and wire version. The
+client, the shared `server-go/db2` Go caller contract, and fingerprinted positive and negative wire
+vectors. Both clients accept a narrow bus-call interface rather than depending on a daemon global,
+so C, Go, `aimee-kb`, and parity harnesses exercise the same bytes and contract fingerprint. The Go
+package is caller-side only during phase one: it does not read the DB2 DSN, open PostgreSQL, serve a
+stage, or become a second DB2 owner. The fixed eight-byte request carries only magic and wire version. The
 fixed sixteen-byte response carries schema, `pg_trgm`, and KB-table evidence; unknown flags and
 non-zero reserved bytes fail closed. Until the descriptor includes the complete DB2 C closure, an
 exported standalone process returns typed `capability_absent` instead of reporting false readiness.
@@ -27,6 +29,13 @@ exported standalone process returns typed `capability_absent` instead of reporti
 No production consumer is switched in this increment. `aimee-kb` now compiles the generated client
 behind `kb_module_db2_health_probe`, but the existing in-process health callers remain authoritative
 until the atomic activation slice moves every lifecycle caller and the DB2 DSN together.
+Go consumers may use `server-go/db2.Client` to call that same C-served stage. The eventual
+`server-go/modules/db2` provider imports the shared contract rather than defining a second wire
+format. Its first nonselected lifecycle handler now ports the bounded readiness query behind an
+injected database seam and replays `tests/baselines/modules/db2-wire-v1.json` byte-for-byte. It is
+not registered by `aimee-module`, does not open the DSN or own a pool/schema, and cannot serve a live
+runtime placement. Live end-to-end verification remains gated on the later activation slice; the
+provider remains nonselected until full C-versus-Go replay and the atomic ownership cutover.
 
 ## Providers and readiness
 

@@ -6,11 +6,12 @@ import "github.com/JBailes/aimee/server-go/delegate"
 // delegate contract. These aliases keep the workflow engine API stable without
 // making one Go module import another.
 type (
-	DelegateRequest     = delegate.DelegateRequest
-	DelegateResult      = delegate.DelegateResult
-	DelegateGroupResult = delegate.DelegateGroupResult
-	AgentClient         = delegate.AgentClient
-	DelegateGroupClient = delegate.DelegateGroupClient
+	DelegateRequest       = delegate.DelegateRequest
+	DelegateResult        = delegate.DelegateResult
+	DelegateGroupResult   = delegate.DelegateGroupResult
+	AgentClient           = delegate.AgentClient
+	DelegateGroupClient   = delegate.DelegateGroupClient
+	TerminationDiagnostic = delegate.TerminationDiagnostic
 	// DelegateExecutionError carries the billing boundary across transport and
 	// runner layers, so both sides must agree on the same type.
 	DelegateExecutionError = delegate.DelegateExecutionError
@@ -22,7 +23,15 @@ var (
 	ErrDelegateTerminal             = delegate.ErrDelegateTerminal
 	ErrDelegateReplayUnavailable    = delegate.ErrDelegateReplayUnavailable
 	ErrDelegateCapacityDeadline     = delegate.ErrDelegateCapacityDeadline
+	ErrDelegateExecutionDeadline    = delegate.ErrDelegateExecutionDeadline
+	ErrDelegateTurnCap              = delegate.ErrDelegateTurnCap
 
 	safeDiagnostic         = delegate.SafeDiagnostic
 	isCapacityBackpressure = delegate.IsCapacityBackpressure
+)
+
+const (
+	terminationTurnCap           = delegate.TerminationTurnCap
+	terminationExecutionDeadline = delegate.TerminationExecutionDeadline
+	terminationCancelled         = delegate.TerminationCancelled
 )
