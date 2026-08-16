@@ -7,7 +7,7 @@
   isolation to Go, and leaves production memory schema and storage semantics with their existing
   owner.
 - **Related residual:**
-  [dataset-benchmark-direct-track.md](../rejected/dataset-benchmark-direct-track.md) separately owns
+  [dataset-benchmark-direct-track.md](dataset-benchmark-direct-track.md) separately owns
   the Go LoCoMo/LongMemEval runner and structured results. This proposal owns only disposable-run
   isolation and retirement of the broken scratch-store API.
 
