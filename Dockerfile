@@ -49,7 +49,7 @@ RUN sh scripts/fetch-treesitter.sh \
 RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
     && mkdir -p /module-runtime/bin \
     && python3 scripts/build_c_module_runtime_bundle.py \
-         --bundle /module-runtime --output /module-runtime/bin \
+         --bundle /module-runtime --output /module-runtime/bin --placement kb \
     && while IFS= read -r module_id; do \
          [ -n "$module_id" ] || continue; \
          install -m 0755 /tmp/aimee-module-go \

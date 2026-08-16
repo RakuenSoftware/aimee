@@ -168,6 +168,52 @@ class RuntimeBundleBuildTests(unittest.TestCase):
         finally:
             temporary.cleanup()
 
+    def test_placement_builds_only_the_processes_that_placement_runs(self) -> None:
+        temporary, root, bundle, output = self.fixture()
+        try:
+            (bundle / "kb.modules").write_text(
+                "db2\t/usr/local/libexec/aimee-modules/aimee-module-db2\n",
+                encoding="utf-8")
+            # A placement that runs no C process must build none of them, so an
+            # image never compiles another placement's build dependencies.
+            (bundle / "server.modules").write_text(
+                "memory\t/usr/local/libexec/aimee-modules/aimee-module-memory\n",
+                encoding="utf-8")
+            compiler = Path(temporary.name) / "fake-cc"
+            pkg_config = Path(temporary.name) / "fake-pkg-config"
+            self.executable(
+                compiler,
+                "#!/usr/bin/env python3\n"
+                "import pathlib, sys\n"
+                "pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text('binary')\n",
+            )
+            self.executable(pkg_config, "#!/bin/sh\necho\n")
+            for placement, expected in (("kb", 1), ("server", 0)):
+                for stale in output.glob("*"):
+                    stale.unlink()
+                code = builder.main([
+                    "--bundle", str(bundle), "--output", str(output),
+                    "--root", str(root), "--cc", str(compiler),
+                    "--pkg-config", str(pkg_config), "--placement", placement,
+                ])
+                self.assertEqual(code, 0, placement)
+                self.assertEqual(len(list(output.glob("*"))), expected, placement)
+        finally:
+            temporary.cleanup()
+
+    def test_placement_manifest_missing_or_malformed_fails_closed(self) -> None:
+        temporary, root, bundle, output = self.fixture()
+        try:
+            (bundle / "bad.modules").write_text("../escape\tpath\n", encoding="utf-8")
+            for placement in ("absent", "bad", "Not-An-Id"):
+                code = builder.main([
+                    "--bundle", str(bundle), "--output", str(output),
+                    "--root", str(root), "--placement", placement,
+                ])
+                self.assertEqual(code, 1, placement)
+        finally:
+            temporary.cleanup()
+
     def test_empty_manifest_is_a_successful_noop(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)

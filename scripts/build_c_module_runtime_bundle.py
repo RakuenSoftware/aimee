@@ -211,8 +211,38 @@ def compiler_command(module: dict[str, object], root: Path, bundle: Path, output
     ]
 
 
-def build(bundle: Path, output: Path, root: Path, cc: str, pkg_config: str) -> int:
+def placed_modules(bundle: Path, placement: str) -> set[str]:
+    """Return the module IDs a placement actually runs.
+
+    The bundle carries every C process, but an image must compile only what it
+    places: building another placement's process drags that process's build
+    dependencies into an image that has no reason to carry them, and leaves an
+    executable in an image that is never allowed to run it.
+    """
+    if not MODULE_ID.fullmatch(placement):
+        fail(f"invalid placement name: {placement!r}")
+    manifest = bundle / f"{placement}.modules"
+    try:
+        text = manifest.read_text(encoding="utf-8")
+    except OSError as exc:
+        fail(f"cannot read placement manifest {manifest.name}: {exc}")
+    identifiers: set[str] = set()
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        identifier = line.split("\t", 1)[0]
+        if not MODULE_ID.fullmatch(identifier):
+            fail(f"{manifest.name}: invalid module id {identifier!r}")
+        identifiers.add(identifier)
+    return identifiers
+
+
+def build(bundle: Path, output: Path, root: Path, cc: str, pkg_config: str,
+          placement: str | None = None) -> int:
     modules = load_builds(bundle)
+    if placement is not None:
+        placed = placed_modules(bundle, placement)
+        modules = [module for module in modules if module["id"] in placed]
     output.mkdir(parents=True, exist_ok=True)
     for module in modules:
         command = compiler_command(module, root, bundle, output, cc, pkg_config)
@@ -233,10 +263,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--cc", default="cc")
     parser.add_argument("--pkg-config", default="pkg-config")
+    parser.add_argument("--placement",
+                        help="build only the C processes this placement runs")
     args = parser.parse_args(argv)
     try:
         count = build(args.bundle.resolve(), args.output.resolve(), args.root.resolve(),
-                      args.cc, args.pkg_config)
+                      args.cc, args.pkg_config, args.placement)
     except BuildError as exc:
         print(f"build_c_module_runtime_bundle: error: {exc}", file=sys.stderr)
         return 1
