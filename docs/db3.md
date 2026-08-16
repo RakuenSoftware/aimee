@@ -43,14 +43,47 @@ DB3 returns bounded opaque point IDs and finite scores. DB2 rehydrates every can
 tenant, project, lifecycle, quarantine, and classification checks. Provider responses never confer
 authority and never contain SQL, table names, connection data, provider query JSON, or source rows.
 
+## Version-one provider frames
+
+Every multibyte integer and float is little-endian. Each payload starts with its own magic, wire
+version, and fixed header length; unknown flags, unknown closed-enum values, nonzero reserved bytes,
+length mismatches, nonfinite numbers, zero identities, and values above the catalog limits are
+malformed. Provider identity is never a payload field.
+
+| Payload | Required semantics |
+| --- | --- |
+| `capabilities` | Generation; ready flag; search/apply operation bits; cosine/L2/dot metric bits; exact-filter bit; maximum dimension, batch, and top-K. Ready evidence requires a nonzero generation. Search requires a metric and nonzero dimension/top-K; apply requires a nonzero batch limit. |
+| `apply` | Nonzero operation and generation, positive opaque point ID, upsert/delete/tombstone kind, bounded collection, and a finite vector only for upsert. The operation is emitted only after DB2's canonical transaction commits. |
+| `apply_chunk` | Operation ID, total encoded apply length, exact offset, and a nonempty chunk. Offset zero restarts an incomplete retry; every subsequent chunk must be contiguous and retain the same total. |
+| `applied` | Operation and generation, durable provider watermark, lag, and `ok`, `retryable`, `rejected`, or `internal`. An `ok` watermark cannot precede the acknowledged generation. |
+| `search` request | Request ID, exact required generation, workspace/project scope, record type, bounded top-K, and finite vector. At least one scope is present. Request/reply fragmentation and cancellation use the bus directly. |
+| `search` success | Matching request ID and exact generation, then at most requested top-K unique positive point IDs with finite scores. |
+| `search` failure | Matching request ID and `invalid_request`, `unavailable`, `retryable`, or `internal`; provider prose and backend details never cross the boundary. |
+| `route` request | `query`, `select`, or `clear`, a request ID, and, only for select, the authenticated provider principal, observed capability generation, and explicit-fallback bit. |
+| `route` reply | Typed result (`ok`, `not_found`, `not_ready`, `generation_conflict`, or `invalid`) plus the current selected principal, provider generation, and fallback bit. A failed selection leaves the previous route intact. |
+
+Version one is additive only. A new closed bit or operation needs a catalog update and conformance
+fixtures; reusing a bit, changing an existing field, or weakening validation requires a new wire
+version and a dual-version compatibility window. Provider implementations must pass the shared
+codec, malformed-frame, duplicate-apply, multi-observer, selected-search, cancellation, and
+revalidation suite before receiving a production grant.
+
 ## Current executable slice
 
-This delivery is the DB3 design/contract PR in the larger DB2 migration. It settles the wire-codec
-boundary only: C routing remains the current activation oracle, and ownership transfer is the next
-bounded PR. That PR adds the real Go DB3 selection/router module and repeats the authenticated
-multi-provider, fallback, and revalidation tests before any runtime selection changes. The
-subsequent DB2 operation ports continue through the already generated `/db2` contract and database-
-effect fixtures; the final provider switch is forbidden until those parity gates close.
+The provider contract and DB2-side router now have an executable Go implementation. The public
+`server-go/db3` package contains every version-one provider frame plus a provider runner. The
+DB2-owned policy in `server-go/modules/db2` keeps an authenticated capability registry, accepts an
+explicit compare-and-select route request, sends search to one selected principal, performs
+pgvector fallback only when that route permits it, and revalidates every result. The external search
+seam is implemented by a raw event-bus endpoint; it never calls provider code or opens a provider
+connection.
+
+This does not activate an external provider in production. There is still no provider descriptor or
+grant, and the C DB2 process is still the activation oracle until its standalone closure and
+outbox/real-row adapters land. The cross-process conformance harness supplies strict test-only grants
+to a C host and runs the DB2 router plus two independent Go providers over the real shared-memory
+bus. Production activation remains ordered behind the C DB2 ownership cutover and database-effect
+parity gates.
 
 `src/modules/db2/db3_route.c` is the descriptor-owned C reference router for the first portable
 operation, memory candidate search. It accepts explicit workspace, project, record type, generation,
@@ -65,14 +98,30 @@ when fallback is enabled. Candidate IDs must be positive and unique, generations
 match, vectors and scores must be finite, and every result passes the injected DB2 authorization check.
 
 The catalog at `src/modules/db2/eventcontract/db3.json` generates the public C constants and Go
-package `server-go/db3`; the existing C codecs remain the activation oracle until routing moves to
-Go. The shared `db3-wire-v1.json` fixtures prove byte-for-byte C/Go compatibility for bounded
-`db3.apply` and `db3.search` frames. A real authenticated
-event-bus test admits DB2 plus two distinct provider observers, delivers one committed operation and
-its duplicate to both, proves each provider records only one effect, routes a search only to the
-selected server, and rejects a second serving principal. These are executable pre-activation
-conformance seams; production outbox and pgvector callbacks connect only after the C DB2 closure is
-standalone, so no second database owner or partial runtime grant is introduced here.
+package identity. The shared `db3-wire-v1.json` fixture now pins all nine payload shapes:
+capabilities, apply, apply chunk, applied acknowledgement, search request, search success, typed
+search failure, route request, and route reply. A direct apply frame is retained when it fits one
+inline slot. Larger committed operations use an ordered, bounded notification chunk envelope,
+because the bus reserves `F_MORE` for request/reply streams. Reassembly is keyed by operation ID and
+rejects gaps, overlaps, total-length changes, oversized bodies, and point-ID mismatch.
+
+Capabilities never self-assert identity: principal, attachment handle, and sequence come from the
+host-stamped bus frame. A new attachment handle may restart its sequence, while duplicate or stale
+evidence from one handle is rejected. Ready search providers declare their generation, supported
+operation, metric, and exact-filter bits, and dimension/top-K limits. Selection requires cosine
+search and exact scope filtering. Route selection is a compare-and-select against that observed
+generation, which remains bound until another successful select or clear; a later capability
+generation makes the old selection unavailable rather than silently advancing it. Removing or
+losing a selected provider does not silently clear the route; searches fail closed or take the
+route's explicit pgvector fallback.
+
+The authenticated event-bus tests admit DB2 plus two distinct provider observers, deliver one
+committed operation and its duplicate to both, prove each provider records only one effect, route a
+fragmented search only to the selected server, reject source-principal substitution, filter an
+unauthorized candidate, and make readiness loss produce observable explicit fallback. These are
+executable pre-activation conformance seams; production outbox and pgvector callbacks connect only
+after the C DB2 closure is standalone, so no second database owner or partial runtime grant is
+introduced here.
 
 ## Exhaustive portability audit
 
@@ -111,11 +160,9 @@ Only after the C process is the sole DB2 owner does the pure-Go DB2 provider rep
 wire and database-effect fixtures. The final provider switch changes runtime selection, not callers
 or contracts.
 
-The current-PR runtime conformance tests exercise the existing C router plus the generated C/Go
-protocol boundary. They use two authenticated provider principals and prove that writes reach
-both observers, duplicate operations are idempotent, one search reaches only the selected server, a
-second server cannot own the route, malformed vectors and scores fail closed, unauthorized candidates
-are removed, and explicit fallback is observable. Activation additionally requires the same fixtures
-against real DB2 rows and the committed outbox. C-versus-Go replay runs the no-provider,
-selected-provider, unavailable, and fallback cases before the C implementation can retire.
-Equivalent routing and selection tests become mandatory again when the real Go DB3 router lands.
+The runtime conformance suite exercises the existing C reference router, every generated/handwritten
+Go codec, the Go selection policy under the race detector, the Go provider runner, notification
+chunk reassembly, request/reply fragmentation and cancellation, and a real C host with two Go
+providers. Activation additionally requires the same fixtures against real DB2 rows and the
+committed outbox. C-versus-Go replay still runs the no-provider, selected-provider, unavailable, and
+fallback cases before the C implementation can retire.

@@ -3336,6 +3336,26 @@ $(TESTPREFIX)/bus-conformance-host: $(OBJDIR)/tests/bus_conformance_host.o \
 .PHONY: bus-conformance-host
 bus-conformance-host: $(TESTPREFIX)/bus-conformance-host
 
+# Strict C host for the Go DB3 provider/router interoperability test. The host
+# owns transport only; every provider, selection, fallback, and idempotency
+# decision in the test runs in Go over authenticated grants.
+$(OBJDIR)/tests/test_bus_db3_go_host.o: C_FLAGS += -Icore/event_bus/include -Imodules/db2/include
+$(TESTPREFIX)/db3-go-host: $(OBJDIR)/tests/test_bus_db3_go_host.o \
+                            $(OBJDIR)/core/event_bus/bus_runtime.o \
+                            $(OBJDIR)/core/event_bus/bus_endpoint.o \
+                            $(OBJDIR)/core/event_bus/bus_attach.o \
+                            $(OBJDIR)/core/event_bus/bus_host.o \
+                            $(OBJDIR)/core/event_bus/bus_route.o \
+                            $(OBJDIR)/core/event_bus/bus_region.o \
+                            $(OBJDIR)/core/event_bus/bus_region_host.o \
+                            $(OBJDIR)/core/event_bus/bus_ring.o \
+                            $(OBJDIR)/core/event_bus/bus_arena.o \
+                            $(OBJDIR)/core/event_bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+.PHONY: db3-go-host
+db3-go-host: $(TESTPREFIX)/db3-go-host
+
 # Event-bus capture + observational replay (feature tree slice 11).
 $(OBJDIR)/tests/test_bus_capture.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-bus-capture: $(OBJDIR)/tests/test_bus_capture.o \

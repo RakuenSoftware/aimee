@@ -36,6 +36,9 @@ fi
 ( cd server-go && BUS_CONFORMANCE_HOST="$harness" \
    CGO_ENABLED=0 go test ./bus/... -run TestCrossLanguageConformance -v -timeout 60s )
 
+echo "== 2. DB3 provider interop: C host <-> Go router and providers =="
+"$repo_root/scripts/test_db3_go_bus.sh"
+
 echo "== 2. module runtime interop: C host/core caller <-> Go module process =="
 make -C src --no-print-directory "build/obj/tests/unit-test-module-runtime"
 module_harness="$repo_root/src/build/obj/tests/unit-test-module-runtime"

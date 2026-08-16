@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "0c9dfbe27148b6760c04b1632794c65ecc4c12881d1ac61e4dac5113ba135c2d"
+const ContractSHA256 = "b95727c278d7fcc47452a1aa083aa7d5605b5adedcd58727b49a1710d2a09570"
 const ProtocolID uint32 = 3
 const WireVersion uint16 = 1
 
@@ -28,10 +28,22 @@ const MaxTopK = 256
 const searchRequestMagic uint32 = 0x53334244
 const searchReplyMagic uint32 = 0x52334244
 const applyMagic uint32 = 0x41334244
+const capabilitiesMagic uint32 = 0x43334244
+const applyChunkMagic uint32 = 0x4b334244
+const appliedMagic uint32 = 0x44334244
+const searchFailureMagic uint32 = 0x45334244
+const routeRequestMagic uint32 = 0x54334244
+const routeReplyMagic uint32 = 0x55334244
 const searchRequestHeader = 36
 const searchReplyHeader = 28
 const candidateBytes = 16
 const applyHeader = 36
+const capabilitiesHeader = 48
+const applyChunkHeader = 32
+const appliedHeader = 40
+const searchFailureHeader = 24
+const routeRequestHeader = 40
+const routeReplyHeader = 40
 
 var ErrMalformed = errors.New("db3: malformed version-1 frame")
 
