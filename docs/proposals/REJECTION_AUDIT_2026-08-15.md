@@ -16,10 +16,10 @@ corrective PR. This keeps one atomic proposal per PR without hiding the remainin
 
 The [governance/evidence-provenance proposal](pending/proposal-evidence-provenance-tiers.md) that
 triggered this audit is rejection #2692. It was restored under Go memory-policy ownership by
-corrective PR #2694. Corrective PRs #2699, #2702, and #2704 subsequently restored #2634, #2655, and
-#2660. This PR sequence is intentionally atomic: #2662 is the current correction, and #2678, #2686,
-#2688, and #2690 remain explicitly queued below rather than being silently left rejected or bundled
-into an unrelated rewrite.
+corrective PR #2694. Corrective PRs #2699, #2702, #2704, and #2715 subsequently restored #2634,
+#2655, #2660, and #2662. This PR sequence is intentionally atomic: #2678 is the current correction,
+and #2686, #2688, and #2690 remain explicitly queued below rather than being silently left rejected
+or bundled into an unrelated rewrite.
 
 | Rejection PR | Proposal | Audit verdict | Reason | Corrective tracking |
 | --- | --- | --- | --- | --- |
@@ -28,7 +28,7 @@ into an unrelated rewrite.
 | #2657 | [`event-bus-third-language-conformance.md`](rejected/event-bus-third-language-conformance.md) | **Appropriately rejected** | Its defining acceptance criterion requires a client in a language other than C or Go and forbids using either reference implementation. A Go rewrite cannot truthfully satisfy independent third-language evidence. | None; rejection stands. |
 | #2660 | [`eval-temp-store-schema-relocation.md`](pending/eval-temp-store-schema-relocation.md) | **Misrejected** | The objective explicitly permits making the store openable or retiring it; a Go-owned disposable eval-store contract can resolve the live C/SQL conflict. | Corrective PR [#2704](https://github.com/RakuenSoftware/aimee/pull/2704). |
 | #2662 | [`dataset-benchmark-direct-track.md`](pending/dataset-benchmark-direct-track.md) | **Misrejected** | Deterministic non-LLM LoCoMo/LongMemEval retrieval measurement remains useful without restoring the retired C binary. | Corrective PR [#2715](https://github.com/RakuenSoftware/aimee/pull/2715): restore a Go benchmark runner over the pending disposable memory boundary with structured, baseline-safe results. |
-| #2678 | [`per-user-content-scope-visibility.md`](rejected/per-user-content-scope-visibility.md) | **Misrejected** | The cross-tenant read hole is a live security objective. SQL RLS and workspace/database paths can mechanically apply a Go-owned visibility decision. | Separate PR required: restore pending with Go actor/project binding, fail-closed policy, and migration authority. |
+| #2678 | [`per-user-content-scope-visibility.md`](pending/per-user-content-scope-visibility.md) | **Misrejected** | The cross-tenant read hole is a live security objective. SQL RLS and workspace/database paths can mechanically apply a Go-owned visibility decision. | Corrective PR [#2721](https://github.com/RakuenSoftware/aimee/pull/2721): restored under Go `execution-policy`, workspace, and DB2 ownership with fail-closed exact binding and migration authority. |
 | #2686 | [`capability-scoped-agent-execution.md`](rejected/capability-scoped-agent-execution.md) | **Misrejected** | Resolve-once disclosure/execution parity remains a valid authorization invariant, and delegate execution now has a Go owner. | Separate PR required: rewrite around `server-go/modules/delegates` and an immutable effective capability set. |
 | #2688 | [`persona-authored-outputs-residual.md`](rejected/persona-authored-outputs-residual.md) | **Misrejected** | Permission, voice, actor/persona provenance, compatibility, and denial/impersonation evidence remain coherent Go-owned work. | Separate PR required: restore pending and slice Go authorization from mechanical legacy composition/output adapters. |
 | #2690 | [`runtime-control-product-boundary-residual.md`](rejected/runtime-control-product-boundary-residual.md) | **Misrejected** | Separate Runtime/Control Go processes, truthful omit behavior, effective config, transport, packaging, and upgrade evidence remain the intended product boundary. | Separate PR required: rewrite around the existing Go process owners and treat packaging/adapters as delivery mechanics. |
