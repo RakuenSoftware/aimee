@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "namespace": {
+    "kind_flag": 2147483648,
+    "protocol_shift": 16,
+    "max_protocol_id": 32767,
+    "max_event_id": 65535
+  },
+  "protocols": [
+    {
+      "id": 3,
+      "name": "db3",
+      "owner": "db2",
+      "catalog": "src/modules/db2/eventcontract/db3.json"
+    }
+  ]
+}

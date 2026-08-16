@@ -23,11 +23,13 @@
   ],
   "public_headers": [
     "src/modules/db2/include/aimee/db2/client.h",
+    "src/modules/db2/include/aimee/db2/db3_contract.h",
     "src/modules/db2/include/aimee/db2/db3_route.h",
     "src/modules/db2/include/aimee/db2/module_api.h"
   ],
   "contracts": [
     "src/modules/db2/eventcontract/declaration-review.json",
+    "src/modules/db2/eventcontract/db3.json",
     "src/modules/db2/eventcontract/link-closure-v1.json",
     "src/modules/db2/eventcontract/operations.json",
     "src/modules/db2/eventcontract/vector-portability.json"

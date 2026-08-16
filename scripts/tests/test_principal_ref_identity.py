@@ -56,6 +56,7 @@ class PrincipalRefIsAnIdentity(unittest.TestCase):
             ref = refs[component["id"]]
             self.assertEqual(component["principal_ref"], ref)
             for stage in component["stages"]:
+                self.assertLess(stage["event_kind"], 0x80000000)
                 self.assertEqual(
                     stage["event_kind"],
                     4096 + ref * 256 + stage["id"],
@@ -120,6 +121,41 @@ class PrincipalRefIsAnIdentity(unittest.TestCase):
                     self.assertIn("c_build", result.stderr)
             finally:
                 descriptor_path.write_text(original, encoding="utf-8")
+
+    def test_a_process_cannot_exceed_its_255_stage_carve(self) -> None:
+        original = CONTRACTS.read_text(encoding="utf-8")
+        try:
+            contracts = json.loads(original)
+            db2 = next(row for row in contracts["components"] if row["id"] == "db2")
+            db2["stages"] = [
+                {"id": index, "name": f"db2-stage-{index}", "event_kind": 11520 + index}
+                for index in range(1, 257)
+            ]
+            CONTRACTS.write_text(json.dumps(contracts, indent=2) + "\n", encoding="utf-8")
+            result = run_validator()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("255-stage carve", result.stderr)
+        finally:
+            CONTRACTS.write_text(original, encoding="utf-8")
+
+    def test_a_module_principal_cannot_enter_the_protocol_half(self) -> None:
+        contracts_original = CONTRACTS.read_text(encoding="utf-8")
+        inventory_original = INVENTORY.read_text(encoding="utf-8")
+        try:
+            inventory = json.loads(inventory_original)
+            inventory["principal_refs"]["db2"] = 8_388_592
+            self.write(inventory)
+            contracts = json.loads(contracts_original)
+            db2 = next(row for row in contracts["components"] if row["id"] == "db2")
+            db2["principal_ref"] = 8_388_592
+            db2["stages"][0]["event_kind"] = 4096 + 8_388_592 * 256 + 1
+            CONTRACTS.write_text(json.dumps(contracts, indent=2) + "\n", encoding="utf-8")
+            result = run_validator()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("protocol event namespace", result.stderr)
+        finally:
+            CONTRACTS.write_text(contracts_original, encoding="utf-8")
+            INVENTORY.write_text(inventory_original, encoding="utf-8")
 
 
 if __name__ == "__main__":

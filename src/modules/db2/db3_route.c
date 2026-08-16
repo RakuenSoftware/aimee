@@ -3,13 +3,13 @@
 #include <math.h>
 #include <string.h>
 
-#define SEARCH_REQUEST_MAGIC  0x53334244u /* DB3S */
-#define SEARCH_REPLY_MAGIC    0x52334244u /* DB3R */
-#define APPLY_MAGIC           0x41334244u /* DB3A */
-#define WIRE_VERSION          1u
-#define SEARCH_REQUEST_HEADER 36u
-#define SEARCH_REPLY_HEADER   28u
-#define APPLY_HEADER          36u
+#define SEARCH_REQUEST_MAGIC  AIMEE_DB3_SEARCH_REQUEST_MAGIC
+#define SEARCH_REPLY_MAGIC    AIMEE_DB3_SEARCH_REPLY_MAGIC
+#define APPLY_MAGIC           AIMEE_DB3_APPLY_MAGIC
+#define WIRE_VERSION          AIMEE_DB3_WIRE_VERSION
+#define SEARCH_REQUEST_HEADER AIMEE_DB3_SEARCH_REQUEST_HEADER
+#define SEARCH_REPLY_HEADER   AIMEE_DB3_SEARCH_REPLY_HEADER
+#define APPLY_HEADER          AIMEE_DB3_APPLY_HEADER
 
 _Static_assert(sizeof(float) == 4, "DB3 wire requires 32-bit float");
 _Static_assert(sizeof(double) == 8, "DB3 wire requires 64-bit double");

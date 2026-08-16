@@ -8,11 +8,22 @@ external provider such as Qdrant can replace only portable serving operations af
 ready, and explicitly selected. DB2 and its pgvector copy remain the canonical integrity and
 recovery authority.
 
-The logical contract owner will receive the next canonical principal when its executable router and
-first served stage land. The current process-contract schema deliberately forbids reserving a
-principal without a real process and stage, so this design audit does not create a fake deployment.
-Each deployed provider has a distinct strict principal, executable identity, and runtime grant. No
-provider descriptor or production grant exists until that provider ships.
+DB3 provider events are protocol events, not module stages. The canonical registry at
+`src/modules/protocol-contracts.json` reserves the high half of the 32-bit event-kind space for
+provider-neutral protocols: bit 31 is set, bits 30 through 16 hold a nonzero protocol ID, and the
+low 16 bits hold a nonzero event ID. DB3 owns protocol ID 3, so version-one events occupy
+`0x80030001` through `0x80030005`. Module stages remain in the low half and cannot collide even as
+the selected provider principal changes. Protocol ID zero is invalid, and future protocols must be
+added to the sorted registry before their catalog can generate artifacts.
+Module authors have at most 255 stages in a principal's 256-kind carve. With that maximum stage,
+the largest low-half principal reference is 8,388,591 (`0x7fffef`); process-contract validation
+rejects either a larger carve or any stage event that reaches `0x80000000`.
+
+The logical DB3 router receives a canonical principal only when its Go executable and first served
+route-control stage land. The process-contract schema deliberately forbids reserving a principal
+without a real process and stage. Each deployed provider has a distinct strict principal,
+executable identity, and runtime grant. No provider descriptor or production grant exists until
+that provider ships.
 
 ## Routing contract
 
@@ -34,6 +45,13 @@ authority and never contain SQL, table names, connection data, provider query JS
 
 ## Current executable slice
 
+This delivery is the DB3 design/contract PR in the larger DB2 migration. It settles the wire-codec
+boundary only: C routing remains the current activation oracle, and ownership transfer is the next
+bounded PR. That PR adds the real Go DB3 selection/router module and repeats the authenticated
+multi-provider, fallback, and revalidation tests before any runtime selection changes. The
+subsequent DB2 operation ports continue through the already generated `/db2` contract and database-
+effect fixtures; the final provider switch is forbidden until those parity gates close.
+
 `src/modules/db2/db3_route.c` is the descriptor-owned C reference router for the first portable
 operation, memory candidate search. It accepts explicit workspace, project, record type, generation,
 bounded vector, and top-K fields; TLS scope hints do not cross the boundary. Injected callbacks bind
@@ -46,7 +64,10 @@ malformed and fallback is disabled, and `explicit_fallback` with the original ex
 when fallback is enabled. Candidate IDs must be positive and unique, generations and request IDs must
 match, vectors and scores must be finite, and every result passes the injected DB2 authorization check.
 
-The same source owns bounded version-one codecs for `db3.apply` and `db3.search`. A real authenticated
+The catalog at `src/modules/db2/eventcontract/db3.json` generates the public C constants and Go
+package `server-go/db3`; the existing C codecs remain the activation oracle until routing moves to
+Go. The shared `db3-wire-v1.json` fixtures prove byte-for-byte C/Go compatibility for bounded
+`db3.apply` and `db3.search` frames. A real authenticated
 event-bus test admits DB2 plus two distinct provider observers, delivers one committed operation and
 its duplicate to both, proves each provider records only one effect, routes a search only to the
 selected server, and rejects a second serving principal. These are executable pre-activation
@@ -90,9 +111,11 @@ Only after the C process is the sole DB2 owner does the pure-Go DB2 provider rep
 wire and database-effect fixtures. The final provider switch changes runtime selection, not callers
 or contracts.
 
-The current C conformance tests use two authenticated provider principals and prove that writes reach
+The current-PR runtime conformance tests exercise the existing C router plus the generated C/Go
+protocol boundary. They use two authenticated provider principals and prove that writes reach
 both observers, duplicate operations are idempotent, one search reaches only the selected server, a
 second server cannot own the route, malformed vectors and scores fail closed, unauthorized candidates
 are removed, and explicit fallback is observable. Activation additionally requires the same fixtures
 against real DB2 rows and the committed outbox. C-versus-Go replay runs the no-provider,
 selected-provider, unavailable, and fallback cases before the C implementation can retire.
+Equivalent routing and selection tests become mandatory again when the real Go DB3 router lands.

@@ -34,6 +34,8 @@ GO_PROCESSES = {
 HOSTED_BY = {"wfe": "/usr/local/bin/aimee-wfe"}
 
 STAGE_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+PROTOCOL_KIND_FLAG = 0x80000000
+MAX_MODULE_STAGES = 255
 
 
 class ContractError(ValueError):
@@ -154,6 +156,9 @@ def validate() -> dict[str, dict[str, object]]:
             stages = raw["stages"]
             if not isinstance(stages, list) or not stages:
                 raise ContractError(f"{component_id}: process must serve at least one stage")
+            if len(stages) > MAX_MODULE_STAGES:
+                raise ContractError(
+                    f"{component_id}: process exceeds its {MAX_MODULE_STAGES}-stage carve")
             for stage_ordinal, stage in enumerate(stages, start=1):
                 if not isinstance(stage, dict) or set(stage) != {"id", "name", "event_kind"}:
                     raise ContractError(f"{component_id}: invalid stage shape")
@@ -161,6 +166,9 @@ def validate() -> dict[str, dict[str, object]]:
                 # Carved from the DECLARED ref, so a module's event kinds move only
                 # when its identity does -- which is never.
                 expected_kind = 4096 + principal_ref * 256 + stage_ordinal
+                if expected_kind >= PROTOCOL_KIND_FLAG:
+                    raise ContractError(
+                        f"{component_id}/{name}: module stage enters protocol event namespace")
                 if type(stage_id) is not int or stage_id != stage_ordinal:
                     raise ContractError(f"{component_id}: stage IDs must be dense from one")
                 if not isinstance(name, str) or not STAGE_RE.fullmatch(name) or name in stage_names:
