@@ -49,6 +49,10 @@
     "top_k": 256
   },
   "wire": {
+    "capabilities": {
+      "magic": 1127432772,
+      "header_bytes": 48
+    },
     "search_request": {
       "magic": 1395868228,
       "header_bytes": 36
@@ -61,6 +65,26 @@
     "apply": {
       "magic": 1093878340,
       "header_bytes": 36
+    },
+    "apply_chunk": {
+      "magic": 1261650500,
+      "header_bytes": 32
+    },
+    "applied": {
+      "magic": 1144209988,
+      "header_bytes": 40
+    },
+    "search_failure": {
+      "magic": 1160987204,
+      "header_bytes": 24
+    },
+    "route_request": {
+      "magic": 1412645444,
+      "header_bytes": 40
+    },
+    "route_reply": {
+      "magic": 1429422660,
+      "header_bytes": 40
     }
   }
 }
