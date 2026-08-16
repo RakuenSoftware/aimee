@@ -233,10 +233,14 @@ def report(operations: dict) -> None:
     nullable = {n: o for n, o in ready.items() if o["nullable"]}
     large = {n: o for n, o in ready.items() if o["large_fields"]}
     print(f"\n  reachable now (T0+T1)                : {len(ready)}")
-    print(f"    of those passing NULL or \"\"        : {len(nullable)}"
-          f"   (literals only -- a lower bound)")
-    print(f"    of those carrying a large field    : {len(large)}"
-          f"   (against AIMEE_DB1_FIELD_MAX)")
+    # Both of these were blockers once and are not now. They stay in the report
+    # because they say what the reachable set is carrying -- a family full of
+    # documents is a different migration from a family full of identifiers --
+    # but neither refuses a call any more.
+    print(f"    passing NULL or \"\" somewhere      : {len(nullable)}"
+          f"   (carried: fields declare required)")
+    print(f"    carrying a prompt/result/document  : {len(large)}"
+          f"   (carried: requests are not capped)")
 
     print("\n  by family (ready / total):")
     families = collections.defaultdict(collections.Counter)

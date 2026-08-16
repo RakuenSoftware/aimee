@@ -71,9 +71,9 @@ rather than first: what is reachable in it is `db1_secret_*` and
 
 ## The two gaps that are not about tiers
 
-### Optional fields — smaller than it looked
+### Optional fields — smaller than it looked (CLOSED)
 
-The wire refuses an empty field, and the generated client refuses a NULL one. A
+The wire refused an empty field, and the generated client refused a NULL one. A
 call-site scan of all 154 reachable operations finds **16** that pass `NULL` or
 `""` as a literal. The remaining 138 need nothing.
 
@@ -82,9 +82,9 @@ NULL. It is also cheap to close — the domains already collapse the two
 themselves, so a per-field `required` flag in the catalog is enough, with the
 client mapping NULL to empty and the stage enforcing which fields may be blank.
 
-### Field size — the one that will ship green and fail in production
+### Field size — the one that will ship green and fail in production (CLOSED)
 
-`AIMEE_DB1_FIELD_MAX` is 512 bytes. **33 of the 154 reachable operations carry a
+`AIMEE_DB1_FIELD_MAX` was 512 bytes. **33 of the 154 reachable operations carry a
 prompt, a result, an output, or a JSON blob**, and DB1's own columns run to 16
 KB. A 512-byte cap truncates none of them: the client refuses the call and
 returns the same -1 it returns for a broken store.
@@ -100,6 +100,10 @@ and a request buffer of the same shape in the client. Raising the constant to
 anything useful puts hundreds of kilobytes on the stack. **Large payloads
 therefore require the generated code to allocate, which is a change to the
 shape of the generated wire rather than to a number in it.**
+
+Both are closed as of the pull requests that follow this document. The counts
+above are kept as they were measured, because they are what justified the order
+below — not because either still blocks a call.
 
 ## Recommended order
 
