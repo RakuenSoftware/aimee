@@ -107,6 +107,27 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                   "src/modules/db2/c/sketch.c and src/modules/db2/c/kb_payload.c.",
     "evidence": "Seven deterministic, database-free sketch primitives with one allowed libc "
                 "dependency (memset); no DB2, event-bus, provider, I/O, or heap dependency.",
+}, {
+    "path": "src/modules/db2/support/text_primitives.c",
+    "source_sha256": "2bbdb09370052759967f53557d0904398c55c118c964699a97a74a9abad02e78",
+    "header": "src/modules/db2/support/db2_text.h",
+    "header_sha256": "748a028371661444d450f1d365dca5e6988f0ba02730b38bfeb32078e67311b2",
+    "defines": ["text_sanitize_utf8"],
+    "resolves": ["text_sanitize_utf8"],
+    "allowed_includes": ["db2_text.h"],
+    "allowed_header_includes": ["stddef.h"],
+    "allowed_undefined": [],
+    "base_references": {
+        "text_sanitize_utf8": [
+            "src/modules/db2/c/canonical_index.c",
+            "src/modules/db2/c/code_index.c",
+            "src/modules/db2/c/kb_payload.c",
+        ],
+    },
+    "provenance": "Definition promoted from src/text.c; all DB2 calls audited in "
+                  "canonical_index.c, code_index.c, and kb_payload.c.",
+    "evidence": "Deterministic in-place UTF-8 repair with no imports, allocation, I/O, DB, "
+                "event-bus, provider, or platform dependency; exhaustive parity tested.",
 }]
 SYSTEM_PREFIXES = ("PQ", "EVP_", "OPENSSL_", "RAND_", "SHA", "CRYPTO_")
 INJECTED_PREFIXES = (

@@ -730,6 +730,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-bus-db2-module \
                 $(TESTPREFIX)/unit-test-db2-dstr-support \
                 $(TESTPREFIX)/unit-test-db2-sketch-support \
+                $(TESTPREFIX)/unit-test-db2-text-support \
                 $(TESTPREFIX)/unit-test-db3-route \
                 $(TESTPREFIX)/unit-test-bus-db3
 
@@ -801,7 +802,8 @@ UNIT_TEST_SHARD_INDEX ?= 0
 UNIT_TEST_SKIP_P1 ?= 0
 ifeq ($(UNIT_TEST_SHARD_INDEX),0)
 UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize
+                        $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-text-support-sanitize
 else
 UNIT_TEST_AUX_TARGETS =
 endif
@@ -6663,6 +6665,53 @@ unit-test-db2-dstr-support: $(TESTPREFIX)/unit-test-db2-dstr-support
 	$<
 
 unit-test-db2-dstr-support-sanitize: $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize
+	$<
+
+DB2_TEXT_SUPPORT_RENAMES = -Dtext_sanitize_utf8=db2_support_text_sanitize_utf8
+DB2_TEXT_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_text_support_impl.o: modules/db2/support/text_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_TEXT_SUPPORT_RENAMES) \
+	      $(DB2_TEXT_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_text_monolith.o: text.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_TEXT_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-text-support: \
+                     $(OBJDIR)/tests/test_db2_text_support.o \
+                     $(OBJDIR)/tests/db2_text_support_impl.o \
+                     $(OBJDIR)/tests/db2_text_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_TEXT_SANITIZE_DIR = $(OBJDIR)/tests/db2-text-support-sanitize
+
+$(DB2_TEXT_SANITIZE_DIR)/test.o: tests/test_db2_text_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_TEXT_SANITIZE_DIR)/support.o: modules/db2/support/text_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_TEXT_SUPPORT_RENAMES) $(DB2_TEXT_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_TEXT_SANITIZE_DIR)/monolith.o: text.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_TEXT_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-text-support-sanitize: \
+                     $(DB2_TEXT_SANITIZE_DIR)/test.o \
+                     $(DB2_TEXT_SANITIZE_DIR)/support.o \
+                     $(DB2_TEXT_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-text-support unit-test-db2-text-support-sanitize
+unit-test-db2-text-support: $(TESTPREFIX)/unit-test-db2-text-support
+	$<
+
+unit-test-db2-text-support-sanitize: $(TESTPREFIX)/unit-test-db2-text-support-sanitize
 	$<
 
 DB2_SKETCH_SUPPORT_RENAMES = \
