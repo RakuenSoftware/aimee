@@ -4,17 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AIMEE_DB3_EVENT_CAPABILITIES 11777u
-#define AIMEE_DB3_EVENT_APPLY        11778u
-#define AIMEE_DB3_EVENT_APPLIED      11779u
-#define AIMEE_DB3_EVENT_SEARCH       11780u
-#define AIMEE_DB3_EVENT_ROUTE        11781u
-
-#define AIMEE_DB3_MAX_SCOPE       64u
-#define AIMEE_DB3_MAX_RECORD_TYPE 32u
-#define AIMEE_DB3_MAX_COLLECTION  32u
-#define AIMEE_DB3_MAX_DIM         4096u
-#define AIMEE_DB3_MAX_TOP_K       256u
+#include <aimee/db2/db3_contract.h>
 
 typedef enum
 {

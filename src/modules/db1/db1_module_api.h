@@ -53,11 +53,13 @@
 #define AIMEE_DB1_OP_FEATURE_BRANCH_UPSERT        6u
 #define AIMEE_DB1_OP_FEATURE_BRANCH_GET           7u
 
-/* Wire bounds, carried from the catalog's declared reply sizes and
-   request arities. Stated so the module refuses an over-long value rather
-   than truncating one into something that looks valid. */
+/* Wire bounds, carried from the catalog. VALUE_MAX is the widest
+   reply a stage may build; FIELDS_MAX is the widest request arity, and
+   sizes the decoder's pointer array. Requests are NOT capped: they carry
+   prompts and documents, an in-process caller passes those whole, and the
+   frame already bounds what arrived. */
 #define AIMEE_DB1_STATE_MAX  6144u
-#define AIMEE_DB1_FIELD_MAX  512u
+#define AIMEE_DB1_VALUE_MAX  512u
 #define AIMEE_DB1_FIELDS_MAX 3u
 
 #define AIMEE_DB1_STATUS_OK       0u

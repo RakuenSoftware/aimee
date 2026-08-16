@@ -27,10 +27,12 @@
 
 #include <aimee/audit/obs_bus.h>
 #include <aimee/core/event_bus/module_client.h>
+#include <aimee/core/event_bus/module_protocol.h>
 #include "log.h"
 #include "module_json_call.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define DB1_GIT_OWNERSHIP_CALL_TIMEOUT_MS 2000
@@ -49,27 +51,37 @@ static void warn_unreachable(int reason)
             reason);
 }
 
-/* op(u32) | field_count(u32) | (len(u32) | bytes) * count, per db1_module_api.h. */
-static int encode(uint8_t *out, size_t out_sz, uint32_t op, const char *const *fields,
-                  uint32_t count, uint32_t *len_out)
+/* Size the frame from the arguments themselves.
+
+   These carry prompts, results and JSON documents, not just identifiers, and
+   in-process callers have always passed them whole. A fixed cap here would
+   refuse exactly those calls and return the same -1 as a broken store -- fine
+   in a test with short strings, wrong the first time a real prompt arrives. The
+   bus bounds the message instead. */
+static int frame_size(const char *const *fields, uint32_t count, size_t *need_out)
 {
    if (count == 0u || count > AIMEE_DB1_FIELDS_MAX)
       return -1;
    size_t need = 8u;
    for (uint32_t i = 0; i < count; ++i)
    {
-      if (!fields[i] || !fields[i][0])
+      /* Empty is legal on the wire: an optional field the caller left out
+         travels as zero length. Which fields may be empty is the operation's
+         business, checked before the frame is built. */
+      if (!fields[i])
          return -1;
       size_t n = strlen(fields[i]);
-      /* Refuse here rather than let the module refuse: an over-long field is a
-         caller bug, and the round trip would only rename it. */
-      if (n >= AIMEE_DB1_FIELD_MAX)
+      if (n > AIMEE_MODULE_MESSAGE_MAX_BODY - need - 4u)
          return -1;
       need += 4u + n;
    }
-   if (need > out_sz)
-      return -1;
+   *need_out = need;
+   return 0;
+}
 
+/* op(u32) | field_count(u32) | (len(u32) | bytes) * count, per db1_module_api.h. */
+static void encode(uint8_t *out, uint32_t op, const char *const *fields, uint32_t count)
+{
    uint32_t at = 0;
    aimee_db1_put_u32(out + at, op);
    at += 4u;
@@ -83,8 +95,6 @@ static int encode(uint8_t *out, size_t out_sz, uint32_t op, const char *const *f
       memcpy(out + at, fields[i], n);
       at += n;
    }
-   *len_out = at;
-   return 0;
 }
 
 /* Returns the module's status, or -1 when the call never produced one. */
@@ -101,38 +111,56 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
       return -1;
    }
 
-   uint8_t request[8u + AIMEE_DB1_FIELDS_MAX * (4u + AIMEE_DB1_FIELD_MAX)];
-   uint32_t request_len = 0;
-   if (encode(request, sizeof request, op, fields, count, &request_len) != 0)
+   size_t request_len = 0;
+   if (frame_size(fields, count, &request_len) != 0)
       return -1;
+   /* The reply is bounded by the caller's own buffer: it asked for at most
+      value_len bytes, so there is no reason to hold more than that. */
+   size_t response_cap = 8u + (value_out ? value_len : 0u);
+   uint8_t *request = malloc(request_len);
+   uint8_t *response = malloc(response_cap);
+   if (!request || !response)
+   {
+      free(request);
+      free(response);
+      return -1;
+   }
+   encode(request, op, fields, count);
 
-   uint8_t response[8u + AIMEE_DB1_FIELD_MAX];
    uint32_t response_len = 0;
    uint64_t deadline = aimee_module_call_deadline_ns(DB1_GIT_OWNERSHIP_CALL_TIMEOUT_MS);
    aimee_module_call_result_t rc =
        obs_bus_module_call(AIMEE_DB1_EVENT_GIT_OWNERSHIP, AIMEE_DB1_STAGE_GIT_OWNERSHIP, 0, deadline,
-                           request, request_len, response, (uint32_t)sizeof response,
+                           request, (uint32_t)request_len, response, (uint32_t)response_cap,
                            &response_len, NULL, NULL);
-   if (rc != AIMEE_MODULE_CALL_OK || response_len < 8u)
-   {
-      warn_unreachable((int)rc);
-      return -1;
-   }
+   free(request);
 
-   uint32_t status = aimee_db1_get_u32(response);
-   uint32_t payload_len = aimee_db1_get_u32(response + 4u);
-   /* A reply whose declared length disagrees with what arrived is not a reply
-      to read part of. */
-   if (payload_len != response_len - 8u)
-      return -1;
-   if (value_out && value_len)
+   int result = -1;
+   if (rc != AIMEE_MODULE_CALL_OK || response_len < 8u)
+      warn_unreachable((int)rc);
+   else
    {
-      if (payload_len >= value_len)
-         return -1;
-      memcpy(value_out, response + 8u, payload_len);
-      value_out[payload_len] = '\0';
+      uint32_t status = aimee_db1_get_u32(response);
+      uint32_t payload_len = aimee_db1_get_u32(response + 4u);
+      /* A reply whose declared length disagrees with what arrived is not a
+         reply to read part of. */
+      if (payload_len == response_len - 8u)
+      {
+         result = (int)status;
+         if (value_out && value_len)
+         {
+            if (payload_len >= value_len)
+               result = -1;
+            else
+            {
+               memcpy(value_out, response + 8u, payload_len);
+               value_out[payload_len] = '\0';
+            }
+         }
+      }
    }
-   return (int)status;
+   free(response);
+   return result;
 }
 
 /* A write answers 0 or -1; the store either took it or it did not. */
@@ -154,7 +182,7 @@ static int read_result(int status, char *value_out)
 
 int db1_git_ownership_upsert(const char *repo_path, const char *branch_name, const char *session_id)
 {
-   if (!repo_path || !branch_name || !session_id)
+   if (!repo_path || !repo_path[0] || !branch_name || !branch_name[0] || !session_id || !session_id[0])
       return -1;
    const char *fields[] = {repo_path, branch_name, session_id};
    return write_result(call_stage(AIMEE_DB1_OP_OWNERSHIP_UPSERT, fields, 3, NULL, 0));
@@ -162,7 +190,7 @@ int db1_git_ownership_upsert(const char *repo_path, const char *branch_name, con
 
 int db1_git_ownership_delete(const char *repo_path, const char *branch_name)
 {
-   if (!repo_path || !branch_name)
+   if (!repo_path || !repo_path[0] || !branch_name || !branch_name[0])
       return -1;
    const char *fields[] = {repo_path, branch_name};
    return write_result(call_stage(AIMEE_DB1_OP_OWNERSHIP_DELETE, fields, 2, NULL, 0));
@@ -170,7 +198,7 @@ int db1_git_ownership_delete(const char *repo_path, const char *branch_name)
 
 int db1_git_ownership_get_owner(const char *repo_path, const char *branch_name, char *owner_out, size_t owner_len)
 {
-   if (!repo_path || !branch_name || !owner_out || owner_len == 0)
+   if (!repo_path || !repo_path[0] || !branch_name || !branch_name[0] || !owner_out || owner_len == 0)
       return -1;
    const char *fields[] = {repo_path, branch_name};
    int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_OWNER_GET, fields, 2, owner_out, owner_len);
@@ -179,7 +207,7 @@ int db1_git_ownership_get_owner(const char *repo_path, const char *branch_name, 
 
 int db1_git_ownership_get_branch_for_session(const char *repo_path, const char *session_id, char *branch_out, size_t branch_len)
 {
-   if (!repo_path || !session_id || !branch_out || branch_len == 0)
+   if (!repo_path || !repo_path[0] || !session_id || !session_id[0] || !branch_out || branch_len == 0)
       return -1;
    const char *fields[] = {repo_path, session_id};
    int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION, fields, 2, branch_out, branch_len);
@@ -188,7 +216,7 @@ int db1_git_ownership_get_branch_for_session(const char *repo_path, const char *
 
 int db1_git_ownership_find_session_by_prefix(const char *session_prefix, char *session_out, size_t session_len)
 {
-   if (!session_prefix || !session_out || session_len == 0)
+   if (!session_prefix || !session_prefix[0] || !session_out || session_len == 0)
       return -1;
    const char *fields[] = {session_prefix};
    int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX, fields, 1, session_out, session_len);

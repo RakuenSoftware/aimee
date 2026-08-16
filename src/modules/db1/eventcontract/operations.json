@@ -228,7 +228,8 @@
         "fields": [
           {
             "name": "key",
-            "type": "text"
+            "type": "text",
+            "required": true
           }
         ]
       },
@@ -255,11 +256,13 @@
         "fields": [
           {
             "name": "key",
-            "type": "text"
+            "type": "text",
+            "required": true
           },
           {
             "name": "state",
-            "type": "text"
+            "type": "text",
+            "required": true
           }
         ]
       },
@@ -291,15 +294,18 @@
         "fields": [
           {
             "name": "key",
-            "type": "text"
+            "type": "text",
+            "required": true
           },
           {
             "name": "branch",
-            "type": "text"
+            "type": "text",
+            "required": true
           },
           {
             "name": "session",
-            "type": "text"
+            "type": "text",
+            "required": true
           }
         ]
       },
@@ -330,11 +336,13 @@
         "fields": [
           {
             "name": "key",
-            "type": "text"
+            "type": "text",
+            "required": true
           },
           {
             "name": "branch",
-            "type": "text"
+            "type": "text",
+            "required": true
           }
         ]
       },
@@ -368,11 +376,13 @@
         "fields": [
           {
             "name": "key",
-            "type": "text"
+            "type": "text",
+            "required": true
           },
           {
             "name": "branch",
-            "type": "text"
+            "type": "text",
+            "required": true
           }
         ]
       },
@@ -406,11 +416,13 @@
         "fields": [
           {
             "name": "key",
-            "type": "text"
+            "type": "text",
+            "required": true
           },
           {
             "name": "session",
-            "type": "text"
+            "type": "text",
+            "required": true
           }
         ]
       },
@@ -443,7 +455,8 @@
         "fields": [
           {
             "name": "prefix",
-            "type": "text"
+            "type": "text",
+            "required": true
           }
         ]
       },
