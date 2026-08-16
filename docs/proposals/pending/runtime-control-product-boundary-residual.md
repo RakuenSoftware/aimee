@@ -13,6 +13,11 @@ reason to discard the product boundary. The remaining decisions have existing Go
 target authority for effective settings. C hosts and adapters, container/service definitions, install
 targets, and compatibility aliases transport or package those decisions; they do not own them.
 
+The rejection's mixed-owner concern is therefore resolved by assigning every remaining policy
+decision to `runtime-web`, `control-web`, or `server-go/internal/config`; retained C, build, packaging,
+and deployment surfaces are mechanical consumers whose parity is acceptance evidence, not independent
+ownership.
+
 This correction restores the proposal lifecycle only. None of the runtime acceptance below is claimed
 as implemented.
 
@@ -130,6 +135,13 @@ package/config state without reviving disabled web residue or losing the last va
   compatible upgrade and rollback in both mixed-version directions.
 - Retained C/config/build/deployment adapters pass parity tests showing they transport or package the Go
   decision without changing lifecycle, config, capability, identity, or readiness.
+
+### Trace to archived acceptance
+
+The archived proposal required Runtime-only, Control-only, and full deployment fixtures to prove
+route/config/capability truth, independent failure behavior, and compatible upgrade from current
+package names. The acceptance bullets above preserve and refine that evidence requirement; they do not
+replace it.
 
 ## Non-goals
 
