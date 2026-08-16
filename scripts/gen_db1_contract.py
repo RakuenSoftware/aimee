@@ -33,6 +33,7 @@ HEADER = Path("src/modules/db1/db1_module_api.h")
 PROCESS_CONTRACTS = Path("src/modules/process-contracts.json")
 MAKEFILE = Path("src/Makefile")
 SOURCE_DIR = Path("src/modules/db1")
+CLIENT_DIR = Path("src/db1_client")
 # Served by the module process alone; the daemon never links it.
 MODULE_ONLY_SOURCES = frozenset({"module_adapter.c"})
 
@@ -107,7 +108,7 @@ def validate_families(raw: object) -> dict[str, dict[str, object]]:
     families: dict[str, dict[str, object]] = {}
     for index, entry in enumerate(raw, start=1):
         family = keys(entry, {"id", "name", "event_kind", "active", "doc",
-                              "covers", "sources", "retired_sources"},
+                              "client_doc", "covers", "sources", "retired_sources"},
                       f"families[{index-1}]")
         # Dense from one, because a family id is its future stage id and stage
         # IDs must be dense from one in the process contract.
@@ -130,6 +131,8 @@ def validate_families(raw: object) -> dict[str, dict[str, object]]:
         # source can hold more than one domain, so "covers" over-states what a
         # family has actually taken. retired_sources is the checked half.
         text(family["doc"], f"{name}.doc", 512)
+        if not isinstance(family["client_doc"], str) or len(family["client_doc"]) > 512:
+            fail("client-doc", f"{name}.client_doc must be a string of at most 512 chars")
         text(family["covers"], f"{name}.covers", 512)
         sources = family["sources"]
         if not isinstance(sources, list) or not sources or sources != sorted(set(sources)):
@@ -161,10 +164,32 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
     order: list[tuple[int, int]] = []
     operations: list[dict[str, object]] = []
     for index, entry in enumerate(raw):
-        operation = keys(entry, {
-            "family", "id", "name", "wire_format", "scope", "transaction",
-            "idempotency", "results", "request", "reply",
-        }, f"operations[{index}]")
+        allowed = {"family", "id", "name", "wire_format", "scope", "transaction",
+                   "idempotency", "results", "request", "reply"}
+        if not isinstance(entry, dict) or not set(entry) <= allowed | {"c_name", "c_params"} or \
+                not allowed <= set(entry):
+            fail("keys", f"operations[{index}] keys differ from version 1")
+        operation = entry
+        if "c_name" in operation:
+            symbol = text(operation["c_name"], f"operations[{index}].c_name", 96)
+            if not NAME.fullmatch(symbol) or not symbol.startswith("db1_"):
+                fail("c-name", f"operations[{index}] c_name {symbol!r} must be a db1_ symbol")
+        if ("c_params" in operation) != ("c_name" in operation):
+            fail("c-params", f"operations[{index}] must name c_params exactly with c_name")
+        if "c_params" in operation:
+            # The wire field names stay as they are -- the first is the scope key
+            # by rule -- so the C signature carries its own names rather than
+            # exporting "key" into a header that has always said repo_path.
+            parameters = operation["c_params"]
+            reads = operation["reply"]["payload"] != "none"
+            expected = len(operation["request"]["fields"]) + (2 if reads else 0)
+            if not isinstance(parameters, list) or len(parameters) != expected or \
+                    len(set(parameters)) != expected:
+                fail("c-params",
+                     f"operations[{index}] c_params must name {expected} distinct parameters")
+            for parameter in parameters:
+                if not isinstance(parameter, str) or not NAME.fullmatch(parameter):
+                    fail("c-params", f"operations[{index}] invalid parameter {parameter!r}")
         family_name = operation["family"]
         if not isinstance(family_name, str) or family_name not in families:
             fail("operation-family", f"operations[{index}] names unknown family {family_name!r}")
@@ -540,6 +565,241 @@ def header_bytes(catalog: dict[str, object]) -> str:
     return "".join(out)
 
 
+CLIENT_SCAFFOLD = """/* db1_client/{stem}.c: the {stem} family, reached over the bus.
+ *
+ * GENERATED from src/modules/db1/eventcontract/operations.json by
+ * scripts/gen_db1_contract.py. Do not edit.
+ *
+ * Same functions, same contract, different side of the boundary: the daemon
+ * links this instead of the DB1 domain, so nothing that calls these had to
+ * change.
+ *
+ * It lives OUTSIDE modules/db1 deliberately. The module's descriptor owns every
+ * .c beside it and compiles them into the DB1 process, so a client with these
+ * names in that directory would be linked twice into the one binary that must
+ * not have it -- once as the caller and once as the implementation.
+{client_doc} *
+ * clang-format is off for the body below: its canonical form is whatever this
+ * generator emits, and reflowing generated output would put the file and the
+ * catalog permanently one reformat apart. */
+/* clang-format off */
+#include "{header}"
+
+#include "db1_module_api.h"
+
+#include <aimee/audit/obs_bus.h>
+#include <aimee/core/event_bus/module_client.h>
+#include "log.h"
+#include "module_json_call.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#define DB1_{upper}_CALL_TIMEOUT_MS 2000
+
+static void warn_unreachable(int reason)
+{{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   /* Said once per process: enough to tell a store that is down from one that
+      is quiet, without one line per call. The numeric
+      aimee_module_call_result_t, not its name, so this does not pull the whole
+      event-bus library in behind the client for one string. */
+   LOG_WARN("db1.{stem}", "DB1 %s is unreachable (module call result %d)", "{family}",
+            reason);
+}}
+
+/* op(u32) | field_count(u32) | (len(u32) | bytes) * count, per db1_module_api.h. */
+static int encode(uint8_t *out, size_t out_sz, uint32_t op, const char *const *fields,
+                  uint32_t count, uint32_t *len_out)
+{{
+   if (count == 0u || count > AIMEE_DB1_FIELDS_MAX)
+      return -1;
+   size_t need = 8u;
+   for (uint32_t i = 0; i < count; ++i)
+   {{
+      if (!fields[i] || !fields[i][0])
+         return -1;
+      size_t n = strlen(fields[i]);
+      /* Refuse here rather than let the module refuse: an over-long field is a
+         caller bug, and the round trip would only rename it. */
+      if (n >= AIMEE_DB1_FIELD_MAX)
+         return -1;
+      need += 4u + n;
+   }}
+   if (need > out_sz)
+      return -1;
+
+   uint32_t at = 0;
+   aimee_db1_put_u32(out + at, op);
+   at += 4u;
+   aimee_db1_put_u32(out + at, count);
+   at += 4u;
+   for (uint32_t i = 0; i < count; ++i)
+   {{
+      uint32_t n = (uint32_t)strlen(fields[i]);
+      aimee_db1_put_u32(out + at, n);
+      at += 4u;
+      memcpy(out + at, fields[i], n);
+      at += n;
+   }}
+   *len_out = at;
+   return 0;
+}}
+
+/* Returns the module's status, or -1 when the call never produced one. */
+static int call_stage(uint32_t op, const char *const *fields, uint32_t count, char *value_out,
+                      size_t value_len)
+{{
+   if (value_out && value_len)
+      value_out[0] = '\\0';
+   /* A local check, not a probe: with nothing serving the stage there is no
+      call to make, and saying so beats waiting out a deadline. */
+   if (!obs_bus_module_available(AIMEE_DB1_EVENT_{upper}))
+   {{
+      warn_unreachable(AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+      return -1;
+   }}
+
+   uint8_t request[8u + AIMEE_DB1_FIELDS_MAX * (4u + AIMEE_DB1_FIELD_MAX)];
+   uint32_t request_len = 0;
+   if (encode(request, sizeof request, op, fields, count, &request_len) != 0)
+      return -1;
+
+   uint8_t response[8u + AIMEE_DB1_FIELD_MAX];
+   uint32_t response_len = 0;
+   uint64_t deadline = aimee_module_call_deadline_ns(DB1_{upper}_CALL_TIMEOUT_MS);
+   aimee_module_call_result_t rc =
+       obs_bus_module_call(AIMEE_DB1_EVENT_{upper}, AIMEE_DB1_STAGE_{upper}, 0, deadline,
+                           request, request_len, response, (uint32_t)sizeof response,
+                           &response_len, NULL, NULL);
+   if (rc != AIMEE_MODULE_CALL_OK || response_len < 8u)
+   {{
+      warn_unreachable((int)rc);
+      return -1;
+   }}
+
+   uint32_t status = aimee_db1_get_u32(response);
+   uint32_t payload_len = aimee_db1_get_u32(response + 4u);
+   /* A reply whose declared length disagrees with what arrived is not a reply
+      to read part of. */
+   if (payload_len != response_len - 8u)
+      return -1;
+   if (value_out && value_len)
+   {{
+      if (payload_len >= value_len)
+         return -1;
+      memcpy(value_out, response + 8u, payload_len);
+      value_out[payload_len] = '\\0';
+   }}
+   return (int)status;
+}}
+
+/* A write answers 0 or -1; the store either took it or it did not. */
+static int write_result(int status)
+{{
+   return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
+}}
+
+/* A read answers found(1) / not-found(0) / error(-1), which is what the direct
+   implementation returns and what its callers already branch on. */
+static int read_result(int status, char *value_out)
+{{
+   if (status == (int)AIMEE_DB1_STATUS_OK)
+      return (value_out && value_out[0]) ? 1 : 0;
+   if (status == (int)AIMEE_DB1_STATUS_MISSING)
+      return 0;
+   return -1;
+}}
+"""
+
+
+def client_bytes(catalog: dict[str, object], family: dict[str, object],
+                 operations: list[dict[str, object]]) -> str:
+    """Render one family's C client.
+
+    Every body is the same three steps -- reject unusable arguments, name the
+    fields, map the status -- which is exactly why writing 347 of them by hand
+    was never the plan.
+    """
+    name = str(family["name"])
+    upper = name.upper()
+    doc = str(family["client_doc"]).strip()
+    prose = ""
+    if doc:
+        prose = "\n *\n" + "\n".join(wrap(doc, " * ", " * "))
+    out = [CLIENT_SCAFFOLD.format(
+        stem=name, family=name.replace("_", " "), upper=upper,
+        header=f"{name}.h", client_doc=prose)]
+
+    for operation in operations:
+        request = operation["request"]
+        reply = operation["reply"]
+        assert isinstance(request, dict) and isinstance(reply, dict)
+        fields = [str(f) for f in request["fields"]]
+        reads = reply["payload"] != "none"
+        names = [str(n) for n in operation["c_params"]]
+        inputs, outputs = names[:len(fields)], names[len(fields):]
+        params = [f"const char *{parameter}" for parameter in inputs]
+        if reads:
+            params += [f"char *{outputs[0]}", f"size_t {outputs[1]}"]
+        guards = [f"!{parameter}" for parameter in inputs]
+        if reads:
+            guards += [f"!{outputs[0]}", f"{outputs[1]} == 0"]
+
+        signature = f"int {operation['c_name']}({', '.join(params)})"
+        body = [signature, "{",
+                f"   if ({' || '.join(guards)})", "      return -1;",
+                f"   const char *fields[] = {{{', '.join(inputs)}}};"]
+        op_symbol = f"AIMEE_DB1_OP_{str(operation['name']).upper()}"
+        if reads:
+            body.append(f"   int status = call_stage({op_symbol}, fields, "
+                        f"{len(fields)}, {outputs[0]}, {outputs[1]});")
+            body.append(f"   return read_result(status, {outputs[0]});")
+        else:
+            body.append(f"   return write_result(call_stage({op_symbol}, fields, "
+                        f"{len(fields)}, NULL, 0));")
+        body.append("}")
+        out.append("\n" + "\n".join(body) + "\n")
+    out.append("\n/* clang-format on */\n")
+    return "".join(out)
+
+
+def client_families(catalog: dict[str, object]) -> list[tuple[dict, list]]:
+    """Families whose whole operation set names a C symbol, in id order."""
+    families = catalog["families"]
+    operations = catalog["operations"]
+    assert isinstance(families, dict) and isinstance(operations, list)
+    result = []
+    for family in sorted(families.values(), key=lambda f: int(f["id"])):
+        own = [o for o in operations if o["family"] == family["name"]]
+        if own and all("c_name" in o for o in own):
+            result.append((family, own))
+        elif any("c_name" in o for o in own):
+            fail("client-partial",
+                 f"{family['name']} names a C symbol for some operations but not all")
+    return result
+
+
+def validate_clients(root: Path, catalog: dict[str, object], write: bool) -> None:
+    for family, operations in client_families(catalog):
+        path = root / CLIENT_DIR / f"{family['name']}.c"
+        expected = client_bytes(catalog, family, operations)
+        if write:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(expected, encoding="utf-8")
+        try:
+            actual = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            fail("client-missing", f"cannot read {path}: {exc}")
+        if actual != expected:
+            fail("client-stale",
+                 f"{path} is not what the catalog generates; run "
+                 f"scripts/gen_db1_contract.py --write")
+
+
 def validate_header(root: Path, catalog: dict[str, object]) -> None:
     """The header must be exactly what the catalog generates.
 
@@ -598,6 +858,7 @@ def run(root: Path, write: bool = False) -> None:
     if write:
         (root / HEADER).write_text(header_bytes(catalog), encoding="utf-8")
     validate_header(root, catalog)
+    validate_clients(root, catalog, write)
     validate_process_contract(root, catalog)
     validate_source_map(root, catalog)
     validate_coupled_sources(catalog)
