@@ -206,14 +206,22 @@ passed by value is an integer, `long long *` is an out-integer the pattern
 simply missed, and `cJSON *` is a document. Three of the four were already
 reachable and were being counted as blocked.
 
-As measured on the day this section was written: **203 of 261 operations fit the
-wire, and 18 of 43 sources are ready** — against 7 of 48 when the body of this
-document was written. What remains is rows (40 operations), alloc (10), a
-per-operation status contract (6) and json (2).
+A third mistake surfaced immediately after, and it was the largest: the survey
+decided what remained by asking which families were **not active**. A family
+goes active to reserve its event kind and let its operations be declared. That
+moves no source out of the daemon — cutover does, by dropping the `.c` from
+`DB1_SRCS`. Seven sources and 23 operations across three active families were
+therefore invisible, including `checkpoints`, and including the very source
+whose client had just been generated. Remaining is now read from `DB1_SRCS`.
 
-**Rows is the next step and it is not close.** It alone takes 18 ready sources
-to 34 — 134 more operations — where alloc adds one source and status adds
-three. That is the whole argument for doing it next.
+As measured after all three corrections: **220 of 284 operations fit the wire,
+and 21 of 49 sources are ready** — against 7 of 48 when the body of this
+document was written. What remains is rows (45 operations), alloc (10), a
+per-operation status contract (6) and json (3).
+
+**Rows is the next step and it is not close.** It alone takes 21 ready sources
+to 39 — 146 more operations — where alloc and json add one source each and
+status adds three. That is the whole argument for doing it next.
 
 ## How to reproduce
 

@@ -21,13 +21,18 @@ call sites, so its numbers move when any of those move -- which is the point.
 docs/proposals/pending/db1-wire-capability-survey.md records what it said on the
 day it was written; re-run this before trusting those numbers again.
 
-Two counting mistakes are deliberately designed out, because both were made:
+Three counting mistakes are deliberately designed out, because all three were
+made, and every one of them flattered the migration:
 
   * Signatures are read from the HEADERS with line joins collapsed. Reading
     definitions line by line silently drops every wrapped signature.
   * CMD_SRCS is excluded. Those files are compiled by cmd-srcs-compile-check so
     they cannot rot, but they are linked into nothing, and counting them as
     production inflates the surface by about a fifth.
+  * What remains is read from DB1_SRCS, not from which families are active. A
+    family goes active to reserve its event kind and let its operations be
+    declared; that moves no source out of the daemon. Treating activation as
+    cutover hid seven sources and 23 operations in three active families.
 """
 
 from __future__ import annotations
@@ -114,11 +119,25 @@ def compile_only_sources(root: Path) -> set[str]:
     return {s for s in declared if Path(s).name not in elsewhere}
 
 
-def reserved_sources(root: Path) -> dict[str, str]:
+def remaining_sources(root: Path) -> dict[str, str]:
+    """Sources the daemon still links, whatever their family's state.
+
+    This used to select families that were not yet active, and that was wrong
+    in the direction that flatters the migration. Activating a family reserves
+    an event kind and lets its operations be declared; it does not move a
+    single source out of the daemon. Cutover does, by dropping the .c from
+    DB1_SRCS -- which is exactly what this reads. Seven sources across three
+    ACTIVE families were invisible under the old rule, including the one whose
+    client had been generated but not yet linked.
+    """
     catalog = json.loads((root / CATALOG).read_text(encoding="utf-8"))
+    makefile = (root / MAKEFILE).read_text(encoding="utf-8")
+    block = re.search(r"^DB1_SRCS\s*[:+]?=(.*?)(?=^\w)", makefile, re.M | re.S)
+    linked = {Path(s).name for s in re.findall(r"([A-Za-z0-9_/.\-]+)\.c",
+                                               block.group(1) if block else "")}
     return {source: family["name"]
-            for family in catalog["families"] if not family["active"]
-            for source in family["sources"]}
+            for family in catalog["families"]
+            for source in family["sources"] if source in linked}
 
 
 def declarations(root: Path, families: dict[str, str]) -> dict[str, dict]:
@@ -233,7 +252,7 @@ def split_call(text: str, start: int) -> list[str] | None:
 
 
 def survey(root: Path) -> dict:
-    families = reserved_sources(root)
+    families = remaining_sources(root)
     declared = declarations(root, families)
     skip = compile_only_sources(root)
 
