@@ -731,6 +731,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-bus-db2-module \
                 $(TESTPREFIX)/unit-test-db2-dstr-support \
                 $(TESTPREFIX)/unit-test-db2-management-read-support \
+                $(TESTPREFIX)/unit-test-db2-rel-enum-text-support \
                 $(TESTPREFIX)/unit-test-db2-rel-type-support \
                 $(TESTPREFIX)/unit-test-db2-sketch-support \
                 $(TESTPREFIX)/unit-test-db2-text-support \
@@ -807,6 +808,7 @@ UNIT_TEST_SKIP_P1 ?= 0
 ifeq ($(UNIT_TEST_SHARD_INDEX),0)
 UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-type-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-text-support-sanitize \
@@ -6830,6 +6832,45 @@ unit-test-db2-time-support: $(TESTPREFIX)/unit-test-db2-time-support
 	$<
 
 unit-test-db2-time-support-sanitize: $(TESTPREFIX)/unit-test-db2-time-support-sanitize
+	$<
+
+DB2_REL_ENUM_TEXT_SUPPORT_RENAMES = \
+   -Dcorrection_behavior_to_text=db2_support_correction_behavior_to_text \
+   -Drel_sensitivity_to_text=db2_support_rel_sensitivity_to_text
+
+$(OBJDIR)/tests/db2_rel_enum_text_support_impl.o: modules/db2/support/rel_enum_text_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_REL_ENUM_TEXT_SUPPORT_RENAMES) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-rel-enum-text-support: \
+                     $(OBJDIR)/tests/test_db2_rel_enum_text_support.o \
+                     $(OBJDIR)/tests/db2_rel_enum_text_support_impl.o \
+                     $(OBJDIR)/tests/db2_rel_type_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_REL_ENUM_TEXT_SANITIZE_DIR = $(OBJDIR)/tests/db2-rel-enum-text-support-sanitize
+
+$(DB2_REL_ENUM_TEXT_SANITIZE_DIR)/test.o: tests/test_db2_rel_enum_text_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_REL_ENUM_TEXT_SANITIZE_DIR)/support.o: modules/db2/support/rel_enum_text_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_REL_ENUM_TEXT_SUPPORT_RENAMES) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize: \
+                     $(DB2_REL_ENUM_TEXT_SANITIZE_DIR)/test.o \
+                     $(DB2_REL_ENUM_TEXT_SANITIZE_DIR)/support.o \
+                     $(OBJDIR)/tests/db2-rel-type-support-sanitize/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-rel-enum-text-support unit-test-db2-rel-enum-text-support-sanitize
+unit-test-db2-rel-enum-text-support: $(TESTPREFIX)/unit-test-db2-rel-enum-text-support
+	$<
+
+unit-test-db2-rel-enum-text-support-sanitize: \
+      $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize
 	$<
 
 DB2_REL_TYPE_SUPPORT_RENAMES = \

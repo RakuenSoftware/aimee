@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "eb42135a5cb800e0a00b813f8e377c2f8e2c06a0",
-  "source_fingerprint": "e64190da1dced2a596143d14f4111308db2a3fd7544e8e7bae3c23d289ae5688",
+  "source_revision": "2b04d475ea2b4fbda86d659f0e48594b62e87aba",
+  "source_fingerprint": "38b6ac05600a5216e1da969e1ea2002e3735af191b8069c92d545be9cac3d652",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
@@ -223,6 +223,35 @@
       },
       "provenance": "Definition promoted from src/shared/management_read.c; the sole DB2 call was audited in management_read_journal.c.",
       "evidence": "Deterministic two-value selector mapping with no imports, allocation, I/O, DB, event-bus, provider, platform, pgvector, or DB3 dependency; ABI parity tested."
+    },
+    {
+      "path": "src/modules/db2/support/rel_enum_text_primitives.c",
+      "source_sha256": "231f5255d1350c752317529e2d0b2bab3528dbc6e0186e4fec780c3319bb8884",
+      "header": "src/modules/db2/support/db2_rel_enum_text.h",
+      "header_sha256": "169b08838b6425976afd817ad315b12db51a86df655b1d8a3dfb1c3ee7f23773",
+      "defines": [
+        "correction_behavior_to_text",
+        "rel_sensitivity_to_text"
+      ],
+      "resolves": [
+        "correction_behavior_to_text",
+        "rel_sensitivity_to_text"
+      ],
+      "allowed_includes": [
+        "db2_rel_enum_text.h"
+      ],
+      "allowed_header_includes": [],
+      "allowed_undefined": [],
+      "base_references": {
+        "correction_behavior_to_text": [
+          "src/modules/db2/c/rel_types_store.c"
+        ],
+        "rel_sensitivity_to_text": [
+          "src/modules/db2/c/rel_types_store.c"
+        ]
+      },
+      "provenance": "Definitions promoted from the DB-free enum text core in src/rel_types.c; both DB2 calls audited in src/modules/db2/c/rel_types_store.c.",
+      "evidence": "Two deterministic three-value switches with descriptor-owned numeric ABI and no imports, shared ontology header, allocation, I/O, DB, event-bus, provider, platform, pgvector, DB3, or logging dependency; enum ABI and parity tested."
     },
     {
       "path": "src/modules/db2/support/rel_type_primitives.c",
@@ -1713,14 +1742,6 @@
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
-      "symbol": "correction_behavior_to_text",
-      "references": [
-        "src/modules/db2/c/rel_types_store.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
       "symbol": "css_analyze",
       "references": [
         "src/modules/db2/c/canonical_index.c"
@@ -2961,14 +2982,6 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "rel_sensitivity_to_text",
-      "references": [
-        "src/modules/db2/c/rel_types_store.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
       "symbol": "rel_types_seed_at",
       "references": [
         "src/modules/db2/c/rel_types_store.c"
@@ -3901,16 +3914,16 @@
   ],
   "summary": {
     "translation_units": 141,
-    "descriptor_support_units": 6,
-    "unresolved_symbols": 339,
+    "descriptor_support_units": 7,
+    "unresolved_symbols": 337,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 25,
       "injected-module-contract": 150,
-      "portable-core-promotion": 20,
+      "portable-core-promotion": 18,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 144
     }
   },
-  "fingerprint": "ec443b173961450cb982112d85f6de82248c366ba9d3e2a94fa94cf53504476d"
+  "fingerprint": "aa7651598626967ea18b26e56c4ccaa972ec860ecdc18b4633848d6ef383dd44"
 }

@@ -86,6 +86,25 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
     "evidence": "Deterministic two-value selector mapping with no imports, allocation, I/O, DB, "
                 "event-bus, provider, platform, pgvector, or DB3 dependency; ABI parity tested.",
 }, {
+    "path": "src/modules/db2/support/rel_enum_text_primitives.c",
+    "source_sha256": "231f5255d1350c752317529e2d0b2bab3528dbc6e0186e4fec780c3319bb8884",
+    "header": "src/modules/db2/support/db2_rel_enum_text.h",
+    "header_sha256": "169b08838b6425976afd817ad315b12db51a86df655b1d8a3dfb1c3ee7f23773",
+    "defines": ["correction_behavior_to_text", "rel_sensitivity_to_text"],
+    "resolves": ["correction_behavior_to_text", "rel_sensitivity_to_text"],
+    "allowed_includes": ["db2_rel_enum_text.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": [],
+    "base_references": {
+        "correction_behavior_to_text": ["src/modules/db2/c/rel_types_store.c"],
+        "rel_sensitivity_to_text": ["src/modules/db2/c/rel_types_store.c"],
+    },
+    "provenance": "Definitions promoted from the DB-free enum text core in src/rel_types.c; both "
+                  "DB2 calls audited in src/modules/db2/c/rel_types_store.c.",
+    "evidence": "Two deterministic three-value switches with descriptor-owned numeric ABI and no "
+                "imports, shared ontology header, allocation, I/O, DB, event-bus, provider, "
+                "platform, pgvector, DB3, or logging dependency; enum ABI and parity tested.",
+}, {
     "path": "src/modules/db2/support/rel_type_primitives.c",
     "source_sha256": "a3a9e88f2a90c0de5d09f952c60ff90843f4f332a9c2a411e2dc1e081f31cce1",
     "header": "src/modules/db2/support/db2_rel_type_helpers.h",

@@ -86,9 +86,9 @@ Link-closure audit:
 `link-closure-v1.json` accounts for all 141 C translation units in the private DB2 boundary. The
 probe compiles each unit plus exact descriptor-owned support, combines only those objects with a
 relocatable link, supplies no archive, shared library, helper stub, or weak definition, and records
-the 339 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
+the 337 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
 disposition and rationale. The current ledger contains 144 explicit system-link dependencies, 25
-pinned vendored/generated inputs, 150 sibling or KB contracts to inject, and 20 support APIs to
+pinned vendored/generated inputs, 150 sibling or KB contracts to inject, and 18 support APIs to
 promote. The standalone-link exit condition requires zero entries in the latter three groups; a
 classified ledger alone is not enough.
 
@@ -147,6 +147,15 @@ enum text conversion remain deferred to a deliberate shared-type boundary. The b
 the legacy process-locale ctype behavior, and the legacy/support comparison fails if the duplicated
 functional set drifts. This slice moves total debt from 341 to 339 and portable promotion debt from
 22 to 20.
+
+The seventh reduction promotes `correction_behavior_to_text` and `rel_sensitivity_to_text`, the two
+enum-to-column-literal switches used only by `c/rel_types_store.c`. A descriptor-private numeric ABI
+records all six authoritative values without importing `rel_types.h` or memory-ontology types. The
+parity test compile-time binds those values and both enum sizes to the monolith's int-sized calling
+convention, then exercises every signed 16-bit value plus the remaining int boundaries. Both normal
+and hardened builds preserve the legacy defaults: an unknown correction becomes `supersede`, while
+an unknown sensitivity fails closed to `pii`. The support object has no imports. This slice moves
+total debt from 339 to 337 and portable promotion debt from 20 to 18.
 
 The gate rejects legacy source additions or omissions, support path escape, symlinks, content drift,
 new unresolved symbols, non-system reference growth, missing evidence, and any attempt to make the

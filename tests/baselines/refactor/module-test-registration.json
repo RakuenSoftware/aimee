@@ -83,6 +83,12 @@
       "ctest": false,
       "make": true,
       "module": "db2",
+      "test": "src/tests/test_db2_rel_enum_text_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
       "test": "src/tests/test_db2_rel_type_support.c"
     },
     {
