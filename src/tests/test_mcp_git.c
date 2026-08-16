@@ -707,12 +707,17 @@ static void test_mirror_workspace_refuses_local_history_writes(void)
       cJSON *(*fn)(cJSON *);
       const char *action;
    } cases[] = {
-       {"reset", handle_git_reset, NULL},      {"add", handle_git_add, NULL},
-       {"restore", handle_git_restore, NULL},  {"merge", handle_git_merge, NULL},
-       {"rebase", handle_git_rebase, NULL},    {"sync", handle_git_sync, NULL},
+       {"reset", handle_git_reset, NULL},
+       {"add", handle_git_add, NULL},
+       {"restore", handle_git_restore, NULL},
+       {"merge", handle_git_merge, NULL},
+       {"rebase", handle_git_rebase, NULL},
+       {"sync", handle_git_sync, NULL},
        {"cherry_pick", handle_git_cherry_pick, NULL},
-       {"revert", handle_git_revert, NULL},    {"pull", handle_git_pull, NULL},
-       {"stash", handle_git_stash, "push"},    {"branch", handle_git_branch, "create"},
+       {"revert", handle_git_revert, NULL},
+       {"pull", handle_git_pull, NULL},
+       {"stash", handle_git_stash, "push"},
+       {"branch", handle_git_branch, "create"},
    };
    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
    {
@@ -2928,6 +2933,94 @@ static void test_second_operation_refused_while_one_is_in_progress(void)
    teardown_git_repo();
 }
 
+/* Rebase writes commits on its FIRST run, not only when continuing after a conflict,
+ * so it needs the operator identity then too. It used to get one only on
+ * action=continue, and git has no ambient identity to fall back on (git_ops points
+ * GIT_CONFIG_GLOBAL/SYSTEM at /dev/null), so a first-run rebase died on git's own
+ * "Committer identity unknown ... unable to auto-detect email address". `pr ready`
+ * hit this through sync, which is a rebase.
+ *
+ * With an identity present the rebase completes; with none, the answer is aimee's
+ * actionable message rather than git's. */
+static void test_rebase_carries_the_identity_on_first_run(void)
+{
+   setup_git_repo();
+
+   /* Diverge, so the rebase must REPLAY a commit and therefore write one. */
+   assert(system("git checkout -q -b behind-branch && echo mine > mine.txt && "
+                 "git add mine.txt && git commit -q -m mine") == 0);
+   assert(system("git checkout -q master") == 0);
+   assert(system("echo theirs > theirs.txt && git add theirs.txt && "
+                 "git commit -q -m theirs") == 0);
+   assert(system("git checkout -q behind-branch") == 0);
+   assert(system("git config --unset-all user.name && git config --unset-all user.email") == 0);
+
+   /* The server's shape: an identity exists in the GLOBAL config, but git children
+    * cannot see it because GIT_CONFIG_GLOBAL/SYSTEM are masked. Only aimee's resolver
+    * can read it, so the operation works exactly when the flags are passed — which is
+    * what makes this discriminating rather than a repeat of the fixture's own config. */
+   char fake_home[256];
+   snprintf(fake_home, sizeof fake_home, "%s/aimee-test-rebase-identity-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(fake_home) != NULL);
+   const char *env_names[] = {"HOME",
+                              "XDG_CONFIG_HOME",
+                              "GIT_CONFIG_NOSYSTEM",
+                              "GIT_CONFIG_SYSTEM",
+                              "GIT_CONFIG_GLOBAL",
+                              "AIMEE_TEST_GIT_IDENTITY_FROM_CONFIG"};
+   char *saved[sizeof(env_names) / sizeof(env_names[0])] = {0};
+   for (size_t i = 0; i < sizeof(env_names) / sizeof(env_names[0]); i++)
+   {
+      const char *value = getenv(env_names[i]);
+      saved[i] = value ? strdup(value) : NULL;
+   }
+
+   setenv("HOME", fake_home, 1);
+   setenv("XDG_CONFIG_HOME", fake_home, 1);
+   unsetenv("GIT_CONFIG_NOSYSTEM");
+   unsetenv("GIT_CONFIG_SYSTEM");
+   unsetenv("GIT_CONFIG_GLOBAL");
+   assert(system("git config --global user.name 'Global Operator' && "
+                 "git config --global user.email 'global@example.test'") == 0);
+   setenv("GIT_CONFIG_NOSYSTEM", "1", 1);
+   setenv("GIT_CONFIG_SYSTEM", "/dev/null", 1);
+   setenv("GIT_CONFIG_GLOBAL", "/dev/null", 1);
+   setenv("AIMEE_TEST_GIT_IDENTITY_FROM_CONFIG", "1", 1);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "base", "master");
+   cJSON *resp = handle_git_rebase(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   /* Without the identity on the first run this is where git says "Committer identity
+    * unknown ... unable to auto-detect email address". */
+   assert(strstr(text, "identity") == NULL);
+   assert(strstr(text, "error") == NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   /* The replayed commit carries the resolved operator, so the identity really was
+    * applied rather than the rebase merely being a no-op. */
+   assert(system("test \"$(git log -1 --format='%cn <%ce>')\" = "
+                 "'Global Operator <global@example.test>'") == 0);
+
+   for (size_t i = 0; i < sizeof(env_names) / sizeof(env_names[0]); i++)
+   {
+      if (saved[i])
+      {
+         setenv(env_names[i], saved[i], 1);
+         free(saved[i]);
+      }
+      else
+         unsetenv(env_names[i]);
+   }
+   char rm[512];
+   snprintf(rm, sizeof rm, "rm -rf '%s'", fake_home);
+   (void)system(rm);
+
+   teardown_git_repo();
+}
+
 /* An uncommitted tree cannot be cleanly restored after a conflict, so the
  * operation is refused before it starts rather than half-done. */
 static void test_integrate_refuses_dirty_tree(void)
@@ -4054,6 +4147,7 @@ int main(void)
    test_merge_keep_conflicts_then_continue();
    test_merge_action_abort();
    test_second_operation_refused_while_one_is_in_progress();
+   test_rebase_carries_the_identity_on_first_run();
    test_integrate_refuses_dirty_tree();
    test_integrate_blocked_on_main();
    test_integrate_requires_a_ref();

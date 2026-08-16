@@ -792,8 +792,7 @@ static void feature_fixture_registry(const char *root, const char *sid, const ch
    FILE *f = fopen(path, "a");
    assert(f != NULL);
    /* repo, worktree, branch, sid, work_name, base */
-   fprintf(f, "%s\t%s\taimee/session/%s\t%s\t%s\torigin/main\n", root, wt, sid, sid,
-           work_name);
+   fprintf(f, "%s\t%s\taimee/session/%s\t%s\t%s\torigin/main\n", root, wt, sid, sid, work_name);
    fclose(f);
    if (wt_out && wt_out_len)
       snprintf(wt_out, wt_out_len, "%s", wt);

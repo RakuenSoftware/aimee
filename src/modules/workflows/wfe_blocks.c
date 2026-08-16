@@ -1470,7 +1470,8 @@ static int wfe_repo_default_branch(const char *repo_dir, char *buf, size_t n)
  *                run open its own PR against a shared branch; the feature branch is
  *                where a feature's slices belong, and the feature reaches the trunk
  *                through one base:trunk PR. pr_base_mode=default_branch (reaching the
- *                engine as AIMEE_PR_BASE_MODE) restores the old default. The head/base pairing this produces (aimee/wi/<parent>.sN
+ *                engine as AIMEE_PR_BASE_MODE) restores the old default. The head/base pairing this
+ * produces (aimee/wi/<parent>.sN
  *                -> aimee/feat/<parent>) is the one base:"feature" already produced, so
  *                it passes the same forge rails -- no rail is relaxed here.
  * *allow_protected defaults to 0; only "trunk" sets it. Returns 0 on success, -1 if a

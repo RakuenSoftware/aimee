@@ -1001,7 +1001,7 @@ void worktree_registry_record(const char *git_root, const char *wt_path, const c
  * an explicit base to the server. */
 
 #define FEATURE_BRANCH_PREFIX "aimee/feat/"
-#define FEATURE_SLUG_MAX 40
+#define FEATURE_SLUG_MAX      40
 
 /* Slugify a work name into the <slug> of aimee/feat/<slug>: lowercase, [a-z0-9-]
  * only, a run of anything else collapsed to a single '-', leading/trailing '-'

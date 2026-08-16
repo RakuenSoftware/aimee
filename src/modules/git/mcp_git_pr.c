@@ -206,7 +206,8 @@ static void pr_promote_feature(const char *principal, const char *slug, const ch
       if (complete < 0)
          snprintf(note, note_len,
                   "\npromote: skipped — could not list open PRs, so whether %s is complete is "
-                  "unknown", feature);
+                  "unknown",
+                  feature);
       return;
    }
 
@@ -215,7 +216,8 @@ static void pr_promote_feature(const char *principal, const char *slug, const ch
    {
       snprintf(note, note_len,
                "\npromote: skipped — %s is complete but the repository default branch could not "
-               "be resolved", feature);
+               "be resolved",
+               feature);
       return;
    }
 
@@ -240,8 +242,10 @@ static void pr_promote_feature(const char *principal, const char *slug, const ch
 
    if (git_pr_create_via_api_slug(principal, slug, feature, def, title, body, 1, url, sizeof(url),
                                   err, sizeof(err)) != 0)
-      snprintf(note, note_len, "\npromote: %s is complete but the PR into %s could not be "
-                               "opened: %.200s", feature, def, err[0] ? err : "unknown");
+      snprintf(note, note_len,
+               "\npromote: %s is complete but the PR into %s could not be "
+               "opened: %.200s",
+               feature, def, err[0] ? err : "unknown");
    else
       snprintf(note, note_len, "\npromote: %s is complete — opened draft PR into %s: %s", feature,
                def, url);
@@ -299,8 +303,7 @@ static int pr_resolve_base(char *out, size_t out_len, char *err, size_t err_len)
     * terminal) and it sticks for the rest of the session. */
    if (pr_repo_default_branch(out, out_len) != 0)
    {
-      snprintf(err, err_len,
-               "cannot resolve the repository default branch (pass base explicitly)");
+      snprintf(err, err_len, "cannot resolve the repository default branch (pass base explicitly)");
       return -1;
    }
    return 0;
