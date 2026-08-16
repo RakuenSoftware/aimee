@@ -46,6 +46,20 @@ family owns one event kind and its operations dispatch on an op id inside the
 payload, so DB1 needs one stage per domain rather than one per call -- roughly
 sixty domains against a ceiling of 255.
 
+The catalog is a complete map, not a wish list: every DB1 source belongs to
+exactly one family or to `infrastructure_sources` -- the connection, schema,
+write path and the module's own handler, which have no callers to migrate. An
+unclaimed domain is one nobody is planning to move, and a twice-claimed one is
+two families expecting to own the same rows; both are refused.
+
+Some sources must migrate together, and `coupled_sources` says which and why. A
+family is the unit that activates, so two halves of one ledger in two families
+is a plan to separate them. The delegate ledger is coupled for a recorded
+reason: `server_compute.c` keeps the reservation beside the launch because a
+ledger across a boundary from the launch left paid-for jobs that nothing could
+replay, and a lookup that fails reads as "no reservation" and launches a second
+one.
+
 Each family also records which DB1 sources the daemon has stopped linking, and
 that half IS machine-checked. The plan and the proof are separate on purpose: a
 DB1 source usually holds more than one domain, so "covers" over-states -- family

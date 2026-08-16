@@ -107,7 +107,8 @@ def validate_families(raw: object) -> dict[str, dict[str, object]]:
     families: dict[str, dict[str, object]] = {}
     for index, entry in enumerate(raw, start=1):
         family = keys(entry, {"id", "name", "event_kind", "active", "doc",
-                              "covers", "retired_sources"}, f"families[{index-1}]")
+                              "covers", "sources", "retired_sources"},
+                      f"families[{index-1}]")
         # Dense from one, because a family id is its future stage id and stage
         # IDs must be dense from one in the process contract.
         if integer(family["id"], f"families[{index-1}].id", 1, 255) != index:
@@ -130,6 +131,12 @@ def validate_families(raw: object) -> dict[str, dict[str, object]]:
         # family has actually taken. retired_sources is the checked half.
         text(family["doc"], f"{name}.doc", 512)
         text(family["covers"], f"{name}.covers", 512)
+        sources = family["sources"]
+        if not isinstance(sources, list) or not sources or sources != sorted(set(sources)):
+            fail("family-sources", f"{name}.sources must be sorted, unique and nonempty")
+        for source in sources:
+            if not isinstance(source, str) or not NAME.fullmatch(source):
+                fail("family-source-name", f"{name} names invalid source {source!r}")
         retired = family["retired_sources"]
         if not isinstance(retired, list) or retired != sorted(set(retired)):
             fail("retired-sources", f"{name}.retired_sources must be sorted and unique")
@@ -236,8 +243,9 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
 
 def validate_catalog(value: object) -> dict[str, object]:
     catalog = keys(value, {
-        "schema_version", "module", "wire_version", "catalog_complete", "families",
-        "result_codes", "operations",
+        "schema_version", "module", "wire_version", "catalog_complete",
+        "infrastructure_sources", "coupled_sources", "families", "result_codes",
+        "operations",
     }, "catalog")
     if catalog["schema_version"] != 1:
         fail("schema-version", "schema_version must equal 1")
@@ -259,6 +267,79 @@ def validate_catalog(value: object) -> dict[str, object]:
     catalog["families"] = families
     catalog["operations"] = operations
     return catalog
+
+
+def validate_source_map(root: Path, catalog: dict[str, object]) -> None:
+    """Every DB1 source belongs to exactly one family, or to infrastructure.
+
+    This is what makes the catalog a map rather than a wish list: a domain
+    nobody claimed is a domain nobody is planning to move, and a domain claimed
+    twice is two families expecting to own the same rows.
+
+    Infrastructure is named separately because it has no callers to migrate --
+    the connection, the schema, the write path and the module's own handler.
+    """
+    try:
+        on_disk = {path.stem for path in (root / SOURCE_DIR).glob("*.c")}
+    except OSError as exc:
+        fail("unreadable", f"cannot list {SOURCE_DIR}: {exc}")
+
+    infrastructure = catalog["infrastructure_sources"]
+    if not isinstance(infrastructure, list) or infrastructure != sorted(set(infrastructure)):
+        fail("infrastructure", "infrastructure_sources must be sorted and unique")
+
+    families = catalog["families"]
+    assert isinstance(families, dict)
+    owner: dict[str, str] = {}
+    for name, family in families.items():
+        for source in family["sources"]:
+            if source in owner:
+                fail("source-duplicate",
+                     f"{source!r} is claimed by both {owner[source]!r} and {name!r}")
+            owner[source] = name
+    for source in infrastructure:
+        if source in owner:
+            fail("source-duplicate",
+                 f"{source!r} is both infrastructure and claimed by {owner[source]!r}")
+        owner[source] = "(infrastructure)"
+
+    for source in sorted(set(owner) - on_disk):
+        fail("source-absent", f"{source!r} is claimed but is not in {SOURCE_DIR}")
+    for source in sorted(on_disk - set(owner)):
+        fail("source-unclaimed",
+             f"{source!r} is in {SOURCE_DIR} but no family or infrastructure claims it")
+
+
+def validate_coupled_sources(catalog: dict[str, object]) -> None:
+    """Sources that must migrate together must sit in one family.
+
+    A family is the unit that activates, so two halves of one ledger in two
+    families is a plan to split them -- and the coupling here exists because
+    splitting this particular ledger already cost paid-for work that could not
+    be replayed.
+    """
+    groups = catalog["coupled_sources"]
+    if not isinstance(groups, list):
+        fail("coupled", "coupled_sources must be an array")
+    families = catalog["families"]
+    assert isinstance(families, dict)
+    owner = {source: name for name, family in families.items() for source in family["sources"]}
+    for index, group in enumerate(groups):
+        entry = keys(group, {"sources", "reason"}, f"coupled_sources[{index}]")
+        sources = entry["sources"]
+        if not isinstance(sources, list) or len(sources) < 2 or sources != sorted(set(sources)):
+            fail("coupled-sources",
+                 f"coupled_sources[{index}].sources must be sorted, unique and hold at least two")
+        text(entry["reason"], f"coupled_sources[{index}].reason", 512)
+        holders = {owner.get(source) for source in sources}
+        if None in holders:
+            missing = sorted(s for s in sources if s not in owner)
+            fail("coupled-unclaimed",
+                 f"coupled_sources[{index}] names unclaimed source(s) {missing}")
+        if len(holders) != 1:
+            fail("coupled-split",
+                 f"coupled_sources[{index}] is split across families {sorted(holders)}: "
+                 f"{entry['reason']}")
 
 
 def validate_retired_sources(root: Path, catalog: dict[str, object]) -> None:
@@ -518,6 +599,8 @@ def run(root: Path, write: bool = False) -> None:
         (root / HEADER).write_text(header_bytes(catalog), encoding="utf-8")
     validate_header(root, catalog)
     validate_process_contract(root, catalog)
+    validate_source_map(root, catalog)
+    validate_coupled_sources(catalog)
     validate_retired_sources(root, catalog)
     families = catalog["families"]
     operations = catalog["operations"]
