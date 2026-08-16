@@ -2,6 +2,10 @@
 # embedder-sweep.sh: benchmark multiple embedding configurations on LoCoMo and
 # LongMemEval and produce a comparative summary.
 #
+# The Aimee direct entry points invoked below were removed, so this is not
+# currently runnable coverage. Their Go replacement is specified in
+# docs/proposals/pending/dataset-benchmark-direct-track.md.
+#
 # Each candidate is identified by a short name and an embedding command that
 # accepts text on stdin and writes a JSON float array to stdout.
 #

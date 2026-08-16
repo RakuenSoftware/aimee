@@ -7,7 +7,9 @@
 # --target  Target name (default: aimee). Supports: aimee, model_only, small_agent, rag_chromadb.
 # --bench   Comma-separated benchmark ids (default: locomo,longmemeval_s).
 #
-# The aimee target dispatches to existing bench_aimee_direct.py scripts.
+# The aimee LoCoMo/LongMemEval routes still dispatch to removed
+# bench_aimee_direct.py scripts and are not working coverage. The pending Go
+# replacement is specified in docs/proposals/pending/dataset-benchmark-direct-track.md.
 # Adapter-based targets (model_only, small_agent, rag_chromadb) dispatch through
 # benchmarks/targets/<name>/adapter.py.
 

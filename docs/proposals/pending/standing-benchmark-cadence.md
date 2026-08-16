@@ -23,24 +23,29 @@ measured, enforceable fact instead of a hope.
 
 ## §0 What already exists
 
-- **Harness is complete.** `benchmarks/locomo/bench_aimee_direct.py`,
-  `bench_aimee_llm.py`, and the comparison baselines (`bench_bm25_llm.py`,
-  `bench_mem0_llm.py`, `bench_rag_chromadb_llm.py`); `benchmarks/longmemeval/`;
-  `benchmarks/memory/`; `benchmarks/code-vector-graph/`. Results docs
-  (`BENCHMARK_RESULTS.md`, `EVAL_CONFIG.md`) exist per suite.
+- **The Aimee direct harness is not complete.** `benchmarks/suite/run-direct.sh` and
+  `benchmarks/embedder-sweep.sh` reference `benchmarks/locomo/bench_aimee_direct.py` and
+  `benchmarks/longmemeval/bench_aimee_direct.py`, but neither entry point exists. The pending
+  [Go direct-track proposal](dataset-benchmark-direct-track.md) owns restoring that deterministic
+  path over disposable memory.
+- **LLM and comparison tracks exist.** Both dataset directories retain `bench_aimee_llm.py` and the
+  comparison baselines (`bench_bm25_llm.py`, `bench_mem0_llm.py`,
+  `bench_rag_chromadb_llm.py`); `benchmarks/memory/` and `benchmarks/code-vector-graph/` also remain.
+  Results docs (`BENCHMARK_RESULTS.md`, `EVAL_CONFIG.md`) exist per suite.
 - **Make targets exist:** `bench`, `bench-check`, `bench-baseline`,
   `memory-retrieval-eval-check`, `curator-eval-check`.
 - **CI runs none of the full datasets.** `.github/workflows/bench-smoke.yml` is
   PR-triggered and mini-only; `benchmarks/check_provisioning.py` gates coverage
   but scores nothing.
 
-The pieces to *run* a benchmark exist; the missing thing is a scheduler, a
-results store, and a drift gate.
+The pieces to run every proposed full benchmark do not yet exist. The scheduler, results store, and
+drift gate must not count the broken direct dispatch as coverage and can consume it only after the
+Go direct-track proposal produces complete, compatible results.
 
 ## §1 Scheduled full-suite workflow
 
-Add `.github/workflows/bench-nightly.yml` (`on: schedule:` — nightly for the
-cheap suites, weekly for the LLM-graded ones, plus `workflow_dispatch`). It
+After the direct track is delivered, add `.github/workflows/bench-nightly.yml` (`on: schedule:` —
+nightly for the cheap suites, weekly for the LLM-graded ones, plus `workflow_dispatch`). It
 provisions the real datasets (gated behind a repo secret / self-hosted runner
 where the datasets or an LLM endpoint are needed), runs the full `bench_*`
 scripts, and writes scored JSON. Keep it OFF the PR path — PRs keep the fast
