@@ -139,6 +139,20 @@ func TestExecutionStageRejectsMalformedTermination(t *testing.T) {
 	}
 }
 
+func TestExecutionStageRejectsTerminationWithMismatchedExecutionCap(t *testing.T) {
+	executor := &fixedExecutor{result: delegatecontract.InvocationResult{
+		Version: delegatecontract.WireVersion, Status: "failed", Error: "bad termination",
+		Termination: &delegatecontract.TerminationDiagnostic{
+			Kind: delegatecontract.TerminationTurnCap, MaxTurns: 2, ObservedTurns: 2,
+		},
+	}}
+	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion,
+		Role: "review", Persona: "reviewer", Prompt: "inspect", ExecutionTimeoutMS: 1000})
+	if reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request); status != bus.ModuleStatusInternal || reply != nil {
+		t.Fatalf("termination with a mismatched execution cap crossed the wire: status=%d reply=%s", status, reply)
+	}
+}
+
 func TestGroupPlanStageCanonicalizesAndReturnsAssignments(t *testing.T) {
 	executor := &planningExecutor{models: []string{"security-agent", "qa-agent"}}
 	request, _ := json.Marshal(delegatecontract.GroupPlan{Version: delegatecontract.WireVersion,

@@ -145,7 +145,8 @@ func NewHandler(executor Executor) bus.ModuleHandler {
 			(result.Status != "done" && result.Status != "failed") ||
 			(result.Status == "done" && result.Termination != nil) ||
 			(result.Termination != nil &&
-				!delegatecontract.ValidTerminationDiagnostic(result.Termination)) {
+				(!delegatecontract.ValidTerminationDiagnostic(result.Termination) ||
+					result.Termination.ExecutionTimeoutMS != decoded.ExecutionTimeoutMS)) {
 			return nil, bus.ModuleStatusInternal
 		}
 		response, err := json.Marshal(result)

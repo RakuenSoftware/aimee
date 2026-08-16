@@ -223,7 +223,7 @@ func TestDelegateResultPreservesTurnCapDiagnostic(t *testing.T) {
 	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed",
 		Error: ErrDelegateTurnCap.Error(), Termination: &TerminationDiagnostic{
 			Kind: TerminationTurnCap, MaxTurns: 2, ObservedTurns: 3,
-			ExecutionTimeoutMS: 5000, ElapsedMS: 1250, Detail: "bounded detail",
+			ExecutionTimeoutMS: 1000, ElapsedMS: 1250, Detail: "bounded detail",
 		}}}
 	client := &BusClient{caller: caller, deadline: time.Second}
 	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
@@ -241,7 +241,7 @@ func TestDelegateResultPreservesTurnCapDiagnostic(t *testing.T) {
 func TestDelegateResultPreservesProducerCancellation(t *testing.T) {
 	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed",
 		Error: context.Canceled.Error(), Termination: &TerminationDiagnostic{
-			Kind: TerminationCancelled, ExecutionTimeoutMS: 5000, ElapsedMS: 250,
+			Kind: TerminationCancelled, ExecutionTimeoutMS: 1000, ElapsedMS: 250,
 		}}}
 	client := &BusClient{caller: caller, deadline: time.Second}
 	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
@@ -252,15 +252,25 @@ func TestDelegateResultPreservesProducerCancellation(t *testing.T) {
 }
 
 func TestDelegateResultRejectsMalformedTermination(t *testing.T) {
-	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed",
-		Error: ErrDelegateTurnCap.Error(), Termination: &TerminationDiagnostic{
+	for name, termination := range map[string]*TerminationDiagnostic{
+		"turn count": {
 			Kind: TerminationTurnCap, MaxTurns: 2, ObservedTurns: 0,
-		}}}
-	client := &BusClient{caller: caller, deadline: time.Second}
-	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
-	if err == nil || !strings.Contains(err.Error(), "invalid terminal result") ||
-		errors.Is(err, ErrDelegateTurnCap) {
-		t.Fatalf("malformed termination was accepted: %v", err)
+			ExecutionTimeoutMS: 1000,
+		},
+		"omitted execution cap": {
+			Kind: TerminationTurnCap, MaxTurns: 2, ObservedTurns: 2,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "failed",
+				Error: ErrDelegateTurnCap.Error(), Termination: termination}}
+			client := &BusClient{caller: caller, deadline: time.Second}
+			_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "qa", Prompt: "review"})
+			if err == nil || !strings.Contains(err.Error(), "invalid terminal result") ||
+				errors.Is(err, ErrDelegateTurnCap) {
+				t.Fatalf("malformed termination was accepted: %v", err)
+			}
+		})
 	}
 }
 

@@ -273,7 +273,8 @@ func (c *BusClient) Delegate(ctx context.Context, request DelegateRequest) (Dele
 	}
 	if result.Version != WireVersion || (result.Status != "done" && result.Status != "failed") ||
 		(result.Status == "done" && result.Termination != nil) ||
-		(result.Termination != nil && !ValidTerminationDiagnostic(result.Termination)) {
+		(result.Termination != nil && (!ValidTerminationDiagnostic(result.Termination) ||
+			result.Termination.ExecutionTimeoutMS != wire.ExecutionTimeoutMS)) {
 		return DelegateResult{}, &DelegateExecutionError{
 			Err:        errors.New("delegate module returned an invalid terminal result"),
 			Dispatched: true, CostKnown: false}
