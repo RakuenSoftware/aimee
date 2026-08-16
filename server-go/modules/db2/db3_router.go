@@ -62,6 +62,7 @@ type db3Selection struct {
 	principal  uint32
 	generation uint64
 	fallback   bool
+	explicit   bool
 }
 
 // DB3Router is DB2's selection policy between its own pgvector implementation
@@ -105,12 +106,41 @@ func (r *DB3Router) ObserveCapabilities(principal, handle uint32, sequence uint6
 	r.providers[principal] = db3Provider{
 		handle: handle, sequence: sequence, capabilities: capabilities,
 	}
+	if !r.selection.explicit {
+		r.selectDeployedDefaultLocked()
+	}
 	return nil
 }
 
-// RemoveProvider removes one attachment's live evidence without clearing an
-// explicit selection. Keeping the selection makes disappearance fail closed;
-// only an explicit route request can return to the pgvector default.
+func eligibleDB3Provider(capabilities protocol.Capabilities) bool {
+	return capabilities.Ready &&
+		capabilities.Operations&protocol.OperationSearch != 0 &&
+		capabilities.Metrics&protocol.MetricCosine != 0 &&
+		capabilities.Filters&protocol.FilterExact != 0
+}
+
+// selectDeployedDefaultLocked chooses the stable principal ordering used by
+// deployment admission. Every ready provider remains an apply observer; the
+// lowest eligible principal serves portable reads unless control installed an
+// explicit override. Principal identities are deployment-owned and unique, so
+// the result does not depend on capability arrival order.
+func (r *DB3Router) selectDeployedDefaultLocked() {
+	selection := db3Selection{}
+	for principal, provider := range r.providers {
+		if !eligibleDB3Provider(provider.capabilities) ||
+			(selection.principal != 0 && principal >= selection.principal) {
+			continue
+		}
+		selection.principal = principal
+		selection.generation = provider.capabilities.Generation
+	}
+	r.selection = selection
+}
+
+// RemoveProvider removes one attachment's live evidence. An automatic route
+// deterministically advances to the next deployed provider (or pgvector when
+// none remains). An explicit route stays pinned and therefore fails closed if
+// its selected provider disappears.
 func (r *DB3Router) RemoveProvider(principal, handle uint32) bool {
 	if r == nil || principal == 0 {
 		return false
@@ -122,6 +152,9 @@ func (r *DB3Router) RemoveProvider(principal, handle uint32) bool {
 		return false
 	}
 	delete(r.providers, principal)
+	if !r.selection.explicit {
+		r.selectDeployedDefaultLocked()
+	}
 	return true
 }
 
@@ -146,7 +179,10 @@ func (r *DB3Router) Route(request protocol.RouteRequest) protocol.RouteReply {
 	case protocol.RouteQuery:
 		return r.routeSnapshot(request.RequestID, protocol.RouteOK)
 	case protocol.RouteClear:
+		// Clear removes the operator override, not the deployment policy. A ready
+		// deployed provider therefore becomes the portable-read default again.
 		r.selection = db3Selection{}
+		r.selectDeployedDefaultLocked()
 		return r.routeSnapshot(request.RequestID, protocol.RouteOK)
 	case protocol.RouteSelect:
 		provider, exists := r.providers[request.Principal]
@@ -154,9 +190,7 @@ func (r *DB3Router) Route(request protocol.RouteRequest) protocol.RouteReply {
 			return r.routeSnapshot(request.RequestID, protocol.RouteNotFound)
 		}
 		capabilities := provider.capabilities
-		if !capabilities.Ready || capabilities.Operations&protocol.OperationSearch == 0 ||
-			capabilities.Metrics&protocol.MetricCosine == 0 ||
-			capabilities.Filters&protocol.FilterExact == 0 {
+		if !eligibleDB3Provider(capabilities) {
 			return r.routeSnapshot(request.RequestID, protocol.RouteNotReady)
 		}
 		if capabilities.Generation != request.CapabilityGeneration {
@@ -164,7 +198,7 @@ func (r *DB3Router) Route(request protocol.RouteRequest) protocol.RouteReply {
 		}
 		r.selection = db3Selection{
 			principal: request.Principal, generation: capabilities.Generation,
-			fallback: request.Fallback,
+			fallback: request.Fallback, explicit: true,
 		}
 		return r.routeSnapshot(request.RequestID, protocol.RouteOK)
 	default:
@@ -268,10 +302,7 @@ func (r *DB3Router) Search(ctx context.Context, request protocol.SearchRequest) 
 	} else {
 		outcome.Route = DB3External
 		capabilities := provider.capabilities
-		if !providerExists || !capabilities.Ready ||
-			capabilities.Operations&protocol.OperationSearch == 0 ||
-			capabilities.Metrics&protocol.MetricCosine == 0 ||
-			capabilities.Filters&protocol.FilterExact == 0 ||
+		if !providerExists || !eligibleDB3Provider(capabilities) ||
 			capabilities.Generation != selection.generation ||
 			request.RequiredGeneration != selection.generation ||
 			uint32(len(request.Vector)) > capabilities.MaxDimension || request.TopK > capabilities.MaxTopK {

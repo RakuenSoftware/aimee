@@ -3,10 +3,10 @@
 ## Purpose and ownership
 
 `db3` is the provider-neutral vector serving contract owned by DB2. Pgvector remains physically
-inside DB2, shares DB2's PostgreSQL transactions and schema, and is the default DB3 behavior. An
-external provider such as Qdrant can replace only portable serving operations after it is admitted,
-ready, and explicitly selected. DB2 and its pgvector copy remain the canonical integrity and
-recovery authority.
+inside DB2, shares DB2's PostgreSQL transactions and schema, and serves portable reads only while no
+ready external DB3 provider is deployed. An admitted, ready external provider such as Qdrant becomes
+the portable-read default automatically. DB2 and its pgvector copy remain the canonical integrity,
+transaction-coupled read, and recovery authority.
 
 DB3 provider events are protocol events, not module stages. The canonical registry at
 `src/modules/protocol-contracts.json` reserves the high half of the 32-bit event-kind space for
@@ -33,11 +33,14 @@ generation must be recognized without duplicating an effect. One failed or laggi
 changes which provider serves reads.
 
 Portable reads are request/reply, never observer fanout. Exactly one admitted and ready external
-principal may hold the selected search route. Installing several providers does not imply score
-comparison, fusion, federation, or multiple reads. With no selected external provider, DB2 uses its
-internal pgvector implementation. If a selected provider is unavailable, DB2 fails closed unless
+principal holds the search route. Deployment admission selects the lowest eligible principal, so
+multiple providers have a deterministic default independent of capability arrival order; all remain
+write observers. Control may explicitly override that choice, and `clear` restores the deployed
+default. With no ready external provider, DB2 uses its internal pgvector implementation. Reads that
+depend on transaction-local or snapshot-consistent PostgreSQL state never enter this router and
+remain on DB2/pgvector. If an explicitly selected provider is unavailable, DB2 fails closed unless
 the route explicitly enables fallback; fallback records the selected principal, failure, and
-`explicit_fallback` provenance.
+`explicit_fallback` provenance. Automatic selection never silently opts into fallback.
 
 DB3 returns bounded opaque point IDs and finite scores. DB2 rehydrates every candidate and repeats
 tenant, project, lifecycle, quarantine, and classification checks. Provider responses never confer
@@ -59,7 +62,7 @@ malformed. Provider identity is never a payload field.
 | `search` request | Request ID, exact required generation, workspace/project scope, record type, bounded top-K, and finite vector. At least one scope is present. Request/reply fragmentation and cancellation use the bus directly. |
 | `search` success | Matching request ID and exact generation, then at most requested top-K unique positive point IDs with finite scores. |
 | `search` failure | Matching request ID and `invalid_request`, `unavailable`, `retryable`, or `internal`; provider prose and backend details never cross the boundary. |
-| `route` request | `query`, `select`, or `clear`, a request ID, and, only for select, the authenticated provider principal, observed capability generation, and explicit-fallback bit. |
+| `route` request | `query`, `select`, or `clear`, a request ID, and, only for select, the authenticated provider principal, observed capability generation, and explicit-fallback bit. `clear` removes an explicit override and restores the deterministic deployed-provider default. |
 | `route` reply | Typed result (`ok`, `not_found`, `not_ready`, `generation_conflict`, or `invalid`) plus the current selected principal, provider generation, and fallback bit. A failed selection leaves the previous route intact. |
 
 Version one is additive only. A new closed bit or operation needs a catalog update and conformance
@@ -91,11 +94,12 @@ bounded vector, and top-K fields; TLS scope hints do not cross the boundary. Inj
 the internal pgvector implementation, the authenticated selected provider, and DB2's authoritative
 candidate check without importing a provider or private KB header.
 
-The route has four tested outcomes: default pgvector when no external principal is selected,
-external-only serving when the selected principal is ready, typed failure when it is unavailable or
-malformed and fallback is disabled, and `explicit_fallback` with the original external error retained
-when fallback is enabled. Candidate IDs must be positive and unique, generations and request IDs must
-match, vectors and scores must be finite, and every result passes the injected DB2 authorization check.
+The route has four tested outcomes: pgvector when no ready external principal is deployed,
+external-only serving through the deterministic deployed default or an explicit override, typed
+failure when that provider is unavailable or malformed and fallback is disabled, and
+`explicit_fallback` with the original external error retained when an override enables fallback.
+Candidate IDs must be positive and unique, generations and request IDs must match, vectors and scores
+must be finite, and every result passes the injected DB2 authorization check.
 
 The catalog at `src/modules/db2/eventcontract/db3.json` generates the public C constants and Go
 package identity. The shared `db3-wire-v1.json` fixture now pins all nine payload shapes:
@@ -109,11 +113,12 @@ Capabilities never self-assert identity: principal, attachment handle, and seque
 host-stamped bus frame. A new attachment handle may restart its sequence, while duplicate or stale
 evidence from one handle is rejected. Ready search providers declare their generation, supported
 operation, metric, and exact-filter bits, and dimension/top-K limits. Selection requires cosine
-search and exact scope filtering. Route selection is a compare-and-select against that observed
-generation, which remains bound until another successful select or clear; a later capability
-generation makes the old selection unavailable rather than silently advancing it. Removing or
-losing a selected provider does not silently clear the route; searches fail closed or take the
-route's explicit pgvector fallback.
+search and exact scope filtering. Ready admission refreshes the deterministic deployed default unless
+control has installed an override. Explicit route selection is a compare-and-select against the
+observed generation, which remains bound until another successful select or clear; a later capability
+generation makes the explicit selection unavailable rather than silently advancing it. Removing an
+automatic default advances to the next eligible principal; losing an explicitly selected provider
+does not silently clear the route, so searches fail closed or take its explicit pgvector fallback.
 
 The authenticated event-bus tests admit DB2 plus two distinct provider observers, deliver one
 committed operation and its duplicate to both, prove each provider records only one effect, route a
