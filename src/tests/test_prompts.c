@@ -174,6 +174,11 @@ int main(void)
       assert(strstr(principles, "Prefer composition over inheritance") != NULL);
       assert(strstr(principles, "Use structured APIs or parsers") != NULL);
       assert(strstr(principles, "Add abstractions only when") != NULL);
+      assert(strstr(principles, "without waiting to be asked") != NULL);
+      assert(strstr(principles, "test results as evidence, not permission") != NULL);
+      assert(strstr(principles, "use compatible checks") == NULL);
+      assert(strstr(principles, "Red before green") == NULL);
+      assert(strstr(principles, "Done means verified") == NULL);
 
       char *p = prompt_prepend_code_principles("BASE_SYSTEM");
       assert(p);
