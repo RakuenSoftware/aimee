@@ -31,7 +31,11 @@ behind `kb_module_db2_health_probe`, but the existing in-process health callers 
 until the atomic activation slice moves every lifecycle caller and the DB2 DSN together.
 Go consumers may use `server-go/db2.Client` to call that same C-served stage. The eventual
 `server-go/modules/db2` provider imports the shared contract rather than defining a second wire
-format; it remains nonselected until full C-versus-Go replay and the atomic ownership cutover.
+format. Its first nonselected lifecycle handler now ports the bounded readiness query behind an
+injected database seam and replays `tests/baselines/modules/db2-wire-v1.json` byte-for-byte. It is
+not registered by `aimee-module`, does not open the DSN or own a pool/schema, and cannot serve a live
+runtime placement. Live end-to-end verification remains gated on the later activation slice; the
+provider remains nonselected until full C-versus-Go replay and the atomic ownership cutover.
 
 ## Providers and readiness
 
