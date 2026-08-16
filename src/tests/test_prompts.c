@@ -177,7 +177,7 @@ int main(void)
       assert(strstr(principles, "without waiting to be asked") != NULL);
       assert(strstr(principles, "deterministically distinguish") != NULL);
       assert(strstr(principles, "controlling the causal boundary") != NULL);
-      assert(strstr(principles, "never optimize implementation or tests for fewer") != NULL);
+      assert(strstr(principles, "not by fewer lines or more tests") != NULL);
       assert(strstr(principles, "test results as evidence, not permission") != NULL);
       assert(strstr(principles, "narrowest relevant existing test command once") != NULL);
       assert(strstr(principles, "one direct equivalent") != NULL);
