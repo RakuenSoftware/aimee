@@ -38,6 +38,18 @@ class CatalogTests(unittest.TestCase):
         (root / contract.CATALOG).write_text(json.dumps(catalog, indent=2) + "\n",
                                              encoding="utf-8")
 
+    def reserved(self, catalog: dict) -> dict:
+        """The first still-reserved family.
+
+        Looked up rather than indexed: activating a family is the whole point of
+        this catalog, and an index would quietly retarget these tests at an
+        active one the moment that happened.
+        """
+        for family in catalog["families"]:
+            if not family["active"]:
+                return family
+        self.skipTest("no reserved family remains to exercise")
+
     def assertRule(self, root: Path, rule: str) -> None:
         with self.assertRaises(contract.ContractError) as caught:
             contract.run(root)
@@ -60,7 +72,7 @@ class CatalogTests(unittest.TestCase):
         try:
             root = Path(tmp.name)
             catalog = self.catalog(root)
-            catalog["families"][1]["event_kind"] = 12000
+            self.reserved(catalog)["event_kind"] = 12000
             self.write(root, catalog)
             self.assertRule(root, "family-event-kind")
         finally:
@@ -73,7 +85,7 @@ class CatalogTests(unittest.TestCase):
             root = Path(tmp.name)
             catalog = self.catalog(root)
             operation = copy.deepcopy(catalog["operations"][0])
-            operation["family"] = catalog["families"][1]["name"]
+            operation["family"] = self.reserved(catalog)["name"]
             operation["name"] = "borrowed"
             catalog["operations"].append(operation)
             self.write(root, catalog)
@@ -98,11 +110,13 @@ class CatalogTests(unittest.TestCase):
         tmp = sandbox()
         try:
             root = Path(tmp.name)
+            reserved = self.reserved(self.catalog(root))
+            symbol = f"AIMEE_DB1_EVENT_{reserved['name'].upper()}"
             header = root / contract.HEADER
             header.write_text(
                 header.read_text(encoding="utf-8").replace(
                     "#endif /* AIMEE_DB1_MODULE_API_H */",
-                    "#define AIMEE_DB1_EVENT_GIT_OWNERSHIP 11778u\n"
+                    f"#define {symbol} {reserved['event_kind']}u\n"
                     "#endif /* AIMEE_DB1_MODULE_API_H */"),
                 encoding="utf-8")
             self.assertRule(root, "header-reserved")

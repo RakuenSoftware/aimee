@@ -25,6 +25,7 @@ when Phase B has moved those callers, not before.
 | Stage | Event kind | Owns |
 | --- | --- | --- |
 | 1 `db1-economizer-state` | `11777` | the economizer's per-conversation reducer state |
+| 2 `db1-git-ownership` | `11778` | which session owns which branch, for the MCP git flows |
 
 Stage 1 is first because it has exactly one production caller, so it proves the
 boundary without a wide cutover. Its callers now reach it over the bus: the
@@ -49,7 +50,7 @@ constants for a family nothing serves yet.
 | Family | Event kind | State |
 | --- | --- | --- |
 | 1 `economizer_state` | `11777` | active |
-| 2 `git_ownership` | `11778` | reserved |
+| 2 `git_ownership` | `11778` | active |
 | 3 `sessions` | `11779` | reserved |
 | 4 `agent_work` | `11780` | reserved |
 | 5 `delegation` | `11781` | reserved |

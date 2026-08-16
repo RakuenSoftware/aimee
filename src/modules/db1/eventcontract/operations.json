@@ -15,7 +15,7 @@
       "id": 2,
       "name": "git_ownership",
       "event_kind": 11778,
-      "active": false,
+      "active": true,
       "covers": "git_ownership, project_clones"
     },
     {
@@ -130,6 +130,129 @@
       "reply": {
         "payload": "none",
         "max_bytes": 0
+      }
+    },
+    {
+      "family": "git_ownership",
+      "id": 1,
+      "name": "ownership_upsert",
+      "wire_format": "db1-fields-v1",
+      "scope": "repository",
+      "transaction": "single",
+      "idempotency": "idempotent",
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          "key",
+          "branch",
+          "session"
+        ]
+      },
+      "reply": {
+        "payload": "none",
+        "max_bytes": 0
+      }
+    },
+    {
+      "family": "git_ownership",
+      "id": 2,
+      "name": "ownership_delete",
+      "wire_format": "db1-fields-v1",
+      "scope": "repository",
+      "transaction": "single",
+      "idempotency": "idempotent",
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          "key",
+          "branch"
+        ]
+      },
+      "reply": {
+        "payload": "none",
+        "max_bytes": 0
+      }
+    },
+    {
+      "family": "git_ownership",
+      "id": 3,
+      "name": "ownership_owner_get",
+      "wire_format": "db1-fields-v1",
+      "scope": "repository",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          "key",
+          "branch"
+        ]
+      },
+      "reply": {
+        "payload": "text",
+        "max_bytes": 512
+      }
+    },
+    {
+      "family": "git_ownership",
+      "id": 4,
+      "name": "ownership_branch_for_session",
+      "wire_format": "db1-fields-v1",
+      "scope": "repository",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          "key",
+          "session"
+        ]
+      },
+      "reply": {
+        "payload": "text",
+        "max_bytes": 512
+      }
+    },
+    {
+      "family": "git_ownership",
+      "id": 5,
+      "name": "ownership_session_by_prefix",
+      "wire_format": "db1-fields-v1",
+      "scope": "global",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          "prefix"
+        ]
+      },
+      "reply": {
+        "payload": "text",
+        "max_bytes": 512
       }
     }
   ]

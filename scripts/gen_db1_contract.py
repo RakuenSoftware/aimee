@@ -40,11 +40,11 @@ KIND_BASE = 4096 + PRINCIPAL_REF * 256
 MAX_BYTES = 1_048_576
 NAME = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 RESULT_CODES = ("ok", "missing", "invalid", "too_long", "failed")
-SCOPES = ("none", "conversation", "session")
+SCOPES = ("none", "conversation", "session", "repository", "global")
 TRANSACTIONS = ("none", "single")
 IDEMPOTENCY = ("safe", "idempotent", "unsafe")
-WIRE_FORMATS = ("db1-keyed-blob-v1",)
-PAYLOADS = ("none", "state")
+WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v1")
+PAYLOADS = ("none", "state", "text")
 
 
 class ContractError(ValueError):
@@ -185,10 +185,21 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
         fields = request["fields"]
         if not isinstance(fields, list) or not fields:
             fail("request-fields", f"{name} request must declare at least one field")
-        # Every operation is keyed: DB1 rows belong to a conversation or session,
-        # and an unkeyed read would cross that boundary.
-        if fields[0] != "key":
-            fail("request-key", f"{name} request must take its key first")
+        # A scoped operation must take its scoping key FIRST, because that key is
+        # the boundary: DB1 rows belong to a conversation, session or repository,
+        # and reading without one crosses it.
+        #
+        # A genuinely global lookup has no such key -- searching for a session by
+        # prefix spans repositories by definition -- so rather than dress one up
+        # as scoped, the catalog makes it say "global" out loud. The declaration
+        # is the audit trail: unscoped access is visible in review instead of
+        # hidden behind a field that is only conventionally a key.
+        if operation["scope"] == "global":
+            if fields[0] == "key":
+                fail("request-global",
+                     f"{name} is declared global but takes a key; scope it instead")
+        elif operation["scope"] != "none" and fields[0] != "key":
+            fail("request-key", f"{name} is scoped, so it must take its key first")
         for field in fields:
             if not isinstance(field, str) or not NAME.fullmatch(field):
                 fail("request-field-name", f"{name} declares invalid request field {field!r}")

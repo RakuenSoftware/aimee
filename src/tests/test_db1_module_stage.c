@@ -15,6 +15,7 @@
 
 #include "checkpoints.h"
 #include "db1.h"
+#include "git_ownership.h"
 #include "platform_test_util.h"
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
@@ -147,12 +148,220 @@ static void test_over_long_state_is_refused_not_truncated(void)
    printf("  PASS: test_over_long_state_is_refused_not_truncated\n");
 }
 
+static aimee_module_status_t call_stage(uint32_t stage, const uint8_t *req, uint32_t req_len,
+                                        uint8_t *resp, uint32_t *resp_len)
+{
+   aimee_module_invocation_t invocation;
+   memset(&invocation, 0, sizeof invocation);
+   invocation.stage_id = stage;
+   *resp_len = 0;
+   return aimee_module_handler(&invocation, req, req_len, resp, 4096u, resp_len, NULL);
+}
+
+/* op | field_count | (len | bytes) * count */
+static uint32_t fields_frame(uint8_t *out, uint32_t op, const char *const *values, uint32_t count)
+{
+   uint32_t n = 0;
+   aimee_db1_put_u32(out + n, op);
+   n += 4;
+   aimee_db1_put_u32(out + n, count);
+   n += 4;
+   for (uint32_t i = 0; i < count; ++i)
+   {
+      uint32_t len = (uint32_t)strlen(values[i]);
+      aimee_db1_put_u32(out + n, len);
+      n += 4;
+      memcpy(out + n, values[i], len);
+      n += len;
+   }
+   return n;
+}
+
+/* An unknown stage must not fall through to another family's decoder: the two
+   frames differ, so a mis-dispatched request would be parsed as nonsense. */
+static void test_unknown_stage_is_refused(void)
+{
+   uint8_t req[256], resp[4096];
+   uint32_t resp_len = 0;
+   const char *values[] = {"/repo", "main", "sess-1"};
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_UPSERT, values, 3);
+   assert(call_stage(0u, req, len, resp, &resp_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   assert(call_stage(99u, req, len, resp, &resp_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   printf("  PASS: test_unknown_stage_is_refused\n");
+}
+
+static void test_git_ownership_round_trips(void)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-test-db1-owner-%d.db", platform_tmpdir(), (int)getpid());
+   remove(path);
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   uint8_t req[1024], resp[4096];
+   uint32_t resp_len = 0;
+   const char *upsert[] = {"/repo/one", "feature", "sess-abc123"};
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_UPSERT, upsert, 3);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+
+   /* The owner is readable back through the same boundary that wrote it. */
+   const char *owner_get[] = {"/repo/one", "feature"};
+   len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_OWNER_GET, owner_get, 2);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+   uint32_t value_len = aimee_db1_get_u32(resp + 4);
+   assert(value_len == strlen("sess-abc123"));
+   assert(memcmp(resp + 8, "sess-abc123", value_len) == 0);
+
+   const char *by_session[] = {"/repo/one", "sess-abc123"};
+   len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION, by_session, 2);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+   value_len = aimee_db1_get_u32(resp + 4);
+   assert(value_len == strlen("feature"));
+   assert(memcmp(resp + 8, "feature", value_len) == 0);
+
+   /* A row nobody wrote is MISSING, not a failure: no owner is a real answer. */
+   const char *absent[] = {"/repo/one", "other"};
+   len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_OWNER_GET, absent, 2);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_MISSING);
+   assert(aimee_db1_get_u32(resp + 4) == 0u);
+
+   const char *del[] = {"/repo/one", "feature"};
+   len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_DELETE, del, 2);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+
+   len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_OWNER_GET, owner_get, 2);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_MISSING);
+
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_git_ownership_round_trips\n");
+}
+
+/* Wrong arity is a contract mismatch between caller and module, so it is
+   refused rather than answered from whatever fields did arrive. */
+static void test_git_ownership_malformed_frames_are_refused(void)
+{
+   uint8_t req[1024], resp[4096];
+   uint32_t resp_len = 0;
+   const char *two[] = {"/repo", "main"};
+   const char *three[] = {"/repo", "main", "sess"};
+
+   /* upsert wants three fields */
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_UPSERT, two, 2);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   /* delete wants two */
+   len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_DELETE, three, 3);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   /* an unknown op is not guessed at */
+   len = fields_frame(req, 250u, two, 2);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   /* a truncated header carries no op at all */
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, 7u, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   /* More fields than any op declares, and every one of them WELL FORMED. The
+      decoder reads into a fixed array of AIMEE_DB1_FIELDS_MAX, so the count
+      check is what stops a frame from writing past it -- a truncated frame
+      would be refused by the field reader instead and prove nothing.
+
+      A normal build cannot tell the two apart: with the bound removed the
+      per-op arity check still refuses this frame, so the result is unchanged
+      even though the write already happened. Built with -fsanitize=address it
+      reports a stack-buffer-overflow, which is what this frame is really for. */
+   const char *too_many[] = {"/repo", "main", "sess", "extra"};
+   len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_UPSERT, too_many, AIMEE_DB1_FIELDS_MAX + 1u);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   /* a length that runs past the frame */
+   aimee_db1_put_u32(req, AIMEE_DB1_OP_OWNERSHIP_DELETE);
+   aimee_db1_put_u32(req + 4, 2u);
+   aimee_db1_put_u32(req + 8, 4096u);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, 12u, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   /* an embedded NUL would shorten a path into a different row */
+   uint32_t n = 0;
+   aimee_db1_put_u32(req + n, AIMEE_DB1_OP_OWNERSHIP_DELETE);
+   n += 4;
+   aimee_db1_put_u32(req + n, 2u);
+   n += 4;
+   aimee_db1_put_u32(req + n, 6u);
+   n += 4;
+   memcpy(req + n, "/re\0po", 6);
+   n += 6;
+   aimee_db1_put_u32(req + n, 4u);
+   n += 4;
+   memcpy(req + n, "main", 4);
+   n += 4;
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, n, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   /* trailing bytes mean the arities disagree */
+   len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_DELETE, two, 2);
+   req[len] = 0;
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len + 1u, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   /* an empty field is not a key */
+   const char *empty[] = {"", "main"};
+   len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_DELETE, empty, 2);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   printf("  PASS: test_git_ownership_malformed_frames_are_refused\n");
+}
+
+/* A read distinguishes "no row" from "the store is broken". Flattening the two
+   would report an unreadable database as "no owner recorded", and the caller
+   would take a branch it does not own. */
+static void test_git_ownership_store_failure_is_not_a_miss(void)
+{
+   uint8_t req[512], resp[4096];
+   uint32_t resp_len = 0;
+
+   /* No open database: every read fails rather than finding nothing. */
+   db1_shutdown();
+   const char *owner_get[] = {"/repo/one", "feature"};
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_OWNER_GET, owner_get, 2);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_FAILED);
+
+   /* A write says so too, rather than reporting a silent success. */
+   const char *upsert[] = {"/repo/one", "feature", "sess"};
+   len = fields_frame(req, AIMEE_DB1_OP_OWNERSHIP_UPSERT, upsert, 3);
+   assert(call_stage(AIMEE_DB1_STAGE_GIT_OWNERSHIP, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_FAILED);
+
+   printf("  PASS: test_git_ownership_store_failure_is_not_a_miss\n");
+}
+
 int main(void)
 {
    printf("db1_module_stage:\n");
    test_malformed_frames_are_refused();
    test_save_then_load_round_trips();
    test_over_long_state_is_refused_not_truncated();
+   test_unknown_stage_is_refused();
+   test_git_ownership_round_trips();
+   test_git_ownership_malformed_frames_are_refused();
+   test_git_ownership_store_failure_is_not_a_miss();
    printf("db1_module_stage: ok\n");
    return 0;
 }

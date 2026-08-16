@@ -654,6 +654,11 @@
           "id": 1,
           "name": "db1-economizer-state",
           "event_kind": 11777
+        },
+        {
+          "id": 2,
+          "name": "db1-git-ownership",
+          "event_kind": 11778
         }
       ]
     }
