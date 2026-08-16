@@ -85,7 +85,10 @@ Three things stay outside the wire, and none of them are payload shapes:
 
 ## Sequence
 
-1. **Counted reply.** One frame change, both generated sides, family 1's keyed
+1. ~~**Counted reply.**~~ Done: the reply is `status | count | (len | bytes) *
+   count`, and the format is named `db1-fields-v2` because the frame changed.
+   Family 1's keyed blob is a different format and did not move.
+1. **Superseded — kept for the sequence.** One frame change, both generated sides, family 1's keyed
    blob untouched. Unlocks the seven sources the survey attributed to T2, and is
    prerequisite for everything below.
 2. **Struct flattening.** Member lists in the catalog; marshalling in the

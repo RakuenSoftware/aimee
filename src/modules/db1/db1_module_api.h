@@ -35,12 +35,16 @@
  * owns which branch, so concurrent local sessions do not stomp on each other.
  *
  * Request:  op(u32) | field_count(u32) | (len(u32) | bytes) * field_count
- * Response: status(u32) | value_len(u32) | value
+ * Response: status(u32) | field_count(u32) | (len(u32) | bytes) * field_count
  *
- * The counted form is the one every family after the first uses. The first
- * family fixed its request at exactly two fields, which suits a keyed blob and
- * suits nothing with three, so the count is explicit here rather than implied
- * by the op. */
+ * Counted in both directions. The first family fixed its request at exactly two
+ * fields, which suits a keyed blob and suits nothing with three, so the count is
+ * explicit here rather than implied by the op.
+ *
+ * The reply counts for the same reason the request does: an operation that
+ * answers with a row, or with a list of them, has somewhere to put the values.
+ * A reply carrying nothing sends a count of zero, and one carrying a single
+ * value sends a count of one -- the shape does not change with the arity. */
 
 #define AIMEE_DB1_EVENT_GIT_OWNERSHIP 11778u
 #define AIMEE_DB1_STAGE_GIT_OWNERSHIP 2u

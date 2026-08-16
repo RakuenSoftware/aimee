@@ -43,17 +43,25 @@ static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, cha
    return 0;
 }
 
+/* status(u32) | field_count(u32) | (len(u32) | bytes) * count. A write answers
+   with no values, a read with one; the shape is the same either way. */
 static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
                             const char *value)
 {
-   uint32_t value_len = (uint32_t)strlen(value);
-   if (cap < 8u + value_len)
+   uint32_t count = value ? 1u : 0u;
+   uint32_t value_len = value ? (uint32_t)strlen(value) : 0u;
+   if (cap < 8u + (count ? 4u + value_len : 0u))
       return AIMEE_DB1_STATUS_FAILED;
    aimee_db1_put_u32(out, status);
-   aimee_db1_put_u32(out + 4u, value_len);
-   if (value_len)
-      memcpy(out + 8u, value, value_len);
-   *out_len = 8u + value_len;
+   aimee_db1_put_u32(out + 4u, count);
+   *out_len = 8u;
+   if (count)
+   {
+      aimee_db1_put_u32(out + 8u, value_len);
+      if (value_len)
+         memcpy(out + 12u, value, value_len);
+      *out_len = 12u + value_len;
+   }
    return status;
 }
 
@@ -258,8 +266,8 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
    else
       status = (rc == 0) ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_FAILED;
 
-   write_reply(response_body, response_capacity, response_len,
-               status, (status == AIMEE_DB1_STATUS_OK && reads) ? value : "");
+   write_reply(response_body, response_capacity, response_len, status,
+               reads ? ((status == AIMEE_DB1_STATUS_OK) ? value : "") : NULL);
    return AIMEE_MODULE_STATUS_OK;
 }
 /* clang-format on */
