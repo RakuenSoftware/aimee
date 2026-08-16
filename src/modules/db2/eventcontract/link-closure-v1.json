@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "6925305e7764121dfefa3c4e2ee2c6c1f3ac7365",
-  "source_fingerprint": "5e41b9a48251716f26192e3013d63708d9cabc921ebabca16661f07e2d86da4a",
+  "source_revision": "eb42135a5cb800e0a00b813f8e377c2f8e2c06a0",
+  "source_fingerprint": "e64190da1dced2a596143d14f4111308db2a3fd7544e8e7bae3c23d289ae5688",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
@@ -223,6 +223,45 @@
       },
       "provenance": "Definition promoted from src/shared/management_read.c; the sole DB2 call was audited in management_read_journal.c.",
       "evidence": "Deterministic two-value selector mapping with no imports, allocation, I/O, DB, event-bus, provider, platform, pgvector, or DB3 dependency; ABI parity tested."
+    },
+    {
+      "path": "src/modules/db2/support/rel_type_primitives.c",
+      "source_sha256": "a3a9e88f2a90c0de5d09f952c60ff90843f4f332a9c2a411e2dc1e081f31cce1",
+      "header": "src/modules/db2/support/db2_rel_type_helpers.h",
+      "header_sha256": "cd1b904cb2fe0ff443ab94d1044ce6eefd71aa4e004ddca4641de27be9a391a2",
+      "defines": [
+        "rel_type_is_functional",
+        "rel_type_normalize"
+      ],
+      "resolves": [
+        "rel_type_is_functional",
+        "rel_type_normalize"
+      ],
+      "allowed_includes": [
+        "ctype.h",
+        "db2_rel_type_helpers.h",
+        "string.h"
+      ],
+      "allowed_header_includes": [
+        "stddef.h"
+      ],
+      "allowed_undefined": [
+        "__ctype_b_loc",
+        "__ctype_tolower_loc",
+        "strcmp"
+      ],
+      "base_references": {
+        "rel_type_is_functional": [
+          "src/modules/db2/c/entity_edges.c"
+        ],
+        "rel_type_normalize": [
+          "src/modules/db2/c/fact_lifecycle.c",
+          "src/modules/db2/c/ontology_evolution.c",
+          "src/modules/db2/c/rel_types_store.c"
+        ]
+      },
+      "provenance": "Definitions promoted from the DB-free core in src/rel_types.c; all DB2 calls audited in entity_edges.c, fact_lifecycle.c, ontology_evolution.c, and rel_types_store.c.",
+      "evidence": "Relation normalization preserves the legacy process-locale ctype behavior and functional classification; only ctype and strcmp are imported. No ontology enum/header, DB, event-bus, provider, platform, pgvector, DB3, allocation, I/O, or logging dependency."
     },
     {
       "path": "src/modules/db2/support/sketch_primitives.c",
@@ -892,7 +931,8 @@
         "src/modules/db2/c/epistemic_directives.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/notes.c",
-        "src/modules/db2/c/prospective_memories.c"
+        "src/modules/db2/c/prospective_memories.c",
+        "src/modules/db2/support/rel_type_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -907,7 +947,8 @@
         "src/modules/db2/c/epistemic_directives.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/notes.c",
-        "src/modules/db2/c/prospective_memories.c"
+        "src/modules/db2/c/prospective_memories.c",
+        "src/modules/db2/support/rel_type_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2928,24 +2969,6 @@
       "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
     },
     {
-      "symbol": "rel_type_is_functional",
-      "references": [
-        "src/modules/db2/c/entity_edges.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "rel_type_normalize",
-      "references": [
-        "src/modules/db2/c/fact_lifecycle.c",
-        "src/modules/db2/c/ontology_evolution.c",
-        "src/modules/db2/c/rel_types_store.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
       "symbol": "rel_types_seed_at",
       "references": [
         "src/modules/db2/c/rel_types_store.c"
@@ -3313,7 +3336,8 @@
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_operator_status_runtime.c",
         "src/modules/db2/c/vault_pg.c",
-        "src/modules/db2/c/write_tier_grant.c"
+        "src/modules/db2/c/write_tier_grant.c",
+        "src/modules/db2/support/rel_type_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3877,16 +3901,16 @@
   ],
   "summary": {
     "translation_units": 141,
-    "descriptor_support_units": 5,
-    "unresolved_symbols": 341,
+    "descriptor_support_units": 6,
+    "unresolved_symbols": 339,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 25,
       "injected-module-contract": 150,
-      "portable-core-promotion": 22,
+      "portable-core-promotion": 20,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 144
     }
   },
-  "fingerprint": "57000eb17b53c2d26ed1c9f70dda79cf3a7c613d914de88ae48961ba377b1c7e"
+  "fingerprint": "ec443b173961450cb982112d85f6de82248c366ba9d3e2a94fa94cf53504476d"
 }
