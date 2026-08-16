@@ -30,9 +30,10 @@ def production_repo() -> tempfile.TemporaryDirectory[str]:
     inventory = repo / validator.INVENTORY_PATH
     inventory.parent.mkdir(parents=True)
     shutil.copy2(REPO_ROOT / validator.INVENTORY_PATH, inventory)
+    include_roots: set[str] = set()
     for source in (REPO_ROOT / "src/modules").glob("*/module.yaml"):
         target = repo / "src/modules" / source.parent.name / "module.yaml"
-        target.parent.mkdir(parents=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         descriptor = json.loads(source.read_text(encoding="utf-8"))
         for field in validator.OWNERSHIP_FIELDS:
@@ -40,14 +41,16 @@ def production_repo() -> tempfile.TemporaryDirectory[str]:
                 owned_target = repo / relative
                 owned_target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(REPO_ROOT / relative, owned_target)
-        # The validator requires every c_build include root to be a real
-        # directory. Only roots that happen to contain descriptor-owned files
-        # appear from the copy above, so materialize the rest: a module may
-        # legitimately include from a root it does not own any file in.
         build = descriptor.get("c_build")
         if isinstance(build, dict):
-            for root in build.get("include_roots", []):
-                (repo / root).mkdir(parents=True, exist_ok=True)
+            include_roots.update(build.get("include_roots", []))
+    # The validator requires every c_build include root to be a real directory.
+    # Only roots that happen to hold a descriptor-owned file appear from the
+    # copies above, so materialize the rest: a module may legitimately include
+    # from a root it owns no file in. Deferred until every descriptor is copied
+    # so that creating one module's root cannot race another module's own dir.
+    for root in sorted(include_roots):
+        (repo / root).mkdir(parents=True, exist_ok=True)
     return tmp
 
 
