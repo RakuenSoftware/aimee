@@ -18,7 +18,8 @@
     "response-composition",
     "vault",
     "execution-policy",
-    "audit"
+    "audit",
+    "db1"
   ],
   "optional": [
     "governance",
@@ -62,7 +63,8 @@
     "sandbox": 26,
     "economizer": 27,
     "postgres": 28,
-    "db2": 29
+    "db2": 29,
+    "db1": 30
   },
   "retired_principal_refs": []
 }

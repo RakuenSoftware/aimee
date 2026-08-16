@@ -29,7 +29,8 @@
     "sandbox",
     "economizer",
     "postgres",
-    "db2"
+    "db2",
+    "db1"
   ],
   "debt": []
 }

@@ -658,6 +658,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-tool-schema-sanitizer \
                $(TESTPREFIX)/unit-test-toolset \
                $(TESTPREFIX)/unit-test-db1-cost-fold \
+               $(TESTPREFIX)/unit-test-db1-module-stage \
                $(TESTPREFIX)/unit-test-db1-roundtable-pipeline \
                $(TESTPREFIX)/unit-test-roundtable-pipeline-eval \
                $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk \
@@ -1799,7 +1800,7 @@ $(TESTPREFIX)/unit-test-working-memory: $(OBJDIR)/tests/test_working_memory.o \
 # Mock-pattern demonstrator: exercises the same wm.h contract using the
 # in-memory implementation. Same test source, different backing.
 $(TESTPREFIX)/unit-test-working-memory-mock: $(OBJDIR)/tests/test_working_memory.o \
-                               $(OBJDIR)/modules/db1/db1_init_mock.o $(OBJDIR)/modules/db1/wm_mock.o
+                               $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/tests/support/wm_mock.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-local-resolution: $(OBJDIR)/tests/test_local_resolution.o \
@@ -4933,6 +4934,25 @@ $(TESTPREFIX)/unit-test-toolset: \
                                        $(OBJDIR)/tests/test_toolset.o \
                                        $(OBJDIR)/toolset.o \
                                        $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# The module adapter carries the stage handler; the bus objects come with
+# module_runtime.h's declarations. db1_init/db_schema/checkpoints give it a real
+# store to round-trip through, because a handler that only parses proves nothing
+# about what a caller gets back.
+$(TESTPREFIX)/unit-test-db1-module-stage: \
+                                       $(OBJDIR)/tests/test_db1_module_stage.o \
+                                       $(OBJDIR)/modules/db1/module_adapter.o \
+                                       $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o \
+                                       $(OBJDIR)/modules/db1/checkpoints.o \
+                                       $(OBJDIR)/core/event_bus/module_runtime.o \
+                                       $(OBJDIR)/core/event_bus/module_protocol.o \
+                                       $(OBJDIR)/core/event_bus/bus_attach.o \
+                                       $(OBJDIR)/core/event_bus/bus_client.o \
+                                       $(OBJDIR)/core/event_bus/bus_endpoint.o \
+                                       $(OBJDIR)/core/event_bus/bus_region.o \
+                                       $(OBJDIR)/core/event_bus/bus_ring.o \
+                                       $(OBJDIR)/core/event_bus/bus_wire.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-db1-cost-fold: \

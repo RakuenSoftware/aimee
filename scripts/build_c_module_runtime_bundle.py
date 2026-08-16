@@ -202,16 +202,63 @@ def compiler_command(module: dict[str, object], root: Path, bundle: Path, output
         IMPORTED_TARGET_FLAGS.get(library, f"-l{library}") for library in libraries
     ]
     binary = output / module["binary"]
+    # The dialect tracks the tree that owns these sources: src/Makefile:107 and
+    # CMakeLists.txt:12,156-158 already build them with _GNU_SOURCE, section
+    # splitting, and -Wno-format-truncation. A bundle that compiles the same
+    # sources under different flags does not prove those sources build.
+    # _GNU_SOURCE is defined empty because the event-bus sources define it that
+    # way themselves, and an implicit =1 would be a -Werror redefinition.
+    #
+    # --gc-sections is load-bearing here, not an optimization. A module process
+    # serves a few stages, not its module's whole surface; without per-function
+    # sections db1 has to satisfy every symbol its 62 sources mention, which
+    # drags in another module's config.c and the yaml parser behind it.
     return [
-        cc, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+        cc, "-std=c11", "-D_GNU_SOURCE=", "-O2", "-Wall", "-Wextra", "-Werror",
+        "-Wno-format-truncation", "-ffunction-sections", "-fdata-sections",
         *(f"-I{path}" for path in include_paths), *cflags, str(main),
         *(str(path) for path in owned_sources), *(str(path) for path in core_sources),
-        *pkg_libraries, *system_flags, "-o", str(binary),
+        *pkg_libraries, *system_flags, "-Wl,--gc-sections", "-o", str(binary),
     ]
 
 
-def build(bundle: Path, output: Path, root: Path, cc: str, pkg_config: str) -> int:
+def placed_modules(bundle: Path, placement: str) -> set[str]:
+    """Return the module IDs a placement is allowed to run.
+
+    The grants directory is the authority, not <placement>.modules: the latter
+    lists what the image STARTS, while a grant is what the image may run at all.
+    A module that is granted but not started by default (db2 in kb) still needs
+    its binary present, or the supervisor comes up unhealthy.
+
+    An image must compile only its own placement. Building another placement's
+    process drags that process's build dependencies into an image with no reason
+    to carry them -- kb has no sqlite, server has no need of db2 -- and leaves an
+    executable in an image that is never allowed to run it.
+    """
+    if not MODULE_ID.fullmatch(placement):
+        fail(f"invalid placement name: {placement!r}")
+    directory = bundle / "grants" / placement
+    try:
+        entries = sorted(item.name for item in directory.iterdir())
+    except OSError as exc:
+        fail(f"cannot read grants for placement {placement!r}: {exc}")
+    identifiers: set[str] = set()
+    for name in entries:
+        if not name.endswith(".grant"):
+            fail(f"grants/{placement}: unexpected entry {name!r}")
+        identifier = name[: -len(".grant")]
+        if not MODULE_ID.fullmatch(identifier):
+            fail(f"grants/{placement}: invalid module id {identifier!r}")
+        identifiers.add(identifier)
+    return identifiers
+
+
+def build(bundle: Path, output: Path, root: Path, cc: str, pkg_config: str,
+          placement: str | None = None) -> int:
     modules = load_builds(bundle)
+    if placement is not None:
+        placed = placed_modules(bundle, placement)
+        modules = [module for module in modules if module["id"] in placed]
     output.mkdir(parents=True, exist_ok=True)
     for module in modules:
         command = compiler_command(module, root, bundle, output, cc, pkg_config)
@@ -232,10 +279,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--cc", default="cc")
     parser.add_argument("--pkg-config", default="pkg-config")
+    parser.add_argument("--placement",
+                        help="build only the C processes this placement runs")
     args = parser.parse_args(argv)
     try:
         count = build(args.bundle.resolve(), args.output.resolve(), args.root.resolve(),
-                      args.cc, args.pkg_config)
+                      args.cc, args.pkg_config, args.placement)
     except BuildError as exc:
         print(f"build_c_module_runtime_bundle: error: {exc}", file=sys.stderr)
         return 1
