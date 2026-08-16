@@ -433,10 +433,20 @@ grammar, parser round-trip, and a five-second `time(NULL)` wall-clock window. `c
 and `code_index.c` also use `aimee_log`, but the support unit has no logging edge, leaving process
 logging as an independent injected policy.
 
-The next support candidates stay explicitly deferred by ownership shape: relation vocabulary moves
-the semantic seed table and its struct/enum ABI; language extractors bring a broad parser/helper
-closure; platform random/process functions carry OS, entropy, and daemon policy. Each requires its
-own coherent admission and parity slice rather than being folded into this unit.
+The sixth admitted unit owns `rel_type_normalize` and `rel_type_is_functional`, the relation helpers
+whose ABI needs only strings, integers, and `size_t`. It deliberately does not import `rel_types.h`
+or its transitive memory-ontology types. Admission pins both exports, their four DB2 referencing
+units, and only the observed ctype and `strcmp` imports. Normal and hardened parity cover the legacy
+corpus, every non-NUL one- and two-byte input, all output lengths through the full test buffer,
+canaries, NULL and zero-length handling, every functional relation, and representative negative
+labels. The byte parity intentionally preserves the process-locale ctype behavior of the authoritative
+copy, and the legacy/support comparison makes drift in the duplicated functional set a test failure.
+
+The next support candidates stay explicitly deferred by ownership shape: relation seed iteration,
+lookup, and enum text conversion move the semantic seed table or its struct/enum ABI; language
+extractors bring a broad parser/helper closure; platform random/process functions carry OS, entropy,
+and daemon policy. Each requires its own coherent admission and parity slice rather than being folded
+into this unit.
 
 These reductions remain phase-one precursors, not substitutes for the program exit criteria below:
 standalone C closure reaches zero non-system packaging/injection/promotion debt; the C process is

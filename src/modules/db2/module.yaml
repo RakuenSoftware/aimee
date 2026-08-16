@@ -15,6 +15,7 @@
     "src/modules/db2/module_adapter.c",
     "src/modules/db2/support/dstr_primitives.c",
     "src/modules/db2/support/management_read_primitives.c",
+    "src/modules/db2/support/rel_type_primitives.c",
     "src/modules/db2/support/sketch_primitives.c",
     "src/modules/db2/support/text_primitives.c",
     "src/modules/db2/support/time_primitives.c"
@@ -34,6 +35,7 @@
     "src/modules/db2/module_adapter.h",
     "src/modules/db2/support/db2_dstr.h",
     "src/modules/db2/support/db2_management_read.h",
+    "src/modules/db2/support/db2_rel_type_helpers.h",
     "src/modules/db2/support/db2_text.h",
     "src/modules/db2/support/db2_time.h",
     "src/modules/db2/support/sketch.h"
@@ -44,6 +46,7 @@
     "src/tests/test_db2_dstr_support.c",
     "src/tests/test_db2_management_read_support.c",
     "src/tests/test_db2_module_contract.c",
+    "src/tests/test_db2_rel_type_support.c",
     "src/tests/test_db2_sketch_support.c",
     "src/tests/test_db2_text_support.c",
     "src/tests/test_db2_time_support.c",

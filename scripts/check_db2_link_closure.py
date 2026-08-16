@@ -86,6 +86,31 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
     "evidence": "Deterministic two-value selector mapping with no imports, allocation, I/O, DB, "
                 "event-bus, provider, platform, pgvector, or DB3 dependency; ABI parity tested.",
 }, {
+    "path": "src/modules/db2/support/rel_type_primitives.c",
+    "source_sha256": "a3a9e88f2a90c0de5d09f952c60ff90843f4f332a9c2a411e2dc1e081f31cce1",
+    "header": "src/modules/db2/support/db2_rel_type_helpers.h",
+    "header_sha256": "cd1b904cb2fe0ff443ab94d1044ce6eefd71aa4e004ddca4641de27be9a391a2",
+    "defines": ["rel_type_is_functional", "rel_type_normalize"],
+    "resolves": ["rel_type_is_functional", "rel_type_normalize"],
+    "allowed_includes": ["ctype.h", "db2_rel_type_helpers.h", "string.h"],
+    "allowed_header_includes": ["stddef.h"],
+    "allowed_undefined": ["__ctype_b_loc", "__ctype_tolower_loc", "strcmp"],
+    "base_references": {
+        "rel_type_is_functional": ["src/modules/db2/c/entity_edges.c"],
+        "rel_type_normalize": [
+            "src/modules/db2/c/fact_lifecycle.c",
+            "src/modules/db2/c/ontology_evolution.c",
+            "src/modules/db2/c/rel_types_store.c",
+        ],
+    },
+    "provenance": "Definitions promoted from the DB-free core in src/rel_types.c; all DB2 calls "
+                  "audited in entity_edges.c, fact_lifecycle.c, ontology_evolution.c, and "
+                  "rel_types_store.c.",
+    "evidence": "Relation normalization preserves the legacy process-locale ctype behavior and "
+                "functional classification; only ctype and strcmp are imported. No ontology "
+                "enum/header, DB, event-bus, provider, platform, pgvector, DB3, allocation, I/O, "
+                "or logging dependency.",
+}, {
     "path": "src/modules/db2/support/sketch_primitives.c",
     "source_sha256": "20318d4f9c92894892ef9475f95c1542602f3a7d2b4d9fe6df2b8d63b4986280",
     "header": "src/modules/db2/support/sketch.h",

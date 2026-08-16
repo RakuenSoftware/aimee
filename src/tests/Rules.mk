@@ -730,6 +730,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-bus-db2-module \
                 $(TESTPREFIX)/unit-test-db2-dstr-support \
                 $(TESTPREFIX)/unit-test-db2-management-read-support \
+                $(TESTPREFIX)/unit-test-db2-rel-type-support \
                 $(TESTPREFIX)/unit-test-db2-sketch-support \
                 $(TESTPREFIX)/unit-test-db2-text-support \
                 $(TESTPREFIX)/unit-test-db2-time-support \
@@ -805,6 +806,7 @@ UNIT_TEST_SKIP_P1 ?= 0
 ifeq ($(UNIT_TEST_SHARD_INDEX),0)
 UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-rel-type-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-text-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-time-support-sanitize
@@ -6817,6 +6819,55 @@ unit-test-db2-time-support: $(TESTPREFIX)/unit-test-db2-time-support
 	$<
 
 unit-test-db2-time-support-sanitize: $(TESTPREFIX)/unit-test-db2-time-support-sanitize
+	$<
+
+DB2_REL_TYPE_SUPPORT_RENAMES = \
+   -Drel_type_is_functional=db2_support_rel_type_is_functional \
+   -Drel_type_normalize=db2_support_rel_type_normalize
+DB2_REL_TYPE_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_rel_type_support_impl.o: modules/db2/support/rel_type_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_REL_TYPE_SUPPORT_RENAMES) \
+	      $(DB2_REL_TYPE_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_rel_type_monolith.o: rel_types.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_REL_TYPE_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-rel-type-support: \
+                     $(OBJDIR)/tests/test_db2_rel_type_support.o \
+                     $(OBJDIR)/tests/db2_rel_type_support_impl.o \
+                     $(OBJDIR)/tests/db2_rel_type_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_REL_TYPE_SANITIZE_DIR = $(OBJDIR)/tests/db2-rel-type-support-sanitize
+
+$(DB2_REL_TYPE_SANITIZE_DIR)/test.o: tests/test_db2_rel_type_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_REL_TYPE_SANITIZE_DIR)/support.o: modules/db2/support/rel_type_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_REL_TYPE_SUPPORT_RENAMES) $(DB2_REL_TYPE_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_REL_TYPE_SANITIZE_DIR)/monolith.o: rel_types.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_REL_TYPE_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-rel-type-support-sanitize: \
+                     $(DB2_REL_TYPE_SANITIZE_DIR)/test.o \
+                     $(DB2_REL_TYPE_SANITIZE_DIR)/support.o \
+                     $(DB2_REL_TYPE_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-rel-type-support unit-test-db2-rel-type-support-sanitize
+unit-test-db2-rel-type-support: $(TESTPREFIX)/unit-test-db2-rel-type-support
+	$<
+
+unit-test-db2-rel-type-support-sanitize: $(TESTPREFIX)/unit-test-db2-rel-type-support-sanitize
 	$<
 
 DB2_SKETCH_SUPPORT_RENAMES = \

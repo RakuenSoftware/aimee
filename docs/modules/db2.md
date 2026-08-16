@@ -86,9 +86,9 @@ Link-closure audit:
 `link-closure-v1.json` accounts for all 141 C translation units in the private DB2 boundary. The
 probe compiles each unit plus exact descriptor-owned support, combines only those objects with a
 relocatable link, supplies no archive, shared library, helper stub, or weak definition, and records
-the 341 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
+the 339 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
 disposition and rationale. The current ledger contains 144 explicit system-link dependencies, 25
-pinned vendored/generated inputs, 150 sibling or KB contracts to inject, and 22 support APIs to
+pinned vendored/generated inputs, 150 sibling or KB contracts to inject, and 20 support APIs to
 promote. The standalone-link exit condition requires zero entries in the latter three groups; a
 classified ledger alone is not enough.
 
@@ -135,6 +135,18 @@ invalid basic ranges and separators, trailing input, NULL/empty input, three hos
 formatter grammar, parser round-trip, and a five-second wall-clock window under normal and hardened
 builds. The two formatter callers that also log do not create a support import: logging remains an
 independent injected process-policy decision.
+
+The sixth reduction promotes `rel_type_normalize` and `rel_type_is_functional` without importing the
+relationship enum, seed-table, or memory-ontology surface. The private header exposes only string,
+integer, and `size_t` ABI. Admission pins both exports, four DB2 referencing units, the three-header
+source envelope, and only the observed ctype and `strcmp` imports. Parity covers the legacy corpus,
+every non-NUL one- and two-byte input, every output length through the full test buffer, canary
+preservation, NULL input/output, zero-length output, all nine functional relations, and representative
+multi-valued and non-canonical labels under normal and hardened builds. Seed iteration, lookup, and
+enum text conversion remain deferred to a deliberate shared-type boundary. The byte parity preserves
+the legacy process-locale ctype behavior, and the legacy/support comparison fails if the duplicated
+functional set drifts. This slice moves total debt from 341 to 339 and portable promotion debt from
+22 to 20.
 
 The gate rejects legacy source additions or omissions, support path escape, symlinks, content drift,
 new unresolved symbols, non-system reference growth, missing evidence, and any attempt to make the
