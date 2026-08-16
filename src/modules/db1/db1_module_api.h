@@ -6,7 +6,7 @@
  * boundary is new. See docs/proposals/pending/db1-as-a-go-module.md.
  *
  * Event kinds are fixed by the process contract at 4096 + ref*256 + stage. DB1
- * declares principal ref 29, so these are not a free choice. */
+ * declares principal ref 30, so these are not a free choice. */
 #ifndef AIMEE_DB1_MODULE_API_H
 #define AIMEE_DB1_MODULE_API_H 1
 
