@@ -159,5 +159,8 @@
     "system_libraries": [
       "m"
     ]
-  }
+  },
+  "contracts": [
+    "src/modules/db1/eventcontract/operations.json"
+  ]
 }
