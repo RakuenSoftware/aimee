@@ -246,8 +246,9 @@ weak backend, or remaining direct production caller prevents enablement.
 DB3-portability tests additionally prove exhaustive 76-symbol coverage, closed classification
 identities, fingerprint drift, duplicate/missing/extra detection, ordering, malformed JSON, resource
 limits, and copied-repository CLI behavior.
-Route and authenticated-bus tests cover default pgvector, selected external serving, unavailable and
-malformed providers, explicit fallback provenance, candidate revalidation, finite/bounded codecs,
+Route and authenticated-bus tests cover pgvector with no deployed provider, deterministic automatic
+external serving, explicit override, unavailable and malformed providers, explicit fallback
+provenance, candidate revalidation, finite/bounded codecs,
 two-observer idempotent apply fanout, and one-server-only search.
 Descriptor-owned cJSON tests additionally prove byte-for-byte vendor origin binding, exact exports,
 complete consumed-symbol resolution, allowed runtime imports, malformed-input behavior, allocator

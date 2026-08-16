@@ -182,16 +182,15 @@ func TestDB3GoProvidersOperateOverAuthenticatedCBus(t *testing.T) {
 	var route protocol.RouteReply
 	for attempt := uint64(1); attempt <= 100; attempt++ {
 		route = routeOverBus(t, controlClient, attempt, protocol.RouteRequest{
-			RequestID: attempt, Action: protocol.RouteSelect, Principal: 1001,
-			CapabilityGeneration: 7, Fallback: true,
+			RequestID: attempt, Action: protocol.RouteQuery,
 		})
-		if route.Result == protocol.RouteOK {
+		if route.Result == protocol.RouteOK && route.SelectedPrincipal == 1001 {
 			break
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
 	if route.Result != protocol.RouteOK || route.SelectedPrincipal != 1001 {
-		t.Fatalf("select route = %+v", route)
+		t.Fatalf("automatic deployed route = %+v", route)
 	}
 
 	outcome := router.Search(context.Background(), db3Request())
@@ -199,6 +198,15 @@ func TestDB3GoProvidersOperateOverAuthenticatedCBus(t *testing.T) {
 		len(outcome.Reply.Candidates) != 1 || outcome.Reply.Candidates[0].PointID != 41 ||
 		internalCalls.Load() != 0 {
 		t.Fatalf("external search = %+v, internal calls %d", outcome, internalCalls.Load())
+	}
+	// Deployment chooses the default without fallback. Control may then pin the
+	// same provider with explicit fallback for the readiness-loss case below.
+	route = routeOverBus(t, controlClient, 101, protocol.RouteRequest{
+		RequestID: 101, Action: protocol.RouteSelect, Principal: 1001,
+		CapabilityGeneration: 7, Fallback: true,
+	})
+	if route.Result != protocol.RouteOK || route.SelectedPrincipal != 1001 || !route.Fallback {
+		t.Fatalf("explicit fallback route = %+v", route)
 	}
 
 	apply := protocol.Apply{OperationID: 7001, Generation: 7, PointID: 41,

@@ -49,7 +49,7 @@ func newTestDB3Router(t *testing.T, internal DB3InternalSearcher,
 
 func allowAll(context.Context, string, string, int64) (bool, error) { return true, nil }
 
-func TestDB3RouterDefaultExternalAndRevalidation(t *testing.T) {
+func TestDB3RouterDeploymentMakesExternalTheDefaultAndRevalidates(t *testing.T) {
 	var internalCalls, externalCalls atomic.Int32
 	router := newTestDB3Router(t,
 		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
@@ -80,11 +80,10 @@ func TestDB3RouterDefaultExternalAndRevalidation(t *testing.T) {
 	if err := router.ObserveCapabilities(1001, 41, 1, db3Capabilities(7, true)); err != nil {
 		t.Fatal(err)
 	}
-	reply := router.Route(protocol.RouteRequest{
-		RequestID: 1, Action: protocol.RouteSelect, Principal: 1001, CapabilityGeneration: 7,
-	})
-	if reply.Result != protocol.RouteOK || reply.SelectedPrincipal != 1001 {
-		t.Fatalf("route reply = %+v", reply)
+	reply := router.Route(protocol.RouteRequest{RequestID: 1, Action: protocol.RouteQuery})
+	if reply.Result != protocol.RouteOK || reply.SelectedPrincipal != 1001 ||
+		reply.ProviderGeneration != 7 {
+		t.Fatalf("automatic route reply = %+v", reply)
 	}
 	outcome = router.Search(context.Background(), db3Request())
 	if outcome.Result != DB3OK || outcome.Route != DB3External ||
@@ -96,8 +95,103 @@ func TestDB3RouterDefaultExternalAndRevalidation(t *testing.T) {
 		t.Fatalf("calls = internal %d external %d", internalCalls.Load(), externalCalls.Load())
 	}
 	router.Route(protocol.RouteRequest{RequestID: 2, Action: protocol.RouteClear})
-	if got := router.Search(context.Background(), db3Request()); got.Route != DB3DefaultPGVector {
+	if got := router.Search(context.Background(), db3Request()); got.Route != DB3External ||
+		got.SelectedPrincipal != 1001 {
 		t.Fatalf("cleared route = %+v", got)
+	}
+}
+
+func TestDB3RouterAutomaticDefaultIsDeterministicAcrossMultipleProviders(t *testing.T) {
+	router := newTestDB3Router(t,
+		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
+			return db3Reply(request, 1), nil
+		},
+		func(_ context.Context, principal uint32, request protocol.SearchRequest) (DB3SearchResponse, error) {
+			reply := db3Reply(request, int64(principal))
+			return DB3SearchResponse{Reply: &reply}, nil
+		}, allowAll)
+
+	// Arrival order is intentionally the reverse of principal order.
+	if err := router.ObserveCapabilities(2002, 52, 1, db3Capabilities(7, true)); err != nil {
+		t.Fatal(err)
+	}
+	if err := router.ObserveCapabilities(1001, 51, 1, db3Capabilities(7, true)); err != nil {
+		t.Fatal(err)
+	}
+	query := router.Route(protocol.RouteRequest{RequestID: 1, Action: protocol.RouteQuery})
+	if query.SelectedPrincipal != 1001 || query.ProviderGeneration != 7 || query.Fallback {
+		t.Fatalf("deterministic deployed default = %+v", query)
+	}
+	if got := router.Search(context.Background(), db3Request()); got.Result != DB3OK ||
+		got.SelectedPrincipal != 1001 || got.Reply.Candidates[0].PointID != 1001 {
+		t.Fatalf("automatic external search = %+v", got)
+	}
+
+	// Losing the automatic default advances to the next deployed provider.
+	if !router.RemoveProvider(1001, 51) {
+		t.Fatal("automatic provider was not removed")
+	}
+	query = router.Route(protocol.RouteRequest{RequestID: 2, Action: protocol.RouteQuery})
+	if query.SelectedPrincipal != 2002 || query.ProviderGeneration != 7 {
+		t.Fatalf("automatic failover route = %+v", query)
+	}
+	if got := router.Search(context.Background(), db3Request()); got.Result != DB3OK ||
+		got.SelectedPrincipal != 2002 || got.Reply.Candidates[0].PointID != 2002 {
+		t.Fatalf("automatic failover search = %+v", got)
+	}
+
+	// Unready evidence remains an observer registration, never a read route.
+	if err := router.ObserveCapabilities(999, 53, 1, db3Capabilities(7, false)); err != nil {
+		t.Fatal(err)
+	}
+	if got := router.Route(protocol.RouteRequest{RequestID: 3, Action: protocol.RouteQuery}); got.SelectedPrincipal != 2002 {
+		t.Fatalf("unready provider displaced default = %+v", got)
+	}
+	if !router.RemoveProvider(2002, 52) {
+		t.Fatal("last ready provider was not removed")
+	}
+	if got := router.Search(context.Background(), db3Request()); got.Result != DB3OK ||
+		got.Route != DB3DefaultPGVector || got.SelectedPrincipal != 0 ||
+		got.Reply.Candidates[0].PointID != 1 {
+		t.Fatalf("no ready deployed provider did not restore pgvector = %+v", got)
+	}
+	if err := router.ObserveCapabilities(999, 53, 2, db3Capabilities(7, true)); err != nil {
+		t.Fatal(err)
+	}
+	if got := router.Route(protocol.RouteRequest{RequestID: 4, Action: protocol.RouteQuery}); got.SelectedPrincipal != 999 || got.ProviderGeneration != 7 {
+		t.Fatalf("provider readiness did not restore external default = %+v", got)
+	}
+}
+
+func TestDB3RouterExplicitOverrideWinsUntilClear(t *testing.T) {
+	router := newTestDB3Router(t,
+		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
+			return db3Reply(request, 1), nil
+		},
+		func(_ context.Context, principal uint32, request protocol.SearchRequest) (DB3SearchResponse, error) {
+			reply := db3Reply(request, int64(principal))
+			return DB3SearchResponse{Reply: &reply}, nil
+		}, allowAll)
+	for _, principal := range []uint32{1001, 2002} {
+		if err := router.ObserveCapabilities(principal, principal, 1, db3Capabilities(7, true)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	selected := router.Route(protocol.RouteRequest{RequestID: 1, Action: protocol.RouteSelect,
+		Principal: 2002, CapabilityGeneration: 7, Fallback: true})
+	if selected.Result != protocol.RouteOK || selected.SelectedPrincipal != 2002 || !selected.Fallback {
+		t.Fatalf("explicit override = %+v", selected)
+	}
+	// A newly admitted lower principal cannot rewrite an explicit choice.
+	if err := router.ObserveCapabilities(500, 500, 1, db3Capabilities(7, true)); err != nil {
+		t.Fatal(err)
+	}
+	if got := router.Route(protocol.RouteRequest{RequestID: 2, Action: protocol.RouteQuery}); got.SelectedPrincipal != 2002 || !got.Fallback {
+		t.Fatalf("admission rewrote explicit override = %+v", got)
+	}
+	cleared := router.Route(protocol.RouteRequest{RequestID: 3, Action: protocol.RouteClear})
+	if cleared.SelectedPrincipal != 500 || cleared.ProviderGeneration != 7 || cleared.Fallback {
+		t.Fatalf("clear did not restore deployed default = %+v", cleared)
 	}
 }
 
@@ -272,8 +366,8 @@ func TestDB3RouterFailClosedAndExplicitFallback(t *testing.T) {
 			if err := router.ObserveCapabilities(1001, 41, 1, db3Capabilities(7, true)); err != nil {
 				t.Fatal(err)
 			}
-			router.Route(protocol.RouteRequest{RequestID: 1, Action: protocol.RouteSelect,
-				Principal: 1001, CapabilityGeneration: 7})
+			// Ready deployment is already the external default; automatic routes
+			// fail closed and never silently opt into pgvector fallback.
 			outcome := router.Search(context.Background(), db3Request())
 			if outcome.Result != test.want || outcome.Route != DB3External || internalCalls.Load() != 0 ||
 				outcome.ExternalError != test.want || outcome.ProviderFailure != test.wantFailure {
