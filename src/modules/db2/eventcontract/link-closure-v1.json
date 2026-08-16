@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "8f90f495fe29d790fb15be8c8aab427885a810ad",
-  "source_fingerprint": "836d1c8436e9d8ae04bf3b83e29e67db6fef9a6db80cae664af5e4cebcd688aa",
+  "source_revision": "5e25927805cbc87738afcfda28dfabcf5c62ca55",
+  "source_fingerprint": "ee40264fc69213f12eb5c9d8167b9b5e9918492750e8979ba7a45107c2b61f4d",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
@@ -580,6 +580,48 @@
       },
       "provenance": "Definition promoted from src/shared/management_read.c; the sole DB2 call was audited in management_read_journal.c.",
       "evidence": "Deterministic two-value selector mapping with no imports, allocation, I/O, DB, event-bus, provider, platform, pgvector, or DB3 dependency; ABI parity tested."
+    },
+    {
+      "path": "src/modules/db2/support/random_primitives.c",
+      "source_sha256": "2e0182a05983d863952d080b754cb90eb4ee6dcf491f4bda7140ef205c0db69f",
+      "header": "src/modules/db2/support/db2_random.h",
+      "header_sha256": "bbbab168e217e7286ffae27ad3f1adaf8ed1797ae70a46c6c1e84bbcd32a98bb",
+      "defines": [
+        "platform_random_bytes",
+        "platform_random_hex"
+      ],
+      "resolves": [
+        "platform_random_bytes",
+        "platform_random_hex"
+      ],
+      "allowed_includes": [
+        "db2_random.h",
+        "bcrypt.h",
+        "stdio.h",
+        "string.h"
+      ],
+      "allowed_header_includes": [
+        "stddef.h"
+      ],
+      "allowed_undefined": [
+        "fclose",
+        "fopen",
+        "fread",
+        "memset",
+        "snprintf"
+      ],
+      "base_references": {
+        "platform_random_bytes": [
+          "src/modules/db2/c/artifacts.c",
+          "src/modules/db2/c/management_action_journal.c",
+          "src/modules/db2/c/management_identity_journal.c"
+        ],
+        "platform_random_hex": [
+          "src/modules/db2/c/management_read_journal.c"
+        ]
+      },
+      "provenance": "Portable CSPRNG and lowercase-hex definitions promoted from src/posix/platform_random.c, src/windows/platform_random.c, and src/platform_random.c; all four DB2 referencing units are pinned.",
+      "evidence": "The descriptor-owned implementation preserves the POSIX /dev/urandom and Windows BCryptGenRandom branches, exports only the two reviewed APIs, and imports only its bounded system I/O and formatting surface. It has no DB, event-bus, provider, pgvector, DB3, config, logging, or heap dependency."
     },
     {
       "path": "src/modules/db2/support/rel_enum_text_primitives.c",
@@ -1899,7 +1941,8 @@
         "src/modules/db2/c/entity_edges.c",
         "src/modules/db2/c/kb_service_backend_memory.c",
         "src/modules/db2/c/memory_export.c",
-        "src/modules/db2/c/rules.c"
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/support/random_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -1927,7 +1970,8 @@
         "src/modules/db2/c/entity_edges.c",
         "src/modules/db2/c/kb_service_backend_memory.c",
         "src/modules/db2/c/memory_export.c",
-        "src/modules/db2/c/rules.c"
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/support/random_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -1958,7 +2002,8 @@
     {
       "symbol": "fread",
       "references": [
-        "src/modules/db2/c/canonical_index.c"
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/support/random_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2805,24 +2850,6 @@
       "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
     },
     {
-      "symbol": "platform_random_bytes",
-      "references": [
-        "src/modules/db2/c/artifacts.c",
-        "src/modules/db2/c/management_action_journal.c",
-        "src/modules/db2/c/management_identity_journal.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "platform_random_hex",
-      "references": [
-        "src/modules/db2/c/management_read_journal.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
       "symbol": "platform_spawn_daemon",
       "references": [
         "src/modules/db2/c/kb_service_backend.c"
@@ -3200,7 +3227,8 @@
         "src/modules/db2/c/vault_pg.c",
         "src/modules/db2/c/vector_index_ops.c",
         "src/modules/db2/c/workflow_patterns.c",
-        "src/modules/db2/c/write_tier_grant.c"
+        "src/modules/db2/c/write_tier_grant.c",
+        "src/modules/db2/support/random_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3956,16 +3984,16 @@
   ],
   "summary": {
     "translation_units": 141,
-    "descriptor_support_units": 8,
-    "unresolved_symbols": 313,
+    "descriptor_support_units": 9,
+    "unresolved_symbols": 311,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
       "injected-module-contract": 150,
-      "portable-core-promotion": 18,
+      "portable-core-promotion": 16,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 145
     }
   },
-  "fingerprint": "6be7e278d5d23401a014b9c64c003a06d956b76d1348272b34e716d8151781fd"
+  "fingerprint": "5fe2711ed32efaaa638abb4e9cefbd29ed1212998397ccc52cf38d32964bb2db"
 }
