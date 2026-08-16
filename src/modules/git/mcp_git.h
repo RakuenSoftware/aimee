@@ -115,4 +115,12 @@ int check_branch_has_merged_pr_for(const char *branch);
  * If mismatch_err is not NULL and a context mismatch is detected, allocates an error string. */
 int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mismatch_err);
 
+/* Refuse an operation that writes LOCAL git state while this workspace is served as a
+ * MIRROR — the server rebuilds its own worktree from a bare mirror plus the client's
+ * diff, and that rebuild is replaced on the client's next change, so the write is
+ * reported as success and then discarded. Returns an error response to hand back, or
+ * NULL when the operation may proceed. Publishing operations (push, pr) must NOT call
+ * this: their result leaves the reconstruction and is durable. */
+cJSON *mcp_git_durability_guard(const char *operation);
+
 #endif /* DEC_MCP_GIT_H */

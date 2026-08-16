@@ -40,6 +40,17 @@ cJSON *handle_git_branch(cJSON *args)
    const char *action = jaction->valuestring;
    cJSON *jname = cJSON_GetObjectItemCaseSensitive(args, "name");
 
+   /* Actions that move refs or the working tree are not durable in a mirror's
+    * server-side reconstruction. list/claim/release are exempt: list only reads, and
+    * claim/release write ownership to db1, which IS shared with the caller. */
+   if (strcmp(action, "create") == 0 || strcmp(action, "switch") == 0 ||
+       strcmp(action, "delete") == 0 || strcmp(action, "orphan") == 0)
+   {
+      cJSON *blocked = mcp_git_durability_guard(action);
+      if (blocked)
+         return blocked;
+   }
+
    if (strcmp(action, "list") == 0)
    {
       int rc;
@@ -403,6 +414,16 @@ cJSON *handle_git_stash(cJSON *args)
    cJSON *jaction = cJSON_GetObjectItemCaseSensitive(args, "action");
    const char *action =
        (cJSON_IsString(jaction) && jaction->valuestring[0]) ? jaction->valuestring : "push";
+
+   /* A stash created in a reconstruction is discarded with it -- and stash is the one
+    * operation whose whole purpose is to hold work that exists nowhere else. list is
+    * read-only. */
+   if (strcmp(action, "list") != 0)
+   {
+      cJSON *blocked = mcp_git_durability_guard("stash");
+      if (blocked)
+         return blocked;
+   }
 
    int rc;
    char cmd[1024];

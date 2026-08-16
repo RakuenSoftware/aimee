@@ -433,6 +433,14 @@ static cJSON *integrate_dispatch(const char *name, cJSON *args)
    if (!op)
       return mcp_text("error: unknown integrate operation");
 
+   /* One choke point for merge/rebase/cherry_pick/revert: all of them rewrite local
+    * history, which a mirror's server-side reconstruction discards. */
+   {
+      cJSON *blocked = mcp_git_durability_guard(name);
+      if (blocked)
+         return blocked;
+   }
+
    cJSON *jaction = cJSON_GetObjectItemCaseSensitive(args, "action");
    const char *action = cJSON_IsString(jaction) ? jaction->valuestring : NULL;
    if (action && action[0] && strcmp(action, "run") != 0)
@@ -475,6 +483,12 @@ cJSON *handle_git_revert(cJSON *args)
  * alone, with no merge commits from the base mixed in. */
 cJSON *handle_git_sync(cJSON *args)
 {
+   /* sync rebases (or merges) the branch, so its result lives in local history too. */
+   {
+      cJSON *blocked = mcp_git_durability_guard("sync");
+      if (blocked)
+         return blocked;
+   }
    char branch[256] = "";
    get_current_branch(branch, sizeof(branch));
 

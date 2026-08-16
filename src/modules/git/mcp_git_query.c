@@ -269,6 +269,53 @@ char *mcp_git_run(const char *cmd, int *exit_code)
    return exec_ws->exec_shell(exec_ws, cmd, exit_code);
 }
 
+/* Refuse an operation whose result would land somewhere the caller can never see.
+ *
+ * A MIRROR workspace is registered under the CLIENT's path, and aimee-server serves it
+ * by rebuilding an equivalent worktree of its own from its bare mirror plus the
+ * client's working diff (workspace_provider.h: "file/exec run direct-fs on that local
+ * worktree"). Reads are fine — the rebuild is faithful, which is why `status` reports
+ * the client's branch and its modified files correctly.
+ *
+ * A WRITE to local history is not fine. It lands in that rebuild, the rebuild is
+ * generation-keyed by the client's diff digest (workspace_mirror.c), and the next
+ * change to the client's working tree materialises a NEW generation from the mirror —
+ * so the commit is reported as created and is then unreachable from every checkout
+ * that exists, including the one the caller was looking at. Observed: `commit` returned
+ * a SHA that `git cat-file` in the client's repository does not know, while the client
+ * still held 28 uncommitted files.
+ *
+ * Refusing is not a regression from working behaviour: the operation never worked, it
+ * only reported that it had. Publishing operations (push, and the PR calls, which go
+ * straight to the forge API) are deliberately NOT guarded — their result leaves the
+ * reconstruction and is durable.
+ *
+ * Returns an error response to hand straight back, or NULL when the operation may
+ * proceed. */
+static cJSON *mcp_text(const char *text); /* defined below with the other helpers */
+
+cJSON *mcp_git_durability_guard(const char *operation)
+{
+   const workspace_provider_t *ws = workspace_provider_active();
+   if (!ws || ws->kind != WS_PROVIDER_MIRROR)
+      return NULL;
+
+   char buf[900];
+   snprintf(buf, sizeof(buf),
+            "error: refusing %s — it would run in aimee-server's reconstruction of this "
+            "checkout, not in the checkout itself.\n\n"
+            "This repository is registered as a MIRROR workspace: the server rebuilds an "
+            "equivalent worktree from its bare mirror plus your working diff, and replaces "
+            "that rebuild whenever your working tree changes. A %s there is reported as "
+            "success and then discarded — the resulting commit exists in no checkout you "
+            "can reach.\n\n"
+            "Run %s where the checkout actually is, or register the repository so "
+            "aimee-server owns it directly (aimee workspace add <path>). Publishing "
+            "operations (push, pr) are unaffected: their result leaves the reconstruction.",
+            operation, operation, operation);
+   return mcp_text(buf);
+}
+
 static void trim_trailing_newline(char *s)
 {
    if (!s)

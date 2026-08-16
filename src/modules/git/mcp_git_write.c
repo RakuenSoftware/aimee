@@ -139,6 +139,15 @@ static cJSON *main_branch_blocked(const char *operation)
 
 cJSON *handle_git_commit(cJSON *args)
 {
+   /* Before anything else: a commit into a mirror's server-side reconstruction is
+    * discarded on the client's next change, and used to be reported as a success with
+    * a SHA no reachable checkout contained. */
+   {
+      cJSON *blocked = mcp_git_durability_guard("commit");
+      if (blocked)
+         return blocked;
+   }
+
    cJSON *jmsg = cJSON_GetObjectItemCaseSensitive(args, "message");
    if (!cJSON_IsString(jmsg) || !jmsg->valuestring[0])
       return mcp_text("error: 'message' parameter is required");
@@ -465,6 +474,11 @@ cJSON *handle_git_push(cJSON *args)
 
 cJSON *handle_git_pull(cJSON *args)
 {
+   {
+      cJSON *blocked = mcp_git_durability_guard("pull");
+      if (blocked)
+         return blocked;
+   }
    cJSON *jrebase = cJSON_GetObjectItemCaseSensitive(args, "rebase");
    int rebase = (jrebase && cJSON_IsTrue(jrebase)) ? 1 : 0;
 
@@ -601,6 +615,11 @@ cJSON *handle_git_clone(cJSON *args)
 
 cJSON *handle_git_reset(cJSON *args)
 {
+   {
+      cJSON *blocked = mcp_git_durability_guard("reset");
+      if (blocked)
+         return blocked;
+   }
    /* Fetch branch once — used for main guard and ownership check */
    char branch[256] = "";
    get_current_branch(branch, sizeof(branch));
@@ -666,6 +685,11 @@ cJSON *handle_git_reset(cJSON *args)
  * would have been refused. */
 cJSON *handle_git_add(cJSON *args)
 {
+   {
+      cJSON *blocked = mcp_git_durability_guard("add");
+      if (blocked)
+         return blocked;
+   }
    char branch[256] = "";
    get_current_branch(branch, sizeof(branch));
    if (strcmp(branch, "main") == 0 || strcmp(branch, "master") == 0)
@@ -840,6 +864,12 @@ cJSON *handle_git_checkout(cJSON *args)
 
 cJSON *handle_git_restore(cJSON *args)
 {
+   /* Also covers checkout with a file list, which routes here. */
+   {
+      cJSON *blocked = mcp_git_durability_guard("restore");
+      if (blocked)
+         return blocked;
+   }
    cJSON *jfiles = cJSON_GetObjectItemCaseSensitive(args, "files");
    cJSON *jstaged = cJSON_GetObjectItemCaseSensitive(args, "staged");
    cJSON *jsource = cJSON_GetObjectItemCaseSensitive(args, "source");

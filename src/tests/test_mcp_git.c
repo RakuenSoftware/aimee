@@ -667,6 +667,102 @@ static void test_git_container_provider_runs_on_server(void)
    printf("  PASS: test_git_container_provider_runs_on_server\n");
 }
 
+/* A MIRROR workspace is registered under the CLIENT's path; aimee-server serves it by
+ * rebuilding its own worktree from a bare mirror plus the client's diff, and replaces
+ * that rebuild whenever the client's tree changes. A commit made there is therefore
+ * discarded — and it USED to be reported as a success, returning a SHA that no
+ * reachable checkout contained while the client still held every file uncommitted.
+ * These pin the refusal, per operation, so the silence cannot come back. */
+static void test_mirror_workspace_refuses_local_history_writes(void)
+{
+   setup_git_repo();
+   system("git checkout -q -b mirror-durability");
+
+   workspace_provider_t mirror;
+   memset(&mirror, 0, sizeof(mirror));
+   mirror.kind = WS_PROVIDER_MIRROR;
+   mirror.exec_shell = container_shell_spy; /* must never be reached */
+   workspace_provider_set_active(&mirror);
+   g_container_shell_spy_called = 0;
+
+   /* commit: the operation that lost work. */
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "message", "would be discarded");
+   cJSON *resp = handle_git_commit(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") != NULL);
+   assert(strstr(text, "reconstruction") != NULL);
+   /* Refused BEFORE running anything: no shell, and nothing reported as committed. */
+   assert(strstr(text, "committed") == NULL);
+   assert(g_container_shell_spy_called == 0);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   /* The same rule for every other local-history write, including the ones that reach
+    * it by delegation (checkout -> restore, switch -> branch). */
+   struct
+   {
+      const char *label;
+      cJSON *(*fn)(cJSON *);
+      const char *action;
+   } cases[] = {
+       {"reset", handle_git_reset, NULL},      {"add", handle_git_add, NULL},
+       {"restore", handle_git_restore, NULL},  {"merge", handle_git_merge, NULL},
+       {"rebase", handle_git_rebase, NULL},    {"sync", handle_git_sync, NULL},
+       {"cherry_pick", handle_git_cherry_pick, NULL},
+       {"revert", handle_git_revert, NULL},    {"pull", handle_git_pull, NULL},
+       {"stash", handle_git_stash, "push"},    {"branch", handle_git_branch, "create"},
+   };
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+   {
+      cJSON *a = cJSON_CreateObject();
+      if (cases[i].action)
+         cJSON_AddStringToObject(a, "action", cases[i].action);
+      cJSON_AddStringToObject(a, "name", "some-branch");
+      cJSON_AddStringToObject(a, "ref", "HEAD~1");
+      cJSON_AddBoolToObject(a, "all", 1);
+      cJSON *r = cases[i].fn(a);
+      char *t = get_mcp_text(r);
+      assert(t != NULL);
+      if (!strstr(t, "reconstruction"))
+      {
+         fprintf(stderr, "mirror durability: %s was not refused: %s\n", cases[i].label, t);
+         assert(0);
+      }
+      cJSON_Delete(r);
+      cJSON_Delete(a);
+   }
+   assert(g_container_shell_spy_called == 0);
+
+   /* READS stay available: the rebuild is faithful, which is the whole reason the
+    * write path looked like it worked. */
+   cJSON *ls = cJSON_CreateObject();
+   cJSON_AddStringToObject(ls, "action", "list");
+   cJSON *ls_resp = handle_git_branch(ls);
+   char *ls_text = get_mcp_text(ls_resp);
+   assert(ls_text != NULL);
+   assert(strstr(ls_text, "reconstruction") == NULL);
+   cJSON_Delete(ls_resp);
+   cJSON_Delete(ls);
+
+   workspace_provider_clear_active();
+
+   /* And with no mirror active the same call is allowed through — the guard keys on
+    * the provider, not on the operation being inherently unsafe. */
+   cJSON *ok_args = cJSON_CreateObject();
+   cJSON_AddStringToObject(ok_args, "message", "lands for real");
+   cJSON *ok_resp = handle_git_commit(ok_args);
+   char *ok_text = get_mcp_text(ok_resp);
+   assert(ok_text != NULL);
+   assert(strstr(ok_text, "reconstruction") == NULL);
+   cJSON_Delete(ok_resp);
+   cJSON_Delete(ok_args);
+
+   teardown_git_repo();
+   printf("  PASS: test_mirror_workspace_refuses_local_history_writes\n");
+}
+
 /* --- Test handle_git_push in non-git directory --- */
 
 static void test_git_push_requires_branch(void)
@@ -3873,6 +3969,7 @@ int main(void)
    test_git_commit_reads_masked_global_identity();
    test_git_commit_skips_sensitive();
    test_git_container_provider_runs_on_server();
+   test_mirror_workspace_refuses_local_history_writes();
    test_git_push_requires_branch();
    test_git_branch_missing_action();
    test_git_branch_create_and_list();
