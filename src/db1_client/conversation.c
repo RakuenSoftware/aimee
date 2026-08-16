@@ -336,4 +336,38 @@ int db1_wm_list(const char *session_id, const char *category, wm_entry_t *out, i
    return rows;
 }
 
+char *db1_wm_assemble_context(const char *session_id)
+{
+   if (!session_id || !session_id[0])
+      return NULL;
+   const char *fields[] = {session_id};
+   char *value = malloc(524288u);
+   if (!value)
+      return NULL;
+   char *const values[] = {value};
+   const size_t caps[] = {524288u};
+   int status = call_stage(AIMEE_DB1_OP_WM_ASSEMBLE_CONTEXT, fields, 1, values, caps, 1, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK || !value[0])
+   {
+      free(value);
+      return NULL;
+   }
+   char *shrunk = realloc(value, strlen(value) + 1u);
+   return shrunk ? shrunk : value;
+}
+
+int db1_payload_rewrite_record(const char *session_id, int deferred, int bytes_saved, int new_payload_tokens, const char *reason, const char *new_prefix_hash)
+{
+   if (!session_id || !session_id[0])
+      return -1;
+   char arg1[24];
+   snprintf(arg1, sizeof arg1, "%d", deferred);
+   char arg2[24];
+   snprintf(arg2, sizeof arg2, "%d", bytes_saved);
+   char arg3[24];
+   snprintf(arg3, sizeof arg3, "%d", new_payload_tokens);
+   const char *fields[] = {session_id, arg1, arg2, arg3, reason ? reason : "", new_prefix_hash ? new_prefix_hash : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_REWRITE_RECORD, fields, 6, NULL, NULL, 0, NULL));
+}
+
 /* clang-format on */
