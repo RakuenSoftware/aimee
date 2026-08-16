@@ -54,9 +54,16 @@ TIER_OF = {"text": 0, "out_text": 0, "int": 1, "out_num": 2}
 TIER_NAME = {
     0: "T0  fits the wire today",
     1: "T1  + integer arguments",
-    2: "T2  + counted reply (integer / multi out-parameter)",
+    2: "T2  + a richer reply (counted, multi-value, or a status beyond ok/miss/fail)",
     3: "T3  + structured payloads (struct, array, malloc'd out)",
 }
+
+# A contract that answers with more than success/failure or found/not-found.
+# The wire maps a write to 0/-1 and a read to 1/0/-1, so an operation that
+# returns a count, or a distinguished refusal like the single-writer -2, loses
+# the distinction it exists to make.
+RICH_RETURN = re.compile(r"(\B-2\b|\B-3\b|number of|count of|returns the number|how many)",
+                         re.I)
 
 
 def compile_only_sources(root: Path) -> set[str]:
@@ -85,13 +92,22 @@ def declarations(root: Path, families: dict[str, str]) -> dict[str, dict]:
     for header in sorted((root / SOURCE_DIR).glob("*.h")):
         if header.stem not in families:
             continue
-        text = re.sub(r"/\*.*?\*/", "", header.read_text(errors="ignore"), flags=re.S)
+        raw = header.read_text(errors="ignore")
+        # The comment immediately before a declaration is its contract, and the
+        # contract is where a count or a distinguished refusal is stated.
+        documented: dict[str, str] = {}
+        for pair in re.finditer(r"/\*(.*?)\*/\s*((?:[^;/]|/(?!\*))*?;)", raw, re.S):
+            named = re.search(r"\b([a-z][a-z0-9_]{3,})\s*\(", pair.group(2))
+            if named:
+                documented[named.group(1)] = pair.group(1)
+        text = re.sub(r"/\*.*?\*/", "", raw, flags=re.S)
         for match in DECL.finditer(text):
             found[match.group(2)] = {
                 "family": families[header.stem],
                 "source": header.stem,
                 "returns": " ".join(match.group(1).split()),
                 "params": " ".join(match.group(3).split()),
+                "contract": " ".join(documented.get(match.group(2), "").split()),
             }
     return found
 
@@ -189,6 +205,16 @@ def survey(root: Path) -> dict:
             tier = max(tier, TIER_OF.get(tag, 3))
         if entry["returns"] in ("char *", "const char *"):
             tier = 3
+        # An operation taking nothing cannot be framed: the request carries at
+        # least one counted field.
+        if not entry["tags"]:
+            tier = max(tier, 2)
+        # One reply value, so a second out buffer has nowhere to go.
+        if entry["tags"].count("out_text") > 1:
+            tier = max(tier, 2)
+        if RICH_RETURN.search(entry.get("contract", "")):
+            tier = max(tier, 2)
+            entry["rich_return"] = True
         entry["tier"] = tier
         names = [p.split()[-1].lstrip("*") for p in entry["params"].split(",")]
         entry["large_fields"] = sorted({
@@ -233,10 +259,14 @@ def report(operations: dict) -> None:
     nullable = {n: o for n, o in ready.items() if o["nullable"]}
     large = {n: o for n, o in ready.items() if o["large_fields"]}
     print(f"\n  reachable now (T0+T1)                : {len(ready)}")
-    print(f"    of those passing NULL or \"\"        : {len(nullable)}"
-          f"   (literals only -- a lower bound)")
-    print(f"    of those carrying a large field    : {len(large)}"
-          f"   (against AIMEE_DB1_FIELD_MAX)")
+    # Both of these were blockers once and are not now. They stay in the report
+    # because they say what the reachable set is carrying -- a family full of
+    # documents is a different migration from a family full of identifiers --
+    # but neither refuses a call any more.
+    print(f"    passing NULL or \"\" somewhere      : {len(nullable)}"
+          f"   (carried: fields declare required)")
+    print(f"    carrying a prompt/result/document  : {len(large)}"
+          f"   (carried: requests are not capped)")
 
     print("\n  by family (ready / total):")
     families = collections.defaultdict(collections.Counter)
