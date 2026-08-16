@@ -30,6 +30,30 @@
    an over-long value rather than truncate one. */
 #define AIMEE_DB1_STATE_MAX 6144u
 
+/* Family 2: branch ownership for the MCP git flows. Rows say which session owns
+   which branch, so concurrent local sessions do not stomp on each other.
+
+   Request:  op(u32) | field_count(u32) | (len(u32) | bytes) * field_count
+   Response: status(u32) | value_len(u32) | value
+
+   The counted form is the one every family after the first uses. Stage 1 fixed
+   its request at exactly two fields, which suited a keyed blob and suits nothing
+   with three, so the count is explicit here rather than implied by the op. */
+#define AIMEE_DB1_EVENT_GIT_OWNERSHIP 11778u
+#define AIMEE_DB1_STAGE_GIT_OWNERSHIP 2u
+
+#define AIMEE_DB1_OP_OWNERSHIP_UPSERT             1u
+#define AIMEE_DB1_OP_OWNERSHIP_DELETE             2u
+#define AIMEE_DB1_OP_OWNERSHIP_OWNER_GET          3u
+#define AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION 4u
+#define AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX  5u
+
+/* Bounds the repo path, branch, session id and prefix a request may carry, and
+   the value a reply returns. Stated so the module refuses an over-long field
+   rather than truncating one into a different row. */
+#define AIMEE_DB1_FIELD_MAX  512u
+#define AIMEE_DB1_FIELDS_MAX 3u
+
 #define AIMEE_DB1_STATUS_OK       0u
 #define AIMEE_DB1_STATUS_MISSING  1u
 #define AIMEE_DB1_STATUS_INVALID  2u
