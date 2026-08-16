@@ -165,25 +165,40 @@ const (
 // deadline exceeded" says neither which one fired nor what the other one was, so
 // a conflicting pair could not be diagnosed from the event log at all.
 //
-// The C runtime already reports both numbers when its own budget ends the loop
-// ("tool loop budget exhausted (elapsed=... effective=... configured=...
-// stage_remaining_cap=...)", src/posix/agent_runtime.c). This carries the
-// equivalent for the other direction, where the stage deadline fires first.
+// The Go delegates producer reports its execution bound, elapsed time, and
+// typed stop reason. This wrapper adds the caller-owned stage wall bound once,
+// using the same formatting path for direct and grouped dispatch.
 type DelegateLimitError struct {
 	Err error
+	// FiringBound is stage_wall, turn_cap, execution_deadline, or cancelled.
+	// It is empty only for legacy callers that construct this type directly.
+	FiringBound string
 	// StageWallRemaining is the stage wall budget this dispatch was given.
 	StageWallRemaining time.Duration
 	// ToolLoopCap is the tool-loop budget actually handed to the delegate, after
 	// applyDelegateDeadlineCap bounded it by the stage's remaining wall.
-	ToolLoopCap time.Duration
+	ToolLoopCap   time.Duration
+	MaxTurns      int
+	ObservedTurns int
 	// Elapsed is how long the dispatch ran before it failed.
 	Elapsed time.Duration
+	Detail  string
 }
 
 func (e *DelegateLimitError) Error() string {
-	return fmt.Sprintf("%s (stage_wall_remaining=%s delegate_tool_loop_cap=%s elapsed=%s)",
+	message := fmt.Sprintf("%s (stage_wall_remaining=%s delegate_tool_loop_cap=%s elapsed=%s",
 		e.Err, boundOrUnset(e.StageWallRemaining), boundOrUnset(e.ToolLoopCap),
 		e.Elapsed.Round(time.Millisecond))
+	if e.FiringBound != "" {
+		message += " firing_bound=" + e.FiringBound
+	}
+	if e.MaxTurns > 0 {
+		message += fmt.Sprintf(" max_turns=%d observed_turns=%d", e.MaxTurns, e.ObservedTurns)
+	}
+	if e.Detail != "" {
+		message += " detail=" + safeDiagnostic(e.Detail)
+	}
+	return message + ")"
 }
 
 // Exactly zero means the bound was never set — no deadline on the context, or no
@@ -205,6 +220,37 @@ func boundOrUnset(d time.Duration) string {
 
 func (e *DelegateLimitError) Unwrap() error { return e.Err }
 
+func decorateDelegateLimitError(err error, stageWallRemaining time.Duration,
+	request DelegateRequest, callerElapsed time.Duration) error {
+	if err == nil {
+		return nil
+	}
+	toolLoopCap := time.Duration(request.ToolLoopTimeoutMSCap) * time.Millisecond
+	var execution *DelegateExecutionError
+	if errors.As(err, &execution) && execution.Termination != nil {
+		termination := execution.Termination
+		elapsed := time.Duration(termination.ElapsedMS) * time.Millisecond
+		if elapsed <= 0 {
+			elapsed = callerElapsed
+		}
+		if termination.ExecutionTimeoutMS > 0 {
+			toolLoopCap = time.Duration(termination.ExecutionTimeoutMS) * time.Millisecond
+		}
+		return &DelegateLimitError{
+			Err: err, FiringBound: termination.Kind, StageWallRemaining: stageWallRemaining,
+			ToolLoopCap: toolLoopCap, MaxTurns: termination.MaxTurns,
+			ObservedTurns: termination.ObservedTurns, Elapsed: elapsed, Detail: termination.Detail,
+		}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &DelegateLimitError{
+			Err: err, FiringBound: "stage_wall", StageWallRemaining: stageWallRemaining,
+			ToolLoopCap: toolLoopCap, Elapsed: callerElapsed,
+		}
+	}
+	return err
+}
+
 func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request DelegateRequest) (DelegateResult, error) {
 	if err := applyDelegateDeadlineCap(ctx, &request); err != nil {
 		return DelegateResult{}, err
@@ -220,24 +266,16 @@ func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request D
 	}
 	started := time.Now()
 	result, err := r.agents.Delegate(ctx, request)
-	// Only the stage-deadline direction is annotated. When the delegate's own
-	// budget ends the loop the C runtime already names both limits, and wrapping
-	// every unrelated dispatch failure would bury its cause behind timings that
-	// had nothing to do with it.
-	if err != nil && errors.Is(err, context.DeadlineExceeded) {
-		return result, &DelegateLimitError{
-			Err:                err,
-			StageWallRemaining: stageWallRemaining,
-			ToolLoopCap:        time.Duration(request.ToolLoopTimeoutMSCap) * time.Millisecond,
-			Elapsed:            time.Since(started),
-		}
-	}
-	return result, err
+	return result, decorateDelegateLimitError(err, stageWallRemaining, request, time.Since(started))
 }
 
 func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requests []DelegateRequest) []DelegateGroupResult {
 	if len(requests) == 0 {
 		return nil
+	}
+	stageWallRemaining := time.Duration(0)
+	if deadline, ok := ctx.Deadline(); ok {
+		stageWallRemaining = time.Until(deadline)
 	}
 	for i := range requests {
 		if err := applyDelegateDeadlineCap(ctx, &requests[i]); err != nil {
@@ -258,7 +296,16 @@ func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requ
 		}
 	}
 	if group, ok := r.agents.(DelegateGroupClient); ok {
-		return group.DelegateGroup(ctx, requests)
+		started := time.Now()
+		out := group.DelegateGroup(ctx, requests)
+		elapsed := time.Since(started)
+		for i := range out {
+			if i < len(requests) {
+				out[i].Err = decorateDelegateLimitError(out[i].Err, stageWallRemaining,
+					requests[i], elapsed)
+			}
+		}
+		return out
 	}
 	// Roundtable never reconstructs grouped delegation or participant identity.
 	// A resource plane without the generic group contract is unavailable to it.

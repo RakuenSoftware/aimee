@@ -2,9 +2,9 @@
 
 - **State:** DONE (2026-08-08) — the two limits are reconciled, and whichever one
   stops a delegate now names both of them and the elapsed time. Clause 3 shipped
-  in an amended form; see [Amendment](#amendment-2026-08-08). The Go producer is delivered;
-  grouped diagnostics and executable exhaustion proof remain in
-  [`delegate-limit-diagnostics-residual.md`](../pending/delegate-limit-diagnostics-residual.md).
+  in an amended form; see [Amendment](#amendment-2026-08-08). The Go producer, grouped diagnostics,
+  and executable exhaustion proof are delivered in
+  [`delegate-limit-diagnostics-residual.md`](delegate-limit-diagnostics-residual.md).
 
 ## Problem
 
