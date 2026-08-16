@@ -47,7 +47,312 @@ SUPPORT_COMPILE_FLAGS = (
     "-std=c11 -Os -Wall -Wextra -Werror " + PROBE_FLAGS
 )
 SUPPORT_INCLUDE_ROOTS = ["src/modules/db2/support"]
+CJSON_DEFINES = [
+    "cJSON_AddArrayToObject",
+    "cJSON_AddBoolToObject",
+    "cJSON_AddFalseToObject",
+    "cJSON_AddItemReferenceToArray",
+    "cJSON_AddItemReferenceToObject",
+    "cJSON_AddItemToArray",
+    "cJSON_AddItemToObject",
+    "cJSON_AddItemToObjectCS",
+    "cJSON_AddNullToObject",
+    "cJSON_AddNumberToObject",
+    "cJSON_AddObjectToObject",
+    "cJSON_AddRawToObject",
+    "cJSON_AddStringToObject",
+    "cJSON_AddTrueToObject",
+    "cJSON_Compare",
+    "cJSON_CreateArray",
+    "cJSON_CreateArrayReference",
+    "cJSON_CreateBool",
+    "cJSON_CreateDoubleArray",
+    "cJSON_CreateFalse",
+    "cJSON_CreateFloatArray",
+    "cJSON_CreateIntArray",
+    "cJSON_CreateNull",
+    "cJSON_CreateNumber",
+    "cJSON_CreateObject",
+    "cJSON_CreateObjectReference",
+    "cJSON_CreateRaw",
+    "cJSON_CreateString",
+    "cJSON_CreateStringArray",
+    "cJSON_CreateStringReference",
+    "cJSON_CreateTrue",
+    "cJSON_Delete",
+    "cJSON_DeleteItemFromArray",
+    "cJSON_DeleteItemFromObject",
+    "cJSON_DeleteItemFromObjectCaseSensitive",
+    "cJSON_DetachItemFromArray",
+    "cJSON_DetachItemFromObject",
+    "cJSON_DetachItemFromObjectCaseSensitive",
+    "cJSON_DetachItemViaPointer",
+    "cJSON_Duplicate",
+    "cJSON_Duplicate_rec",
+    "cJSON_GetArrayItem",
+    "cJSON_GetArraySize",
+    "cJSON_GetErrorPtr",
+    "cJSON_GetNumberValue",
+    "cJSON_GetObjectItem",
+    "cJSON_GetObjectItemCaseSensitive",
+    "cJSON_GetStringValue",
+    "cJSON_HasObjectItem",
+    "cJSON_InitHooks",
+    "cJSON_InsertItemInArray",
+    "cJSON_IsArray",
+    "cJSON_IsBool",
+    "cJSON_IsFalse",
+    "cJSON_IsInvalid",
+    "cJSON_IsNull",
+    "cJSON_IsNumber",
+    "cJSON_IsObject",
+    "cJSON_IsRaw",
+    "cJSON_IsString",
+    "cJSON_IsTrue",
+    "cJSON_Minify",
+    "cJSON_Parse",
+    "cJSON_ParseWithLength",
+    "cJSON_ParseWithLengthOpts",
+    "cJSON_ParseWithOpts",
+    "cJSON_Print",
+    "cJSON_PrintBuffered",
+    "cJSON_PrintPreallocated",
+    "cJSON_PrintUnformatted",
+    "cJSON_ReplaceItemInArray",
+    "cJSON_ReplaceItemInObject",
+    "cJSON_ReplaceItemInObjectCaseSensitive",
+    "cJSON_ReplaceItemViaPointer",
+    "cJSON_SetNumberHelper",
+    "cJSON_SetValuestring",
+    "cJSON_Version",
+    "cJSON_free",
+    "cJSON_malloc",
+]
+CJSON_BASE_REFERENCES = {
+    "cJSON_AddArrayToObject": [
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+    ],
+    "cJSON_AddBoolToObject": [
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/vector_status.c",
+    ],
+    "cJSON_AddItemToArray": [
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_ingest.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_payload.c",
+    ],
+    "cJSON_AddItemToObject": [
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_payload.c",
+    ],
+    "cJSON_AddNumberToObject": [
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/memory_payload.c",
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/c/vector_status.c",
+    ],
+    "cJSON_AddObjectToObject": ["src/modules/db2/c/kb_service_backend_memory.c"],
+    "cJSON_AddStringToObject": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_ingest.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/memory_payload.c",
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/c/vector_status.c",
+    ],
+    "cJSON_CreateArray": [
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_ingest.c",
+        "src/modules/db2/c/memory_payload.c",
+    ],
+    "cJSON_CreateNumber": [
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+    ],
+    "cJSON_CreateObject": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_ingest.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/memory_payload.c",
+        "src/modules/db2/c/rules.c",
+        "src/modules/db2/c/vector_status.c",
+    ],
+    "cJSON_CreateString": [
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_payload.c",
+    ],
+    "cJSON_Delete": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/memory_payload.c",
+        "src/modules/db2/c/org_model_catalog.c",
+        "src/modules/db2/c/pgvec_transport.c",
+        "src/modules/db2/c/rules.c",
+    ],
+    "cJSON_DeleteItemFromObjectCaseSensitive": ["src/modules/db2/c/demotion.c"],
+    "cJSON_GetArrayItem": [
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/org_model_catalog.c",
+    ],
+    "cJSON_GetArraySize": [
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/memory_payload.c",
+        "src/modules/db2/c/org_model_catalog.c",
+    ],
+    "cJSON_GetObjectItemCaseSensitive": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/pgvec_transport.c",
+    ],
+    "cJSON_IsArray": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/org_model_catalog.c",
+    ],
+    "cJSON_IsBool": ["src/modules/db2/c/kb_service_backend_agent.c"],
+    "cJSON_IsNumber": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+    ],
+    "cJSON_IsObject": ["src/modules/db2/c/kb_service_backend_agent.c"],
+    "cJSON_IsString": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_export.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/org_model_catalog.c",
+        "src/modules/db2/c/pgvec_transport.c",
+    ],
+    "cJSON_IsTrue": ["src/modules/db2/c/kb_service_backend_agent.c"],
+    "cJSON_Parse": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/code_audit.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/pgvec_transport.c",
+    ],
+    "cJSON_ParseWithOpts": ["src/modules/db2/c/org_model_catalog.c"],
+    "cJSON_PrintUnformatted": [
+        "src/modules/db2/c/artifacts.c",
+        "src/modules/db2/c/collab_rules.c",
+        "src/modules/db2/c/corpus_structural.c",
+        "src/modules/db2/c/demotion.c",
+        "src/modules/db2/c/fidelity.c",
+        "src/modules/db2/c/kb_payload.c",
+        "src/modules/db2/c/kb_service_backend_agent.c",
+        "src/modules/db2/c/kb_service_backend_memory.c",
+        "src/modules/db2/c/memory_export.c",
+        "src/modules/db2/c/memory_payload.c",
+        "src/modules/db2/c/rules.c",
+    ],
+}
 SUPPORT_UNITS: list[dict[str, object]] = [{
+    "path": "src/modules/db2/support/cjson.c",
+    "source_sha256": "c17f53aaa58dddb899f452b02dc313b98af9111c81d87797c72607c1f6d6b4d4",
+    "header": "src/modules/db2/support/cJSON.h",
+    "header_sha256": "b3e16fec5613b4150c1e6636f4576cb54e2d8641bce391c9470dd19aa346e15a",
+    "origin_source": "src/vendor/cJSON.c",
+    "origin_header": "src/vendor/headers/cJSON.h",
+    "defines": CJSON_DEFINES,
+    "resolves": sorted(CJSON_BASE_REFERENCES),
+    "allowed_includes": [
+        "string.h", "stdio.h", "math.h", "stdlib.h", "limits.h",
+        "ctype.h", "float.h", "locale.h", "cJSON.h",
+    ],
+    "allowed_header_includes": ["stddef.h"],
+    "allowed_undefined": [
+        "_GLOBAL_OFFSET_TABLE_", "__ctype_tolower_loc", "__isoc99_sscanf", "free",
+        "malloc", "realloc", "sprintf", "strcmp", "strcpy", "strlen", "strncmp", "strtod",
+    ],
+    "base_references": CJSON_BASE_REFERENCES,
+    "provenance": "Exact descriptor-owned copies of src/vendor/cJSON.c and its public header; "
+                  "every DB2 reference is frozen in this policy and byte drift from the canonical "
+                  "vendored input fails closed.",
+    "evidence": "The pinned cJSON implementation resolves all 25 reviewed generated-input "
+                "dependencies while exporting the complete canonical API and importing only its "
+                "reviewed C runtime surface; it contains no DB2, bus, provider, or database code.",
+}, {
     "path": "src/modules/db2/support/dstr_primitives.c",
     "source_sha256": "ae448e0ae6e0464922042536b77ab396ea230d5ba16ec977e003ecd614cf22ab",
     "header": "src/modules/db2/support/db2_dstr.h",
@@ -255,7 +560,7 @@ SYSTEM_SYMBOLS = {
     "pthread_mutex_trylock", "pthread_mutex_unlock", "pthread_once", "pthread_self",
     "pthread_setspecific", "qsort",
     "read", "realloc", "realpath", "recv", "select", "send", "setsockopt", "shutdown", "sleep",
-    "snprintf", "socket", "sqlite3_close", "sqlite3_errmsg", "sqlite3_exec", "sqlite3_free",
+    "snprintf", "socket", "sprintf", "sqlite3_close", "sqlite3_errmsg", "sqlite3_exec", "sqlite3_free",
     "sqlite3_open", "stat", "stderr", "strcasecmp", "strcasestr", "strchr", "strcmp", "strcpy",
     "strcspn", "strdup", "strerror",
     "strftime", "strlen", "strncasecmp", "strncat", "strncmp", "strncpy", "strnlen",
@@ -412,8 +717,8 @@ def _support_includes(root: Path, raw: str) -> list[str]:
         if not match:
             fail("support-include", f"malformed include at {raw}:{number}")
         result.append(match.group(1))
-    if result != sorted(set(result)):
-        fail("support-include", f"includes must be sorted and unique in {raw}: {result}")
+    if len(result) != len(set(result)):
+        fail("support-include", f"includes must be unique in {raw}: {result}")
     return result
 
 
@@ -570,6 +875,19 @@ def descriptor_support_policy(root: Path, descriptor: object) -> list[dict[str, 
         actual_header_sha256 = hashlib.sha256(support_header.read_bytes()).hexdigest()
         if actual_header_sha256 != unit["header_sha256"]:
             fail("support-header-hash", f"{header_raw}: reviewed header content changed")
+        origin_source_raw = unit.get("origin_source")
+        origin_header_raw = unit.get("origin_header")
+        if (origin_source_raw is None) != (origin_header_raw is None):
+            fail("support-origin", f"{raw}: source and header origins must be declared together")
+        if origin_source_raw is not None:
+            if not isinstance(origin_source_raw, str) or not isinstance(origin_header_raw, str):
+                fail("support-origin", f"{raw}: origins must be paths")
+            origin_source = _safe_file(root, origin_source_raw, Path("src/vendor"))
+            origin_header = _safe_file(root, origin_header_raw, Path("src/vendor"))
+            if support_source.read_bytes() != origin_source.read_bytes():
+                fail("support-origin-drift", f"{raw}: differs from {origin_source_raw}")
+            if support_header.read_bytes() != origin_header.read_bytes():
+                fail("support-origin-drift", f"{header_raw}: differs from {origin_header_raw}")
         includes = _support_includes(root, raw)
         if includes != unit["allowed_includes"]:
             fail("support-include", f"{raw}: expected={unit['allowed_includes']}, "
@@ -645,6 +963,15 @@ def _string_list(value: object, label: str, *, symbols: bool = False) -> list[st
     return result
 
 
+def _ordered_string_list(value: object, label: str) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
+        fail("contract-shape", f"{label} must be a string array")
+    result = list(value)
+    if len(result) != len(set(result)):
+        fail("contract-order", f"{label} must be unique")
+    return result
+
+
 def _validate_support_units(
     root: Path, value: object, legacy_units: list[str], *, check_files: bool
 ) -> list[dict[str, object]]:
@@ -657,8 +984,11 @@ def _validate_support_units(
         "allowed_header_includes", "allowed_undefined", "base_references",
         "provenance", "evidence", "source_sha256", "header_sha256",
     }
+    origin_fields = {"origin_source", "origin_header"}
     for index, unit in enumerate(value):
-        if not isinstance(unit, dict) or set(unit) != required:
+        keys = frozenset(unit) if isinstance(unit, dict) else frozenset()
+        if (not isinstance(unit, dict) or
+                keys not in {frozenset(required), frozenset(required | origin_fields)}):
             fail("support-shape", f"descriptor_support_units[{index}] has invalid keys")
         path = unit["path"]
         if not isinstance(path, str) or path <= previous:
@@ -677,19 +1007,26 @@ def _validate_support_units(
         header_sha256 = unit["header_sha256"]
         if not isinstance(header_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", header_sha256):
             fail("support-header-hash", f"{header}: header_sha256 must be lowercase SHA-256")
+        if origin_fields <= set(unit):
+            for field in sorted(origin_fields):
+                origin = unit[field]
+                if not isinstance(origin, str):
+                    fail("support-origin", f"{path}: {field} must be a path")
+                if check_files:
+                    _safe_file(root, origin, Path("src/vendor"))
         defines = _string_list(unit["defines"], f"support[{index}].defines", symbols=True)
         resolves = _string_list(unit["resolves"], f"support[{index}].resolves", symbols=True)
-        includes = _string_list(unit["allowed_includes"],
-                                f"support[{index}].allowed_includes")
-        header_includes = _string_list(
+        includes = _ordered_string_list(unit["allowed_includes"],
+                                        f"support[{index}].allowed_includes")
+        header_includes = _ordered_string_list(
             unit["allowed_header_includes"],
             f"support[{index}].allowed_header_includes",
         )
         allowed_undefined = _string_list(
             unit["allowed_undefined"], f"support[{index}].allowed_undefined", symbols=True
         )
-        if defines != resolves:
-            fail("support-resolves", f"{path}: global definitions must exactly equal resolves")
+        if not set(resolves) <= set(defines):
+            fail("support-resolves", f"{path}: resolves must be a subset of global definitions")
         if any("/" in item or "\\" in item for item in [*includes, *header_includes]):
             fail("support-include", f"{path}: include names must not contain paths")
         base_references = unit["base_references"]
@@ -883,18 +1220,33 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
     for unit in added_support:
         base_references = unit["base_references"]
         assert isinstance(base_references, dict)
+        expected_disposition = (
+            "descriptor-owned-copy/generated-input"
+            if "origin_source" in unit else "portable-core-promotion"
+        )
         for symbol in unit["resolves"]:
             before = previous_rows.get(str(symbol))
-            if (before is None or before["disposition"] != "portable-core-promotion" or
+            if (before is None or before["disposition"] != expected_disposition or
                     before["references"] != base_references[symbol]):
                 fail("previous-support-admission",
-                     f"{unit['path']}: {symbol} lacks exact portable-core base evidence")
+                     f"{unit['path']}: {symbol} lacks exact {expected_disposition} base evidence")
             if symbol in current_rows:
                 fail("previous-support-resolution",
                      f"{unit['path']}: declared resolution {symbol} remains unresolved")
     added_symbols = sorted(set(current_rows) - set(previous_rows))
-    if added_symbols:
-        fail("previous-symbol-growth", f"new unresolved symbols are forbidden: {added_symbols}")
+    rejected_added: list[str] = []
+    for symbol in added_symbols:
+        row = current_rows[symbol]
+        references = set(row["references"])
+        permitted_paths = {
+            str(unit["path"]) for unit in added_support
+            if symbol in unit["allowed_undefined"]
+        }
+        if (row["disposition"] != "system-link" or
+                not references or not references <= permitted_paths):
+            rejected_added.append(symbol)
+    if rejected_added:
+        fail("previous-symbol-growth", f"new unresolved symbols are forbidden: {rejected_added}")
     expanded: list[str] = []
     for symbol in sorted(set(current_rows) & set(previous_rows)):
         before = set(previous_rows[symbol]["references"])

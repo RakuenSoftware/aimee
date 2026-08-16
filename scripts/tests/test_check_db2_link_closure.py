@@ -133,6 +133,34 @@ class LinkClosureTest(unittest.TestCase):
             "evidence": "Deterministic fixture support with no private dependency.",
         }
 
+    def _copy_support_row(self) -> dict[str, object]:
+        support = self.root / "src/modules/db2/support"
+        vendor = self.root / "src/vendor/headers"
+        support.mkdir(parents=True, exist_ok=True)
+        vendor.mkdir(parents=True, exist_ok=True)
+        source_text = '#include "fixture.h"\nint extra(void) { return 1; }\nint outside(void) { return 7; }\n'
+        header_text = "#include <stddef.h>\n"
+        (support / "fixture.c").write_text(source_text, encoding="utf-8")
+        (support / "fixture.h").write_text(header_text, encoding="utf-8")
+        (self.root / "src/vendor/fixture.c").write_text(source_text, encoding="utf-8")
+        (vendor / "fixture.h").write_text(header_text, encoding="utf-8")
+        return {
+            "path": "src/modules/db2/support/fixture.c",
+            "header": "src/modules/db2/support/fixture.h",
+            "source_sha256": hashlib.sha256(source_text.encode()).hexdigest(),
+            "header_sha256": hashlib.sha256(header_text.encode()).hexdigest(),
+            "origin_source": "src/vendor/fixture.c",
+            "origin_header": "src/vendor/headers/fixture.h",
+            "defines": ["extra", "outside"],
+            "resolves": ["outside"],
+            "allowed_includes": ["fixture.h"],
+            "allowed_header_includes": ["stddef.h"],
+            "allowed_undefined": [],
+            "base_references": {"outside": ["src/modules/db2/c/a.c"]},
+            "provenance": "Exact fixture copy with a pinned generated-input origin and call site.",
+            "evidence": "Fixture copy proves extra canonical exports need not be unresolved DB2 imports.",
+        }
+
     def _support_comparison(self) -> tuple[dict[str, object], dict[str, object]]:
         previous = copy.deepcopy(self.contract)
         previous["unresolved"].append({  # type: ignore[union-attr]
@@ -252,6 +280,38 @@ class LinkClosureTest(unittest.TestCase):
         with self.assertRaisesRegex(checker.ClosureError, "previous-symbol-growth"):
             checker.compare_contracts(self.root, previous, current)
 
+    def test_previous_contract_allows_added_support_system_import(self) -> None:
+        previous, current = self._support_comparison()
+        previous["unresolved"].append({  # type: ignore[union-attr]
+            "symbol": "zz_resolved",
+            "references": ["src/modules/db2/c/a.c"],
+            "disposition": "portable-core-promotion",
+            "evidence": "Fixture debt removed alongside the support admission.",
+        })
+        self._refresh_summary(previous)
+        unit = current["descriptor_support_units"][0]  # type: ignore[index]
+        unit["allowed_undefined"] = ["z_runtime"]
+        current["unresolved"].append({  # type: ignore[union-attr]
+            "symbol": "z_runtime",
+            "references": ["src/modules/db2/support/fixture.c"],
+            "disposition": "system-link",
+            "evidence": "Reviewed system import introduced only by the admitted support object.",
+        })
+        self._refresh_summary(current)
+        checker.compare_contracts(self.root, previous, current)
+
+    def test_previous_contract_rejects_added_system_import_from_legacy_unit(self) -> None:
+        previous, current = self._support_comparison()
+        current["unresolved"].append({  # type: ignore[union-attr]
+            "symbol": "z_runtime",
+            "references": ["src/modules/db2/c/a.c"],
+            "disposition": "system-link",
+            "evidence": "Unreviewed system import from a legacy translation unit.",
+        })
+        self._refresh_summary(current)
+        with self.assertRaisesRegex(checker.ClosureError, "previous-symbol-growth"):
+            checker.compare_contracts(self.root, previous, current)
+
     def test_previous_contract_rejects_new_translation_unit(self) -> None:
         (self.root / "src/modules/db2/c/b.c").write_text("int b;\n", encoding="utf-8")
         previous = copy.deepcopy(self.contract)
@@ -301,6 +361,24 @@ class LinkClosureTest(unittest.TestCase):
 
     def test_previous_contract_allows_exact_support_shrink(self) -> None:
         previous, current = self._support_comparison()
+        checker.compare_contracts(self.root, previous, current)
+
+    def test_previous_contract_allows_generated_input_copy_shrink(self) -> None:
+        previous = copy.deepcopy(self.contract)
+        previous["unresolved"][0][  # type: ignore[index]
+            "disposition"
+        ] = "descriptor-owned-copy/generated-input"
+        previous["unresolved"].append({  # type: ignore[union-attr]
+            "symbol": "z_remaining",
+            "references": ["src/modules/db2/c/a.c"],
+            "disposition": "system-link",
+            "evidence": "A fixture system dependency that remains unresolved.",
+        })
+        self._refresh_summary(previous)
+        current = copy.deepcopy(previous)
+        current["descriptor_support_units"] = [self._copy_support_row()]
+        current["unresolved"] = [current["unresolved"][1]]  # type: ignore[index]
+        self._refresh_summary(current)
         checker.compare_contracts(self.root, previous, current)
 
     def test_support_admission_requires_portable_base_disposition(self) -> None:
@@ -356,6 +434,20 @@ class LinkClosureTest(unittest.TestCase):
             with self.assertRaisesRegex(checker.ClosureError, "support-descriptor"):
                 checker.descriptor_support_policy(REPO, descriptor)
 
+    def test_cjson_source_descriptor_omission_fails(self) -> None:
+        descriptor = json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))
+        descriptor["sources"].remove("src/modules/db2/support/cjson.c")
+        with mock.patch.object(checker, "SUPPORT_UNITS", self.production_support):
+            with self.assertRaisesRegex(checker.ClosureError, "support-descriptor"):
+                checker.descriptor_support_policy(REPO, descriptor)
+
+    def test_cjson_header_descriptor_omission_fails(self) -> None:
+        descriptor = json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))
+        descriptor["private_headers"].remove("src/modules/db2/support/cJSON.h")
+        with mock.patch.object(checker, "SUPPORT_UNITS", self.production_support):
+            with self.assertRaisesRegex(checker.ClosureError, "support-descriptor"):
+                checker.descriptor_support_policy(REPO, descriptor)
+
     def test_support_forbidden_include_fails(self) -> None:
         unit = self._support_row()
         path = self.root / str(unit["path"])
@@ -402,6 +494,47 @@ class LinkClosureTest(unittest.TestCase):
         }
         with mock.patch.object(checker, "SUPPORT_UNITS", [unit]):
             with self.assertRaisesRegex(checker.ClosureError, "support-header-hash"):
+                checker.descriptor_support_policy(self.root, descriptor)
+
+    def test_owned_copy_source_must_match_vendor_origin(self) -> None:
+        unit = self._copy_support_row()
+        origin = self.root / str(unit["origin_source"])
+        origin.write_text("int outside(void) { return 8; }\n", encoding="utf-8")
+        descriptor = {
+            "sources": [unit["path"]],
+            "private_headers": [unit["header"]],
+            "c_build": {"include_roots": checker.SUPPORT_INCLUDE_ROOTS},
+        }
+        with mock.patch.object(checker, "SUPPORT_UNITS", [unit]):
+            with self.assertRaisesRegex(checker.ClosureError, "support-origin-drift"):
+                checker.descriptor_support_policy(self.root, descriptor)
+
+    def test_owned_copy_header_must_match_vendor_origin(self) -> None:
+        unit = self._copy_support_row()
+        origin = self.root / str(unit["origin_header"])
+        origin.write_text("#include <stdint.h>\n", encoding="utf-8")
+        descriptor = {
+            "sources": [unit["path"]],
+            "private_headers": [unit["header"]],
+            "c_build": {"include_roots": checker.SUPPORT_INCLUDE_ROOTS},
+        }
+        with mock.patch.object(checker, "SUPPORT_UNITS", [unit]):
+            with self.assertRaisesRegex(checker.ClosureError, "support-origin-drift"):
+                checker.descriptor_support_policy(self.root, descriptor)
+
+    def test_owned_copy_rejects_symlink_origin(self) -> None:
+        unit = self._copy_support_row()
+        origin = self.root / str(unit["origin_source"])
+        target = self.root / "origin.c"
+        origin.rename(target)
+        origin.symlink_to(target)
+        descriptor = {
+            "sources": [unit["path"]],
+            "private_headers": [unit["header"]],
+            "c_build": {"include_roots": checker.SUPPORT_INCLUDE_ROOTS},
+        }
+        with mock.patch.object(checker, "SUPPORT_UNITS", [unit]):
+            with self.assertRaisesRegex(checker.ClosureError, "source-file"):
                 checker.descriptor_support_policy(self.root, descriptor)
 
     def test_support_forbidden_header_include_fails(self) -> None:
@@ -560,6 +693,23 @@ class LinkClosureTest(unittest.TestCase):
     def test_real_repository_contract_and_probe(self) -> None:
         with mock.patch.object(checker, "SUPPORT_UNITS", self.production_support):
             checker.check(REPO, run_probe=True)
+
+    def test_real_repository_eliminates_generated_input_debt(self) -> None:
+        contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 313)
+        self.assertEqual(
+            contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 0
+        )
+        self.assertEqual(contract["summary"]["dispositions"]["system-link"], 145)
+        self.assertFalse(any(
+            row["symbol"].startswith("cJSON_") for row in contract["unresolved"]
+        ))
+        cjson = next(
+            unit for unit in contract["descriptor_support_units"]
+            if unit["path"] == "src/modules/db2/support/cjson.c"
+        )
+        self.assertEqual(cjson["resolves"], sorted(checker.CJSON_BASE_REFERENCES))
+        self.assertEqual(cjson["defines"], checker.CJSON_DEFINES)
 
 
 if __name__ == "__main__":

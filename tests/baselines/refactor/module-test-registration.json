@@ -65,6 +65,12 @@
       "ctest": false,
       "make": true,
       "module": "db2",
+      "test": "src/tests/test_db2_cjson_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
       "test": "src/tests/test_db2_dstr_support.c"
     },
     {
