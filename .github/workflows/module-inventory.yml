@@ -93,6 +93,17 @@ jobs:
         run: python3 -I -S scripts/gen_db2_declaration_ledger.py
       - name: Test DB2 declaration-ledger failure modes
         run: python3 -I scripts/tests/test_gen_db2_declaration_ledger.py -v
+      - name: Enforce exhaustive DB3 portability decisions
+        run: python3 -I -S scripts/check_db3_portability.py
+      - name: Test DB3 portability-audit failure modes
+        run: python3 -I scripts/tests/test_check_db3_portability.py -v
+      - name: Measure DB2 C link closure
+        run: python3 -I -S scripts/check_db2_link_closure.py
+      - name: Refuse DB2 C link-closure debt growth
+        if: github.event_name == 'pull_request'
+        run: python3 -I -S scripts/check_db2_link_closure.py --no-probe --previous-ref FETCH_HEAD
+      - name: Test DB2 C link-closure failure modes
+        run: python3 -I scripts/tests/test_check_db2_link_closure.py -v
       - name: Refuse premature DB2 process activation
         run: python3 -I -S scripts/check_db2_activation.py
       - name: Test DB2 activation-gate failure modes

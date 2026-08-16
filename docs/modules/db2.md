@@ -69,6 +69,45 @@ explicitly private and retained in DB2, lifecycle health is a reviewed retained-
 and 850 production-consumed declarations remain
 without a reviewed disposition.
 
+The separate `vector-portability.json` audit covers all 76 declared `pgvec_*` symbols, including
+internal and currently unconsumed surfaces. It distinguishes provider-neutral candidate searches,
+post-commit mutation fanout, provider-local control, necessarily retained DB2 authority, and deferred
+analytics. The provider-specific C names remain private DB2 implementation details; the audit records
+which logical effects may later receive DB3 operations without leaking those names onto the wire.
+See `docs/db3.md` for routing, admission, fallback, and revalidation invariants.
+
+The descriptor also owns the database-free C reference route and wire codecs for the first portable
+memory-candidate operation. Its internal pgvector, external provider, and authoritative candidate
+checks are injected, so the route can be exhaustively tested before the private DB2 source closure is
+linked. This is not a production cutover: the module remains disabled and no provider grant ships.
+
+Link-closure audit:
+
+`link-closure-v1.json` accounts for all 141 C translation units in the private DB2 boundary. The
+probe compiles each unit plus exact descriptor-owned support, combines only those objects with a
+relocatable link, supplies no archive, shared library, helper stub, or weak definition, and records
+the 348 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
+disposition and rationale. The current ledger contains 144 explicit system-link dependencies, 25
+pinned vendored/generated inputs, 150 sibling or KB contracts to inject, and 29 support APIs to
+promote. The standalone-link exit condition requires zero entries in the latter three groups; a
+classified ledger alone is not enough.
+
+The first closure reduction promotes seven deterministic sketch primitives from `src/sketch.c` into
+the descriptor-owned `support/sketch_primitives.c`. Their DB2 calls are confined to `c/sketch.c` and
+`c/kb_payload.c`. Admission pins the reviewed source and owned-header hashes, exact exports, and base
+references, permits only `sketch.h` and `string.h`, and permits only `memset` as a possible system ABI
+import. An extra export, include, undefined symbol, weak definition, non-system reference edge,
+descriptor omission, or failure to resolve all seven reviewed symbols fails closed. Fixed-vector
+parity and sanitizer tests compare the support implementation with the still-authoritative monolith
+during the pre-activation period. Both are registered in the native suite; the sanitizer target
+compiles independent test, support, and monolith objects with ASan, UBSan, and FORTIFY enabled.
+
+The gate rejects legacy source additions or omissions, support path escape, symlinks, content drift,
+new unresolved symbols, non-system reference growth, missing evidence, and any attempt to make the
+probe pass through helper objects or libraries. Resolved symbols are also surfaced as
+review-required shrinkage so the ledger and its human-readable counts cannot silently become stale.
+Regeneration never activates the module or asserts that the C closure is complete.
+
 A review transition binds the symbol and normalized-signature hash to one closed disposition,
 family, DB3 placement, and nonempty reason. Signature drift invalidates the review. Unsupported or
 ambiguous C declarations, malformed lexical input, stale review rows, premature completeness, and
@@ -109,6 +148,12 @@ comments/literals/directives, identical and conflicting duplicates, malformed ne
 limits, signature-bound review transitions, pgvector retention, output symlinks, reproducibility,
 and unchanged-output failure. Activation-gate mutation tests prove that an incomplete source list,
 weak backend, or remaining direct production caller prevents enablement.
+DB3-portability tests additionally prove exhaustive 76-symbol coverage, closed classification
+identities, fingerprint drift, duplicate/missing/extra detection, ordering, malformed JSON, resource
+limits, and copied-repository CLI behavior.
+Route and authenticated-bus tests cover default pgvector, selected external serving, unavailable and
+malformed providers, explicit fallback provenance, candidate revalidation, finite/bounded codecs,
+two-observer idempotent apply fanout, and one-server-only search.
 
 ## Operational diagnostics
 
