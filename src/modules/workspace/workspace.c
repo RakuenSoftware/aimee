@@ -983,6 +983,145 @@ void worktree_registry_record(const char *git_root, const char *wt_path, const c
    worktree_registry_append(global_path, git_root, wt_path, branch, sid, work_name, base_branch);
 }
 
+/* --- feature-branch targeting -------------------------------------------------
+ *
+ * A session's PRs target a durable feature branch (aimee/feat/<slug>) rather than
+ * the repository's default branch, so the slices of one feature accumulate on one
+ * branch and reach the default branch through a SINGLE reviewed PR.
+ *
+ * This derives a SUGGESTION only. It is not the store, and nothing that opens a PR
+ * may call it: reading the launcher's registry means reading a file under the
+ * checkout, and the PR path runs on aimee-server, which for a detached or mirrored
+ * workspace cannot see that directory at all (#2386). The store is db1, keyed
+ * repo+session next to branch ownership -- see feature_branch_for_session() in
+ * branch_ownership.c.
+ *
+ * What this is for: a CLI running where the checkout actually is, offering the
+ * operator a sensible default derived from the session's work name before it sends
+ * an explicit base to the server. */
+
+#define FEATURE_BRANCH_PREFIX "aimee/feat/"
+#define FEATURE_SLUG_MAX      40
+
+/* Slugify a work name into the <slug> of aimee/feat/<slug>: lowercase, [a-z0-9-]
+ * only, a run of anything else collapsed to a single '-', leading/trailing '-'
+ * trimmed, capped at FEATURE_SLUG_MAX chars. Returns 0 with `out` filled, or -1
+ * when nothing usable survives (empty or all-punctuation name) -- the caller then
+ * fails closed instead of inventing a branch name. */
+static int feature_slug(const char *name, char *out, size_t out_len)
+{
+   if (!out || out_len < 2)
+      return -1;
+   out[0] = '\0';
+   if (!name)
+      return -1;
+
+   size_t cap = out_len - 1;
+   if (cap > FEATURE_SLUG_MAX)
+      cap = FEATURE_SLUG_MAX;
+
+   size_t n = 0;
+   int pending_dash = 0;
+   for (const unsigned char *p = (const unsigned char *)name; *p && n < cap; p++)
+   {
+      unsigned char c = *p;
+      int keep = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+      if (!keep && c >= 'A' && c <= 'Z')
+      {
+         c = (unsigned char)(c - 'A' + 'a');
+         keep = 1;
+      }
+      if (keep)
+      {
+         if (pending_dash && n > 0 && n + 1 < cap)
+            out[n++] = '-';
+         pending_dash = 0;
+         out[n++] = (char)c;
+      }
+      else if (n > 0)
+         pending_dash = 1; /* collapse a run of separators, emitted only if more follows */
+   }
+   out[n] = '\0';
+   return n > 0 ? 0 : -1;
+}
+
+/* Locate the registry row that owns `path` -- the last row whose worktree column is
+ * `path` or a parent of it -- by walking up from `path` until a registry.tsv is found,
+ * exactly as the attention guard does. Fills `store_dir` (the .aimee/worktrees dir the
+ * row was found in), `wt` (the canonical worktree path from the row, which is the key
+ * both stores agree on) and `work_name` (column 5, empty when the row has none).
+ * Returns 0 when a row was found, -1 otherwise. */
+static int feature_registry_row_for(const char *path, char *store_dir, size_t store_dir_len,
+                                    char *wt, size_t wt_len, char *work_name, size_t work_name_len)
+{
+   store_dir[0] = wt[0] = work_name[0] = '\0';
+
+   char probe[MAX_PATH_LEN];
+   snprintf(probe, sizeof(probe), "%s", path);
+   for (int depth = 0; depth < 40; depth++)
+   {
+      char reg[MAX_PATH_LEN + 64];
+      snprintf(reg, sizeof(reg), "%s/.aimee/worktrees/registry.tsv", probe);
+      FILE *f = fopen(reg, "r");
+      if (f)
+      {
+         int found = -1;
+         char line[2048];
+         while (fgets(line, sizeof(line), f))
+         {
+            line[strcspn(line, "\r\n")] = '\0';
+            /* fields: repo, worktree, branch, sid, work_name, base */
+            char *field[6] = {0};
+            int nf = 0;
+            char *p = line;
+            field[nf++] = p;
+            while (nf < 6 && (p = strchr(p, '\t')))
+            {
+               *p++ = '\0';
+               field[nf++] = p;
+            }
+            if (nf < 2 || !field[1] || !field[1][0])
+               continue;
+            size_t wl = strlen(field[1]);
+            /* the worktree path is `path` itself or a parent of it */
+            if (strncmp(path, field[1], wl) != 0 || (path[wl] != '\0' && path[wl] != '/'))
+               continue;
+            snprintf(store_dir, store_dir_len, "%s/.aimee/worktrees", probe);
+            snprintf(wt, wt_len, "%s", field[1]);
+            snprintf(work_name, work_name_len, "%s", (nf >= 5 && field[4]) ? field[4] : "");
+            found = 0;
+         }
+         fclose(f);
+         if (found == 0)
+            return 0;
+      }
+      char *slash = strrchr(probe, '/');
+      if (!slash || slash == probe)
+         break;
+      *slash = '\0';
+   }
+   return -1;
+}
+
+int feature_branch_suggest(const char *wt_path, char *buf, size_t buf_len)
+{
+   if (buf && buf_len)
+      buf[0] = '\0';
+   if (!buf || buf_len < sizeof(FEATURE_BRANCH_PREFIX) + 1 || !wt_path || !wt_path[0])
+      return -1;
+
+   char store_dir[MAX_PATH_LEN], wt[MAX_PATH_LEN], work_name[256];
+   if (feature_registry_row_for(wt_path, store_dir, sizeof(store_dir), wt, sizeof(wt), work_name,
+                                sizeof(work_name)) != 0)
+      return -1;
+
+   char slug[FEATURE_SLUG_MAX + 1];
+   if (feature_slug(work_name, slug, sizeof(slug)) != 0)
+      return -1;
+   snprintf(buf, buf_len, FEATURE_BRANCH_PREFIX "%s", slug);
+   return 0;
+}
+
 static void worktree_registry_remove_from_file(const char *path, const char *wt_path)
 {
    if (!path || !path[0] || !wt_path || !wt_path[0])

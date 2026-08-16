@@ -1464,7 +1464,16 @@ static int wfe_repo_default_branch(const char *repo_dir, char *buf, size_t n)
  *                feature PR targets the trunk; sets *allow_protected so exec_pr_open
  *                may OPEN a PR against main/master (it never merges -- merge keeps its
  *                own wfe_autonomous_target_ok() rail).
- *   "default"/absent -> the autonomous base (the aimee integration branch).
+ *   "default"/absent -> the PARENT's feature branch when this run has one (a slice
+ *                merges into the feature it belongs to), else the autonomous base.
+ *                Slices aiming at the integration branch by default is what made every
+ *                run open its own PR against a shared branch; the feature branch is
+ *                where a feature's slices belong, and the feature reaches the trunk
+ *                through one base:trunk PR. pr_base_mode=default_branch (reaching the
+ *                engine as AIMEE_PR_BASE_MODE) restores the old default. The head/base pairing this
+ * produces (aimee/wi/<parent>.sN
+ *                -> aimee/feat/<parent>) is the one base:"feature" already produced, so
+ *                it passes the same forge rails -- no rail is relaxed here.
  * *allow_protected defaults to 0; only "trunk" sets it. Returns 0 on success, -1 if a
  * feature base was requested but the run has no parent (a misconfiguration -> the
  * caller fails closed). */
@@ -1491,6 +1500,20 @@ static int resolve_pr_base(wfe_ctx *ctx, const wfe_node_t *node, char *buf, size
       if (allow_protected)
          *allow_protected = 1; /* open-only against the repo trunk (never merged here) */
       return wfe_repo_default_branch(wd, buf, n);
+   }
+   /* base:"default"/absent. Prefer this run's parent feature branch -- a slice belongs
+    * to its feature, not to the shared integration branch. Only a run with a parent has
+    * one; a top-level run keeps the autonomous base (its own final PR is base:"trunk").
+    * config_pr_base_mode()=="default_branch" opts back out to the old behaviour. */
+   if (wfe_pr_base_prefers_feature())
+   {
+      const char *wi = wfe_ctx_work_item(ctx);
+      db1_work_item_t row;
+      if (wi && wi[0] && db1_work_item_get(wi, &row) == 1 && row.parent_id[0])
+      {
+         feature_branch_name(row.parent_id, buf, n);
+         return 0;
+      }
    }
    const char *ab = wfe_autonomous_base();
    snprintf(buf, n, "%s", (ab && ab[0]) ? ab : "");

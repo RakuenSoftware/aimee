@@ -308,6 +308,13 @@ static int run_server(const char *socket_path, log_level_t log_level)
          platform_setenv("AIMEE_KB_API_URL", local_kb);
       }
    }
+   /* The workflow engine is deliberately config-free (it links and tests in isolation),
+    * so it reads the PR base policy from the environment. Export the configured value
+    * here to keep `pr_base_mode` the single operator knob rather than letting the engine
+    * and the session/CLI path disagree. Pre-set env still wins. */
+   if (!(getenv("AIMEE_PR_BASE_MODE") && getenv("AIMEE_PR_BASE_MODE")[0]))
+      platform_setenv("AIMEE_PR_BASE_MODE", config_pr_base_mode());
+
    /* KB bearer credentials are consumed through runtime_secret. Never export a
     * config value back into the process environment. */
 

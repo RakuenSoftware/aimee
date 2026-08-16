@@ -191,6 +191,12 @@ const char *wfe_repo_local(const char *wi_repo);
 const char *wfe_autonomous_base(void);
 int wfe_base_is_protected(const char *branch); /* 1 if main/master/release* (refused) */
 int wfe_autonomous_target_ok(void);            /* 1 if the configured base is mergeable */
+/* 1 iff a pr.open with no explicit base should prefer this run's feature branch over
+ * the autonomous base. Reads AIMEE_PR_BASE_MODE ("default_branch" opts out); the server
+ * exports the configured pr_base_mode into it at startup. Default: prefer the feature
+ * branch, so a feature's slices accumulate on one branch. */
+int wfe_pr_base_prefers_feature(void);
+
 /* 1 iff `base` is an aimee-managed feature branch (an "aimee/feat/" prefix) — the
  * ONLY base an autonomous merge may land a PR into. The merge seam refuses every
  * other base (integration/protected branches) so a misconfigured pr.open base

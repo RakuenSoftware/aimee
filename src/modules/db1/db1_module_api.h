@@ -50,6 +50,8 @@
 #define AIMEE_DB1_OP_OWNERSHIP_OWNER_GET          3u
 #define AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION 4u
 #define AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX  5u
+#define AIMEE_DB1_OP_FEATURE_BRANCH_UPSERT        6u
+#define AIMEE_DB1_OP_FEATURE_BRANCH_GET           7u
 
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and

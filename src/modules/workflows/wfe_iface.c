@@ -61,6 +61,16 @@ int wfe_base_is_feature(const char *base)
    return base && strncmp(base, "aimee/feat/", 11) == 0;
 }
 
+int wfe_pr_base_prefers_feature(void)
+{
+   /* Env, not config_pr_base_mode(): this module is deliberately config-free so it
+    * links and tests in isolation, exactly as AIMEE_AUTONOMY_BASE does above. The
+    * server exports the configured pr_base_mode into this variable at startup, so
+    * `aimee config set pr_base_mode ...` remains the single operator knob. */
+   const char *m = getenv("AIMEE_PR_BASE_MODE");
+   return !(m && strcmp(m, "default_branch") == 0);
+}
+
 /* Server-side authoritative cost estimate (WP-5): a delegate turn's USD cost as
  * wall-clock seconds * a configured rate. Provider-agnostic (never trusts a
  * provider-reported figure) so the per-run USD budget cap actually bites. Rate is

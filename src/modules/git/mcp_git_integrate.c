@@ -80,17 +80,25 @@ typedef struct
    const char *abort;       /* git words to abort */
    const char *skip;        /* git words to skip a commit, NULL if not applicable */
    int commits_on_continue; /* continuing creates a commit -> needs an identity */
+   /* STARTING creates a commit too, and that was missed: the identity was supplied
+    * only to a continuation, so a first-run rebase died on "Committer identity
+    * unknown ... unable to auto-detect email address" — git has no ambient identity
+    * to fall back on because git_ops points GIT_CONFIG_GLOBAL/SYSTEM at /dev/null.
+    * `sync` inherits this, being a rebase, which is where it was first seen.
+    * merge is 0: a fast-forward writes no commit and must keep working without an
+    * identity; when it does need one, git's own refusal is the accurate answer. */
+   int commits_on_start;
 } integrate_op_t;
 
 static const integrate_op_t OPS[] = {
     {"merge", "merge --no-edit '%s'", "ref (the branch or commit to merge in)", "MERGE_HEAD",
-     "merge --continue", "merge --abort", NULL, 1},
+     "merge --continue", "merge --abort", NULL, 1, 0},
     {"rebase", "rebase '%s'", "base (the branch to rebase onto)", "REBASE_HEAD",
-     "rebase --continue", "rebase --abort", "rebase --skip", 1},
+     "rebase --continue", "rebase --abort", "rebase --skip", 1, 1},
     {"cherry_pick", "cherry-pick '%s'", "ref (the commit to cherry-pick)", "CHERRY_PICK_HEAD",
-     "cherry-pick --continue", "cherry-pick --abort", "cherry-pick --skip", 1},
+     "cherry-pick --continue", "cherry-pick --abort", "cherry-pick --skip", 1, 1},
     {"revert", "revert --no-edit '%s'", "ref (the commit to revert)", "REVERT_HEAD",
-     "revert --continue", "revert --abort", "revert --skip", 1},
+     "revert --continue", "revert --abort", "revert --skip", 1, 1},
 };
 
 /* Never let git open an editor: these run unattended, and a blocked editor looks
@@ -365,13 +373,24 @@ static cJSON *integrate_run(const integrate_op_t *op, cJSON *args)
    char pre[64] = "";
    short_head(pre, sizeof(pre));
 
+   /* The same identity the continuation gets: rebase/cherry_pick/revert write commits
+    * on the FIRST run too, and without this they die on "Committer identity unknown"
+    * rather than on anything the caller did. */
+   char start_ident[768] = "";
+   if (op->commits_on_start)
+   {
+      int have = mcp_git_identity_flags(start_ident, sizeof(start_ident));
+      if (have <= 0)
+         return mcp_text(mcp_git_identity_error(have));
+   }
+
    char *esc_ref = shell_escape(ref);
    char start[512];
    snprintf(start, sizeof(start), op->start, esc_ref);
    free(esc_ref);
 
    char cmd[1024];
-   snprintf(cmd, sizeof(cmd), "git %s %s 2>&1", GIT_NO_EDITOR, start);
+   snprintf(cmd, sizeof(cmd), "git %s %s %s 2>&1", start_ident, GIT_NO_EDITOR, start);
    char *out = mcp_git_run(cmd, &rc);
 
    if (rc == 0)
@@ -433,6 +452,14 @@ static cJSON *integrate_dispatch(const char *name, cJSON *args)
    if (!op)
       return mcp_text("error: unknown integrate operation");
 
+   /* One choke point for merge/rebase/cherry_pick/revert: all of them rewrite local
+    * history, which a mirror's server-side reconstruction discards. */
+   {
+      cJSON *blocked = mcp_git_durability_guard(name);
+      if (blocked)
+         return blocked;
+   }
+
    cJSON *jaction = cJSON_GetObjectItemCaseSensitive(args, "action");
    const char *action = cJSON_IsString(jaction) ? jaction->valuestring : NULL;
    if (action && action[0] && strcmp(action, "run") != 0)
@@ -475,6 +502,12 @@ cJSON *handle_git_revert(cJSON *args)
  * alone, with no merge commits from the base mixed in. */
 cJSON *handle_git_sync(cJSON *args)
 {
+   /* sync rebases (or merges) the branch, so its result lives in local history too. */
+   {
+      cJSON *blocked = mcp_git_durability_guard("sync");
+      if (blocked)
+         return blocked;
+   }
    char branch[256] = "";
    get_current_branch(branch, sizeof(branch));
 

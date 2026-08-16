@@ -53,6 +53,7 @@ DB1_ONLY_TABLES = {
     "agent_jobs",
     "agent_log",
     "branch_ownership",
+    "session_feature_branch",
     "clarify_qa",
     "clarify_sessions",
     "checkpoints",
