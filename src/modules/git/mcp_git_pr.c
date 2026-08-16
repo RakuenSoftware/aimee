@@ -267,13 +267,28 @@ static int pr_resolve_base(char *out, size_t out_len, char *err, size_t err_len)
     * the checkout: this runs on aimee-server, which for a detached or mirrored
     * workspace cannot see the checkout's directory at all. */
    char feat[256];
-   if (strcmp(config_pr_base_mode(), "default_branch") != 0 &&
-       feature_branch_for_session(feat, sizeof(feat)) == 0 && feat[0])
+   if (strcmp(config_pr_base_mode(), "default_branch") != 0)
    {
-      if (pr_ensure_feature_branch(feat, err, err_len) != 0)
+      int found = feature_branch_for_session(feat, sizeof(feat));
+      if (found == 0 && feat[0])
+      {
+         if (pr_ensure_feature_branch(feat, err, err_len) != 0)
+            return -1;
+         snprintf(out, out_len, "%s", feat);
+         return 0;
+      }
+      /* "Could not tell" is NOT "nothing named". Falling through on an unreachable
+       * store would open the PR against the trunk while this session has a feature
+       * branch it cannot see -- silently retargeting the PR, which is the whole
+       * failure this feature exists to remove. Only a definite absence falls back. */
+      if (found < 0)
+      {
+         snprintf(err, err_len,
+                  "cannot read this session's feature branch, so the base is unknown. Pass base "
+                  "explicitly, or set pr_base_mode=default_branch to target the repository "
+                  "default branch");
          return -1;
-      snprintf(out, out_len, "%s", feat);
-      return 0;
+      }
    }
 
    /* No feature branch for this session -> the repository's default branch, which is

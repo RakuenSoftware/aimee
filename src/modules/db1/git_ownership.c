@@ -149,12 +149,15 @@ int db1_session_feature_branch_get(const char *repo_path, const char *session_id
    sqlite3_bind_text(stmt, 1, repo_path, -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(stmt, 2, session_id, -1, SQLITE_TRANSIENT);
 
-   int found = 1; /* 1 = nothing recorded for this session */
+   /* House read convention, the same one every sibling here uses and the one the
+    * generated stage maps onto the wire: FOUND(1) / not-found(0) / error(-1).
+    * Inverting it locally would have the stage report a recorded feature as MISSING. */
+   int found = 0;
    if (sqlite3_step(stmt) == SQLITE_ROW)
    {
       const unsigned char *name = sqlite3_column_text(stmt, 0);
       snprintf(branch_out, branch_len, "%s", name ? (const char *)name : "");
-      found = branch_out[0] ? 0 : 1;
+      found = branch_out[0] ? 1 : 0;
    }
    sqlite3_finalize(stmt);
    return found;

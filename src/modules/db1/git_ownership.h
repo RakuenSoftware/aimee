@@ -26,8 +26,9 @@ extern "C"
    /* The feature branch a session's PRs target, keyed the same way ownership is
     * (repo_path + session_id) and for the same reason: it has to be readable by
     * aimee-server, which for a detached or mirrored workspace cannot see the
-    * checkout's own directory at all. Returns 0 on success, -1 otherwise; _get
-    * returns 1 when the session has no feature branch recorded. */
+    * checkout's own directory at all. _upsert returns 0 / -1; _get follows the same
+    * read convention as its siblings here — FOUND(1), not-found(0), error(-1) — which
+    * is what the generated stage maps onto the wire. */
    int db1_session_feature_branch_upsert(const char *repo_path, const char *session_id,
                                          const char *feature_branch);
    int db1_session_feature_branch_get(const char *repo_path, const char *session_id,

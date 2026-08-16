@@ -212,7 +212,17 @@ int feature_branch_for_session(char *branch_out, size_t branch_len)
    char repo[MAX_PATH_LEN];
    if (get_repo_path(repo, sizeof(repo)) != 0)
       return -1;
-   return db1_session_feature_branch_get(repo, session_id(), branch_out, branch_len);
+   /* db1 answers FOUND(1)/not-found(0)/error(-1); this function's callers want
+    * 0 = use this branch, 1 = nothing named, -1 = could not tell. An error must NOT
+    * collapse into "nothing named": the PR path treats that as "fall back to the
+    * default branch", which would silently retarget a PR whenever the store was
+    * unreachable. */
+   int lookup = db1_session_feature_branch_get(repo, session_id(), branch_out, branch_len);
+   if (lookup == 1)
+      return 0;
+   if (lookup == 0)
+      return 1;
+   return -1;
 }
 
 cJSON *branch_own_guard_for(const char *branch, const char *operation)

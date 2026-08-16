@@ -50,6 +50,8 @@
 #define AIMEE_DB1_OP_OWNERSHIP_OWNER_GET          3u
 #define AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION 4u
 #define AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX  5u
+#define AIMEE_DB1_OP_FEATURE_BRANCH_UPSERT        6u
+#define AIMEE_DB1_OP_FEATURE_BRANCH_GET           7u
 
 /* Wire bounds, carried from the catalog's declared reply sizes and
    request arities. Stated so the module refuses an over-long value rather
