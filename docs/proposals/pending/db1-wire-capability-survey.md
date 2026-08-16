@@ -43,10 +43,22 @@ to sit inside an active family without being served.
 
 | tier | needs | ops | cumulative |
 | --- | --- | --- | --- |
-| T0 | nothing — fits the wire today | 76 | 76 (27%) |
-| T1 | integer arguments | 78 | 154 (54%) |
-| T2 | a counted reply (integer or multi out-parameter) | 18 | 172 (61%) |
+| T0 | nothing — fits the wire today | 63 | 63 (22%) |
+| T1 | integer arguments | 75 | 138 (49%) |
+| T2 | a richer reply — counted, multi-value, or a status beyond ok/miss/fail | 34 | 172 (61%) |
 | T3 | structured payloads (struct in/out, arrays, malloc'd returns) | 109 | 281 (100%) |
+
+The first version of this table said 76/78/18 and put 154 in reach. It was
+wrong, and the way it was wrong is the more useful fact: it classified
+**parameters** and never the **return contract**. The wire answers a write with
+0 or -1 and a read with found, not-found or error, so an operation that returns
+a count, or a distinguished refusal like `db1_wfe_bind`'s -2 for a single-writer
+conflict, has nowhere to put the distinction it exists to make. Migrating one of
+those would have quietly reported a conflict as an error.
+
+Two mechanical cases were mis-tiered the same way: an operation taking no
+arguments cannot be framed at all, and one with two out buffers has one reply
+value to put them in. Sixteen operations were affected across the three.
 
 T1 shipped, which is what took reachability from 27% to 54%. T2 buys 18
 operations, which is a poor return for a frame change. T3 is the real remainder
@@ -56,24 +68,25 @@ Per family, ready means T0 + T1:
 
 | family | ready | total | behind T2 | behind T3 |
 | --- | --- | --- | --- | --- |
-| workflow | 60 | 91 | 6 | 25 |
-| delegation | 27 | 37 | 3 | 7 |
-| runtime | 22 | 35 | 2 | 11 |
-| agent_work | 16 | 38 | 3 | 19 |
+| workflow | 51 | 91 | 15 | 25 |
+| delegation | 26 | 37 | 4 | 7 |
+| runtime | 20 | 35 | 4 | 11 |
+| agent_work | 15 | 38 | 4 | 19 |
 | sessions | 8 | 22 | 0 | 14 |
-| conversation | 8 | 20 | 1 | 11 |
-| telemetry | 8 | 33 | 3 | 22 |
-| identity | 5 | 5 | 0 | 0 |
+| conversation | 7 | 20 | 2 | 11 |
+| telemetry | 7 | 33 | 4 | 22 |
+| identity | 4 | 5 | 1 | 0 |
 
-Only `identity` is fully reachable, and it is the one family that should go last
+No family is fully reachable now that return contracts count -- `identity` came
+closest at 4 of 5, and it is the one family that should go last
 rather than first: what is reachable in it is `db1_secret_*` and
 `db1_remote_client_*`, whose caller is `server_bearer_auth.c`.
 
 ## The two gaps that are not about tiers
 
-### Optional fields — smaller than it looked
+### Optional fields — smaller than it looked (CLOSED)
 
-The wire refuses an empty field, and the generated client refuses a NULL one. A
+The wire refused an empty field, and the generated client refused a NULL one. A
 call-site scan of all 154 reachable operations finds **16** that pass `NULL` or
 `""` as a literal. The remaining 138 need nothing.
 
@@ -82,9 +95,9 @@ NULL. It is also cheap to close — the domains already collapse the two
 themselves, so a per-field `required` flag in the catalog is enough, with the
 client mapping NULL to empty and the stage enforcing which fields may be blank.
 
-### Field size — the one that will ship green and fail in production
+### Field size — the one that will ship green and fail in production (CLOSED)
 
-`AIMEE_DB1_FIELD_MAX` is 512 bytes. **33 of the 154 reachable operations carry a
+`AIMEE_DB1_FIELD_MAX` was 512 bytes. **33 of the 154 reachable operations carry a
 prompt, a result, an output, or a JSON blob**, and DB1's own columns run to 16
 KB. A 512-byte cap truncates none of them: the client refuses the call and
 returns the same -1 it returns for a broken store.
@@ -100,6 +113,10 @@ and a request buffer of the same shape in the client. Raising the constant to
 anything useful puts hundreds of kilobytes on the stack. **Large payloads
 therefore require the generated code to allocate, which is a change to the
 shape of the generated wire rather than to a number in it.**
+
+Both are closed as of the pull requests that follow this document. The counts
+above are kept as they were measured, because they are what justified the order
+below — not because either still blocks a call.
 
 ## Recommended order
 
