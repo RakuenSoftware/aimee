@@ -211,7 +211,7 @@ jobs:
 
 def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[str]:
     result = [f"src/modules/{module_id}/module.yaml"]
-    for key in ("sources", "private_headers", "public_headers", "tests", "docs",
+    for key in ("sources", "private_headers", "public_headers", "contracts", "tests", "docs",
                 "go_sources", "go_tests"):
         values = descriptor.get(key, [])
         if not isinstance(values, list) or not all(isinstance(item, str) for item in values):

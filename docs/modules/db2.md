@@ -10,11 +10,12 @@ carved out of the KB link.
 
 ## Public contracts
 
-The C process owns principal 29 and event `11521`. The fixed eight-byte request carries only magic
-and wire version. The fixed sixteen-byte response carries schema, `pg_trgm`, and KB-table evidence;
-unknown flags and non-zero reserved bytes fail closed. Until the descriptor includes the complete
-DB2 C closure, an exported standalone process returns typed `capability_absent` instead of reporting
-false readiness.
+The C process owns principal 29 and event `11521`. Its descriptor owns
+`eventcontract/operations.json`, which generates the public C header and the fingerprinted positive
+and negative wire vectors. The fixed eight-byte request carries only magic and wire version. The
+fixed sixteen-byte response carries schema, `pg_trgm`, and KB-table evidence; unknown flags and
+non-zero reserved bytes fail closed. Until the descriptor includes the complete DB2 C closure, an
+exported standalone process returns typed `capability_absent` instead of reporting false readiness.
 
 ## Dependencies and consumers
 
@@ -45,7 +46,8 @@ clients, and removes DB2/libpq objects from `aimee-kb`; there is no in-image loc
 
 The only current surface is `AIMEE_DB2_EVENT_HEALTH` on the KB-local Unix-domain module bus. There
 is no HTTP listener, network service, generic query operation, raw SQL payload, or provider-secret
-field. Later operations must be typed, bounded catalog entries.
+field. The catalog reserves the eight family identities and event kinds `11521` through `11528`, but
+only lifecycle is active and granted. Later operations must be typed, bounded catalog entries.
 
 ## Data and migrations
 
@@ -71,7 +73,9 @@ closure returns `capability_absent`, making partial packaging visible and non-au
 Focused C tests cover every response flag combination, malformed magic/version/length, unknown
 flags, reserved bytes, wrong stage, undersized output, cancellation, missing callbacks, backend
 failure, and successful encode-handler-decode. Runtime-bundle tests compile the descriptor-owned C
-process. Boundary tests prohibit any direct import from `src/modules/db2/c` into private `src/kb`.
+process. Catalog tests mutate every closed field, process/descriptor binding, resource limit, and
+generated artifact. Boundary tests prohibit any direct import from `src/modules/db2/c` into private
+`src/kb`.
 
 ## Operational diagnostics
 
@@ -88,8 +92,8 @@ until the complete process cutover is ready.
 
 ## Extension and removal
 
-Next increments add the exhaustive operation catalog, generated C client/dispatch, the complete C
-source closure, and replay gates before activation. After parity, a pure-Go implementation replaces
-the C process behind the same contract. The `src/modules/db2/c` tree is removed only after the Go
-runtime is the sole deployed provider and every boundary test proves the old link and fallback are
-gone.
+Next increments complete the operation catalog, generate C client/dispatch, package the complete C
+source closure, and add replay gates before activation. After parity, a pure-Go implementation
+replaces the C process behind the same contract. The `src/modules/db2/c` tree is removed only after
+the Go runtime is the sole deployed provider and every boundary test proves the old link and fallback
+are gone.

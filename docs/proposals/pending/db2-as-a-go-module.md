@@ -1,7 +1,8 @@
 # Proposal: put DB2 behind a module boundary, then port it to Go
 
 - **State:** PENDING — the C source boundary and separately buildable C process shell are registered;
-  no production DB2 operation has moved behind the process boundary yet.
+  the descriptor owns the generated health contract and reserves the eight catalog families, but no
+  production DB2 operation has moved behind the process boundary yet.
 - **Date:** 2026-08-15.
 - **Charter roles:** Constrain-Verify / Gate-Promote.
 - **Thesis:** DB2 was created as a portable source boundary and now resides intact at
@@ -89,9 +90,10 @@ rg -n '^#include [<"](?:\.\./)?db2/|^#include [<"][^">]*db2[^">]*\.h' \
   src --glob '!src/modules/db2/c/**' | wc -l
 ```
 
-These planning-time counts are evidence, not a frozen migration manifest. The first implementation
-commit reruns the commands at its merge base and checks in the generated catalog; completeness gates
-use that current catalog rather than the numbers above.
+These planning-time counts are evidence, not a frozen migration manifest. The S2 declaration-audit
+slice reruns the commands at its merge base and accounts for the full surface before
+`catalog_complete` can become true; completeness gates use that current ledger rather than the
+numbers above.
 
 The include count is the client-adapter inventory, not a reason to repartition DB2. Those
 consumers already meet a typed source boundary. Phase one preserves their operation semantics
@@ -149,6 +151,12 @@ never reused. The descriptor owns that file and the contract generator emits:
 - `server-go/modules/db2/contract_generated.go`, used unchanged by the Go provider; and
 - `tests/baselines/modules/db2-wire-v1.json`, containing the contract fingerprint and positive
   and negative vectors.
+
+The catalog bootstrap owns and generates the already-registered lifecycle-health operation first.
+It reserves family IDs and event kinds `11521` through `11528`, but only lifecycle kind `11521` is
+active in `process-contracts.json`; reserved inactive kinds are not grants. `catalog_complete` stays
+false until the declaration and consumer audit accounts for the complete DB2 call surface. CI
+rejects generated-header or vector-baseline drift and rejects a premature completeness claim.
 
 The bus already carries event kind, correlation, deadline, cancellation, and fragmentation.
 The DB2 request body therefore has only a 24-byte little-endian header followed by the declared

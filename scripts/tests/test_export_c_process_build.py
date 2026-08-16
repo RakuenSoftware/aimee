@@ -46,6 +46,15 @@ class CProcessBuildTests(unittest.TestCase):
             },
         }
 
+    def test_owned_files_include_contract_sources(self) -> None:
+        descriptor = self.descriptor()
+        descriptor["contracts"] = ["src/modules/db2/eventcontract/operations.json"]
+        owned = exporter.module_owned_files("db2", descriptor)
+        self.assertIn("src/modules/db2/eventcontract/operations.json", owned)
+        descriptor["contracts"] = "src/modules/db2/eventcontract/operations.json"
+        with self.assertRaisesRegex(exporter.ExportError, "contracts must be a string array"):
+            exporter.module_owned_files("db2", descriptor)
+
     def test_cmake_compiles_every_owned_source_once(self) -> None:
         cmake = exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", self.descriptor())
         for source in self.descriptor()["sources"]:

@@ -15,6 +15,9 @@
   "public_headers": [
     "src/modules/db2/include/aimee/db2/module_api.h"
   ],
+  "contracts": [
+    "src/modules/db2/eventcontract/operations.json"
+  ],
   "private_headers": [
     "src/modules/db2/module_adapter.h"
   ],

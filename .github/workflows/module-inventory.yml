@@ -85,6 +85,10 @@ jobs:
           python3 -I -S scripts/check_db2_source_boundary.py --previous-ref FETCH_HEAD
       - name: Test DB2 source-boundary failure modes
         run: python3 -I scripts/tests/test_check_db2_source_boundary.py -v
+      - name: Enforce generated DB2 operation contract
+        run: python3 -I -S scripts/gen_db2_contract.py
+      - name: Test DB2 operation-contract failure modes
+        run: python3 -I scripts/tests/test_gen_db2_contract.py -v
       - name: Enforce module bus boundary
         run: python3 -I -S scripts/check_module_bus_boundary.py
       - name: Test module bus-boundary failure modes
