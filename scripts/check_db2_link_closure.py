@@ -48,6 +48,25 @@ SUPPORT_COMPILE_FLAGS = (
 )
 SUPPORT_INCLUDE_ROOTS = ["src/modules/db2/support"]
 SUPPORT_UNITS: list[dict[str, object]] = [{
+    "path": "src/modules/db2/support/dstr_primitives.c",
+    "source_sha256": "ae448e0ae6e0464922042536b77ab396ea230d5ba16ec977e003ecd614cf22ab",
+    "header": "src/modules/db2/support/db2_dstr.h",
+    "header_sha256": "47d3f825ea79b187a1f500e7bf58beda95dc472a4573ebff7128212019185b7c",
+    "defines": ["dstr_appendf", "dstr_init", "dstr_steal"],
+    "resolves": ["dstr_appendf", "dstr_init", "dstr_steal"],
+    "allowed_includes": ["db2_dstr.h", "stdarg.h", "stdio.h", "stdlib.h"],
+    "allowed_header_includes": ["stddef.h"],
+    "allowed_undefined": ["realloc", "vsnprintf"],
+    "base_references": {
+        "dstr_appendf": ["src/modules/db2/c/collab_rules.c"],
+        "dstr_init": ["src/modules/db2/c/collab_rules.c"],
+        "dstr_steal": ["src/modules/db2/c/collab_rules.c"],
+    },
+    "provenance": "Definitions and required static helpers promoted from src/dstr.c; all DB2 "
+                  "calls audited in src/modules/db2/c/collab_rules.c.",
+    "evidence": "Three deterministic dynamic-string lifecycle functions with only realloc and "
+                "vsnprintf imports; no DB2, event-bus, provider, I/O, or platform dependency.",
+}, {
     "path": "src/modules/db2/support/sketch_primitives.c",
     "source_sha256": "20318d4f9c92894892ef9475f95c1542602f3a7d2b4d9fe6df2b8d63b4986280",
     "header": "src/modules/db2/support/sketch.h",

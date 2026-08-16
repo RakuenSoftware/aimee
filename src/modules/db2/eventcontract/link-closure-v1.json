@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "45b864b8a8d5b1b3ef2d752e5c2f44bd02bc7540",
-  "source_fingerprint": "fb050d2d8987e57dec8df4a9dfb0422d3a64b09f6f3737abcb824fe59903bfe7",
+  "source_revision": "9886a70761a92f0e6e32f97e4c4dfd904a7256e9",
+  "source_fingerprint": "12cc09b56341f9f0dbfbe05fd01ab8e41400f4c4a660469961530d00887f26a8",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
@@ -158,6 +158,48 @@
     "src/modules/db2/c/write_tier_grant.c"
   ],
   "descriptor_support_units": [
+    {
+      "path": "src/modules/db2/support/dstr_primitives.c",
+      "source_sha256": "ae448e0ae6e0464922042536b77ab396ea230d5ba16ec977e003ecd614cf22ab",
+      "header": "src/modules/db2/support/db2_dstr.h",
+      "header_sha256": "47d3f825ea79b187a1f500e7bf58beda95dc472a4573ebff7128212019185b7c",
+      "defines": [
+        "dstr_appendf",
+        "dstr_init",
+        "dstr_steal"
+      ],
+      "resolves": [
+        "dstr_appendf",
+        "dstr_init",
+        "dstr_steal"
+      ],
+      "allowed_includes": [
+        "db2_dstr.h",
+        "stdarg.h",
+        "stdio.h",
+        "stdlib.h"
+      ],
+      "allowed_header_includes": [
+        "stddef.h"
+      ],
+      "allowed_undefined": [
+        "realloc",
+        "vsnprintf"
+      ],
+      "base_references": {
+        "dstr_appendf": [
+          "src/modules/db2/c/collab_rules.c"
+        ],
+        "dstr_init": [
+          "src/modules/db2/c/collab_rules.c"
+        ],
+        "dstr_steal": [
+          "src/modules/db2/c/collab_rules.c"
+        ]
+      },
+      "provenance": "Definitions and required static helpers promoted from src/dstr.c; all DB2 calls audited in src/modules/db2/c/collab_rules.c.",
+      "evidence": "Three deterministic dynamic-string lifecycle functions with only realloc and vsnprintf imports; no DB2, event-bus, provider, I/O, or platform dependency."
+    },
     {
       "path": "src/modules/db2/support/sketch_primitives.c",
       "source_sha256": "20318d4f9c92894892ef9475f95c1542602f3a7d2b4d9fe6df2b8d63b4986280",
@@ -1601,30 +1643,6 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "dstr_appendf",
-      "references": [
-        "src/modules/db2/c/collab_rules.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "dstr_init",
-      "references": [
-        "src/modules/db2/c/collab_rules.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "dstr_steal",
-      "references": [
-        "src/modules/db2/c/collab_rules.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
       "symbol": "exp",
       "references": [
         "src/modules/db2/c/curiosity.c",
@@ -2808,7 +2826,8 @@
         "src/modules/db2/c/db2_witness_emit.c",
         "src/modules/db2/c/db_postgres.c",
         "src/modules/db2/c/memory_export.c",
-        "src/modules/db2/c/memory_query.c"
+        "src/modules/db2/c/memory_query.c",
+        "src/modules/db2/support/dstr_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3785,7 +3804,8 @@
     {
       "symbol": "vsnprintf",
       "references": [
-        "src/modules/db2/c/db2_reembed.c"
+        "src/modules/db2/c/db2_reembed.c",
+        "src/modules/db2/support/dstr_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3793,16 +3813,16 @@
   ],
   "summary": {
     "translation_units": 141,
-    "descriptor_support_units": 1,
-    "unresolved_symbols": 348,
+    "descriptor_support_units": 2,
+    "unresolved_symbols": 345,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 25,
       "injected-module-contract": 150,
-      "portable-core-promotion": 29,
+      "portable-core-promotion": 26,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 144
     }
   },
-  "fingerprint": "d92a1385034247a19ff75052595ce82a8b42baf44f02016839a9ce85b5849563"
+  "fingerprint": "b59a0e14c6ce628b97fa9c57873f5f7e2b7209166c099358113638533cd383b4"
 }

@@ -13,6 +13,7 @@
     "src/modules/db2/client/generated.c",
     "src/modules/db2/db3_route.c",
     "src/modules/db2/module_adapter.c",
+    "src/modules/db2/support/dstr_primitives.c",
     "src/modules/db2/support/sketch_primitives.c"
   ],
   "public_headers": [
@@ -28,12 +29,14 @@
   ],
   "private_headers": [
     "src/modules/db2/module_adapter.h",
+    "src/modules/db2/support/db2_dstr.h",
     "src/modules/db2/support/sketch.h"
   ],
   "tests": [
     "src/tests/test_bus_db2_module.c",
     "src/tests/test_bus_db3.c",
     "src/tests/test_db2_module_contract.c",
+    "src/tests/test_db2_dstr_support.c",
     "src/tests/test_db2_sketch_support.c",
     "src/tests/test_db3_route.c"
   ],

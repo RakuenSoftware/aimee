@@ -86,6 +86,13 @@ void dstr_vappendf(dstr_t *s, const char *fmt, va_list ap)
    /* Need more space */
    dstr_reserve(s, (size_t)n);
    avail = s->cap > s->len ? s->cap - s->len : 0;
+   if ((size_t)n >= avail)
+   {
+      if (s->data)
+         s->data[s->len] = '\0';
+      va_end(ap2);
+      return; /* reserve failed; preserve the existing string */
+   }
    vsnprintf(s->data + s->len, avail, fmt, ap2);
    s->len += (size_t)n;
    va_end(ap2);
