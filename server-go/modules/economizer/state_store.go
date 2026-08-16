@@ -27,7 +27,17 @@ type StateStore interface {
 // unreadable blob are therefore all the same outcome by design.
 func restoreState(store StateStore, stats *GatewayStatsStore, key string) *ReduceState {
 	st := &ReduceState{Recall: NewRecallIndex()}
-	if store == nil || key == "" {
+	if key == "" {
+		// The caller named no conversation, so there is nothing to continue.
+		// Not counted: running cold is the correct and intended outcome.
+		return st
+	}
+	if store == nil {
+		// A caller that named a conversation expects continuity, and there is
+		// nowhere to get it. This is the one degradation that never heals --
+		// the store is wired once at startup -- so it must not be the one that
+		// goes uncounted.
+		statsIncStore(stats, StatStateUnavailable)
 		return st
 	}
 	blob, found, err := store.LoadState(context.Background(), key)

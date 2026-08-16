@@ -211,6 +211,37 @@ func TestModuleStoreFailuresAreNotFatal(t *testing.T) {
 	}
 }
 
+// A module wired without a store is the degradation that never heals: it is
+// decided once at startup and lasts the life of the process. It is therefore
+// the one that most needs counting.
+func TestAMissingStoreIsCountedWhenAConversationWasNamed(t *testing.T) {
+	handler := NewHandlerWithStore(nil)
+	body, err := json.Marshal(ReduceRequest{
+		Messages:      rawMessages(t, 20),
+		Seam:          "gateway",
+		HistoryFold:   true,
+		ClosetEnabled: true,
+		StateKey:      "conv-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, status := handler(bus.ModuleInvocation{StageID: StageReduce}, body); status != bus.ModuleStatusOK {
+		t.Fatalf("a storeless module must still reduce: %v", status)
+	}
+	out, status := handler(bus.ModuleInvocation{StageID: StageStats}, []byte(`{}`))
+	if status != bus.ModuleStatusOK {
+		t.Fatalf("stats stage status = %v", status)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(out, &raw); err != nil {
+		t.Fatalf("stats are not JSON: %v", err)
+	}
+	if n, _ := raw["economizer_state_unavailable"].(float64); n < 1 {
+		t.Errorf("a named conversation with no store went uncounted: %v", raw)
+	}
+}
+
 // A store that degrades must be COUNTED, because degrading is silent by design:
 // the fold keeps running and simply stops warming up, which looks exactly like a
 // fold that is working.
