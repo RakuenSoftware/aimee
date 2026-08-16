@@ -10,7 +10,7 @@ func TestEpisodeInventoryAndTouch(t *testing.T) {
 	s.AddFile("src/modules/db2/c/code_index.c")
 	s.AddFile("src/headers/code_span.h")
 	s.AddFile("src/modules/db2/c/code_index.c") // duplicate
-	s.AddFile("")                     // ignored
+	s.AddFile("")                               // ignored
 
 	if len(s.Files) != 2 {
 		t.Fatalf("file count = %d, want 2", len(s.Files))

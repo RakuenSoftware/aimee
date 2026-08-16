@@ -139,9 +139,7 @@ void econ_module_result_free(econ_module_result_t *out)
    if (!out)
       return;
    free(out->recall_hint);
-   free(out->state);
    out->recall_hint = NULL;
-   out->state = NULL;
 }
 
 int econ_module_reduce(const cJSON *messages, const char *system_prompt, econ_module_seam_t seam,
@@ -202,11 +200,10 @@ int econ_module_reduce(const cJSON *messages, const char *system_prompt, econ_mo
    if (req->closet_denylist && req->closet_denylist[0])
       cJSON_AddStringToObject(payload, "closet_denylist", req->closet_denylist);
 
-   add_int(payload, "turn", req->turn);
    if (req->session_key && req->session_key[0])
       cJSON_AddStringToObject(payload, "session_key", req->session_key);
-   if (req->state && req->state[0])
-      cJSON_AddStringToObject(payload, "state", req->state);
+   if (req->state_key && req->state_key[0])
+      cJSON_AddStringToObject(payload, "state_key", req->state_key);
 
    /* Ask for the result code instead of discarding it. Passing NULL here made an
     * economizer that was never reached indistinguishable from one that ran and
@@ -251,8 +248,6 @@ int econ_module_reduce(const cJSON *messages, const char *system_prompt, econ_mo
       out->closet_evicted = cJSON_IsTrue(cJSON_GetObjectItem((cJSON *)reply, "closet_evicted"));
       if ((v = cJSON_GetObjectItemCaseSensitive(reply, "recall_hint")) && cJSON_IsString(v))
          out->recall_hint = dup_or_null(v->valuestring);
-      if ((v = cJSON_GetObjectItemCaseSensitive(reply, "state")) && cJSON_IsString(v))
-         out->state = dup_or_null(v->valuestring);
    }
 
    /* An ABSENT messages field means "forward your original untouched" — the

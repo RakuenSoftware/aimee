@@ -75,8 +75,6 @@ void db1_agent_job_heartbeat(int job_id);
 void db1_agent_job_heartbeat_ext(int job_id, const char *current_tool, int api_call_count);
 int db1_agent_job_is_cancelled(int job_id);
 int db1_delegation_spawn_stop_reason(const char *delegation_id, char *out, size_t out_sz);
-int db1_economizer_state_save(const char *session_id, const char *json);
-int db1_economizer_state_load(const char *session_id, char *out, size_t out_sz);
 
 /* The agent loop declares a local `char session_id[128]` for the ephemeral-SSH id,
  * which shadows the global session_id() accessor inside that function. Reach the
@@ -637,26 +635,6 @@ native_provider_http:
    mw_pipeline_cfgs_t mw_cfgs;
    mw_pipeline_build(&mw_pipeline, &mw_cfgs, &agent->middleware, mw_max_turns, agent->model);
 
-   /* The reducer's state is now the MODULE's shape, so this side carries it as an
-    * opaque blob: loaded once, handed to each reduce, and saved back whenever the
-    * module returns a new one.
-    *
-    * A run is one agent invocation, but a conversation spans several, so without
-    * this every user turn would re-derive the fold boundary and start with an
-    * EMPTY page table — a coordinate evicted in the previous run would be
-    * unrecoverable.
-    *
-    * Strictly keyed by session id and skipped entirely when there is none:
-    * restoring another conversation's state here would leak its context. */
-   char agent_reduce_state_blob[ECON_MODULE_STATE_MAX + 1];
-   agent_reduce_state_blob[0] = '\0';
-   {
-      const char *econ_sid = econ_conversation_id();
-      if (econ_sid && econ_sid[0])
-         (void)db1_economizer_state_load(econ_sid, agent_reduce_state_blob,
-                                         sizeof(agent_reduce_state_blob));
-   }
-
    while (turn < max_t)
    {
       /* Stop before issuing a fourth provider request without evidence. The
@@ -874,8 +852,15 @@ native_provider_http:
             mreq.recall_enabled = config_fold_recall_enabled();
             mreq.recall_ttl_turns = config_fold_recall_ttl_turns();
             mreq.recall_inject = config_fold_recall_inject();
-            mreq.turn = turn;
-            mreq.state = agent_reduce_state_blob;
+            /* Name the conversation and let the module keep its own reducer
+             * state under it. A run is one agent invocation but a conversation
+             * spans several, so without a stable name every user turn would
+             * re-derive the fold boundary and start with an EMPTY page table --
+             * a coordinate evicted in the previous run would be unrecoverable.
+             *
+             * Strictly the session id, and NULL when there is none: a shared or
+             * guessed name here would serve one conversation another's context. */
+            mreq.state_key = econ_conversation_id();
 
             /* The freeze guardrail prices each cache tier; the module does the
              * arithmetic, this side supplies the rates. */
@@ -917,14 +902,6 @@ native_provider_http:
                          econ_res.mutated, econ_res.reason[0] ? econ_res.reason : "none",
                          econ_res.baseline_tokens, econ_res.reduced_tokens, econ_res.removed_tokens,
                          econ_res.folded_msgs, econ_res.retained_msgs, econ_res.reused_boundary);
-            /* Persist the state the module handed back, so the freeze boundary
-             * and page table survive into the next turn. */
-            if (econ_res.state && econ_res.state[0])
-            {
-               snprintf(agent_reduce_state_blob, sizeof agent_reduce_state_blob, "%s",
-                        econ_res.state);
-               db1_economizer_state_save(econ_conversation_id(), agent_reduce_state_blob);
-            }
          }
       }
       cJSON *eff_messages = reduce_active ? reduced_messages : messages;

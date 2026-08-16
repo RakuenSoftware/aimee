@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/db1"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
 	controlweb "github.com/JBailes/aimee/server-go/modules/control-web"
@@ -42,6 +43,38 @@ var errUsage = errors.New("usage: aimee-module-NAME DAEMON_MODULE_BUS_SOCKET")
 // seats them over. Both are required -- a review with no configured panel,
 // or with no way to reach an agent, is not a degraded review but no review.
 const roundtableDelegatePrincipalRef uint32 = 65
+
+// economizerStorePrincipalRef is the economizer's OUTBOUND identity. A module's
+// serving grant requests nothing, so reaching another module's stage needs a
+// second principal that is granted exactly that request and nothing else.
+const economizerStorePrincipalRef uint32 = 66
+
+// economizerStore seats the economizer's reducer state on DB1.
+//
+// A failure here is not fatal to the module. Reducer state makes the NEXT turn
+// cheaper, so a module that cannot reach the store still reduces -- it just
+// never warms up. Refusing to serve would turn a lost optimization into a lost
+// feature, so this returns a nil store and lets the caller carry on.
+func economizerStore(ctx context.Context, moduleBusSocket string) economizer.StateStore {
+	if ctx == nil || moduleBusSocket == "" {
+		return nil
+	}
+	busClient, err := bus.ConnectClient(ctx, moduleBusSocket, 1, economizerStorePrincipalRef)
+	if err != nil {
+		return nil
+	}
+	caller, err := bus.NewConcurrentModuleCaller(ctx, busClient)
+	if err != nil {
+		busClient.Detach()
+		return nil
+	}
+	store, err := db1.NewClient(caller, 0)
+	if err != nil {
+		busClient.Detach()
+		return nil
+	}
+	return store
+}
 
 func roundtableReviewer(ctx context.Context, moduleBusSocket string) (*roundtable.PanelReviewer, error) {
 	home := os.Getenv("AIMEE_HOME")
@@ -264,9 +297,11 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			{EventKind: economizer.EventPostStatus, StageID: economizer.StagePostStatus},
 			{EventKind: economizer.EventStats, StageID: economizer.StageStats},
 		}
-		// Stateless: per-conversation reducer state travels with each request, so
-		// there is no store to open and no failure mode before serving.
-		config.Handler = economizer.NewHandler()
+		// Per-conversation reducer state is the module's own, kept in DB1 over
+		// the bus. An unreachable store is not a failure mode before serving:
+		// the module reduces without warming up.
+		config.Handler = economizer.NewHandlerWithStore(
+			economizerStore(ctx, moduleBusSocket))
 	case "postgres":
 		config.ModuleName = name
 		config.PrincipalRef = 28

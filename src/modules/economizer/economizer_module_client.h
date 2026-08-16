@@ -96,19 +96,21 @@ extern "C"
       int closet_max_ratio_pct;
       const char *closet_denylist; /* borrowed; may be NULL */
 
-      int turn;
       /* Whose lever this is, for the gateway seam's circuit breaker. NULL or
        * empty means the request carried no resolvable identity: it reduces
        * normally but can never read or trip a breaker, so one anonymous request
        * cannot switch off another identity's session. Ignored on the delegate
        * seam, which has no breaker. */
       const char *session_key;
-      /* Serialized reducer state from the previous turn, or NULL on the first.
+      /* Names the conversation whose reducer state this turn continues. The
+       * caller owns conversation identity, so it supplies the name; the module
+       * owns the state kept under it, and loads and saves it itself. NULL or
+       * empty reduces normally but always from cold, and persists nothing.
        * Borrowed. */
-      const char *state;
+      const char *state_key;
    } econ_module_request_t;
 
-   /* The ledger, plus the state to persist for the next turn. */
+   /* The ledger. Reducer state is the module's own and never travels here. */
    typedef struct
    {
       int mutated; /* 1 when `messages` was replaced */
@@ -144,7 +146,6 @@ extern "C"
 
       int recall_surfaced;
       char *recall_hint; /* owned; free with econ_module_result_free */
-      char *state;       /* owned; persist verbatim, free with econ_module_result_free */
    } econ_module_result_t;
 
    /* Reduce `messages`, returning a NEW array in `*reduced` or NULL.

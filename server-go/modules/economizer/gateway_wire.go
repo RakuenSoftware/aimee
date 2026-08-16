@@ -44,6 +44,14 @@ const (
 	Stat5xxDisable            = "5xx_disable"
 	StatStreamErrorDisable    = "stream_error_disable"
 	StatHardBypass            = "hard_bypass"
+
+	// Reducer state is an optimization, so a store failure degrades silently by
+	// design -- the reduction still runs, it just never warms up. That is
+	// exactly why it has to be COUNTED: a fold that has quietly stopped reusing
+	// its freeze boundary looks like a fold that is working, and the only other
+	// evidence is a token bill that does not fall.
+	StatStateUnavailable = "state_unavailable"
+	StatStateSaveFailed  = "state_save_failed"
 )
 
 // GatewayConfig is the resolved configuration for one request.
