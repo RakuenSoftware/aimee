@@ -34,6 +34,7 @@ PROCESS_CONTRACTS = Path("src/modules/process-contracts.json")
 MAKEFILE = Path("src/Makefile")
 SOURCE_DIR = Path("src/modules/db1")
 CLIENT_DIR = Path("src/db1_client")
+STAGES_HEADER = Path("src/modules/db1/db1_stages.h")
 # Served by the module process alone; the daemon never links it.
 MODULE_ONLY_SOURCES = frozenset({"module_adapter.c"})
 
@@ -309,6 +310,11 @@ def validate_source_map(root: Path, catalog: dict[str, object]) -> None:
     except OSError as exc:
         fail("unreadable", f"cannot list {SOURCE_DIR}: {exc}")
 
+    # Generated wire is not a domain, so no family claims it -- but only the
+    # files this generator actually emits are exempt, so a stray *_stage.c is
+    # still an unclaimed source rather than a name that happens to look derived.
+    on_disk -= {f"{family['name']}_stage" for family, _ in client_families(catalog)}
+
     infrastructure = catalog["infrastructure_sources"]
     if not isinstance(infrastructure, list) or infrastructure != sorted(set(infrastructure)):
         fail("infrastructure", "infrastructure_sources must be sorted and unique")
@@ -407,7 +413,10 @@ def validate_retired_sources(root: Path, catalog: dict[str, object]) -> None:
                      f"{source!r} is retired by both {claimed[source]!r} and {name!r}")
             claimed[source] = name
 
-    unlinked = on_disk - linked - set(MODULE_ONLY_SOURCES)
+    # Generated stage handlers serve the module and were never in the daemon, so
+    # their absence from the link is not evidence of a migration.
+    generated = {f"{family['name']}_stage.c" for family, _ in client_families(catalog)}
+    unlinked = on_disk - linked - set(MODULE_ONLY_SOURCES) - generated
     for source in sorted(unlinked - set(claimed)):
         fail("retired-unclaimed",
              f"{source!r} is no longer linked into the daemon but no family retires it")
@@ -800,6 +809,190 @@ def validate_clients(root: Path, catalog: dict[str, object], write: bool) -> Non
                  f"scripts/gen_db1_contract.py --write")
 
 
+STAGE_SCAFFOLD = """/* modules/db1/{stem}_stage.c: the {family} stage handler.
+ *
+ * GENERATED from src/modules/db1/eventcontract/operations.json by
+ * scripts/gen_db1_contract.py. Do not edit.
+ *
+ * The serving half of the boundary: decode the frame the client encoded, call
+ * the domain, and answer. The domain itself is hand-written and untouched --
+ * only the wire around it is generated.
+ *
+ * clang-format is off for the body below: its canonical form is whatever this
+ * generator emits. */
+/* clang-format off */
+#include "db1_stages.h"
+
+#include "db1_module_api.h"
+#include "{stem}.h"
+
+#include <string.h>
+
+/* Read one counted field, refusing anything that would run past the end or
+   carry an embedded NUL: every field here is spliced into a query parameter,
+   and a NUL would silently shorten it into a different row. */
+static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, char *out,
+                        size_t out_sz)
+{{
+   if (*offset + 4u > len)
+      return 1;
+   uint32_t n = aimee_db1_get_u32(body + *offset);
+   *offset += 4u;
+   if (n > len || *offset + n > len || n == 0u || n >= out_sz)
+      return 1;
+   if (memchr(body + *offset, 0, n) != NULL)
+      return 1;
+   memcpy(out, body + *offset, n);
+   out[n] = '\\0';
+   *offset += n;
+   return 0;
+}}
+
+static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
+                            const char *value)
+{{
+   uint32_t value_len = (uint32_t)strlen(value);
+   if (cap < 8u + value_len)
+      return AIMEE_DB1_STATUS_FAILED;
+   aimee_db1_put_u32(out, status);
+   aimee_db1_put_u32(out + 4u, value_len);
+   if (value_len)
+      memcpy(out + 8u, value, value_len);
+   *out_len = 8u + value_len;
+   return status;
+}}
+
+aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32_t request_len,
+                                             uint8_t *response_body, uint32_t response_capacity,
+                                             uint32_t *response_len)
+{{
+   if (request_len < 8u)
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   uint32_t op = aimee_db1_get_u32(request_body);
+   uint32_t count = aimee_db1_get_u32(request_body + 4u);
+   /* Bounds the fixed array below. Without it a well-formed frame declaring
+      more fields than any operation takes writes past it. */
+   if (count == 0u || count > AIMEE_DB1_FIELDS_MAX)
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+
+   char field[AIMEE_DB1_FIELDS_MAX][AIMEE_DB1_FIELD_MAX];
+   uint32_t offset = 8u;
+   for (uint32_t i = 0; i < count; ++i)
+      if (read_counted(request_body, request_len, &offset, field[i], sizeof field[i]) != 0)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   /* Trailing bytes mean the caller and the module disagree about the op's
+      arity, which is a contract mismatch rather than something to tolerate. */
+   if (offset != request_len)
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+
+   char value[AIMEE_DB1_FIELD_MAX];
+   value[0] = '\\0';
+   int rc = -1;
+   int reads = 0;
+
+   switch (op)
+   {{
+{cases}   default:
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+   }}
+
+   /* The two conventions must not be flattened. A read returns FOUND(1),
+      not-found(0) or error(-1); a write returns 0 or -1. Mapping a read's -1
+      onto MISSING would report a broken store as "nothing recorded", and the
+      caller would act on an absence that was never established. */
+   uint32_t status;
+   if (reads)
+   {{
+      if (rc < 0)
+         status = AIMEE_DB1_STATUS_FAILED;
+      else if (rc == 0 || !value[0])
+         status = AIMEE_DB1_STATUS_MISSING;
+      else
+         status = AIMEE_DB1_STATUS_OK;
+   }}
+   else
+      status = (rc == 0) ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_FAILED;
+
+   write_reply(response_body, response_capacity, response_len,
+               status, (status == AIMEE_DB1_STATUS_OK && reads) ? value : "");
+   return AIMEE_MODULE_STATUS_OK;
+}}
+/* clang-format on */
+"""
+
+
+def stage_bytes(family: dict[str, object], operations: list[dict[str, object]]) -> str:
+    name = str(family["name"])
+    cases = []
+    for operation in operations:
+        request = operation["request"]
+        reply = operation["reply"]
+        assert isinstance(request, dict) and isinstance(reply, dict)
+        arity = len(request["fields"])
+        reads = reply["payload"] != "none"
+        args = [f"field[{i}]" for i in range(arity)]
+        if reads:
+            args += ["value", "sizeof value"]
+        cases.append(
+            f"   case AIMEE_DB1_OP_{str(operation['name']).upper()}:\n"
+            f"      if (count != {arity}u)\n"
+            f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
+            f"      rc = {operation['c_name']}({', '.join(args)});\n"
+            + ("      reads = 1;\n" if reads else "")
+            + "      break;\n")
+    return STAGE_SCAFFOLD.format(stem=name, family=name.replace("_", " "),
+                                 cases="".join(cases))
+
+
+def stages_header_bytes(catalog: dict[str, object]) -> str:
+    """Declarations for every generated stage handler, for the adapter to call."""
+    lines = ["""/* Entry points for the generated DB1 stage handlers.
+ *
+ * GENERATED from src/modules/db1/eventcontract/operations.json by
+ * scripts/gen_db1_contract.py. Do not edit.
+ *
+ * module_adapter.c dispatches by stage and calls these; each is emitted beside
+ * the domain it serves.
+ *
+ * clang-format is off below: the canonical form is whatever this emits. */
+/* clang-format off */
+#ifndef AIMEE_DB1_STAGES_H
+#define AIMEE_DB1_STAGES_H 1
+
+#include <aimee/core/event_bus/module_runtime.h>
+
+#include <stdint.h>
+"""]
+    for family, _ in client_families(catalog):
+        name = str(family["name"])
+        lines.append(
+            f"\naimee_module_status_t aimee_db1_stage_{name}("
+            "const uint8_t *request_body, uint32_t request_len,\n"
+            f"{' ' * (len(name) + 30)}uint8_t *response_body,\n"
+            f"{' ' * (len(name) + 30)}uint32_t response_capacity,\n"
+            f"{' ' * (len(name) + 30)}uint32_t *response_len);\n")
+    lines.append("\n#endif /* AIMEE_DB1_STAGES_H */\n/* clang-format on */\n")
+    return "".join(lines)
+
+
+def validate_stages(root: Path, catalog: dict[str, object], write: bool) -> None:
+    wanted = {(root / SOURCE_DIR / f"{family['name']}_stage.c"): stage_bytes(family, operations)
+              for family, operations in client_families(catalog)}
+    wanted[root / STAGES_HEADER] = stages_header_bytes(catalog)
+    for path, expected in wanted.items():
+        if write:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(expected, encoding="utf-8")
+        try:
+            actual = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            fail("stage-missing", f"cannot read {path}: {exc}")
+        if actual != expected:
+            fail("stage-stale",
+                 f"{path} is not what the catalog generates; run "
+                 f"scripts/gen_db1_contract.py --write")
+
+
 def validate_header(root: Path, catalog: dict[str, object]) -> None:
     """The header must be exactly what the catalog generates.
 
@@ -859,6 +1052,7 @@ def run(root: Path, write: bool = False) -> None:
         (root / HEADER).write_text(header_bytes(catalog), encoding="utf-8")
     validate_header(root, catalog)
     validate_clients(root, catalog, write)
+    validate_stages(root, catalog, write)
     validate_process_contract(root, catalog)
     validate_source_map(root, catalog)
     validate_coupled_sources(catalog)
