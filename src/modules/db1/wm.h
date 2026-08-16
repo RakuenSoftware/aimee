@@ -1,7 +1,7 @@
 /* db1/wm.h: session-scoped key-value scratch space with TTL.
  *
  * Pure domain API. No backend types in any signature. Implementations
- * live in src/db1/wm.c (sqlite) and src/db1/wm_mock.c (in-memory for tests).
+ * live in src/modules/db1/wm.c (sqlite) and src/tests/support/wm_mock.c (in-memory for tests).
  */
 #ifndef DEC_DB1_WM_H
 #define DEC_DB1_WM_H 1

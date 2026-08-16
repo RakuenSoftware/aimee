@@ -1,4 +1,4 @@
-/* db1/db1_init_mock.c: no-op lifecycle for mock builds.
+/* tests/support/db1_init_mock.c: no-op lifecycle for mock builds.
  *
  * Link this INSTEAD OF db1_init.c when the test links wm_mock.c (and
  * any other *_mock.c). The mock subsystems hold their own state; there's

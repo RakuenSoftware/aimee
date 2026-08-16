@@ -203,10 +203,11 @@ def compiler_command(module: dict[str, object], root: Path, bundle: Path, output
     ]
     binary = output / module["binary"]
     return [
-        cc, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+        cc, "-std=c11", "-D_GNU_SOURCE=", "-O2", "-Wall", "-Wextra", "-Werror",
+        "-Wno-format-truncation", "-ffunction-sections", "-fdata-sections",
         *(f"-I{path}" for path in include_paths), *cflags, str(main),
         *(str(path) for path in owned_sources), *(str(path) for path in core_sources),
-        *pkg_libraries, *system_flags, "-o", str(binary),
+        *pkg_libraries, *system_flags, "-Wl,--gc-sections", "-o", str(binary),
     ]
 
 

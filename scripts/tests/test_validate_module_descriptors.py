@@ -40,6 +40,14 @@ def production_repo() -> tempfile.TemporaryDirectory[str]:
                 owned_target = repo / relative
                 owned_target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(REPO_ROOT / relative, owned_target)
+        # The validator requires every c_build include root to be a real
+        # directory. Only roots that happen to contain descriptor-owned files
+        # appear from the copy above, so materialize the rest: a module may
+        # legitimately include from a root it does not own any file in.
+        build = descriptor.get("c_build")
+        if isinstance(build, dict):
+            for root in build.get("include_roots", []):
+                (repo / root).mkdir(parents=True, exist_ok=True)
     return tmp
 
 

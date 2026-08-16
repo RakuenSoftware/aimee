@@ -22,7 +22,6 @@
     "src/modules/db1/db.c",
     "src/modules/db1/db1_cron_jobs.c",
     "src/modules/db1/db1_init.c",
-    "src/modules/db1/db1_init_mock.c",
     "src/modules/db1/db1_trigger.c",
     "src/modules/db1/db1_write.c",
     "src/modules/db1/db_schema.c",
@@ -72,7 +71,6 @@
     "src/modules/db1/wfe_store.c",
     "src/modules/db1/windows.c",
     "src/modules/db1/wm.c",
-    "src/modules/db1/wm_mock.c",
     "src/modules/db1/working_profile_local.c"
   ],
   "private_headers": [
@@ -147,13 +145,19 @@
   ],
   "c_build": {
     "include_roots": [
-      "src",
       "src/headers",
-      "src/modules/db1"
+      "src/modules/config",
+      "src/modules/db1",
+      "src/modules/db2/c",
+      "src/modules/guardrails",
+      "src/modules/learning/include",
+      "src/vendor/headers"
     ],
     "pkg_config": [
       "sqlite3"
     ],
-    "system_libraries": []
+    "system_libraries": [
+      "m"
+    ]
   }
 }

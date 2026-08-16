@@ -1,4 +1,4 @@
-/* db1/wm_mock.c: in-memory mock of wm.h for unit tests.
+/* tests/support/wm_mock.c: in-memory mock of wm.h for unit tests.
  *
  * Link this INSTEAD OF wm.c (never both — they define the same symbols).
  * Also define a mock db1_init.c if the test doesn't want the sqlite

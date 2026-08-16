@@ -1787,7 +1787,7 @@ $(TESTPREFIX)/unit-test-working-memory: $(OBJDIR)/tests/test_working_memory.o \
 # Mock-pattern demonstrator: exercises the same wm.h contract using the
 # in-memory implementation. Same test source, different backing.
 $(TESTPREFIX)/unit-test-working-memory-mock: $(OBJDIR)/tests/test_working_memory.o \
-                               $(OBJDIR)/modules/db1/db1_init_mock.o $(OBJDIR)/modules/db1/wm_mock.o
+                               $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/tests/support/wm_mock.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-local-resolution: $(OBJDIR)/tests/test_local_resolution.o \
