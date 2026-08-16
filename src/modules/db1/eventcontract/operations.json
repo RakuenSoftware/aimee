@@ -9,70 +9,82 @@
       "name": "economizer_state",
       "event_kind": 11777,
       "active": true,
-      "covers": "checkpoints"
+      "covers": "checkpoints (the economizer's reducer state only)",
+      "retired_sources": []
     },
     {
       "id": 2,
       "name": "git_ownership",
       "event_kind": 11778,
       "active": true,
-      "covers": "git_ownership, project_clones"
+      "covers": "git_ownership",
+      "retired_sources": [
+        "git_ownership.c"
+      ]
     },
     {
       "id": 3,
       "name": "sessions",
       "event_kind": 11779,
       "active": false,
-      "covers": "server_sessions, primary_sessions, session_state, session_paths, webchat_claude_sessions, webchat_live"
+      "covers": "server_sessions, primary_sessions, session_state, session_paths, webchat_claude_sessions, webchat_live",
+      "retired_sources": []
     },
     {
       "id": 4,
       "name": "agent_work",
       "event_kind": 11780,
       "active": false,
-      "covers": "agent_jobs, agent_log, coord_jobs, cognify_jobs, db1_cron_jobs, db1_trigger"
+      "covers": "agent_jobs, agent_log, coord_jobs, cognify_jobs, db1_cron_jobs, db1_trigger",
+      "retired_sources": []
     },
     {
       "id": 5,
       "name": "delegation",
       "event_kind": 11781,
       "active": false,
-      "covers": "delegations, delegate_reservation, delegate_learning, delegation_checkpoint"
+      "covers": "delegations, delegate_reservation, delegate_learning, delegation_checkpoint",
+      "retired_sources": []
     },
     {
       "id": 6,
       "name": "workflow",
       "event_kind": 11782,
       "active": false,
-      "covers": "wfe_store, wfe_binding, execution_plans, execution_trace, pipelines, roadmap_runtime, roundtable_pipeline"
+      "covers": "wfe_store, wfe_binding, execution_plans, execution_trace, pipelines, roadmap_runtime, roundtable_pipeline",
+      "retired_sources": []
     },
     {
       "id": 7,
       "name": "conversation",
       "event_kind": 11783,
       "active": false,
-      "covers": "conv_context, clarify, payload_rewrite_state, user_memory, wm, windows"
+      "covers": "conv_context, clarify, payload_rewrite_state, user_memory, wm, windows",
+      "retired_sources": []
     },
     {
       "id": 8,
       "name": "identity",
       "event_kind": 11784,
       "active": false,
-      "covers": "secrets, server_identity_jti, server_management_jti, remote_client_grant, local_operator"
+      "covers": "secrets, server_identity_jti, server_management_jti, remote_client_grant",
+      "retired_sources": []
     },
     {
       "id": 9,
       "name": "telemetry",
       "event_kind": 11785,
       "active": false,
-      "covers": "token_audit, cost_fold, interaction_events, guardrail_events, eval, ensemble, diagnose, diagnostics"
+      "covers": "token_audit, cost_fold, interaction_events, guardrail_events, eval, ensemble, diagnose, diagnostics",
+      "retired_sources": []
     },
     {
       "id": 10,
       "name": "runtime",
       "event_kind": 11786,
       "active": false,
-      "covers": "runtime_state, env, model_catalog, model_pricing, working_profile_local, tool_local_availability, caches, web_page_cache, fsnap, decisions, maintenance, mcp_osv_cache"
+      "covers": "runtime_state, project_clones, local_operator, env, model_catalog, model_pricing, working_profile_local, tool_local_availability, caches, web_page_cache, fsnap, decisions, maintenance, mcp_osv_cache",
+      "retired_sources": []
     }
   ],
   "result_codes": [

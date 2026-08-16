@@ -20,13 +20,22 @@ SPEC.loader.exec_module(contract)
 
 
 def sandbox() -> tempfile.TemporaryDirectory[str]:
-    """A copy of the three files the contract binds together."""
+    """A copy of the files the contract binds together.
+
+    The DB1 sources are recreated as empty files rather than copied: the
+    retired-sources rule only asks which names exist and which the Makefile
+    still mentions, so their contents are irrelevant and copying sixty files
+    per test is not.
+    """
     tmp = tempfile.TemporaryDirectory()
     root = Path(tmp.name)
-    for relative in (contract.CATALOG, contract.HEADER, contract.PROCESS_CONTRACTS):
+    for relative in (contract.CATALOG, contract.HEADER, contract.PROCESS_CONTRACTS,
+                     contract.MAKEFILE):
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO_ROOT / relative, target)
+    for source in (REPO_ROOT / contract.SOURCE_DIR).glob("*.c"):
+        (root / contract.SOURCE_DIR / source.name).touch()
     return tmp
 
 
@@ -172,6 +181,67 @@ class CatalogTests(unittest.TestCase):
                 contract.run(root)
         finally:
             tmp.cleanup()
+
+    def test_a_family_cannot_retire_a_source_the_daemon_still_links(self) -> None:
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            catalog = self.catalog(root)
+            active = next(f for f in catalog["families"] if f["active"])
+            active["retired_sources"] = sorted(set(active["retired_sources"]) | {"db1_init.c"})
+            self.write(root, catalog)
+            self.assertRule(root, "retired-still-linked")
+        finally:
+            tmp.cleanup()
+
+    def test_a_source_cannot_leave_the_daemon_unclaimed(self) -> None:
+        # The half that catches a migration in progress: dropping a domain from
+        # the daemon's link without a family owning it would leave nothing
+        # saying where its callers went.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            makefile = root / contract.MAKEFILE
+            text = makefile.read_text(encoding="utf-8")
+            self.assertIn("modules/db1/checkpoints.c", text)
+            makefile.write_text(text.replace(" modules/db1/checkpoints.c", "", 1),
+                                encoding="utf-8")
+            self.assertRule(root, "retired-unclaimed")
+        finally:
+            tmp.cleanup()
+
+    def test_a_reserved_family_cannot_retire_anything(self) -> None:
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            catalog = self.catalog(root)
+            self.reserved(catalog)["retired_sources"] = ["git_ownership.c"]
+            self.write(root, catalog)
+            self.assertRule(root, "retired-reserved")
+        finally:
+            tmp.cleanup()
+
+    def test_two_families_cannot_retire_the_same_source(self) -> None:
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            catalog = self.catalog(root)
+            actives = [f for f in catalog["families"] if f["active"]]
+            self.assertGreaterEqual(len(actives), 2)
+            actives[0]["retired_sources"] = ["git_ownership.c"]
+            actives[1]["retired_sources"] = ["git_ownership.c"]
+            self.write(root, catalog)
+            self.assertRule(root, "retired-duplicate")
+        finally:
+            tmp.cleanup()
+
+    def test_the_module_adapter_is_never_claimed(self) -> None:
+        # It is served by the module process alone and was never in the daemon,
+        # so it is not evidence of a migration and must not need claiming.
+        catalog = self.catalog(REPO_ROOT)
+        for family in catalog["families"]:
+            self.assertNotIn("module_adapter.c", family["retired_sources"])
+        contract.run(REPO_ROOT)
 
     def test_every_operation_is_keyed(self) -> None:
         # DB1 rows belong to a conversation or session; an unkeyed read would
