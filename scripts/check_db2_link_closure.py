@@ -48,6 +48,25 @@ SUPPORT_COMPILE_FLAGS = (
 )
 SUPPORT_INCLUDE_ROOTS = ["src/modules/db2/support"]
 SUPPORT_UNITS: list[dict[str, object]] = [{
+    "path": "src/modules/db2/support/dstr_primitives.c",
+    "source_sha256": "ae448e0ae6e0464922042536b77ab396ea230d5ba16ec977e003ecd614cf22ab",
+    "header": "src/modules/db2/support/db2_dstr.h",
+    "header_sha256": "47d3f825ea79b187a1f500e7bf58beda95dc472a4573ebff7128212019185b7c",
+    "defines": ["dstr_appendf", "dstr_init", "dstr_steal"],
+    "resolves": ["dstr_appendf", "dstr_init", "dstr_steal"],
+    "allowed_includes": ["db2_dstr.h", "stdarg.h", "stdio.h", "stdlib.h"],
+    "allowed_header_includes": ["stddef.h"],
+    "allowed_undefined": ["realloc", "vsnprintf"],
+    "base_references": {
+        "dstr_appendf": ["src/modules/db2/c/collab_rules.c"],
+        "dstr_init": ["src/modules/db2/c/collab_rules.c"],
+        "dstr_steal": ["src/modules/db2/c/collab_rules.c"],
+    },
+    "provenance": "Definitions and required static helpers promoted from src/dstr.c; all DB2 "
+                  "calls audited in src/modules/db2/c/collab_rules.c.",
+    "evidence": "Three deterministic dynamic-string lifecycle functions with only realloc and "
+                "vsnprintf imports; no DB2, event-bus, provider, I/O, or platform dependency.",
+}, {
     "path": "src/modules/db2/support/sketch_primitives.c",
     "source_sha256": "20318d4f9c92894892ef9475f95c1542602f3a7d2b4d9fe6df2b8d63b4986280",
     "header": "src/modules/db2/support/sketch.h",
@@ -88,6 +107,27 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                   "src/modules/db2/c/sketch.c and src/modules/db2/c/kb_payload.c.",
     "evidence": "Seven deterministic, database-free sketch primitives with one allowed libc "
                 "dependency (memset); no DB2, event-bus, provider, I/O, or heap dependency.",
+}, {
+    "path": "src/modules/db2/support/text_primitives.c",
+    "source_sha256": "2bbdb09370052759967f53557d0904398c55c118c964699a97a74a9abad02e78",
+    "header": "src/modules/db2/support/db2_text.h",
+    "header_sha256": "748a028371661444d450f1d365dca5e6988f0ba02730b38bfeb32078e67311b2",
+    "defines": ["text_sanitize_utf8"],
+    "resolves": ["text_sanitize_utf8"],
+    "allowed_includes": ["db2_text.h"],
+    "allowed_header_includes": ["stddef.h"],
+    "allowed_undefined": [],
+    "base_references": {
+        "text_sanitize_utf8": [
+            "src/modules/db2/c/canonical_index.c",
+            "src/modules/db2/c/code_index.c",
+            "src/modules/db2/c/kb_payload.c",
+        ],
+    },
+    "provenance": "Definition promoted from src/text.c; all DB2 calls audited in "
+                  "canonical_index.c, code_index.c, and kb_payload.c.",
+    "evidence": "Deterministic in-place UTF-8 repair with no imports, allocation, I/O, DB, "
+                "event-bus, provider, or platform dependency; exhaustive parity tested.",
 }]
 SYSTEM_PREFIXES = ("PQ", "EVP_", "OPENSSL_", "RAND_", "SHA", "CRYPTO_")
 INJECTED_PREFIXES = (

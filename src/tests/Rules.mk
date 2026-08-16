@@ -728,7 +728,9 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
 TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-bus-db2-module \
+                $(TESTPREFIX)/unit-test-db2-dstr-support \
                 $(TESTPREFIX)/unit-test-db2-sketch-support \
+                $(TESTPREFIX)/unit-test-db2-text-support \
                 $(TESTPREFIX)/unit-test-db3-route \
                 $(TESTPREFIX)/unit-test-bus-db3
 
@@ -799,7 +801,9 @@ UNIT_TEST_SHARD_COUNT ?= 1
 UNIT_TEST_SHARD_INDEX ?= 0
 UNIT_TEST_SKIP_P1 ?= 0
 ifeq ($(UNIT_TEST_SHARD_INDEX),0)
-UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize
+UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-text-support-sanitize
 else
 UNIT_TEST_AUX_TARGETS =
 endif
@@ -6613,6 +6617,103 @@ $(TESTPREFIX)/unit-test-sketch: $(OBJDIR)/tests/test_sketch.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
 
+DB2_DSTR_SUPPORT_RENAMES = \
+   -Ddstr_appendf=db2_support_dstr_appendf \
+   -Ddstr_init=db2_support_dstr_init \
+   -Ddstr_steal=db2_support_dstr_steal
+DB2_DSTR_TEST_ALLOCATOR = -Drealloc=db2_test_realloc
+
+$(OBJDIR)/tests/db2_dstr_support_impl.o: modules/db2/support/dstr_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_DSTR_SUPPORT_RENAMES) \
+	      $(DB2_DSTR_TEST_ALLOCATOR) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_dstr_monolith.o: dstr.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_DSTR_TEST_ALLOCATOR) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-dstr-support: \
+                     $(OBJDIR)/tests/test_db2_dstr_support.o \
+                     $(OBJDIR)/tests/db2_dstr_support_impl.o \
+                     $(OBJDIR)/tests/db2_dstr_monolith.o
+	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_DSTR_SANITIZE_DIR = $(OBJDIR)/tests/db2-dstr-support-sanitize
+
+$(DB2_DSTR_SANITIZE_DIR)/test.o: tests/test_db2_dstr_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_DSTR_SANITIZE_DIR)/support.o: modules/db2/support/dstr_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_DSTR_SUPPORT_RENAMES) \
+	      $(DB2_DSTR_TEST_ALLOCATOR) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_DSTR_SANITIZE_DIR)/monolith.o: dstr.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_DSTR_TEST_ALLOCATOR) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-dstr-support-sanitize: \
+                     $(DB2_DSTR_SANITIZE_DIR)/test.o \
+                     $(DB2_DSTR_SANITIZE_DIR)/support.o \
+                     $(DB2_DSTR_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -o $@ $^
+
+.PHONY: unit-test-db2-dstr-support unit-test-db2-dstr-support-sanitize
+unit-test-db2-dstr-support: $(TESTPREFIX)/unit-test-db2-dstr-support
+	$<
+
+unit-test-db2-dstr-support-sanitize: $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize
+	$<
+
+DB2_TEXT_SUPPORT_RENAMES = -Dtext_sanitize_utf8=db2_support_text_sanitize_utf8
+DB2_TEXT_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_text_support_impl.o: modules/db2/support/text_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_TEXT_SUPPORT_RENAMES) \
+	      $(DB2_TEXT_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_text_monolith.o: text.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_TEXT_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-text-support: \
+                     $(OBJDIR)/tests/test_db2_text_support.o \
+                     $(OBJDIR)/tests/db2_text_support_impl.o \
+                     $(OBJDIR)/tests/db2_text_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_TEXT_SANITIZE_DIR = $(OBJDIR)/tests/db2-text-support-sanitize
+
+$(DB2_TEXT_SANITIZE_DIR)/test.o: tests/test_db2_text_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_TEXT_SANITIZE_DIR)/support.o: modules/db2/support/text_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_TEXT_SUPPORT_RENAMES) $(DB2_TEXT_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_TEXT_SANITIZE_DIR)/monolith.o: text.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_TEXT_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-text-support-sanitize: \
+                     $(DB2_TEXT_SANITIZE_DIR)/test.o \
+                     $(DB2_TEXT_SANITIZE_DIR)/support.o \
+                     $(DB2_TEXT_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-text-support unit-test-db2-text-support-sanitize
+unit-test-db2-text-support: $(TESTPREFIX)/unit-test-db2-text-support
+	$<
+
+unit-test-db2-text-support-sanitize: $(TESTPREFIX)/unit-test-db2-text-support-sanitize
+	$<
+
 DB2_SKETCH_SUPPORT_RENAMES = \
    -Dsketch_bloom_init=db2_support_sketch_bloom_init \
    -Dsketch_count_min_init=db2_support_sketch_count_min_init \
@@ -6633,28 +6734,28 @@ $(TESTPREFIX)/unit-test-db2-sketch-support: \
 	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS) -lm
 
 DB2_SKETCH_SANITIZE_DIR = $(OBJDIR)/tests/db2-sketch-support-sanitize
-DB2_SKETCH_SANITIZE_FLAGS = -O1 -g -fno-lto -fsanitize=address,undefined \
-                            -fno-omit-frame-pointer -U_FORTIFY_SOURCE \
-                            -D_FORTIFY_SOURCE=3
+DB2_SUPPORT_SANITIZE_FLAGS = -O1 -g -fno-lto -fsanitize=address,undefined \
+                             -fno-omit-frame-pointer -U_FORTIFY_SOURCE \
+                             -D_FORTIFY_SOURCE=3
 
 $(DB2_SKETCH_SANITIZE_DIR)/test.o: tests/test_db2_sketch_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SKETCH_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
 $(DB2_SKETCH_SANITIZE_DIR)/support.o: modules/db2/support/sketch_primitives.c
 	@mkdir -p $(dir $@)
 	$(CC) $(TEST_C_FLAGS) $(DB2_SKETCH_SUPPORT_RENAMES) \
-	      $(DB2_SKETCH_SANITIZE_FLAGS) -c -o $@ $<
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
 $(DB2_SKETCH_SANITIZE_DIR)/monolith.o: sketch.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SKETCH_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
 $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize: \
                      $(DB2_SKETCH_SANITIZE_DIR)/test.o \
                      $(DB2_SKETCH_SANITIZE_DIR)/support.o \
                      $(DB2_SKETCH_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SKETCH_SANITIZE_FLAGS) -o $@ $^ -lm
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -o $@ $^ -lm
 
 .PHONY: unit-test-db2-sketch-support
 unit-test-db2-sketch-support: $(TESTPREFIX)/unit-test-db2-sketch-support

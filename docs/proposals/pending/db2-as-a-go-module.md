@@ -403,6 +403,18 @@ new symbol or non-system reference edge, and fixed-vector plus sanitizer parity 
 pre-activation monolith. This pattern permits bounded process-owned portability code without
 reopening the legacy DB2 feature surface.
 
+The next admitted unit applies the same policy to the sole DB2 dynamic-string lifecycle. It owns the
+exact `dstr_t` field layout and only `dstr_init`, `dstr_appendf`, and `dstr_steal`; all three base
+references are confined to `c/collab_rules.c`, and its only possible imports are `realloc` and
+`vsnprintf`. Normal and ASan/UBSan/FORTIFY parity cover empty state, formatting, repeated capacity
+growth, long content, ownership transfer, and controlled allocation failure while the monolith
+remains authoritative. Both copies preserve the prior string when that growth allocation fails.
+
+The third admitted unit owns only `text_sanitize_utf8`. It is a deterministic, allocation-free
+in-place repair with no imports and five legacy calls across three DB2 units. Admission pins the
+minimal header, source envelope, export, and base references; exhaustive byte-class, Unicode
+boundary, truncation, mixed-input, NULL, and sanitizer parity protects the monolith contract.
+
 ### 4.3 Supervision and atomic activation
 
 Development may land the exporter, catalog, module binary, and adapters in reviewable commits, but
