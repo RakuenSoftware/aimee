@@ -2,7 +2,7 @@
 #ifndef AIMEE_KB_MANAGEMENT_CERT_LIFECYCLE_H
 #define AIMEE_KB_MANAGEMENT_CERT_LIFECYCLE_H
 
-#include "db2/management_client_instance.h"
+#include "modules/db2/c/management_client_instance.h"
 #include "kb_pki.h"
 #include "kb_workload_provider.h"
 

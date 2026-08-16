@@ -49,7 +49,7 @@ code surface.
 - `src/memory_assemble.c`
 - `src/server/server_mcp.c`
 - `src/server/kb_client_memory.c`
-- `src/db2/kb_service_backend_memory.c`
+- `src/modules/db2/c/kb_service_backend_memory.c`
 - `src/kb/kb_service_memory.c`
 - `src/tests/test_memory_advanced.c`
 - `docs/gen/configuration.md`

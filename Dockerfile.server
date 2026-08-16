@@ -55,45 +55,13 @@ RUN build_version="$AIMEE_VERSION" \
     && make -C src ../aimee-server ../aimee ../aimee-forwarder -j"$(nproc)" \
          GIT_VERSION="v$build_version"
 
-# db1 is the one C process whose handler has an implementation behind it: its
-# stage reads and writes the store. Its objects were already produced by the
-# `make -C src` above, so the loop links them rather than recompiling. The
-# module build's minimal flag set is right for a self-contained adapter and
-# wrong for real sources, which need the Makefile's warning suppressions and its
-# whole include list. db1 stays self-contained even so: the only core symbols it
-# needs are aimee_home and aimee_log. Mocks are test-only alternatives, and the
-# adapter's text is already inlined in the generated source.
-#
-# A comment cannot live inside the loop below: every continued line needs a
-# trailing backslash, so an unescaped comment line ends the RUN mid-loop.
 # Build the independently supervised same-container module adapters from the
 # canonical contract. C processes link only the extracted event-bus client;
 # Go processes are copies of the static multicall runtime under attested names.
 RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
     && mkdir -p /module-runtime/bin \
-    && for source in /module-runtime/src/*.c; do \
-         [ -e "$source" ] || continue; \
-         binary="${source##*/}"; binary="${binary%.c}"; \
-         extra=""; libs=""; \
-         if [ "$binary" = "aimee-module-db1" ]; then \
-           extra="$(ls src/build/obj/modules/db1/*.o | grep -v _mock | grep -v module_adapter | tr '\n' ' ') src/build/obj/aimee_home.o src/build/obj/log.o"; \
-           libs="-lsqlite3"; \
-         fi; \
-         cc -std=c11 -O2 -Wall -Wextra -Werror -Isrc/core/event_bus/include \
-           -Isrc/modules/memory/include -Isrc/modules/learning/include \
-           -Isrc/modules/routing/include -Isrc/modules/delegates/include \
-           -Isrc/modules/tools/include -Isrc/modules/workspace/include \
-           -Isrc/modules/git/include -Isrc/modules/skills/include \
-           -Isrc/modules/response-composition/include \
-           -Isrc/modules/db1 \
-           "$source" $extra \
-           src/core/event_bus/bus_attach.c src/core/event_bus/bus_client.c \
-           src/core/event_bus/bus_endpoint.c src/core/event_bus/bus_region.c \
-           src/core/event_bus/bus_ring.c src/core/event_bus/bus_wire.c \
-           src/core/event_bus/module_protocol.c src/core/event_bus/module_runtime.c \
-           -pthread $libs \
-           -o "/module-runtime/bin/$binary"; \
-       done \
+    && python3 scripts/build_c_module_runtime_bundle.py \
+         --bundle /module-runtime --output /module-runtime/bin \
     && while IFS= read -r module_id; do \
          [ -n "$module_id" ] || continue; \
          install -m 0755 /tmp/aimee-module-go \

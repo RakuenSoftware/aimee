@@ -31,7 +31,7 @@ psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $SCHEMA_ONLY_DB
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "CREATE DATABASE $SCHEMA_ONLY_DB;"
 SCHEMA_ONLY_URL="${BASE_URL%/*}/$SCHEMA_ONLY_DB"
 psql -v ON_ERROR_STOP=1 "$SCHEMA_ONLY_URL" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
-sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/db2/schema.sql" | psql -v ON_ERROR_STOP=1 "$SCHEMA_ONLY_URL" -f - >/dev/null
+sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/db2/c/schema.sql" | psql -v ON_ERROR_STOP=1 "$SCHEMA_ONLY_URL" -f - >/dev/null
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE $SCHEMA_ONLY_DB;"
 echo "== Schema-only developer load: PASSED =="
 
@@ -44,9 +44,9 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -c "CREATE EXTENSION IF NOT EXISTS vector; CRE
 
 # Three-phase provisioning, matching the real hardened deploy order:
 #   1. roles (create) -> 2. schema (DDL) -> 3. grants (runtime DML/EXECUTE).
-psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/src/db2/schema_roles.sql"
-sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/db2/schema.sql" | psql -v ON_ERROR_STOP=1 "$DB_URL" -f -
-psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/src/db2/schema_grants.sql"
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/src/modules/db2/c/schema_roles.sql"
+sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/db2/c/schema.sql" | psql -v ON_ERROR_STOP=1 "$DB_URL" -f -
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/src/modules/db2/c/schema_grants.sql"
 
 echo "== P1 RLS gate: running isolation assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p1_rls_isolation_test.sql"
@@ -104,7 +104,7 @@ echo "== P7 fenced vendor-operation multi-worker concurrency gate =="
 "$ROOT/scripts/p7_rotation_ops_concurrency.sh" "$DB_URL"
 
 echo "== P7 primary barrier grant-reapplication gate =="
-psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/src/db2/schema_grants.sql"
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/src/modules/db2/c/schema_grants.sql"
 
 echo "== P7 primary vault maintenance barrier assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_vault_barrier_pg_test.sql"

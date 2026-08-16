@@ -16,7 +16,7 @@
 ## Why this is the remaining P7 scope
 
 Everything P7 has landed so far makes evidence *correct inside PostgreSQL*. The
-kb audit chain (`kb_audit_event`, `src/db2/kb_audit_worm.c`) is hash-chained and
+kb audit chain (`kb_audit_event`, `src/modules/db2/c/kb_audit_worm.c`) is hash-chained and
 trigger-protected; the reseal outbox (`kb_vault_rewrap_worm`) has deterministic
 event IDs and exact replay checks; D3b added the atomic primary open event
 (`kb_vault_open_event`) with a full row hash.

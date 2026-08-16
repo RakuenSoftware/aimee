@@ -18,7 +18,7 @@
  * Skips (exit 0) when AIMEE_TEST_DB2_URL is unset, so CI without a database
  * stays green; the point of the variable is that this can never quietly
  * "pass" by connecting to a deployment an operator did not name. */
-#include "db2.h"
+#include "modules/db2/c/db2.h"
 #include "lifecycle.h"
 #include "memory_vectors.h"
 #include <assert.h>

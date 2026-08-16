@@ -5,18 +5,18 @@
 #include "cJSON.h"
 #include "dashboard.h"
 #include "db.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "platform_test_util.h"
 #include <aimee/workspace/workspace.h>
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
-#include "../db2/lifecycle.h"
-#include "../db2/memory_briefing.h"
-#include "../db2/memory_lifecycle.h"
-#include "../db2/memory_query.h"
-#include "../db2/memory_relations.h"
-#include "../db2/memory_scope_query.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/lifecycle.h"
+#include "../modules/db2/c/memory_briefing.h"
+#include "../modules/db2/c/memory_lifecycle.h"
+#include "../modules/db2/c/memory_query.h"
+#include "../modules/db2/c/memory_relations.h"
+#include "../modules/db2/c/memory_scope_query.h"
 
 static char tmpdir[64];
 

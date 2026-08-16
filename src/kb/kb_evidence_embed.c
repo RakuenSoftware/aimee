@@ -11,9 +11,9 @@
 
 #include "aimee.h"
 #include "cJSON.h"
-#include "db2/db2.h" /* db2_lease_release_idle */
-#include "db2/artifacts.h"
-#include "db2/evidence_vectors.h"
+#include "modules/db2/c/db2.h" /* db2_lease_release_idle */
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/evidence_vectors.h"
 #include "log.h"
 #include "memory.h"
 

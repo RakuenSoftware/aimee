@@ -24,14 +24,18 @@ MAX_DEPTH = 32
 MAX_ARRAY = 256
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 BASE_KEYS = {"descriptor_version", "id", "dependencies", "runtime_toggle"}
+C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
+BUILD_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
 OWNERSHIP_FIELDS = (
-    "sources", "private_headers", "public_headers", "tests", "docs", "go_sources", "go_tests",
+    "sources", "private_headers", "public_headers", "contracts", "tests", "docs", "go_sources",
+    "go_tests",
 )
 DEFAULT_ON = {"runtime-web", "control-web", "sandbox", "postgres"}
 ROLE_EXTENSIONS = {
     "sources": {".c", ".cpp", ".S", ".s"},
     "private_headers": {".h", ".hpp"},
     "public_headers": {".h", ".hpp"},
+    "contracts": {".json"},
     "tests": {".c", ".cpp", ".py", ".sh"},
     "docs": {".md"},
     "go_sources": {".go"},
@@ -162,6 +166,28 @@ def schema() -> dict[str, object]:
             },
             "enabled_by_default": {"type": "boolean"},
             "ownership_complete": {"type": "boolean"},
+            "c_build": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": sorted(C_BUILD_KEYS),
+                "properties": {
+                    "include_roots": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "uniqueItems": True,
+                    },
+                    "pkg_config": {
+                        "type": "array",
+                        "items": {"type": "string", "pattern": BUILD_TOKEN_RE.pattern},
+                        "uniqueItems": True,
+                    },
+                    "system_libraries": {
+                        "type": "array",
+                        "items": {"type": "string", "pattern": BUILD_TOKEN_RE.pattern},
+                        "uniqueItems": True,
+                    },
+                },
+            },
             "runtime_toggle": {
                 "type": "object",
                 "additionalProperties": False,
@@ -201,7 +227,7 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
     if identifier not in required | optional:
         fail("module-unknown", f"unknown module ID {identifier!r}", "/id")
     required_keys = BASE_KEYS | ({"enabled_by_default"} if identifier in optional else set())
-    allowed_keys = required_keys | set(OWNERSHIP_FIELDS) | {"ownership_complete"}
+    allowed_keys = required_keys | set(OWNERSHIP_FIELDS) | {"ownership_complete", "c_build"}
     if not required_keys <= set(value) or not set(value) <= allowed_keys:
         fail(
             "descriptor-keys",
@@ -261,6 +287,33 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
     if "ownership_complete" in value and type(value["ownership_complete"]) is not bool:
         fail("ownership-complete-type", "ownership_complete must be boolean",
              "/ownership_complete")
+    if "c_build" in value:
+        build = value["c_build"]
+        if not isinstance(build, dict) or set(build) != C_BUILD_KEYS:
+            fail("c-build-shape", f"c_build keys must equal {sorted(C_BUILD_KEYS)}", "/c_build")
+        for field in sorted(C_BUILD_KEYS):
+            entries = build[field]
+            if not isinstance(entries, list):
+                fail("c-build-type", f"c_build.{field} must be an array", f"/c_build/{field}")
+            if field == "include_roots" and not entries:
+                fail("c-build-empty", "c_build.include_roots must not be empty",
+                     "/c_build/include_roots")
+            previous = ""
+            for index, entry in enumerate(entries):
+                pointer = f"/c_build/{field}/{index}"
+                if not isinstance(entry, str):
+                    fail("c-build-type", f"c_build.{field} entries must be strings", pointer)
+                if entry <= previous:
+                    fail("c-build-order", f"c_build.{field} must be sorted and unique", pointer)
+                previous = entry
+                if field == "include_roots":
+                    pure = PurePosixPath(entry)
+                    if (not entry or "\\" in entry or pure.is_absolute() or "." in pure.parts or
+                            ".." in pure.parts or pure.as_posix() != entry):
+                        fail("c-build-path", f"invalid repository-relative include root {entry!r}",
+                             pointer)
+                elif not BUILD_TOKEN_RE.fullmatch(entry):
+                    fail("c-build-token", f"invalid build token {entry!r}", pointer)
     return identifier
 
 
@@ -301,6 +354,7 @@ def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
         "sources": PurePosixPath("src/modules") / identifier,
         "private_headers": PurePosixPath("src/modules") / identifier,
         "public_headers": PurePosixPath("src/modules") / identifier / "include/aimee" / identifier,
+        "contracts": PurePosixPath("src/modules") / identifier / "eventcontract",
         "tests": PurePosixPath("src/tests"),
         "docs": PurePosixPath("docs/modules"),
         "go_sources": PurePosixPath("server-go/modules") / identifier,
@@ -325,6 +379,7 @@ def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
         "sources": module_root,
         "private_headers": module_root,
         "public_headers": _resolve_owned(module_root / "include/aimee" / identifier, pointer),
+        "contracts": _resolve_owned(module_root / "eventcontract", pointer),
         "tests": _resolve_owned(resolved_repo / "src/tests", pointer),
         "docs": _resolve_owned(resolved_repo / "docs/modules", pointer),
         "go_sources": _resolve_owned(resolved_repo / "server-go/modules" / identifier, pointer),
@@ -395,6 +450,25 @@ def validate_complete_ownership(repo: Path, identifier: str,
                 f"missing={missing}, extra={extra}",
                 f"/{role}",
             )
+    contract_root = module_root / "eventcontract"
+    actual_contracts: set[str] = set()
+    if contract_root.is_dir():
+        for path in contract_root.rglob("*.json"):
+            relative = path.relative_to(repo).as_posix()
+            if path.is_symlink() or not path.is_file():
+                fail("ownership-complete-file",
+                     f"{identifier} contracts path is not a regular file: {relative}",
+                     "/contracts")
+            actual_contracts.add(relative)
+    found["contracts"] = actual_contracts
+    declared_contracts = set(value.get("contracts", []))
+    missing_contracts = sorted(actual_contracts - declared_contracts)
+    extra_contracts = sorted(declared_contracts - actual_contracts)
+    if missing_contracts or extra_contracts:
+        fail("ownership-complete",
+             f"{identifier} contracts mismatch for JSON files; "
+             f"missing={missing_contracts}, extra={extra_contracts}",
+             "/contracts")
     go_root = repo / "server-go/modules" / identifier
     for role, is_test in (("go_sources", False), ("go_tests", True)):
         actual: set[str] = set()
@@ -416,7 +490,8 @@ def validate_complete_ownership(repo: Path, identifier: str,
             fail("ownership-complete",
                  f"{identifier} {role} mismatch for Go files; missing={missing}, extra={extra}",
                  f"/{role}")
-    if not any(found.values()):
+    implementation_roles = ("sources", "private_headers", "go_sources", "go_tests")
+    if not any(found.get(role) for role in implementation_roles):
         # An empty module root satisfies set equality vacuously, so the latch would
         # assert completeness for a module whose implementation has never been moved
         # under src/modules/<id>. That is migration debt, not completion. Keep this
@@ -453,6 +528,17 @@ def validate_ownership(
     ownership = report["ownership"]
     assert isinstance(ownership, dict)
     claimed: dict[str, str] = {}
+    build = value.get("c_build")
+    if isinstance(build, dict):
+        for index, raw in enumerate(build["include_roots"]):
+            pointer = f"/c_build/include_roots/{index}"
+            pure = PurePosixPath(raw)
+            lexical = repo.resolve().joinpath(*pure.parts)
+            resolved = _resolve_owned(lexical, pointer)
+            if not _contained(resolved, repo.resolve()):
+                fail("c-build-path-escape", f"include root escapes repository: {raw}", pointer)
+            if resolved != lexical or not resolved.is_dir():
+                fail("c-build-directory", f"include root is not a real directory: {raw}", pointer)
     for field in OWNERSHIP_FIELDS:
         raw_entries = value.get(field, [])
         if not isinstance(raw_entries, list):

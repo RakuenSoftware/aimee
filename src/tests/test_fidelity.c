@@ -6,10 +6,10 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "db2_test_shim.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
-#include "../db2/fidelity.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/fidelity.h"
 
 static int64_t count_kind(void *conn, const char *kind)
 {

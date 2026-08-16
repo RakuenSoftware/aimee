@@ -3,10 +3,10 @@
  * unimplemented anchors — kept out of the shared config layer so the enum + the
  * "real anchor only" rule live in one kb-owned place. */
 #include "kb_vault_policy.h"
-#include "db2/db2_witness_checkpoint.h" /* anchor coverage + freshness (P2b gate) */
-#include "kb/kb_witness_cadence.h"      /* last-verification-clean + freshness bound */
-#include "vault_custody_mock.h"         /* vault_custody_mock_provider */
-#include "vault_custody_tpm2.h"         /* vault_custody_tpm2_provider (real or stub) */
+#include "modules/db2/c/db2_witness_checkpoint.h" /* anchor coverage + freshness (P2b gate) */
+#include "kb/kb_witness_cadence.h"                /* last-verification-clean + freshness bound */
+#include "vault_custody_mock.h"                   /* vault_custody_mock_provider */
+#include "vault_custody_tpm2.h"                   /* vault_custody_tpm2_provider (real or stub) */
 #include "vault_custody_pkcs11.h"
 #include "vault_custody_kms.h"
 #include "vault_internal.h"       /* vault_custody_set_provider */

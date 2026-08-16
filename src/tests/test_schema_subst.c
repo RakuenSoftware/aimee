@@ -12,8 +12,8 @@
 #include <string.h>
 
 #include "aimee.h" /* EMBED_MAX_DIM — the upper bound an unusable width is judged against */
-#include "db2/db_schema.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/db_schema.h"
+#include "modules/db2/c/db_postgres.h"
 
 /* Capture the SQL db_apply_schema_postgres() hands to Postgres. */
 static char *g_captured_sql = NULL;

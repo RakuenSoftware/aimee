@@ -1,8 +1,8 @@
 #include "kb_egress_admission.h"
-#include "../db2/org_budget.h"
-#include "../db2/org_rate.h"
+#include "../modules/db2/c/org_budget.h"
+#include "../modules/db2/c/org_rate.h"
 #include "kb_vault_policy.h"
-#include "../db2/org_token_audit.h"
+#include "../modules/db2/c/org_token_audit.h"
 #include <stdio.h>
 #include <string.h>
 int kb_egress_admit_dispatch(const kb_egress_admission_t *a, kb_egress_dispatch_fn fn, void *ctx,

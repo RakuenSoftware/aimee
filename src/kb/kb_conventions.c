@@ -8,10 +8,10 @@
 
 #include "aimee.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db2/kb_payload.h"
-#include "db2/kb_service_backend.h"
-#include "db2/memory_query.h"
-#include "db2/lifecycle.h"
+#include "modules/db2/c/kb_payload.h"
+#include "modules/db2/c/kb_service_backend.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/lifecycle.h"
 #endif
 #include "kb.h"
 #include "memory.h"

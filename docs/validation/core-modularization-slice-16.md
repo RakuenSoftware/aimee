@@ -76,7 +76,7 @@ gateway-policy, agent-policy-intercept, tool-validation, and workflow native-gat
 
 ### Vault
 
-Owned evidence includes all `src/modules/vault/*`; storage provider `src/db2/vault_pg.*`; server entry
+Owned evidence includes all `src/modules/vault/*`; storage provider `src/modules/db2/c/vault_pg.*`; server entry
 points in `src/server/server_vault*.c`; and KB rewrap/binding touchpoints. The service boundary begins at
 `vault_service_unlock` (`src/modules/vault/vault_service.c:150`), set/get at lines 265/294, injection at
 line 360, principal resolution at `src/modules/vault/vault_principal.c:31`, storage binding at
@@ -111,11 +111,11 @@ detached/container, runner, scope, and turn tests were inspected.
 
 The target `src/modules/tools` directory currently contains only its descriptor. Distributed owned
 candidates include `src/headers/agent_tools.h`, `src/server/agent_tools.c`, platform `agent_tools*`,
-`src/toolset.c`, `src/headers/toolset.h`, `src/db2/tool_registry.*`, tool argument/schema helpers,
+`src/toolset.c`, `src/headers/toolset.h`, `src/modules/db2/c/tool_registry.*`, tool argument/schema helpers,
 `src/cmd_toolset.c`, and `src/tool_prompts/*`. The live seams are `build_tools_array`
 (`src/server/agent_tools.c:1492`), Git-provider registration (line 1344),
 `dispatch_tool_call_ctx` (`src/posix/agent_tools_dispatch.c:1884`), effective toolsets
-(`src/toolset.c:534`), and DB2 lookup (`src/db2/tool_registry.c:10`). Toolset, validation, schema,
+(`src/toolset.c:534`), and DB2 lookup (`src/modules/db2/c/tool_registry.c:10`). Toolset, validation, schema,
 arguments, output, prompts, MCP native dispatch/surface, script-runner, and server-compute tests were inspected.
 
 ### Git
@@ -162,7 +162,7 @@ outside those primitives is a **hypothesis, unverified**.
 | `tools::agent_tools Git schemas/providers` ↔ `git::mcp_git handlers` | `src/server/agent_tools.c:807`; `src/modules/git/mcp_git_query.c:321` | `duplicated-by-adjacent-module` candidate, not confirmed | `defer` schema/dispatch consolidation |
 | `workspace::worktree_* declarations` ↔ `execution-policy::guardrails.h worktree declarations` | `src/modules/workspace/workspace.h:67`; `src/modules/guardrails/guardrails.h:219` | `duplicated-by-adjacent-module` candidate, not confirmed | `relocate` in a workspace source slice after comparison |
 | `tools::tool_git_* platform readers` ↔ `git::mcp_git_query` | `src/posix/agent_tools.c:1817`; `src/modules/git/mcp_git_query.c:321` | `duplicated-by-adjacent-module` candidate, not confirmed | `defer` behavior/caller comparison before deletion |
-| `vault::vault_store_backend_t` ↔ `db2::vault_pg_backend` | `src/modules/vault/vault_internal.h:27`; `src/db2/vault_pg.c:745` | provider implementation, not duplicate authority | `retain` behind the vault facade |
+| `vault::vault_store_backend_t` ↔ `db2::vault_pg_backend` | `src/modules/vault/vault_internal.h:27`; `src/modules/db2/c/vault_pg.c:745` | provider implementation, not duplicate authority | `retain` behind the vault facade |
 
 No `unreachable`, `superseded`, `configuration-only`, or `test-only` candidate met the static threshold.
 Each substantial provider family has a non-test definition/reference, route, registry, or configuration

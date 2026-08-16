@@ -29,7 +29,7 @@ void reflection_test_release_idle(void);
 #define db2_lease_release_idle reflection_test_release_idle
 #include <sqlite3.h>
 
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 
 /* The unit under test (pulls its own headers). */
 #include "../kb/kb_reflection.c"

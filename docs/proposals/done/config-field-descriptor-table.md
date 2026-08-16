@@ -1,8 +1,9 @@
 # Proposal: Config field-descriptor table — collapse the parallel config plumbing
 
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
-> specification for work already delivered. The remaining save-side work was later
-> [rejected](../rejected/config-field-descriptor-save-residual.md) under the Go-or-rejected policy.
+> specification for work already delivered. The remaining save-side objective is
+> [pending under Go ownership](../pending/config-field-descriptor-save-residual.md); PR #2655's
+> C-only rejection was reversed after the rejection audit.
 
 - **State:** DONE — delivered scope archived 2026-07-26.
 - **Author:** JBailes (drafted by Claude, 2026-07-20).

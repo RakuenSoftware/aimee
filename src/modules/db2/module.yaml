@@ -1,0 +1,41 @@
+{
+  "descriptor_version": 1,
+  "id": "db2",
+  "dependencies": [
+    "config",
+    "module-runtime"
+  ],
+  "enabled_by_default": false,
+  "runtime_toggle": {
+    "supported": false
+  },
+  "sources": [
+    "src/modules/db2/client/generated.c",
+    "src/modules/db2/module_adapter.c"
+  ],
+  "public_headers": [
+    "src/modules/db2/include/aimee/db2/client.h",
+    "src/modules/db2/include/aimee/db2/module_api.h"
+  ],
+  "contracts": [
+    "src/modules/db2/eventcontract/declaration-review.json",
+    "src/modules/db2/eventcontract/operations.json"
+  ],
+  "private_headers": [
+    "src/modules/db2/module_adapter.h"
+  ],
+  "tests": [
+    "src/tests/test_bus_db2_module.c",
+    "src/tests/test_db2_module_contract.c"
+  ],
+  "docs": [
+    "docs/modules/db2.md"
+  ],
+  "c_build": {
+    "include_roots": [
+      "src/modules/db2/include"
+    ],
+    "pkg_config": [],
+    "system_libraries": []
+  }
+}

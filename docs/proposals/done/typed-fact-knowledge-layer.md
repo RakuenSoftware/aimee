@@ -9,11 +9,11 @@
   Calibrate (provenance-keyed confidence classes), Curate (self-extending
   ontology promotion), Gate-Promote (default-off flag rollout per the
   readiness program).
-- **Scope:** a new ontology subsystem (`src/db2/rel_types.{c,h}` +
-  migration), an entity-identity registry (`src/db2/entity_registry.{c,h}` +
+- **Scope:** a new ontology subsystem (`src/modules/db2/c/rel_types.{c,h}` +
+  migration), an entity-identity registry (`src/modules/db2/c/entity_registry.{c,h}` +
   alias/conflict tables), a typed-fact write gate
   (`src/memory_fact_gate.{c,h}`, sibling of `memory_gate_check`), extensions
-  to the existing typed-edge store (`src/db2/entity_edges.{c,h}` already
+  to the existing typed-edge store (`src/modules/db2/c/entity_edges.{c,h}` already
   carries `relation_id`/`subject_kind`/`object_kind`), a pattern-first
   extractor (`src/memory_extract_patterns.{c,h}`), a correction/retraction
   path (`src/memory_correction.{c,h}` + ingress hook in

@@ -276,7 +276,7 @@ a core dump. Keep the existing `OPENSSL_cleanse`-on-free discipline.
 ## §6 WORM-audited key use
 
 Every decrypt/use of an org key writes an entry to the existing WORM audit ledger
-(`src/modules/audit/audit_ledger.c`, `src/db2/kb_audit_worm.c`) — **one shared Postgres ledger
+(`src/modules/audit/audit_ledger.c`, `src/modules/db2/c/kb_audit_worm.c`) — **one shared Postgres ledger
 across all instances** (invariant #9), so key-use history is complete regardless of
 which instance served the call: identity/team, timestamp,
 `provider:cred`, and request id — **never the secret or a fingerprint of it**.

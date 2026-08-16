@@ -9,7 +9,7 @@ against the real schema on a real Postgres, including the failure it warns about
 - **Commit**: `e569530f93` (testing, after #2632).
 - **Host**: Proxmox `pvetest` at 192.168.1.252, LXC **CT 410** `aimee-ci-repro`.
 - **Postgres**: 17, with `pg_trgm` and `vector` available.
-- **Schema**: `src/db2/schema.sql` at that commit, applied to a scratch database `scope_probe`.
+- **Schema**: `src/modules/db2/c/schema.sql` at that commit, applied to a scratch database `scope_probe`.
   212 tables. The file is a TEMPLATE: `halfvec(__EMBED_DIM__)` must be substituted (the migrate step
   does this at runtime), and applying it raw stops at that line with `ON_ERROR_STOP`, leaving only
   the first 111 tables and none of the tenancy ones. Substituted `768` for the probe.

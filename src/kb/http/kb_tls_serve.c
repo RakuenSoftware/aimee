@@ -19,11 +19,11 @@
 #include "kb_enroll.h" /* KB_ENROLL_SCOPE_MAX */
 #include "kb_http.h"   /* kb_http_route_ex */
 #include "kb_http_egress.h"
-#include "../../db2/server_registry.h"
-#include "../../db2/management_jwks_runtime.h"
-#include "../../db2/db2_tenant.h"
-#include "db2/db2.h"    /* request-scoped DB2 lease */
-#include "kb_ingress.h" /* B5 identity-header ingress guard */
+#include "../../modules/db2/c/server_registry.h"
+#include "../../modules/db2/c/management_jwks_runtime.h"
+#include "../../modules/db2/c/db2_tenant.h"
+#include "modules/db2/c/db2.h" /* request-scoped DB2 lease */
+#include "kb_ingress.h"        /* B5 identity-header ingress guard */
 #include "kb_auth_oidc.h"
 #include "kb_identity.h"
 #include "kb_caller_token.h"
@@ -32,10 +32,10 @@
 #include "server_identity_token.h"
 #include "pam_auth.h"
 #include "config.h"
-#include "log.h"             /* LOG_WARN */
-#include "db2/enrollments.h" /* revocation source of truth + last-seen */
-#include "kb_paths.h"        /* kb_default_config_dir */
-#include "kb_pki.h"          /* CA load + CSR signing for renew */
+#include "log.h"                       /* LOG_WARN */
+#include "modules/db2/c/enrollments.h" /* revocation source of truth + last-seen */
+#include "kb_paths.h"                  /* kb_default_config_dir */
+#include "kb_pki.h"                    /* CA load + CSR signing for renew */
 #include "runtime_secret.h"
 #include "util.h"
 #include <aimee/core/connection/auth.h>

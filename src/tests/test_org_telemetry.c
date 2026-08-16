@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "db2/org_telemetry_fmt.h"
+#include "modules/db2/c/org_telemetry_fmt.h"
 #include "schema_data.h" /* AIMEE_DB2_SCHEMA_SQL (generated) */
 
 /* ---- 1. metric_name validation (^[a-zA-Z0-9_:]{1,128}$) ---- */

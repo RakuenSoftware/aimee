@@ -213,6 +213,55 @@ class DescriptorTests(unittest.TestCase):
         complete_type["ownership_complete"] = 1
         self.assert_rule(complete_type, "ownership-complete-type")
 
+    def test_c_build_contract_is_closed_sorted_and_safe(self) -> None:
+        descriptor = self.required()
+        descriptor["c_build"] = {
+            "include_roots": ["src", "src/modules/memory"],
+            "pkg_config": ["libpq"],
+            "system_libraries": ["OpenSSL::Crypto", "m"],
+        }
+        required, optional = self.taxonomy()
+        self.assertEqual(
+            validator.validate_descriptor(descriptor, required, optional), "memory"
+        )
+
+        cases = (
+            ({"include_roots": ["src"], "pkg_config": []}, "c-build-shape"),
+            ({"include_roots": [], "pkg_config": [], "system_libraries": []},
+             "c-build-empty"),
+            ({"include_roots": ["src", "src"], "pkg_config": [],
+              "system_libraries": []}, "c-build-order"),
+            ({"include_roots": ["../outside"], "pkg_config": [],
+              "system_libraries": []}, "c-build-path"),
+            ({"include_roots": ["src"], "pkg_config": ["libpq;injected"],
+              "system_libraries": []}, "c-build-token"),
+            ({"include_roots": ["src"], "pkg_config": [],
+              "system_libraries": [7]}, "c-build-type"),
+        )
+        for build, rule in cases:
+            mutated = self.required()
+            mutated["c_build"] = build
+            with self.subTest(rule=rule):
+                self.assert_rule(mutated, rule)
+
+    def test_c_build_include_roots_must_be_real_directories(self) -> None:
+        descriptor = json.loads(
+            (REPO_ROOT / "src/modules/module-runtime/module.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        descriptor["c_build"] = {
+            "include_roots": ["src/modules/module-runtime/missing"],
+            "pkg_config": [],
+            "system_libraries": [],
+        }
+        required, optional = self.taxonomy()
+        validator.validate_descriptor(descriptor, required, optional)
+        with self.assertRaisesRegex(
+            validator.DescriptorError, r"rule=c-build-directory"
+        ):
+            validator.validate_ownership(REPO_ROOT, "module-runtime", descriptor)
+
     def test_ownership_is_optional_and_report_preserves_declared_order(self) -> None:
         report = validator.ownership_report(REPO_ROOT, [Path("src/modules")])
         self.assertEqual(report["schema_version"], 1)
@@ -258,8 +307,52 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(
             {field: len(report["ownership"][field]) for field in validator.OWNERSHIP_FIELDS},
             {"sources": 1, "private_headers": 0, "public_headers": 1, "tests": 1,
-             "docs": 1, "go_sources": 0, "go_tests": 0},
+             "contracts": 0, "docs": 1, "go_sources": 0, "go_tests": 0},
         )
+
+    def test_contract_ownership_is_scoped_and_complete(self) -> None:
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            relative = "src/modules/module-runtime/eventcontract/example.json"
+            contract = repo / relative
+            contract.parent.mkdir(parents=True)
+            contract.write_text('{"schema_version":1}\n', encoding="utf-8")
+            self.mutate_descriptor(
+                repo,
+                "module-runtime",
+                lambda value: value.__setitem__("contracts", [relative]),
+            )
+            validator.validate_roots(repo, [Path("src/modules")])
+
+            self.mutate_descriptor(
+                repo,
+                "module-runtime",
+                lambda value: value.__setitem__("contracts", []),
+            )
+            with self.assertRaisesRegex(
+                validator.DescriptorError,
+                r"rule=ownership-complete pointer=/contracts.*example.json",
+            ):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
+
+    def test_contract_ownership_rejects_wrong_boundary_and_extension(self) -> None:
+        descriptor = json.loads(
+            (REPO_ROOT / "src/modules/module-runtime/module.yaml").read_text(encoding="utf-8")
+        )
+        cases = (
+            ("src/modules/module-runtime/example.json", "ownership-role-boundary"),
+            ("src/modules/module-runtime/eventcontract/example.yaml", "ownership-role"),
+        )
+        for relative, rule in cases:
+            mutated = copy.deepcopy(descriptor)
+            mutated["contracts"] = [relative]
+            with self.subTest(relative=relative), self.assertRaisesRegex(
+                validator.DescriptorError, rf"rule={rule} pointer=/contracts/0"
+            ):
+                validator.validate_ownership(REPO_ROOT, "module-runtime", mutated)
 
     def test_production_complete_ownership_mutations(self) -> None:
         cases = (

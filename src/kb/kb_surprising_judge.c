@@ -9,9 +9,9 @@
 
 #include "kb_surprising_judge.h"
 #include "kb_curator_llm.h"
-#include "db2/pgvec_transport.h" /* pgvec_code_node_path */
-#include "db2/canonical_index.h" /* canonical_index_structure */
-#include "headers/index.h"       /* definition_t */
+#include "modules/db2/c/pgvec_transport.h" /* pgvec_code_node_path */
+#include "modules/db2/c/canonical_index.h" /* canonical_index_structure */
+#include "headers/index.h"                 /* definition_t */
 #include "cJSON.h"
 
 #include <stdio.h>

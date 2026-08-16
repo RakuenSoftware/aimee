@@ -62,7 +62,7 @@ db=aimee_identity_mint_e2e
 prov_role=aimee_mint_provisioner
 prov_pw=$(head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')
 # The token authority connects as ITSELF, not through a member role: role_assert()
-# in db2/management_token_authority.c requires current_user to literally be
+# in modules/db2/c/management_token_authority.c requires current_user to literally be
 # aimee_kb_token_authority_runtime, with LOGIN, NOINHERIT, no superuser/bypassrls/
 # createdb/createrole/replication, a search_path pinned to 'pg_catalog, pg_temp',
 # row_security on, and no CREATE on public. schema_roles.sql already creates it
@@ -177,9 +177,9 @@ step "Provisioning $db (roles -> schema -> grants, the hardened deploy order)"
 as_super dropdb --maintenance-db="$maint_db" --force --if-exists "$db"
 as_super createdb --maintenance-db="$maint_db" "$db"
 psqlq -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;'
-psqlq -f src/db2/schema_roles.sql
-sed 's/__EMBED_DIM__/1024/g' src/db2/schema.sql | psqlq -f -
-psqlq -f src/db2/schema_grants.sql
+psqlq -f src/modules/db2/c/schema_roles.sql
+sed 's/__EMBED_DIM__/1024/g' src/modules/db2/c/schema.sql | psqlq -f -
+psqlq -f src/modules/db2/c/schema_grants.sql
 
 # The provisioners require pg_has_role(session_user,'aimee_kb_migrate','MEMBER')
 # and then SET ROLE to their own NOINHERIT provisioning role. aimee_kb_migrate is

@@ -8,7 +8,7 @@
  * (server_identity_token_verify) — the code that will gate /v1 writes — must
  * accept it against a JWKS carrying that key. A mint the server would reject is
  * a silent lockout, so asserting only "a JWT came out" would not be a test. */
-#include "kb/kb_mgmt_token_authority.h"
+#include "kb_mgmt_token_authority.h"
 
 #include <assert.h>
 #include <openssl/bn.h>

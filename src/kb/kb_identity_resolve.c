@@ -8,7 +8,7 @@
 
 #include "kb_identity.h"
 
-#include "db2_tenant.h"
+#include "modules/db2/c/db2_tenant.h"
 #include "membership.h"
 
 #include <string.h>

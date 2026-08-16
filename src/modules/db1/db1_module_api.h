@@ -16,7 +16,7 @@
 /* Stage 1: the economizer's per-conversation reducer state. Chosen as the first
  * stage because it has exactly one production caller, so it proves the boundary
  * without a wide cutover. */
-#define AIMEE_DB1_EVENT_ECONOMIZER_STATE 11521u
+#define AIMEE_DB1_EVENT_ECONOMIZER_STATE 11777u
 #define AIMEE_DB1_STAGE_ECONOMIZER_STATE 1u
 
 /* Request:  op(u32) | key_len(u32) | key | json_len(u32) | json

@@ -139,8 +139,8 @@ identical to today (mismatch still refused downstream, catching a misconfigured 
 
 - `src/config_database.c` / `src/headers/config_database.h` —
   `config_embedding_dim_is_pinned`.
-- `src/db2/db_schema.c` / `src/db2/db_schema.h` — `db2_embedding_dim_get`.
-- `src/db2/db2_init.c` / `src/db2/lifecycle.h` — `db2_effective_dim` (pure),
+- `src/modules/db2/c/db_schema.c` / `src/modules/db2/c/db_schema.h` — `db2_embedding_dim_get`.
+- `src/modules/db2/c/db2_init.c` / `src/modules/db2/c/lifecycle.h` — `db2_effective_dim` (pure),
   `db2_set_embedding_dim_pinned`, the `g_embed_dim_pinned` static + its reset in
   `db2_shutdown`, and the recorded-preference block in `db2_init`.
 - **All three** `db2_set_embedding_dim(...)` call sites get a companion

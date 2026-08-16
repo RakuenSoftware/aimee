@@ -15,11 +15,11 @@
         },
         {
           "path": "src/kb/kb_main.c",
-          "sha256": "e20663ffd5d18261f348e0cab7c31defe6347a1b328fbacc78734490f5554db2"
+          "sha256": "338465eb32a5c4d51fc160b8c1419666896249dff17cb2a4421a40a9a2322d25"
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "ab88ce20ebbac5f89b8e58410958751429d41bc506b33f6907f237e12cca62c3"
+          "sha256": "bde2424f62ee56d654f07edf451d053c2117dbbde7154ea4e8c3033ae5b3f8c7"
         }
       ]
     },
@@ -42,35 +42,35 @@
           "sha256": "59685e5e0675b58e3ff6cbf2cb7c137afb8d392cd4ff199cb617782c258dc1f7"
         },
         {
-          "path": "src/db1/roadmap_runtime.sql",
+          "path": "src/modules/db1/roadmap_runtime.sql",
           "sha256": "fffebbb2b94a2aaf8d1c1e51ed3bf4f65d71b6efabe54376e2940a3a56238a37"
         },
         {
-          "path": "src/db1/schema.sql",
+          "path": "src/modules/db1/schema.sql",
           "sha256": "bed9be96f874e0408ee957484d2ccb349ea1ddcbaa48476048a55ff7e1cc0b9c"
         },
         {
-          "path": "src/db2/cases.sql",
+          "path": "src/modules/db2/c/cases.sql",
           "sha256": "43e8e695d2d113f0759edf1176ecd74496b68b2da78a1e245d9d033bc60e187c"
         },
         {
-          "path": "src/db2/roadmap.sql",
+          "path": "src/modules/db2/c/roadmap.sql",
           "sha256": "56b5a63d9ea9f04e8069fd69632b24980d48373ef61f0da0ca740b138427b243"
         },
         {
-          "path": "src/db2/schema.sql",
-          "sha256": "adabc8c441bfeb264fc86902678513e896f9c98a10c1dc11b627bb4f2d5e40ac"
+          "path": "src/modules/db2/c/schema.sql",
+          "sha256": "4efd5a2d3e545136109b13aabe8e1d2795839eb2fd9f9bd2df744d7c840bccb2"
         },
         {
-          "path": "src/db2/schema_grants.sql",
-          "sha256": "b9843d0f7d8cf4177a0d390e9fa2bb127523f4d9e0e768593b74775e38abc34e"
+          "path": "src/modules/db2/c/schema_grants.sql",
+          "sha256": "eb29e6544b6fcc73d565d9cdacde93c5006cade14cbe06bc281457abca8d7405"
         },
         {
-          "path": "src/db2/schema_roles.sql",
+          "path": "src/modules/db2/c/schema_roles.sql",
           "sha256": "fa6b1e538151324968db9ee80477ae2830672a533ede95e945340dffdd712a9a"
         },
         {
-          "path": "src/db2/schema_sqlite.sql",
+          "path": "src/modules/db2/c/schema_sqlite.sql",
           "sha256": "d33628d2e53c65cfb21ddbdec31209538df120d13f2d5ed4b6764fc8993c8793"
         }
       ]
@@ -79,11 +79,11 @@
       "files": [
         {
           "path": "Dockerfile",
-          "sha256": "df8a238fd300ad231bbe76a92c604576921c547a79aad53bd80335c5918455a3"
+          "sha256": "c2dd3ffd59e300be2d4dfc700ca7aec6755b497eabe82b89fa139880f7c2be12"
         },
         {
           "path": "Dockerfile.authority-bootstrap",
-          "sha256": "72bb0a7352f53a3afac8c06172dd392c658bf538ae1dfc1af504221181248217"
+          "sha256": "723e3dda7e26546ed89b836e2e5d3f680849588b6f6278d259a532c4b57e756b"
         },
         {
           "path": "Dockerfile.control-web",
@@ -107,7 +107,7 @@
         },
         {
           "path": "Dockerfile.server",
-          "sha256": "a236e9ad97b9e1b07e5b94e6b1e1b3073ea0f1db1204ad26170dc5336968a94f"
+          "sha256": "611353d9e8d345a7cd9c6da8b6ec8c0c6eea746f20049593b66dd09e1c4d4107"
         },
         {
           "path": "Dockerfile.status-authority",
@@ -163,7 +163,7 @@
         },
         {
           "path": "src/headers/agent_config.h",
-          "sha256": "b6f8aae22e6e332755f875380ccbe4419e747d8bdc863cc985a69439b1fa3d4c"
+          "sha256": "0248636c222f522d9e6bd7a3742ca13e7504ab3cc16f9be2ec01d03da16d959c"
         },
         {
           "path": "src/headers/agent_config_internal.h",
@@ -175,7 +175,7 @@
         },
         {
           "path": "src/headers/agent_exec.h",
-          "sha256": "5925aec5bbb58153cd87a7d6c1e2e5ed4174e2863dc4c48592a40d894b57d27c"
+          "sha256": "10306341e363c7ec6396979c289d162bf3eb8e3ae942868d96127ff70d417627"
         },
         {
           "path": "src/headers/agent_pipeline.h",
@@ -363,7 +363,7 @@
         },
         {
           "path": "src/headers/cli_v1_routes_internal.h",
-          "sha256": "ed32b7c56d5702239509d9a3b9d09a833cb55009a9f85c75397a59629c707c06"
+          "sha256": "90ab949598f934bc62025266a0d783941632d7648420de52c48616504649619d"
         },
         {
           "path": "src/headers/client_constants.h",
@@ -379,7 +379,7 @@
         },
         {
           "path": "src/headers/cmd_agent_delegate_impl.h",
-          "sha256": "171bd0caf87b258cdc96479e73c6cde536aabeff56ad817c6ea00ba67a7c5fd0"
+          "sha256": "9421627b902afe74ce244bc388dbdea88a1816ebcc6d5f4c5e7ba65055a5dfe3"
         },
         {
           "path": "src/headers/cmd_agent_delegate_internal.h",
@@ -566,10 +566,6 @@
           "sha256": "fad6a14b7bd1e1e119108cc2d726ac3902930a783f2fae2e3669c8e9a04dfdea"
         },
         {
-          "path": "src/headers/gw_mutate_stats.h",
-          "sha256": "082505565b5482efa37feef3227c40c984e620c946555b30e62ada820349fc00"
-        },
-        {
           "path": "src/headers/hardware_probe.h",
           "sha256": "be7f94aa5c0ba0b8c863b2f2b68a52826df9a400170f48efe9f230651c5231db"
         },
@@ -623,7 +619,7 @@
         },
         {
           "path": "src/headers/kb_auth_oidc.h",
-          "sha256": "a0c313503d14149e12d054e3a744f6582c2ad9d8dde7536926223e012d9451b1"
+          "sha256": "60de41d8000e82147399a4f89d9fd19e7eb32271210b50efee7304f4e105eb53"
         },
         {
           "path": "src/headers/kb_background.h",
@@ -636,6 +632,10 @@
         {
           "path": "src/headers/kb_blob_store.h",
           "sha256": "27e683d709ec3fa69f62479132f37599f78d7f5460ef9b122c1bd9214d6c0df9"
+        },
+        {
+          "path": "src/headers/kb_caller_token.h",
+          "sha256": "358127a0f263014b39841b8fab396e1d06df57e744f6cdc67584c7986943bee8"
         },
         {
           "path": "src/headers/kb_client_management.h",
@@ -663,7 +663,7 @@
         },
         {
           "path": "src/headers/kb_http.h",
-          "sha256": "edfc1e835d1850cd52cd2bc7268ef1a79ecb468733f7128be1d887a0989fffaf"
+          "sha256": "eb2ce898f9aee0b7c1e0368db759e489b914df668f9994c7c5fb1bcec70ad797"
         },
         {
           "path": "src/headers/kb_http_accounts.h",
@@ -743,7 +743,7 @@
         },
         {
           "path": "src/headers/kb_identity.h",
-          "sha256": "29a7786adab0c40a102c5abb88ea7ac707777d11fcc7e8fa54ee9f587efb0a91"
+          "sha256": "8de5781ad9b6b4a6f3a05ac14738c049c62e60612328fa2212ffe879c81c4938"
         },
         {
           "path": "src/headers/kb_identity_token.h",
@@ -759,7 +759,7 @@
         },
         {
           "path": "src/headers/kb_ingress.h",
-          "sha256": "ce72590f155ffa8484534f532d1a6fb3ffff478597f090590f7bb26033c5cb80"
+          "sha256": "e39971437b2400e748811dc1932ea95b6c055ad624c1ed599e2ba9837caed54d"
         },
         {
           "path": "src/headers/kb_insights_util.h",
@@ -835,7 +835,7 @@
         },
         {
           "path": "src/headers/kb_reqctx.h",
-          "sha256": "069b9a1b541fc8afc0391659c6a691c65fc00baf5bb42aa0f3c42c60c48588d5"
+          "sha256": "151ff7e70d1fa8a76f74cbad759cd935092fc2111c2109260a1e301940400e77"
         },
         {
           "path": "src/headers/kb_route_acl.h",
@@ -847,7 +847,7 @@
         },
         {
           "path": "src/headers/kb_scope.h",
-          "sha256": "e77aafb763778b92a1b2173a93b30c05978588d17f920b914596cda98a9c7e8f"
+          "sha256": "7be4ec89b9a0659141652fd9f01ef01ac6aea19da2aa48a3c1f8c55518f5b296"
         },
         {
           "path": "src/headers/kb_service.h",
@@ -859,7 +859,7 @@
         },
         {
           "path": "src/headers/kb_tls.h",
-          "sha256": "8333cf9418b5f37a61e5c508c8a2fedba9456a3a14a35f8aac124bf65bd57d0a"
+          "sha256": "fd5baf46405bc6584b0504d04a6c97d798f47bf8a89dcaf546d91f189e3ee7f9"
         },
         {
           "path": "src/headers/kb_tsr_sidecar.h",
@@ -926,8 +926,8 @@
           "sha256": "3074166650c9dd722c22f1d04ab99eb38e960e03556f44d8bc4184744050db9e"
         },
         {
-          "path": "src/headers/msg_session_disable.h",
-          "sha256": "3f298b0f0a177ffbc7775585f8523694c608ed5ddc5ef488923c8785d6b322ac"
+          "path": "src/headers/msg_session_key.h",
+          "sha256": "0205c0db86314deff5c5e7b59698bb5b37dd31a10412935c310d95e2908e2a76"
         },
         {
           "path": "src/headers/oauth_defaults.h",
@@ -1023,7 +1023,7 @@
         },
         {
           "path": "src/headers/prompts.h",
-          "sha256": "1d49dbf34387116b11688f1e3345d92df864b8687ba61d0f0a7d73c34455fc1f"
+          "sha256": "5f7225c1cccd0a8fe6cf34a931541d0907fd8106227c3e880d85c862244de4ca"
         },
         {
           "path": "src/headers/provider_catalog.h",
@@ -1067,7 +1067,7 @@
         },
         {
           "path": "src/headers/request_context.h",
-          "sha256": "1acd3d96389d5c62d2cc8421cdae25c5e359ddc1c90cd7439805d6e9247fe6bb"
+          "sha256": "6a12594d28d7a93419893f2a94d8e49b373dac032da37dee65735956b8dd2ef4"
         },
         {
           "path": "src/headers/response_dedup.h",
@@ -1075,7 +1075,7 @@
         },
         {
           "path": "src/headers/role_templates.h",
-          "sha256": "e8fd97a4b7376667b1cedb6b3e5ec4dd14af99d9668e9a1ec0abd22648e5d106"
+          "sha256": "32b00d50bdf8752cec891f5b940e1f300cf208100179c6d6b1cb068c2693855f"
         },
         {
           "path": "src/headers/rounds_to_resume.h",
@@ -1099,7 +1099,7 @@
         },
         {
           "path": "src/headers/server.h",
-          "sha256": "192e8fa47b395801a6bf82ea0182bbf8b82b6fa5c02c89da359cf2f30672f26d"
+          "sha256": "9907d9dec871e02e10fb6c316d48be150845686bb7787a3991dcd0fcac16ab29"
         },
         {
           "path": "src/headers/server_cli_oauth.h",
@@ -1127,7 +1127,7 @@
         },
         {
           "path": "src/headers/server_http.h",
-          "sha256": "76c540a27d2916d2f613b6230243b95f4151b8db155a9459e26439a0be084284"
+          "sha256": "2053eec56edbe8ba0b8afed0d5e18c33065472514072fc3dc50ba96e50798ed0"
         },
         {
           "path": "src/headers/server_http_authz.h",
@@ -1139,11 +1139,11 @@
         },
         {
           "path": "src/headers/server_http_internal.h",
-          "sha256": "d2495674db42784189be8dee3951c079a50b6f501d1285364e78ea1f552324e9"
+          "sha256": "d5b9976f3d84c6fd3327664abcc0a9cac75646a6b637296987af5e8b87c97fba"
         },
         {
           "path": "src/headers/server_identity_token.h",
-          "sha256": "aeeb8a3a2b55b0ced3b1b48aa277ce6aa070f40605ad634a80cc5ac0acec3100"
+          "sha256": "107b59fe13165c44fb2712c7ec0e5ecb3995c087db012c700224ecfc5dea1ee7"
         },
         {
           "path": "src/headers/server_internal.h",
@@ -1435,7 +1435,7 @@
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_launch_args.h",
-          "sha256": "53def22ce166ebe5ca81685d62b0db22055ff6c976d281cf9db236bd9ee0515a"
+          "sha256": "79f9ee6a9813d9b5ac89295601e7ba55db53c2bb26eeb8b36e009b130da9644a"
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_patch_coordinator.h",
@@ -1447,11 +1447,11 @@
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_role.h",
-          "sha256": "cda8dcea776a609a713a8e68a5b00247450b543dc6ce57c954d6743750ea4ef5"
+          "sha256": "ef22307e45af4bcfb18599b0ea53fc3909911f81ada0805100892c8b2122550a"
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_run_phases.h",
-          "sha256": "8a80fb60e7194c36e0a81e4f4de6985545b8ce96dd44c6209617666065f4a3a1"
+          "sha256": "10918ae454372f42f6621b88bf948a65e56defb2e487a984b8b2ad6fd46eb2e2"
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/delegate_sandbox_image.h",
@@ -1471,7 +1471,7 @@
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/module_api.h",
-          "sha256": "9ad846d77b1654acebadfbd62c8065eaf2cfd3e972f05d5c4ec3410ca632da5d"
+          "sha256": "4f1ef21d6aa361f00bc12d5b4673c07c1e60138a53381b5f614d51efecc48ba8"
         },
         {
           "path": "src/modules/delegates/include/aimee/delegates/panel_provider.h",
@@ -1534,6 +1534,10 @@
           "sha256": "f9dbb8c0371342a98dd05e0f95d64904af50ea679663dff5ea2f9f3abbd5c768"
         },
         {
+          "path": "src/modules/postgres/include/aimee/postgres/module_api.h",
+          "sha256": "7c649b4378fdbbfa00917de2367a6eda19fc602dc658fa36567019e1abe10002"
+        },
+        {
           "path": "src/modules/protocols/include/aimee/protocols/acp/acp_server.h",
           "sha256": "ac6196c9264e2c6e3a2c2cb247f1e55996f0f906c60e814afe2429d0d53a4d54"
         },
@@ -1579,7 +1583,7 @@
         },
         {
           "path": "src/modules/sandbox/include/aimee/sandbox/module_api.h",
-          "sha256": "bd6bb5eb012ffc9acd484dd2969f32f83204653ca4d5f834f272d2ffce0fc3b7"
+          "sha256": "ddbb9d8a3ea918a0c24d4c743de67b22115977319bdfeed397ed415d8d099b5e"
         },
         {
           "path": "src/modules/skills/include/aimee/skills/module_api.h",
@@ -1591,7 +1595,7 @@
         },
         {
           "path": "src/modules/tools/include/aimee/tools/agent_tools.h",
-          "sha256": "ef11512e82cb0a15a060184e8183d3f1845c60a6aaf41d89b4dcb0ecb6fab886"
+          "sha256": "8170d2bb6cc55c84425c94e58bbfad59192af24722668d9d72dc12b7fa6ec140"
         },
         {
           "path": "src/modules/tools/include/aimee/tools/module_api.h",
@@ -1628,7 +1632,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "7ee07955265906804d3f984d4ae6a3048fcc4845ee649d3dfa15021ddcc7511c",
+      "sha256": "4a62967a115608050c662e83f49fe3c9865e2af5b52d1a40656cd38076f9cf6b",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

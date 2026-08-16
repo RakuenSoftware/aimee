@@ -6,7 +6,7 @@
 #include "db1.h"
 #include "artifacts.h"
 #include "calibration.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "working_profile.h"
 #include "platform_test_util.h"
 

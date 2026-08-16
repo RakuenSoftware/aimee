@@ -2,7 +2,7 @@
 #ifndef AIMEE_KB_MANAGEMENT_ACTION_H
 #define AIMEE_KB_MANAGEMENT_ACTION_H
 
-#include "db2/management_action_journal.h"
+#include "modules/db2/c/management_action_journal.h"
 #include "kb_management_health_exchange.h"
 #include "kb_mgmt_token_authority_ipc.h"
 

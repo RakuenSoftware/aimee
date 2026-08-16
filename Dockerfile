@@ -1,4 +1,4 @@
-# Debian 13 (trixie) for libpq 17. The kb links db2/vault_operator_status_runtime.c,
+# Debian 13 (trixie) for libpq 17. The kb links modules/db2/c/vault_operator_status_runtime.c,
 # which uses the PostgreSQL 17 async-cancel API (PQcancelCreate / PGcancelConn /
 # PQcancelPoll). Bookworm ships libpq 15, where those symbols do not exist, so the
 # kb build failed here with -Werror=implicit-function-declaration while the native
@@ -48,23 +48,8 @@ RUN sh scripts/fetch-treesitter.sh \
 
 RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
     && mkdir -p /module-runtime/bin \
-    && for source in /module-runtime/src/*.c; do \
-         [ -e "$source" ] || continue; \
-         binary="${source##*/}"; binary="${binary%.c}"; \
-         cc -std=c11 -O2 -Wall -Wextra -Werror -Isrc/core/event_bus/include \
-           -Isrc/modules/memory/include -Isrc/modules/learning/include \
-           -Isrc/modules/routing/include -Isrc/modules/delegates/include \
-           -Isrc/modules/tools/include -Isrc/modules/workspace/include \
-           -Isrc/modules/git/include -Isrc/modules/skills/include \
-           -Isrc/modules/response-composition/include \
-           "$source" \
-           src/core/event_bus/bus_attach.c src/core/event_bus/bus_client.c \
-           src/core/event_bus/bus_endpoint.c src/core/event_bus/bus_region.c \
-           src/core/event_bus/bus_ring.c src/core/event_bus/bus_wire.c \
-           src/core/event_bus/module_protocol.c src/core/event_bus/module_runtime.c \
-           -pthread \
-           -o "/module-runtime/bin/$binary"; \
-       done \
+    && python3 scripts/build_c_module_runtime_bundle.py \
+         --bundle /module-runtime --output /module-runtime/bin \
     && while IFS= read -r module_id; do \
          [ -n "$module_id" ] || continue; \
          install -m 0755 /tmp/aimee-module-go \
@@ -74,7 +59,7 @@ RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
 # pgvectorscale (StreamingDiskANN). Always installed: it adds ~1 MB to the image,
 # and the kb already decides at RUNTIME whether to use it -- pgvec_vectorscale_available()
 # probes pg_extension and falls back to HNSW with a warning when it is absent
-# (src/db2/pgvec_transport.c). Gating it at build time would defeat that and make
+# (src/modules/db2/c/pgvec_transport.c). Gating it at build time would defeat that and make
 # the index type a property of which image you happened to pull.
 #
 # Upstream ships the built extension as a .deb per (version, pg major, arch), so

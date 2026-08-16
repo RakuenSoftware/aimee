@@ -3,11 +3,11 @@
 #include <stdio.h>
 
 #include "aimee.h"
-#include "db2_test_shim.h"
-#include "../db2/code_index.h"
-#include "../db2/code_index_ops.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/code_index.h"
+#include "../modules/db2/c/code_index_ops.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
 
 /* Count files rows for (project, path) over the shim. -1 on DB/step failure. */
 static int file_count_path(const char *project, const char *path)

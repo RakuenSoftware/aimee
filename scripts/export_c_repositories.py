@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import re
 import shutil
 import subprocess
@@ -30,6 +31,14 @@ CORE_VERSION_FILE = ROOT / "src/core/VERSION"
 REMOTE_ROOT = "https://github.com/RakuenSoftware"
 HOSTED_BY_EXECUTABLE = {"wfe": "/usr/local/bin/aimee-wfe"}
 PRINCIPAL_CLASS = 1
+C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
+BUILD_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
+CMAKE_TARGET_PACKAGES = {
+    "OpenSSL::Crypto": "OpenSSL",
+    "OpenSSL::SSL": "OpenSSL",
+    "Threads::Threads": "Threads",
+    "ZLIB::ZLIB": "ZLIB",
+}
 
 
 class ExportError(RuntimeError):
@@ -202,7 +211,7 @@ jobs:
 
 def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[str]:
     result = [f"src/modules/{module_id}/module.yaml"]
-    for key in ("sources", "private_headers", "public_headers", "tests", "docs",
+    for key in ("sources", "private_headers", "public_headers", "contracts", "tests", "docs",
                 "go_sources", "go_tests"):
         values = descriptor.get(key, [])
         if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
@@ -257,6 +266,101 @@ int main(int argc, char **argv)
    return aimee_module_process_run(&config);
 }}
 """
+
+
+def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
+        list[str], list[str], list[str], list[str]]:
+    """Return validated C sources, include roots, pkg-config deps, and link items."""
+    sources = descriptor.get("sources")
+    if not isinstance(sources, list) or not sources or not all(isinstance(item, str) for item in sources):
+        raise ExportError(f"{module_id}: C process must declare descriptor-owned sources")
+    c_sources = [item for item in sources if PurePosixPath(item).suffix == ".c"]
+    if len(c_sources) != len(sources):
+        raise ExportError(f"{module_id}: C process sources must all be .c files")
+    if c_sources != sorted(set(c_sources)):
+        raise ExportError(f"{module_id}: C process sources must be sorted and unique")
+    build = descriptor.get("c_build")
+    if not isinstance(build, dict) or set(build) != C_BUILD_KEYS:
+        raise ExportError(f"{module_id}: C process must declare exact c_build fields")
+
+    parsed: dict[str, list[str]] = {}
+    for field in sorted(C_BUILD_KEYS):
+        entries = build[field]
+        if not isinstance(entries, list) or not all(isinstance(item, str) for item in entries):
+            raise ExportError(f"{module_id}: c_build.{field} must be a string array")
+        if entries != sorted(set(entries)):
+            raise ExportError(f"{module_id}: c_build.{field} must be sorted and unique")
+        if field == "include_roots" and not entries:
+            raise ExportError(f"{module_id}: c_build.include_roots must not be empty")
+        for entry in entries:
+            if field == "include_roots":
+                pure = PurePosixPath(entry)
+                if (not entry or "\\" in entry or pure.is_absolute() or "." in pure.parts or
+                        ".." in pure.parts or pure.as_posix() != entry):
+                    raise ExportError(f"{module_id}: unsafe include root {entry!r}")
+            elif not BUILD_TOKEN.fullmatch(entry):
+                raise ExportError(f"{module_id}: unsafe c_build.{field} token {entry!r}")
+            elif field == "system_libraries" and "::" in entry and entry not in CMAKE_TARGET_PACKAGES:
+                raise ExportError(f"{module_id}: unsupported imported CMake target {entry!r}")
+        parsed[field] = entries
+    return c_sources, parsed["include_roots"], parsed["pkg_config"], parsed["system_libraries"]
+
+
+def c_process_cmake(module_id: str, binary: str, version: str,
+                    descriptor: dict[str, object]) -> str:
+    """Generate the standalone build for a descriptor-owned C process."""
+    sources, include_roots, pkg_config, libraries = c_process_build(module_id, descriptor)
+    source_lines = "\n".join(f"    {source}" for source in sources)
+    include_lines = "\n".join(
+        f"    ${{CMAKE_CURRENT_SOURCE_DIR}}/{root}" for root in include_roots
+    )
+    package_names = sorted({
+        CMAKE_TARGET_PACKAGES[library]
+        for library in libraries
+        if library in CMAKE_TARGET_PACKAGES
+    })
+    discovery: list[str] = [f"find_package({package} REQUIRED)" for package in package_names]
+    link_items = ["aimee::aimee-core-event-bus-client"]
+    if pkg_config:
+        discovery.extend([
+            "find_package(PkgConfig REQUIRED)",
+            f"pkg_check_modules(MODULE_PKG REQUIRED IMPORTED_TARGET {' '.join(pkg_config)})",
+        ])
+        link_items.append("PkgConfig::MODULE_PKG")
+    link_items.extend(libraries)
+    discovery_text = "\n".join(discovery)
+    if discovery_text:
+        discovery_text += "\n"
+    link_lines = "\n".join(f"    {item}" for item in link_items)
+    return f"""cmake_minimum_required(VERSION 3.16)
+project(aimee_module_{module_id.replace('-', '_')} VERSION {version} LANGUAGES C)
+
+include(GNUInstallDirs)
+find_package(aimee-core {version} EXACT CONFIG REQUIRED)
+{discovery_text}if(NOT TARGET aimee::aimee-core-event-bus-client)
+    message(FATAL_ERROR "{binary} requires the Linux event-bus client")
+endif()
+add_executable({binary}
+    runtime/main.c
+{source_lines}
+)
+target_compile_features({binary} PRIVATE c_std_11)
+target_include_directories({binary} PRIVATE
+{include_lines}
+)
+target_link_libraries({binary} PRIVATE
+{link_lines}
+)
+configure_file(grants/module.grant.in ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant @ONLY)
+install(TARGETS {binary} RUNTIME DESTINATION ${{CMAKE_INSTALL_BINDIR}})
+install(FILES ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant
+        DESTINATION ${{CMAKE_INSTALL_DATADIR}}/aimee/module-grants)
+"""
+
+
+def c_process_has_handler(sources: list[str]) -> bool:
+    """A C process owns a handler when any declared source is its module adapter."""
+    return any(PurePosixPath(source).name == "module_adapter.c" for source in sources)
 
 
 def go_module_main(module_id: str, principal_ref: int,
@@ -383,8 +487,9 @@ def export_module(
     if descriptor.get("id") != module_id:
         raise ExportError(f"{descriptor_path}: descriptor id mismatch")
     owned = module_owned_files(module_id, descriptor)
-    adapter_source = f"src/modules/{module_id}/module_adapter.c"
-    has_handler = adapter_source in owned
+    declared_sources = descriptor.get("sources", [])
+    assert isinstance(declared_sources, list)
+    has_handler = c_process_has_handler(declared_sources)
     repository = output_root / f"aimee-module-{module_id}"
     repository.mkdir()
     for relative in owned:
@@ -418,23 +523,7 @@ serve={serve}
             )
             write_text(
                 repository / "CMakeLists.txt",
-                f"""cmake_minimum_required(VERSION 3.16)
-project(aimee_module_{module_id.replace('-', '_')} VERSION {version} LANGUAGES C)
-
-include(GNUInstallDirs)
-find_package(aimee-core {version} EXACT CONFIG REQUIRED)
-if(NOT TARGET aimee::aimee-core-event-bus-client)
-    message(FATAL_ERROR "{binary} requires the Linux event-bus client")
-endif()
-add_executable({binary} runtime/main.c{f' {adapter_source}' if has_handler else ''})
-target_compile_features({binary} PRIVATE c_std_11)
-target_include_directories({binary} PRIVATE src/modules/{module_id}/include)
-target_link_libraries({binary} PRIVATE aimee::aimee-core-event-bus-client)
-configure_file(grants/module.grant.in ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant @ONLY)
-install(TARGETS {binary} RUNTIME DESTINATION ${{CMAKE_INSTALL_BINDIR}})
-install(FILES ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant
-        DESTINATION ${{CMAKE_INSTALL_DATADIR}}/aimee/module-grants)
-""",
+                c_process_cmake(module_id, binary, version, descriptor),
             )
             handler_text = (
                 "Its repository-owned handler implements the declared stage contract."
@@ -647,14 +736,13 @@ def export_runtime_bundle(output_root: Path) -> int:
     placement_rows: dict[str, list[str]] = {"server": [], "kb": []}
     runtimes: dict[str, str] = {}
     go_modules: list[str] = []
+    c_builds: list[dict[str, object]] = []
     count = 0
     for module_id, contract in contracts.items():
         if contract["execution"] != "process":
             continue
         descriptor = load_json(ROOT / f"src/modules/{module_id}/module.yaml")
-        adapter_source = f"src/modules/{module_id}/module_adapter.c"
-        owned = module_owned_files(module_id, descriptor)
-        has_handler = adapter_source in owned
+        module_owned_files(module_id, descriptor)
         enabled = module_id in required or descriptor.get("enabled_by_default") is True
         principal_ref = contract["principal_ref"]
         stages = contract["stages"]
@@ -669,10 +757,24 @@ def export_runtime_bundle(output_root: Path) -> int:
         assert isinstance(runtime, str)
         runtimes[module_id] = runtime
         if runtime == "c":
-            generated = module_main(module_id, principal_ref, stages, has_handler)
-            if has_handler:
-                generated += "\n" + (ROOT / adapter_source).read_text(encoding="utf-8")
-            write_text(output_root / "src" / f"{binary}.c", generated)
+            sources, include_roots, pkg_config, libraries = c_process_build(
+                module_id, descriptor
+            )
+            has_handler = c_process_has_handler(sources)
+            main_path = f"src/{binary}.c"
+            write_text(
+                output_root / main_path,
+                module_main(module_id, principal_ref, stages, has_handler),
+            )
+            c_builds.append({
+                "id": module_id,
+                "binary": binary,
+                "main": main_path,
+                "sources": sources,
+                "include_roots": include_roots,
+                "pkg_config": pkg_config,
+                "system_libraries": libraries,
+            })
         else:
             go_sources = descriptor.get("go_sources", [])
             if not isinstance(go_sources, list) or not go_sources:
@@ -718,11 +820,17 @@ serve=
     for placement, rows in placement_rows.items():
         write_text(output_root / f"{placement}.modules", "\n".join(rows) + "\n")
     write_text(output_root / "go.modules", "\n".join(go_modules) + "\n")
+    c_builds.sort(key=lambda row: str(row["id"]))
+    write_text(
+        output_root / "c-build.json",
+        json.dumps({"schema_version": 1, "modules": c_builds}, indent=2) + "\n",
+    )
     write_text(
         output_root / "MANIFEST.json",
         json.dumps(
             {"schema_version": 1, "contracts": str(process_contracts.CONTRACTS.relative_to(ROOT)),
-             "process_count": count, "runtimes": runtimes, "placements": placement_rows},
+             "c_build": "c-build.json", "process_count": count,
+             "runtimes": runtimes, "placements": placement_rows},
             indent=2,
         ) + "\n",
     )

@@ -12,9 +12,9 @@
 
 #include "roadmap.h"
 
-#include "db2/artifacts.h"
-#include "db2/db_postgres.h"
-#include "db2/lifecycle.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/lifecycle.h"
 #include "headers/dstr.h"
 #include "headers/platform_path.h"
 

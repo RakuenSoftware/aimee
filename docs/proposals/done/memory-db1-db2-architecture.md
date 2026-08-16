@@ -60,9 +60,9 @@ correctness/privacy boundary, not just organization.
 ## §0.1 What already exists (so we don't rebuild it)
 
 - **db2** already has the structured `memories` table (tier/kind/key/content/lifecycle/…), the
-  `rules` table (`src/db2/schema.sql:15` — org rules with `directive_type`, `weight`, `domain`),
+  `rules` table (`src/modules/db2/c/schema.sql:15` — org rules with `directive_type`, `weight`, `domain`),
   provenance, conflicts, and recall selectors (`db2_memory_list_recall_section`,
-  `src/db2/memory_score_fields.c:1355`).
+  `src/modules/db2/c/memory_score_fields.c:1355`).
 - **db1** already has a `harness_memory` table (`src/db1/harness_memory.c`) — but it is the `.md`
   mirror, not a first-class user-memory store. It also holds session_state, token_audit, etc.
 - Recall currently queries **db2 only** (`src/memory_context.c:835`+).

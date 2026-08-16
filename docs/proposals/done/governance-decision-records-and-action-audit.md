@@ -69,7 +69,7 @@ These three facts are load-bearing and were verified before finalizing:
   `stale_edit` (`:1845`), `subagent_blocked` (`:1615`), `antipattern_blocked` (`:1673`). `audit_log()`
   (`src/log.c`) writes JSON lines to a mode-0600, rotated `audit.log`. So a **bounded reason code and
   a fire-and-forget audit sink already exist at exactly this call site.**
-- **G2 — a `decision_log` table already exists.** `src/db2/schema.sql:29`:
+- **G2 — a `decision_log` table already exists.** `src/modules/db2/c/schema.sql:29`:
   `decision_log(options, chosen, rationale, assumptions, outcome, created_at)` — the decision-record
   shape is already purpose-built. Relation *types* are runtime-registerable via the `rel_types` table
   (`schema.sql:1067`, `db2_rel_types_stage_provisional()` in `rel_types_store.c:132`) — a plain

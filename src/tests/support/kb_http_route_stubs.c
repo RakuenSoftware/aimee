@@ -5,9 +5,9 @@
 #include "kb_http_rate.h"
 #include "kb/http/kb_http_servers.h"
 #include "kb_http_telemetry.h"
-#include "db2/server_registry.h"
-#include "db2/management_identity_journal.h"
-#include "db2/write_tier_grant.h"
+#include "modules/db2/c/server_registry.h"
+#include "modules/db2/c/management_identity_journal.h"
+#include "modules/db2/c/write_tier_grant.h"
 #include "kb_oidc_token_exchange.h"
 #include "vault_service.h"
 #include <stdio.h>

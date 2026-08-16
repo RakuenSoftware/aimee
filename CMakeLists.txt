@@ -469,107 +469,110 @@ set(DB1_SRCS
     ${AIMEE_SRC_DIR}/modules/db1/wfe_binding.c
 )
 
+# The preserved C implementation now lives under module ownership. It remains
+# in-process until the staged aimee-kb process-contract cutover; the later Go
+# port replaces this private tree without moving PostgreSQL/pgvector out of DB2.
 set(DB2_SRCS
-    ${AIMEE_SRC_DIR}/db2/db2_init.c
-    ${AIMEE_SRC_DIR}/db2/db2_reembed.c
-    ${AIMEE_SRC_DIR}/db2/db2_pool.c
-    ${AIMEE_SRC_DIR}/db2/agent_hints.c
-    ${AIMEE_SRC_DIR}/db2/agent_outcomes.c
-    ${AIMEE_SRC_DIR}/db2/canonical_index.c
-    ${AIMEE_SRC_DIR}/db2/anti_patterns.c
-    ${AIMEE_SRC_DIR}/db2/collab_rules.c
-    ${AIMEE_SRC_DIR}/db2/curiosity.c
-    ${AIMEE_SRC_DIR}/db2/decision_log.c
-    ${AIMEE_SRC_DIR}/db2/enrollments.c
-    ${AIMEE_SRC_DIR}/db2/db2_tenant.c
-    ${AIMEE_SRC_DIR}/db2/db2_hardening.c
-    ${AIMEE_SRC_DIR}/db2/team.c
-    ${AIMEE_SRC_DIR}/db2/project.c
-    ${AIMEE_SRC_DIR}/db2/membership.c
-    ${AIMEE_SRC_DIR}/db2/admin_grant.c
-    ${AIMEE_SRC_DIR}/db2/oidc_jwks.c
-    ${AIMEE_SRC_DIR}/db2/entity_edges.c
-    ${AIMEE_SRC_DIR}/db2/entity_profiles.c
-    ${AIMEE_SRC_DIR}/db2/epistemic_directives.c
-    ${AIMEE_SRC_DIR}/db2/failed_queries.c
-    ${AIMEE_SRC_DIR}/db2/feedback.c
-    ${AIMEE_SRC_DIR}/db2/notes.c
-    ${AIMEE_SRC_DIR}/db2/prospective_memories.c
-    ${AIMEE_SRC_DIR}/db2/rules.c
-    ${AIMEE_SRC_DIR}/db2/stopwords.c
-    ${AIMEE_SRC_DIR}/db2/tasks.c
-    ${AIMEE_SRC_DIR}/db2/tool_registry.c
-    ${AIMEE_SRC_DIR}/db2/trace_mining.c
-    ${AIMEE_SRC_DIR}/db2/kind_lifecycle.c
-    ${AIMEE_SRC_DIR}/db2/kb_payload.c
-    ${AIMEE_SRC_DIR}/db2/kb_runtime_state.c
-    ${AIMEE_SRC_DIR}/db2/kb_service_backend.c
-    ${AIMEE_SRC_DIR}/db2/kb_service_backend_ingest.c
-    ${AIMEE_SRC_DIR}/db2/kb_service_backend_agent.c
-    ${AIMEE_SRC_DIR}/db2/kb_service_backend_memory.c
-    ${AIMEE_SRC_DIR}/db2/memory_briefing.c
-    ${AIMEE_SRC_DIR}/db2/memory_conflicts.c
-    ${AIMEE_SRC_DIR}/db2/memory_export.c
-    ${AIMEE_SRC_DIR}/db2/memory_health.c
-    ${AIMEE_SRC_DIR}/db2/memory_lifecycle.c
-    ${AIMEE_SRC_DIR}/db2/memory_payload.c
-    ${AIMEE_SRC_DIR}/db2/memory_promotion.c
-    ${AIMEE_SRC_DIR}/db2/memory_query.c
-    ${AIMEE_SRC_DIR}/db2/memory_query_bookkeeping.c
-    ${AIMEE_SRC_DIR}/db2/memory_entity_graph.c
-    ${AIMEE_SRC_DIR}/db2/memory_row_mapper_pg.c
-    ${AIMEE_SRC_DIR}/db2/memory_score_fields.c
-    ${AIMEE_SRC_DIR}/db2/memory_scope_query.c
-    ${AIMEE_SRC_DIR}/db2/memory_relations.c
-    ${AIMEE_SRC_DIR}/db2/memory_scenes.c
-    ${AIMEE_SRC_DIR}/db2/vector_index_ops.c
-    ${AIMEE_SRC_DIR}/db2/code_index_ops.c
-    ${AIMEE_SRC_DIR}/db2/learning.c
-    ${AIMEE_SRC_DIR}/db2/code_index.c
-    ${AIMEE_SRC_DIR}/db2/code_project_lifecycle.c
-    ${AIMEE_SRC_DIR}/db2/css_graph.c
-    ${AIMEE_SRC_DIR}/db2/typed_facts.c
-    ${AIMEE_SRC_DIR}/db2/css_migration.c
-    ${AIMEE_SRC_DIR}/db2/css_render.c
-    ${AIMEE_SRC_DIR}/db2/css_insights.c
-    ${AIMEE_SRC_DIR}/db2/db_schema.c
-    ${AIMEE_SRC_DIR}/db2/memory_lint.c
-    ${AIMEE_SRC_DIR}/db2/sketch.c
-    ${AIMEE_SRC_DIR}/db2/artifacts.c
-    ${AIMEE_SRC_DIR}/db2/corpus_structural.c
-    ${AIMEE_SRC_DIR}/db2/corpus_jobs.c
-    ${AIMEE_SRC_DIR}/db2/curator_terms.c
-    ${AIMEE_SRC_DIR}/db2/curator_gaps.c
-    ${AIMEE_SRC_DIR}/db2/cross_repo_resolver.c
-    ${AIMEE_SRC_DIR}/db2/cross_repo_classify.c
-    ${AIMEE_SRC_DIR}/db2/cross_repo_stats.c
-    ${AIMEE_SRC_DIR}/db2/cross_repo_deps.c
-    ${AIMEE_SRC_DIR}/db2/cross_repo_review.c
-    ${AIMEE_SRC_DIR}/db2/cross_repo_identity.c
-    ${AIMEE_SRC_DIR}/db2/cross_repo_route.c
-    ${AIMEE_SRC_DIR}/db2/cross_repo_build.c
-    ${AIMEE_SRC_DIR}/db2/mining.c
-    ${AIMEE_SRC_DIR}/db2/calibration.c
-    ${AIMEE_SRC_DIR}/db2/demotion.c
-    ${AIMEE_SRC_DIR}/db2/feature_rows.c
-    ${AIMEE_SRC_DIR}/db2/report_enrichments.c
-    ${AIMEE_SRC_DIR}/db2/bandit.c
-    ${AIMEE_SRC_DIR}/db2/kb_maintenance.c
-    ${AIMEE_SRC_DIR}/db2/kb_service_backend_export.c
-    ${AIMEE_SRC_DIR}/db2/kb_docs.c
-    ${AIMEE_SRC_DIR}/db2/kb_releases.c
-    ${AIMEE_SRC_DIR}/db2/pgvec_transport.c
-    ${AIMEE_SRC_DIR}/db2/memory_vectors.c
-    ${AIMEE_SRC_DIR}/db2/kb_vectors.c
-    ${AIMEE_SRC_DIR}/db2/vector_status.c
-    ${AIMEE_SRC_DIR}/db2/pgvec_verify.c
-    ${AIMEE_SRC_DIR}/db2/pgvec_kb_service.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/db2_init.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/db2_reembed.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/db2_pool.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/agent_hints.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/agent_outcomes.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/canonical_index.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/anti_patterns.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/collab_rules.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/curiosity.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/decision_log.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/enrollments.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/db2_tenant.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/db2_hardening.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/team.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/project.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/membership.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/admin_grant.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/oidc_jwks.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/entity_edges.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/entity_profiles.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/epistemic_directives.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/failed_queries.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/feedback.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/notes.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/prospective_memories.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/rules.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/stopwords.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/tasks.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/tool_registry.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/trace_mining.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/kind_lifecycle.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/kb_payload.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/kb_runtime_state.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend_ingest.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend_agent.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend_memory.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_briefing.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_conflicts.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_export.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_health.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_lifecycle.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_payload.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_promotion.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_query.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_query_bookkeeping.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_entity_graph.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_row_mapper_pg.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_score_fields.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_scope_query.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_relations.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_scenes.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/vector_index_ops.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/code_index_ops.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/learning.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/code_index.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/code_project_lifecycle.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/css_graph.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/typed_facts.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/css_migration.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/css_render.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/css_insights.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/db_schema.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_lint.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/sketch.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/artifacts.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/corpus_structural.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/corpus_jobs.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/curator_terms.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/curator_gaps.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/cross_repo_resolver.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/cross_repo_classify.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/cross_repo_stats.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/cross_repo_deps.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/cross_repo_review.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/cross_repo_identity.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/cross_repo_route.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/cross_repo_build.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/mining.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/calibration.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/demotion.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/feature_rows.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/report_enrichments.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/bandit.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/kb_maintenance.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend_export.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/kb_docs.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/kb_releases.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/pgvec_transport.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/memory_vectors.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/kb_vectors.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/vector_status.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/pgvec_verify.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/pgvec_kb_service.c
 )
 
 set(CORE_SRCS
     ${AIMEE_SRC_DIR}/modules/db1/db.c
     ${AIMEE_SRC_DIR}/modules/db1/db_schema.c
-    ${AIMEE_SRC_DIR}/db2/db_postgres.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/db_postgres.c
     ${AIMEE_SRC_DIR}/modules/config/config.c
     ${AIMEE_SRC_DIR}/modules/config/config_sections.c
     ${AIMEE_SRC_DIR}/modules/config/config_database.c
@@ -1100,7 +1103,7 @@ set(SERVER_DATA_SRCS ${DATA_SRCS})
 list(REMOVE_ITEM SERVER_DATA_SRCS ${SERVER_SRCS} ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c)
 list(APPEND SERVER_DATA_SRCS ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c)
 set(SERVER_CORE_SRCS ${CORE_SRCS})
-list(REMOVE_ITEM SERVER_CORE_SRCS ${AIMEE_SRC_DIR}/db2/db_postgres.c)
+list(REMOVE_ITEM SERVER_CORE_SRCS ${AIMEE_SRC_DIR}/modules/db2/c/db_postgres.c)
 
 set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_main.c
@@ -1277,7 +1280,7 @@ add_library(aimee-core STATIC
 target_include_directories(aimee-core PUBLIC
     ${AIMEE_PROJECT_INCLUDE_DIRS}
     ${AIMEE_SRC_DIR}/modules/db1
-    ${AIMEE_SRC_DIR}/db2
+    ${AIMEE_SRC_DIR}/modules/db2/c
 )
 target_compile_options(aimee-core PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-core PUBLIC Threads::Threads)
@@ -1532,7 +1535,7 @@ target_include_directories(aimee PRIVATE
     ${AIMEE_SRC_DIR}/modules/config
     ${AIMEE_SRC_DIR}/vendor/headers
     ${AIMEE_SRC_DIR}/modules/db1
-    ${AIMEE_SRC_DIR}/db2)
+    ${AIMEE_SRC_DIR}/modules/db2/c)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee PRIVATE aimee-core-connection)
 find_package(ZLIB QUIET)
@@ -1649,15 +1652,15 @@ add_custom_target(tool_prompts_header DEPENDS "${TOOL_PROMPTS_HEADER}")
 add_dependencies(aimee-agent tool_prompts_header)
 
 # Generate schema_data.h from tier schema SQL. modules/db1/db_schema.c and
-# db2/db_schema.c include this header to embed their tier schemas as C
+# modules/db2/c/db_schema.c includes this header to embed its tier schemas as C
 # string constants for DB1 and DB2. Without this rule, fresh CMake checkouts
 # fail to build with "schema_data.h: No such file or directory" because the
 # generator only ran from the Makefile.
 set(SCHEMA_DATA_HEADER "${AIMEE_SRC_DIR}/schema_data.h")
 set(SCHEMA_FILES
     "${AIMEE_SRC_DIR}/modules/db1/schema.sql"
-    "${AIMEE_SRC_DIR}/db2/schema.sql"
-    "${AIMEE_SRC_DIR}/db2/schema_sqlite.sql"
+    "${AIMEE_SRC_DIR}/modules/db2/c/schema.sql"
+    "${AIMEE_SRC_DIR}/modules/db2/c/schema_sqlite.sql"
 )
 add_custom_command(
     OUTPUT "${SCHEMA_DATA_HEADER}"

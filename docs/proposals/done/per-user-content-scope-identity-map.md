@@ -140,10 +140,10 @@ the final slice records reader readiness after live RLS isolation coverage. Sche
 leaves content RLS disabled. An operator must explicitly attribute every content-bearing code project
 and call `kb_content_scope_enable()`; the function refuses an incomplete backfill.
 
-- [`kb_project_visible`](../../../src/db2/schema.sql#L2144) centralizes project visibility, while
-  [`kb_content_scope_enable`](../../../src/db2/schema.sql#L2225) fails closed until readers and
+- [`kb_project_visible`](../../../src/modules/db2/c/schema.sql#L2144) centralizes project visibility, while
+  [`kb_content_scope_enable`](../../../src/modules/db2/c/schema.sql#L2225) fails closed until readers and
   attribution are ready.
-- [`db2_maintenance_scope_begin`](../../../src/db2/db2_tenant.c#L197) owns the closed-name,
+- [`db2_maintenance_scope_begin`](../../../src/modules/db2/c/db2_tenant.c#L197) owns the closed-name,
   exact-project maintenance context and transaction-local cleanup.
 - [`test_content_scope_pg.c`](../../../src/tests/test_content_scope_pg.c#L140) proves the predicate,
   readiness marker, maintenance isolation, re-embed boundary, pooled-context cleanup, and ordinary

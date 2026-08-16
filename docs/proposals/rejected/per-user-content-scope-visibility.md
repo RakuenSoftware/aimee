@@ -69,7 +69,7 @@ rather than inventing a second one.
            WHERE p.name = kb_documents.project AND kb_project_visible(p.kb_project))
    ```
 
-   Migrations here are `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in `src/db2/schema.sql`, applied by
+   Migrations here are `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in `src/modules/db2/c/schema.sql`, applied by
    the owner migrate step, so this is one line plus a backfill.
 3. **Deny is the default and the fallback.** An unattributed row is invisible. This matches
    `kb_identity_combine`, which already treats a failed lookup as an empty team set rather than a
@@ -145,7 +145,7 @@ Rejected 2026-08-15 under the requirement to implement pending proposals in Go o
 
 - Slices 1 through 3 are delivered: `projects.kb_project`, `kb_project_visible()`, the
   document/file-index policies, and the vector/structured-document ownership policies remain
-  authoritative in `src/db2/schema.sql`. Applying the schema still enables nothing; the operator
+  authoritative in `src/modules/db2/c/schema.sql`. Applying the schema still enables nothing; the operator
   must complete the documented preflight and call `kb_content_scope_enable()`.
 - Slice 4 requires PostgreSQL schema, RLS policy, migration, and attribution changes for code-index
   files. A Go wrapper cannot enforce reads performed by other database callers.

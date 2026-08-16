@@ -16,7 +16,7 @@ does not own schema migration policy, which stays with the server's bootstrap.
 
 ## Public contracts
 
-The process serves principal 29 on the server bus. The wire contract is `src/modules/db1/db1_module_api.h`. It is deliberately
+The process serves principal 30 on the server bus. The wire contract is `src/modules/db1/db1_module_api.h`. It is deliberately
 PRIVATE rather than published under `include/aimee/db1/`: a module with a public
 include root must retire its flat one, and db1's flat root is what resolves the
 bare `#include "db1.h"` in several hundred files. The contract becomes public
@@ -24,7 +24,7 @@ when Phase B has moved those callers, not before.
 
 | Stage | Event kind | Owns |
 | --- | --- | --- |
-| 1 `db1-economizer-state` | `11521` | the economizer's per-conversation reducer state |
+| 1 `db1-economizer-state` | `11777` | the economizer's per-conversation reducer state |
 
 Stage 1 is first because it has exactly one production caller, so it proves the
 boundary without a wide cutover.
@@ -101,7 +101,7 @@ transport.
 
 The module logs attach and shutdown through the shared runtime. A caller seeing
 `CAPABILITY_ABSENT` should check that the process is running and that its grant
-lists event kind `11521`.
+lists event kind `11777`.
 
 ## Compatibility
 

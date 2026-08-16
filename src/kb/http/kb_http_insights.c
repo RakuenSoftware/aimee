@@ -10,7 +10,7 @@
 
 #include "kb_http_insights.h"
 
-#include "db2_tenant.h"
+#include "modules/db2/c/db2_tenant.h"
 #include "kb_insights_util.h"
 #include "kb_reqctx.h"
 #include "org_spend.h"

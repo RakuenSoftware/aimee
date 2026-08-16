@@ -16,8 +16,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "demotion.h"
-#include "db2_test_shim.h"
-#include "db2_internal.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "modules/db2/c/db2_internal.h"
 #include "db_postgres.h"
 #include "config.h"
 #include "config_learning.h"

@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "module": "db2",
+  "wire_version": 1,
+  "catalog_complete": false,
+  "families": [
+    {
+      "id": 1,
+      "name": "lifecycle",
+      "event_kind": 11521,
+      "active": true
+    },
+    {
+      "id": 2,
+      "name": "tenancy",
+      "event_kind": 11522,
+      "active": false
+    },
+    {
+      "id": 3,
+      "name": "memory",
+      "event_kind": 11523,
+      "active": false
+    },
+    {
+      "id": 4,
+      "name": "index",
+      "event_kind": 11524,
+      "active": false
+    },
+    {
+      "id": 5,
+      "name": "learning",
+      "event_kind": 11525,
+      "active": false
+    },
+    {
+      "id": 6,
+      "name": "organization",
+      "event_kind": 11526,
+      "active": false
+    },
+    {
+      "id": 7,
+      "name": "custody",
+      "event_kind": 11527,
+      "active": false
+    },
+    {
+      "id": 8,
+      "name": "maintenance",
+      "event_kind": 11528,
+      "active": false
+    }
+  ],
+  "result_codes": [
+    "ok",
+    "not_found",
+    "conflict",
+    "denied",
+    "retryable",
+    "invalid_state"
+  ],
+  "operations": [
+    {
+      "family": "lifecycle",
+      "id": 1,
+      "name": "health",
+      "wire_format": "db2-health-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Readiness covers the PostgreSQL schema, pg_trgm, and canonical KB tables.",
+      "request": {
+        "magic": 1363685956,
+        "encoded_size": 8
+      },
+      "reply": {
+        "magic": 1380463172,
+        "encoded_size": 16,
+        "flags": [
+          {
+            "bit": 0,
+            "name": "schema"
+          },
+          {
+            "bit": 1,
+            "name": "pg_trgm"
+          },
+          {
+            "bit": 2,
+            "name": "kb_tables"
+          }
+        ]
+      }
+    }
+  ]
+}

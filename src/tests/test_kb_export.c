@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 #include "cJSON.h"
-#include "../db2/kb_service_backend_export.h"
+#include "../modules/db2/c/kb_service_backend_export.h"
 #include "../kb_export_json.h"
 #include "../kb_export_obsidian.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */

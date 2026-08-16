@@ -2,8 +2,8 @@
  * See docs/proposals/done/bayesian-promotion-threshold-calibration.md */
 
 #include "kb_calibrate.h"
-#include "db2/calibration.h"
-#include "db2/artifacts.h"
+#include "modules/db2/c/calibration.h"
+#include "modules/db2/c/artifacts.h"
 #include "headers/log.h"
 #include "platform_process.h"
 #include <cJSON.h>

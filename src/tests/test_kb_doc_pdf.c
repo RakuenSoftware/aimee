@@ -9,11 +9,11 @@
 #include <unistd.h>
 
 #include "aimee.h"
-#include "db2.h"
-#include "db2_test_shim.h"
-#include "../db2/db_postgres.h"
-#include "../db2/kb_payload.h"
-#include "../db2/code_index.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/kb_payload.h"
+#include "../modules/db2/c/code_index.h"
 #include "kb_blob_reconcile.h"
 #include "kb_blob_store.h"
 #include "kb_doc_hash.h"

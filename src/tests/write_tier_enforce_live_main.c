@@ -40,9 +40,9 @@
  */
 
 #include "db1.h"
-#include "kb/kb_mgmt_jwks_publication.h"
-#include "kb/kb_mgmt_token_public.h"
-#include "kb/kb_mgmt_token_roots_provision.h"
+#include "kb_mgmt_jwks_publication.h"
+#include "kb_mgmt_token_public.h"
+#include "kb_mgmt_token_roots_provision.h"
 #include "kb_identity_token.h"
 #include "server/server_mgmt_jwks_cache.h"
 

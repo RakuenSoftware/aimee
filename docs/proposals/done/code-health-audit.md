@@ -24,4 +24,4 @@ The residual follow-up is complete.
 
 ## Verification Notes
 
-Verified in-tree evidence: `src/kb/kb_curator_index_code_unit.c`, `src/db2/schema.sql`, `src/db2/schema_sqlite.sql`, `src/db2/pgvec_transport.c`, `src/kb/kb_service_graph.c`, `src/kb/kb_service.c`, `src/db2/kb_service_backend.h`, and `src/cli_code_audit.c`.
+Verified in-tree evidence: `src/kb/kb_curator_index_code_unit.c`, `src/modules/db2/c/schema.sql`, `src/modules/db2/c/schema_sqlite.sql`, `src/modules/db2/c/pgvec_transport.c`, `src/kb/kb_service_graph.c`, `src/kb/kb_service.c`, `src/modules/db2/c/kb_service_backend.h`, and `src/cli_code_audit.c`.

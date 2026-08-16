@@ -31,7 +31,7 @@ SURFACES = {
     ),
     "database-schemas": (
         "src/modules/db1/*.sql",
-        "src/db2/*.sql",
+        "src/modules/db2/c/*.sql",
         "deploy/migrations/*.sql",
     ),
     "packages": (

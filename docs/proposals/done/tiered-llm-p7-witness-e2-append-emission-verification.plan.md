@@ -81,7 +81,7 @@ that slice must validate them against the reserved set. A blanket CHECK forbiddi
 themselves use `!`.
 
 **Reseal — `kb_vault_rewrap_worm`.** Add the call inside the existing definer
-functions in `src/db2/schema.sql` that already `PERFORM
+functions in `src/modules/db2/c/schema.sql` that already `PERFORM
 org_vault_rewrap_worm_append`: the `intent`, `resealed`, `completed`, `abort`,
 and `recovery_required` transitions. Each already performs its control-row
 update, operation-row write, and WORM append in one plpgsql body, so the witness
@@ -103,7 +103,7 @@ shard `FOR UPDATE` is never contended (the advisory lock already serialized), an
 the high-blast-radius C admission-path change with its unsafe `MAX(seq)+INSERT`
 sequence assignment is avoided entirely.
 
-The C `db2_kb_audit_append` (`src/db2/kb_audit_worm.c`) is the *other* writer, used
+The C `db2_kb_audit_append` (`src/modules/db2/c/kb_audit_worm.c`) is the *other* writer, used
 by only three call sites: two conspicuous integration-test overrides in
 `kb_main.c` and artifact promotion in `artifacts.c` — none of them vault or key
 security events. Witnessing that path (artifact-promotion audits) is a bounded
@@ -227,7 +227,7 @@ health signal for exactly this reason.
 
 ## 3. Emission
 
-**Status: built and PG17-validated.** `src/db2/db2_witness_emit.c` reads committed
+**Status: built and PG17-validated.** `src/modules/db2/c/db2_witness_emit.c` reads committed
 state only, driven from the checkpoint cadence in `src/kb/kb_witness_cadence.c`.
 
 **Log/OTLP path — all evidence bytes.** Witness records, signed checkpoints, and

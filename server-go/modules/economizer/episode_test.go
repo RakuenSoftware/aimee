@@ -7,15 +7,15 @@ import "testing"
 func TestEpisodeInventoryAndTouch(t *testing.T) {
 	var s EpisodeSeal
 	s.SetConclusion("concluded: the index rebuild is idempotent")
-	s.AddFile("src/db2/code_index.c")
+	s.AddFile("src/modules/db2/c/code_index.c")
 	s.AddFile("src/headers/code_span.h")
-	s.AddFile("src/db2/code_index.c") // duplicate
+	s.AddFile("src/modules/db2/c/code_index.c") // duplicate
 	s.AddFile("")                     // ignored
 
 	if len(s.Files) != 2 {
 		t.Fatalf("file count = %d, want 2", len(s.Files))
 	}
-	if !s.Touches("src/db2/code_index.c") || !s.Touches("src/headers/code_span.h") {
+	if !s.Touches("src/modules/db2/c/code_index.c") || !s.Touches("src/headers/code_span.h") {
 		t.Error("a member file must be recognised")
 	}
 	if s.Touches("src/unrelated.c") {

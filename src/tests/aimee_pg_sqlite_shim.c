@@ -33,8 +33,8 @@
 #endif
 
 #include "db_postgres.h"
-#include "../db2/db2.h"
-#include "../db2/db2_internal.h"
+#include "../modules/db2/c/db2.h"
+#include "../modules/db2/c/db2_internal.h"
 
 #include <ctype.h>
 #include <math.h>

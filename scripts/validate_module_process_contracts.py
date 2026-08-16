@@ -116,9 +116,13 @@ def validate() -> dict[str, dict[str, object]]:
         if component_id in PROCESS_REQUIRED and execution != "process":
             raise ContractError(f"{component_id}: required feature must be a process")
 
+        descriptor = load(ROOT / f"src/modules/{component_id}/module.yaml")
+
         if execution == "core":
             if set(raw) != {"id", "execution", "placements"}:
                 raise ContractError(f"{component_id}: core component has process fields")
+            if "c_build" in descriptor:
+                raise ContractError(f"{component_id}: core component must not declare c_build")
         else:
             keys = set(raw) - {"hosted_by"}
             if keys != {"id", "execution", "runtime", "principal_ref", "placements", "stages"}:
@@ -137,6 +141,9 @@ def validate() -> dict[str, dict[str, object]]:
                 raise ContractError(f"{component_id}: process runtime must be c or go")
             if (component_id in GO_PROCESSES) != (runtime == "go"):
                 raise ContractError(f"{component_id}: runtime differs from the migration set")
+            if ("c_build" in descriptor) != (runtime == "c"):
+                raise ContractError(
+                    f"{component_id}: c_build must exist exactly for a C process runtime")
             principal_ref = raw["principal_ref"]
             expected_ref = declared_refs[component_id]
             if type(principal_ref) is not int or principal_ref != expected_ref or principal_ref in refs:

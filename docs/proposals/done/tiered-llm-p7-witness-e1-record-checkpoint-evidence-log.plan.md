@@ -5,7 +5,7 @@
   encodings, deterministic export form, evidence log, and per-`(tenant, provider)`
   shard counters are delivered with exact stable vectors and offline verification.
 - **Depends on:** P7-reseal D3b, the kb audit chain
-  (`src/db2/kb_audit_worm.c`), and the reseal outbox
+  (`src/modules/db2/c/kb_audit_worm.c`), and the reseal outbox
   (`kb_vault_rewrap_worm`).
 - **Enables:** E2's atomic admission caller, emission, and verification; E3's
   kill matrix and release-gate flip.
@@ -100,7 +100,7 @@ hashes are not exactly 32 bytes, or whose source discriminator is unknown. There
 is no "unknown field, ignore" path.
 
 All variable-length fields are length-prefixed before hashing, using the same
-pack-then-hash discipline as `org_vault_rewrap_pack_bytes` in `src/db2/schema.sql`
+pack-then-hash discipline as `org_vault_rewrap_pack_bytes` in `src/modules/db2/c/schema.sql`
 — a concatenation without explicit lengths is forgeable by field-boundary
 shifting, and the existing SQL side already avoids that. The C and SQL packing
 must agree; a test asserts identical digests for the same logical event computed
@@ -459,7 +459,7 @@ against the code rather than assumed:**
 
 - **Reseal and D3b open are already in-transaction and are the easy cases.**
   Every `org_vault_rewrap_worm_append` call site is a `PERFORM` inside a SQL
-  SECURITY DEFINER function (`src/db2/schema.sql`, the `intent`, `resealed`,
+  SECURITY DEFINER function (`src/modules/db2/c/schema.sql`, the `intent`, `resealed`,
   `completed`, `abort`, and `recovery_required` transitions), and both
   `kb_vault_open_event` inserts are likewise inside definer functions. Adding the
   witness append to those functions is same-transaction by construction — no
@@ -476,7 +476,7 @@ against the code rather than assumed:**
   drains these tables. A witness append added to those bodies inherits the same
   transaction with no design change.
 - **The admission path needs the witness append moved inside an existing
-  transaction.** `db2_kb_audit_append` (`src/db2/kb_audit_worm.c:44`) issues its
+  transaction.** `db2_kb_audit_append` (`src/modules/db2/c/kb_audit_worm.c:44`) issues its
   own `BEGIN`, reads the current head, computes the row hash in C, inserts, and
   commits. It is a self-contained transaction that a caller cannot join. E2 adds
   the witness insert and shard advance *inside that function, before its commit*.
@@ -518,7 +518,7 @@ the source-ledger predecessor where one exists, the source discriminator and
 source identity, the group id from §4, and the emitting seal epoch and fencing
 token. Append-only by the same trigger discipline the existing
 WORM tables use (`kb_worm_block` / `org_vault_rewrap_worm_block` in
-`src/db2/schema.sql`), with UPDATE, DELETE, and TRUNCATE all rejected. Direct
+`src/modules/db2/c/schema.sql`), with UPDATE, DELETE, and TRUNCATE all rejected. Direct
 table access is revoked from PUBLIC and from `aimee_kb_runtime`; the only paths
 in are narrowly scoped SECURITY DEFINER functions with a pinned `search_path`,
 matching the pattern D3a and D3b established.

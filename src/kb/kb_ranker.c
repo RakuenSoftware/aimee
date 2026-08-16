@@ -5,11 +5,11 @@
 
 #include "kb_ranker.h"
 #include "kb_features.h"
-#include "db2/artifacts.h"
+#include "modules/db2/c/artifacts.h"
 
 #define KB_RANKER_FEATURE_SET_VERSION KB_FEATURE_SET_VERSION
-#include "db2/db2_internal.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db_postgres.h"
 #include "aimee.h"
 #include "log.h"
 

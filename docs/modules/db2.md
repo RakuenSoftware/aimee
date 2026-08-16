@@ -1,0 +1,134 @@
+# db2 module
+
+## Purpose and non-goals
+
+`db2` is the KB-local process boundary for the shared PostgreSQL knowledge store. The first
+increment registers a separately buildable C process and freezes its lifecycle-health wire format
+while the existing implementation remains authoritative in the KB process. It does not activate a
+second store owner, send SQL over the bus, or claim that the C implementation has already been
+carved out of the KB link.
+
+## Public contracts
+
+The C process owns principal 29 and event `11521`. Its descriptor owns
+`eventcontract/operations.json`, which generates the public C codec, transport-agnostic typed C
+client, and fingerprinted positive and negative wire vectors. The client accepts a bus-call
+function rather than depending on a daemon global, so `aimee-kb` and parity harnesses exercise the
+same bytes. The fixed eight-byte request carries only magic and wire version. The
+fixed sixteen-byte response carries schema, `pg_trgm`, and KB-table evidence; unknown flags and
+non-zero reserved bytes fail closed. Until the descriptor includes the complete DB2 C closure, an
+exported standalone process returns typed `capability_absent` instead of reporting false readiness.
+
+## Dependencies and consumers
+
+- `config`: owns deployment configuration and the existing DB2 configuration surface.
+- `module-runtime`: owns authenticated event-bus process admission and lifecycle transport.
+
+No production consumer is switched in this increment. `aimee-kb` now compiles the generated client
+behind `kb_module_db2_health_probe`, but the existing in-process health callers remain authoritative
+until the atomic activation slice moves every lifecycle caller and the DB2 DSN together.
+
+## Providers and readiness
+
+The transitional provider is `aimee-module-db2`, built as an independent C process from the
+descriptor. DB2 continues to own PostgreSQL and pgvector. A future DB3 provider may serve portable
+vector capabilities, but transactional and relationally coupled pgvector operations remain here.
+The process is not ready merely because it attached: successful backend health evidence is required.
+
+## Configuration and activation
+
+The module is optional and disabled by default while the old in-process implementation remains the
+single production owner. This avoids concurrent schema, pool, and migration ownership. Activation
+is a later atomic image change that passes `AIMEE_DB2_URL` only to this process, enables generated
+clients, and removes DB2/libpq objects from `aimee-kb`; there is no in-image local-call fallback.
+
+- `runtime_toggle.supported`: `false`; the disabled process shell is a build artifact, not a
+  production runtime choice. Activation changes the complete image contract atomically.
+
+`check_db2_activation.py` makes that sequencing executable. Setting `enabled_by_default` is rejected
+unless the descriptor declares every inventoried DB2 C translation unit, weak backend resolution is
+gone, and the declaration ledger proves that `db2_health_probe` has no production direct callers.
+
+## Surfaces
+
+The only current surface is `AIMEE_DB2_EVENT_HEALTH` on the KB-local Unix-domain module bus. There
+is no HTTP listener, network service, generic query operation, raw SQL payload, or provider-secret
+field. The catalog reserves the eight family identities and event kinds `11521` through `11528`, but
+only lifecycle is active and granted. Later operations must be typed, bounded catalog entries.
+`module_api.h` is generated from that catalog and must not be edited by hand.
+
+Declaration audit:
+
+`declaration-review.json` is the reviewed source for transitions from the legacy C surface. Its
+generated ledger accounts for all 1,351 non-static function declarations in all 137 DB2 headers,
+records identical duplicate declarations by location, and fails on conflicting signatures. The
+ledger also tokenizes every frozen consumer so test-only and production references cannot be
+confused. At this checkpoint 166 declarations are unconsumed implementation details, 273 are used
+only by private implementation tests, 61 externally referenced `pgvec_*` declarations are
+explicitly private and retained in DB2, lifecycle health is a reviewed retained-DB2 wire operation,
+and 850 production-consumed declarations remain
+without a reviewed disposition.
+
+A review transition binds the symbol and normalized-signature hash to one closed disposition,
+family, DB3 placement, and nonempty reason. Signature drift invalidates the review. Unsupported or
+ambiguous C declarations, malformed lexical input, stale review rows, premature completeness, and
+generated-ledger drift fail closed. No C signature is treated as a wire encoding: pointer buffers,
+callbacks, and composite transactions still require an explicit provider-neutral operation.
+
+## Data and migrations
+
+This increment performs no reads, writes, schema changes, or migrations in `aimee-module-db2`.
+The existing C DB2 owner retains those responsibilities until its complete source and dependency
+closure is packaged and replay-tested behind this process boundary.
+
+## Security and privacy
+
+The wire contains capability bits only. DSNs, SQL, row contents, identities, and driver errors do
+not cross the bus. Runtime admission continues to pin the executable path, UID, principal class,
+principal reference, and event-kind grant. The `AIMEE_DB2_URL` secret remains with the current owner
+until the activation image transfers it exclusively to the module process.
+
+## Supported journeys
+
+Build tooling exports and compiles `aimee-module-db2` from its descriptor. A test backend can prove
+the complete health encode-handler-decode path. A production bundle without the still-unmigrated C
+closure returns `capability_absent`, making partial packaging visible and non-authoritative.
+
+## Tests and failure behavior
+
+Focused C tests cover every response flag combination, malformed magic/version/length, unknown
+flags, reserved bytes, wrong stage, undersized output, cancellation, missing callbacks, backend
+failure, typed-client transport/protocol failures, and successful encode-handler-decode. A dedicated
+integration test crosses the real authenticated event bus from the generated client through the
+module runtime into the C handler and verifies non-zero evidence. Runtime-bundle tests compile the
+descriptor-owned C
+process. Catalog tests mutate every closed field, process/descriptor binding, resource limit, and
+generated artifact. Boundary tests prohibit any direct import from `src/modules/db2/c` into private
+`src/kb`. Declaration-ledger tests cover C linkage blocks, multiline and callback declarations,
+comments/literals/directives, identical and conflicting duplicates, malformed nesting, resource
+limits, signature-bound review transitions, pgvector retention, output symlinks, reproducibility,
+and unchanged-output failure. Activation-gate mutation tests prove that an incomplete source list,
+weak backend, or remaining direct production caller prevents enablement.
+
+## Operational diagnostics
+
+Before activation this process is a packaging and contract probe only. `capability_absent` means the
+standalone runtime has not yet acquired the complete DB2 backend; it is not a database-health
+verdict. Existing KB health remains unchanged.
+
+## Compatibility
+
+No public KB route, CLI response, schema object, configuration key, or database behavior changes in
+this increment. The event contract is versioned independently so the C and future Go providers can
+share byte-for-byte replay fixtures. `AIMEE_DB2_EVENT_HEALTH` is additive and has no active caller
+until the complete process cutover is ready.
+
+## Extension and removal
+
+Next increments review the remaining production declarations, map them to typed operations or
+private/compatibility dispositions, generate the remaining C dispatch families, package the complete
+C source
+closure, and add replay gates before activation. After parity, a pure-Go implementation
+replaces the C process behind the same contract. The `src/modules/db2/c` tree is removed only after
+the Go runtime is the sole deployed provider and every boundary test proves the old link and fallback
+are gone.

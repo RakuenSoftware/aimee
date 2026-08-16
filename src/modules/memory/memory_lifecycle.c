@@ -8,7 +8,7 @@
 #include "util.h"
 #include "cJSON.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db2/memory_lifecycle.h"
+#include "modules/db2/c/memory_lifecycle.h"
 #include "dogfood.h"
 #include "log.h"
 #endif

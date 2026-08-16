@@ -9,7 +9,7 @@
 #include "aimee.h"
 #include <sqlite3.h>
 
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "kb_curator_resolve_entities.h"
 
 /* Stub the heavy embed + vector deps the handler references. Returns a full

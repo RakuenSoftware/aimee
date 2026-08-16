@@ -1,4 +1,4 @@
-#include "kb/kb_mgmt_token_authority.h"
+#include "kb_mgmt_token_authority.h"
 
 #include <assert.h>
 #include <openssl/bn.h>

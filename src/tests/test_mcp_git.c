@@ -17,8 +17,8 @@
 #include "cJSON.h"
 #include "db_schema.h"
 #include "../db1/db1.h"
-#include "../db2/db2.h"
-#include "../db2/db2_internal.h"
+#include "../modules/db2/c/db2.h"
+#include "../modules/db2/c/db2_internal.h"
 #include "support/git_module_fixture.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 

@@ -17,9 +17,9 @@
 #include "cJSON.h"
 #include "db1_optional.h"
 #if !defined(AIMEE_DB2_DISABLED)
-#include "db2/curiosity.h"
-#include "db2/memory_payload.h"
-#include "db2/code_index_ops.h" /* db2_code_index_drift_candidates (auditable-correctness D7) */
+#include "modules/db2/c/curiosity.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/code_index_ops.h" /* db2_code_index_drift_candidates (auditable-correctness D7) */
 #endif
 #include "log.h"
 #include "memory.h"

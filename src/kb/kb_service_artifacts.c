@@ -6,7 +6,7 @@
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
 #include "config.h"
-#include "db2/artifacts.h"
+#include "modules/db2/c/artifacts.h"
 #include "kb_reasoning.h"
 #include "kb_service_artifacts.h"
 #include "log.h"

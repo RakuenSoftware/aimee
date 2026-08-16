@@ -7,7 +7,7 @@
 #include "kb_http_bootstrap.h"
 
 #include "cJSON.h"
-#include "db2/enrollments.h"
+#include "modules/db2/c/enrollments.h"
 #include "kb_enroll.h"
 #include "kb_http_identity_login.h"
 #include "kb_identity.h"

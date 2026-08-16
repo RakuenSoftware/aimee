@@ -172,17 +172,17 @@ static void test_changes_table_splits_multi_path_cell(void)
 
 static void test_changes_table_canonicalizes_schema_paths(void)
 {
-   const char *proposal =
-       "# Proposal: Cron DB Schema\n"
-       "\n"
-       "### Changes\n"
-       "| File | Change |\n"
-       "|------|--------|\n"
-       "| `src/db1/db1_schema.sql` | Add cron job tables. |\n"
-       "| `src/db2/db2_schema.sql`, `src/db2/db2_schema_sqlite.sql` | Mirror tables. |\n"
-       "\n"
-       "## Acceptance Criteria\n"
-       "- [ ] Delegates receive existing schema files.\n";
+   const char *proposal = "# Proposal: Cron DB Schema\n"
+                          "\n"
+                          "### Changes\n"
+                          "| File | Change |\n"
+                          "|------|--------|\n"
+                          "| `src/db1/db1_schema.sql` | Add cron job tables. |\n"
+                          "| `src/db2/db2_schema.sql`, "
+                          "`src/db2/db2_schema_sqlite.sql` | Mirror tables. |\n"
+                          "\n"
+                          "## Acceptance Criteria\n"
+                          "- [ ] Delegates receive existing schema files.\n";
 
    char err[256] = "";
    cJSON *plan = delegate_plan_build_from_text("docs/p.md", proposal, err, sizeof(err));
@@ -192,10 +192,10 @@ static void test_changes_table_canonicalizes_schema_paths(void)
    cJSON *packets = arr(plan, "packets");
    assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 0), "owned_files"),
                            "src/modules/db1/schema.sql"));
-   assert(
-       str_arr_contains(arr(cJSON_GetArrayItem(packets, 1), "owned_files"), "src/db2/schema.sql"));
+   assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 1), "owned_files"),
+                           "src/modules/db2/c/schema.sql"));
    assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 2), "owned_files"),
-                           "src/db2/schema_sqlite.sql"));
+                           "src/modules/db2/c/schema_sqlite.sql"));
    assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 0), "read_context"),
                            "src/modules/db1/schema.sql"));
    cJSON_Delete(plan);

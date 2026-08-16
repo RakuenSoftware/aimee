@@ -11,7 +11,7 @@
 #include "kb_http_rate.h"
 
 #include "cJSON.h"
-#include "db2_tenant.h"
+#include "modules/db2/c/db2_tenant.h"
 #include "kb_reqctx.h"
 #include "org_rate.h"
 

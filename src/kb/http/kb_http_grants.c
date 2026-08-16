@@ -3,9 +3,9 @@
 #include "kb_http_grants.h"
 
 #include "cJSON.h"
-#include "db2/management_intent_fields.h" /* db2_intent_canonical_actor (header-only) */
-#include "db2/db2_tenant.h"               /* db2_tenant_scope_*: sets aimee.principal */
-#include "db2/write_tier_grant.h"
+#include "modules/db2/c/management_intent_fields.h" /* db2_intent_canonical_actor (header-only) */
+#include "modules/db2/c/db2_tenant.h"               /* db2_tenant_scope_*: sets aimee.principal */
+#include "modules/db2/c/write_tier_grant.h"
 #include "kb_identity.h" /* kb_identity_key: the actor's canonical identity */
 #include "kb_identity_token.h"
 #include "kb_reqctx.h" /* kb_reqctx_actor: the VERIFIED per-request principal */

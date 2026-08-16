@@ -6,8 +6,8 @@
 #include "cJSON.h"
 #if !defined(AIMEE_DB2_DISABLED)
 #include "db1_optional.h"
-#include "db2/memory_health.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/memory_health.h"
+#include "modules/db2/c/memory_query.h"
 #include "kb.h"
 #include "log.h"
 #endif

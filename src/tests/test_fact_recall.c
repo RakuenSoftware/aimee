@@ -1,13 +1,13 @@
 /* test_fact_recall.c: typed-fact recall into the envelope + §7 PII gating,
  * against the sqlite shim. P5. */
 #include "../headers/aimee.h"
-#include "../db2/fact_recall.h"
-#include "../db2/fact_lifecycle.h"
-#include "../db2/rel_types_store.h"
-#include "../db2/entity_registry.h"
-#include "../db2/db2_test_shim.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
+#include "../modules/db2/c/fact_recall.h"
+#include "../modules/db2/c/fact_lifecycle.h"
+#include "../modules/db2/c/rel_types_store.h"
+#include "../modules/db2/c/entity_registry.h"
+#include "../modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
 #include "modules/memory/memory_ontology.h"
 #include "modules/memory/memory_pii_gate.h"
 #include <assert.h>

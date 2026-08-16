@@ -8,13 +8,13 @@
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
 #include "config.h"
-#include "db2/kb_service_backend.h"
-#include "db2/bandit.h"
-#include "db2/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
-#include "db2/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
-#include "db2/memory_scope_query.h"
-#include "db2/fidelity.h"       /* db2_fidelity_report_by_turn (auditable-correctness P3) */
-#include "db2/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5 code provenance) */
+#include "modules/db2/c/kb_service_backend.h"
+#include "modules/db2/c/bandit.h"
+#include "modules/db2/c/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
+#include "modules/db2/c/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
+#include "modules/db2/c/memory_scope_query.h"
+#include "modules/db2/c/fidelity.h" /* db2_fidelity_report_by_turn (auditable-correctness P3) */
+#include "modules/db2/c/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5 code provenance) */
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
 #include "kb_service_memory.h"

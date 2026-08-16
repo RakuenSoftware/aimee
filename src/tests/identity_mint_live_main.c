@@ -24,7 +24,7 @@
  */
 #include "kb_mgmt_token_authority_ipc.h"
 #include "kb/kb_mgmt_token_authority_service.h"
-#include "db2/management_token_authority.h"
+#include "modules/db2/c/management_token_authority.h"
 #include "vault_custody_kms.h"
 #include "vault_server_key.h"
 

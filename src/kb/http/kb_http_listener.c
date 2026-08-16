@@ -1,7 +1,7 @@
 /* kb_http_listener.c: bounded concurrent plain-HTTP listener for aimee-kb. */
 
 #include "kb_http.h"
-#include "db2/db2.h"
+#include "modules/db2/c/db2.h"
 #include "kb/kb_login_throttle.h"
 #include "log.h"
 #include <sys/stat.h>

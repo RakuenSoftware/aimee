@@ -6,11 +6,11 @@
 #include "agent_exec.h"
 #include "db.h"
 #include "../db1/db1.h"
-#include "../db2/db2.h"
-#include "../db2/db2_test_shim.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
-#include "../db2/lifecycle.h"
+#include "../modules/db2/c/db2.h"
+#include "../modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/lifecycle.h"
 
 static void setup(void)
 {

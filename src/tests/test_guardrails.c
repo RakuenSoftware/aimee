@@ -10,8 +10,8 @@
 #include "db.h"
 #include <aimee/audit/obs_bus.h> /* obs_bus_flush — gsem_record records guardrail events async now */
 #include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "server/obs_bus_adapter.h"
 #include <aimee/workspace/workspace.h>
 #include "session_worktree_key.h"

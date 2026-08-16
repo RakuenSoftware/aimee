@@ -1,6 +1,6 @@
 #include "kb/http/kb_http_servers.h"
 #include "kb_reqctx.h"
-#include "db2/db2_tenant.h"
+#include "modules/db2/c/db2_tenant.h"
 
 #include <assert.h>
 #include <pthread.h>

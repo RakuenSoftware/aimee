@@ -27,7 +27,7 @@
 #include "kb_http_identity_login.h"
 #include "kb/kb_login_throttle.h"
 
-#include "db2/management_identity_journal.h"
+#include "modules/db2/c/management_identity_journal.h"
 #include "kb_auth_oidc.h"
 #include "kb_oidc_login.h"
 #include "kb_oidc_login_store.h"

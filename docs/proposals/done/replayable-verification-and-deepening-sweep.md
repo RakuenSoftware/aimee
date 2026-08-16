@@ -285,7 +285,7 @@ relation**, reusing the existing assert / supersede / recall machinery — no ne
 table, no new accessor:
 
 - Relation `architecture_settled`, `head_kind = code_site`, `tail_kind = SCALAR`
-  (added to the seed `TF_ONTOLOGY[]` in `src/db2/typed_facts.c`).
+  (added to the seed `TF_ONTOLOGY[]` in `src/modules/db2/c/typed_facts.c`).
 - **subject** = canonical site `file:symbol-prefix` (prefer the **symbol-
   qualified** identity over a bare path, so a moved file doesn't silently strand
   the decision); **object** = the verdict/pointer (`extracted@<commit>` /

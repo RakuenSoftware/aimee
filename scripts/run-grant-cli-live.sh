@@ -94,7 +94,7 @@ snapshot_owner_role
 runuser -u postgres -- dropdb --force --if-exists "$db" >/dev/null 2>&1
 # The roles live at cluster scope, so they are created in the maintenance database first —
 # createdb -O below needs the owner role to already exist.
-runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -f src/db2/schema_roles.sql >/dev/null 2>&1
+runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -f src/modules/db2/c/schema_roles.sql >/dev/null 2>&1
 # OWNED BY aimee_kb_owner. kb re-applies the schema at boot as that role, and it cannot
 # redefine objects owned by postgres ("must be owner of function pg_now_text") — so whoever
 # pre-applies has to be the same role kb will connect as. A real deployment's migrate step is
@@ -103,7 +103,7 @@ runuser -u postgres -- createdb -O aimee_kb_owner "$db" 2>/dev/null \
   || runuser -u postgres -- createdb "$db" || fail "createdb"
 psqlq -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;' \
   || fail "extensions"
-psqlq -f src/db2/schema_roles.sql >/dev/null 2>&1
+psqlq -f src/modules/db2/c/schema_roles.sql >/dev/null 2>&1
 # PostgreSQL 15+ stopped granting CREATE on schema public to non-owners, so the owner role
 # cannot apply the schema without this. A real deployment's migrate step holds the same
 # privilege; schema_roles.sql does not grant it because it does not know the database name.

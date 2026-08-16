@@ -2,11 +2,11 @@
 #include "managed_server_identity_install.h"
 
 #include "managed_server_identity.h"
-#include "db2/db2.h"
-#include "db2/db2_tenant.h"
-#include "db2/membership.h"
-#include "db2/server_registry.h"
-#include "db2/team.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_tenant.h"
+#include "modules/db2/c/membership.h"
+#include "modules/db2/c/server_registry.h"
+#include "modules/db2/c/team.h"
 #include "kb_identity.h"
 #include "kb_paths.h"
 

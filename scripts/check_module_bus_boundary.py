@@ -10,6 +10,7 @@ from pathlib import Path
 
 
 MODULES = "src/modules"
+DB2_C_BOUNDARY = "src/modules/db2/c/"
 # The shared core contract every module is allowed to depend on. It is not a
 # peer module and carries no peer's domain types.
 CORE = "core"
@@ -337,6 +338,12 @@ def included_module(header: str) -> str | None:
     parts = header.split("/")
     if len(parts) < 2 or parts[0] not in MODULE_ROOTS:
         return None
+    # DB2's intact C implementation has moved under its future module root, but
+    # remains the in-process lower storage layer until the generated bus clients
+    # replace every direct include. The separate DB2 source-boundary checker
+    # freezes and shrink-ratchets that exact compatibility surface.
+    if parts[0] == "modules" and parts[1:3] == ["db2", "c"]:
+        return None
     return parts[1]
 
 
@@ -350,6 +357,8 @@ def crossings(root: Path):
     found: set[tuple[str, str]] = set()
     for path in sorted((*modules.rglob("*.c"), *modules.rglob("*.h"))):
         relative = path.relative_to(root).as_posix()
+        if relative.startswith(DB2_C_BOUNDARY):
+            continue
         owner = owning_module(relative)
         for header in INCLUDE.findall(path.read_text(encoding="utf-8")):
             if "/" not in header:

@@ -18,7 +18,7 @@
 #include "anti_patterns.h"
 #include "evidence_vectors.h"
 #include "feature_rows.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "cJSON.h"
 #include "modules/learning/learning_evidence.h"
 

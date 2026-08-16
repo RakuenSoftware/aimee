@@ -19,7 +19,7 @@ Incorporates plan-review **R1** (30 items, 6 blocking — see end).
   CI gate → regenerate + commit `schema_data.h`.
 - **Accessor style:** `src/db1/wm.c`/`wm.h` — `db1_conn()`, sqlite3 prepare/bind/step/
   finalize, `now_utc()`. **SHA-256:** OpenSSL `SHA256()` + `SHA256_DIGEST_LENGTH` already used
-  in-tree (`src/db2/entity_nodes.c:43`); reuse directly.
+  in-tree (`src/modules/db2/c/entity_nodes.c:43`); reuse directly.
 - **Op + HTTP routes:** op handlers in `src/server/server.c` table (`{"wm.set", …}`); routes
   in `src/server/server_http_routes.inc` (`/v1/…`→op→handler, a `CAP_*`, `rh_dispatch_op`).
 - **Hook seam:** `aimee hooks pre`→`src/cmd_hooks.c`→`pre_tool_check`

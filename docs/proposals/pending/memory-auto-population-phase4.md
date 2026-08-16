@@ -50,7 +50,7 @@ radius. This proposal makes that split concrete.
 
 ## §1 What already exists (build on, don't rebuild)
 
-- **db2 `rules`** (`src/db2/schema.sql`): `polarity`, `weight`, `domain`, `directive_type`
+- **db2 `rules`** (`src/modules/db2/c/schema.sql`): `polarity`, `weight`, `domain`, `directive_type`
   (default `soft`), **`expires_at`**, **`last_reinforced_at`** — decay + reinforcement columns are
   already present. Feedback→rules and promotion reuse them.
 - **Feedback→brief generator**: `kb_client_rules_generate` already synthesizes rule-like guidance

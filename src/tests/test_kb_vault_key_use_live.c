@@ -5,11 +5,11 @@
 #include "modules/vault/vault_crypto.h"
 #include "modules/vault/vault_internal.h"
 #include "modules/vault/vault_server_key.h"
-#include "db2.h"
-#include "db2/db2_internal.h"
-#include "db2/db2_tenant.h"
-#include "db2/db_postgres.h"
-#include "db2/org_vault_key_use.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db2_tenant.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/org_vault_key_use.h"
 
 #include <assert.h>
 #include <openssl/crypto.h>

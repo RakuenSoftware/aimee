@@ -144,5 +144,16 @@
   ],
   "docs": [
     "docs/modules/db1.md"
-  ]
+  ],
+  "c_build": {
+    "include_roots": [
+      "src",
+      "src/headers",
+      "src/modules/db1"
+    ],
+    "pkg_config": [
+      "sqlite3"
+    ],
+    "system_libraries": []
+  }
 }

@@ -3,7 +3,7 @@
 of tables, and that the DB1 schema only contains DB1-owned tables.
 
 After the 3db split, the DB2 shim schema used by tests lives in
-src/db2/schema_sqlite.sql; production DB2 uses src/db2/schema.sql.
+src/modules/db2/c/schema_sqlite.sql; production DB2 uses src/modules/db2/c/schema.sql.
 Drift between those two files breaks the DB2 shim test path.
 
 Run via `make schema-sync-check` (or directly during CI). Exits non-zero on
@@ -22,8 +22,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DB1_SCHEMA = ROOT / "src" / "modules" / "db1" / "schema.sql"
-DB2_SCHEMA_PG = ROOT / "src" / "db2" / "schema.sql"
-DB2_SCHEMA_SQLITE = ROOT / "src" / "db2" / "schema_sqlite.sql"
+DB2_SCHEMA_PG = ROOT / "src" / "modules" / "db2" / "c" / "schema.sql"
+DB2_SCHEMA_SQLITE = ROOT / "src" / "modules" / "db2" / "c" / "schema_sqlite.sql"
 
 # CREATE TABLE [IF NOT EXISTS] <name> ( ... ). `name` may be quoted or bare.
 TABLE_RE = re.compile(
@@ -204,24 +204,24 @@ def main() -> int:
         for name in sorted(db1_unexpected):
             print(f"  - {name}")
     if db1_only_in_db2_native:
-        print("schema drift: DB1-only tables present in src/db2/schema.sql:")
+        print("schema drift: DB1-only tables present in src/modules/db2/c/schema.sql:")
         for name in sorted(db1_only_in_db2_native):
             print(f"  - {name}")
     if db1_only_in_db2_shim:
-        print("schema drift: DB1-only tables present in src/db2/schema_sqlite.sql:")
+        print("schema drift: DB1-only tables present in src/modules/db2/c/schema_sqlite.sql:")
         for name in sorted(db1_only_in_db2_shim):
             print(f"  - {name}")
     if missing_in_native:
         print(
-            "schema drift: tables in src/db2/schema_sqlite.sql but missing "
-            "in src/db2/schema.sql:"
+            "schema drift: tables in src/modules/db2/c/schema_sqlite.sql but missing "
+            "in src/modules/db2/c/schema.sql:"
         )
         for name in sorted(missing_in_native):
             print(f"  - {name}")
     if missing_in_shim:
         print(
-            "schema drift: tables in src/db2/schema.sql but missing "
-            "in src/db2/schema_sqlite.sql:"
+            "schema drift: tables in src/modules/db2/c/schema.sql but missing "
+            "in src/modules/db2/c/schema_sqlite.sql:"
         )
         for name in sorted(missing_in_shim):
             print(f"  - {name}")

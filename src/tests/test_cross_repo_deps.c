@@ -1,6 +1,6 @@
 /* test_cross_repo_deps.c: unit tests for the pure cross-repo resolver core
  * (S2a: import resolution + distinctiveness). DB-free -- exercises
- * src/db2/cross_repo_resolver.c directly. Acceptance #1 (mechanical) for the
+ * src/modules/db2/c/cross_repo_resolver.c directly. Acceptance #1 (mechanical) for the
  * S2a portion; S2b adds the tier-pipeline tests. See
  * docs/proposals/pending/cross-repo-dependency-graph.md. */
 
