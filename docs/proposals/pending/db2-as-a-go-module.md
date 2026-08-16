@@ -308,6 +308,14 @@ The migration lands in independently testable slices, but activation remains ato
 7. **S7 — C retirement.** Deploy only the Go provider, remove the C tree and C-only shims after the
    compatibility window, and prove no C DB2 object, stale grant, or fallback executable ships.
 
+This implementation is intentionally split across those ordered PRs. The current S2 owner PR adds
+the exact C link-closure audit and does not claim the C cutover, Go port, or complete DB3 runtime.
+Subsequent autonomous S2 PRs own elimination of each audited dependency cluster. S3 and S4 own the
+replayable C process and atomic ownership switch; S5 owns the deployable provider-neutral DB3
+descriptor, grants, pgvector adapter, and external-provider conformance; S6 owns the aimee-kb Go
+implementation and parity switch. Pulling any of those later owners into this audit PR would violate
+the required C-first ordering and activate an unproven partial closure.
+
 Material changes to operation ownership, fallback semantics, observer selection, or the activation
 boundary return to roundtable review. Mechanical catalog additions follow the frozen rules above.
 
@@ -376,6 +384,15 @@ Audit the 297 consumers by runtime placement before conversion:
 The compatibility headers keep existing typed function signatures only while a consumer group is
 being converted. They contain codecs, never SQL or connection access. A generated manifest accounts
 for all 967 old include directives and fails on an unclassified or newly introduced one.
+
+Before changing dependency clusters, a descriptor-owned link-closure contract freezes every DB2 C
+translation unit and the external symbols left after a no-library relocatable link. The probe may
+resolve DB2-to-DB2 references only; helper objects, weak definitions, archives, shared libraries, and
+transitive core links are forbidden. Every remaining symbol records its referencing units, reviewed
+disposition, and rationale. New debt fails immediately, while resolved debt requires an explicit
+baseline update. This is a migration ledger, not standalone-readiness evidence: S2 exits only when
+the complete source set links through declared system dependencies and bounded injected contracts
+without the monolithic core.
 
 ### 4.3 Supervision and atomic activation
 

@@ -81,6 +81,22 @@ memory-candidate operation. Its internal pgvector, external provider, and author
 checks are injected, so the route can be exhaustively tested before the private DB2 source closure is
 linked. This is not a production cutover: the module remains disabled and no provider grant ships.
 
+Link-closure audit:
+
+`link-closure-v1.json` accounts for all 141 C translation units in the private DB2 boundary. The
+probe compiles each unit, combines only those objects with a relocatable link, supplies no archive,
+shared library, helper stub, or weak definition, and records the 355 genuinely external symbols plus
+every referencing unit. Each symbol has a reviewed disposition and rationale. The current ledger
+contains 144 explicit system-link dependencies, 25 pinned vendored/generated inputs, 150 sibling or
+KB contracts to inject, and 36 support APIs to promote. The standalone-link exit condition requires
+zero entries in the latter three groups; a classified ledger alone is not enough.
+
+The gate rejects source omissions, symlinks, content drift, new unresolved symbols, changed
+references, missing evidence, and any attempt to make the probe pass through helper objects or
+libraries. Resolved symbols are also surfaced as review-required shrinkage so the ledger and its
+human-readable counts cannot silently become stale. Regeneration never activates the module or
+asserts that the C closure is complete.
+
 A review transition binds the symbol and normalized-signature hash to one closed disposition,
 family, DB3 placement, and nonempty reason. Signature drift invalidates the review. Unsupported or
 ambiguous C declarations, malformed lexical input, stale review rows, premature completeness, and

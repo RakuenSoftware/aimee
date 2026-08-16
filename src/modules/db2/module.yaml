@@ -21,6 +21,7 @@
   ],
   "contracts": [
     "src/modules/db2/eventcontract/declaration-review.json",
+    "src/modules/db2/eventcontract/link-closure-v1.json",
     "src/modules/db2/eventcontract/operations.json",
     "src/modules/db2/eventcontract/vector-portability.json"
   ],
