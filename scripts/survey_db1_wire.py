@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
 """Measure what the remaining DB1 operations need from the module wire.
 
-Reports, for every DB1 function that a linked binary still calls: the capability
-tier its signature needs, whether its callers pass NULL or an empty string, and
-whether it carries a field the current size cap would refuse.
+Reports, for every DB1 function that a linked binary still calls: which wire
+capabilities its signature still needs, and what its callers pass.
+
+The T0..T3 ladder this script used to print has been retired, because three of
+its four rungs shipped: integer arguments, the counted reply (which carried
+multi-value replies and zero-argument requests with it), and struct flattening.
+A ladder also modelled the remainder as if each rung sat on the one below, and
+it does not -- rows and callee-allocated out-parameters are independent, and
+neither waits on the other.
+
+What replaced it is a SET of missing capabilities per operation, unioned per
+source. That matches how migration actually works: the unit that moves is a
+whole .c file, so a source is ready exactly when that union is empty, and the
+question worth asking is which single capability empties the most of them.
 
 This is a measurement, not a gate. It reads the headers, the Makefile and the
 call sites, so its numbers move when any of those move -- which is the point.
@@ -39,23 +50,46 @@ DECL = re.compile(
 CALL = re.compile(r"\b([a-z][a-z0-9_]{2,})\s*\(")
 
 TEXT = re.compile(r"const char \s*\*\s*\w+$")
-SCALAR = re.compile(r"(int|int64_t|long|unsigned int|unsigned|time_t|double) \w+$")
+SCALAR = re.compile(r"(int|int64_t|long|long long|unsigned long long|unsigned int"
+                    r"|unsigned|time_t|double) \w+$")
+# An enum passed by value is an integer. A NON-enum _t by value would not be,
+# so the enum names are read from the headers rather than assumed from the
+# suffix -- most _t types here are structs.
+ENUM_DECL = re.compile(r"typedef\s+enum\b[^;]*?\}\s*(\w+_t)\s*;", re.S)
+BY_VALUE = re.compile(r"\b([a-z_0-9]+_t) \w+$")
+# An array of fixed-width strings: rows of one text column, spelled as a
+# pointer to an array rather than a pointer to a struct.
+OUT_TEXT_ROWS = re.compile(r"char \s*\(\s*\*\s*\w+\s*\)\s*\[")
+JSON_IN = re.compile(r"(const )?cJSON \s*\*\s*\w+$")
 OUT_TEXT = re.compile(r"char \s*\*\s*\w+$")
 CAP = re.compile(r"size_t \w+$")
-OUT_NUM = re.compile(r"(int|int64_t|double|size_t) \s*\*\s*\w+$")
+OUT_NUM = re.compile(r"(int|int64_t|double|size_t|long|long long"
+                     r"|unsigned long long) \s*\*\s*\w+$")
 STRUCT_IN = re.compile(r"const [a-z_0-9]+_t \s*\*\s*\w+$")
 STRUCT_OUT = re.compile(r"[a-z_0-9]+_t \s*\*\s*\w+$")
 ARRAY_LEN = re.compile(r"(int|size_t) (max|n|count|cap|limit)\w*$")
+# A callee-allocated out-parameter: the double star is the whole tell, and it is
+# why these fall through STRUCT_OUT/OUT_TEXT, whose \w+$ cannot match a second *.
+ALLOC_OUT = re.compile(r"(char|[a-z_0-9]+_t) \s*\*\s*\*\s*\w+$")
 # Names that carry a prompt, a result or a document rather than an identifier.
 LARGE = re.compile(r"(json|metadata|content|prompt|body|payload|text|summary|blob"
                    r"|result|output|detail|notes?|message|reason|sql|patch|diff)", re.I)
 
-TIER_OF = {"text": 0, "out_text": 0, "int": 1, "out_num": 2}
-TIER_NAME = {
-    0: "T0  fits the wire today",
-    1: "T1  + integer arguments",
-    2: "T2  + a richer reply (counted, multi-value, or a status beyond ok/miss/fail)",
-    3: "T3  + structured payloads (struct, array, malloc'd out)",
+# What a tag still needs from the wire. A tag absent from this map needs
+# nothing: text, int, out_text, out_num, struct_in and struct_out all cross
+# today, the last two since struct flattening.
+NEEDS = {
+    "out_array": "rows",
+    "alloc_out": "alloc",
+    "json_in": "json",
+    "other": "unknown",
+}
+CAPABILITY = {
+    "rows": "rows -- a list of rows, which is a struct repeated",
+    "alloc": "alloc -- a callee-allocated out-parameter (generator, not frame)",
+    "json": "json -- a cJSON tree, which the wire carries but the client must build",
+    "status": "status -- a return contract beyond ok/miss/fail, per operation",
+    "unknown": "unknown -- a parameter shape the classifier does not recognise",
 }
 
 # A contract that answers with more than success/failure or found/not-found.
@@ -112,7 +146,14 @@ def declarations(root: Path, families: dict[str, str]) -> dict[str, dict]:
     return found
 
 
-def classify(params: str) -> list[str]:
+def enum_types(root: Path) -> set[str]:
+    names: set[str] = set()
+    for header in sorted((root / SOURCE_DIR).glob("*.h")):
+        names.update(ENUM_DECL.findall(header.read_text(errors="ignore")))
+    return names
+
+
+def classify(params: str, enums: frozenset[str] = frozenset()) -> list[str]:
     raw = params.strip()
     parts = [p.strip() for p in raw.split(",")] if raw not in ("void", "") else []
     tags, index = [], 0
@@ -127,7 +168,17 @@ def classify(params: str) -> list[str]:
             tags.append("out_array")
             index += 2
             continue
-        if TEXT.search(current):
+        if following and OUT_TEXT_ROWS.search(current) and ARRAY_LEN.search(following):
+            tags.append("out_array")
+            index += 2
+            continue
+        if OUT_TEXT_ROWS.search(current):
+            tags.append("out_array")
+        elif JSON_IN.search(current):
+            tags.append("json_in")
+        elif ALLOC_OUT.search(current):
+            tags.append("alloc_out")
+        elif TEXT.search(current):
             tags.append("text")
         elif SCALAR.search(current):
             tags.append("int")
@@ -137,6 +188,8 @@ def classify(params: str) -> list[str]:
             tags.append("out_num")
         elif STRUCT_OUT.search(current) or OUT_TEXT.search(current):
             tags.append("struct_out")
+        elif BY_VALUE.search(current) and BY_VALUE.search(current).group(1) in enums:
+            tags.append("int")
         else:
             tags.append("other")
         index += 1
@@ -197,25 +250,25 @@ def survey(root: Path) -> dict:
                 callers[name].add(relative)
 
     operations = {}
+    enums = frozenset(enum_types(root))
     for name, sites in callers.items():
         entry = dict(declared[name], callers=sorted(sites))
-        entry["tags"] = classify(entry["params"])
-        tier = 0
-        for tag in entry["tags"]:
-            tier = max(tier, TIER_OF.get(tag, 3))
+        entry["tags"] = classify(entry["params"], enums)
+        needs = {NEEDS[tag] for tag in entry["tags"] if tag in NEEDS}
+        # A returned string is allocated by the callee like any other.
         if entry["returns"] in ("char *", "const char *"):
-            tier = 3
-        # An operation taking nothing cannot be framed: the request carries at
-        # least one counted field.
-        if not entry["tags"]:
-            tier = max(tier, 2)
-        # One reply value, so a second out buffer has nowhere to go.
-        if entry["tags"].count("out_text") > 1:
-            tier = max(tier, 2)
+            needs.add("alloc")
+        # A return contract that says more than success/failure or found/not
+        # -- a count, or a distinguished refusal like the single-writer -2 --
+        # has nowhere to put the distinction it exists to make. The counted
+        # reply gives it somewhere; what the value MEANS is still a decision
+        # per operation, which is why this stays a blocker and not a feature.
         if RICH_RETURN.search(entry.get("contract", "")):
-            tier = max(tier, 2)
-            entry["rich_return"] = True
-        entry["tier"] = tier
+            needs.add("status")
+        # Zero arguments and a second out buffer were both blockers under the
+        # single-value reply. The counted reply carried them: a request may
+        # declare no fields, and a reply may carry as many as it needs.
+        entry["needs"] = sorted(needs)
         names = [p.split()[-1].lstrip("*") for p in entry["params"].split(",")]
         entry["large_fields"] = sorted({
             field for tag, field in zip(entry["tags"], names)
@@ -224,7 +277,7 @@ def survey(root: Path) -> dict:
 
     # Nullability, for the operations that could migrate today.
     for name, entry in operations.items():
-        if entry["tier"] > 1:
+        if entry["needs"]:
             entry["nullable"] = []
             continue
         positions = [i for i, tag in enumerate(entry["tags"]) if tag == "text"]
@@ -245,20 +298,20 @@ def survey(root: Path) -> dict:
 
 def report(operations: dict) -> None:
     total = len(operations)
-    tiers = collections.Counter(o["tier"] for o in operations.values())
     print(f"DB1 operations with a linked caller: {total}")
     print(f"caller files involved              : "
           f"{len({c for o in operations.values() for c in o['callers']})}\n")
-    running = 0
-    for tier in sorted(tiers):
-        running += tiers[tier]
-        print(f"  {TIER_NAME[tier]:52} {tiers[tier]:>4}   cumulative "
-              f"{running:>3} ({100 * running // total}%)")
+    blocked = collections.Counter(
+        need for o in operations.values() for need in o["needs"])
+    fits = sum(1 for o in operations.values() if not o["needs"])
+    print(f"  {'fits the wire today':62} {fits:>4} ({100 * fits // total}%)")
+    for need, count in blocked.most_common():
+        print(f"  needs {CAPABILITY[need]:56} {count:>4}")
 
-    ready = {n: o for n, o in operations.items() if o["tier"] <= 1}
+    ready = {n: o for n, o in operations.items() if not o["needs"]}
     nullable = {n: o for n, o in ready.items() if o["nullable"]}
     large = {n: o for n, o in ready.items() if o["large_fields"]}
-    print(f"\n  reachable now (T0+T1)                : {len(ready)}")
+    print(f"\n  reachable now                        : {len(ready)}")
     # Both of these were blockers once and are not now. They stay in the report
     # because they say what the reachable set is carrying -- a family full of
     # documents is a different migration from a family full of identifiers --
@@ -274,24 +327,45 @@ def report(operations: dict) -> None:
     # in-process -- the client and the domain would otherwise both define the
     # symbols that did move. Per-operation readiness overstates the work that
     # can be done by roughly six times.
-    per_source = collections.defaultdict(list)
+    per_source = collections.defaultdict(set)
+    source_ops = collections.Counter()
     for entry in operations.values():
-        per_source[entry["source"]].append(entry["tier"])
+        per_source[entry["source"]].update(entry["needs"])
+        source_ops[entry["source"]] += 1
+    done = [s for s, needs in per_source.items() if not needs]
     print("\n  whole sources ready to migrate (the unit that can actually move):")
-    for limit, label in ((1, "today"), (2, "with T2"), (3, "with T3")):
-        done = [s for s, tiers in per_source.items() if max(tiers) <= limit]
-        moved = sum(len(per_source[s]) for s in done)
-        print(f"    {label:9} {len(done):>2} of {len(per_source)} sources"
-              f"   {moved:>3} of {total} operations")
+    print(f"    today     {len(done):>2} of {len(per_source)} sources"
+          f"   {sum(source_ops[s] for s in done):>3} of {total} operations")
 
-    print("\n  by family (ready / total):")
+    # The question this instrument exists to answer: which ONE capability
+    # empties the most sources. A source needing two is unlocked by neither
+    # alone, so these do not sum -- the combined row is what they buy together.
+    print("\n  sources unlocked by adding one capability:")
+    for need in sorted(CAPABILITY):
+        gained = [s for s, n in per_source.items() if n and n <= {need}]
+        if not gained:
+            continue
+        print(f"    + {need:9} {len(gained):>2} more sources"
+              f"   {sum(source_ops[s] for s in gained):>3} operations")
+    for combo in ("rows alloc", "rows alloc json status"):
+        allowed = set(combo.split())
+        gained = [s for s, n in per_source.items() if n and n <= allowed]
+        print(f"    + {combo:17} {len(gained):>2} more sources"
+              f"   {sum(source_ops[s] for s in gained):>3} operations")
+
+    print("\n  by family (ready / total, then what the rest still need):")
     families = collections.defaultdict(collections.Counter)
+    family_needs = collections.defaultdict(collections.Counter)
     for entry in operations.values():
-        families[entry["family"]][entry["tier"]] += 1
+        families[entry["family"]]["ready" if not entry["needs"] else "blocked"] += 1
+        for need in entry["needs"]:
+            family_needs[entry["family"]][need] += 1
     for family in sorted(families, key=lambda f: -sum(families[f].values())):
         counts = families[family]
-        print(f"    {family:14} {counts[0] + counts[1]:>3} / {sum(counts.values()):<3}"
-              f"   behind T2 {counts[2]:>2}   behind T3 {counts[3]:>2}")
+        rest = "  ".join(f"{need} {n}" for need, n in
+                         sorted(family_needs[family].items()))
+        print(f"    {family:14} {counts['ready']:>3} / "
+              f"{sum(counts.values()):<3}   {rest}")
 
 
 def main(argv: list[str] | None = None) -> int:
