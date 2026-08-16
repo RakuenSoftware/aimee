@@ -9,6 +9,7 @@
       "name": "economizer_state",
       "event_kind": 11777,
       "active": true,
+      "doc": "the economizer's per-conversation reducer state. Chosen as the first family because it has exactly one production caller, so it proved the boundary without a wide cutover.",
       "covers": "checkpoints (the economizer's reducer state only)",
       "retired_sources": []
     },
@@ -17,6 +18,7 @@
       "name": "git_ownership",
       "event_kind": 11778,
       "active": true,
+      "doc": "branch ownership for the MCP git flows. Rows say which session owns which branch, so concurrent local sessions do not stomp on each other.",
       "covers": "git_ownership",
       "retired_sources": [
         "git_ownership.c"
@@ -27,6 +29,7 @@
       "name": "sessions",
       "event_kind": 11779,
       "active": false,
+      "doc": "server and webchat session rows.",
       "covers": "server_sessions, primary_sessions, session_state, session_paths, webchat_claude_sessions, webchat_live",
       "retired_sources": []
     },
@@ -35,6 +38,7 @@
       "name": "agent_work",
       "event_kind": 11780,
       "active": false,
+      "doc": "queued agent work: jobs, logs and the cron that drives them.",
       "covers": "agent_jobs, agent_log, coord_jobs, cognify_jobs, db1_cron_jobs, db1_trigger",
       "retired_sources": []
     },
@@ -43,6 +47,7 @@
       "name": "delegation",
       "event_kind": 11781,
       "active": false,
+      "doc": "delegation spawns, reservations and their checkpoints.",
       "covers": "delegations, delegate_reservation, delegate_learning, delegation_checkpoint",
       "retired_sources": []
     },
@@ -51,6 +56,7 @@
       "name": "workflow",
       "event_kind": 11782,
       "active": false,
+      "doc": "the workflow engine's stores, plans and traces.",
       "covers": "wfe_store, wfe_binding, execution_plans, execution_trace, pipelines, roadmap_runtime, roundtable_pipeline",
       "retired_sources": []
     },
@@ -59,6 +65,7 @@
       "name": "conversation",
       "event_kind": 11783,
       "active": false,
+      "doc": "per-conversation context, clarifications and working memory.",
       "covers": "conv_context, clarify, payload_rewrite_state, user_memory, wm, windows",
       "retired_sources": []
     },
@@ -67,6 +74,7 @@
       "name": "identity",
       "event_kind": 11784,
       "active": false,
+      "doc": "secrets and the replay stores behind token consumption.",
       "covers": "secrets, server_identity_jti, server_management_jti, remote_client_grant",
       "retired_sources": []
     },
@@ -75,6 +83,7 @@
       "name": "telemetry",
       "event_kind": 11785,
       "active": false,
+      "doc": "token accounting, evaluations and recorded events.",
       "covers": "token_audit, cost_fold, interaction_events, guardrail_events, eval, ensemble, diagnose, diagnostics",
       "retired_sources": []
     },
@@ -83,6 +92,7 @@
       "name": "runtime",
       "event_kind": 11786,
       "active": false,
+      "doc": "local runtime resolution, caches and model metadata.",
       "covers": "runtime_state, project_clones, local_operator, env, model_catalog, model_pricing, working_profile_local, tool_local_availability, caches, web_page_cache, fsnap, decisions, maintenance, mcp_osv_cache",
       "retired_sources": []
     }
