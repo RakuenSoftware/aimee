@@ -93,7 +93,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/se
                              $(OBJDIR)/server/http_retry.o $(OBJDIR)/server/failover.o \
                              $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/posix/cli_main.o \
 	                             $(OBJDIR)/modules/guardrails/guardrails.o $(OBJDIR)/modules/guardrails/guardrails_orchestrator.o $(OBJDIR)/modules/guardrails/guardrails_action_audit.o $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/modules/guardrails/guardrails_tdd.o $(OBJDIR)/modules/guardrails/guardrails_semantic.o $(OBJDIR)/modules/guardrails/guardrails_blast_radius.o $(OBJDIR)/modules/skills/skill.o $(OBJDIR)/session_state.o $(OBJDIR)/file_safety.o $(OBJDIR)/modules/git/git_verify.o $(OBJDIR)/modules/git/git_verify_state.o $(OBJDIR)/modules/git/git_verify_config.o $(OBJDIR)/modules/git/git_verify_jobs.o $(OBJDIR)/modules/git/git_verify_hook.o $(OBJDIR)/modules/git/git_verify_ops.o $(OBJDIR)/modules/git/git_verify_select.o $(OBJDIR)/modules/git/git_verify_step.o \
-                             $(OBJDIR)/branch_ownership.o \
+                             $(OBJDIR)/branch_ownership.o $(OBJDIR)/modules/db1/git_ownership.o \
                              $(OBJDIR)/dstr.o $(OBJDIR)/diff.o $(OBJDIR)/anchor_snapshot.o $(OBJDIR)/edit_anchored.o \
                              $(OBJDIR)/code_outline.o $(OBJDIR)/modules/tools/agent_tools_anchored.o \
                              $(OBJDIR)/posix/web_read.o \
@@ -659,6 +659,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-toolset \
                $(TESTPREFIX)/unit-test-db1-cost-fold \
                $(TESTPREFIX)/unit-test-db1-module-stage \
+               $(TESTPREFIX)/unit-test-db1-git-ownership-client \
                $(TESTPREFIX)/unit-test-db1-roundtable-pipeline \
                $(TESTPREFIX)/unit-test-roundtable-pipeline-eval \
                $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk \
@@ -4950,6 +4951,15 @@ $(TESTPREFIX)/unit-test-toolset: \
 # module_runtime.h's declarations. db1_init/db_schema/checkpoints give it a real
 # store to round-trip through, because a handler that only parses proves nothing
 # about what a caller gets back.
+# The bus client the daemon links in place of the domain. Stubs the bus: the
+# framing and the result mapping are what this pins, and the module that answers
+# these frames is covered by unit-test-db1-module-stage.
+$(TESTPREFIX)/unit-test-db1-git-ownership-client: \
+                                       $(OBJDIR)/tests/test_db1_git_ownership_client.o \
+                                       $(OBJDIR)/db1_client/git_ownership.o \
+                                       $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
 $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/tests/test_db1_module_stage.o \
                                        $(OBJDIR)/modules/db1/module_adapter.o \

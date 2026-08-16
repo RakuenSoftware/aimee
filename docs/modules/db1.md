@@ -27,6 +27,14 @@ when Phase B has moved those callers, not before.
 | 1 `db1-economizer-state` | `11777` | the economizer's per-conversation reducer state |
 | 2 `db1-git-ownership` | `11778` | which session owns which branch, for the MCP git flows |
 
+Branch ownership's callers now cross the bus. The daemon links
+`src/db1_client/git_ownership.c` in place of the domain, so nothing that calls
+branch ownership changed: the same functions, the same contract, a different
+side of the boundary. Enforcement fails OPEN when the module is unreachable,
+which is what it has always done without a database -- but the failure surface
+is larger now that it depends on a separate process, so the client says once,
+loudly, that the guard is off rather than letting it look quiet.
+
 Stage 1 is first because it has exactly one production caller, so it proves the
 boundary without a wide cutover. Its callers now reach it over the bus: the
 economizer loads and saves its own reducer state and no longer has that blob

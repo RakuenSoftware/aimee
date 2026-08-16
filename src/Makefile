@@ -322,8 +322,15 @@ CORE_OBJS = $(CORE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o
 # of the tree call typed domain functions declared in modules/db1/*.h and never
 # see a handle. src/tests/support/{db1_init,wm}_mock.c are alternative implementations linked by
 # tests that want to exercise the API contract without a real backend.
-DB1_SRCS = modules/db1/db1_init.c modules/db1/db1_write.c modules/db1/wm.c modules/db1/fsnap.c modules/db1/checkpoints.c modules/db1/roadmap_runtime.c modules/db1/clarify.c modules/db1/diagnose.c modules/db1/ensemble.c modules/db1/caches.c modules/db1/web_page_cache.c modules/db1/primary_sessions.c modules/db1/webchat_claude_sessions.c modules/db1/webchat_live.c modules/db1/env.c modules/db1/delegations.c modules/db1/delegation_checkpoint.c modules/db1/decisions.c modules/db1/eval.c modules/db1/runtime_state.c modules/db1/server_sessions.c modules/db1/session_state.c modules/db1/session_paths.c modules/db1/token_audit.c modules/db1/model_pricing.c modules/db1/agent_log.c modules/db1/agent_jobs.c modules/db1/coord_jobs.c modules/db1/execution_plans.c modules/db1/pipelines.c modules/db1/roundtable_pipeline.c modules/db1/secrets.c modules/db1/cognify_jobs.c modules/db1/cost_fold.c modules/db1/local_operator.c modules/db1/remote_client_grant.c modules/db1/project_clones.c modules/db1/git_ownership.c modules/db1/tool_local_availability.c modules/db1/model_catalog.c modules/db1/execution_trace.c modules/db1/working_profile_local.c modules/db1/windows.c modules/db1/diagnostics.c modules/db1/maintenance.c modules/db1/conv_context.c modules/db1/payload_rewrite_state.c modules/db1/guardrail_events.c modules/db1/db1_trigger.c modules/db1/db1_cron_jobs.c modules/db1/delegate_learning.c modules/db1/delegate_reservation.c modules/db1/interaction_events.c modules/db1/mcp_osv_cache.c modules/db1/server_management_jti.c modules/db1/server_identity_jti.c server/server_mgmt_jwks_cache.c modules/db1/wfe_store.c modules/db1/wfe_binding.c modules/db1/user_memory.c
+DB1_SRCS = modules/db1/db1_init.c modules/db1/db1_write.c modules/db1/wm.c modules/db1/fsnap.c modules/db1/checkpoints.c modules/db1/roadmap_runtime.c modules/db1/clarify.c modules/db1/diagnose.c modules/db1/ensemble.c modules/db1/caches.c modules/db1/web_page_cache.c modules/db1/primary_sessions.c modules/db1/webchat_claude_sessions.c modules/db1/webchat_live.c modules/db1/env.c modules/db1/delegations.c modules/db1/delegation_checkpoint.c modules/db1/decisions.c modules/db1/eval.c modules/db1/runtime_state.c modules/db1/server_sessions.c modules/db1/session_state.c modules/db1/session_paths.c modules/db1/token_audit.c modules/db1/model_pricing.c modules/db1/agent_log.c modules/db1/agent_jobs.c modules/db1/coord_jobs.c modules/db1/execution_plans.c modules/db1/pipelines.c modules/db1/roundtable_pipeline.c modules/db1/secrets.c modules/db1/cognify_jobs.c modules/db1/cost_fold.c modules/db1/local_operator.c modules/db1/remote_client_grant.c modules/db1/project_clones.c modules/db1/tool_local_availability.c modules/db1/model_catalog.c modules/db1/execution_trace.c modules/db1/working_profile_local.c modules/db1/windows.c modules/db1/diagnostics.c modules/db1/maintenance.c modules/db1/conv_context.c modules/db1/payload_rewrite_state.c modules/db1/guardrail_events.c modules/db1/db1_trigger.c modules/db1/db1_cron_jobs.c modules/db1/delegate_learning.c modules/db1/delegate_reservation.c modules/db1/interaction_events.c modules/db1/mcp_osv_cache.c modules/db1/server_management_jti.c modules/db1/server_identity_jti.c server/server_mgmt_jwks_cache.c modules/db1/wfe_store.c modules/db1/wfe_binding.c modules/db1/user_memory.c
 DB1_OBJS = $(DB1_SRCS:%.c=$(OBJDIR)/%.o)
+
+# Branch ownership is served by the DB1 module now, so the daemon links the bus
+# client rather than the domain. The domain itself still builds -- the module
+# process compiles it from the descriptor -- it just no longer sits inside this
+# binary. See src/db1_client/git_ownership.c.
+DB1_CLIENT_SRCS = db1_client/git_ownership.c
+DB1_CLIENT_OBJS = $(DB1_CLIENT_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 0c: DB2 (shared knowledge tier) ---
 DB2_PG_SRCS = modules/db2/c/db_postgres.c
@@ -860,12 +867,12 @@ GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o \
                $(OBJDIR)/modules/vault/runtime_secret.o $(GATEWAY_PLATFORM_OBJS)
 
 # All source files for linting (excluding vendored cJSON)
-ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c modules/db2/c/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c modules/db2/c/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c modules/db2/c/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
+ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB1_CLIENT_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c modules/db2/c/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c modules/db2/c/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c modules/db2/c/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
            $(CORE_CONNECTION_SRCS) $(CORE_EVENT_BUS_SRCS) $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(KB_SYNTHESIS_SRCS) $(GATEWAY_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
 LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(wildcard tests/fuzz_*.c) $(wildcard tests/bench_*.c)
 
 # All object files for dependency tracking
-ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS) $(STATUS_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) $(CMD_OBJS) \
+ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS) $(STATUS_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) $(CMD_OBJS) \
            $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(GATEWAY_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
 # Header dependency tracking must cover EVERY object we compile, not just the ones
 # a hand-maintained *_OBJS variable happens to name. Objects reachable only as a
@@ -1315,7 +1322,7 @@ $(RUNTIME_WEB): $(RUNTIME_WEB_GO_SRCS)
 # synthesize a tcp: endpoint from a --server / AIMEE_SERVER_URL / remote.conf
 # target. --gc-sections drops the rest of aimee_client (the actual TCP/TLS
 # transport), so no extra net/tls/uds objects are needed here.
-$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(AUDIT_REPLAY_OBJ) $(OBJDIR)/aimee_client.o $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB)
+$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(AUDIT_REPLAY_OBJ) $(OBJDIR)/aimee_client.o $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_SERVER)
 
