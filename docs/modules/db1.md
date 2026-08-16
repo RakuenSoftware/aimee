@@ -27,7 +27,37 @@ when Phase B has moved those callers, not before.
 | 1 `db1-economizer-state` | `11777` | the economizer's per-conversation reducer state |
 
 Stage 1 is first because it has exactly one production caller, so it proves the
-boundary without a wide cutover.
+boundary without a wide cutover. Its callers now reach it over the bus: the
+economizer loads and saves its own reducer state and no longer has that blob
+carried in and back out by the seam.
+
+The remaining domains are declared as reserved families in
+`src/modules/db1/eventcontract/operations.json`, the same shape DB2 uses. A
+family owns one event kind and its operations dispatch on an op id inside the
+payload, so DB1 needs one stage per domain rather than one per call -- roughly
+sixty domains against a ceiling of 255.
+
+Reserving the kinds up front is what keeps the numbering stable: a family
+activated later answers the kind it was always going to answer, so a migration
+that has already shipped cannot be renumbered by one that follows. Each
+reservation names the sources it will cover, which makes the outstanding work
+countable from the catalog instead of rediscovered each time. Regrouping or
+renaming a RESERVED family is free; an active one is a contract callers already
+speak. `scripts/gen_db1_contract.py` enforces all of that, and refuses wire
+constants for a family nothing serves yet.
+
+| Family | Event kind | State |
+| --- | --- | --- |
+| 1 `economizer_state` | `11777` | active |
+| 2 `git_ownership` | `11778` | reserved |
+| 3 `sessions` | `11779` | reserved |
+| 4 `agent_work` | `11780` | reserved |
+| 5 `delegation` | `11781` | reserved |
+| 6 `workflow` | `11782` | reserved |
+| 7 `conversation` | `11783` | reserved |
+| 8 `identity` | `11784` | reserved |
+| 9 `telemetry` | `11785` | reserved |
+| 10 `runtime` | `11786` | reserved |
 
 ## Dependencies and consumers
 

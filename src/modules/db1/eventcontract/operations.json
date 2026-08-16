@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "module": "db1",
+  "wire_version": 1,
+  "catalog_complete": false,
+  "families": [
+    {
+      "id": 1,
+      "name": "economizer_state",
+      "event_kind": 11777,
+      "active": true,
+      "covers": "checkpoints"
+    },
+    {
+      "id": 2,
+      "name": "git_ownership",
+      "event_kind": 11778,
+      "active": false,
+      "covers": "git_ownership, project_clones"
+    },
+    {
+      "id": 3,
+      "name": "sessions",
+      "event_kind": 11779,
+      "active": false,
+      "covers": "server_sessions, primary_sessions, session_state, session_paths, webchat_claude_sessions, webchat_live"
+    },
+    {
+      "id": 4,
+      "name": "agent_work",
+      "event_kind": 11780,
+      "active": false,
+      "covers": "agent_jobs, agent_log, coord_jobs, cognify_jobs, db1_cron_jobs, db1_trigger"
+    },
+    {
+      "id": 5,
+      "name": "delegation",
+      "event_kind": 11781,
+      "active": false,
+      "covers": "delegations, delegate_reservation, delegate_learning, delegation_checkpoint"
+    },
+    {
+      "id": 6,
+      "name": "workflow",
+      "event_kind": 11782,
+      "active": false,
+      "covers": "wfe_store, wfe_binding, execution_plans, execution_trace, pipelines, roadmap_runtime, roundtable_pipeline"
+    },
+    {
+      "id": 7,
+      "name": "conversation",
+      "event_kind": 11783,
+      "active": false,
+      "covers": "conv_context, clarify, payload_rewrite_state, user_memory, wm, windows"
+    },
+    {
+      "id": 8,
+      "name": "identity",
+      "event_kind": 11784,
+      "active": false,
+      "covers": "secrets, server_identity_jti, server_management_jti, remote_client_grant, local_operator"
+    },
+    {
+      "id": 9,
+      "name": "telemetry",
+      "event_kind": 11785,
+      "active": false,
+      "covers": "token_audit, cost_fold, interaction_events, guardrail_events, eval, ensemble, diagnose, diagnostics"
+    },
+    {
+      "id": 10,
+      "name": "runtime",
+      "event_kind": 11786,
+      "active": false,
+      "covers": "runtime_state, env, model_catalog, model_pricing, working_profile_local, tool_local_availability, caches, web_page_cache, fsnap, decisions, maintenance, mcp_osv_cache"
+    }
+  ],
+  "result_codes": [
+    "ok",
+    "missing",
+    "invalid",
+    "too_long",
+    "failed"
+  ],
+  "operations": [
+    {
+      "family": "economizer_state",
+      "id": 1,
+      "name": "state_load",
+      "wire_format": "db1-keyed-blob-v1",
+      "scope": "conversation",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          "key"
+        ]
+      },
+      "reply": {
+        "payload": "state",
+        "max_bytes": 6144
+      }
+    },
+    {
+      "family": "economizer_state",
+      "id": 2,
+      "name": "state_save",
+      "wire_format": "db1-keyed-blob-v1",
+      "scope": "conversation",
+      "transaction": "single",
+      "idempotency": "idempotent",
+      "results": [
+        "ok",
+        "invalid",
+        "too_long",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          "key",
+          "state"
+        ]
+      },
+      "reply": {
+        "payload": "none",
+        "max_bytes": 0
+      }
+    }
+  ]
+}
