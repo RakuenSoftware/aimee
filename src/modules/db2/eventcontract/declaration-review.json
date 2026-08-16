@@ -4,6 +4,14 @@
   "declarations_complete": false,
   "reviews": [
     {
+      "symbol": "db2_health_probe",
+      "signature_sha256": "325f260c51f255dae61d7323836bc549a712cb5486abeb4f4967ffdc57ac05ee",
+      "disposition": "wire-operation",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "The typed lifecycle.health operation replaces production direct callers; PostgreSQL schema and extension readiness remain DB2 authority."
+    },
+    {
       "symbol": "pgvec_code_delete_project",
       "signature_sha256": "45c29c809f61b8e5477df2aeed71c164879447e1dabdc6ff27509b799384da9a",
       "disposition": "private-db2",

@@ -53,6 +53,12 @@
       "ctest": true,
       "make": true,
       "module": "db2",
+      "test": "src/tests/test_bus_db2_module.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "db2",
       "test": "src/tests/test_db2_module_contract.c"
     },
     {

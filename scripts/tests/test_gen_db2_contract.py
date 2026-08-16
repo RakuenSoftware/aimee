@@ -40,6 +40,8 @@ class ContractTests(unittest.TestCase):
             generator.DESCRIPTOR,
             generator.PROCESS_CONTRACTS,
             generator.HEADER,
+            generator.CLIENT_HEADER,
+            generator.CLIENT_SOURCE,
             generator.BASELINE,
             generator.DECLARATION_REVIEW,
             generator.DECLARATION_LEDGER,
@@ -52,12 +54,16 @@ class ContractTests(unittest.TestCase):
     def test_production_catalog_and_generated_outputs_match(self) -> None:
         generator.run(REPO_ROOT, False)
         catalog = generator.validate_catalog(generator.load_json(REPO_ROOT / generator.CATALOG))
-        header, baseline = generator.generated(REPO_ROOT)
+        header, client_header, client_source, baseline = generator.generated(REPO_ROOT)
         self.assertEqual(header, (REPO_ROOT / generator.HEADER).read_bytes())
+        self.assertEqual(client_header, (REPO_ROOT / generator.CLIENT_HEADER).read_bytes())
+        self.assertEqual(client_source, (REPO_ROOT / generator.CLIENT_SOURCE).read_bytes())
         self.assertEqual(baseline, (REPO_ROOT / generator.BASELINE).read_bytes())
         fingerprint = generator.catalog_fingerprint(catalog)
         self.assertIn(fingerprint.encode(), header)
         self.assertIn(b"#define AIMEE_DB2_RESULT_INVALID_STATE 5u", header)
+        self.assertIn(b"aimee_db2_health_call", client_header)
+        self.assertIn(b"AIMEE_MODULE_CALL_PROTOCOL", client_source)
         self.assertEqual(json.loads(baseline)["catalog_sha256"], fingerprint)
         self.assertEqual(
             json.loads(baseline)["result_codes"],
@@ -227,6 +233,8 @@ class ContractTests(unittest.TestCase):
         try:
             root = Path(temporary.name)
             (root / generator.HEADER).unlink()
+            (root / generator.CLIENT_HEADER).unlink()
+            (root / generator.CLIENT_SOURCE).unlink()
             (root / generator.BASELINE).unlink()
             generator.run(root, True)
             generator.run(root, False)

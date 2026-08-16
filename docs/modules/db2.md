@@ -11,8 +11,10 @@ carved out of the KB link.
 ## Public contracts
 
 The C process owns principal 29 and event `11521`. Its descriptor owns
-`eventcontract/operations.json`, which generates the public C header and the fingerprinted positive
-and negative wire vectors. The fixed eight-byte request carries only magic and wire version. The
+`eventcontract/operations.json`, which generates the public C codec, transport-agnostic typed C
+client, and fingerprinted positive and negative wire vectors. The client accepts a bus-call
+function rather than depending on a daemon global, so `aimee-kb` and parity harnesses exercise the
+same bytes. The fixed eight-byte request carries only magic and wire version. The
 fixed sixteen-byte response carries schema, `pg_trgm`, and KB-table evidence; unknown flags and
 non-zero reserved bytes fail closed. Until the descriptor includes the complete DB2 C closure, an
 exported standalone process returns typed `capability_absent` instead of reporting false readiness.
@@ -22,8 +24,9 @@ exported standalone process returns typed `capability_absent` instead of reporti
 - `config`: owns deployment configuration and the existing DB2 configuration surface.
 - `module-runtime`: owns authenticated event-bus process admission and lifecycle transport.
 
-No production consumer is switched in this increment. The existing in-process health callers remain
-authoritative until the atomic activation slice moves every lifecycle caller and the DB2 DSN together.
+No production consumer is switched in this increment. `aimee-kb` now compiles the generated client
+behind `kb_module_db2_health_probe`, but the existing in-process health callers remain authoritative
+until the atomic activation slice moves every lifecycle caller and the DB2 DSN together.
 
 ## Providers and readiness
 
@@ -42,6 +45,10 @@ clients, and removes DB2/libpq objects from `aimee-kb`; there is no in-image loc
 - `runtime_toggle.supported`: `false`; the disabled process shell is a build artifact, not a
   production runtime choice. Activation changes the complete image contract atomically.
 
+`check_db2_activation.py` makes that sequencing executable. Setting `enabled_by_default` is rejected
+unless the descriptor declares every inventoried DB2 C translation unit, weak backend resolution is
+gone, and the declaration ledger proves that `db2_health_probe` has no production direct callers.
+
 ## Surfaces
 
 The only current surface is `AIMEE_DB2_EVENT_HEALTH` on the KB-local Unix-domain module bus. There
@@ -58,7 +65,8 @@ records identical duplicate declarations by location, and fails on conflicting s
 ledger also tokenizes every frozen consumer so test-only and production references cannot be
 confused. At this checkpoint 166 declarations are unconsumed implementation details, 273 are used
 only by private implementation tests, 61 externally referenced `pgvec_*` declarations are
-explicitly private and retained in DB2, and 851 production-consumed declarations remain
+explicitly private and retained in DB2, lifecycle health is a reviewed retained-DB2 wire operation,
+and 850 production-consumed declarations remain
 without a reviewed disposition.
 
 A review transition binds the symbol and normalized-signature hash to one closed disposition,
@@ -90,13 +98,17 @@ closure returns `capability_absent`, making partial packaging visible and non-au
 
 Focused C tests cover every response flag combination, malformed magic/version/length, unknown
 flags, reserved bytes, wrong stage, undersized output, cancellation, missing callbacks, backend
-failure, and successful encode-handler-decode. Runtime-bundle tests compile the descriptor-owned C
+failure, typed-client transport/protocol failures, and successful encode-handler-decode. A dedicated
+integration test crosses the real authenticated event bus from the generated client through the
+module runtime into the C handler and verifies non-zero evidence. Runtime-bundle tests compile the
+descriptor-owned C
 process. Catalog tests mutate every closed field, process/descriptor binding, resource limit, and
 generated artifact. Boundary tests prohibit any direct import from `src/modules/db2/c` into private
 `src/kb`. Declaration-ledger tests cover C linkage blocks, multiline and callback declarations,
 comments/literals/directives, identical and conflicting duplicates, malformed nesting, resource
 limits, signature-bound review transitions, pgvector retention, output symlinks, reproducibility,
-and unchanged-output failure.
+and unchanged-output failure. Activation-gate mutation tests prove that an incomplete source list,
+weak backend, or remaining direct production caller prevents enablement.
 
 ## Operational diagnostics
 
@@ -114,7 +126,8 @@ until the complete process cutover is ready.
 ## Extension and removal
 
 Next increments review the remaining production declarations, map them to typed operations or
-private/compatibility dispositions, generate C client/dispatch, package the complete C source
+private/compatibility dispositions, generate the remaining C dispatch families, package the complete
+C source
 closure, and add replay gates before activation. After parity, a pure-Go implementation
 replaces the C process behind the same contract. The `src/modules/db2/c` tree is removed only after
 the Go runtime is the sole deployed provider and every boundary test proves the old link and fallback

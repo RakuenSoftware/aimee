@@ -47,8 +47,8 @@ class DeclarationLedgerTests(unittest.TestCase):
         self.assertEqual(value["summary"], {
             "headers": 137,
             "declarations": 1351,
-            "reviewed": 61,
-            "audit_pending": 851,
+            "reviewed": 62,
+            "audit_pending": 850,
             "internal_unconsumed": 166,
             "private_test_only": 273,
         })
@@ -63,6 +63,10 @@ class DeclarationLedgerTests(unittest.TestCase):
         self.assertTrue(all(row["review"]["disposition"] == "private-db2" and
                             row["review"]["db3_placement"] == "retained-db2"
                             for row in pgvector))
+        health = next(row for row in value["declarations"]
+                      if row["symbol"] == "db2_health_probe")
+        self.assertEqual(health["review"]["disposition"], "wire-operation")
+        self.assertEqual(health["review"]["db3_placement"], "retained-db2")
 
     def test_parser_handles_linkage_multiline_callbacks_and_comments(self) -> None:
         source = r'''

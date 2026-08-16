@@ -106,6 +106,22 @@ class BoundaryTests(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def test_public_generated_client_is_not_a_private_boundary_consumer(self) -> None:
+        tmp = self.repo()
+        try:
+            root = Path(tmp.name)
+            (root / "src/kb/consumer.c").write_text(
+                '#include <aimee/db2/client.h>\n', encoding="utf-8"
+            )
+            inventory = checker.build_inventory(root, self.revision)
+            self.assertNotIn(
+                "src/kb/consumer.c",
+                {row["path"] for row in inventory["consumers"]},
+            )
+            checker.check(root)
+        finally:
+            tmp.cleanup()
+
     def test_include_removal_is_allowed(self) -> None:
         tmp = self.repo()
         try:

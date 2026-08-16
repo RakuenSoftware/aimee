@@ -725,7 +725,8 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-server-mgmt-jwks-cache
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening
 TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
-TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract
+TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
+                $(TESTPREFIX)/unit-test-bus-db2-module
 
 MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/memory.o \
@@ -3223,11 +3224,41 @@ $(OBJDIR)/modules/db2/module_adapter.o: C_FLAGS += -Icore/event_bus/include \
                                                    -Imodules/db2/include
 $(TESTPREFIX)/unit-test-db2-module-contract: \
                                         $(OBJDIR)/tests/test_db2_module_contract.o \
+                                        $(OBJDIR)/modules/db2/client/generated.o \
                                         $(OBJDIR)/modules/db2/module_adapter.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
 
 .PHONY: unit-test-db2-module-contract
 unit-test-db2-module-contract: $(TESTPREFIX)/unit-test-db2-module-contract
+	$<
+
+$(OBJDIR)/tests/test_bus_db2_module.o: C_FLAGS += -Icore/event_bus/include \
+                                                   -Imodules/db2 \
+                                                   -Imodules/db2/include
+$(OBJDIR)/modules/db2/client/generated.o: C_FLAGS += -Icore/event_bus/include \
+                                                        -Imodules/db2/include
+$(TESTPREFIX)/unit-test-bus-db2-module: \
+                                        $(OBJDIR)/tests/test_bus_db2_module.o \
+                                        $(OBJDIR)/modules/db2/client/generated.o \
+                                        $(OBJDIR)/modules/db2/module_adapter.o \
+                                        $(OBJDIR)/core/event_bus/module_client.o \
+                                        $(OBJDIR)/core/event_bus/module_runtime.o \
+                                        $(OBJDIR)/core/event_bus/module_protocol.o \
+                                        $(OBJDIR)/core/event_bus/bus_runtime.o \
+                                        $(OBJDIR)/core/event_bus/bus_endpoint.o \
+                                        $(OBJDIR)/core/event_bus/bus_client.o \
+                                        $(OBJDIR)/core/event_bus/bus_attach.o \
+                                        $(OBJDIR)/core/event_bus/bus_host.o \
+                                        $(OBJDIR)/core/event_bus/bus_route.o \
+                                        $(OBJDIR)/core/event_bus/bus_region.o \
+                                        $(OBJDIR)/core/event_bus/bus_region_host.o \
+                                        $(OBJDIR)/core/event_bus/bus_ring.o \
+                                        $(OBJDIR)/core/event_bus/bus_arena.o \
+                                        $(OBJDIR)/core/event_bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-db2-module
+unit-test-bus-db2-module: $(TESTPREFIX)/unit-test-bus-db2-module
 	$<
 
 # Event-bus conformance host harness (feature tree slice 10). A test binary that

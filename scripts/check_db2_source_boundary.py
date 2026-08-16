@@ -132,7 +132,7 @@ def _is_db2_include(target: str) -> bool:
     # This is the replacement process contract, not a direct implementation
     # dependency. New callers may adopt it while the old private-header
     # inventory remains shrink-only.
-    if target == "aimee/db2/module_api.h":
+    if target.startswith("aimee/db2/"):
         return False
     path = PurePosixPath(target)
     parts = path.parts

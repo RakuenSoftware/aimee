@@ -8255,9 +8255,15 @@
           "line": 218
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "lifecycle",
+        "reason": "The typed lifecycle.health operation replaces production direct callers; PostgreSQL schema and extension readiness remain DB2 authority."
+      },
       "signature": "int db2_health_probe ( int * schema_ok , int * have_pg_trgm )",
       "signature_sha256": "325f260c51f255dae61d7323836bc549a712cb5486abeb4f4967ffdc57ac05ee",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_health_probe"
     },
     {
@@ -23478,15 +23484,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "8cce62f423877411524c432e76ce96d4b9222393be06a6d9b45aca98b72cf57f",
+  "fingerprint": "44fab13c2035929820440965263aa1a159bf9a99cc4a281ee22324953c85796f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 851,
+    "audit_pending": 850,
     "declarations": 1351,
     "headers": 137,
     "internal_unconsumed": 166,
     "private_test_only": 273,
-    "reviewed": 61
+    "reviewed": 62
   }
 }

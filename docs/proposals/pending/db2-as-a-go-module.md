@@ -1,10 +1,11 @@
 # Proposal: put DB2 behind a module boundary, then port it to Go
 
 - **State:** PENDING — the C source boundary and separately buildable C process shell are registered;
-  the descriptor owns the generated health contract and declaration-review source, all 1,351
-  external C declarations are mechanically inventoried, and provider-specific pgvector declarations
-  are explicitly retained/private; no production DB2 operation has moved behind the process boundary
-  yet.
+  the descriptor owns the generated health contract, typed C client, and declaration-review source;
+  all 1,351 external C declarations are mechanically inventoried, lifecycle health is reviewed as a
+  retained-DB2 wire operation, and provider-specific pgvector declarations are explicitly
+  retained/private. The typed client/handler path passes through the real event bus, but production
+  remains on direct calls until the standalone C backend is complete.
 - **Date:** 2026-08-15.
 - **Charter roles:** Constrain-Verify / Gate-Promote.
 - **Thesis:** DB2 was created as a portable source boundary and now resides intact at

@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <aimee/db2/module_api.h>
+#include <aimee/db2/client.h>
 
 #include "module_adapter.h"
 
@@ -14,6 +15,10 @@ static int health_result;
 static int kb_health_result;
 static int health_calls;
 static int kb_health_calls;
+static aimee_module_call_result_t transport_result;
+static uint8_t transport_response[AIMEE_DB2_RESPONSE_LEN];
+static uint32_t transport_response_len;
+static int transport_calls;
 
 int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
 {
@@ -49,6 +54,34 @@ static void reset(void)
    kb_health_result = 0;
    health_calls = 0;
    kb_health_calls = 0;
+   transport_result = AIMEE_MODULE_CALL_OK;
+   transport_response_len = AIMEE_DB2_RESPONSE_LEN;
+   transport_calls = 0;
+   assert(aimee_db2_health_response_encode(AIMEE_DB2_FLAG_SCHEMA | AIMEE_DB2_FLAG_KB_TABLES,
+                                           transport_response, sizeof(transport_response)) == 0);
+}
+
+static aimee_module_call_result_t
+transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_id,
+          uint64_t deadline_ns, const void *request_body, uint32_t request_len, void *response_body,
+          uint32_t response_capacity, uint32_t *response_len,
+          aimee_module_cancelled_fn cancelled_fn, void *cancel_context)
+{
+   assert(context == (void *)0x1234);
+   assert(event_kind == AIMEE_DB2_EVENT_HEALTH);
+   assert(stage_id == AIMEE_DB2_STAGE_HEALTH);
+   assert(trace_id == 77);
+   assert(deadline_ns == 88);
+   assert(aimee_db2_health_request_decode(request_body, request_len) == 0);
+   assert(cancelled_fn == NULL && cancel_context == NULL);
+   transport_calls++;
+   if (transport_result != AIMEE_MODULE_CALL_OK)
+      return transport_result;
+   if (transport_response_len > response_capacity)
+      return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+   memcpy(response_body, transport_response, transport_response_len);
+   *response_len = transport_response_len;
+   return AIMEE_MODULE_CALL_OK;
 }
 
 static void test_wire_contract(void)
@@ -182,10 +215,41 @@ static void test_handler_success_and_failures(void)
    assert(kb_health_calls == prior_kb_health_calls + 1);
 }
 
+static void test_typed_client(void)
+{
+   reset();
+   int schema_ok = 9, have_pg_trgm = 9, kb_tables_ok = 9;
+   assert(aimee_db2_health_call(NULL, NULL, 77, 88, &schema_ok, &have_pg_trgm, &kb_tables_ok, NULL,
+                                NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(!schema_ok && !have_pg_trgm && !kb_tables_ok);
+
+   assert(aimee_db2_health_call(transport, (void *)0x1234, 77, 88, &schema_ok, &have_pg_trgm,
+                                &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(schema_ok && !have_pg_trgm && kb_tables_ok);
+   assert(transport_calls == 1);
+
+   transport_result = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+   schema_ok = have_pg_trgm = kb_tables_ok = 9;
+   assert(aimee_db2_health_call(transport, (void *)0x1234, 77, 88, &schema_ok, &have_pg_trgm,
+                                &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
+   assert(!schema_ok && !have_pg_trgm && !kb_tables_ok);
+
+   transport_result = AIMEE_MODULE_CALL_OK;
+   transport_response[0] ^= 1u;
+   assert(aimee_db2_health_call(transport, (void *)0x1234, 77, 88, &schema_ok, &have_pg_trgm,
+                                &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_PROTOCOL);
+   assert(!schema_ok && !have_pg_trgm && !kb_tables_ok);
+   transport_response[0] ^= 1u;
+   transport_response_len--;
+   assert(aimee_db2_health_call(transport, (void *)0x1234, 77, 88, NULL, NULL, NULL, NULL, NULL) ==
+          AIMEE_MODULE_CALL_PROTOCOL);
+}
+
 int main(void)
 {
    test_wire_contract();
    test_handler_success_and_failures();
+   test_typed_client();
    puts("test_db2_module_contract: ok");
    return 0;
 }
