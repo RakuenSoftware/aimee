@@ -36,6 +36,12 @@ def sandbox() -> tempfile.TemporaryDirectory[str]:
         shutil.copy2(REPO_ROOT / relative, target)
     for source in (REPO_ROOT / contract.SOURCE_DIR).glob("*.c"):
         (root / contract.SOURCE_DIR / source.name).touch()
+    # The generated clients are real content, not placeholders: the contract
+    # compares them byte for byte.
+    for client in (REPO_ROOT / contract.CLIENT_DIR).glob("*.c"):
+        target = root / contract.CLIENT_DIR / client.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(client, target)
     return tmp
 
 

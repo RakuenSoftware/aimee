@@ -28,6 +28,7 @@
       "event_kind": 11777,
       "active": true,
       "doc": "the economizer's per-conversation reducer state. Chosen as the first family because it has exactly one production caller, so it proved the boundary without a wide cutover.",
+      "client_doc": "",
       "covers": "checkpoints (the economizer's reducer state only)",
       "sources": [
         "checkpoints"
@@ -40,6 +41,7 @@
       "event_kind": 11778,
       "active": true,
       "doc": "branch ownership for the MCP git flows. Rows say which session owns which branch, so concurrent local sessions do not stomp on each other.",
+      "client_doc": "A failure returns -1, never \"no owner\". branch_own_check() reads a negative as \"no enforcement\" and allows the operation, which is what it has always done without a database, whereas a fabricated 0 would assert the branch is unowned and let a caller take one somebody else holds.",
       "covers": "git_ownership",
       "sources": [
         "git_ownership"
@@ -54,6 +56,7 @@
       "event_kind": 11779,
       "active": false,
       "doc": "server and webchat session rows.",
+      "client_doc": "",
       "covers": "server_sessions, primary_sessions, session_state, session_paths, webchat_claude_sessions, webchat_live",
       "sources": [
         "primary_sessions",
@@ -71,6 +74,7 @@
       "event_kind": 11780,
       "active": false,
       "doc": "queued agent work: logs, coordination jobs and the cron that drives them.",
+      "client_doc": "",
       "covers": "agent_log, coord_jobs, cognify_jobs, db1_cron_jobs, db1_trigger",
       "sources": [
         "agent_log",
@@ -87,6 +91,7 @@
       "event_kind": 11781,
       "active": false,
       "doc": "delegation spawns, reservations, checkpoints and the agent_jobs ledger they reserve against. These move as ONE unit: a reservation resolves to a job id, and server_compute.c records that the ledger and the launch were deliberately co-located because a ledger across a boundary from the launch left paid-for jobs that nothing could replay. Splitting them across families would restore exactly that topology one migration at a time.",
+      "client_doc": "",
       "covers": "delegations, delegate_reservation, delegate_learning, delegation_checkpoint, agent_jobs",
       "sources": [
         "agent_jobs",
@@ -103,6 +108,7 @@
       "event_kind": 11782,
       "active": false,
       "doc": "the workflow engine's stores, plans and traces.",
+      "client_doc": "",
       "covers": "wfe_store, wfe_binding, execution_plans, execution_trace, pipelines, roadmap_runtime, roundtable_pipeline",
       "sources": [
         "execution_plans",
@@ -121,6 +127,7 @@
       "event_kind": 11783,
       "active": false,
       "doc": "per-conversation context, clarifications and working memory.",
+      "client_doc": "",
       "covers": "conv_context, clarify, payload_rewrite_state, user_memory, wm, windows",
       "sources": [
         "clarify",
@@ -138,6 +145,7 @@
       "event_kind": 11784,
       "active": false,
       "doc": "secrets and the replay stores behind token consumption.",
+      "client_doc": "",
       "covers": "secrets, server_identity_jti, server_management_jti, remote_client_grant",
       "sources": [
         "remote_client_grant",
@@ -153,6 +161,7 @@
       "event_kind": 11785,
       "active": false,
       "doc": "token accounting, evaluations and recorded events.",
+      "client_doc": "",
       "covers": "token_audit, cost_fold, interaction_events, guardrail_events, eval, ensemble, diagnose, diagnostics",
       "sources": [
         "cost_fold",
@@ -172,6 +181,7 @@
       "event_kind": 11786,
       "active": false,
       "doc": "local runtime resolution, caches and model metadata.",
+      "client_doc": "",
       "covers": "runtime_state, project_clones, local_operator, env, model_catalog, model_pricing, working_profile_local, tool_local_availability, caches, web_page_cache, fsnap, decisions, maintenance, mcp_osv_cache",
       "sources": [
         "caches",
@@ -253,6 +263,12 @@
       "family": "git_ownership",
       "id": 1,
       "name": "ownership_upsert",
+      "c_name": "db1_git_ownership_upsert",
+      "c_params": [
+        "repo_path",
+        "branch_name",
+        "session_id"
+      ],
       "wire_format": "db1-fields-v1",
       "scope": "repository",
       "transaction": "single",
@@ -278,6 +294,11 @@
       "family": "git_ownership",
       "id": 2,
       "name": "ownership_delete",
+      "c_name": "db1_git_ownership_delete",
+      "c_params": [
+        "repo_path",
+        "branch_name"
+      ],
       "wire_format": "db1-fields-v1",
       "scope": "repository",
       "transaction": "single",
@@ -302,6 +323,13 @@
       "family": "git_ownership",
       "id": 3,
       "name": "ownership_owner_get",
+      "c_name": "db1_git_ownership_get_owner",
+      "c_params": [
+        "repo_path",
+        "branch_name",
+        "owner_out",
+        "owner_len"
+      ],
       "wire_format": "db1-fields-v1",
       "scope": "repository",
       "transaction": "none",
@@ -327,6 +355,13 @@
       "family": "git_ownership",
       "id": 4,
       "name": "ownership_branch_for_session",
+      "c_name": "db1_git_ownership_get_branch_for_session",
+      "c_params": [
+        "repo_path",
+        "session_id",
+        "branch_out",
+        "branch_len"
+      ],
       "wire_format": "db1-fields-v1",
       "scope": "repository",
       "transaction": "none",
@@ -352,6 +387,12 @@
       "family": "git_ownership",
       "id": 5,
       "name": "ownership_session_by_prefix",
+      "c_name": "db1_git_ownership_find_session_by_prefix",
+      "c_params": [
+        "session_prefix",
+        "session_out",
+        "session_len"
+      ],
       "wire_format": "db1-fields-v1",
       "scope": "global",
       "transaction": "none",

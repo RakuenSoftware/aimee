@@ -46,6 +46,14 @@ family owns one event kind and its operations dispatch on an op id inside the
 payload, so DB1 needs one stage per domain rather than one per call -- roughly
 sixty domains against a ceiling of 255.
 
+The C client is generated too. There are 347 operations still to move, and
+`git_ownership` showed what one costs by hand -- five of them filled a pull
+request. Every client body is the same three steps (reject unusable arguments,
+name the fields, map the status), so the catalog carries the C symbol and its
+parameter names and `scripts/gen_db1_contract.py --write` emits the file. The
+generated client was checked against the hand-written one it replaced: same
+signatures, and it passes that client's own mutation-tested suite unchanged.
+
 The catalog is a complete map, not a wish list: every DB1 source belongs to
 exactly one family or to `infrastructure_sources` -- the connection, schema,
 write path and the module's own handler, which have no callers to migrate. An
