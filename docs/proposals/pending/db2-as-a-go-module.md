@@ -442,8 +442,15 @@ canaries, NULL and zero-length handling, every functional relation, and represen
 labels. The byte parity intentionally preserves the process-locale ctype behavior of the authoritative
 copy, and the legacy/support comparison makes drift in the duplicated functional set a test failure.
 
+The seventh admitted unit owns `correction_behavior_to_text` and `rel_sensitivity_to_text`, the two
+enum-to-column-literal switches used only by `c/rel_types_store.c`. Its private numeric ABI avoids
+importing `rel_types.h` and the transitive memory-ontology surface. Compile-time checks bind all six
+values and both enum sizes to the authoritative int-sized calling convention. Exhaustive signed
+16-bit and remaining int-boundary parity protects each explicit value and both default classes under
+normal and hardened builds. The unit has no imports and does not change DB2 or DB3 vector ownership.
+
 The next support candidates stay explicitly deferred by ownership shape: relation seed iteration,
-lookup, and enum text conversion move the semantic seed table or its struct/enum ABI; language
+lookup, and remaining ontology helpers move the semantic seed table or its struct ABI; language
 extractors bring a broad parser/helper closure; platform random/process functions carry OS, entropy,
 and daemon policy. Each requires its own coherent admission and parity slice rather than being folded
 into this unit.
