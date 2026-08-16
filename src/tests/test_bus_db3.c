@@ -17,10 +17,12 @@
 #include <time.h>
 #include <unistd.h>
 
-#define DB2_REF        29u
-#define PROVIDER_A_REF 66u
-#define PROVIDER_B_REF 67u
-#define COLLISION_REF  68u
+#define DB2_REF 29u
+/* Deliberately outside the canonical module/client range: these identities
+ * exist only in this isolated provider-conformance runtime. */
+#define PROVIDER_A_REF 1001u
+#define PROVIDER_B_REF 1002u
+#define COLLISION_REF  1003u
 
 typedef struct
 {
