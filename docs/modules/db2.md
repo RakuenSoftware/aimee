@@ -95,9 +95,9 @@ Link-closure audit:
 `link-closure-v1.json` accounts for all 141 C translation units in the private DB2 boundary. The
 probe compiles each unit plus exact descriptor-owned support, combines only those objects with a
 relocatable link, supplies no archive, shared library, helper stub, or weak definition, and records
-the 313 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
+the 311 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
 disposition and rationale. The current ledger contains 145 explicit system-link dependencies, zero
-remaining vendored/generated inputs, 150 sibling or KB contracts to inject, and 18 support APIs to
+remaining vendored/generated inputs, 150 sibling or KB contracts to inject, and 16 support APIs to
 promote. The standalone-link exit condition requires zero entries in the latter three groups; a
 classified ledger alone is not enough.
 
@@ -178,6 +178,25 @@ eliminates the generated-input class from 25 to zero. The owned implementation i
 libc `sprintf` ABI, so the honest net ratchet is total debt from 337 to 313 and reviewed system-link
 dependencies from 144 to 145 rather than claiming that a transitive dependency disappeared.
 
+The ninth reduction promotes `platform_random_bytes` and `platform_random_hex` behind a minimal
+descriptor-private ABI. The support implementation preserves the existing POSIX `/dev/urandom` and
+Windows `BCryptGenRandom` branches plus the bounded lowercase-hex formatter. Admission pins the
+source and header hashes, both exports, the four DB2 referencing units, the complete include
+envelope, and the five observed POSIX system imports. Deterministic I/O seams compare success,
+open/read/close failure, zero-fill, length bounds, terminators, and buffer canaries byte-for-byte
+with the authoritative legacy implementation. The real source is also exercised for nonzero and
+nonrepeating output, eight-thread concurrency, fork safety, and ASan/UBSan/FORTIFY cleanliness.
+This slice moves total debt from 313 to 311 and portable promotion debt from 18 to 16 without
+changing database, pgvector, provider, event-bus, or activation ownership.
+
+The remaining portable rows are named migration debt, not an assertion that copying is always the
+right answer. DB2 owns the decision and must close it before activation: relationship seed iteration
+triggers a shared ontology-type boundary; canonical-index extraction and shell helpers trigger a
+typed indexing capability review; logging, session identity, and briefing rendering trigger an
+injected process/config/memory contract review; executable discovery and daemon spawning trigger a
+runtime lifecycle capability review. Those rows may be reclassified only with a reviewed contract
+and replay evidence, so later slices do not repeatedly guess between support copying and injection.
+
 The gate rejects legacy source additions or omissions, support path escape, symlinks, content drift,
 new unresolved symbols, non-system reference growth, missing evidence, and any attempt to make the
 probe pass through helper objects or libraries. Resolved symbols are also surfaced as
@@ -233,6 +252,9 @@ two-observer idempotent apply fanout, and one-server-only search.
 Descriptor-owned cJSON tests additionally prove byte-for-byte vendor origin binding, exact exports,
 complete consumed-symbol resolution, allowed runtime imports, malformed-input behavior, allocator
 balance, descriptor closure, and sanitizer-clean execution.
+Descriptor-owned randomness tests prove exact legacy parity under deterministic I/O, bounded failure
+behavior, lowercase encoding, canary preservation, real entropy-source operation, concurrent calls,
+fork safety, descriptor closure, and sanitizer-clean execution.
 
 ## Operational diagnostics
 

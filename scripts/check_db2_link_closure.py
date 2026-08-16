@@ -391,6 +391,31 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
     "evidence": "Deterministic two-value selector mapping with no imports, allocation, I/O, DB, "
                 "event-bus, provider, platform, pgvector, or DB3 dependency; ABI parity tested.",
 }, {
+    "path": "src/modules/db2/support/random_primitives.c",
+    "source_sha256": "2e0182a05983d863952d080b754cb90eb4ee6dcf491f4bda7140ef205c0db69f",
+    "header": "src/modules/db2/support/db2_random.h",
+    "header_sha256": "bbbab168e217e7286ffae27ad3f1adaf8ed1797ae70a46c6c1e84bbcd32a98bb",
+    "defines": ["platform_random_bytes", "platform_random_hex"],
+    "resolves": ["platform_random_bytes", "platform_random_hex"],
+    "allowed_includes": ["db2_random.h", "bcrypt.h", "stdio.h", "string.h"],
+    "allowed_header_includes": ["stddef.h"],
+    "allowed_undefined": ["fclose", "fopen", "fread", "memset", "snprintf"],
+    "base_references": {
+        "platform_random_bytes": [
+            "src/modules/db2/c/artifacts.c",
+            "src/modules/db2/c/management_action_journal.c",
+            "src/modules/db2/c/management_identity_journal.c",
+        ],
+        "platform_random_hex": ["src/modules/db2/c/management_read_journal.c"],
+    },
+    "provenance": "Portable CSPRNG and lowercase-hex definitions promoted from "
+                  "src/posix/platform_random.c, src/windows/platform_random.c, and "
+                  "src/platform_random.c; all four DB2 referencing units are pinned.",
+    "evidence": "The descriptor-owned implementation preserves the POSIX /dev/urandom and "
+                "Windows BCryptGenRandom branches, exports only the two reviewed APIs, and "
+                "imports only its bounded system I/O and formatting surface. It has no DB, "
+                "event-bus, provider, pgvector, DB3, config, logging, or heap dependency.",
+}, {
     "path": "src/modules/db2/support/rel_enum_text_primitives.c",
     "source_sha256": "231f5255d1350c752317529e2d0b2bab3528dbc6e0186e4fec780c3319bb8884",
     "header": "src/modules/db2/support/db2_rel_enum_text.h",

@@ -733,6 +733,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-db2-cjson-support \
                 $(TESTPREFIX)/unit-test-db2-dstr-support \
                 $(TESTPREFIX)/unit-test-db2-management-read-support \
+                $(TESTPREFIX)/unit-test-db2-random-support \
                 $(TESTPREFIX)/unit-test-db2-rel-enum-text-support \
                 $(TESTPREFIX)/unit-test-db2-rel-type-support \
                 $(TESTPREFIX)/unit-test-db2-sketch-support \
@@ -811,6 +812,7 @@ ifeq ($(UNIT_TEST_SHARD_INDEX),0)
 UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-cjson-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-random-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-type-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize \
@@ -6710,6 +6712,95 @@ unit-test-db2-cjson-support: $(TESTPREFIX)/unit-test-db2-cjson-support
 	$<
 
 unit-test-db2-cjson-support-sanitize: $(TESTPREFIX)/unit-test-db2-cjson-support-sanitize
+	$<
+
+DB2_RANDOM_TEST_FLAGS = -Imodules/db2/support -Iheaders -pthread
+DB2_RANDOM_SUPPORT_RENAMES = \
+   -Dplatform_random_bytes=db2_support_platform_random_bytes \
+   -Dplatform_random_hex=db2_support_platform_random_hex
+DB2_RANDOM_LEGACY_RENAMES = \
+   -Dplatform_random_bytes=legacy_platform_random_bytes \
+   -Dplatform_random_hex=legacy_platform_random_hex
+DB2_RANDOM_IO_SEAMS = -include tests/support/db2_random_io_seam.h
+
+$(OBJDIR)/tests/test_db2_random_support.o: tests/test_db2_random_support.c \
+                                             modules/db2/support/db2_random.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_random_support_real.o: modules/db2/support/random_primitives.c \
+                                               modules/db2/support/db2_random.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_random_support_impl.o: modules/db2/support/random_primitives.c \
+                                               modules/db2/support/db2_random.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_RANDOM_SUPPORT_RENAMES) \
+	      $(DB2_RANDOM_IO_SEAMS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_random_legacy_common.o: platform_random.c headers/platform_random.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_RANDOM_LEGACY_RENAMES) \
+	      -c -o $@ $<
+
+$(OBJDIR)/tests/db2_random_legacy_platform.o: posix/platform_random.c headers/platform_random.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_RANDOM_LEGACY_RENAMES) \
+	      $(DB2_RANDOM_IO_SEAMS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-random-support: \
+                     $(OBJDIR)/tests/test_db2_random_support.o \
+                     $(OBJDIR)/tests/db2_random_support_real.o \
+                     $(OBJDIR)/tests/db2_random_support_impl.o \
+                     $(OBJDIR)/tests/db2_random_legacy_common.o \
+                     $(OBJDIR)/tests/db2_random_legacy_platform.o
+	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS) -pthread
+
+DB2_RANDOM_SANITIZE_DIR = $(OBJDIR)/tests/db2-random-support-sanitize
+
+$(DB2_RANDOM_SANITIZE_DIR)/test.o: tests/test_db2_random_support.c \
+                                          modules/db2/support/db2_random.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      -c -o $@ $<
+
+$(DB2_RANDOM_SANITIZE_DIR)/real.o: modules/db2/support/random_primitives.c \
+                                          modules/db2/support/db2_random.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      -c -o $@ $<
+
+$(DB2_RANDOM_SANITIZE_DIR)/support.o: modules/db2/support/random_primitives.c \
+                                             modules/db2/support/db2_random.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      $(DB2_RANDOM_SUPPORT_RENAMES) $(DB2_RANDOM_IO_SEAMS) -c -o $@ $<
+
+$(DB2_RANDOM_SANITIZE_DIR)/legacy-common.o: platform_random.c headers/platform_random.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      $(DB2_RANDOM_LEGACY_RENAMES) -c -o $@ $<
+
+$(DB2_RANDOM_SANITIZE_DIR)/legacy-platform.o: posix/platform_random.c \
+                                                 headers/platform_random.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      $(DB2_RANDOM_LEGACY_RENAMES) $(DB2_RANDOM_IO_SEAMS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-random-support-sanitize: \
+                     $(DB2_RANDOM_SANITIZE_DIR)/test.o \
+                     $(DB2_RANDOM_SANITIZE_DIR)/real.o \
+                     $(DB2_RANDOM_SANITIZE_DIR)/support.o \
+                     $(DB2_RANDOM_SANITIZE_DIR)/legacy-common.o \
+                     $(DB2_RANDOM_SANITIZE_DIR)/legacy-platform.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -o $@ $^ -pthread
+
+.PHONY: unit-test-db2-random-support unit-test-db2-random-support-sanitize
+unit-test-db2-random-support: $(TESTPREFIX)/unit-test-db2-random-support
+	$<
+
+unit-test-db2-random-support-sanitize: $(TESTPREFIX)/unit-test-db2-random-support-sanitize
 	$<
 
 DB2_DSTR_SUPPORT_RENAMES = \
