@@ -18,7 +18,10 @@ DESCRIPTOR = Path("src/modules/db2/module.yaml")
 PROCESS_CONTRACTS = Path("src/modules/process-contracts.json")
 HEADER = Path("src/modules/db2/include/aimee/db2/module_api.h")
 BASELINE = Path("tests/baselines/modules/db2-wire-v1.json")
+DECLARATION_REVIEW = Path("src/modules/db2/eventcontract/declaration-review.json")
+DECLARATION_LEDGER = Path("tests/baselines/db2/declarations-v1.json")
 MAX_BYTES = 1_048_576
+MAX_LEDGER_BYTES = 2_097_152
 MAX_DEPTH = 32
 MAX_ARRAY = 4096
 FAMILIES = (
@@ -69,13 +72,13 @@ def _domain(value: object, label: str, depth: int = 0) -> None:
             _domain(item, label, depth + 1)
 
 
-def load_json(path: Path) -> object:
+def load_json(path: Path, maximum: int = MAX_BYTES) -> object:
     try:
         raw = path.read_bytes()
     except OSError as exc:
         fail("input", f"cannot read {path}: {exc}")
-    if len(raw) > MAX_BYTES:
-        fail("input-size", f"{path} exceeds {MAX_BYTES} bytes")
+    if len(raw) > maximum:
+        fail("input-size", f"{path} exceeds {maximum} bytes")
     if raw.startswith(b"\xef\xbb\xbf"):
         fail("json-bom", f"{path} begins with a UTF-8 BOM")
     try:
@@ -245,6 +248,24 @@ def _validate_repository_bindings(root: Path, catalog: dict[str, object]) -> Non
     active = {kind for kind, enabled in reserved.items() if enabled}
     if actual != active:
         fail("process-activation", f"DB2 granted kinds {sorted(actual)} differ from active {sorted(active)}")
+
+
+def _validate_declaration_gate(root: Path, catalog: dict[str, object]) -> None:
+    review = load_json(root / DECLARATION_REVIEW)
+    ledger = load_json(root / DECLARATION_LEDGER, MAX_LEDGER_BYTES)
+    if (not isinstance(review, dict) or
+            type(review.get("declarations_complete")) is not bool):
+        fail("declaration-review", f"{DECLARATION_REVIEW} has no completeness boolean")
+    if (not isinstance(ledger, dict) or
+            type(ledger.get("declarations_complete")) is not bool or
+            not isinstance(ledger.get("summary"), dict) or
+            type(ledger["summary"].get("audit_pending")) is not int):
+        fail("declaration-ledger", f"{DECLARATION_LEDGER} has no typed completeness summary")
+    if review["declarations_complete"] != ledger["declarations_complete"]:
+        fail("declaration-completeness-drift", "review and generated ledger disagree")
+    if catalog["catalog_complete"] and (
+            not review["declarations_complete"] or ledger["summary"]["audit_pending"] != 0):
+        fail("catalog-declaration-gate", "catalog completeness requires a closed declaration audit")
 
 
 def catalog_fingerprint(catalog: dict[str, object]) -> str:
@@ -441,6 +462,7 @@ static inline int aimee_db2_health_response_decode(const uint8_t *input, size_t 
 def generated(root: Path) -> tuple[bytes, bytes]:
     catalog = validate_catalog(load_json(root / CATALOG))
     _validate_repository_bindings(root, catalog)
+    _validate_declaration_gate(root, catalog)
     return header_bytes(catalog), baseline_bytes(catalog)
 
 

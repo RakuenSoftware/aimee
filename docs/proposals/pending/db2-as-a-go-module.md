@@ -1,8 +1,10 @@
 # Proposal: put DB2 behind a module boundary, then port it to Go
 
 - **State:** PENDING — the C source boundary and separately buildable C process shell are registered;
-  the descriptor owns the generated health contract and reserves the eight catalog families, but no
-  production DB2 operation has moved behind the process boundary yet.
+  the descriptor owns the generated health contract and declaration-review source, all 1,351
+  external C declarations are mechanically inventoried, and provider-specific pgvector declarations
+  are explicitly retained/private; no production DB2 operation has moved behind the process boundary
+  yet.
 - **Date:** 2026-08-15.
 - **Charter roles:** Constrain-Verify / Gate-Promote.
 - **Thesis:** DB2 was created as a portable source boundary and now resides intact at
@@ -157,6 +159,16 @@ It reserves family IDs and event kinds `11521` through `11528`, but only lifecyc
 active in `process-contracts.json`; reserved inactive kinds are not grants. `catalog_complete` stays
 false until the declaration and consumer audit accounts for the complete DB2 call surface. CI
 rejects generated-header or vector-baseline drift and rejects a premature completeness claim.
+
+The declaration gate is separate from codec generation. A checked-in review binds a symbol and its
+normalized-signature hash to a closed disposition, family, DB3 placement, and reason. The generated
+ledger cross-references the exact frozen consumer set, records harmless identical declarations, and
+rejects conflicting signatures or unsupported C constructs rather than silently omitting them.
+Test-only and unconsumed declarations do not become wire operations. The 61 currently externally
+referenced `pgvec_*` declarations are explicitly `private-db2`/`retained-db2`; this prevents provider
+names and PostgreSQL mechanics from leaking into the later DB3 contract without claiming that their
+provider-neutral logical operations are ineligible. `catalog_complete` cannot pass while the ledger
+contains an `audit-pending` production declaration.
 
 The bus already carries event kind, correlation, deadline, cancellation, and fragmentation.
 The DB2 request body therefore has only a 24-byte little-endian header followed by the declared

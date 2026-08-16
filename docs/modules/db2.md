@@ -48,6 +48,24 @@ The only current surface is `AIMEE_DB2_EVENT_HEALTH` on the KB-local Unix-domain
 is no HTTP listener, network service, generic query operation, raw SQL payload, or provider-secret
 field. The catalog reserves the eight family identities and event kinds `11521` through `11528`, but
 only lifecycle is active and granted. Later operations must be typed, bounded catalog entries.
+`module_api.h` is generated from that catalog and must not be edited by hand.
+
+Declaration audit:
+
+`declaration-review.json` is the reviewed source for transitions from the legacy C surface. Its
+generated ledger accounts for all 1,351 non-static function declarations in all 137 DB2 headers,
+records identical duplicate declarations by location, and fails on conflicting signatures. The
+ledger also tokenizes every frozen consumer so test-only and production references cannot be
+confused. At this checkpoint 166 declarations are unconsumed implementation details, 273 are used
+only by private implementation tests, 61 externally referenced `pgvec_*` declarations are
+explicitly private and retained in DB2, and 851 production-consumed declarations remain
+without a reviewed disposition.
+
+A review transition binds the symbol and normalized-signature hash to one closed disposition,
+family, DB3 placement, and nonempty reason. Signature drift invalidates the review. Unsupported or
+ambiguous C declarations, malformed lexical input, stale review rows, premature completeness, and
+generated-ledger drift fail closed. No C signature is treated as a wire encoding: pointer buffers,
+callbacks, and composite transactions still require an explicit provider-neutral operation.
 
 ## Data and migrations
 
@@ -75,7 +93,10 @@ flags, reserved bytes, wrong stage, undersized output, cancellation, missing cal
 failure, and successful encode-handler-decode. Runtime-bundle tests compile the descriptor-owned C
 process. Catalog tests mutate every closed field, process/descriptor binding, resource limit, and
 generated artifact. Boundary tests prohibit any direct import from `src/modules/db2/c` into private
-`src/kb`.
+`src/kb`. Declaration-ledger tests cover C linkage blocks, multiline and callback declarations,
+comments/literals/directives, identical and conflicting duplicates, malformed nesting, resource
+limits, signature-bound review transitions, pgvector retention, output symlinks, reproducibility,
+and unchanged-output failure.
 
 ## Operational diagnostics
 
@@ -92,8 +113,9 @@ until the complete process cutover is ready.
 
 ## Extension and removal
 
-Next increments complete the operation catalog, generate C client/dispatch, package the complete C
-source closure, and add replay gates before activation. After parity, a pure-Go implementation
+Next increments review the remaining production declarations, map them to typed operations or
+private/compatibility dispositions, generate C client/dispatch, package the complete C source
+closure, and add replay gates before activation. After parity, a pure-Go implementation
 replaces the C process behind the same contract. The `src/modules/db2/c` tree is removed only after
 the Go runtime is the sole deployed provider and every boundary test proves the old link and fallback
 are gone.

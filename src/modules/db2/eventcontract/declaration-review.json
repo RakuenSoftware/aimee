@@ -1,0 +1,495 @@
+{
+  "schema_version": 1,
+  "module": "db2",
+  "declarations_complete": false,
+  "reviews": [
+    {
+      "symbol": "pgvec_code_delete_project",
+      "signature_sha256": "45c29c809f61b8e5477df2aeed71c164879447e1dabdc6ff27509b799384da9a",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_code_node_path",
+      "signature_sha256": "be3f5708665e86527ed5dacda5e91c0a60e1da3d69472f0a994d52dfabd7e032",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_code_search_paths",
+      "signature_sha256": "12c967a3c4668b86c49648ffb9defaffada5d0e8331aa27faa000f1671b2932b",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_code_similar_pairs",
+      "signature_sha256": "30829910364042e23f577f9f6814387c1c2aadf0a3b68905c3165e69b414ab1b",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_corpus_index_type",
+      "signature_sha256": "7ecc94728f86fc9bb9c116d10929abb21cdf83629884aaf754a18fba2fb410b3",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_curator_claim_delete",
+      "signature_sha256": "441a4660428ae9d9c743ec2fb8a0d4f550aacfb41f129048b713dc0a6c37eace",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_curator_claim_search",
+      "signature_sha256": "ed0586aefeabb85338f3e554963d1389886f6cfc95ace3f596f23913121eeb35",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_curator_claim_upsert",
+      "signature_sha256": "f036d998cfe9b3b3a69d1125e4546e633d47e50ec36068d955e64719cdc39835",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_curator_code_unit_delete",
+      "signature_sha256": "eaebcb1e04d6ca9c1c3eed2865cb37c069e52c78827120a2ae0ef509aa210354",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_curator_code_unit_delete_project",
+      "signature_sha256": "75a9494e2231c10c886c003fd831f47c9b4cd62e8178162d363343e57cc6b3cb",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_curator_code_unit_search",
+      "signature_sha256": "e7c14e612cb369de70eb2314ddfa5f3781a6c43b885ecebe93eac653a9e54455",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_curator_code_unit_upsert",
+      "signature_sha256": "6a987071ea19d710e8fe2261907d35c30a31692d841874ce0bb60801615120c6",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_curator_entity_delete",
+      "signature_sha256": "c101176093901f754edea0c078a72b3dae0acdc0b387f2f5b6c953dab7d4830c",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_curator_entity_lookup",
+      "signature_sha256": "bd260b8414a9d4f5fbe52032074b807e905b8f75e6cb0058f442d0921d73d174",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_curator_entity_search",
+      "signature_sha256": "e01cc5bbe1aa1708368d92b7362bce8d23fb5af9a73c35c43da6332b7f919c2c",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_curator_entity_upsert",
+      "signature_sha256": "83511116b0316092e76077b1d80b80639fc5284e29abec70f053c7d57a0351db",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_curator_narrative_delete",
+      "signature_sha256": "590eb8d84d5738c7e898408ac50e1b42801890562a0dfd15cc58880263d24447",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_curator_narrative_search",
+      "signature_sha256": "d9a9fe00f81fab04b274f95e41104c99eae71420d09f5dc4839198595acf07b7",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_curator_narrative_upsert",
+      "signature_sha256": "4325ed0a1947aff695887fa1c72cb36b9978fdba5e3bdd726612536da801eb84",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_ensure_corpus_index",
+      "signature_sha256": "e24a6ead508f2190db0bf01446560587a2d5698f66e67ace9bef27a63bf06416",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_delete",
+      "signature_sha256": "f93159ab9303911d0c2a12a50bb81b5f90f40a06edfaaf483ba25863e6037383",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_search",
+      "signature_sha256": "f870577a3ad2761d9cfcccba2e03cf5ae0c505193434db42b036f839d1814a24",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_service_code_exists_by_hash",
+      "signature_sha256": "fe8cebf35ae956323be6f5350eb1d5513ade70349260378140bd117278cc8d4f",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_service_code_upsert",
+      "signature_sha256": "01314345dc6cd82803a0c049fa0cfc4cacb81bf24def9eaff7586e81842e8e19",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_service_ensure_code_collection",
+      "signature_sha256": "b99d2f07e8af1648cdb46a3e3aa2823676d299f7deb6829e979618b65a9cede0",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_service_ensure_kb_collection",
+      "signature_sha256": "b82e51e816a713f4c335149624cd09a631b3e87fae01df840b495fe8e137351a",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_service_ensure_memory_collection",
+      "signature_sha256": "4460134fb085bac4d71fd1ca6ce428b8da97d66256f0c317ec37ea50a8386fc7",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_service_reconcile_orphans",
+      "signature_sha256": "d5bfc9b529f6685ba6d59223df1fa9dd4ed5e1c168659b9ac5dc16e5e0331ace",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_service_search_memory_points",
+      "signature_sha256": "7efc1baf6ea4b77cb09f179f7c740d83bbd9d0087c658519de1cb3275294365f",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_service_upsert_document_point",
+      "signature_sha256": "d99c58a927c8c7accbba579380d14527daa0c3ed53655247527be7fa24940857",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_upsert",
+      "signature_sha256": "1d0265c957300a7be32d09edf316064d066243c16356e5fc68f647dfe07d2f1e",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_vector_collection_name",
+      "signature_sha256": "475ce4ce77f0c7916a43641bfef8b076c8b596d684a5bdeb39194ac478005842",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_vector_delete_current_project",
+      "signature_sha256": "2d51ff4ce0a59b88a855b9f8e484c9dd2e03c66b716691cf1ac82f2d01aa70e2",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_vector_delete_point",
+      "signature_sha256": "09aa5f68d054c5974a03c62369ab50bfcae69253d164c2fa56f3b595d1366cf1",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_vector_delete_project",
+      "signature_sha256": "d442144d5ac5c4cd33182ea04cc95eee6aa6b19da73e50f7a06b78e0690c2efa",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_vector_search_project",
+      "signature_sha256": "c3386f4d0e339283832760eb7e7f4a94b2ddd19e69c360ea1963085b3ffc57ec",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_vector_search_scoped",
+      "signature_sha256": "05a4ddb15cb758a9b67e3cfeaabe238cef8a691c652b7d04b41f37a640da14de",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_vector_upsert_document",
+      "signature_sha256": "507d0c85e1d519480e07159cba55faaa0b7fa9d7a74674f4b25305af90b451da",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kb_vector_upsert_document_batch",
+      "signature_sha256": "949f030feb0cf464272b7b90ced6d8d65646a6f73119e95d4d79a90a72d93dac",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_kbpdf_delete_project",
+      "signature_sha256": "f013cb966a6b0537116cc83ea84150e5092d6b1c1991ae6ae1540df79e9b03c9",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_delete",
+      "signature_sha256": "f928c0d7904690b7105c708f9c3c0d71eff71cb38c0bd5a5939efcec0194831e",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_search",
+      "signature_sha256": "4f54500f1f9b1b636fc682423c43a42ae0c36da57b7e0c77ac48e51b01d76d72",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_upsert",
+      "signature_sha256": "423d68121bcc9365889fd7a85cf5dd6dd1dfb403fab2d7c221315e2ff2632796",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_vector_collection_exists",
+      "signature_sha256": "970a6597e3d80bf37c459184affec3b199a1ce4f302bca36fe4e1d5eb88e20f1",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_vector_collection_name",
+      "signature_sha256": "57f73e52f17277bcf9060901228faf957a6c3cd7dfacbe7d8a7c40bf9fc1e5fe",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_vector_collection_recreate",
+      "signature_sha256": "823a421c4008dea0a9caaf2b7c8df064c77d4d9946ffb96c8d592d7237cf7f15",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_vector_delete_point",
+      "signature_sha256": "28d630f5e8345e68357013d2d6b96675e9ef24f87cab27986a753ed482262258",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_vector_ensure_payload_indexes",
+      "signature_sha256": "72d24c8dd27be2b744b45cf51f5e1eaca3ba300ca9bfd81b4d50bfd38aa46156",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_vector_near_duplicate_pairs",
+      "signature_sha256": "0ba356f46dad8fb5f7811ae8ccd560c370484662068a90cc8f40552402602e89",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_vector_scope_hint_clear",
+      "signature_sha256": "695496a9f1cada5b20d5a2b4830e0f5f6123995f0181a99be9fb25b4d2fd9b65",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_vector_scope_hint_set",
+      "signature_sha256": "1f7f43922a05e55657831b84d8296102e1ebbc9d4f1e616a3054ede3aeee5e58",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_vector_search_record_type",
+      "signature_sha256": "5162275eb78ab6fe04703289917cf9e4879000392e43d8a8781bc98b20f20c1c",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_vector_search_with_kinds",
+      "signature_sha256": "56b8ac66e565b078b3450caf4e5729c2765277fa18fa89b3dd12882b8607ec9f",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_vector_upsert_memory",
+      "signature_sha256": "629d7ab90d15ee8f0b91eab9d4b81b4c0efd45602189c162437e33fa9b6d59e0",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_memory_vector_upsert_unit",
+      "signature_sha256": "4ebd3a8cfe08c36894061425adf0462c8f6bd27b37600b0803219b3ee289f30e",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_schema_version",
+      "signature_sha256": "10ae2794b5c396967b625a66f50f1fe1a586f7d48ae86ef11eb53142f16d97ff",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_scroll",
+      "signature_sha256": "4e4db41e8e3a16ec6163ad90b0ce9c6714474e421f1f5175e9b41c87fba3d4c3",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_search_latency_snapshot",
+      "signature_sha256": "858baf44f71f7d89dc57c903f1b15c1be07a9a25084aa814ecb36a9dc8edd735",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_vector_status_json",
+      "signature_sha256": "6f6e2d213226a72f8e8a1252f95f3140a7af7c5b7b91a4b7e818d0f2b5c8926f",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_verify_snapshot",
+      "signature_sha256": "a2df700d9d2e82cc3776c9d842485aa8ed35be287ddfd6c61a058a6adbd64e3f",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    },
+    {
+      "symbol": "pgvec_verify_snapshot_cleanup",
+      "signature_sha256": "9a63ecd2682eab302576a2d023d3dd00dd2a4b4c2d3e779213dda9a9fb7857fa",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Provider-specific pgvector symbol remains a private DB2 implementation target; portable DB3 operations use provider-neutral names."
+    }
+  ]
+}

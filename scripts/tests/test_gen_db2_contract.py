@@ -41,6 +41,8 @@ class ContractTests(unittest.TestCase):
             generator.PROCESS_CONTRACTS,
             generator.HEADER,
             generator.BASELINE,
+            generator.DECLARATION_REVIEW,
+            generator.DECLARATION_LEDGER,
         ):
             target = root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -195,6 +197,28 @@ class ContractTests(unittest.TestCase):
             path.write_text(json.dumps(process), encoding="utf-8")
             with self.assertRaisesRegex(generator.ContractError, "rule=event-kind-collision"):
                 generator.generated(root)
+        finally:
+            temporary.cleanup()
+
+    def test_declaration_completeness_gate_fails_closed(self) -> None:
+        temporary = self.fixture()
+        try:
+            root = Path(temporary.name)
+            review_path = root / generator.DECLARATION_REVIEW
+            review = json.loads(review_path.read_text(encoding="utf-8"))
+            review["declarations_complete"] = True
+            review_path.write_text(json.dumps(review), encoding="utf-8")
+            with self.assertRaisesRegex(generator.ContractError,
+                                        "rule=declaration-completeness-drift"):
+                generator.generated(root)
+
+            shutil.copy2(REPO_ROOT / generator.DECLARATION_REVIEW, review_path)
+            catalog = generator.validate_catalog(
+                generator.load_json(root / generator.CATALOG))
+            catalog["catalog_complete"] = True
+            with self.assertRaisesRegex(generator.ContractError,
+                                        "rule=catalog-declaration-gate"):
+                generator._validate_declaration_gate(root, catalog)
         finally:
             temporary.cleanup()
 
