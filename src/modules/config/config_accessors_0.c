@@ -273,6 +273,13 @@ int config_require_session_worktree(void)
    return v;
 }
 
+int config_feature_auto_promote(void)
+{
+   int v = 0;
+   config_field_read(offsetof(config_t, feature_auto_promote), sizeof(v), &v);
+   return v;
+}
+
 int config_require_aimee_memory(void)
 {
    int v = 0;

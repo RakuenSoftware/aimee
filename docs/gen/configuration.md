@@ -123,7 +123,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 
 > **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `aimee_synthesis_model`
 
-### Advanced tuning keys (81)
+### Advanced tuning keys (83)
 
 Expert scalars with sensible defaults; settable in the config file but off the everyday surface.
 
@@ -140,6 +140,7 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `code_surprising_precision_floor` | float | §4 self-suppress: when the LLM-judge-sampled precision of surprising-link candidates falls below this floor, an unjudged /v1/code/graph/surprising request returns no candidates (default 0 = disabled). |
 | `cost_reward_lambda_pct` | int | Cost-penalty weight (percent) in the reward. |
 | `delegates_enabled` | bool | n/a |
+| `feature_auto_promote` | bool | When every PR on a feature branch has merged, automatically open the feature -> default-branch PR as a draft (default on). Off leaves promotion to an explicit action. |
 | `guardrails_semantic_block_threshold` | float | Semantic score threshold to block. |
 | `guardrails_semantic_prompt_threshold` | float | Semantic score threshold for prompt-level flags. |
 | `guardrails_semantic_warn_threshold` | float | Semantic score threshold to warn. |
@@ -206,6 +207,7 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `memory_semantic_floor_scale` | float | Multiplier on the semantic-recall cosine floors (0 = auto-scale by the active embedder dimension; >0 pins it). |
 | `memory_semantic_weight` | float | Semantic (vector) weight in hybrid recall. |
 | `memory_window_radius` | int | Neighbour radius for memory-window expansion. |
+| `pr_base_mode` | string | What a PR opened from a session targets. feature (default): the session's durable feature branch aimee/feat/<slug>, so a feature's slices accumulate on one branch and reach the default branch through a single reviewed PR. default_branch: every PR aims at the repo's default branch. Any other value fails closed rather than guessing a base. |
 | `prompt_manager_block_enabled` | bool | n/a |
 | `prompt_manager_review_enabled` | bool | n/a |
 | `session_worktree_base` | string | What a new primary session's branch+worktree is cut from. Order: configured -> remote default -> main -> master. Values: remote_default (default), local_default, current (opt-in only, never a fallback), or an explicit ref. Env: AIMEE_SESSION_WORKTREE_BASE. |
@@ -292,7 +294,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 228 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 229 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -532,6 +534,7 @@ The binaries read 228 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_ORCH_DELEGATES` | Enable delegate resource use by the orchestration plane. |
 | `AIMEE_ORCH_WORKFLOWS` | Enable workflow orchestration surfaces. |
 | `AIMEE_PANEL_SEAT_WAIT_SECS` | Maximum wait for a roundtable seat to acquire an eligible agent. |
+| `AIMEE_PR_BASE_MODE` | What a pr.open with no explicit base targets: the run's feature branch (default) or, when set to default_branch, the autonomous base. The server exports the configured pr_base_mode into this variable at startup, so `aimee config set pr_base_mode` stays the one operator knob; the workflow engine reads it from the environment because that module is deliberately config-free. |
 | `AIMEE_WFE_ENGINE` | Workflow runtime selector; current server images require `go`. |
 | `AIMEE_WFE_WORKTREE_GC_GRACE_SECS` | Grace period before an unowned workflow worktree can be collected. |
 | `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER` | Enable automatic scheduling of admitted autonomous work items. |

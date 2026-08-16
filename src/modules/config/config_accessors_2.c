@@ -873,6 +873,18 @@ const char *config_session_worktree_base(void)
    return buf;
 }
 
+/* Empty means "no config loaded yet", not "no mode": return the documented default
+ * rather than an empty string the resolver would have to treat as a misconfiguration.
+ * Mirrors config_guardrail_mode's fallback. */
+const char *config_pr_base_mode(void)
+{
+   static _Thread_local char buf[32];
+   buf[0] = 0;
+   config_field_read(offsetof(config_t, pr_base_mode), sizeof(buf), buf);
+   buf[sizeof(buf) - 1] = 0;
+   return buf[0] ? buf : "feature";
+}
+
 const char *config_delegate_sandbox_image(void)
 {
    static _Thread_local char buf[256];

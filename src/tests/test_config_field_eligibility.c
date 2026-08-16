@@ -72,6 +72,8 @@ static const elig_row_t g_eligibility[] = {
     {"tool_output_max_bytes", 0},
     {"require_session_worktree", 1},
     {"session_worktree_base", 0},
+    {"pr_base_mode", 1},
+    {"feature_auto_promote", 1},
     {"require_aimee_memory", 1},
     {"require_aimee_git", 1},
     {"subagent_ban_enabled", 1},

@@ -667,6 +667,107 @@ static void test_git_container_provider_runs_on_server(void)
    printf("  PASS: test_git_container_provider_runs_on_server\n");
 }
 
+/* A MIRROR workspace is registered under the CLIENT's path; aimee-server serves it by
+ * rebuilding its own worktree from a bare mirror plus the client's diff, and replaces
+ * that rebuild whenever the client's tree changes. A commit made there is therefore
+ * discarded — and it USED to be reported as a success, returning a SHA that no
+ * reachable checkout contained while the client still held every file uncommitted.
+ * These pin the refusal, per operation, so the silence cannot come back. */
+static void test_mirror_workspace_refuses_local_history_writes(void)
+{
+   setup_git_repo();
+   system("git checkout -q -b mirror-durability");
+
+   workspace_provider_t mirror;
+   memset(&mirror, 0, sizeof(mirror));
+   mirror.kind = WS_PROVIDER_MIRROR;
+   mirror.exec_shell = container_shell_spy; /* must never be reached */
+   workspace_provider_set_active(&mirror);
+   g_container_shell_spy_called = 0;
+
+   /* commit: the operation that lost work. */
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "message", "would be discarded");
+   cJSON *resp = handle_git_commit(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "error") != NULL);
+   assert(strstr(text, "reconstruction") != NULL);
+   /* Refused BEFORE running anything: no shell, and nothing reported as committed. */
+   assert(strstr(text, "committed") == NULL);
+   assert(g_container_shell_spy_called == 0);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   /* The same rule for every other local-history write, including the ones that reach
+    * it by delegation (checkout -> restore, switch -> branch). */
+   struct
+   {
+      const char *label;
+      cJSON *(*fn)(cJSON *);
+      const char *action;
+   } cases[] = {
+       {"reset", handle_git_reset, NULL},
+       {"add", handle_git_add, NULL},
+       {"restore", handle_git_restore, NULL},
+       {"merge", handle_git_merge, NULL},
+       {"rebase", handle_git_rebase, NULL},
+       {"sync", handle_git_sync, NULL},
+       {"cherry_pick", handle_git_cherry_pick, NULL},
+       {"revert", handle_git_revert, NULL},
+       {"pull", handle_git_pull, NULL},
+       {"stash", handle_git_stash, "push"},
+       {"branch", handle_git_branch, "create"},
+   };
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+   {
+      cJSON *a = cJSON_CreateObject();
+      if (cases[i].action)
+         cJSON_AddStringToObject(a, "action", cases[i].action);
+      cJSON_AddStringToObject(a, "name", "some-branch");
+      cJSON_AddStringToObject(a, "ref", "HEAD~1");
+      cJSON_AddBoolToObject(a, "all", 1);
+      cJSON *r = cases[i].fn(a);
+      char *t = get_mcp_text(r);
+      assert(t != NULL);
+      if (!strstr(t, "reconstruction"))
+      {
+         fprintf(stderr, "mirror durability: %s was not refused: %s\n", cases[i].label, t);
+         assert(0);
+      }
+      cJSON_Delete(r);
+      cJSON_Delete(a);
+   }
+   assert(g_container_shell_spy_called == 0);
+
+   /* READS stay available: the rebuild is faithful, which is the whole reason the
+    * write path looked like it worked. */
+   cJSON *ls = cJSON_CreateObject();
+   cJSON_AddStringToObject(ls, "action", "list");
+   cJSON *ls_resp = handle_git_branch(ls);
+   char *ls_text = get_mcp_text(ls_resp);
+   assert(ls_text != NULL);
+   assert(strstr(ls_text, "reconstruction") == NULL);
+   cJSON_Delete(ls_resp);
+   cJSON_Delete(ls);
+
+   workspace_provider_clear_active();
+
+   /* And with no mirror active the same call is allowed through — the guard keys on
+    * the provider, not on the operation being inherently unsafe. */
+   cJSON *ok_args = cJSON_CreateObject();
+   cJSON_AddStringToObject(ok_args, "message", "lands for real");
+   cJSON *ok_resp = handle_git_commit(ok_args);
+   char *ok_text = get_mcp_text(ok_resp);
+   assert(ok_text != NULL);
+   assert(strstr(ok_text, "reconstruction") == NULL);
+   cJSON_Delete(ok_resp);
+   cJSON_Delete(ok_args);
+
+   teardown_git_repo();
+   printf("  PASS: test_mirror_workspace_refuses_local_history_writes\n");
+}
+
 /* --- Test handle_git_push in non-git directory --- */
 
 static void test_git_push_requires_branch(void)
@@ -1021,10 +1122,14 @@ static void test_git_pr_create_missing_title(void)
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[512];
+   /* A github origin and an explicit base: this test is about the TITLE, and create
+    * now checks the cheap preconditions first (origin, then base), so a fixture missing
+    * either would fail before reaching the title path this test exists to pin. */
    snprintf(cmd, sizeof(cmd),
             "cd '%s' && git init -q && git config user.email test@test && "
             "git config user.name test && echo x > f.txt && "
-            "git add f.txt && git commit -q -m 'init'",
+            "git add f.txt && git commit -q -m 'init' && "
+            "git remote add origin https://github.com/example/repo.git",
             tmpdir);
    assert(system(cmd) == 0);
 
@@ -1034,6 +1139,7 @@ static void test_git_pr_create_missing_title(void)
 
    cJSON *args = cJSON_CreateObject();
    cJSON_AddStringToObject(args, "action", "create");
+   cJSON_AddStringToObject(args, "base", "master");
    cJSON *resp = handle_git_pr(args);
    char *text = get_mcp_text(resp);
    assert(text != NULL);
@@ -2283,6 +2389,70 @@ static void teardown_ownership_db(void)
    db1_shutdown();
 }
 
+/* The feature branch a session's PRs target lives in DB1, keyed repo+session, for one
+ * reason: the PR path runs on aimee-server, and a server serving a DETACHED or MIRROR
+ * workspace cannot read anything under the checkout (that is #2386 -- server-side path
+ * access against a client-held checkout, which broke every pr create). A file under
+ * the worktree would resolve here and nowhere that matters. */
+static void test_feature_branch_store_is_session_scoped(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   session_id_set_override("session-A");
+
+   char branch[256];
+   /* Nothing recorded yet: 1, not an error, and not a guessed branch. The PR path
+    * treats this as "use the repository default branch" rather than refusing. */
+   assert(feature_branch_for_session(branch, sizeof(branch)) == 1);
+   assert(branch[0] == '\0');
+
+   assert(feature_branch_set("aimee/feat/operator-choice") == 0);
+   assert(feature_branch_for_session(branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/operator-choice") == 0);
+
+   /* Re-naming the feature replaces it rather than accumulating. */
+   assert(feature_branch_set("aimee/feat/second-choice") == 0);
+   assert(feature_branch_for_session(branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/second-choice") == 0);
+
+   /* Another session in the same repo must not inherit it: two concurrent sessions on
+    * different features would otherwise aim their PRs at each other's branch. */
+   session_id_set_override("session-B");
+   assert(feature_branch_for_session(branch, sizeof(branch)) == 1);
+   assert(branch[0] == '\0');
+   assert(feature_branch_set("aimee/feat/other-feature") == 0);
+   assert(feature_branch_for_session(branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/other-feature") == 0);
+
+   session_id_set_override("session-A");
+   assert(feature_branch_for_session(branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/second-choice") == 0);
+
+   /* Anything outside aimee/feat/<slug> is refused. This is caller-supplied input -- a
+    * PR's `base` -- and whatever is stored is what a later PR in this session opens
+    * against, so a bad value here retargets real PRs. */
+   assert(feature_branch_set(NULL) == -1);
+   assert(feature_branch_set("") == -1);
+   assert(feature_branch_set("main") == -1);
+   assert(feature_branch_set("aimee/feat/") == -1);
+   assert(feature_branch_set("aimee/feat/../../main") == -1);
+   assert(feature_branch_set("aimee/feat/a/b") == -1);
+   assert(feature_branch_set("aimee/feat/Caps") == -1);
+   assert(feature_branch_set("aimee/feat/-lead") == -1);
+   assert(feature_branch_set("aimee/feat/trail-") == -1);
+   assert(feature_branch_set("aimee/feat/has space") == -1);
+   assert(feature_branch_set("aimee/feat/x\nmain") == -1);
+   assert(feature_branch_set("refs/heads/aimee/feat/x") == -1);
+
+   /* None of those may have displaced the real one. */
+   assert(feature_branch_for_session(branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/second-choice") == 0);
+
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+}
+
 static void test_branch_create_registers_ownership(void)
 {
    setup_git_repo();
@@ -2759,6 +2929,94 @@ static void test_second_operation_refused_while_one_is_in_progress(void)
    assert(strstr(text, "action=continue") != NULL);
    cJSON_Delete(resp);
    cJSON_Delete(args);
+
+   teardown_git_repo();
+}
+
+/* Rebase writes commits on its FIRST run, not only when continuing after a conflict,
+ * so it needs the operator identity then too. It used to get one only on
+ * action=continue, and git has no ambient identity to fall back on (git_ops points
+ * GIT_CONFIG_GLOBAL/SYSTEM at /dev/null), so a first-run rebase died on git's own
+ * "Committer identity unknown ... unable to auto-detect email address". `pr ready`
+ * hit this through sync, which is a rebase.
+ *
+ * With an identity present the rebase completes; with none, the answer is aimee's
+ * actionable message rather than git's. */
+static void test_rebase_carries_the_identity_on_first_run(void)
+{
+   setup_git_repo();
+
+   /* Diverge, so the rebase must REPLAY a commit and therefore write one. */
+   assert(system("git checkout -q -b behind-branch && echo mine > mine.txt && "
+                 "git add mine.txt && git commit -q -m mine") == 0);
+   assert(system("git checkout -q master") == 0);
+   assert(system("echo theirs > theirs.txt && git add theirs.txt && "
+                 "git commit -q -m theirs") == 0);
+   assert(system("git checkout -q behind-branch") == 0);
+   assert(system("git config --unset-all user.name && git config --unset-all user.email") == 0);
+
+   /* The server's shape: an identity exists in the GLOBAL config, but git children
+    * cannot see it because GIT_CONFIG_GLOBAL/SYSTEM are masked. Only aimee's resolver
+    * can read it, so the operation works exactly when the flags are passed — which is
+    * what makes this discriminating rather than a repeat of the fixture's own config. */
+   char fake_home[256];
+   snprintf(fake_home, sizeof fake_home, "%s/aimee-test-rebase-identity-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(fake_home) != NULL);
+   const char *env_names[] = {"HOME",
+                              "XDG_CONFIG_HOME",
+                              "GIT_CONFIG_NOSYSTEM",
+                              "GIT_CONFIG_SYSTEM",
+                              "GIT_CONFIG_GLOBAL",
+                              "AIMEE_TEST_GIT_IDENTITY_FROM_CONFIG"};
+   char *saved[sizeof(env_names) / sizeof(env_names[0])] = {0};
+   for (size_t i = 0; i < sizeof(env_names) / sizeof(env_names[0]); i++)
+   {
+      const char *value = getenv(env_names[i]);
+      saved[i] = value ? strdup(value) : NULL;
+   }
+
+   setenv("HOME", fake_home, 1);
+   setenv("XDG_CONFIG_HOME", fake_home, 1);
+   unsetenv("GIT_CONFIG_NOSYSTEM");
+   unsetenv("GIT_CONFIG_SYSTEM");
+   unsetenv("GIT_CONFIG_GLOBAL");
+   assert(system("git config --global user.name 'Global Operator' && "
+                 "git config --global user.email 'global@example.test'") == 0);
+   setenv("GIT_CONFIG_NOSYSTEM", "1", 1);
+   setenv("GIT_CONFIG_SYSTEM", "/dev/null", 1);
+   setenv("GIT_CONFIG_GLOBAL", "/dev/null", 1);
+   setenv("AIMEE_TEST_GIT_IDENTITY_FROM_CONFIG", "1", 1);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "base", "master");
+   cJSON *resp = handle_git_rebase(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   /* Without the identity on the first run this is where git says "Committer identity
+    * unknown ... unable to auto-detect email address". */
+   assert(strstr(text, "identity") == NULL);
+   assert(strstr(text, "error") == NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   /* The replayed commit carries the resolved operator, so the identity really was
+    * applied rather than the rebase merely being a no-op. */
+   assert(system("test \"$(git log -1 --format='%cn <%ce>')\" = "
+                 "'Global Operator <global@example.test>'") == 0);
+
+   for (size_t i = 0; i < sizeof(env_names) / sizeof(env_names[0]); i++)
+   {
+      if (saved[i])
+      {
+         setenv(env_names[i], saved[i], 1);
+         free(saved[i]);
+      }
+      else
+         unsetenv(env_names[i]);
+   }
+   char rm[512];
+   snprintf(rm, sizeof rm, "rm -rf '%s'", fake_home);
+   (void)system(rm);
 
    teardown_git_repo();
 }
@@ -3804,6 +4062,7 @@ int main(void)
    test_git_commit_reads_masked_global_identity();
    test_git_commit_skips_sensitive();
    test_git_container_provider_runs_on_server();
+   test_mirror_workspace_refuses_local_history_writes();
    test_git_push_requires_branch();
    test_git_branch_missing_action();
    test_git_branch_create_and_list();
@@ -3864,6 +4123,7 @@ int main(void)
    test_verify_gate_enforced_with_enforce_true_and_stale_verify();
 
    /* Branch ownership tests */
+   test_feature_branch_store_is_session_scoped();
    test_branch_create_registers_ownership();
    test_commit_blocked_by_other_session_ownership();
    test_push_blocked_by_other_session_ownership();
@@ -3887,6 +4147,7 @@ int main(void)
    test_merge_keep_conflicts_then_continue();
    test_merge_action_abort();
    test_second_operation_refused_while_one_is_in_progress();
+   test_rebase_carries_the_identity_on_first_run();
    test_integrate_refuses_dirty_tree();
    test_integrate_blocked_on_main();
    test_integrate_requires_a_ref();

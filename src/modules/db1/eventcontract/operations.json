@@ -464,6 +464,89 @@
         "payload": "text",
         "max_bytes": 512
       }
+    },
+    {
+      "family": "git_ownership",
+      "id": 6,
+      "name": "feature_branch_upsert",
+      "c_name": "db1_session_feature_branch_upsert",
+      "c_params": [
+        "repo_path",
+        "session_id",
+        "feature_branch"
+      ],
+      "wire_format": "db1-fields-v1",
+      "scope": "repository",
+      "transaction": "single",
+      "idempotency": "idempotent",
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "key",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "session",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "branch",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "payload": "none",
+        "max_bytes": 0
+      }
+    },
+    {
+      "family": "git_ownership",
+      "id": 7,
+      "name": "feature_branch_get",
+      "c_name": "db1_session_feature_branch_get",
+      "c_params": [
+        "repo_path",
+        "session_id",
+        "branch_out",
+        "branch_len"
+      ],
+      "wire_format": "db1-fields-v1",
+      "scope": "repository",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "key",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "session",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "payload": "text",
+        "max_bytes": 512
+      }
     }
   ]
 }

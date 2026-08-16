@@ -293,6 +293,14 @@ CFG_KEY_DESC = {
                               "remote default -> main -> master. Values: remote_default (default), "
                               "local_default, current (opt-in only, never a fallback), or an explicit "
                               "ref. Env: AIMEE_SESSION_WORKTREE_BASE.",
+    "pr_base_mode": "What a PR opened from a session targets. feature (default): the session's "
+                    "durable feature branch aimee/feat/<slug>, so a feature's slices accumulate on "
+                    "one branch and reach the default branch through a single reviewed PR. "
+                    "default_branch: every PR aims at the repo's default branch. Any other value "
+                    "fails closed rather than guessing a base.",
+    "feature_auto_promote": "When every PR on a feature branch has merged, automatically open the "
+                            "feature -> default-branch PR as a draft (default on). Off leaves "
+                            "promotion to an explicit action.",
     "kb_fusion_static_alpha": "Lexical/dense blend weight (0-1) for the static_alpha fusion mode.",
     "kb_pdf_ingest_enabled": "Route PDF uploads through the structured geometry extractor "
     "(kb_doc_pdf) instead of plain pdftotext (default off).",
@@ -962,6 +970,7 @@ ENV_DESC = {
     "AIMEE_WEBCHAT_USERS": ("Server runtime", "Optional first-boot webchat account registry. It is sealed into Vault and removed from the environment before runtime-web starts."),
     "AIMEE_VAULT_ENV_OVERWRITE": ("Server runtime", "First-boot control flag allowing supplied credential values to replace existing Vault records. It is not itself a credential."),
     "AIMEE_AUTONOMY_BASE": ("Workflow engine", "Legacy C workflow integration-branch fallback. The Go WFE uses the branch checked out when it admits the repository."),
+    "AIMEE_PR_BASE_MODE": ("Workflow engine", "What a pr.open with no explicit base targets: the run's feature branch (default) or, when set to default_branch, the autonomous base. The server exports the configured pr_base_mode into this variable at startup, so `aimee config set pr_base_mode` stays the one operator knob; the workflow engine reads it from the environment because that module is deliberately config-free."),
     "AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL": ("Workflow engine", "Maximum active autonomous work items for one authenticated principal."),
     "AIMEE_AUTONOMY_MAX_USD": ("Workflow engine", "Default USD ceiling for an autonomous work item; 0 disables this default ceiling."),
     "AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN": ("Workflow engine", "Autonomous-submission rate limit per principal."),
