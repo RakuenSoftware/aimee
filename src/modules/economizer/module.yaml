@@ -45,8 +45,9 @@
     "server-go/modules/economizer/reduce.go",
     "server-go/modules/economizer/register.go",
     "server-go/modules/economizer/repair.go",
-    "server-go/modules/economizer/stats.go",
-    "server-go/modules/economizer/state.go"
+    "server-go/modules/economizer/state.go",
+    "server-go/modules/economizer/state_store.go",
+    "server-go/modules/economizer/stats.go"
   ],
   "go_tests": [
     "server-go/modules/economizer/breaker_test.go",

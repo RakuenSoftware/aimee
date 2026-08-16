@@ -117,10 +117,12 @@ type ReduceRequest struct {
 	ClosetMaxRatioPct     int    `json:"closet_max_ratio_pct,omitempty"`
 	ClosetDenylist        string `json:"closet_denylist,omitempty"`
 
-	// State is the serialized per-conversation reducer state, empty on the first
-	// turn of a conversation.
-	State string `json:"state,omitempty"`
-	Turn  int    `json:"turn,omitempty"`
+	// StateKey identifies the conversation whose reducer state this reduction
+	// continues. The caller owns conversation identity, so it names the
+	// conversation; the module owns the state kept under that name, so the blob
+	// and the turn counter never cross this boundary. Empty means "do not
+	// persist", which reduces normally but always from cold.
+	StateKey string `json:"state_key,omitempty"`
 }
 
 // ReduceResponse carries the reduced view and the ledger.
@@ -155,11 +157,6 @@ type ReduceResponse struct {
 
 	RecallHint     string `json:"recall_hint,omitempty"`
 	RecallSurfaced int    `json:"recall_surfaced,omitempty"`
-
-	// State is the serialized reducer state to persist for the next turn. Empty
-	// when it could not be serialized, which the caller treats as "keep what you
-	// have" rather than "clear it".
-	State string `json:"state,omitempty"`
 }
 
 var reduceReasonNames = map[ReduceReason]string{
@@ -174,7 +171,15 @@ var reduceReasonNames = map[ReduceReason]string{
 //
 // The breaker is created per handler rather than as a package global so a test
 // gets a clean one and two handlers never share a lever.
+// NewHandler serves without a state store: reductions still run, they just
+// never warm up between turns. Used where no store is reachable, and by tests.
 func NewHandler() bus.ModuleHandler {
+	return NewHandlerWithStore(nil)
+}
+
+// NewHandlerWithStore serves with somewhere to keep per-conversation reducer
+// state. A nil store is legal and means the same as NewHandler.
+func NewHandlerWithStore(store StateStore) bus.ModuleHandler {
 	breaker := NewSessionBreaker()
 	stats := NewGatewayStatsStore()
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
@@ -199,7 +204,7 @@ func NewHandler() bus.ModuleHandler {
 			if err := json.Unmarshal(request, &req); err != nil {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
-			return handleReduce(breaker, stats, &req)
+			return handleReduce(breaker, stats, store, &req)
 		case StageJSONCompact:
 			return handleJSONCompact(invocation, request)
 		case StageToolRecall:
@@ -214,7 +219,8 @@ func NewHandler() bus.ModuleHandler {
 	}
 }
 
-func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, req *ReduceRequest) ([]byte, bus.ModuleStatus) {
+func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, store StateStore,
+	req *ReduceRequest) ([]byte, bus.ModuleStatus) {
 	messages := ParseJSON(string(req.Messages))
 	if messages == nil || !messages.IsArray() {
 		return nil, bus.ModuleStatusInvalidRequest
@@ -281,17 +287,7 @@ func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, req *Reduce
 		cfg.DelegateSeam = true
 	}
 
-	st := &ReduceState{Turn: req.Turn, Recall: NewRecallIndex()}
-	if req.State != "" {
-		// A state we cannot read is DISCARDED rather than fatal: the reduction
-		// still runs, it just starts from a cold freeze and an empty page table.
-		// Failing the whole request would be worse than losing one turn of warmth.
-		_ = RestoreState(st, req.State)
-		st.Turn = req.Turn
-		if st.Recall == nil {
-			st.Recall = NewRecallIndex()
-		}
-	}
+	st := restoreState(store, stats, req.StateKey)
 
 	out := Reduce(messages, req.SystemPrompt, seam, cfg, st)
 
@@ -335,9 +331,12 @@ func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, req *Reduce
 		// prefix and cost the cache.
 		resp.Messages = json.RawMessage(PrintJSONUnformatted(out.Messages))
 	}
-	if blob, ok := SerializeState(st); ok {
-		resp.State = blob
-	}
+	// Persist BEFORE any bypass decision and regardless of it. The freeze
+	// boundary has to advance on every turn the reducer saw, not only the ones
+	// that shipped a reduced payload: drop it on a bypass and the next turn
+	// re-folds from cold, moving the prefix and costing the cache read the
+	// freeze exists to keep.
+	persistState(store, stats, req.StateKey, st)
 
 	body, err := json.Marshal(resp)
 	if err != nil {

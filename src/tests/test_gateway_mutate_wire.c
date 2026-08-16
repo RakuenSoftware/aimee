@@ -14,29 +14,6 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 
-/* The seam now carries reducer state per session so it can hold a freeze boundary.
- * These fixtures stand in for db1 rather than linking sqlite into what is a pure
- * decision fixture: every test below runs with the module unreachable, so the seam
- * bypasses before it would ever read a state blob. Persistence itself is covered by
- * the Go module's state tests and verified live on the deploy. */
-int db1_economizer_state_save(const char *session_id, const char *json);
-int db1_economizer_state_load(const char *session_id, char *out, size_t out_sz);
-
-int db1_economizer_state_save(const char *session_id, const char *json)
-{
-   (void)session_id;
-   (void)json;
-   return 0;
-}
-
-int db1_economizer_state_load(const char *session_id, char *out, size_t out_sz)
-{
-   (void)session_id;
-   if (out && out_sz)
-      out[0] = '\0';
-   return -1; /* "no state": the first turn of a session takes this path */
-}
-
 /* A container {"messages":[<msg>]} whose single message tags which array it is. */
 static cJSON *container_with(const char *tag)
 {

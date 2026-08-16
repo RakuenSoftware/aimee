@@ -424,20 +424,30 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
     )
 
 
-def go_process_shared_sources(module_id: str) -> list[str]:
-    """Return shared caller contracts needed by independently built Go modules.
+# Caller-side contracts that live outside any implementation module, mapped to
+# the modules that import them. Each is deliberately not owned by the module it
+# talks to: every peer that calls delegates may import server-go/delegate, and
+# every peer that keeps state in DB1 may import server-go/db1, without importing
+# the serving module. Add entries here in lockstep with the caller's process
+# contract and runtime-bundle coverage.
+GO_SHARED_CONTRACTS = {
+    "server-go/delegate": {"delegates", "roundtable"},
+    "server-go/db1": {"economizer"},
+}
 
-    ``server-go/delegate`` is intentionally outside any implementation module:
-    every module that calls delegates may import it. Add such module IDs here in
-    lockstep with their process contract and runtime-bundle coverage.
-    """
-    if module_id not in {"delegates", "roundtable"}:
-        return []
-    return sorted(
-        path.relative_to(ROOT).as_posix()
-        for path in (ROOT / "server-go/delegate").glob("*.go")
-        if not path.name.endswith("_test.go")
-    )
+
+def go_process_shared_sources(module_id: str) -> list[str]:
+    """Return shared caller contracts needed by independently built Go modules."""
+    sources: list[str] = []
+    for directory, importers in GO_SHARED_CONTRACTS.items():
+        if module_id not in importers:
+            continue
+        sources.extend(
+            path.relative_to(ROOT).as_posix()
+            for path in (ROOT / directory).glob("*.go")
+            if not path.name.endswith("_test.go")
+        )
+    return sorted(sources)
 
 
 def go_dependency_version(module_path: str) -> str:

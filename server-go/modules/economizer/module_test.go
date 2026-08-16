@@ -1,8 +1,10 @@
 package economizer
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +20,53 @@ func invoke(t *testing.T, req ReduceRequest) (ReduceResponse, bus.ModuleStatus) 
 		t.Fatal(err)
 	}
 	out, status := NewHandler()(bus.ModuleInvocation{StageID: StageReduce}, body)
+	var resp ReduceResponse
+	if status == bus.ModuleStatusOK {
+		if err := json.Unmarshal(out, &resp); err != nil {
+			t.Fatalf("response is not JSON: %v", err)
+		}
+	}
+	return resp, status
+}
+
+// memStore is a StateStore that keeps blobs in memory, so the state tests
+// exercise the module's own load/save path without needing a bus.
+type memStore struct {
+	blobs   map[string]string
+	loadErr error
+	saveErr error
+	loads   int
+	saves   int
+}
+
+func (m *memStore) LoadState(_ context.Context, key string) (string, bool, error) {
+	m.loads++
+	if m.loadErr != nil {
+		return "", false, m.loadErr
+	}
+	blob, ok := m.blobs[key]
+	return blob, ok && blob != "", nil
+}
+
+func (m *memStore) SaveState(_ context.Context, key, blob string) error {
+	m.saves++
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	if m.blobs == nil {
+		m.blobs = map[string]string{}
+	}
+	m.blobs[key] = blob
+	return nil
+}
+
+func invokeWithStore(t *testing.T, store StateStore, req ReduceRequest) (ReduceResponse, bus.ModuleStatus) {
+	t.Helper()
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, status := NewHandlerWithStore(store)(bus.ModuleInvocation{StageID: StageReduce}, body)
 	var resp ReduceResponse
 	if status == bus.ModuleStatusOK {
 		if err := json.Unmarshal(out, &resp); err != nil {
@@ -80,47 +129,144 @@ func TestModuleNoMutationOmitsMessages(t *testing.T) {
 	}
 }
 
-// State round-trips through the stage, so a conversation keeps its freeze
-// boundary and page table across turns.
+// State round-trips through the STORE, so a conversation keeps its freeze
+// boundary and page table across turns without the caller ever handling it.
 func TestModuleStateRoundTrip(t *testing.T) {
-	first, status := invoke(t, ReduceRequest{
-		Messages:      rawMessages(t, 20),
-		Seam:          "delegate",
-		HistoryFold:   true,
-		ClosetEnabled: true,
-		RecallEnabled: true,
-		Turn:          1,
-	})
-	if status != bus.ModuleStatusOK || first.State == "" {
-		t.Fatalf("expected serialized state back: %+v", first)
+	store := &memStore{}
+	turn := func() ReduceRequest {
+		return ReduceRequest{
+			Messages:      rawMessages(t, 20),
+			Seam:          "delegate",
+			HistoryFold:   true,
+			ClosetEnabled: true,
+			RecallEnabled: true,
+			StateKey:      "conv-1",
+		}
+	}
+	if _, status := invokeWithStore(t, store, turn()); status != bus.ModuleStatusOK {
+		t.Fatalf("first turn status = %v", status)
+	}
+	first, ok := store.blobs["conv-1"]
+	if !ok || first == "" {
+		t.Fatalf("the module must persist its own state, store = %+v", store.blobs)
 	}
 
-	second, status := invoke(t, ReduceRequest{
+	if _, status := invokeWithStore(t, store, turn()); status != bus.ModuleStatusOK {
+		t.Fatalf("second turn status = %v", status)
+	}
+	if store.blobs["conv-1"] == "" {
+		t.Error("state should survive a second turn")
+	}
+	// The turn counter is the module's to advance now that it owns the blob.
+	var restored ReduceState
+	if err := RestoreState(&restored, store.blobs["conv-1"]); err != nil {
+		t.Fatalf("stored state is unreadable: %v", err)
+	}
+	if restored.Turn < 1 {
+		t.Errorf("turn should advance across turns, got %d", restored.Turn)
+	}
+}
+
+// A conversation with no key still reduces; it just never warms up. This is the
+// path a caller takes when it has no conversation identity to name.
+func TestModuleWithoutAStateKeyNeverPersists(t *testing.T) {
+	store := &memStore{}
+	resp, status := invokeWithStore(t, store, ReduceRequest{
 		Messages:      rawMessages(t, 20),
 		Seam:          "delegate",
 		HistoryFold:   true,
 		ClosetEnabled: true,
-		RecallEnabled: true,
-		State:         first.State,
-		Turn:          2,
 	})
-	if status != bus.ModuleStatusOK {
-		t.Fatalf("status = %v", status)
+	if status != bus.ModuleStatusOK || !resp.Mutated {
+		t.Fatalf("the reduction should still run: status=%v resp=%+v", status, resp)
 	}
-	if second.State == "" {
-		t.Error("state should survive a second turn")
+	if store.loads != 0 || store.saves != 0 {
+		t.Errorf("an unkeyed request touched the store: %d loads, %d saves",
+			store.loads, store.saves)
+	}
+}
+
+// An unreachable store costs one cold turn, not the reduction. Reducer state is
+// an optimization, so every storage failure lands in the same safe place.
+func TestModuleStoreFailuresAreNotFatal(t *testing.T) {
+	for name, store := range map[string]*memStore{
+		"load fails": {loadErr: errStoreDown},
+		"save fails": {saveErr: errStoreDown},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp, status := invokeWithStore(t, store, ReduceRequest{
+				Messages:      rawMessages(t, 20),
+				Seam:          "delegate",
+				HistoryFold:   true,
+				ClosetEnabled: true,
+				StateKey:      "conv-1",
+			})
+			if status != bus.ModuleStatusOK {
+				t.Fatalf("a store failure must not fail the reduction: %v", status)
+			}
+			if !resp.Mutated {
+				t.Error("the reduction should still have run")
+			}
+		})
+	}
+}
+
+// A store that degrades must be COUNTED, because degrading is silent by design:
+// the fold keeps running and simply stops warming up, which looks exactly like a
+// fold that is working.
+func TestStoreDegradationIsCounted(t *testing.T) {
+	for name, tc := range map[string]struct {
+		store   *memStore
+		counter string
+	}{
+		"unreachable on load": {&memStore{loadErr: errStoreDown}, "economizer_state_unavailable"},
+		"unreadable blob":     {&memStore{blobs: map[string]string{"conv-1": "{not valid"}}, "economizer_state_unavailable"},
+		"write fails":         {&memStore{saveErr: errStoreDown}, "economizer_state_save_failed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			handler := NewHandlerWithStore(tc.store)
+			body, err := json.Marshal(ReduceRequest{
+				Messages:      rawMessages(t, 20),
+				Seam:          "gateway",
+				HistoryFold:   true,
+				ClosetEnabled: true,
+				StateKey:      "conv-1",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, status := handler(bus.ModuleInvocation{StageID: StageReduce}, body); status != bus.ModuleStatusOK {
+				t.Fatalf("degradation must not fail the reduction: %v", status)
+			}
+			out, status := handler(bus.ModuleInvocation{StageID: StageStats}, []byte(`{}`))
+			if status != bus.ModuleStatusOK {
+				t.Fatalf("stats stage status = %v", status)
+			}
+			var raw map[string]any
+			if err := json.Unmarshal(out, &raw); err != nil {
+				t.Fatalf("stats are not JSON: %v", err)
+			}
+			got, ok := raw[tc.counter]
+			if !ok {
+				t.Fatalf("counter %q absent from stats: %v", tc.counter, raw)
+			}
+			if n, _ := got.(float64); n < 1 {
+				t.Errorf("counter %q = %v, want at least 1", tc.counter, got)
+			}
+		})
 	}
 }
 
 // An unreadable state is DISCARDED, not fatal: the reduction still runs, it just
 // starts cold. Failing the request would cost more than one turn of warmth.
 func TestModuleBadStateIsNotFatal(t *testing.T) {
-	resp, status := invoke(t, ReduceRequest{
+	store := &memStore{blobs: map[string]string{"conv-1": "{not valid"}}
+	resp, status := invokeWithStore(t, store, ReduceRequest{
 		Messages:      rawMessages(t, 20),
 		Seam:          "delegate",
 		HistoryFold:   true,
 		ClosetEnabled: true,
-		State:         "{not valid",
+		StateKey:      "conv-1",
 	})
 	if status != bus.ModuleStatusOK {
 		t.Fatalf("a bad state blob must not fail the request: %v", status)
@@ -311,3 +457,5 @@ func TestModuleEventKindMatchesContract(t *testing.T) {
 		}
 	}
 }
+
+var errStoreDown = errors.New("store is unreachable")
