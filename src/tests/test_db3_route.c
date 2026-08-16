@@ -6,6 +6,12 @@
 #include <stdio.h>
 #include <string.h>
 
+_Static_assert(AIMEE_DB3_EVENT_CAPABILITIES == 0x80030001u, "DB3 capability event drift");
+_Static_assert(AIMEE_DB3_EVENT_APPLY == 0x80030002u, "DB3 apply event drift");
+_Static_assert(AIMEE_DB3_EVENT_APPLIED == 0x80030003u, "DB3 applied event drift");
+_Static_assert(AIMEE_DB3_EVENT_SEARCH == 0x80030004u, "DB3 search event drift");
+_Static_assert(AIMEE_DB3_EVENT_ROUTE == 0x80030005u, "DB3 route event drift");
+
 typedef struct
 {
    int calls;
@@ -88,9 +94,9 @@ static void test_default_external_and_authorization(void)
    assert(out.reply.candidates[0].point_id == 10 && out.reply.candidates[1].point_id == 12);
 
    auth.reject_id = 21;
-   assert(aimee_db3_route_select(&route, 66, 1, 0, search, &external) == 0);
+   assert(aimee_db3_route_select(&route, 1001, 1, 0, search, &external) == 0);
    assert(aimee_db3_memory_candidates_search(&route, &req, &out) == AIMEE_DB3_OK);
-   assert(out.route == AIMEE_DB3_ROUTE_EXTERNAL && out.selected_principal == 66);
+   assert(out.route == AIMEE_DB3_ROUTE_EXTERNAL && out.selected_principal == 1001);
    assert(internal.calls == 1 && external.calls == 1 && out.reply.count == 2);
    assert(out.reply.candidates[0].point_id == 20 && out.reply.candidates[1].point_id == 22);
 
@@ -108,16 +114,16 @@ static void test_fail_closed_and_explicit_fallback(void)
    aimee_db3_search_outcome_t out;
    assert(aimee_db3_route_init(&route, search, &internal, authorize, &auth) == 0);
 
-   assert(aimee_db3_route_select(&route, 66, 0, 0, search, &external) == 0);
+   assert(aimee_db3_route_select(&route, 1001, 0, 0, search, &external) == 0);
    assert(aimee_db3_memory_candidates_search(&route, &req, &out) == AIMEE_DB3_UNAVAILABLE);
    assert(out.route == AIMEE_DB3_ROUTE_EXTERNAL && out.external_error == AIMEE_DB3_UNAVAILABLE);
    assert(internal.calls == 0 && external.calls == 0);
 
-   assert(aimee_db3_route_select(&route, 66, 1, 0, search, &external) == 0);
+   assert(aimee_db3_route_select(&route, 1001, 1, 0, search, &external) == 0);
    assert(aimee_db3_memory_candidates_search(&route, &req, &out) == AIMEE_DB3_PROVIDER_FAILURE);
    assert(internal.calls == 0 && external.calls == 1);
 
-   assert(aimee_db3_route_select(&route, 66, 1, 1, search, &external) == 0);
+   assert(aimee_db3_route_select(&route, 1001, 1, 1, search, &external) == 0);
    assert(aimee_db3_memory_candidates_search(&route, &req, &out) == AIMEE_DB3_OK);
    assert(out.route == AIMEE_DB3_ROUTE_EXPLICIT_FALLBACK);
    assert(out.external_error == AIMEE_DB3_PROVIDER_FAILURE);
@@ -221,6 +227,54 @@ static void test_wire_codecs(void)
    assert(aimee_db3_apply_validate(&apply) != 0);
    apply.dimension = 0;
    assert(aimee_db3_apply_validate(&apply) == 0);
+
+   /* Generated tests/baselines/modules/db3-wire-v1.json replays these exact
+    * bytes in Go. Pin them here as the C side of the cross-language fixture. */
+   const uint8_t expected_request[] = {
+       0x44, 0x42, 0x33, 0x53, 0x01, 0x00, 0x24, 0x00, 0x4d, 0x00, 0x00, 0x00,
+       0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+       0x0b, 0x00, 0x09, 0x00, 0x06, 0x00, 0x03, 0x00, 0x02, 0x00, 0x00, 0x00,
+       0x77, 0x6f, 0x72, 0x6b, 0x73, 0x70, 0x61, 0x63, 0x65, 0x2d, 0x61, 0x70,
+       0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x2d, 0x61, 0x6d, 0x65, 0x6d, 0x6f,
+       0x72, 0x79, 0x9a, 0x99, 0x99, 0x3e, 0xcd, 0xcc, 0x4c, 0x3e, 0xcd, 0xcc,
+       0xcc, 0x3d};
+   const uint8_t expected_reply[] = {
+       0x44, 0x42, 0x33, 0x52, 0x01, 0x00, 0x1c, 0x00, 0x4d, 0x00, 0x00, 0x00,
+       0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+       0x02, 0x00, 0x00, 0x00, 0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+       0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0xee, 0x3f, 0x2a, 0x00, 0x00, 0x00,
+       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe8, 0x3f};
+   const uint8_t expected_apply[] = {
+       0x44, 0x42, 0x33, 0x41, 0x01, 0x00, 0x01, 0x00, 0xe9, 0x03, 0x00, 0x00,
+       0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+       0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x03, 0x00,
+       0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0xcd, 0xcc, 0xcc, 0x3d, 0xcd, 0xcc,
+       0x4c, 0x3e, 0x9a, 0x99, 0x99, 0x3e};
+   aimee_db3_search_request_t fixture_request = {.request_id = 77,
+                                                  .required_generation = 7,
+                                                  .workspace = "workspace-a",
+                                                  .project = "project-a",
+                                                  .record_type = "memory",
+                                                  .dimension = 3,
+                                                  .top_k = 2,
+                                                  .vector = {0.3f, 0.2f, 0.1f}};
+   assert(aimee_db3_search_request_encode(&fixture_request, wire, sizeof(wire), &length) == 0);
+   assert(length == sizeof(expected_request) && memcmp(wire, expected_request, length) == 0);
+   aimee_db3_search_reply_t fixture_reply = {.request_id = 77,
+                                              .generation = 7,
+                                              .count = 2,
+                                              .candidates = {{41, 0.95}, {42, 0.75}}};
+   assert(aimee_db3_search_reply_encode(&fixture_reply, wire, sizeof(wire), &length) == 0);
+   assert(length == sizeof(expected_reply) && memcmp(wire, expected_reply, length) == 0);
+   aimee_db3_apply_t fixture_apply = {.operation_id = 1001,
+                                      .generation = 7,
+                                      .point_id = 41,
+                                      .kind = AIMEE_DB3_APPLY_UPSERT,
+                                      .collection = "memory",
+                                      .dimension = 3,
+                                      .vector = {0.1f, 0.2f, 0.3f}};
+   assert(aimee_db3_apply_encode(&fixture_apply, wire, sizeof(wire), &length) == 0);
+   assert(length == sizeof(expected_apply) && memcmp(wire, expected_apply, length) == 0);
 }
 
 int main(void)

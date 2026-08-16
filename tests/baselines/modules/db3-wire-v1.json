@@ -1,0 +1,50 @@
+{
+  "apply_hex": "4442334101000100e90300000000000007000000000000002900000000000000060003006d656d6f7279cdcccc3dcdcc4c3e9a99993e",
+  "contract_sha256": "0c9dfbe27148b6760c04b1632794c65ecc4c12881d1ac61e4dac5113ba135c2d",
+  "events": [
+    {
+      "delivery": "db2",
+      "event_kind": 2147680257,
+      "id": 1,
+      "name": "capabilities",
+      "pattern": "notification",
+      "source": "provider"
+    },
+    {
+      "delivery": "all-providers",
+      "event_kind": 2147680258,
+      "id": 2,
+      "name": "apply",
+      "pattern": "notification",
+      "source": "db2"
+    },
+    {
+      "delivery": "db2",
+      "event_kind": 2147680259,
+      "id": 3,
+      "name": "applied",
+      "pattern": "notification",
+      "source": "provider"
+    },
+    {
+      "delivery": "selected-provider",
+      "event_kind": 2147680260,
+      "id": 4,
+      "name": "search",
+      "pattern": "request-reply",
+      "source": "db2"
+    },
+    {
+      "delivery": "db3-router",
+      "event_kind": 2147680261,
+      "id": 5,
+      "name": "route",
+      "pattern": "request-reply",
+      "source": "control"
+    }
+  ],
+  "protocol_id": 3,
+  "schema_version": 1,
+  "search_reply_hex": "4442335201001c004d000000000000000700000000000000020000002900000000000000666666666666ee3f2a00000000000000000000000000e83f",
+  "search_request_hex": "44423353010024004d0000000000000007000000000000000b0009000600030002000000776f726b73706163652d6170726f6a6563742d616d656d6f72799a99993ecdcc4c3ecdcccc3d"
+}
