@@ -67,6 +67,25 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
     "evidence": "Three deterministic dynamic-string lifecycle functions with only realloc and "
                 "vsnprintf imports; no DB2, event-bus, provider, I/O, or platform dependency.",
 }, {
+    "path": "src/modules/db2/support/management_read_primitives.c",
+    "source_sha256": "2b1799442b2d57c6088eaa8fbcff744d6422bd3011b816bf78f3faefde4b8058",
+    "header": "src/modules/db2/support/db2_management_read.h",
+    "header_sha256": "b95b4714b891a71689bc2ad95bae3f693d6694cde83a3fef481d7212c4c2f318",
+    "defines": ["server_mgmt_read_selector_name"],
+    "resolves": ["server_mgmt_read_selector_name"],
+    "allowed_includes": ["db2_management_read.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": [],
+    "base_references": {
+        "server_mgmt_read_selector_name": [
+            "src/modules/db2/c/management_read_journal.c",
+        ],
+    },
+    "provenance": "Definition promoted from src/shared/management_read.c; the sole DB2 call was "
+                  "audited in management_read_journal.c.",
+    "evidence": "Deterministic two-value selector mapping with no imports, allocation, I/O, DB, "
+                "event-bus, provider, platform, pgvector, or DB3 dependency; ABI parity tested.",
+}, {
     "path": "src/modules/db2/support/sketch_primitives.c",
     "source_sha256": "20318d4f9c92894892ef9475f95c1542602f3a7d2b4d9fe6df2b8d63b4986280",
     "header": "src/modules/db2/support/sketch.h",
@@ -128,6 +147,49 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                   "canonical_index.c, code_index.c, and kb_payload.c.",
     "evidence": "Deterministic in-place UTF-8 repair with no imports, allocation, I/O, DB, "
                 "event-bus, provider, or platform dependency; exhaustive parity tested.",
+}, {
+    "path": "src/modules/db2/support/time_primitives.c",
+    "source_sha256": "3a75fa922a9d7ddfbd51a4297461a266d9e14a2c995422a1ae6165116545f04c",
+    "header": "src/modules/db2/support/db2_time.h",
+    "header_sha256": "f6b01dfcda9c2d6e10d2ffb8fae9376dac4ac2fc0cc84bcc10f16f23235117e8",
+    "defines": ["now_utc", "parse_utc_ts"],
+    "resolves": ["now_utc", "parse_utc_ts"],
+    "allowed_includes": ["db2_time.h", "stdio.h", "string.h"],
+    "allowed_header_includes": ["stddef.h", "time.h"],
+    "allowed_undefined": [
+        "__isoc23_sscanf", "__isoc99_sscanf", "gmtime_r", "strftime", "time", "timegm",
+    ],
+    "base_references": {
+        "now_utc": [
+            "src/modules/db2/c/artifacts.c",
+            "src/modules/db2/c/bandit.c",
+            "src/modules/db2/c/calibration.c",
+            "src/modules/db2/c/canonical_index.c",
+            "src/modules/db2/c/code_index.c",
+            "src/modules/db2/c/code_index_ops.c",
+            "src/modules/db2/c/code_project_lifecycle.c",
+            "src/modules/db2/c/corpus_jobs.c",
+            "src/modules/db2/c/corpus_structural.c",
+            "src/modules/db2/c/demotion.c",
+            "src/modules/db2/c/feature_rows.c",
+            "src/modules/db2/c/feedback.c",
+            "src/modules/db2/c/kb_docs.c",
+            "src/modules/db2/c/kb_releases.c",
+            "src/modules/db2/c/report_enrichments.c",
+            "src/modules/db2/c/rules.c",
+            "src/modules/db2/c/tasks.c",
+            "src/modules/db2/c/vector_index_ops.c",
+        ],
+        "parse_utc_ts": [
+            "src/modules/db2/c/code_index.c",
+            "src/modules/db2/c/demotion.c",
+        ],
+    },
+    "provenance": "Adjacent UTC formatter and parser definitions promoted from src/util.c; all "
+                  "eighteen formatter and two parser DB2 units audited.",
+    "evidence": "Shared UTC timestamp contract with only system time/parsing imports; Linux uses "
+                "timegm and the preserved Windows branch uses _mkgmtime. No DB, event-bus, "
+                "provider, pgvector, DB3, allocation, I/O, or logging dependency.",
 }]
 SYSTEM_PREFIXES = ("PQ", "EVP_", "OPENSSL_", "RAND_", "SHA", "CRYPTO_")
 INJECTED_PREFIXES = (

@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "2770a84679f82f10c068b245abdb11ce04639f66",
-  "source_fingerprint": "d80b7ff5d0f81e9896efdbe6184cc1682587a2f734ffd180e640915d14164312",
+  "source_revision": "6925305e7764121dfefa3c4e2ee2c6c1f3ac7365",
+  "source_fingerprint": "5e41b9a48251716f26192e3013d63708d9cabc921ebabca16661f07e2d86da4a",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
@@ -201,6 +201,30 @@
       "evidence": "Three deterministic dynamic-string lifecycle functions with only realloc and vsnprintf imports; no DB2, event-bus, provider, I/O, or platform dependency."
     },
     {
+      "path": "src/modules/db2/support/management_read_primitives.c",
+      "source_sha256": "2b1799442b2d57c6088eaa8fbcff744d6422bd3011b816bf78f3faefde4b8058",
+      "header": "src/modules/db2/support/db2_management_read.h",
+      "header_sha256": "b95b4714b891a71689bc2ad95bae3f693d6694cde83a3fef481d7212c4c2f318",
+      "defines": [
+        "server_mgmt_read_selector_name"
+      ],
+      "resolves": [
+        "server_mgmt_read_selector_name"
+      ],
+      "allowed_includes": [
+        "db2_management_read.h"
+      ],
+      "allowed_header_includes": [],
+      "allowed_undefined": [],
+      "base_references": {
+        "server_mgmt_read_selector_name": [
+          "src/modules/db2/c/management_read_journal.c"
+        ]
+      },
+      "provenance": "Definition promoted from src/shared/management_read.c; the sole DB2 call was audited in management_read_journal.c.",
+      "evidence": "Deterministic two-value selector mapping with no imports, allocation, I/O, DB, event-bus, provider, platform, pgvector, or DB3 dependency; ABI parity tested."
+    },
+    {
       "path": "src/modules/db2/support/sketch_primitives.c",
       "source_sha256": "20318d4f9c92894892ef9475f95c1542602f3a7d2b4d9fe6df2b8d63b4986280",
       "header": "src/modules/db2/support/sketch.h",
@@ -288,6 +312,65 @@
       },
       "provenance": "Definition promoted from src/text.c; all DB2 calls audited in canonical_index.c, code_index.c, and kb_payload.c.",
       "evidence": "Deterministic in-place UTF-8 repair with no imports, allocation, I/O, DB, event-bus, provider, or platform dependency; exhaustive parity tested."
+    },
+    {
+      "path": "src/modules/db2/support/time_primitives.c",
+      "source_sha256": "3a75fa922a9d7ddfbd51a4297461a266d9e14a2c995422a1ae6165116545f04c",
+      "header": "src/modules/db2/support/db2_time.h",
+      "header_sha256": "f6b01dfcda9c2d6e10d2ffb8fae9376dac4ac2fc0cc84bcc10f16f23235117e8",
+      "defines": [
+        "now_utc",
+        "parse_utc_ts"
+      ],
+      "resolves": [
+        "now_utc",
+        "parse_utc_ts"
+      ],
+      "allowed_includes": [
+        "db2_time.h",
+        "stdio.h",
+        "string.h"
+      ],
+      "allowed_header_includes": [
+        "stddef.h",
+        "time.h"
+      ],
+      "allowed_undefined": [
+        "__isoc23_sscanf",
+        "__isoc99_sscanf",
+        "gmtime_r",
+        "strftime",
+        "time",
+        "timegm"
+      ],
+      "base_references": {
+        "now_utc": [
+          "src/modules/db2/c/artifacts.c",
+          "src/modules/db2/c/bandit.c",
+          "src/modules/db2/c/calibration.c",
+          "src/modules/db2/c/canonical_index.c",
+          "src/modules/db2/c/code_index.c",
+          "src/modules/db2/c/code_index_ops.c",
+          "src/modules/db2/c/code_project_lifecycle.c",
+          "src/modules/db2/c/corpus_jobs.c",
+          "src/modules/db2/c/corpus_structural.c",
+          "src/modules/db2/c/demotion.c",
+          "src/modules/db2/c/feature_rows.c",
+          "src/modules/db2/c/feedback.c",
+          "src/modules/db2/c/kb_docs.c",
+          "src/modules/db2/c/kb_releases.c",
+          "src/modules/db2/c/report_enrichments.c",
+          "src/modules/db2/c/rules.c",
+          "src/modules/db2/c/tasks.c",
+          "src/modules/db2/c/vector_index_ops.c"
+        ],
+        "parse_utc_ts": [
+          "src/modules/db2/c/code_index.c",
+          "src/modules/db2/c/demotion.c"
+        ]
+      },
+      "provenance": "Adjacent UTC formatter and parser definitions promoted from src/util.c; all eighteen formatter and two parser DB2 units audited.",
+      "evidence": "Shared UTC timestamp contract with only system time/parsing imports; Linux uses timegm and the preserved Windows branch uses _mkgmtime. No DB, event-bus, provider, pgvector, DB3, allocation, I/O, or logging dependency."
     }
   ],
   "unresolved": [
@@ -856,7 +939,8 @@
     {
       "symbol": "__isoc23_sscanf",
       "references": [
-        "src/modules/db2/c/memory_query.c"
+        "src/modules/db2/c/memory_query.c",
+        "src/modules/db2/support/time_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -1878,7 +1962,8 @@
         "src/modules/db2/c/memory_conflicts.c",
         "src/modules/db2/c/memory_health.c",
         "src/modules/db2/c/memory_relations.c",
-        "src/modules/db2/c/ontology_evolution.c"
+        "src/modules/db2/c/ontology_evolution.c",
+        "src/modules/db2/support/time_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2622,40 +2707,6 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "now_utc",
-      "references": [
-        "src/modules/db2/c/artifacts.c",
-        "src/modules/db2/c/bandit.c",
-        "src/modules/db2/c/calibration.c",
-        "src/modules/db2/c/canonical_index.c",
-        "src/modules/db2/c/code_index.c",
-        "src/modules/db2/c/code_index_ops.c",
-        "src/modules/db2/c/code_project_lifecycle.c",
-        "src/modules/db2/c/corpus_jobs.c",
-        "src/modules/db2/c/corpus_structural.c",
-        "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/feature_rows.c",
-        "src/modules/db2/c/feedback.c",
-        "src/modules/db2/c/kb_docs.c",
-        "src/modules/db2/c/kb_releases.c",
-        "src/modules/db2/c/report_enrichments.c",
-        "src/modules/db2/c/rules.c",
-        "src/modules/db2/c/tasks.c",
-        "src/modules/db2/c/vector_index_ops.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "parse_utc_ts",
-      "references": [
-        "src/modules/db2/c/code_index.c",
-        "src/modules/db2/c/demotion.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
       "symbol": "platform_get_exe_path",
       "references": [
         "src/modules/db2/c/kb_service_backend.c"
@@ -2923,14 +2974,6 @@
       "symbol": "run_cmd",
       "references": [
         "src/modules/db2/c/canonical_index.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "server_mgmt_read_selector_name",
-      "references": [
-        "src/modules/db2/c/management_read_journal.c"
       ],
       "disposition": "portable-core-promotion",
       "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
@@ -3348,7 +3391,8 @@
         "src/modules/db2/c/memory_conflicts.c",
         "src/modules/db2/c/memory_health.c",
         "src/modules/db2/c/memory_relations.c",
-        "src/modules/db2/c/ontology_evolution.c"
+        "src/modules/db2/c/ontology_evolution.c",
+        "src/modules/db2/support/time_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3569,7 +3613,8 @@
         "src/modules/db2/c/memory_conflicts.c",
         "src/modules/db2/c/memory_health.c",
         "src/modules/db2/c/memory_relations.c",
-        "src/modules/db2/c/ontology_evolution.c"
+        "src/modules/db2/c/ontology_evolution.c",
+        "src/modules/db2/support/time_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3578,7 +3623,8 @@
       "symbol": "timegm",
       "references": [
         "src/modules/db2/c/canonical_index.c",
-        "src/modules/db2/c/curiosity.c"
+        "src/modules/db2/c/curiosity.c",
+        "src/modules/db2/support/time_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3831,16 +3877,16 @@
   ],
   "summary": {
     "translation_units": 141,
-    "descriptor_support_units": 3,
-    "unresolved_symbols": 344,
+    "descriptor_support_units": 5,
+    "unresolved_symbols": 341,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 25,
       "injected-module-contract": 150,
-      "portable-core-promotion": 25,
+      "portable-core-promotion": 22,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 144
     }
   },
-  "fingerprint": "a6b6e2be90604ded69a4febf7c6fbed95eca724fe0667e5dc887523011429d8f"
+  "fingerprint": "57000eb17b53c2d26ed1c9f70dda79cf3a7c613d914de88ae48961ba377b1c7e"
 }

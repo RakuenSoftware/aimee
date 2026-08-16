@@ -415,6 +415,37 @@ in-place repair with no imports and five legacy calls across three DB2 units. Ad
 minimal header, source envelope, export, and base references; exhaustive byte-class, Unicode
 boundary, truncation, mixed-input, NULL, and sanitizer parity protects the monolith contract.
 
+The fourth admitted unit owns only `server_mgmt_read_selector_name`, the deterministic two-value
+mapping used by `c/management_read_journal.c`. Its private header records the process-side numeric
+ABI without importing the broad legacy management-read surface. Compile-time checks bind both
+values and the int-sized calling convention to `management_read.h`; normal and hardened parity
+exercise every signed 16-bit value and the remaining int boundary classes. Its empty import set and
+single base reference prove that this slice neither moves pgvector out of DB2 nor couples DB2 to a
+DB3 provider. The DB3 route and multi-observer event contracts are unchanged.
+
+The fifth admitted unit owns the adjacent `now_utc` and `parse_utc_ts` contract. It covers all 18
+DB2 formatter units and both parser units without importing the rest of `util.c`. Admission pins the
+`size_t`/`time_t` ABI, both exports, every base reference, and only the observed system time/parsing
+imports. The inherited `timegm`/`_mkgmtime` platform split is explicit. Normal and hardened parity
+cover both stored spellings, date-only input, inherited calendar normalization, invalid basic
+ranges and separators, trailing input, NULL/empty input, three host timezones, exact formatter
+grammar, parser round-trip, and a five-second `time(NULL)` wall-clock window. `canonical_index.c`
+and `code_index.c` also use `aimee_log`, but the support unit has no logging edge, leaving process
+logging as an independent injected policy.
+
+The next support candidates stay explicitly deferred by ownership shape: relation vocabulary moves
+the semantic seed table and its struct/enum ABI; language extractors bring a broad parser/helper
+closure; platform random/process functions carry OS, entropy, and daemon policy. Each requires its
+own coherent admission and parity slice rather than being folded into this unit.
+
+These reductions remain phase-one precursors, not substitutes for the program exit criteria below:
+standalone C closure reaches zero non-system packaging/injection/promotion debt; the C process is
+atomically activated and removed from the KB link; the Go DB2 provider passes the same event replay
+and PostgreSQL/pgvector parity gates; then the already-frozen DB3 contract connects its 14 portable
+searches, 32 committed-mutation fanouts, 15 provider-control operations, and 12 retained DB2
+authority operations to the selected provider. `docs/db3.md` defines default pgvector, explicit
+external selection, multi-observer fanout, revalidation, fail-closed behavior, and fallback proof.
+
 ### 4.3 Supervision and atomic activation
 
 Development may land the exporter, catalog, module binary, and adapters in reviewable commits, but
