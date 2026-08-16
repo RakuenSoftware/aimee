@@ -32,6 +32,9 @@ static uint32_t stub_request_len;
    are separate so a reply can be made to lie about its own shape. */
 static uint32_t stub_rows;
 static int stub_extra_values;
+/* When set, the reply is this single value rather than rows: the returned
+   string path answers with one. */
+static const char *stub_text;
 
 int obs_bus_module_available(uint32_t event_kind)
 {
@@ -68,10 +71,22 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
    if (stub_result != AIMEE_MODULE_CALL_OK)
       return stub_result;
 
-   uint32_t values = stub_rows * WM_LIST_WIDTH + (uint32_t)stub_extra_values;
    uint8_t *out = (uint8_t *)response_body;
    if (response_capacity < 8u)
       return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+   if (stub_text)
+   {
+      uint32_t n = (uint32_t)strlen(stub_text);
+      if (response_capacity < 12u + n)
+         return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
+      aimee_db1_put_u32(out, stub_status);
+      aimee_db1_put_u32(out + 4u, 1u);
+      aimee_db1_put_u32(out + 8u, n);
+      memcpy(out + 12u, stub_text, n);
+      *response_len = 12u + n;
+      return AIMEE_MODULE_CALL_OK;
+   }
+   uint32_t values = stub_rows * WM_LIST_WIDTH + (uint32_t)stub_extra_values;
    aimee_db1_put_u32(out, stub_status);
    aimee_db1_put_u32(out + 4u, values);
    uint32_t at = 8u;
@@ -100,6 +115,7 @@ static void reset(void)
    stub_request_len = 0;
    stub_rows = 0;
    stub_extra_values = 0;
+   stub_text = NULL;
 }
 
 /* --- reading back the frame the client emitted ---------------------------- */
@@ -247,9 +263,68 @@ static void test_unusable_arguments_cost_no_round_trip(void)
    printf("  PASS: test_unusable_arguments_cost_no_round_trip\n");
 }
 
+/* A returned string is memory the caller frees, exactly as the in-process
+   domain's contract said. The client allocates it here instead of the domain,
+   and the caller cannot tell -- which is the whole point of the boundary. */
+static void test_a_returned_string_is_the_callers_to_free(void)
+{
+   reset();
+   stub_rows = 0u;
+   stub_text = "session context, assembled";
+   char *got = db1_wm_assemble_context("sess-1");
+   assert(got != NULL);
+   assert(strcmp(got, "session context, assembled") == 0);
+   /* Sized to the string, not to the buffer the call reserved: the reply's
+      length is known only once it arrives, so the client shrinks to fit. */
+   free(got);
+   assert(stub_calls == 1);
+   printf("  PASS: test_a_returned_string_is_the_callers_to_free\n");
+}
+
+/* NULL means "nothing to assemble", and an empty string must mean the same,
+   because that is what the wire carries for a domain that returned NULL. A
+   caller that took "" for content would build an empty context block instead
+   of leaving it out. */
+static void test_an_empty_returned_string_is_a_miss(void)
+{
+   reset();
+   stub_text = "";
+   assert(db1_wm_assemble_context("sess-1") == NULL);
+
+   reset();
+   stub_text = "something";
+   stub_status = AIMEE_DB1_STATUS_MISSING;
+   assert(db1_wm_assemble_context("sess-1") == NULL);
+   printf("  PASS: test_an_empty_returned_string_is_a_miss\n");
+}
+
+/* A store that cannot be reached returns NULL, which is the same answer the
+   in-process domain gave when a session had nothing. That conflation is the
+   domain's own contract -- this only has to avoid inventing content. */
+static void test_an_unreachable_store_returns_no_string(void)
+{
+   reset();
+   stub_available = 0;
+   assert(db1_wm_assemble_context("sess-1") == NULL);
+   assert(stub_calls == 0);
+
+   reset();
+   stub_result = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+   assert(db1_wm_assemble_context("sess-1") == NULL);
+
+   reset();
+   assert(db1_wm_assemble_context(NULL) == NULL);
+   assert(db1_wm_assemble_context("") == NULL);
+   assert(stub_calls == 0);
+   printf("  PASS: test_an_unreachable_store_returns_no_string\n");
+}
+
 int main(void)
 {
    printf("db1_conversation_client:\n");
+   test_a_returned_string_is_the_callers_to_free();
+   test_an_empty_returned_string_is_a_miss();
+   test_an_unreachable_store_returns_no_string();
    test_a_list_reply_becomes_rows();
    test_an_empty_list_is_zero_rows_not_an_error();
    test_a_partial_row_is_refused();

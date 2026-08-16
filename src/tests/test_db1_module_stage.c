@@ -1,3 +1,6 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 /* test_db1_module_stage.c: the DB1 module's stage handler.
  *
  * The handler is the whole boundary: it is what every caller will reach once
@@ -568,9 +571,68 @@ static void test_wm_list_stops_at_the_bound_it_was_given(void)
    printf("  PASS: test_wm_list_stops_at_the_bound_it_was_given\n");
 }
 
+/* The domain returns memory. The stage hands that straight to the reply rather
+   than copying it through the stack buffer -- these carry an assembled context,
+   not an identifier -- and frees it after the reply is written. Whether it is
+   freed is ASAN's business; whether it ARRIVES is this test's. */
+static void test_assembled_context_crosses_and_is_released(void)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-test-db1-wmctx-%d.db", platform_tmpdir(), (int)getpid());
+   remove(path);
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   assert(db1_wm_set("sess-ctx", "alpha", "the first value", "notes", 0) == 0);
+
+   uint8_t req[1024], resp[4096];
+   uint32_t resp_len = 0;
+   const char *args[] = {"sess-ctx"};
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_WM_ASSEMBLE_CONTEXT, args, 1);
+   assert(call_stage(AIMEE_DB1_STAGE_CONVERSATION, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+   assert(aimee_db1_get_u32(resp + 4u) == 1u);
+   uint32_t n = aimee_db1_get_u32(resp + 8u);
+   /* The value the domain built, not an empty placeholder: a stage that
+      dropped the returned pointer would answer with nothing and read as a
+      session that has no working memory. */
+   assert(n > 0);
+   assert(memmem(resp + 12u, n, "the first value", strlen("the first value")) != NULL);
+
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_assembled_context_crosses_and_is_released\n");
+}
+
+/* A session with nothing assembles to NULL, which must reach the caller as a
+   miss rather than as an empty string it might render. */
+static void test_an_unassembled_context_is_a_miss(void)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-test-db1-wmctx0-%d.db", platform_tmpdir(), (int)getpid());
+   remove(path);
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   uint8_t req[1024], resp[4096];
+   uint32_t resp_len = 0;
+   const char *args[] = {"sess-nothing"};
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_WM_ASSEMBLE_CONTEXT, args, 1);
+   assert(call_stage(AIMEE_DB1_STAGE_CONVERSATION, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_MISSING);
+
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_an_unassembled_context_is_a_miss\n");
+}
+
 int main(void)
 {
    printf("db1_module_stage:\n");
+   test_assembled_context_crosses_and_is_released();
+   test_an_unassembled_context_is_a_miss();
    test_malformed_frames_are_refused();
    test_save_then_load_round_trips();
    test_over_long_state_is_refused_not_truncated();

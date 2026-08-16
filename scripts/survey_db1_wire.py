@@ -115,7 +115,7 @@ NEEDS = {
 }
 CAPABILITY = {
     "column": "column -- a list whose row is one value rather than a struct",
-    "alloc": "alloc -- a callee-allocated out-parameter (generator, not frame)",
+    "alloc": "alloc -- a callee-allocated out-parameter, T ** or char **",
     "json": "json -- a cJSON tree, which the wire carries but the client must build",
     "status": "status -- a return contract beyond ok/miss/fail, per operation",
     "unknown": "unknown -- a parameter shape the classifier does not recognise",
@@ -302,9 +302,10 @@ def survey(root: Path) -> dict:
         entry = dict(declared[name], callers=sorted(sites))
         entry["tags"] = classify(entry["params"], enums)
         needs = {NEEDS[tag] for tag in entry["tags"] if tag in NEEDS}
-        # A returned string is allocated by the callee like any other.
-        if entry["returns"] in ("char *", "const char *"):
-            needs.add("alloc")
+        # A returned string crosses today: the client allocates the declared
+        # maximum, the stage hands the domain's own string to the reply, and
+        # the caller frees what it is given exactly as before. A callee
+        # allocated OUT-PARAMETER still does not -- that is the alloc_out tag.
         # A return contract that says more than success/failure or found/not
         # -- a count, or a distinguished refusal like the single-writer -2 --
         # has nowhere to put the distinction it exists to make. The counted

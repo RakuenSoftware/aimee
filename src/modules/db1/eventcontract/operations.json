@@ -67,7 +67,10 @@
     "windows",
     "wm"
    ],
-   "retired_sources": []
+   "retired_sources": [
+    "payload_rewrite_state.c",
+    "wm.c"
+   ]
   },
   {
    "id": 4,
@@ -944,6 +947,105 @@
      }
     ],
     "max_bytes": 8192
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 6,
+   "name": "wm_assemble_context",
+   "c_name": "db1_wm_assemble_context",
+   "c_params": [
+    "session_id"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "context",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 7,
+   "name": "rewrite_record",
+   "c_name": "db1_payload_rewrite_record",
+   "c_params": [
+    "session_id",
+    "deferred",
+    "bytes_saved",
+    "new_payload_tokens",
+    "reason",
+    "new_prefix_hash"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "deferred",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "bytes_saved",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "new_payload_tokens",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "reason",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "new_prefix_hash",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
    }
   }
  ]
