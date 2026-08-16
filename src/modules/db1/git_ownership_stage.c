@@ -195,12 +195,43 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
       break;
    case AIMEE_DB1_OP_FEATURE_BRANCH_UPSERT:
       if (count != 3u)
+      {
+         free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[2][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
       rc = db1_session_feature_branch_upsert(field[0], field[1], field[2]);
       break;
    case AIMEE_DB1_OP_FEATURE_BRANCH_GET:
       if (count != 2u)
+      {
+         free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
       rc = db1_session_feature_branch_get(field[0], field[1], value, sizeof value);
       reads = 1;
       break;

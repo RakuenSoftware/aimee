@@ -225,7 +225,7 @@ int db1_git_ownership_find_session_by_prefix(const char *session_prefix, char *s
 
 int db1_session_feature_branch_upsert(const char *repo_path, const char *session_id, const char *feature_branch)
 {
-   if (!repo_path || !session_id || !feature_branch)
+   if (!repo_path || !repo_path[0] || !session_id || !session_id[0] || !feature_branch || !feature_branch[0])
       return -1;
    const char *fields[] = {repo_path, session_id, feature_branch};
    return write_result(call_stage(AIMEE_DB1_OP_FEATURE_BRANCH_UPSERT, fields, 3, NULL, 0));
@@ -233,7 +233,7 @@ int db1_session_feature_branch_upsert(const char *repo_path, const char *session
 
 int db1_session_feature_branch_get(const char *repo_path, const char *session_id, char *branch_out, size_t branch_len)
 {
-   if (!repo_path || !session_id || !branch_out || branch_len == 0)
+   if (!repo_path || !repo_path[0] || !session_id || !session_id[0] || !branch_out || branch_len == 0)
       return -1;
    const char *fields[] = {repo_path, session_id};
    int status = call_stage(AIMEE_DB1_OP_FEATURE_BRANCH_GET, fields, 2, branch_out, branch_len);

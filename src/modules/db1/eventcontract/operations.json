@@ -488,15 +488,18 @@
         "fields": [
           {
             "name": "key",
-            "type": "text"
+            "type": "text",
+            "required": true
           },
           {
             "name": "session",
-            "type": "text"
+            "type": "text",
+            "required": true
           },
           {
             "name": "branch",
-            "type": "text"
+            "type": "text",
+            "required": true
           }
         ]
       },
@@ -530,17 +533,19 @@
         "fields": [
           {
             "name": "key",
-            "type": "text"
+            "type": "text",
+            "required": true
           },
           {
             "name": "session",
-            "type": "text"
+            "type": "text",
+            "required": true
           }
         ]
       },
       "reply": {
         "payload": "text",
-        "max_bytes": 256
+        "max_bytes": 512
       }
     }
   ]
