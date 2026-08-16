@@ -46,6 +46,13 @@ family owns one event kind and its operations dispatch on an op id inside the
 payload, so DB1 needs one stage per domain rather than one per call -- roughly
 sixty domains against a ceiling of 255.
 
+Request fields carry a type. Half of what is left takes an integer argument --
+a job id, a spawn id, a threshold -- and those travel as decimal text: the
+client prints, the stage parses, and a field that is not exactly a number is
+refused rather than truncated, so "12abc" cannot become 12. A separate numeric
+type on the wire would buy nothing a printf does not, and the frame already
+carries counted bytes.
+
 Both halves of the boundary are generated: the client the daemon calls and the
 stage handler the module serves. `module_adapter.c` still dispatches by stage
 by hand, because family 1 speaks a different wire and has no C caller at all;
