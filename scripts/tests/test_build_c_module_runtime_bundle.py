@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -171,14 +173,14 @@ class RuntimeBundleBuildTests(unittest.TestCase):
     def test_placement_builds_only_the_processes_that_placement_runs(self) -> None:
         temporary, root, bundle, output = self.fixture()
         try:
-            (bundle / "kb.modules").write_text(
-                "db2\t/usr/local/libexec/aimee-modules/aimee-module-db2\n",
-                encoding="utf-8")
-            # A placement that runs no C process must build none of them, so an
-            # image never compiles another placement's build dependencies.
-            (bundle / "server.modules").write_text(
-                "memory\t/usr/local/libexec/aimee-modules/aimee-module-memory\n",
-                encoding="utf-8")
+            # db2 is granted to kb but is NOT in kb.modules: a granted module
+            # still needs its binary, so the grants directory is the authority.
+            (bundle / "grants/kb").mkdir(parents=True)
+            (bundle / "grants/kb/db2.grant").write_text("{}", encoding="utf-8")
+            (bundle / "kb.modules").write_text("", encoding="utf-8")
+            # A placement that grants no C process must build none of them.
+            (bundle / "grants/server").mkdir(parents=True)
+            (bundle / "grants/server/memory.grant").write_text("{}", encoding="utf-8")
             compiler = Path(temporary.name) / "fake-cc"
             pkg_config = Path(temporary.name) / "fake-pkg-config"
             self.executable(
@@ -204,13 +206,26 @@ class RuntimeBundleBuildTests(unittest.TestCase):
     def test_placement_manifest_missing_or_malformed_fails_closed(self) -> None:
         temporary, root, bundle, output = self.fixture()
         try:
-            (bundle / "bad.modules").write_text("../escape\tpath\n", encoding="utf-8")
-            for placement in ("absent", "bad", "Not-An-Id"):
-                code = builder.main([
-                    "--bundle", str(bundle), "--output", str(output),
-                    "--root", str(root), "--placement", placement,
-                ])
+            (bundle / "grants/bad").mkdir(parents=True)
+            (bundle / "grants/bad/not an id.grant").write_text("{}", encoding="utf-8")
+            (bundle / "grants/stray").mkdir(parents=True)
+            (bundle / "grants/stray/memory.grant.disabled").write_text(
+                "x", encoding="utf-8")
+            # A real, readable directory reachable only by traversal: the
+            # placement name must be rejected on its own, not merely because
+            # the escaped path happens not to exist.
+            (bundle / "escaped").mkdir(parents=True)
+            (bundle / "escaped/memory.grant").write_text("{}", encoding="utf-8")
+            for placement in ("absent", "bad", "stray", "Not-An-Id", "../escaped"):
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    code = builder.main([
+                        "--bundle", str(bundle), "--output", str(output),
+                        "--root", str(root), "--placement", placement,
+                    ])
                 self.assertEqual(code, 1, placement)
+                if placement == "stray":
+                    self.assertIn("memory.grant.disabled", stderr.getvalue())
         finally:
             temporary.cleanup()
 

@@ -223,27 +223,32 @@ def compiler_command(module: dict[str, object], root: Path, bundle: Path, output
 
 
 def placed_modules(bundle: Path, placement: str) -> set[str]:
-    """Return the module IDs a placement actually runs.
+    """Return the module IDs a placement is allowed to run.
 
-    The bundle carries every C process, but an image must compile only what it
-    places: building another placement's process drags that process's build
-    dependencies into an image that has no reason to carry them, and leaves an
+    The grants directory is the authority, not <placement>.modules: the latter
+    lists what the image STARTS, while a grant is what the image may run at all.
+    A module that is granted but not started by default (db2 in kb) still needs
+    its binary present, or the supervisor comes up unhealthy.
+
+    An image must compile only its own placement. Building another placement's
+    process drags that process's build dependencies into an image with no reason
+    to carry them -- kb has no sqlite, server has no need of db2 -- and leaves an
     executable in an image that is never allowed to run it.
     """
     if not MODULE_ID.fullmatch(placement):
         fail(f"invalid placement name: {placement!r}")
-    manifest = bundle / f"{placement}.modules"
+    directory = bundle / "grants" / placement
     try:
-        text = manifest.read_text(encoding="utf-8")
+        entries = sorted(item.name for item in directory.iterdir())
     except OSError as exc:
-        fail(f"cannot read placement manifest {manifest.name}: {exc}")
+        fail(f"cannot read grants for placement {placement!r}: {exc}")
     identifiers: set[str] = set()
-    for line in text.splitlines():
-        if not line.strip():
-            continue
-        identifier = line.split("\t", 1)[0]
+    for name in entries:
+        if not name.endswith(".grant"):
+            fail(f"grants/{placement}: unexpected entry {name!r}")
+        identifier = name[: -len(".grant")]
         if not MODULE_ID.fullmatch(identifier):
-            fail(f"{manifest.name}: invalid module id {identifier!r}")
+            fail(f"grants/{placement}: invalid module id {identifier!r}")
         identifiers.add(identifier)
     return identifiers
 
