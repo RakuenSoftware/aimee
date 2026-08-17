@@ -1160,3 +1160,66 @@ int rh_server_forensics(const route_req_t *rq, char *resp, int cap)
    cJSON_Delete(root);
    return (n >= 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
 }
+
+/* GET /v1/cli/manifest -- the method -> route map, read off the live registry.
+ *
+ * The thin client used to carry this map compiled in: 245 rows generated from
+ * g_v1_routes by scripts/gen-cli-v1-routes.py, with a lint check diffing the
+ * two. That kept the SOURCE TREE consistent with itself and could say nothing
+ * about a deployed client against a deployed server, which is the only pairing
+ * that exists at runtime. A client 324 commits behind its server could not
+ * reach anything added in between and reported "has no /v1 route" --
+ * indistinguishable from a typo. The static copy had also silently drifted: it
+ * was missing workspace.mirror-sync, a route the server had all along.
+ *
+ * `op` is the method the client asks for. `async` marks rows whose POST returns
+ * a run handle to poll rather than a final response -- the client must know
+ * that to drive the request and cannot infer it from the path.
+ *
+ * RM_PREFIX rows are omitted: their path carries an inline {id} the client
+ * substitutes, which is a different marshalling contract
+ * (cli_v1_pathid_route_for_method). Rows with no `op` are not
+ * method-addressable at all.
+ */
+int rh_cli_manifest(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   cJSON *root = cJSON_CreateObject();
+   cJSON *routes = cJSON_CreateArray();
+   if (!root || !routes)
+   {
+      cJSON_Delete(root);
+      cJSON_Delete(routes);
+      return err_json(resp, cap, 500, "out of memory");
+   }
+   for (int i = 0; g_v1_routes[i].verb; i++)
+   {
+      const http_route_t *e = &g_v1_routes[i];
+      if (!e->op || !e->op[0] || e->kind != RM_EXACT)
+         continue;
+      if (e->handler != rh_dispatch_op && e->handler != rh_dispatch_op_async)
+         continue;
+      cJSON *row = cJSON_CreateObject();
+      if (!row)
+         continue;
+      cJSON_AddStringToObject(row, "op", e->op);
+      cJSON_AddStringToObject(row, "verb", e->verb);
+      cJSON_AddStringToObject(row, "path", e->path);
+      if (e->handler == rh_dispatch_op_async)
+         cJSON_AddBoolToObject(row, "async", 1);
+      cJSON_AddItemToArray(routes, row);
+   }
+   /* Bumped only when the SHAPE of this document changes. A client that does
+    * not recognise the version must say so rather than guess at the rows. */
+   cJSON_AddNumberToObject(root, "manifest_version", 1);
+   cJSON_AddStringToObject(root, "server_version", AIMEE_VERSION);
+   cJSON_AddItemToObject(root, "routes", routes);
+
+   char *s = cJSON_PrintUnformatted(root);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(root);
+   if (n <= 0 || n >= cap)
+      return err_json(resp, cap, 500, "cli manifest too large");
+   return 200;
+}
