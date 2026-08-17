@@ -19,6 +19,7 @@
 #include "conv_context.h"
 #include "db1_windows.h"
 #include "payload_rewrite_state.h"
+#include "user_memory.h"
 #include "wm.h"
 
 #include "db1_module_api.h"
@@ -301,53 +302,53 @@ int db1_wm_list(const char *session_id, const char *category, wm_entry_t *out, i
    char arg2[32];
    snprintf(arg2, sizeof arg2, "%d", max);
    const char *fields[] = {session_id, category ? category : "", arg2};
-   char **values = malloc((size_t)max * 8u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 8u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 1u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 8u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 8u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 1u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 8u + 0u] = scratch[row * 1u + 0u];
-      caps[row * 8u + 0u] = sizeof scratch[row * 1u + 0u];
-      values[row * 8u + 1u] = out[row].session_id;
-      caps[row * 8u + 1u] = sizeof out[row].session_id;
-      values[row * 8u + 2u] = out[row].key;
-      caps[row * 8u + 2u] = sizeof out[row].key;
-      values[row * 8u + 3u] = out[row].value;
-      caps[row * 8u + 3u] = sizeof out[row].value;
-      values[row * 8u + 4u] = out[row].category;
-      caps[row * 8u + 4u] = sizeof out[row].category;
-      values[row * 8u + 5u] = out[row].created_at;
-      caps[row * 8u + 5u] = sizeof out[row].created_at;
-      values[row * 8u + 6u] = out[row].updated_at;
-      caps[row * 8u + 6u] = sizeof out[row].updated_at;
-      values[row * 8u + 7u] = out[row].expires_at;
-      caps[row * 8u + 7u] = sizeof out[row].expires_at;
+      wire_values[wire_row * 8u + 0u] = wire_scratch[wire_row * 1u + 0u];
+      wire_caps[wire_row * 8u + 0u] = sizeof wire_scratch[wire_row * 1u + 0u];
+      wire_values[wire_row * 8u + 1u] = out[wire_row].session_id;
+      wire_caps[wire_row * 8u + 1u] = sizeof out[wire_row].session_id;
+      wire_values[wire_row * 8u + 2u] = out[wire_row].key;
+      wire_caps[wire_row * 8u + 2u] = sizeof out[wire_row].key;
+      wire_values[wire_row * 8u + 3u] = out[wire_row].value;
+      wire_caps[wire_row * 8u + 3u] = sizeof out[wire_row].value;
+      wire_values[wire_row * 8u + 4u] = out[wire_row].category;
+      wire_caps[wire_row * 8u + 4u] = sizeof out[wire_row].category;
+      wire_values[wire_row * 8u + 5u] = out[wire_row].created_at;
+      wire_caps[wire_row * 8u + 5u] = sizeof out[wire_row].created_at;
+      wire_values[wire_row * 8u + 6u] = out[wire_row].updated_at;
+      wire_caps[wire_row * 8u + 6u] = sizeof out[wire_row].updated_at;
+      wire_values[wire_row * 8u + 7u] = out[wire_row].expires_at;
+      wire_caps[wire_row * 8u + 7u] = sizeof out[wire_row].expires_at;
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_WM_LIST, fields, 3, values, caps,
-                           (uint32_t)(max * 8), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 8u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_WM_LIST, fields, 3, wire_values, wire_caps,
+                           (uint32_t)(max * 8), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 8u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 8u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 8u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].id = (int64_t)strtoll(scratch[row * 1u + 0u], NULL, 10);
+      out[wire_row].id = (int64_t)strtoll(wire_scratch[wire_row * 1u + 0u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 char *db1_wm_assemble_context(const char *session_id)
@@ -393,31 +394,31 @@ int db1_wm_search_session_ids(const char *query, char (*out)[WM_SESSION_ID_LEN],
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", max);
    const char *fields[] = {query, arg1};
-   char **values = malloc((size_t)max * 1u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 1u * sizeof *caps);
-   if (!values || !caps)
+   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
+   if (!wire_values || !wire_caps)
    {
-      free(values);
-      free(caps);
+      free(wire_values);
+      free(wire_caps);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 1u + 0u] = out[row];
-      caps[row * 1u + 0u] = sizeof out[row];
+      wire_values[wire_row * 1u + 0u] = out[wire_row];
+      wire_caps[wire_row * 1u + 0u] = sizeof out[wire_row];
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_WM_SEARCH_SESSION_IDS, fields, 2, values, caps,
-                           (uint32_t)(max * 1), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 1u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_WM_SEARCH_SESSION_IDS, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 1), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
    {
       return -1;
    }
-   int rows = (int)(filled / 1u);
-   return rows;
+   int wire_rows = (int)(wire_filled / 1u);
+   return wire_rows;
 }
 
 int64_t db1_conv_record_event(const char *session_id, const char *tool_name, const char *tool_input, const char *tool_result, int result_bytes)
@@ -479,55 +480,55 @@ int db1_conv_pending_events(const char *session_id, conv_tool_event_t *out, int 
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", max);
    const char *fields[] = {session_id, arg1};
-   char **values = malloc((size_t)max * 8u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 8u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 3u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 8u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 8u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 3u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 8u + 0u] = scratch[row * 3u + 0u];
-      caps[row * 8u + 0u] = sizeof scratch[row * 3u + 0u];
-      values[row * 8u + 1u] = out[row].session_id;
-      caps[row * 8u + 1u] = sizeof out[row].session_id;
-      values[row * 8u + 2u] = out[row].tool_name;
-      caps[row * 8u + 2u] = sizeof out[row].tool_name;
-      values[row * 8u + 3u] = out[row].tool_input;
-      caps[row * 8u + 3u] = sizeof out[row].tool_input;
-      values[row * 8u + 4u] = out[row].tool_result;
-      caps[row * 8u + 4u] = sizeof out[row].tool_result;
-      values[row * 8u + 5u] = scratch[row * 3u + 1u];
-      caps[row * 8u + 5u] = sizeof scratch[row * 3u + 1u];
-      values[row * 8u + 6u] = scratch[row * 3u + 2u];
-      caps[row * 8u + 6u] = sizeof scratch[row * 3u + 2u];
-      values[row * 8u + 7u] = out[row].created_at;
-      caps[row * 8u + 7u] = sizeof out[row].created_at;
+      wire_values[wire_row * 8u + 0u] = wire_scratch[wire_row * 3u + 0u];
+      wire_caps[wire_row * 8u + 0u] = sizeof wire_scratch[wire_row * 3u + 0u];
+      wire_values[wire_row * 8u + 1u] = out[wire_row].session_id;
+      wire_caps[wire_row * 8u + 1u] = sizeof out[wire_row].session_id;
+      wire_values[wire_row * 8u + 2u] = out[wire_row].tool_name;
+      wire_caps[wire_row * 8u + 2u] = sizeof out[wire_row].tool_name;
+      wire_values[wire_row * 8u + 3u] = out[wire_row].tool_input;
+      wire_caps[wire_row * 8u + 3u] = sizeof out[wire_row].tool_input;
+      wire_values[wire_row * 8u + 4u] = out[wire_row].tool_result;
+      wire_caps[wire_row * 8u + 4u] = sizeof out[wire_row].tool_result;
+      wire_values[wire_row * 8u + 5u] = wire_scratch[wire_row * 3u + 1u];
+      wire_caps[wire_row * 8u + 5u] = sizeof wire_scratch[wire_row * 3u + 1u];
+      wire_values[wire_row * 8u + 6u] = wire_scratch[wire_row * 3u + 2u];
+      wire_caps[wire_row * 8u + 6u] = sizeof wire_scratch[wire_row * 3u + 2u];
+      wire_values[wire_row * 8u + 7u] = out[wire_row].created_at;
+      wire_caps[wire_row * 8u + 7u] = sizeof out[wire_row].created_at;
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_CONV_PENDING_EVENTS, fields, 2, values, caps,
-                           (uint32_t)(max * 8), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 8u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_CONV_PENDING_EVENTS, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 8), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 8u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 8u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 8u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].id = (int64_t)strtoll(scratch[row * 3u + 0u], NULL, 10);
-      out[row].result_bytes = (int)strtol(scratch[row * 3u + 1u], NULL, 10);
-      out[row].chain_id = (int64_t)strtoll(scratch[row * 3u + 2u], NULL, 10);
+      out[wire_row].id = (int64_t)strtoll(wire_scratch[wire_row * 3u + 0u], NULL, 10);
+      out[wire_row].result_bytes = (int)strtol(wire_scratch[wire_row * 3u + 1u], NULL, 10);
+      out[wire_row].chain_id = (int64_t)strtoll(wire_scratch[wire_row * 3u + 2u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_conv_list_chains(const char *session_id, conv_tool_chain_t *out, int max)
@@ -539,61 +540,61 @@ int db1_conv_list_chains(const char *session_id, conv_tool_chain_t *out, int max
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", max);
    const char *fields[] = {session_id, arg1};
-   char **values = malloc((size_t)max * 10u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 10u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 5u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 10u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 10u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 5u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 10u + 0u] = scratch[row * 5u + 0u];
-      caps[row * 10u + 0u] = sizeof scratch[row * 5u + 0u];
-      values[row * 10u + 1u] = out[row].session_id;
-      caps[row * 10u + 1u] = sizeof out[row].session_id;
-      values[row * 10u + 2u] = scratch[row * 5u + 1u];
-      caps[row * 10u + 2u] = sizeof scratch[row * 5u + 1u];
-      values[row * 10u + 3u] = scratch[row * 5u + 2u];
-      caps[row * 10u + 3u] = sizeof scratch[row * 5u + 2u];
-      values[row * 10u + 4u] = out[row].tools;
-      caps[row * 10u + 4u] = sizeof out[row].tools;
-      values[row * 10u + 5u] = out[row].stub;
-      caps[row * 10u + 5u] = sizeof out[row].stub;
-      values[row * 10u + 6u] = scratch[row * 5u + 3u];
-      caps[row * 10u + 6u] = sizeof scratch[row * 5u + 3u];
-      values[row * 10u + 7u] = scratch[row * 5u + 4u];
-      caps[row * 10u + 7u] = sizeof scratch[row * 5u + 4u];
-      values[row * 10u + 8u] = out[row].state;
-      caps[row * 10u + 8u] = sizeof out[row].state;
-      values[row * 10u + 9u] = out[row].created_at;
-      caps[row * 10u + 9u] = sizeof out[row].created_at;
+      wire_values[wire_row * 10u + 0u] = wire_scratch[wire_row * 5u + 0u];
+      wire_caps[wire_row * 10u + 0u] = sizeof wire_scratch[wire_row * 5u + 0u];
+      wire_values[wire_row * 10u + 1u] = out[wire_row].session_id;
+      wire_caps[wire_row * 10u + 1u] = sizeof out[wire_row].session_id;
+      wire_values[wire_row * 10u + 2u] = wire_scratch[wire_row * 5u + 1u];
+      wire_caps[wire_row * 10u + 2u] = sizeof wire_scratch[wire_row * 5u + 1u];
+      wire_values[wire_row * 10u + 3u] = wire_scratch[wire_row * 5u + 2u];
+      wire_caps[wire_row * 10u + 3u] = sizeof wire_scratch[wire_row * 5u + 2u];
+      wire_values[wire_row * 10u + 4u] = out[wire_row].tools;
+      wire_caps[wire_row * 10u + 4u] = sizeof out[wire_row].tools;
+      wire_values[wire_row * 10u + 5u] = out[wire_row].stub;
+      wire_caps[wire_row * 10u + 5u] = sizeof out[wire_row].stub;
+      wire_values[wire_row * 10u + 6u] = wire_scratch[wire_row * 5u + 3u];
+      wire_caps[wire_row * 10u + 6u] = sizeof wire_scratch[wire_row * 5u + 3u];
+      wire_values[wire_row * 10u + 7u] = wire_scratch[wire_row * 5u + 4u];
+      wire_caps[wire_row * 10u + 7u] = sizeof wire_scratch[wire_row * 5u + 4u];
+      wire_values[wire_row * 10u + 8u] = out[wire_row].state;
+      wire_caps[wire_row * 10u + 8u] = sizeof out[wire_row].state;
+      wire_values[wire_row * 10u + 9u] = out[wire_row].created_at;
+      wire_caps[wire_row * 10u + 9u] = sizeof out[wire_row].created_at;
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_CONV_LIST_CHAINS, fields, 2, values, caps,
-                           (uint32_t)(max * 10), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 10u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_CONV_LIST_CHAINS, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 10), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 10u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 10u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 10u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].id = (int64_t)strtoll(scratch[row * 5u + 0u], NULL, 10);
-      out[row].event_id_first = (int64_t)strtoll(scratch[row * 5u + 1u], NULL, 10);
-      out[row].event_id_last = (int64_t)strtoll(scratch[row * 5u + 2u], NULL, 10);
-      out[row].raw_bytes = (int)strtol(scratch[row * 5u + 3u], NULL, 10);
-      out[row].stub_bytes = (int)strtol(scratch[row * 5u + 4u], NULL, 10);
+      out[wire_row].id = (int64_t)strtoll(wire_scratch[wire_row * 5u + 0u], NULL, 10);
+      out[wire_row].event_id_first = (int64_t)strtoll(wire_scratch[wire_row * 5u + 1u], NULL, 10);
+      out[wire_row].event_id_last = (int64_t)strtoll(wire_scratch[wire_row * 5u + 2u], NULL, 10);
+      out[wire_row].raw_bytes = (int)strtol(wire_scratch[wire_row * 5u + 3u], NULL, 10);
+      out[wire_row].stub_bytes = (int)strtol(wire_scratch[wire_row * 5u + 4u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_conv_chain_events(int64_t chain_id, conv_tool_event_t *out, int max)
@@ -607,55 +608,55 @@ int db1_conv_chain_events(int64_t chain_id, conv_tool_event_t *out, int max)
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", max);
    const char *fields[] = {arg0, arg1};
-   char **values = malloc((size_t)max * 8u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 8u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 3u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 8u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 8u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 3u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 8u + 0u] = scratch[row * 3u + 0u];
-      caps[row * 8u + 0u] = sizeof scratch[row * 3u + 0u];
-      values[row * 8u + 1u] = out[row].session_id;
-      caps[row * 8u + 1u] = sizeof out[row].session_id;
-      values[row * 8u + 2u] = out[row].tool_name;
-      caps[row * 8u + 2u] = sizeof out[row].tool_name;
-      values[row * 8u + 3u] = out[row].tool_input;
-      caps[row * 8u + 3u] = sizeof out[row].tool_input;
-      values[row * 8u + 4u] = out[row].tool_result;
-      caps[row * 8u + 4u] = sizeof out[row].tool_result;
-      values[row * 8u + 5u] = scratch[row * 3u + 1u];
-      caps[row * 8u + 5u] = sizeof scratch[row * 3u + 1u];
-      values[row * 8u + 6u] = scratch[row * 3u + 2u];
-      caps[row * 8u + 6u] = sizeof scratch[row * 3u + 2u];
-      values[row * 8u + 7u] = out[row].created_at;
-      caps[row * 8u + 7u] = sizeof out[row].created_at;
+      wire_values[wire_row * 8u + 0u] = wire_scratch[wire_row * 3u + 0u];
+      wire_caps[wire_row * 8u + 0u] = sizeof wire_scratch[wire_row * 3u + 0u];
+      wire_values[wire_row * 8u + 1u] = out[wire_row].session_id;
+      wire_caps[wire_row * 8u + 1u] = sizeof out[wire_row].session_id;
+      wire_values[wire_row * 8u + 2u] = out[wire_row].tool_name;
+      wire_caps[wire_row * 8u + 2u] = sizeof out[wire_row].tool_name;
+      wire_values[wire_row * 8u + 3u] = out[wire_row].tool_input;
+      wire_caps[wire_row * 8u + 3u] = sizeof out[wire_row].tool_input;
+      wire_values[wire_row * 8u + 4u] = out[wire_row].tool_result;
+      wire_caps[wire_row * 8u + 4u] = sizeof out[wire_row].tool_result;
+      wire_values[wire_row * 8u + 5u] = wire_scratch[wire_row * 3u + 1u];
+      wire_caps[wire_row * 8u + 5u] = sizeof wire_scratch[wire_row * 3u + 1u];
+      wire_values[wire_row * 8u + 6u] = wire_scratch[wire_row * 3u + 2u];
+      wire_caps[wire_row * 8u + 6u] = sizeof wire_scratch[wire_row * 3u + 2u];
+      wire_values[wire_row * 8u + 7u] = out[wire_row].created_at;
+      wire_caps[wire_row * 8u + 7u] = sizeof out[wire_row].created_at;
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_CONV_CHAIN_EVENTS, fields, 2, values, caps,
-                           (uint32_t)(max * 8), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 8u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_CONV_CHAIN_EVENTS, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 8), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 8u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 8u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 8u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].id = (int64_t)strtoll(scratch[row * 3u + 0u], NULL, 10);
-      out[row].result_bytes = (int)strtol(scratch[row * 3u + 1u], NULL, 10);
-      out[row].chain_id = (int64_t)strtoll(scratch[row * 3u + 2u], NULL, 10);
+      out[wire_row].id = (int64_t)strtoll(wire_scratch[wire_row * 3u + 0u], NULL, 10);
+      out[wire_row].result_bytes = (int)strtol(wire_scratch[wire_row * 3u + 1u], NULL, 10);
+      out[wire_row].chain_id = (int64_t)strtoll(wire_scratch[wire_row * 3u + 2u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_conv_search_chains(const char *session_id, const char *query, conv_tool_chain_t *out, int max)
@@ -667,61 +668,61 @@ int db1_conv_search_chains(const char *session_id, const char *query, conv_tool_
    char arg2[32];
    snprintf(arg2, sizeof arg2, "%d", max);
    const char *fields[] = {session_id, query, arg2};
-   char **values = malloc((size_t)max * 10u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 10u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 5u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 10u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 10u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 5u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 10u + 0u] = scratch[row * 5u + 0u];
-      caps[row * 10u + 0u] = sizeof scratch[row * 5u + 0u];
-      values[row * 10u + 1u] = out[row].session_id;
-      caps[row * 10u + 1u] = sizeof out[row].session_id;
-      values[row * 10u + 2u] = scratch[row * 5u + 1u];
-      caps[row * 10u + 2u] = sizeof scratch[row * 5u + 1u];
-      values[row * 10u + 3u] = scratch[row * 5u + 2u];
-      caps[row * 10u + 3u] = sizeof scratch[row * 5u + 2u];
-      values[row * 10u + 4u] = out[row].tools;
-      caps[row * 10u + 4u] = sizeof out[row].tools;
-      values[row * 10u + 5u] = out[row].stub;
-      caps[row * 10u + 5u] = sizeof out[row].stub;
-      values[row * 10u + 6u] = scratch[row * 5u + 3u];
-      caps[row * 10u + 6u] = sizeof scratch[row * 5u + 3u];
-      values[row * 10u + 7u] = scratch[row * 5u + 4u];
-      caps[row * 10u + 7u] = sizeof scratch[row * 5u + 4u];
-      values[row * 10u + 8u] = out[row].state;
-      caps[row * 10u + 8u] = sizeof out[row].state;
-      values[row * 10u + 9u] = out[row].created_at;
-      caps[row * 10u + 9u] = sizeof out[row].created_at;
+      wire_values[wire_row * 10u + 0u] = wire_scratch[wire_row * 5u + 0u];
+      wire_caps[wire_row * 10u + 0u] = sizeof wire_scratch[wire_row * 5u + 0u];
+      wire_values[wire_row * 10u + 1u] = out[wire_row].session_id;
+      wire_caps[wire_row * 10u + 1u] = sizeof out[wire_row].session_id;
+      wire_values[wire_row * 10u + 2u] = wire_scratch[wire_row * 5u + 1u];
+      wire_caps[wire_row * 10u + 2u] = sizeof wire_scratch[wire_row * 5u + 1u];
+      wire_values[wire_row * 10u + 3u] = wire_scratch[wire_row * 5u + 2u];
+      wire_caps[wire_row * 10u + 3u] = sizeof wire_scratch[wire_row * 5u + 2u];
+      wire_values[wire_row * 10u + 4u] = out[wire_row].tools;
+      wire_caps[wire_row * 10u + 4u] = sizeof out[wire_row].tools;
+      wire_values[wire_row * 10u + 5u] = out[wire_row].stub;
+      wire_caps[wire_row * 10u + 5u] = sizeof out[wire_row].stub;
+      wire_values[wire_row * 10u + 6u] = wire_scratch[wire_row * 5u + 3u];
+      wire_caps[wire_row * 10u + 6u] = sizeof wire_scratch[wire_row * 5u + 3u];
+      wire_values[wire_row * 10u + 7u] = wire_scratch[wire_row * 5u + 4u];
+      wire_caps[wire_row * 10u + 7u] = sizeof wire_scratch[wire_row * 5u + 4u];
+      wire_values[wire_row * 10u + 8u] = out[wire_row].state;
+      wire_caps[wire_row * 10u + 8u] = sizeof out[wire_row].state;
+      wire_values[wire_row * 10u + 9u] = out[wire_row].created_at;
+      wire_caps[wire_row * 10u + 9u] = sizeof out[wire_row].created_at;
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_CONV_SEARCH_CHAINS, fields, 3, values, caps,
-                           (uint32_t)(max * 10), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 10u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_CONV_SEARCH_CHAINS, fields, 3, wire_values, wire_caps,
+                           (uint32_t)(max * 10), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 10u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 10u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 10u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].id = (int64_t)strtoll(scratch[row * 5u + 0u], NULL, 10);
-      out[row].event_id_first = (int64_t)strtoll(scratch[row * 5u + 1u], NULL, 10);
-      out[row].event_id_last = (int64_t)strtoll(scratch[row * 5u + 2u], NULL, 10);
-      out[row].raw_bytes = (int)strtol(scratch[row * 5u + 3u], NULL, 10);
-      out[row].stub_bytes = (int)strtol(scratch[row * 5u + 4u], NULL, 10);
+      out[wire_row].id = (int64_t)strtoll(wire_scratch[wire_row * 5u + 0u], NULL, 10);
+      out[wire_row].event_id_first = (int64_t)strtoll(wire_scratch[wire_row * 5u + 1u], NULL, 10);
+      out[wire_row].event_id_last = (int64_t)strtoll(wire_scratch[wire_row * 5u + 2u], NULL, 10);
+      out[wire_row].raw_bytes = (int)strtol(wire_scratch[wire_row * 5u + 3u], NULL, 10);
+      out[wire_row].stub_bytes = (int)strtol(wire_scratch[wire_row * 5u + 4u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_conv_state_get(const char *session_id, int64_t *last_event_id_out, int *chain_count_out, int *event_count_out)
@@ -834,39 +835,39 @@ int db1_windows_list_ids_by_tier_before_days(const char *tier, int older_than_da
    char arg2[32];
    snprintf(arg2, sizeof arg2, "%d", max);
    const char *fields[] = {tier, arg1, arg2};
-   char **values = malloc((size_t)max * 1u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 1u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 1u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 1u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out_ids, 0, (size_t)max * sizeof *out_ids);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 1u + 0u] = scratch[row * 1u + 0u];
-      caps[row * 1u + 0u] = sizeof scratch[row * 1u + 0u];
+      wire_values[wire_row * 1u + 0u] = wire_scratch[wire_row * 1u + 0u];
+      wire_caps[wire_row * 1u + 0u] = sizeof wire_scratch[wire_row * 1u + 0u];
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_WINDOW_IDS_BY_TIER, fields, 3, values, caps,
-                           (uint32_t)(max * 1), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 1u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_WINDOW_IDS_BY_TIER, fields, 3, wire_values, wire_caps,
+                           (uint32_t)(max * 1), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 1u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 1u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out_ids[row] = (int64_t)strtoll(scratch[row * 1u + 0u], NULL, 10);
+      out_ids[wire_row] = (int64_t)strtoll(wire_scratch[wire_row * 1u + 0u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_windows_find_candidates_by_terms(const char *const *terms, int term_count, db1_window_search_candidate_t *out, int max)
@@ -881,51 +882,51 @@ int db1_windows_find_candidates_by_terms(const char *const *terms, int term_coun
    fields[0] = arg0;
    for (int at = 0; at < term_count; ++at)
       fields[1 + at] = terms[at] ? terms[at] : "";
-   char **values = malloc((size_t)max * 6u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 6u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 3u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 6u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 6u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 3u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 6u + 0u] = scratch[row * 3u + 0u];
-      caps[row * 6u + 0u] = sizeof scratch[row * 3u + 0u];
-      values[row * 6u + 1u] = out[row].session_id;
-      caps[row * 6u + 1u] = sizeof out[row].session_id;
-      values[row * 6u + 2u] = scratch[row * 3u + 1u];
-      caps[row * 6u + 2u] = sizeof scratch[row * 3u + 1u];
-      values[row * 6u + 3u] = out[row].summary;
-      caps[row * 6u + 3u] = sizeof out[row].summary;
-      values[row * 6u + 4u] = out[row].created_at;
-      caps[row * 6u + 4u] = sizeof out[row].created_at;
-      values[row * 6u + 5u] = scratch[row * 3u + 2u];
-      caps[row * 6u + 5u] = sizeof scratch[row * 3u + 2u];
+      wire_values[wire_row * 6u + 0u] = wire_scratch[wire_row * 3u + 0u];
+      wire_caps[wire_row * 6u + 0u] = sizeof wire_scratch[wire_row * 3u + 0u];
+      wire_values[wire_row * 6u + 1u] = out[wire_row].session_id;
+      wire_caps[wire_row * 6u + 1u] = sizeof out[wire_row].session_id;
+      wire_values[wire_row * 6u + 2u] = wire_scratch[wire_row * 3u + 1u];
+      wire_caps[wire_row * 6u + 2u] = sizeof wire_scratch[wire_row * 3u + 1u];
+      wire_values[wire_row * 6u + 3u] = out[wire_row].summary;
+      wire_caps[wire_row * 6u + 3u] = sizeof out[wire_row].summary;
+      wire_values[wire_row * 6u + 4u] = out[wire_row].created_at;
+      wire_caps[wire_row * 6u + 4u] = sizeof out[wire_row].created_at;
+      wire_values[wire_row * 6u + 5u] = wire_scratch[wire_row * 3u + 2u];
+      wire_caps[wire_row * 6u + 5u] = sizeof wire_scratch[wire_row * 3u + 2u];
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_WINDOW_CANDIDATES_BY_TERMS, fields, (uint32_t)(1 + term_count), values, caps,
-                           (uint32_t)(max * 6), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 6u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_WINDOW_CANDIDATES_BY_TERMS, fields, (uint32_t)(1 + term_count), wire_values, wire_caps,
+                           (uint32_t)(max * 6), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 6u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 6u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 6u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].window_id = (int64_t)strtoll(scratch[row * 3u + 0u], NULL, 10);
-      out[row].seq = (int)strtol(scratch[row * 3u + 1u], NULL, 10);
-      out[row].match_count = (int)strtol(scratch[row * 3u + 2u], NULL, 10);
+      out[wire_row].window_id = (int64_t)strtoll(wire_scratch[wire_row * 3u + 0u], NULL, 10);
+      out[wire_row].seq = (int)strtol(wire_scratch[wire_row * 3u + 1u], NULL, 10);
+      out[wire_row].match_count = (int)strtol(wire_scratch[wire_row * 3u + 2u], NULL, 10);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_window_list_files(int64_t window_id, char (*out)[MAX_PATH_LEN], int max)
@@ -939,31 +940,31 @@ int db1_window_list_files(int64_t window_id, char (*out)[MAX_PATH_LEN], int max)
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", max);
    const char *fields[] = {arg0, arg1};
-   char **values = malloc((size_t)max * 1u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 1u * sizeof *caps);
-   if (!values || !caps)
+   char **wire_values = malloc((size_t)max * 1u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 1u * sizeof *wire_caps);
+   if (!wire_values || !wire_caps)
    {
-      free(values);
-      free(caps);
+      free(wire_values);
+      free(wire_caps);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 1u + 0u] = out[row];
-      caps[row * 1u + 0u] = sizeof out[row];
+      wire_values[wire_row * 1u + 0u] = out[wire_row];
+      wire_caps[wire_row * 1u + 0u] = sizeof out[wire_row];
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_WINDOW_LIST_FILES, fields, 2, values, caps,
-                           (uint32_t)(max * 1), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 1u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_WINDOW_LIST_FILES, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(max * 1), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 1u != 0u)
    {
       return -1;
    }
-   int rows = (int)(filled / 1u);
-   return rows;
+   int wire_rows = (int)(wire_filled / 1u);
+   return wire_rows;
 }
 
 int db1_window_index_summary(int64_t window_id, const char *summary)
@@ -986,42 +987,42 @@ int db1_windows_find_lexical_hits(const char *const *terms, int term_count, db1_
    fields[0] = arg0;
    for (int at = 0; at < term_count; ++at)
       fields[1 + at] = terms[at] ? terms[at] : "";
-   char **values = malloc((size_t)max * 2u * sizeof *values);
-   size_t *caps = malloc((size_t)max * 2u * sizeof *caps);
-   char (*scratch)[32] = malloc((size_t)max * 2u * sizeof *scratch);
-   if (!values || !caps || !scratch)
+   char **wire_values = malloc((size_t)max * 2u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)max * 2u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)max * 2u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
    {
-      free(values);
-      free(caps);
-      free(scratch);
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
       return -1;
    }
    memset(out, 0, (size_t)max * sizeof *out);
-   for (int row = 0; row < max; ++row)
+   for (int wire_row = 0; wire_row < max; ++wire_row)
    {
-      values[row * 2u + 0u] = scratch[row * 2u + 0u];
-      caps[row * 2u + 0u] = sizeof scratch[row * 2u + 0u];
-      values[row * 2u + 1u] = scratch[row * 2u + 1u];
-      caps[row * 2u + 1u] = sizeof scratch[row * 2u + 1u];
+      wire_values[wire_row * 2u + 0u] = wire_scratch[wire_row * 2u + 0u];
+      wire_caps[wire_row * 2u + 0u] = sizeof wire_scratch[wire_row * 2u + 0u];
+      wire_values[wire_row * 2u + 1u] = wire_scratch[wire_row * 2u + 1u];
+      wire_caps[wire_row * 2u + 1u] = sizeof wire_scratch[wire_row * 2u + 1u];
    }
-   uint32_t filled = 0;
-   int status = call_stage(AIMEE_DB1_OP_WINDOW_LEXICAL_HITS, fields, (uint32_t)(1 + term_count), values, caps,
-                           (uint32_t)(max * 2), &filled);
-   free(values);
-   free(caps);
-   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 2u != 0u)
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_WINDOW_LEXICAL_HITS, fields, (uint32_t)(1 + term_count), wire_values, wire_caps,
+                           (uint32_t)(max * 2), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 2u != 0u)
    {
-      free(scratch);
+      free(wire_scratch);
       return -1;
    }
-   int rows = (int)(filled / 2u);
-   for (int row = 0; row < rows; ++row)
+   int wire_rows = (int)(wire_filled / 2u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
    {
-      out[row].window_id = (int64_t)strtoll(scratch[row * 2u + 0u], NULL, 10);
-      out[row].rank = strtod(scratch[row * 2u + 1u], NULL);
+      out[wire_row].window_id = (int64_t)strtoll(wire_scratch[wire_row * 2u + 0u], NULL, 10);
+      out[wire_row].rank = strtod(wire_scratch[wire_row * 2u + 1u], NULL);
    }
-   free(scratch);
-   return rows;
+   free(wire_scratch);
+   return wire_rows;
 }
 
 int db1_window_set_tier(int64_t window_id, const char *tier)
@@ -1070,6 +1071,82 @@ int db1_windows_delete_after_turn(const char *session_id, int turn)
    snprintf(arg1, sizeof arg1, "%d", turn);
    const char *fields[] = {session_id, arg1};
    return write_result(call_stage(AIMEE_DB1_OP_WINDOWS_DELETE_AFTER_TURN, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_user_memory_list_recall(db1_user_recall_section_t section, db1_user_memory_row_t *rows, int cap)
+{
+   if (!rows || cap <= 0)
+      return -1;
+   if (cap > 32)
+      cap = 32;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", section);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", cap);
+   const char *fields[] = {arg0, arg1};
+   char **wire_values = malloc((size_t)cap * 5u * sizeof *wire_values);
+   size_t *wire_caps = malloc((size_t)cap * 5u * sizeof *wire_caps);
+   char (*wire_scratch)[32] = malloc((size_t)cap * 1u * sizeof *wire_scratch);
+   if (!wire_values || !wire_caps || !wire_scratch)
+   {
+      free(wire_values);
+      free(wire_caps);
+      free(wire_scratch);
+      return -1;
+   }
+   memset(rows, 0, (size_t)cap * sizeof *rows);
+   for (int wire_row = 0; wire_row < cap; ++wire_row)
+   {
+      wire_values[wire_row * 5u + 0u] = wire_scratch[wire_row * 1u + 0u];
+      wire_caps[wire_row * 5u + 0u] = sizeof wire_scratch[wire_row * 1u + 0u];
+      wire_values[wire_row * 5u + 1u] = rows[wire_row].tier;
+      wire_caps[wire_row * 5u + 1u] = sizeof rows[wire_row].tier;
+      wire_values[wire_row * 5u + 2u] = rows[wire_row].kind;
+      wire_caps[wire_row * 5u + 2u] = sizeof rows[wire_row].kind;
+      wire_values[wire_row * 5u + 3u] = rows[wire_row].key;
+      wire_caps[wire_row * 5u + 3u] = sizeof rows[wire_row].key;
+      wire_values[wire_row * 5u + 4u] = rows[wire_row].content;
+      wire_caps[wire_row * 5u + 4u] = sizeof rows[wire_row].content;
+   }
+   uint32_t wire_filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_USER_MEMORY_LIST_RECALL, fields, 2, wire_values, wire_caps,
+                           (uint32_t)(cap * 5), &wire_filled);
+   free(wire_values);
+   free(wire_caps);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 5u != 0u)
+   {
+      free(wire_scratch);
+      return -1;
+   }
+   int wire_rows = (int)(wire_filled / 5u);
+   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
+   {
+      rows[wire_row].id = (int64_t)strtoll(wire_scratch[wire_row * 1u + 0u], NULL, 10);
+   }
+   free(wire_scratch);
+   return wire_rows;
+}
+
+int db1_user_memory_any()
+{
+   const char *const *fields = NULL;
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int status = call_stage(AIMEE_DB1_OP_USER_MEMORY_ANY, fields, 0, values, caps, 1, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int64_t)strtoll(slot0, NULL, 10);
+}
+
+int db1_user_memory_upsert(const char *kind, const char *tier, const char *key, const char *content, double confidence, const char *source_session)
+{
+   if (!kind || !kind[0] || !tier || !tier[0] || !key || !key[0] || !content || !content[0])
+      return -1;
+   char arg4[32];
+   snprintf(arg4, sizeof arg4, "%.17g", (double)confidence);
+   const char *fields[] = {kind, tier, key, content, arg4, source_session ? source_session : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_USER_MEMORY_UPSERT, fields, 6, NULL, NULL, 0, NULL));
 }
 
 /* clang-format on */

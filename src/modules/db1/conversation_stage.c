@@ -16,6 +16,7 @@
 #include "conv_context.h"
 #include "db1_windows.h"
 #include "payload_rewrite_state.h"
+#include "user_memory.h"
 #include "wm.h"
 
 #include <errno.h>
@@ -1623,6 +1624,136 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
       rc = db1_windows_delete_after_turn(field[0], parsed1);
+      break;
+   }
+   case AIMEE_DB1_OP_USER_MEMORY_LIST_RECALL:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed0;
+      if (parse_int(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed1 <= 0 || parsed1 > 32)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      db1_user_memory_row_t *found = calloc((size_t)parsed1, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_user_memory_list_recall(parsed0, found, parsed1);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed1)
+                                 ? (uint32_t)rc : (uint32_t)parsed1;
+         const char **cells = malloc((size_t)produced * 5u * sizeof *cells);
+         char (*numbers)[32] = malloc((size_t)produced * 1u * sizeof *numbers);
+         if (!cells || !numbers)
+         {
+            free(cells);
+            free(numbers);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         numeric_owned = numbers;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            snprintf(numbers[row * 1u + 0u], 32,
+                     "%lld", (long long)found[row].id);
+            cells[row * 5u + 0u] = numbers[row * 1u + 0u];
+            cells[row * 5u + 1u] = found[row].tier;
+            cells[row * 5u + 2u] = found[row].kind;
+            cells[row * 5u + 3u] = found[row].key;
+            cells[row * 5u + 4u] = found[row].content;
+         }
+         rows = cells;
+         row_count = produced * 5u;
+      }
+      listed = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_USER_MEMORY_ANY:
+   {
+      if (count != 0u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t produced = db1_user_memory_any();
+      rc = (produced >= 0) ? 0 : -1;
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
+      row_slots[0] = row_text[0];
+      rows = row_slots;
+      row_count = 1u;
+      break;
+   }
+   case AIMEE_DB1_OP_USER_MEMORY_UPSERT:
+   {
+      if (count != 6u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[2][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[3][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[4][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t parsed4;
+      if (parse_int64(field[4], &parsed4) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_user_memory_upsert(field[0], field[1], field[2], field[3], parsed4, field[5]);
       break;
    }
    default:
