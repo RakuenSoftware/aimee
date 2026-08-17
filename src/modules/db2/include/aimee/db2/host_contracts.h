@@ -134,6 +134,17 @@ extern "C"
    aimee_db2_register_token_record_validators(aimee_db2_mgmt_token_record_valid_fn management,
                                               aimee_db2_identity_token_record_valid_fn identity);
 
+   /* Compare retained computed-style JSON through the CSS owner's canonical
+    * parser and oracle. A successful provider returns 0 and writes binary
+    * validity/verdict flags plus a nonnegative diff count. */
+   typedef int (*aimee_db2_css_render_compare_fn)(const char *before_json, const char *after_json,
+                                                  int *before_valid, int *after_valid,
+                                                  int *available, int *equivalent, int *diff_count);
+
+   /* Install the CSS render-oracle adapter during process startup. NULL removes
+    * it; DB2 then fails evaluation closed without changing a stored verdict. */
+   void aimee_db2_register_css_render_compare_provider(aimee_db2_css_render_compare_fn provider);
+
 #ifdef __cplusplus
 }
 #endif

@@ -8,6 +8,7 @@
 #include "kb_route_acl.h"
 #include "aimee.h"
 #include "cJSON.h"
+#include "css_render_oracle.h"
 #include "log.h"
 #include "memory.h"
 
@@ -33,6 +34,31 @@
 #define KB_MODULE_EMBED_DEADLINE_NS (25ULL * 1000000000ULL)
 
 static atomic_uint_fast64_t next_trace = 1;
+
+static int css_render_compare(const char *before_json, const char *after_json, int *before_valid,
+                              int *after_valid, int *available, int *equivalent, int *diff_count)
+{
+   if (!before_valid || !after_valid || !available || !equivalent || !diff_count)
+      return -1;
+   css_render_snapshot_t *before = before_json ? css_render_snapshot_parse(before_json) : NULL;
+   css_render_snapshot_t *after = after_json ? css_render_snapshot_parse(after_json) : NULL;
+   css_render_result_t *result = css_render_oracle_compare(before, after);
+   if (!result)
+   {
+      css_render_snapshot_free(before);
+      css_render_snapshot_free(after);
+      return -1;
+   }
+   *before_valid = before != NULL;
+   *after_valid = after != NULL;
+   *available = result->available;
+   *equivalent = result->equivalent;
+   *diff_count = result->diff_count;
+   css_render_result_free(result);
+   css_render_snapshot_free(before);
+   css_render_snapshot_free(after);
+   return 0;
+}
 
 _Static_assert((int)AIMEE_DB2_PRINCIPAL_NONE == (int)KB_PRIN_NONE, "DB2 principal NONE ABI drift");
 _Static_assert((int)AIMEE_DB2_PRINCIPAL_OIDC == (int)KB_PRIN_OIDC, "DB2 principal OIDC ABI drift");
@@ -427,6 +453,7 @@ void kb_module_stage_adapters_configure(void)
    aimee_db2_register_fact_scan_provider(scan_fact_turn);
    aimee_db2_register_embed_provider(embed_text);
    aimee_db2_register_identity_key_provider(identity_key);
+   aimee_db2_register_css_render_compare_provider(css_render_compare);
    kb_curator_grounding_register_provider(grounding_decide);
    kb_route_acl_register_authorization_provider(control_web_authorize);
 }

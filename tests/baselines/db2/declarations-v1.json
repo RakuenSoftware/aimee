@@ -1237,6 +1237,21 @@
     },
     {
       "consumers": [
+        "src/tests/test_css_render.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/css_render.h",
+          "line": 31
+        }
+      ],
+      "signature": "void aimee_db2_register_css_render_compare_provider ( db2_css_render_compare_fn provider )",
+      "signature_sha256": "2187e0e80cfbc43fc34bb1a88fe02368d545488cd36fcd1c0e330f274d9bd2e0",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_css_render_compare_provider"
+    },
+    {
+      "consumers": [
         "src/tests/test_kb.c"
       ],
       "locations": [
@@ -5737,13 +5752,28 @@
     },
     {
       "consumers": [
+        "src/tests/test_css_render.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/css_render.h",
+          "line": 35
+        }
+      ],
+      "signature": "int db2_css_render_compare ( const char * before_json , const char * after_json , int * before_valid , int * after_valid , int * available , int * equivalent , int * diff_count )",
+      "signature_sha256": "80607fb893df306e028dbfb32b0a270a4200c7a089eed11eb0ede105e4e8ce74",
+      "status": "private-test-only",
+      "symbol": "db2_css_render_compare"
+    },
+    {
+      "consumers": [
         "src/kb/kb_service_css.c",
         "src/tests/test_css_render.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/css_render.h",
-          "line": 44
+          "line": 57
         }
       ],
       "signature": "int db2_css_render_oracle_evaluate ( const char * project , const char * unit_path , const char * now_iso , css_render_verdict_t * out )",
@@ -5758,7 +5788,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/css_render.h",
-          "line": 35
+          "line": 48
         }
       ],
       "signature": "int db2_css_render_snapshot_get ( const char * project , const char * unit_path , const char * phase , char * * out )",
@@ -5774,7 +5804,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/css_render.h",
-          "line": 30
+          "line": 43
         }
       ],
       "signature": "int db2_css_render_snapshot_store ( const char * project , const char * unit_path , const char * phase , const char * snapshot_json , const char * now_iso )",
@@ -23885,15 +23915,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "db65cfcf98ff17eb1fcdd5d9a96dcd71ec121cbf60a060147a51ffe7167df353",
+  "fingerprint": "f4f01da1f39f40fd7d7da356358eec0df148a0887c57edf46af500e06d8fc956",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 895,
-    "declarations": 1362,
+    "declarations": 1364,
     "headers": 136,
     "internal_unconsumed": 143,
-    "private_test_only": 262,
+    "private_test_only": 264,
     "reviewed": 62
   }
 }

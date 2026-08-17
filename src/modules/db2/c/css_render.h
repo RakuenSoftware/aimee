@@ -22,6 +22,19 @@ extern "C"
       char summary[256]; /* short human summary recorded on the unit note */
    } css_render_verdict_t;
 
+   typedef int (*db2_css_render_compare_fn)(const char *before_json, const char *after_json,
+                                            int *before_valid, int *after_valid, int *available,
+                                            int *equivalent, int *diff_count);
+
+   /* Internal declaration of the CSS host contract exported publicly through
+    * <aimee/db2/host_contracts.h>. */
+   void aimee_db2_register_css_render_compare_provider(db2_css_render_compare_fn provider);
+
+   /* Apply the installed provider and reject malformed or inconsistent output.
+    * Exposed for focused boundary tests; evaluation uses this same helper. */
+   int db2_css_render_compare(const char *before_json, const char *after_json, int *before_valid,
+                              int *after_valid, int *available, int *equivalent, int *diff_count);
+
    /* Store (upsert) a computed-style snapshot for (project, unit_path, phase).
     * phase must be "before" or "after". snapshot_json is retained verbatim (the
     * origin artifact). This is the seam where a sandboxed render backend's output

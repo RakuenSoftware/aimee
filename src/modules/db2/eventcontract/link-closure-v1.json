@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "2ab2fd5a9d2a83cea2457f195cf671775975a687",
-  "source_fingerprint": "51d9a3776fa1cf024da67d2f4081bb1d41ff6ff07d9d9214da37ffa4f5f68939",
+  "source_revision": "0adf8029000611341fd40d9e42b0e9f8c1cf3859",
+  "source_fingerprint": "3166be124137195ecc31f2e14ead8614e826208ea8648662945862783ea50262",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -2108,38 +2108,6 @@
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
-      "symbol": "css_render_oracle_compare",
-      "references": [
-        "src/modules/db2/c/css_render.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "css_render_result_free",
-      "references": [
-        "src/modules/db2/c/css_render.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "css_render_snapshot_free",
-      "references": [
-        "src/modules/db2/c/css_render.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "css_render_snapshot_parse",
-      "references": [
-        "src/modules/db2/c/css_render.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "css_stylesheet_free",
       "references": [
         "src/modules/db2/c/canonical_index.c"
@@ -3465,15 +3433,15 @@
   "summary": {
     "translation_units": 138,
     "descriptor_support_units": 22,
-    "unresolved_symbols": 173,
+    "unresolved_symbols": 169,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 34,
+      "injected-module-contract": 30,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "91e808885bec95e0f3a0257bb9ed8e19f822ac3bfe083fb8eaa7b8fadc15f06e"
+  "fingerprint": "183a38cff5496d29f0b5c52e73f7d6306e1f8fdcda8e321b82a745b3f506ea27"
 }
