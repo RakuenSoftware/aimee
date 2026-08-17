@@ -390,6 +390,42 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
     "evidence": "Three deterministic dynamic-string lifecycle functions with only realloc and "
                 "vsnprintf imports; no DB2, event-bus, provider, I/O, or platform dependency.",
 }, {
+    "path": "src/modules/db2/support/log_primitives.c",
+    "source_sha256": "67a6e3bc54ee59c6fe47c5741ee36bb2c5c7776c293d34ae319f8033ad633131",
+    "header": "src/modules/db2/support/db2_log.h",
+    "header_sha256": "124c268149b35dd6236b90ff7503e37e0588b27995a2715bc5f4b99cba2ef186",
+    "defines": ["aimee_log", "db2_log_install"],
+    "resolves": ["aimee_log"],
+    "allowed_includes": ["db2_log.h", "stdio.h"],
+    "allowed_header_includes": ["stdarg.h"],
+    "allowed_undefined": ["vsnprintf"],
+    "base_references": {
+        "aimee_log": [
+            "src/modules/db2/c/canonical_index.c",
+            "src/modules/db2/c/code_index.c",
+            "src/modules/db2/c/cross_repo_build.c",
+            "src/modules/db2/c/cross_repo_deps.c",
+            "src/modules/db2/c/cross_repo_identity.c",
+            "src/modules/db2/c/cross_repo_review.c",
+            "src/modules/db2/c/cross_repo_route.c",
+            "src/modules/db2/c/cross_repo_stats.c",
+            "src/modules/db2/c/db2_init.c",
+            "src/modules/db2/c/db2_reembed.c",
+            "src/modules/db2/c/db2_tenant.c",
+            "src/modules/db2/c/enrollments.c",
+            "src/modules/db2/c/fact_ingest.c",
+            "src/modules/db2/c/kb_payload.c",
+            "src/modules/db2/c/learning.c",
+            "src/modules/db2/c/pgvec_transport.c",
+            "src/modules/db2/c/vault_pg.c",
+        ],
+    },
+    "provenance": "The monolithic logger is replaced by a process-startup-installed sink; all "
+                  "seventeen DB2 logging translation units are pinned to this bounded surface.",
+    "evidence": "One formatting export and one startup installer preserve DB2 log level, module, "
+                "and message semantics with a bounded message buffer and only vsnprintf imported. "
+                "The sink carries no KB logger state, database, bus, provider, or allocation edge.",
+}, {
     "path": "src/modules/db2/support/management_read_primitives.c",
     "source_sha256": "2b1799442b2d57c6088eaa8fbcff744d6422bd3011b816bf78f3faefde4b8058",
     "header": "src/modules/db2/support/db2_management_read.h",

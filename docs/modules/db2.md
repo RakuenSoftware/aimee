@@ -110,9 +110,9 @@ the process boundary while their storage calls migrate to generated DB2 clients.
 calls as injected DB2 callbacks would recreate the monolith inside the module. The
 probe compiles each unit plus exact descriptor-owned support, combines only those objects with a
 relocatable link, supplies no archive, shared library, helper stub, or weak definition, and records
-the 207 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
+the 206 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
 disposition and rationale. The current ledger contains 139 explicit system-link dependencies, zero
-remaining vendored/generated inputs, 59 sibling or KB contracts to inject, and 9 support APIs to
+remaining vendored/generated inputs, 59 sibling or KB contracts to inject, and 8 support APIs to
 promote. The standalone-link exit condition requires zero entries in the latter three groups; a
 classified ledger alone is not enough.
 
@@ -178,8 +178,8 @@ and parsing imports. The existing Linux `timegm` and Windows `_mkgmtime` branche
 Parity covers both stored timestamp spellings, date-only values, epoch and calendar normalization,
 invalid basic ranges and separators, trailing input, NULL/empty input, three host timezones, exact
 formatter grammar, parser round-trip, and a five-second wall-clock window under normal and hardened
-builds. The two formatter callers that also log do not create a support import: logging remains an
-independent injected process-policy decision.
+builds. The two formatter callers that also log share the bounded process logger described below;
+the time support unit itself retains no logging import.
 
 The sixth reduction promotes `rel_type_normalize` and `rel_type_is_functional` without importing the
 relationship enum, seed-table, or memory-ontology surface. The private header exposes only string,
@@ -239,9 +239,18 @@ and compare canonical, normalized, missing, empty, NULL, and overlong lookups. T
 debt from 311 to 308 and portable promotion debt from 16 to 13 without importing the memory module
 or changing database, pgvector, provider, DB3, event-bus, or activation ownership.
 
+The eleventh reduction replaces the monolithic host logger import with a descriptor-owned process
+sink. Seventeen DB2 units retain the existing `aimee_log` ABI while a startup-only installer binds
+level, module, and a capped formatted message to the module runtime. The remaining six legacy
+logger includes are localized to the same private header even though they currently emit no symbol.
+Normal and hardened tests cover an absent sink, formatting, truncation, invalid levels and pointers,
+and uninstall. The implementation imports only `vsnprintf` and has no KB logger state, allocation,
+database, bus, pgvector, provider, or DB3 edge. This slice moves total debt from 207 to 206 and
+portable promotion debt from 9 to 8.
+
 The remaining portable rows are named migration debt, not an assertion that copying is always the
 right answer. DB2 owns the decision and must close it before activation: canonical-index extraction
-and shell helpers trigger a typed indexing capability review; logging, session identity, and
+and shell helpers trigger a typed indexing capability review; session identity and
 briefing rendering trigger an injected process/config/memory contract review; executable discovery
 and daemon spawning trigger a runtime lifecycle capability review. Those rows may be reclassified
 only with a reviewed contract and replay evidence, so later slices do not repeatedly guess between

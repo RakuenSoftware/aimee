@@ -63,6 +63,10 @@ HOST_ADAPTER_REHOMES = {
 }
 ADMITTED_SUPPORT_TEST_INCLUDES = {
     (
+        "src/tests/test_db2_log_support.c",
+        "../modules/db2/support/db2_log.h",
+    ),
+    (
         "src/tests/test_db2_rel_seed_support.c",
         "../modules/db2/support/db2_rel_seed.h",
     ),
@@ -607,6 +611,25 @@ def enforce_shrink_only(previous: object, current: object) -> None:
                 None,
             )
             if config_localized is not None and count <= config_localized[0]:
+                continue
+            # DB2 process logging is a startup-installed module-private sink;
+            # replacing the host logger include is directional debt removal.
+            log_localized = next(
+                (
+                    value
+                    for (old_source, old_header, old_resolved), value
+                    in previous_dependencies.items()
+                    if old_source == source
+                    and PurePosixPath(old_header).name == "log.h"
+                    and old_resolved == "src/headers/log.h"
+                    and header == "../support/db2_log.h"
+                    and resolved == "src/modules/db2/support/db2_log.h"
+                    and value[1] == "host-api"
+                    and classification == "module-private-api"
+                ),
+                None,
+            )
+            if log_localized is not None and count <= log_localized[0]:
                 continue
             fail(
                 "baseline-growth",

@@ -24,7 +24,7 @@
 
 #include "aimee.h"
 #include "db_postgres.h"
-#include "log.h"
+#include "../support/db2_log.h"
 #include "util.h"
 
 #include <ctype.h>

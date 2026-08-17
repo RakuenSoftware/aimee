@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "e4f83d22ddc012b6bfd16935a9fa90cbac4f8147",
-  "source_fingerprint": "d88ad887c296cce19034688ad9439b282b8e73945029facc718be8ce52b12822",
+  "source_revision": "20631a5a11f1675342abe5ec5c0862db7d601cbf",
+  "source_fingerprint": "cd568aaf893892d3387ffb21e9a402ad0963283e11a48318c330df225919c23b",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -506,6 +506,52 @@
       },
       "provenance": "Definitions and required static helpers promoted from src/dstr.c; all DB2 calls audited in src/modules/db2/c/collab_rules.c.",
       "evidence": "Three deterministic dynamic-string lifecycle functions with only realloc and vsnprintf imports; no DB2, event-bus, provider, I/O, or platform dependency."
+    },
+    {
+      "path": "src/modules/db2/support/log_primitives.c",
+      "source_sha256": "67a6e3bc54ee59c6fe47c5741ee36bb2c5c7776c293d34ae319f8033ad633131",
+      "header": "src/modules/db2/support/db2_log.h",
+      "header_sha256": "124c268149b35dd6236b90ff7503e37e0588b27995a2715bc5f4b99cba2ef186",
+      "defines": [
+        "aimee_log",
+        "db2_log_install"
+      ],
+      "resolves": [
+        "aimee_log"
+      ],
+      "allowed_includes": [
+        "db2_log.h",
+        "stdio.h"
+      ],
+      "allowed_header_includes": [
+        "stdarg.h"
+      ],
+      "allowed_undefined": [
+        "vsnprintf"
+      ],
+      "base_references": {
+        "aimee_log": [
+          "src/modules/db2/c/canonical_index.c",
+          "src/modules/db2/c/code_index.c",
+          "src/modules/db2/c/cross_repo_build.c",
+          "src/modules/db2/c/cross_repo_deps.c",
+          "src/modules/db2/c/cross_repo_identity.c",
+          "src/modules/db2/c/cross_repo_review.c",
+          "src/modules/db2/c/cross_repo_route.c",
+          "src/modules/db2/c/cross_repo_stats.c",
+          "src/modules/db2/c/db2_init.c",
+          "src/modules/db2/c/db2_reembed.c",
+          "src/modules/db2/c/db2_tenant.c",
+          "src/modules/db2/c/enrollments.c",
+          "src/modules/db2/c/fact_ingest.c",
+          "src/modules/db2/c/kb_payload.c",
+          "src/modules/db2/c/learning.c",
+          "src/modules/db2/c/pgvec_transport.c",
+          "src/modules/db2/c/vault_pg.c"
+        ]
+      },
+      "provenance": "The monolithic logger is replaced by a process-startup-installed sink; all seventeen DB2 logging translation units are pinned to this bounded surface.",
+      "evidence": "One formatting export and one startup installer preserve DB2 log level, module, and message semantics with a bounded message buffer and only vsnprintf imported. The sink carries no KB logger state, database, bus, provider, or allocation edge."
     },
     {
       "path": "src/modules/db2/support/management_read_primitives.c",
@@ -1554,30 +1600,6 @@
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
-    },
-    {
-      "symbol": "aimee_log",
-      "references": [
-        "src/modules/db2/c/canonical_index.c",
-        "src/modules/db2/c/code_index.c",
-        "src/modules/db2/c/cross_repo_build.c",
-        "src/modules/db2/c/cross_repo_deps.c",
-        "src/modules/db2/c/cross_repo_identity.c",
-        "src/modules/db2/c/cross_repo_review.c",
-        "src/modules/db2/c/cross_repo_route.c",
-        "src/modules/db2/c/cross_repo_stats.c",
-        "src/modules/db2/c/db2_init.c",
-        "src/modules/db2/c/db2_reembed.c",
-        "src/modules/db2/c/db2_tenant.c",
-        "src/modules/db2/c/enrollments.c",
-        "src/modules/db2/c/fact_ingest.c",
-        "src/modules/db2/c/kb_payload.c",
-        "src/modules/db2/c/learning.c",
-        "src/modules/db2/c/pgvec_transport.c",
-        "src/modules/db2/c/vault_pg.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
     },
     {
       "symbol": "atoi",
@@ -3224,7 +3246,8 @@
       "symbol": "vsnprintf",
       "references": [
         "src/modules/db2/c/db2_reembed.c",
-        "src/modules/db2/support/dstr_primitives.c"
+        "src/modules/db2/support/dstr_primitives.c",
+        "src/modules/db2/support/log_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3232,16 +3255,16 @@
   ],
   "summary": {
     "translation_units": 138,
-    "descriptor_support_units": 11,
-    "unresolved_symbols": 207,
+    "descriptor_support_units": 12,
+    "unresolved_symbols": 206,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
       "injected-module-contract": 59,
-      "portable-core-promotion": 9,
+      "portable-core-promotion": 8,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "cb21f9ef17af7a80631a4dcb33cbe6cd49dde03183b58c0aa8a0ea0469a26ad5"
+  "fingerprint": "d50908553bf933d77fa2fddd0d82fac2422dbef34702fce574dfd3ab1c208b56"
 }

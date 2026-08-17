@@ -4,7 +4,7 @@
 #include "../headers/aimee.h"      /* MAX_PATH_LEN, now_utc */
 #include "../headers/code_match.h" /* code_match_line (P1b span enrichment) */
 #include "cross_repo_resolver.h"   /* H0b: xrepo_lang_name / xrepo_path_is_vendored */
-#include "../headers/log.h"        /* aimee_log */
+#include "../support/db2_log.h"    /* aimee_log */
 #include "db2.h"
 #include "db2_internal.h"
 #include "db_postgres.h"

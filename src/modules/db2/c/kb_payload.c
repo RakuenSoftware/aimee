@@ -12,7 +12,7 @@
 #include "db_postgres.h"
 #include "cJSON.h"
 #include "db2_internal.h"
-#include "../headers/log.h"
+#include "../support/db2_log.h"
 
 #include <ctype.h>
 #include <stddef.h>

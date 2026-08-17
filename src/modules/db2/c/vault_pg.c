@@ -17,7 +17,7 @@
 #include "vault_kek_check.h"
 #include "vault_store.h"     /* VAULT_STORE_NO_ENTRY, vault_store_entry_t */
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX */
-#include "log.h"
+#include "../support/db2_log.h"
 
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
 #include <errno.h>

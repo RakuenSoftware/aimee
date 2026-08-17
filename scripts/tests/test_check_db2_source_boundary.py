@@ -62,8 +62,8 @@ class BoundaryTests(unittest.TestCase):
     def test_production_tree_matches_baseline(self) -> None:
         result = checker.check(REPO_ROOT)
         self.assertEqual(result["source_files"], 280)
-        self.assertEqual(result["consumer_files"], 302)
-        self.assertEqual(result["include_directives"], 990)
+        self.assertEqual(result["consumer_files"], 303)
+        self.assertEqual(result["include_directives"], 991)
 
     def test_inventory_is_deterministic_sorted_and_classified(self) -> None:
         tmp = self.repo()
@@ -452,7 +452,7 @@ class BoundaryTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("302 consumers", result.stdout)
+        self.assertIn("303 consumers", result.stdout)
 
 
 if __name__ == "__main__":

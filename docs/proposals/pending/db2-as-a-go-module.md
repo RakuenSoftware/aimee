@@ -6,8 +6,8 @@
   closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
   support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
   deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
-  closure currently records 207 external symbols: 139 declared system links, 59 sibling contracts
-  to inject, and 9 portable APIs to close. This is explicitly not the S4 atomic ownership cutover or
+  closure currently records 206 external symbols: 139 declared system links, 59 sibling contracts
+  to inject, and 8 portable APIs to close. This is explicitly not the S4 atomic ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
 - **Date:** 2026-08-15.
@@ -474,9 +474,12 @@ values and both enum sizes to the authoritative int-sized calling convention. Ex
 normal and hardened builds. The unit has no imports and does not change DB2 or DB3 vector ownership.
 
 Later admitted units now own the pinned cJSON input, portable randomness, and the generated full-field
-relationship seed. The remaining support candidates stay explicitly deferred by ownership shape:
+relationship seed. Process logging now crosses one bounded, startup-installed sink that preserves
+level, module, and a capped formatted message without linking the host logger into DB2; normal and
+hardened tests cover startup absence, formatting, truncation, invalid calls, and removal. The
+remaining support candidates stay explicitly deferred by ownership shape:
 language extractors bring a broad parser/helper closure; process discovery/spawn carries runtime
-lifecycle policy; and logging, session, and briefing helpers belong behind injected host contracts.
+lifecycle policy; and session and briefing helpers belong behind injected host contracts.
 Each requires its own coherent admission and parity slice rather than being folded into an unrelated
 unit.
 

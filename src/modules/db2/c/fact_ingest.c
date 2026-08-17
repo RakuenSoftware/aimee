@@ -8,7 +8,7 @@
 #include "../support/db2_runtime_config.h"
 #include "modules/memory/memory_extract_patterns.h" /* memory_extract_patterns, retraction */
 #include "modules/memory/memory_pii_gate.h"         /* memory_pii_turn_requests_sensitive */
-#include "../headers/log.h"                         /* LOG_WARN */
+#include "../support/db2_log.h"                     /* LOG_WARN */
 
 #define FI_MAX_TRIPLES 16
 

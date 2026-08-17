@@ -12,7 +12,7 @@
 #include "cross_repo_stats.h"
 #include "db2.h"
 #include "db_postgres.h"
-#include "log.h"
+#include "../support/db2_log.h"
 
 #include <ctype.h>
 #include <stdint.h>

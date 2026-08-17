@@ -4,7 +4,7 @@
 #include "db2_internal.h"
 #include "db_postgres.h"
 #include "db2.h" /* db2_lease_begin/_end */
-#include "log.h"
+#include "../support/db2_log.h"
 
 #include <string.h>
 

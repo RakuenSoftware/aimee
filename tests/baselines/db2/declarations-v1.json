@@ -806,6 +806,10 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_db2_log_support.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_db2_pool.c"
     },
     {
@@ -23679,7 +23683,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "453b60c9d0311ee9fb6cf50de74e340e9d0dba377a3850c35f282b82e7d6c182",
+  "fingerprint": "7183657f67246dfe41052a4744e2f306a46ca0a3195e9d12288d90c179b5c009",
   "module": "db2",
   "schema_version": 1,
   "summary": {

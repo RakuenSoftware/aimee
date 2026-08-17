@@ -761,6 +761,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-bus-db2-module \
                 $(TESTPREFIX)/unit-test-db2-cjson-support \
                 $(TESTPREFIX)/unit-test-db2-dstr-support \
+                $(TESTPREFIX)/unit-test-db2-log-support \
                 $(TESTPREFIX)/unit-test-db2-management-read-support \
                 $(TESTPREFIX)/unit-test-db2-random-support \
                 $(TESTPREFIX)/unit-test-db2-rel-enum-text-support \
@@ -842,6 +843,7 @@ UNIT_TEST_SKIP_P1 ?= 0
 ifeq ($(UNIT_TEST_SHARD_INDEX),0)
 UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-cjson-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-log-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-random-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize \
@@ -7156,6 +7158,37 @@ unit-test-db2-runtime-config-support: $(TESTPREFIX)/unit-test-db2-runtime-config
 
 unit-test-db2-runtime-config-support-sanitize: \
                      $(TESTPREFIX)/unit-test-db2-runtime-config-support-sanitize
+	$<
+
+$(OBJDIR)/tests/db2_log_support_impl.o: modules/db2/support/log_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-log-support: \
+                     $(OBJDIR)/tests/test_db2_log_support.o \
+                     $(OBJDIR)/tests/db2_log_support_impl.o
+	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_LOG_SANITIZE_DIR = $(OBJDIR)/tests/db2-log-support-sanitize
+
+$(DB2_LOG_SANITIZE_DIR)/test.o: tests/test_db2_log_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_LOG_SANITIZE_DIR)/support.o: modules/db2/support/log_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-log-support-sanitize: \
+                     $(DB2_LOG_SANITIZE_DIR)/test.o \
+                     $(DB2_LOG_SANITIZE_DIR)/support.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -o $@ $^
+
+.PHONY: unit-test-db2-log-support unit-test-db2-log-support-sanitize
+unit-test-db2-log-support: $(TESTPREFIX)/unit-test-db2-log-support
+	$<
+
+unit-test-db2-log-support-sanitize: $(TESTPREFIX)/unit-test-db2-log-support-sanitize
 	$<
 
 DB2_REL_TYPE_SUPPORT_RENAMES = \
