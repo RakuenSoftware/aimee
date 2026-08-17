@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "3710f2f2868d4eb23e6b2569fbc6ba330e60ee9b",
-  "source_fingerprint": "3830b8a7a4010366f3c6d7a35b942cde975b1fe7ddaa7c6054474af843a610fd",
+  "source_revision": "1d7c6a2d8d0573e61091dcee5b40bd76e281a8eb",
+  "source_fingerprint": "c619e7fe647e73a9c0c2706affea6733bf565767e6ee3924326c9c62ffeea9cf",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -2357,14 +2357,6 @@
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
-      "symbol": "kb_mdl_score",
-      "references": [
-        "src/modules/db2/c/artifacts.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "kb_mgmt_token_authority_record_valid",
       "references": [
         "src/modules/db2/c/management_token_authority.c"
@@ -3526,15 +3518,15 @@
   "summary": {
     "translation_units": 138,
     "descriptor_support_units": 22,
-    "unresolved_symbols": 181,
+    "unresolved_symbols": 180,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 42,
+      "injected-module-contract": 41,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "1b1d2440c91161d43569671da2854299c0cba5b8de5e55268896454dcd8709b7"
+  "fingerprint": "1763e0ffb79877032818c2a9b22e91a5cce2a2f0bbe10851e2d2f3cdca31a967"
 }

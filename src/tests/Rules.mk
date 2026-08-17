@@ -8097,6 +8097,8 @@ $(TESTPREFIX)/unit-test-retrieval-outcome-bridge: $(OBJDIR)/tests/test_retrieval
                      $(OBJDIR)/server/retrieval_outcome_bridge.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(OBJDIR)/tests/test_artifacts.o: C_FLAGS += -Imodules/db2/include
+
 # Pure render/extract helpers behind the kb_search tool — cJSON + dstr only.
 $(TESTPREFIX)/unit-test-td-search-render: $(OBJDIR)/tests/test_td_search_render.o \
                      $(OBJDIR)/posix/td_search_render.o \

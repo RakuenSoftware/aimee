@@ -6,7 +6,6 @@
 #include "db_postgres.h"
 #include "feature_rows.h"
 #include "kb_audit_worm.h"
-#include "kb_mdl.h"
 #include "platform_random.h"
 #include "aimee.h"
 #include "cJSON.h"
@@ -16,6 +15,13 @@
 #include <string.h>
 
 #define ARTIFACT_MDL_FEATURE_SET_VERSION "mdl-v1"
+
+static db2_mdl_score_fn g_mdl_score_provider;
+
+void aimee_db2_register_mdl_score_provider(db2_mdl_score_fn provider)
+{
+   g_mdl_score_provider = provider;
+}
 
 void db2_artifact_gen_id(char *buf, size_t len)
 {
@@ -131,15 +137,18 @@ static void db2_artifact_emit_mdl_features_if_needed(const char *id, const char 
    if (!evidence || !evidence[0])
       evidence = candidate;
 
-   kb_mdl_score_t score;
-   if (kb_mdl_score(candidate, evidence, &score) == 0)
+   double l_candidate;
+   double l_residual;
+   double total;
+   if (g_mdl_score_provider &&
+       g_mdl_score_provider(candidate, evidence, &l_candidate, &l_residual, &total) == 0)
    {
       int rank = artifact_payload_rank(root);
       char features[256];
       snprintf(features, sizeof(features),
                "{\"mdl.l_candidate\":%.6f,\"mdl.l_residual\":%.6f,"
                "\"mdl.total\":%.6f,\"mdl.rank_in_cluster\":%d}",
-               score.l_candidate, score.l_residual, score.total, rank);
+               l_candidate, l_residual, total, rank);
       (void)db2_feature_row_upsert(id, "artifact", scope_kind_copy, scope_id_copy,
                                    ARTIFACT_MDL_FEATURE_SET_VERSION, features, NULL);
    }

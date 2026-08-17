@@ -20,6 +20,16 @@ extern "C"
     * when the provider returns anything other than 64 lowercase hex bytes. */
    void aimee_db2_register_audit_hash_provider(aimee_db2_audit_hash_fn provider);
 
+   /* Score one synthesis candidate against its evidence bundle. The provider
+    * returns 0 and fills all three outputs on success, or -1 when scoring is
+    * unavailable. */
+   typedef int (*aimee_db2_mdl_score_fn)(const char *candidate, const char *evidence,
+                                         double *l_candidate, double *l_residual, double *total);
+
+   /* Install the KB host's canonical MDL scorer during process startup. NULL
+    * removes it; artifact commits continue without optional MDL features. */
+   void aimee_db2_register_mdl_score_provider(aimee_db2_mdl_score_fn provider);
+
 #ifdef __cplusplus
 }
 #endif

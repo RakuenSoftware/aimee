@@ -14,6 +14,13 @@ extern "C"
 {
 #endif
 
+   typedef int (*db2_mdl_score_fn)(const char *candidate, const char *evidence, double *l_candidate,
+                                   double *l_residual, double *total);
+
+   /* Internal declaration of the host contract exported publicly through
+    * <aimee/db2/host_contracts.h>. NULL removes the provider. */
+   void aimee_db2_register_mdl_score_provider(db2_mdl_score_fn provider);
+
    /* Generate a random UUID string (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
     * into buf.  buf must be at least 37 bytes. */
    void db2_artifact_gen_id(char *buf, size_t len);
@@ -223,8 +230,8 @@ extern "C"
     * projects. Writes up to `max` rows into out; returns the count
     * (>= 0), or -1 on error. */
    int db2_artifact_filter_facets(int64_t release_id, const char *project, const char *kind,
-                                   const char *status, const char *priority, const char *component,
-                                   db2_artifact_row_t *out, int max);
+                                  const char *status, const char *priority, const char *component,
+                                  db2_artifact_row_t *out, int max);
    int db2_artifact_filter_facets_scoped(int64_t release_id, const char *project,
                                          const char *exclude_project, const char *kind,
                                          const char *status, const char *priority,
