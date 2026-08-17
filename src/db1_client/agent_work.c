@@ -20,6 +20,7 @@
  * generator emits, and reflowing generated output would put the file and the
  * catalog permanently one reformat apart. */
 /* clang-format off */
+#include "agent_log.h"
 #include "cognify_jobs.h"
 
 #include "db1_module_api.h"
@@ -275,6 +276,739 @@ int db1_cognify_job_mark(int64_t job_id, const char *status, const char *error)
    snprintf(arg0, sizeof arg0, "%lld", (long long)job_id);
    const char *fields[] = {arg0, status, error ? error : ""};
    return write_result(call_stage(AIMEE_DB1_OP_COGNIFY_MARK, fields, 3, NULL, NULL, 0, NULL));
+}
+
+long long db1_agent_log_insert(const db1_agent_log_insert_row_t *row)
+{
+   if (!row)
+      return -1;
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", row->prompt_tokens);
+   char arg3[32];
+   snprintf(arg3, sizeof arg3, "%d", row->completion_tokens);
+   char arg4[32];
+   snprintf(arg4, sizeof arg4, "%d", row->latency_ms);
+   char arg5[32];
+   snprintf(arg5, sizeof arg5, "%d", row->success);
+   char arg7[32];
+   snprintf(arg7, sizeof arg7, "%d", row->turns);
+   char arg8[32];
+   snprintf(arg8, sizeof arg8, "%d", row->tool_calls);
+   char arg9[32];
+   snprintf(arg9, sizeof arg9, "%d", row->confidence);
+   const char *fields[] = {row->agent_name, row->role, arg2, arg3, arg4, arg5, row->error ? row->error : "", arg7, arg8, arg9, row->session_id ? row->session_id : ""};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_INSERT, fields, 11, values, caps, 1, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int64_t)strtoll(slot0, NULL, 10);
+}
+
+int db1_agent_log_list_recent(db1_agent_log_display_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max);
+   const char *fields[] = {arg0};
+   char **values = malloc((size_t)max * 13u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 13u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 8u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 13u + 0u] = scratch[row * 8u + 0u];
+      caps[row * 13u + 0u] = sizeof scratch[row * 8u + 0u];
+      values[row * 13u + 1u] = out[row].agent_name;
+      caps[row * 13u + 1u] = sizeof out[row].agent_name;
+      values[row * 13u + 2u] = out[row].role;
+      caps[row * 13u + 2u] = sizeof out[row].role;
+      values[row * 13u + 3u] = scratch[row * 8u + 1u];
+      caps[row * 13u + 3u] = sizeof scratch[row * 8u + 1u];
+      values[row * 13u + 4u] = scratch[row * 8u + 2u];
+      caps[row * 13u + 4u] = sizeof scratch[row * 8u + 2u];
+      values[row * 13u + 5u] = scratch[row * 8u + 3u];
+      caps[row * 13u + 5u] = sizeof scratch[row * 8u + 3u];
+      values[row * 13u + 6u] = scratch[row * 8u + 4u];
+      caps[row * 13u + 6u] = sizeof scratch[row * 8u + 4u];
+      values[row * 13u + 7u] = scratch[row * 8u + 5u];
+      caps[row * 13u + 7u] = sizeof scratch[row * 8u + 5u];
+      values[row * 13u + 8u] = scratch[row * 8u + 6u];
+      caps[row * 13u + 8u] = sizeof scratch[row * 8u + 6u];
+      values[row * 13u + 9u] = scratch[row * 8u + 7u];
+      caps[row * 13u + 9u] = sizeof scratch[row * 8u + 7u];
+      values[row * 13u + 10u] = out[row].session_id;
+      caps[row * 13u + 10u] = sizeof out[row].session_id;
+      values[row * 13u + 11u] = out[row].created_at;
+      caps[row * 13u + 11u] = sizeof out[row].created_at;
+      values[row * 13u + 12u] = out[row].error;
+      caps[row * 13u + 12u] = sizeof out[row].error;
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_LIST_RECENT, fields, 1, values, caps,
+                           (uint32_t)(max * 13), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 13u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 13u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].id = (int64_t)strtoll(scratch[row * 8u + 0u], NULL, 10);
+      out[row].prompt_tokens = (int)strtol(scratch[row * 8u + 1u], NULL, 10);
+      out[row].completion_tokens = (int)strtol(scratch[row * 8u + 2u], NULL, 10);
+      out[row].latency_ms = (int)strtol(scratch[row * 8u + 3u], NULL, 10);
+      out[row].success = (int)strtol(scratch[row * 8u + 4u], NULL, 10);
+      out[row].turns = (int)strtol(scratch[row * 8u + 5u], NULL, 10);
+      out[row].tool_calls = (int)strtol(scratch[row * 8u + 6u], NULL, 10);
+      out[row].confidence = (int)strtol(scratch[row * 8u + 7u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_agent_log_list_by_session(const char *session_id, db1_agent_log_display_t *out, int max)
+{
+   if (!session_id || !session_id[0] || !out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {session_id, arg1};
+   char **values = malloc((size_t)max * 13u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 13u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 8u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 13u + 0u] = scratch[row * 8u + 0u];
+      caps[row * 13u + 0u] = sizeof scratch[row * 8u + 0u];
+      values[row * 13u + 1u] = out[row].agent_name;
+      caps[row * 13u + 1u] = sizeof out[row].agent_name;
+      values[row * 13u + 2u] = out[row].role;
+      caps[row * 13u + 2u] = sizeof out[row].role;
+      values[row * 13u + 3u] = scratch[row * 8u + 1u];
+      caps[row * 13u + 3u] = sizeof scratch[row * 8u + 1u];
+      values[row * 13u + 4u] = scratch[row * 8u + 2u];
+      caps[row * 13u + 4u] = sizeof scratch[row * 8u + 2u];
+      values[row * 13u + 5u] = scratch[row * 8u + 3u];
+      caps[row * 13u + 5u] = sizeof scratch[row * 8u + 3u];
+      values[row * 13u + 6u] = scratch[row * 8u + 4u];
+      caps[row * 13u + 6u] = sizeof scratch[row * 8u + 4u];
+      values[row * 13u + 7u] = scratch[row * 8u + 5u];
+      caps[row * 13u + 7u] = sizeof scratch[row * 8u + 5u];
+      values[row * 13u + 8u] = scratch[row * 8u + 6u];
+      caps[row * 13u + 8u] = sizeof scratch[row * 8u + 6u];
+      values[row * 13u + 9u] = scratch[row * 8u + 7u];
+      caps[row * 13u + 9u] = sizeof scratch[row * 8u + 7u];
+      values[row * 13u + 10u] = out[row].session_id;
+      caps[row * 13u + 10u] = sizeof out[row].session_id;
+      values[row * 13u + 11u] = out[row].created_at;
+      caps[row * 13u + 11u] = sizeof out[row].created_at;
+      values[row * 13u + 12u] = out[row].error;
+      caps[row * 13u + 12u] = sizeof out[row].error;
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_LIST_BY_SESSION, fields, 2, values, caps,
+                           (uint32_t)(max * 13), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 13u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 13u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].id = (int64_t)strtoll(scratch[row * 8u + 0u], NULL, 10);
+      out[row].prompt_tokens = (int)strtol(scratch[row * 8u + 1u], NULL, 10);
+      out[row].completion_tokens = (int)strtol(scratch[row * 8u + 2u], NULL, 10);
+      out[row].latency_ms = (int)strtol(scratch[row * 8u + 3u], NULL, 10);
+      out[row].success = (int)strtol(scratch[row * 8u + 4u], NULL, 10);
+      out[row].turns = (int)strtol(scratch[row * 8u + 5u], NULL, 10);
+      out[row].tool_calls = (int)strtol(scratch[row * 8u + 6u], NULL, 10);
+      out[row].confidence = (int)strtol(scratch[row * 8u + 7u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_agent_log_search_session_ids_by_role(const char *pattern, char (*out_ids)[DB1_AL_SESSION_LEN], int max)
+{
+   if (!pattern || !pattern[0] || !out_ids || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {pattern, arg1};
+   char **values = malloc((size_t)max * 1u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 1u * sizeof *caps);
+   if (!values || !caps)
+   {
+      free(values);
+      free(caps);
+      return -1;
+   }
+   memset(out_ids, 0, (size_t)max * sizeof *out_ids);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 1u + 0u] = out_ids[row];
+      caps[row * 1u + 0u] = sizeof out_ids[row];
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_SEARCH_SESSIONS_BY_ROLE, fields, 2, values, caps,
+                           (uint32_t)(max * 1), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 1u != 0u)
+   {
+      return -1;
+   }
+   int rows = (int)(filled / 1u);
+   return rows;
+}
+
+int db1_agent_log_count_per_role(const char *since_or_null, db1_agent_log_role_count_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {since_or_null ? since_or_null : "", arg1};
+   char **values = malloc((size_t)max * 2u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 2u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 1u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 2u + 0u] = out[row].role;
+      caps[row * 2u + 0u] = sizeof out[row].role;
+      values[row * 2u + 1u] = scratch[row * 1u + 0u];
+      caps[row * 2u + 1u] = sizeof scratch[row * 1u + 0u];
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_COUNT_PER_ROLE, fields, 2, values, caps,
+                           (uint32_t)(max * 2), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 2u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 2u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].count = (int)strtol(scratch[row * 1u + 0u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_agent_log_failures_since_seconds(int max_rows, int since_secs, db1_agent_log_failure_t *out)
+{
+   if (!out || max_rows <= 0)
+      return -1;
+   if (max_rows > 64)
+      max_rows = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max_rows);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", since_secs);
+   const char *fields[] = {arg0, arg1};
+   char **values = malloc((size_t)max_rows * 3u * sizeof *values);
+   size_t *caps = malloc((size_t)max_rows * 3u * sizeof *caps);
+   if (!values || !caps)
+   {
+      free(values);
+      free(caps);
+      return -1;
+   }
+   memset(out, 0, (size_t)max_rows * sizeof *out);
+   for (int row = 0; row < max_rows; ++row)
+   {
+      values[row * 3u + 0u] = out[row].role;
+      caps[row * 3u + 0u] = sizeof out[row].role;
+      values[row * 3u + 1u] = out[row].error;
+      caps[row * 3u + 1u] = sizeof out[row].error;
+      values[row * 3u + 2u] = out[row].created_at;
+      caps[row * 3u + 2u] = sizeof out[row].created_at;
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_FAILURES_SINCE, fields, 2, values, caps,
+                           (uint32_t)(max_rows * 3), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 3u != 0u)
+   {
+      return -1;
+   }
+   int rows = (int)(filled / 3u);
+   return rows;
+}
+
+int db1_agent_log_list_recent_errors(int since_days, db1_agent_log_recent_error_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", since_days);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {arg0, arg1};
+   char **values = malloc((size_t)max * 1u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 1u * sizeof *caps);
+   if (!values || !caps)
+   {
+      free(values);
+      free(caps);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 1u + 0u] = out[row].error;
+      caps[row * 1u + 0u] = sizeof out[row].error;
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_LIST_RECENT_ERRORS, fields, 2, values, caps,
+                           (uint32_t)(max * 1), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 1u != 0u)
+   {
+      return -1;
+   }
+   int rows = (int)(filled / 1u);
+   return rows;
+}
+
+int db1_agent_log_list_delegation_patterns(int since_days, int min_total, db1_agent_log_delegation_pattern_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", since_days);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", min_total);
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", max);
+   const char *fields[] = {arg0, arg1, arg2};
+   char **values = malloc((size_t)max * 8u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 8u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 5u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 8u + 0u] = out[row].role;
+      caps[row * 8u + 0u] = sizeof out[row].role;
+      values[row * 8u + 1u] = out[row].agent_name;
+      caps[row * 8u + 1u] = sizeof out[row].agent_name;
+      values[row * 8u + 2u] = scratch[row * 5u + 0u];
+      caps[row * 8u + 2u] = sizeof scratch[row * 5u + 0u];
+      values[row * 8u + 3u] = scratch[row * 5u + 1u];
+      caps[row * 8u + 3u] = sizeof scratch[row * 5u + 1u];
+      values[row * 8u + 4u] = scratch[row * 5u + 2u];
+      caps[row * 8u + 4u] = sizeof scratch[row * 5u + 2u];
+      values[row * 8u + 5u] = scratch[row * 5u + 3u];
+      caps[row * 8u + 5u] = sizeof scratch[row * 5u + 3u];
+      values[row * 8u + 6u] = scratch[row * 5u + 4u];
+      caps[row * 8u + 6u] = sizeof scratch[row * 5u + 4u];
+      values[row * 8u + 7u] = out[row].recent_error;
+      caps[row * 8u + 7u] = sizeof out[row].recent_error;
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_DELEGATION_PATTERNS, fields, 3, values, caps,
+                           (uint32_t)(max * 8), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 8u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 8u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].wins = (int)strtol(scratch[row * 5u + 0u], NULL, 10);
+      out[row].fails = (int)strtol(scratch[row * 5u + 1u], NULL, 10);
+      out[row].total = (int)strtol(scratch[row * 5u + 2u], NULL, 10);
+      out[row].avg_turns = (int)strtol(scratch[row * 5u + 3u], NULL, 10);
+      out[row].avg_tools = (int)strtol(scratch[row * 5u + 4u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_agent_log_list_failure_episode_seeds(int since_days, int min_fails, db1_agent_log_failure_episode_seed_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", since_days);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", min_fails);
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", max);
+   const char *fields[] = {arg0, arg1, arg2};
+   char **values = malloc((size_t)max * 4u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 4u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 1u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 4u + 0u] = out[row].role;
+      caps[row * 4u + 0u] = sizeof out[row].role;
+      values[row * 4u + 1u] = out[row].agent_name;
+      caps[row * 4u + 1u] = sizeof out[row].agent_name;
+      values[row * 4u + 2u] = scratch[row * 1u + 0u];
+      caps[row * 4u + 2u] = sizeof scratch[row * 1u + 0u];
+      values[row * 4u + 3u] = out[row].errors;
+      caps[row * 4u + 3u] = sizeof out[row].errors;
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_FAILURE_SEEDS, fields, 3, values, caps,
+                           (uint32_t)(max * 4), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 4u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 4u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].fails = (int)strtol(scratch[row * 1u + 0u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_agent_log_metrics_by_role(db1_agent_log_metric_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max);
+   const char *fields[] = {arg0};
+   char **values = malloc((size_t)max * 8u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 8u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 7u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 8u + 0u] = out[row].role;
+      caps[row * 8u + 0u] = sizeof out[row].role;
+      values[row * 8u + 1u] = scratch[row * 7u + 0u];
+      caps[row * 8u + 1u] = sizeof scratch[row * 7u + 0u];
+      values[row * 8u + 2u] = scratch[row * 7u + 1u];
+      caps[row * 8u + 2u] = sizeof scratch[row * 7u + 1u];
+      values[row * 8u + 3u] = scratch[row * 7u + 2u];
+      caps[row * 8u + 3u] = sizeof scratch[row * 7u + 2u];
+      values[row * 8u + 4u] = scratch[row * 7u + 3u];
+      caps[row * 8u + 4u] = sizeof scratch[row * 7u + 3u];
+      values[row * 8u + 5u] = scratch[row * 7u + 4u];
+      caps[row * 8u + 5u] = sizeof scratch[row * 7u + 4u];
+      values[row * 8u + 6u] = scratch[row * 7u + 5u];
+      caps[row * 8u + 6u] = sizeof scratch[row * 7u + 5u];
+      values[row * 8u + 7u] = scratch[row * 7u + 6u];
+      caps[row * 8u + 7u] = sizeof scratch[row * 7u + 6u];
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_METRICS_BY_ROLE, fields, 1, values, caps,
+                           (uint32_t)(max * 8), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 8u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 8u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].total = (int)strtol(scratch[row * 7u + 0u], NULL, 10);
+      out[row].successes = (int)strtol(scratch[row * 7u + 1u], NULL, 10);
+      out[row].avg_latency_ms = (int)strtol(scratch[row * 7u + 2u], NULL, 10);
+      out[row].tokens = (int64_t)strtoll(scratch[row * 7u + 3u], NULL, 10);
+      out[row].cache_write_tokens = (int64_t)strtoll(scratch[row * 7u + 4u], NULL, 10);
+      out[row].cache_read_tokens = (int64_t)strtoll(scratch[row * 7u + 5u], NULL, 10);
+      out[row].estimated_cost_usd = strtod(scratch[row * 7u + 6u], NULL);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_agent_log_agent_stats(const char *agent_name_or_null, db1_agent_log_agent_stats_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {agent_name_or_null ? agent_name_or_null : "", arg1};
+   char **values = malloc((size_t)max * 9u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 9u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 8u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 9u + 0u] = out[row].agent_name;
+      caps[row * 9u + 0u] = sizeof out[row].agent_name;
+      values[row * 9u + 1u] = scratch[row * 8u + 0u];
+      caps[row * 9u + 1u] = sizeof scratch[row * 8u + 0u];
+      values[row * 9u + 2u] = scratch[row * 8u + 1u];
+      caps[row * 9u + 2u] = sizeof scratch[row * 8u + 1u];
+      values[row * 9u + 3u] = scratch[row * 8u + 2u];
+      caps[row * 9u + 3u] = sizeof scratch[row * 8u + 2u];
+      values[row * 9u + 4u] = scratch[row * 8u + 3u];
+      caps[row * 9u + 4u] = sizeof scratch[row * 8u + 3u];
+      values[row * 9u + 5u] = scratch[row * 8u + 4u];
+      caps[row * 9u + 5u] = sizeof scratch[row * 8u + 4u];
+      values[row * 9u + 6u] = scratch[row * 8u + 5u];
+      caps[row * 9u + 6u] = sizeof scratch[row * 8u + 5u];
+      values[row * 9u + 7u] = scratch[row * 8u + 6u];
+      caps[row * 9u + 7u] = sizeof scratch[row * 8u + 6u];
+      values[row * 9u + 8u] = scratch[row * 8u + 7u];
+      caps[row * 9u + 8u] = sizeof scratch[row * 8u + 7u];
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_AGENT_STATS, fields, 2, values, caps,
+                           (uint32_t)(max * 9), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 9u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 9u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].total_calls = (int)strtol(scratch[row * 8u + 0u], NULL, 10);
+      out[row].total_prompt_tokens = (int)strtol(scratch[row * 8u + 1u], NULL, 10);
+      out[row].total_completion_tokens = (int)strtol(scratch[row * 8u + 2u], NULL, 10);
+      out[row].avg_latency_ms = (int)strtol(scratch[row * 8u + 3u], NULL, 10);
+      out[row].success_rate = strtod(scratch[row * 8u + 4u], NULL);
+      out[row].total_cache_write_tokens = (int64_t)strtoll(scratch[row * 8u + 5u], NULL, 10);
+      out[row].total_cache_read_tokens = (int64_t)strtoll(scratch[row * 8u + 6u], NULL, 10);
+      out[row].total_estimated_cost_usd = strtod(scratch[row * 8u + 7u], NULL);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_agent_log_hud_summary(db1_agent_log_hud_t *out, int recent_secs)
+{
+   if (!out)
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", recent_secs);
+   const char *fields[] = {arg0};
+   char slot0[32];
+   char slot1[32];
+   char slot2[32];
+   char slot3[32];
+   char slot4[32];
+   char slot5[32];
+   char slot6[32];
+   char slot7[32];
+   char slot8[32];
+   char slot9[32];
+   char *const values[] = {slot0, slot1, slot2, slot3, slot4, slot5, slot6, slot7, slot8, slot9};
+   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof slot4, sizeof slot5, sizeof slot6, sizeof slot7, sizeof slot8, sizeof slot9};
+   memset(out, 0, sizeof *out);
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_HUD_SUMMARY, fields, 1, values, caps, 10, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   out->total_calls = (int)strtol(slot0, NULL, 10);
+   out->successful_calls = (int)strtol(slot1, NULL, 10);
+   out->failed_calls = (int)strtol(slot2, NULL, 10);
+   out->total_prompt_tokens = (int64_t)strtoll(slot3, NULL, 10);
+   out->total_completion_tokens = (int64_t)strtoll(slot4, NULL, 10);
+   out->total_turns = (int)strtol(slot5, NULL, 10);
+   out->total_tool_calls = (int)strtol(slot6, NULL, 10);
+   out->avg_latency_ms = strtod(slot7, NULL);
+   out->recent_calls = (int)strtol(slot8, NULL, 10);
+   out->recent_successes = (int)strtol(slot9, NULL, 10);
+   return 0;
+}
+
+int db1_agent_log_session_outcome(const char *session_id, int *successes_out, int *total_out)
+{
+   if (!session_id || !session_id[0] || !successes_out || !total_out)
+      return -1;
+   const char *fields[] = {session_id};
+   char slot0[32];
+   char slot1[32];
+   char *const values[] = {slot0, slot1};
+   const size_t caps[] = {sizeof slot0, sizeof slot1};
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_SESSION_OUTCOME, fields, 1, values, caps, 2, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   *successes_out = (int)strtol(slot0, NULL, 10);
+   *total_out = (int)strtol(slot1, NULL, 10);
+   return 0;
+}
+
+int db1_agent_log_prometheus(db1_agent_log_prometheus_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max);
+   const char *fields[] = {arg0};
+   char **values = malloc((size_t)max * 8u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 8u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 6u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 8u + 0u] = out[row].agent_name;
+      caps[row * 8u + 0u] = sizeof out[row].agent_name;
+      values[row * 8u + 1u] = out[row].role;
+      caps[row * 8u + 1u] = sizeof out[row].role;
+      values[row * 8u + 2u] = scratch[row * 6u + 0u];
+      caps[row * 8u + 2u] = sizeof scratch[row * 6u + 0u];
+      values[row * 8u + 3u] = scratch[row * 6u + 1u];
+      caps[row * 8u + 3u] = sizeof scratch[row * 6u + 1u];
+      values[row * 8u + 4u] = scratch[row * 6u + 2u];
+      caps[row * 8u + 4u] = sizeof scratch[row * 6u + 2u];
+      values[row * 8u + 5u] = scratch[row * 6u + 3u];
+      caps[row * 8u + 5u] = sizeof scratch[row * 6u + 3u];
+      values[row * 8u + 6u] = scratch[row * 6u + 4u];
+      caps[row * 8u + 6u] = sizeof scratch[row * 6u + 4u];
+      values[row * 8u + 7u] = scratch[row * 6u + 5u];
+      caps[row * 8u + 7u] = sizeof scratch[row * 6u + 5u];
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_PROMETHEUS, fields, 1, values, caps,
+                           (uint32_t)(max * 8), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 8u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 8u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].total = (int)strtol(scratch[row * 6u + 0u], NULL, 10);
+      out[row].successes = (int)strtol(scratch[row * 6u + 1u], NULL, 10);
+      out[row].prompt_tokens = (int)strtol(scratch[row * 6u + 2u], NULL, 10);
+      out[row].completion_tokens = (int)strtol(scratch[row * 6u + 3u], NULL, 10);
+      out[row].avg_latency_ms = (int)strtol(scratch[row * 6u + 4u], NULL, 10);
+      out[row].tool_calls = (int)strtol(scratch[row * 6u + 5u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_agent_log_stats(const char *since_or_null, db1_agent_log_stats_t *out)
+{
+   if (!out)
+      return -1;
+   const char *fields[] = {since_or_null ? since_or_null : ""};
+   char slot0[32];
+   char slot1[32];
+   char slot2[32];
+   char slot3[32];
+   char slot4[32];
+   char slot5[32];
+   char *const values[] = {slot0, slot1, slot2, slot3, slot4, slot5};
+   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof slot4, sizeof slot5};
+   memset(out, 0, sizeof *out);
+   int status = call_stage(AIMEE_DB1_OP_AGENT_LOG_STATS, fields, 1, values, caps, 6, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   out->total = (int)strtol(slot0, NULL, 10);
+   out->turns = (int64_t)strtoll(slot1, NULL, 10);
+   out->tool_calls = (int64_t)strtoll(slot2, NULL, 10);
+   out->prompt_tokens = (int64_t)strtoll(slot3, NULL, 10);
+   out->completion_tokens = (int64_t)strtoll(slot4, NULL, 10);
+   out->successes = (int)strtol(slot5, NULL, 10);
+   return 0;
 }
 
 /* clang-format on */
