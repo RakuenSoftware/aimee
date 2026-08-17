@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "source_revision": "84c88215672ee80095732f401cc68ee75ad96d4b",
+  "source_revision": "ef432c9f4229957557a99e35ae3ace119719bc18",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 138,
@@ -10,8 +10,8 @@
     "production_consumers": 151,
     "test_consumers": 152,
     "include_directives": 991,
-    "outbound_dependency_rows": 170,
-    "outbound_include_directives": 170
+    "outbound_dependency_rows": 169,
+    "outbound_include_directives": 169
   },
   "source_files": {
     "c": [
@@ -6178,13 +6178,6 @@
       "count": 1
     },
     {
-      "source": "src/modules/db2/c/canonical_index.c",
-      "header": "util.h",
-      "resolved": "src/headers/util.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
       "source": "src/modules/db2/c/canonical_index.h",
       "header": "index.h",
       "resolved": "src/headers/index.h",
@@ -7277,5 +7270,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "b24c503015095b659d474d705b80b1b055f1fa374e2e20289aa406a9589ede59"
+  "fingerprint": "83df03f733aa2a79843d55db7fe7090ca9f39a079c691975a83f5737ecbced45"
 }

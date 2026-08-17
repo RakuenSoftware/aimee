@@ -25,7 +25,6 @@
 #include "aimee.h"
 #include "db_postgres.h"
 #include "../support/db2_log.h"
-#include "util.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -34,10 +33,30 @@
 #include <sys/stat.h>
 #include <time.h>
 
-#define CI_LOG_TAG  "db2.canonical_index"
-#define CI_ERRBUF   256
-#define CI_MAX_DEPS 64
-#define CI_MAX_DEFS 256
+#define CI_LOG_TAG         "db2.canonical_index"
+#define CI_ERRBUF          256
+#define CI_MAX_DEPS        64
+#define CI_MAX_DEFS        256
+#define CI_EXEC_MAX_OUTPUT (64u * 1024u * 1024u)
+
+static canonical_index_exec_capture_fn ci_exec_capture;
+
+void canonical_index_set_exec_capture(canonical_index_exec_capture_fn capture)
+{
+   ci_exec_capture = capture;
+}
+
+static char *ci_capture_argv(const char *const argv[], int *exit_code)
+{
+   if (exit_code)
+      *exit_code = -1;
+   if (!ci_exec_capture || !exit_code)
+      return NULL;
+
+   char *out = NULL;
+   *exit_code = ci_exec_capture(argv, &out, CI_EXEC_MAX_OUTPUT);
+   return out;
+}
 
 static const char *ci_get_extension(const char *path)
 {
@@ -766,32 +785,30 @@ static void ci_parse_build_manifest(const char *root, const char *path,
 
 static void ci_collect_build_exclusions(const char *root, ci_exclusion_list_t *exclusions)
 {
-   char *esc = shell_escape(root);
-   char cmd[MAX_PATH_LEN * 2 + 512];
    int rc;
-   snprintf(cmd, sizeof(cmd), "git -C %s rev-parse --is-inside-work-tree 2>/dev/null", esc);
-   char *probe = run_cmd(cmd, &rc);
+   const char *probe_argv[] = {"git", "-C", root, "rev-parse", "--is-inside-work-tree", NULL};
+   char *probe = ci_capture_argv(probe_argv, &rc);
    int in_git = (rc == 0 && probe && strncmp(probe, "true", 4) == 0);
    free(probe);
 
    char *out = NULL;
    if (in_git)
    {
-      snprintf(cmd, sizeof(cmd),
-               "git -C %s ls-files --cached --others --exclude-standard 2>/dev/null", esc);
-      out = run_cmd(cmd, &rc);
+      const char *list_argv[] = {
+          "git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", NULL};
+      out = ci_capture_argv(list_argv, &rc);
    }
    else
    {
-      snprintf(cmd, sizeof(cmd),
-               "find %s -maxdepth 4 -type f \\( -name Makefile -o -name makefile"
-               " -o -name GNUmakefile -o -name '*.mk' -o -name CMakeLists.txt"
-               " -o -name package.json -o -name pyproject.toml -o -name Cargo.toml \\)"
-               " ! -name '.*' ! -path '*/.*/*' 2>/dev/null",
-               esc);
-      out = run_cmd(cmd, &rc);
+      const char *find_argv[] = {"find",   root,    "-maxdepth",      "4",  "-type", "f",
+                                 "(",      "-name", "Makefile",       "-o", "-name", "makefile",
+                                 "-o",     "-name", "GNUmakefile",    "-o", "-name", "*.mk",
+                                 "-o",     "-name", "CMakeLists.txt", "-o", "-name", "package.json",
+                                 "-o",     "-name", "pyproject.toml", "-o", "-name", "Cargo.toml",
+                                 ")",      "!",     "-name",          ".*", "!",     "-path",
+                                 "*/.*/*", NULL};
+      out = ci_capture_argv(find_argv, &rc);
    }
-   free(esc);
    if (!out)
       return;
 
@@ -947,31 +964,27 @@ static void ci_collect_text_files(const char *root, ci_file_list_t *list)
    ci_exclusion_list_t build_exclusions = {0};
    ci_collect_build_exclusions(root, &build_exclusions);
 
-   char *esc = shell_escape(root);
-   char cmd[MAX_PATH_LEN * 2 + 512];
    int rc;
-   snprintf(cmd, sizeof(cmd), "git -C %s rev-parse --is-inside-work-tree 2>/dev/null", esc);
-   char *probe = run_cmd(cmd, &rc);
+   const char *probe_argv[] = {"git", "-C", root, "rev-parse", "--is-inside-work-tree", NULL};
+   char *probe = ci_capture_argv(probe_argv, &rc);
    int in_git = (rc == 0 && probe && strncmp(probe, "true", 4) == 0);
    free(probe);
 
    char *out = NULL;
    if (in_git)
    {
-      snprintf(cmd, sizeof(cmd),
-               "git -C %s ls-files --cached --others --exclude-standard 2>/dev/null", esc);
-      out = run_cmd(cmd, &rc);
+      const char *list_argv[] = {
+          "git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", NULL};
+      out = ci_capture_argv(list_argv, &rc);
    }
    else
    {
-      snprintf(cmd, sizeof(cmd),
-               "find %s -type f"
-               " ! -name '.*' ! -path '*/.*/*'"
-               " -size -%dc 2>/dev/null",
-               esc, MAX_FILE_SIZE + 1);
-      out = run_cmd(cmd, &rc);
+      char size_arg[32];
+      snprintf(size_arg, sizeof(size_arg), "-%dc", MAX_FILE_SIZE + 1);
+      const char *find_argv[] = {"find", root,    "-type",  "f",     "!",      "-name", ".*",
+                                 "!",    "-path", "*/.*/*", "-size", size_arg, NULL};
+      out = ci_capture_argv(find_argv, &rc);
    }
-   free(esc);
    if (!out)
       return;
 
@@ -1081,29 +1094,23 @@ static void ci_cochange_flush(char names[][128], int ncount, cochange_pair_t *pa
 
 /* Mine git history under `abs_root` into co_edited edges. Incremental via a
  * per-project HEAD marker in kb_runtime_state; the marker is validated as a git
- * object id and shell-escaped before interpolation. See index.c for the full
+ * object id and passed as one argv element (never shell-interpolated). See index.c for the full
  * rationale (this is the production twin of index_backfill_cochange). */
 static void ci_backfill_cochange(const char *project, const char *abs_root)
 {
-   char *esc = shell_escape(abs_root);
-   if (!esc)
-      return;
-   char cmd[MAX_PATH_LEN * 2 + 512];
    int rc;
 
-   snprintf(cmd, sizeof(cmd), "git -C %s rev-parse HEAD 2>/dev/null", esc);
-   char *head = run_cmd(cmd, &rc);
+   const char *head_argv[] = {"git", "-C", abs_root, "rev-parse", "HEAD", NULL};
+   char *head = ci_capture_argv(head_argv, &rc);
    if (rc != 0 || !head)
    {
       free(head);
-      free(esc);
       return;
    }
    head[strcspn(head, "\r\n")] = '\0';
    if (!cochange_is_hex_sha(head))
    {
       free(head);
-      free(esc);
       return;
    }
 
@@ -1115,7 +1122,6 @@ static void ci_backfill_cochange(const char *project, const char *abs_root)
    {
       db2_kb_runtime_state_set(key, head);
       free(head);
-      free(esc);
       return;
    }
 
@@ -1125,31 +1131,26 @@ static void ci_backfill_cochange(const char *project, const char *abs_root)
       if (strcmp(marker, head) == 0)
       {
          free(head);
-         free(esc);
          return;
       }
-      char *emarker = shell_escape(marker);
-      const char *m = emarker ? emarker : marker;
-      snprintf(cmd, sizeof(cmd), "git -C %s merge-base --is-ancestor %s HEAD 2>/dev/null", esc, m);
-      char *anc = run_cmd(cmd, &rc);
+      const char *ancestor_argv[] = {"git",           "-C",   abs_root, "merge-base",
+                                     "--is-ancestor", marker, "HEAD",   NULL};
+      char *anc = ci_capture_argv(ancestor_argv, &rc);
       free(anc);
       if (rc != 0)
       {
          db2_kb_runtime_state_set(key, head);
-         free(emarker);
          free(head);
-         free(esc);
          return;
       }
-      snprintf(revspec, sizeof(revspec), "%s..HEAD", m);
-      free(emarker);
+      snprintf(revspec, sizeof(revspec), "%s..HEAD", marker);
    }
 
-   snprintf(cmd, sizeof(cmd),
-            "git -C %s log --no-merges -M --reverse --format='@@%%H' --name-only %s 2>/dev/null",
-            esc, revspec);
-   char *log = run_cmd(cmd, &rc);
-   free(esc);
+   const char *log_argv[] = {
+       "git", "-C",        abs_root,        "log",         "--no-merges",
+       "-M",  "--reverse", "--format=@@%H", "--name-only", revspec[0] ? revspec : NULL,
+       NULL};
+   char *log = ci_capture_argv(log_argv, &rc);
    if (rc != 0 || !log)
    {
       free(log);
@@ -1218,6 +1219,8 @@ int canonical_index_scan_project(const char *name, const char *root, int force, 
 {
    if (inspected_out)
       *inspected_out = 0;
+   if (!ci_exec_capture)
+      return -1;
 
    void *conn = ci_conn();
    if (!conn)

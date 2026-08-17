@@ -6,8 +6,8 @@
   closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
   support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
   deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
-  closure currently records 205 external symbols: 139 declared system links, 59 sibling contracts
-  to inject, and 7 portable APIs to close. This is explicitly not the S4 atomic ownership cutover or
+  closure currently records 203 external symbols: 139 declared system links, 59 sibling contracts
+  to inject, and 5 portable APIs to close. This is explicitly not the S4 atomic ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
 - **Date:** 2026-08-15.
@@ -477,11 +477,10 @@ Later admitted units now own the pinned cJSON input, portable randomness, and th
 relationship seed. Process logging now crosses one bounded, startup-installed sink that preserves
 level, module, and a capped formatted message without linking the host logger into DB2; normal and
 hardened tests cover startup absence, formatting, truncation, invalid calls, and removal. The
-remaining support candidates stay explicitly deferred by ownership shape:
-language extractors bring a broad parser/helper closure; process discovery/spawn carries runtime
-lifecycle policy; and session and briefing helpers belong behind injected host contracts.
-Each requires its own coherent admission and parity slice rather than being folded into an unrelated
-unit.
+only remaining portable support cluster is the five canonical-index language-extractor entry
+points, which bring a broad parser/helper closure. Process lifecycle, session, and briefing helpers
+are sibling-contract work rather than support-copy candidates. Each requires its own coherent
+contract and parity slice rather than being folded into an unrelated unit.
 
 The three former `kb_service_backend_{memory,agent,export}.c` units are not support candidates or DB2
 implementation. They compose KB JSON/RPC responses while invoking high-level memory, dashboard,
@@ -502,6 +501,14 @@ retained DB2 SQL backend. DB2 continues to own durable async-queue claims and st
 the caller-side supervisor owns process lifecycle and will invoke the generated queue operations.
 Queue drain now supplies its bounded worker identity explicitly, so DB2 persists caller attribution
 without reaching back into the host's process-global session configuration.
+
+Canonical-index local discovery now follows the same ownership rule. DB2 constructs fixed argv
+vectors for its exact `git` and `find` operations and accepts one startup-installed capture
+capability; the KB host installs its bounded fork/exec implementation before workers start. No
+repository path, revision marker, or DB2 string is shell-interpolated, missing installation fails a
+local scan before database mutation, and the caller-pushed `scan_files` path needs no process
+capability. This removes the generic `run_cmd` and `shell_escape` imports rather than copying a shell
+surface into the module.
 
 The closure compiler now matches the production standalone mode by disabling DB1 and the DB2
 SQLite test shim. SQLite compatibility remains tested separately, but its weak DB1 cache hook and

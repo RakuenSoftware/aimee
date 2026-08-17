@@ -13,6 +13,7 @@
 #include "modules/db2/c/db2_internal.h"
 #include "db_postgres.h"
 #include "platform_test_util.h"
+#include "util.h"
 
 /* Create a temp directory with a test source file */
 static char *create_test_project(void)
@@ -317,11 +318,11 @@ static char *create_cochange_repo(void)
 {
    char *dir = malloc(PATH_MAX);
    assert(dir != NULL);
-   snprintf(dir, PATH_MAX, "%s/aimee-cochange-XXXXXX", platform_tmpdir());
+   snprintf(dir, PATH_MAX, "%s/aimee cochange-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(dir) != NULL);
    char cmd[4096];
    snprintf(cmd, sizeof(cmd),
-            "cd %s && git init -q && git config user.email t@t && git config user.name t && "
+            "cd '%s' && git init -q && git config user.email t@t && git config user.name t && "
             "printf 'int a(){return 1;}\\n' > a.c && printf 'int b(){return 2;}\\n' > b.c && "
             "printf 'int c(){return 3;}\\n' > c.c && printf 'int d(){return 4;}\\n' > d.c && "
             "git add -A && git commit -qm init && "
@@ -338,6 +339,13 @@ static char *create_cochange_repo(void)
 int main(void)
 {
    printf("index: ");
+
+   int missing_host_inspected = 7;
+   canonical_index_set_exec_capture(NULL);
+   assert(canonical_index_scan_project("missing-host", "/not-scanned", 1,
+                                       &missing_host_inspected) == -1);
+   assert(missing_host_inspected == 0);
+   canonical_index_set_exec_capture(safe_exec_capture);
 
    db2_test_shim_open();
 
@@ -814,7 +822,7 @@ int main(void)
       assert(found_coedited);
 
       char rmcmd[512];
-      snprintf(rmcmd, sizeof(rmcmd), "rm -rf %s", repo);
+      snprintf(rmcmd, sizeof(rmcmd), "rm -rf '%s'", repo);
       (void)system(rmcmd);
       free(repo);
    }

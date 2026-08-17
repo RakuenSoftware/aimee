@@ -110,9 +110,9 @@ the process boundary while their storage calls migrate to generated DB2 clients.
 calls as injected DB2 callbacks would recreate the monolith inside the module. The
 probe compiles each unit plus exact descriptor-owned support, combines only those objects with a
 relocatable link, supplies no archive, shared library, helper stub, or weak definition, and records
-the 205 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
+the 203 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
 disposition and rationale. The current ledger contains 139 explicit system-link dependencies, zero
-remaining vendored/generated inputs, 59 sibling or KB contracts to inject, and 7 support APIs to
+remaining vendored/generated inputs, 59 sibling or KB contracts to inject, and 5 support APIs to
 promote. The standalone-link exit condition requires zero entries in the latter three groups; a
 classified ledger alone is not enough.
 
@@ -255,12 +255,21 @@ configuration or database access, and database-backed plus HTTP-adapter tests co
 round-trip attribution. This moves total debt from 206 to 205 and portable promotion debt from 8 to
 7 while leaving durable claim/state ownership inside DB2.
 
+The twelfth reduction removes generic shell execution from canonical indexing. The DB2 owner now
+constructs fixed argv vectors for its exact `git` and `find` operations, while the KB host installs
+the bounded `safe_exec_capture` capability once before ingest workers start. A missing installer
+fails `canonical_index_scan_project` before database mutation; caller-pushed
+`canonical_index_scan_files` remains process-free. The production index test covers absence and a
+git root containing a space, including incremental co-change replay. This moves total debt from 205
+to 203 and portable promotion debt from 7 to 5, removes one host-header dependency, and eliminates
+both `run_cmd` and `shell_escape` without adding shell parsing to the module.
+
 The remaining portable rows are named migration debt, not an assertion that copying is always the
-right answer. DB2 owns the decision and must close it before activation: canonical-index extraction
-and shell helpers trigger a typed indexing capability review; session identity and
-briefing rendering trigger an injected process/config/memory contract review; executable discovery
-and daemon spawning trigger a runtime lifecycle capability review. Those rows may be reclassified
-only with a reviewed contract and replay evidence, so later slices do not repeatedly guess between
+right answer. All five belong to the canonical-index language-extractor cluster, whose parser and
+helper closure must be admitted or replaced coherently with replay evidence before activation.
+Session identity, briefing rendering, executable lifecycle, and other remaining host calls are
+already classified as sibling contracts rather than portable support. Rows may be reclassified only
+with a reviewed contract and replay evidence, so later slices do not repeatedly guess between
 support copying and injection.
 
 The gate rejects legacy source additions or omissions, support path escape, symlinks, content drift,

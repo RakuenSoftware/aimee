@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "84c88215672ee80095732f401cc68ee75ad96d4b",
-  "source_fingerprint": "17d4504347e757f8ea76c6b0f4fd6b49ce87b819a81170eb68259e7a6473247e",
+  "source_revision": "ef432c9f4229957557a99e35ae3ace119719bc18",
+  "source_fingerprint": "664efe7cd122cc191d8e4d5cf0b9a5cb987211c94b5b9b66b5d209c2f2c12134",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -2402,22 +2402,6 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "run_cmd",
-      "references": [
-        "src/modules/db2/c/canonical_index.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "shell_escape",
-      "references": [
-        "src/modules/db2/c/canonical_index.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
       "symbol": "sleep",
       "references": [
         "src/modules/db2/c/db2_pool.c"
@@ -3248,15 +3232,15 @@
   "summary": {
     "translation_units": 138,
     "descriptor_support_units": 12,
-    "unresolved_symbols": 205,
+    "unresolved_symbols": 203,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
       "injected-module-contract": 59,
-      "portable-core-promotion": 7,
+      "portable-core-promotion": 5,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "526890b1790674eaeb9f8b00983602fbf7998b41f9bab91fe4655f22eba1bd81"
+  "fingerprint": "d96e0ce0b2b5eba73707ec43d0036e12f1d6c292c866ccc8dbbc8a7a8d622a87"
 }
