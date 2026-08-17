@@ -6,8 +6,8 @@
   closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
   support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
   deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
-  link remains blocked by 43 sibling contracts. Its closure records 182 external symbols: 139
-  declared system links and those 43 injected contracts; portable API debt is zero. This is
+  link remains blocked by 41 sibling contracts. Its closure records 180 external symbols: 139
+  declared system links and those 41 injected contracts; portable API debt is zero. This is
   explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
@@ -537,6 +537,18 @@ repository path, revision marker, or DB2 string is shell-interpolated, missing i
 local scan before database mutation, and the caller-pushed `scan_files` path needs no process
 capability. This removes the generic `run_cmd` and `shell_escape` imports rather than copying a shell
 surface into the module.
+
+The audit WORM store now follows that injection rule as well. DB2 accepts one startup-installed
+canonical row-hash provider owned by the audit module; missing installation or malformed hash output
+fails appends before commit and makes verification fail closed. The KB host installs the existing
+byte-identical implementation before DB2 initialization, so the process boundary removes the direct
+audit-module link without duplicating its canonicalization or changing stored chain values.
+
+Artifact MDL feature emission now accepts a startup-installed scorer contract as well. Its boundary
+returns only the candidate, residual, and total scalar values DB2 persists; the KB host adapts the
+existing canonical scorer and retains ownership of zstd and ranking internals. Missing or failed
+scoring omits the optional feature row without failing the artifact commit, preserving the previous
+scorer-failure behavior while removing the direct KB link.
 
 The closure compiler now matches the production standalone mode by disabling DB1 and the DB2
 SQLite test shim. SQLite compatibility remains tested separately, but its weak DB1 cache hook and

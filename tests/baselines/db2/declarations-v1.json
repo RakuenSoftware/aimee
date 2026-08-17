@@ -1220,6 +1220,38 @@
   "declarations": [
     {
       "consumers": [
+        "src/tests/test_code_project_lifecycle.c",
+        "src/tests/test_kb_audit_worm.c",
+        "src/tests/test_kb_audit_worm_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/kb_audit_worm.h",
+          "line": 21
+        }
+      ],
+      "signature": "void aimee_db2_register_audit_hash_provider ( db2_audit_hash_fn provider )",
+      "signature_sha256": "8b6a2fb7e64f7f358d82c66cc77537019be51faacfe5a92901fb97c977b73459",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_audit_hash_provider"
+    },
+    {
+      "consumers": [
+        "src/tests/test_artifacts.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/artifacts.h",
+          "line": 22
+        }
+      ],
+      "signature": "void aimee_db2_register_mdl_score_provider ( db2_mdl_score_fn provider )",
+      "signature_sha256": "e5f7efdd10154625d6ac214c5b44fc9620a13ede315fb55308a0f399ff03b577",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_mdl_score_provider"
+    },
+    {
+      "consumers": [
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/test_kb_vault_rewrap_live.c",
         "src/tests/test_management_status_key_ctx.c",
@@ -2865,7 +2897,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 49
+          "line": 56
         }
       ],
       "signature": "int db2_artifact_citation_count ( const char * artifact_id )",
@@ -2888,7 +2920,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 90
+          "line": 97
         }
       ],
       "signature": "int db2_artifact_cite ( const char * artifact_id , const char * source_kind , const char * source_id )",
@@ -2907,7 +2939,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 129
+          "line": 136
         }
       ],
       "signature": "int db2_artifact_count ( const char * kind , const char * state )",
@@ -2923,7 +2955,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 225
+          "line": 232
         }
       ],
       "signature": "int db2_artifact_filter_facets ( int64_t release_id , const char * project , const char * kind , const char * status , const char * priority , const char * component , db2_artifact_row_t * out , int max )",
@@ -2940,7 +2972,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 228
+          "line": 235
         }
       ],
       "signature": "int db2_artifact_filter_facets_scoped ( int64_t release_id , const char * project , const char * exclude_project , const char * kind , const char * status , const char * priority , const char * component , db2_artifact_row_t * out , int max )",
@@ -2955,7 +2987,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 240
+          "line": 247
         }
       ],
       "signature": "int db2_artifact_flag_review ( const char * id , const char * reason )",
@@ -2994,7 +3026,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 19
+          "line": 26
         }
       ],
       "signature": "void db2_artifact_gen_id ( char * buf , size_t len )",
@@ -3009,7 +3041,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 168
+          "line": 175
         }
       ],
       "signature": "int db2_artifact_invalidate_citing ( const char * source_kind , const char * source_id , int edit_span_start , int edit_span_end )",
@@ -3029,7 +3061,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 96
+          "line": 103
         }
       ],
       "signature": "int db2_artifact_link ( const char * from_id , const char * to_id , const char * link_kind )",
@@ -3046,7 +3078,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 235
+          "line": 242
         }
       ],
       "signature": "int db2_artifact_links_read ( const char * id , db2_artifact_link_row_t * out , int max )",
@@ -3066,7 +3098,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 147
+          "line": 154
         }
       ],
       "signature": "int db2_artifact_list_proposed ( const char * target_surface , int limit , db2_artifact_proposed_t * out , int max_out )",
@@ -3093,7 +3125,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 208
+          "line": 215
         }
       ],
       "signature": "int db2_artifact_read ( const char * id , db2_artifact_row_t * out , db2_artifact_citation_t * citations , int max_citations , int * citation_count )",
@@ -3108,7 +3140,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 82
+          "line": 89
         }
       ],
       "signature": "int db2_artifact_register_exemplar ( const char * artifact_id , const char * collection )",
@@ -3126,7 +3158,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 154
+          "line": 161
         }
       ],
       "signature": "int db2_artifact_reject ( const char * id , const char * verdict_tag , const char * verdict_scope , const char * counter_example , const char * before_json )",
@@ -3141,7 +3173,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 65
+          "line": 72
         }
       ],
       "signature": "int db2_artifact_review_rollback ( const char * artifact_id , const char * restore_state , const char * verdict_tag , const char * verdict_scope , const char * counter_example )",
@@ -3165,7 +3197,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 71
+          "line": 78
         }
       ],
       "signature": "int db2_artifact_set_state ( const char * id , const char * new_state )",
@@ -3180,7 +3212,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 76
+          "line": 83
         }
       ],
       "signature": "int db2_artifact_set_target_surface ( const char * id , const char * target_surface )",
@@ -3198,7 +3230,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 173
+          "line": 180
         }
       ],
       "signature": "int db2_artifact_stamp_reflected ( const char * id )",
@@ -3213,7 +3245,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 77
+          "line": 84
         }
       ],
       "signature": "int db2_artifact_target_surface ( const char * id , char * out , int out_len )",
@@ -3226,7 +3258,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 86
+          "line": 93
         }
       ],
       "signature": "int db2_artifact_touch ( const char * id )",
@@ -3242,7 +3274,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 54
+          "line": 61
         }
       ],
       "signature": "int db2_artifact_verdict_suppressed ( const char * verdict_tag , const char * verdict_scope )",
@@ -3284,7 +3316,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 26
+          "line": 33
         }
       ],
       "signature": "int db2_artifact_write ( const char * id , const char * kind , const char * state , const char * scope_kind , const char * scope_id , const char * operator_id , double confidence , const char * payload_json )",
@@ -3299,7 +3331,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 43
+          "line": 50
         }
       ],
       "signature": "int db2_artifact_write_evidence ( const char * kind , const char * scope_kind , const char * scope_id , const char * operator_id , const char * content_hash , const char * payload_json , char * id_out , int id_out_len )",
@@ -3314,7 +3346,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 32
+          "line": 39
         }
       ],
       "signature": "int db2_artifact_write_ex ( const char * id , const char * kind , const char * state , const char * scope_kind , const char * scope_id , const char * operator_id , double confidence , int attempt_count , const char * payload_json )",
@@ -3330,7 +3362,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 124
+          "line": 131
         }
       ],
       "signature": "int db2_audit_event_list ( const char * since , const char * until , const char * scope_kind , int limit , db2_audit_event_row_t * out , int max )",
@@ -3352,7 +3384,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 100
+          "line": 107
         }
       ],
       "signature": "int db2_audit_event_write ( const char * id , const char * source_artifact_id , const char * target_surface , const char * target_id , const char * operator_id , const char * scope_kind , const char * scope_id , double applied_confidence , int flagged_for_review , const char * before_json , const char * after_json )",
@@ -3367,7 +3399,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 58
+          "line": 65
         }
       ],
       "signature": "int db2_audit_read_latest_before ( const char * artifact_id , char * out , int out_len )",
@@ -5741,7 +5773,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/artifacts.h",
-          "line": 166
+          "line": 173
         }
       ],
       "signature": "int db2_curator_reembed_all ( void )",
@@ -8620,7 +8652,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 16
+          "line": 25
         }
       ],
       "signature": "int db2_kb_audit_append ( const char * actor_role , const char * actor_principal , const char * action , const char * subject , const char * verdict , const char * detail )",
@@ -8635,7 +8667,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 22
+          "line": 31
         }
       ],
       "signature": "int db2_kb_audit_append_in_txn ( void * conn , const char * actor_role , const char * actor_principal , const char * action , const char * subject , const char * verdict , const char * detail )",
@@ -8651,7 +8683,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 31
+          "line": 40
         }
       ],
       "signature": "long db2_kb_audit_count ( void )",
@@ -8667,7 +8699,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 28
+          "line": 37
         }
       ],
       "signature": "int db2_kb_audit_verify_chain ( char * err , size_t errlen )",
@@ -8680,7 +8712,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 37
+          "line": 46
         }
       ],
       "signature": "int db2_kb_audit_worm_enabled ( void )",
@@ -8695,7 +8727,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 36
+          "line": 45
         }
       ],
       "signature": "void db2_kb_audit_worm_set_enabled ( int enabled )",
@@ -23703,15 +23735,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "e5efc0a9563f491b531554b46417fa5ddb3500936dd0da292ed76f892646e01f",
+  "fingerprint": "953e4e1bfebd4f7b2a276d968dab7509ade957a801ed71c9334f32e56b5cba89",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 895,
-    "declarations": 1350,
+    "declarations": 1352,
     "headers": 136,
     "internal_unconsumed": 141,
-    "private_test_only": 252,
+    "private_test_only": 254,
     "reviewed": 62
   }
 }

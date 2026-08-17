@@ -3,12 +3,15 @@
 #include "kb_module_stage_adapters.h"
 
 #include "kb_curator_grounding.h"
+#include "kb_mdl.h"
 #include "kb_route_acl.h"
 
+#include <aimee/audit/audit_worm_chain.h>
 #include <aimee/audit/obs_bus.h>
 #include <aimee/control-web/module_api.h>
 #include <aimee/core/event_bus/module_protocol.h>
 #include <aimee/db2/client.h>
+#include <aimee/db2/host_contracts.h>
 #include <aimee/kb-synthesis/module_api.h>
 #include <aimee/postgres/module_api.h>
 
@@ -87,6 +90,20 @@ static int control_web_authorize(const char *method, const char *path, int *allo
    return aimee_control_web_response_decode(response, response_len, allowed);
 }
 
+static int score_mdl(const char *candidate, const char *evidence, double *l_candidate,
+                     double *l_residual, double *total)
+{
+   if (!l_candidate || !l_residual || !total)
+      return -1;
+   kb_mdl_score_t score = {0};
+   if (kb_mdl_score(candidate, evidence, &score) != 0)
+      return -1;
+   *l_candidate = score.l_candidate;
+   *l_residual = score.l_residual;
+   *total = score.total;
+   return 0;
+}
+
 int kb_module_postgres_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_tables_ok)
 {
    uint8_t request[AIMEE_POSTGRES_REQUEST_LEN];
@@ -122,6 +139,8 @@ int kb_module_db2_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_tables
 
 void kb_module_stage_adapters_configure(void)
 {
+   aimee_db2_register_audit_hash_provider(audit_worm_row_hash);
+   aimee_db2_register_mdl_score_provider(score_mdl);
    kb_curator_grounding_register_provider(grounding_decide);
    kb_route_acl_register_authorization_provider(control_web_authorize);
 }

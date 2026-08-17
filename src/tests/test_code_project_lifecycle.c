@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <aimee/audit/audit_worm_chain.h>
+#include <aimee/db2/host_contracts.h>
+
 #include "../modules/db2/c/code_index.h"
 #include "../modules/db2/c/code_project_lifecycle.h"
 #include "../modules/db2/c/db2_internal.h"
@@ -367,6 +370,7 @@ static void test_reindex_under_new_name_takes_the_alias(void)
 int main(void)
 {
    db2_test_shim_open();
+   aimee_db2_register_audit_hash_provider(audit_worm_row_hash);
    test_move_detach_readd();
    test_manifest_confirmation_and_audit();
    test_gc_audit();

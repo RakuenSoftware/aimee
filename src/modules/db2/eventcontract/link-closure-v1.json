@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "bcae23e9be3b6b8b6e87b436178366d1a128544c",
-  "source_fingerprint": "de4712dfef5182feb1c9f87990208ff2b1dfdd55d432126b2106a1cc9f224ea3",
+  "source_revision": "1d7c6a2d8d0573e61091dcee5b40bd76e281a8eb",
+  "source_fingerprint": "c619e7fe647e73a9c0c2706affea6733bf565767e6ee3924326c9c62ffeea9cf",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -2059,14 +2059,6 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "audit_worm_row_hash",
-      "references": [
-        "src/modules/db2/c/kb_audit_worm.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "calloc",
       "references": [
         "src/modules/db2/c/code_audit.c",
@@ -2360,14 +2352,6 @@
       "symbol": "kb_identity_token_authority_record_valid",
       "references": [
         "src/modules/db2/c/management_token_authority.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "kb_mdl_score",
-      "references": [
-        "src/modules/db2/c/artifacts.c"
       ],
       "disposition": "injected-module-contract",
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
@@ -3534,15 +3518,15 @@
   "summary": {
     "translation_units": 138,
     "descriptor_support_units": 22,
-    "unresolved_symbols": 182,
+    "unresolved_symbols": 180,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 43,
+      "injected-module-contract": 41,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "f1e12d9cc1baaefcbf23346dc239eb68d7cd295ee19cb59848352344a466c4a7"
+  "fingerprint": "1763e0ffb79877032818c2a9b22e91a5cce2a2f0bbe10851e2d2f3cdca31a967"
 }

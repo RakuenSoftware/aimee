@@ -344,7 +344,21 @@ relation, every non-NUL byte, sensitive-name and case/length boundaries, local a
 provider failures after partial writes, invalid batches, and output canaries. This moves total debt
 from 185 to 182 and injected-contract debt from 46 to 43 without adding a system dependency.
 
-The remaining 43 non-system rows are sibling-contract migration debt. Session identity, briefing
+The twenty-third reduction replaces DB2's direct audit-module row-hash call with one bounded
+startup-installed host contract. The KB host installs the existing canonical WORM hash owner before
+DB2 initialization; absent providers and non-lowercase/non-64-byte results fail before an append and
+fail chain verification explicitly. Existing SQLite parity, lifecycle audit, and optional real-PG
+mixed-chain tests preserve the pinned cross-engine digest. This moves total debt from 182 to 181 and
+injected-contract debt from 43 to 42 without copying audit canonicalization into DB2.
+
+The twenty-fourth reduction replaces DB2 artifact feature emission's direct KB MDL scorer call with
+a startup-installed host contract that returns only the three scalar score values DB2 consumes. The
+KB host retains canonical zstd scoring and installs a thin adapter; an absent or failed scorer keeps
+the artifact commit successful while omitting the optional `mdl-v1` feature row, matching the prior
+scoring-failure behavior. This moves total debt from 181 to 180 and injected-contract debt from 42
+to 41 without copying the MDL implementation or its zstd dependency into DB2.
+
+The remaining 41 non-system rows are sibling-contract migration debt. Session identity, briefing
 rendering, executable lifecycle, configuration, memory, and other host calls must close through
 their reviewed process contracts before activation; they are not portable-support candidates. Rows
 may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide

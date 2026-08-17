@@ -5,6 +5,7 @@
 #include "../modules/db2/c/db2_test_shim.h"
 #include "artifacts.h" /* db2_audit_event_write — the central kb audit seam */
 #include <aimee/audit/audit_worm_chain.h>
+#include <aimee/db2/host_contracts.h>
 #include "modules/db2/c/db2_internal.h"
 #include "db_postgres.h"
 #include "kb_audit_worm.h"
@@ -13,12 +14,48 @@
 #include <stdio.h>
 #include <string.h>
 
+static void invalid_hash(long long seq, const char *actor_role, const char *actor_principal,
+                         const char *action, const char *subject, const char *verdict,
+                         const char *key_id, const char *detail, const char *prev_hash,
+                         char out_hex[65])
+{
+   (void)seq;
+   (void)actor_role;
+   (void)actor_principal;
+   (void)action;
+   (void)subject;
+   (void)verdict;
+   (void)key_id;
+   (void)detail;
+   (void)prev_hash;
+   snprintf(out_hex, 65, "not-a-hash");
+}
+
+static void test_hash_provider_gate(void)
+{
+   long before = db2_kb_audit_count();
+   assert(before >= 0);
+   aimee_db2_register_audit_hash_provider(NULL);
+   assert(db2_kb_audit_append("primary", "u", "tool.read", "missing", "allow", "{}") == -1);
+   assert(db2_kb_audit_count() == before);
+   aimee_db2_register_audit_hash_provider(invalid_hash);
+   assert(db2_kb_audit_append("primary", "u", "tool.read", "invalid", "allow", "{}") == -1);
+   assert(db2_kb_audit_count() == before);
+   aimee_db2_register_audit_hash_provider(audit_worm_row_hash);
+   printf("  PASS: kb_hash_provider_gate\n");
+}
+
 static void test_append_and_verify(void)
 {
    assert(db2_kb_audit_append("primary", "u", "tool.read", "v1-1", "allow", "{}") == 0);
    assert(db2_kb_audit_append("delegate", "mimo", "kb.query", "q1", "ok", "{}") == 0);
    assert(db2_kb_audit_count() == 2);
    char err[160];
+   assert(db2_kb_audit_verify_chain(err, sizeof err) == 0);
+   aimee_db2_register_audit_hash_provider(NULL);
+   assert(db2_kb_audit_verify_chain(err, sizeof err) == -1);
+   assert(strstr(err, "provider unavailable or invalid") != NULL);
+   aimee_db2_register_audit_hash_provider(audit_worm_row_hash);
    assert(db2_kb_audit_verify_chain(err, sizeof err) == 0);
    printf("  PASS: kb_append_and_verify\n");
 }
@@ -97,6 +134,7 @@ static void test_capture_via_seam(void)
 int main(void)
 {
    db2_test_shim_open();
+   test_hash_provider_gate();
    test_append_and_verify();
    test_cross_engine_vector();
    test_worm_triggers();
