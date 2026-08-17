@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "29dad84a86bba128fb9d8b86b4545329afb93dc9",
-  "source_fingerprint": "7760b1ac50943708b0c89e7b7ec1c30c741b07d2fa55adb698bb49464720ad4d",
+  "source_revision": "b5c4f05278681a0f9f0886d192de3f46f196d6a6",
+  "source_fingerprint": "c28955ceb2f9c5c5b6e0a9fc39d7c359ca1014f6676a43fff6ee4fe3ad4e2607",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -535,6 +535,47 @@
       },
       "provenance": "The two pure co-change policy definitions are promoted from src/cochange.c; both DB2 calls are pinned to canonical_index.c.",
       "evidence": "The descriptor owns the fixed pair ABI, lowercase object-id validator, deduplication, bulk-commit gate, lexical ordering, and output cap. Monolith parity and sanitizer tests cover boundary inputs; the implementation imports only C runtime functions and contains no git, DB, bus, provider, pgvector, DB3, allocation, configuration, or logging dependency."
+    },
+    {
+      "path": "src/modules/db2/support/code_import_primitives.c",
+      "source_sha256": "747342db5ec2b2f8cb2f66aa20c87c9f8aee27a2707a5cdb41e0a3051ab8ace4",
+      "header": "src/modules/db2/support/db2_code_import.h",
+      "header_sha256": "67f300db20b72e013894d6c6271e64015d66729da1064dea5c000646b2b4375b",
+      "defines": [
+        "code_import_identity",
+        "code_import_resolves_path",
+        "code_path_import_identity"
+      ],
+      "resolves": [
+        "code_import_identity",
+        "code_import_resolves_path"
+      ],
+      "resolution_disposition": "injected-module-contract",
+      "allowed_includes": [
+        "db2_code_import.h",
+        "stdio.h",
+        "string.h"
+      ],
+      "allowed_header_includes": [
+        "stddef.h"
+      ],
+      "allowed_undefined": [
+        "snprintf",
+        "strcmp",
+        "strlen",
+        "strncmp",
+        "strrchr"
+      ],
+      "base_references": {
+        "code_import_identity": [
+          "src/modules/db2/c/code_index.c"
+        ],
+        "code_import_resolves_path": [
+          "src/modules/db2/c/code_index.c"
+        ]
+      },
+      "provenance": "The path/import identity definitions and required slash-normalization helper are promoted from src/extractors.c; every DB2 call is pinned to src/modules/db2/c/code_index.c.",
+      "evidence": "The descriptor owns the 4096-byte normalization boundary, Python relative-import resolution, __init__ identity rule, separator normalization, output truncation, and empty-input behavior. Normal and sanitizer parity cover NULL, every non-NUL byte, POSIX and Windows separators, relative-dot levels, all short output capacities, the internal path boundary, and a cross-product of importer/import/target identities. Only bounded C string and formatting APIs are imported; there is no extractor, tree-sitter, filesystem, DB, bus, provider, pgvector, DB3, allocation, configuration, I/O, or logging edge."
     },
     {
       "path": "src/modules/db2/support/code_match_primitives.c",
@@ -1984,22 +2025,6 @@
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
-      "symbol": "code_import_identity",
-      "references": [
-        "src/modules/db2/c/code_index.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "code_import_resolves_path",
-      "references": [
-        "src/modules/db2/c/code_index.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "css_analyze",
       "references": [
         "src/modules/db2/c/canonical_index.c"
@@ -2723,6 +2748,7 @@
         "src/modules/db2/c/workflow_patterns.c",
         "src/modules/db2/c/write_tier_grant.c",
         "src/modules/db2/support/cochange_primitives.c",
+        "src/modules/db2/support/code_import_primitives.c",
         "src/modules/db2/support/extractor_primitives.c",
         "src/modules/db2/support/random_primitives.c"
       ],
@@ -2867,6 +2893,7 @@
         "src/modules/db2/c/write_tier_grant.c",
         "src/modules/db2/support/cjson.c",
         "src/modules/db2/support/cochange_primitives.c",
+        "src/modules/db2/support/code_import_primitives.c",
         "src/modules/db2/support/extractor_primitives.c",
         "src/modules/db2/support/model_validation_primitives.c",
         "src/modules/db2/support/rel_seed_primitives.c",
@@ -3003,6 +3030,7 @@
         "src/modules/db2/c/vault_pg.c",
         "src/modules/db2/support/cert_serial_primitives.c",
         "src/modules/db2/support/cjson.c",
+        "src/modules/db2/support/code_import_primitives.c",
         "src/modules/db2/support/extractor_primitives.c",
         "src/modules/db2/support/model_validation_primitives.c"
       ],
@@ -3046,6 +3074,7 @@
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_pg.c",
         "src/modules/db2/support/cjson.c",
+        "src/modules/db2/support/code_import_primitives.c",
         "src/modules/db2/support/code_match_primitives.c",
         "src/modules/db2/support/extractor_primitives.c",
         "src/modules/db2/support/model_validation_primitives.c"
@@ -3086,6 +3115,7 @@
         "src/modules/db2/c/cross_repo_build.c",
         "src/modules/db2/c/cross_repo_deps.c",
         "src/modules/db2/c/cross_repo_identity.c",
+        "src/modules/db2/support/code_import_primitives.c",
         "src/modules/db2/support/extractor_primitives.c"
       ],
       "disposition": "system-link",
@@ -3444,16 +3474,16 @@
   ],
   "summary": {
     "translation_units": 138,
-    "descriptor_support_units": 19,
-    "unresolved_symbols": 189,
+    "descriptor_support_units": 20,
+    "unresolved_symbols": 187,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 50,
+      "injected-module-contract": 48,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "a80cdee275d319beecfd4e21803a84ee6d56e3b7f3ccde61fad2538b9f7567ab"
+  "fingerprint": "1cabcc606dc19fe254f2055bd2d1885f36a821943b9746bc69dbf0dced3ff2af"
 }

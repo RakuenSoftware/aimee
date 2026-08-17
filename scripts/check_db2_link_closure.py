@@ -415,6 +415,34 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "only C runtime functions and contains no git, DB, bus, provider, pgvector, "
                 "DB3, allocation, configuration, or logging dependency.",
 }, {
+    "path": "src/modules/db2/support/code_import_primitives.c",
+    "source_sha256": "747342db5ec2b2f8cb2f66aa20c87c9f8aee27a2707a5cdb41e0a3051ab8ace4",
+    "header": "src/modules/db2/support/db2_code_import.h",
+    "header_sha256": "67f300db20b72e013894d6c6271e64015d66729da1064dea5c000646b2b4375b",
+    "defines": [
+        "code_import_identity", "code_import_resolves_path", "code_path_import_identity",
+    ],
+    "resolves": ["code_import_identity", "code_import_resolves_path"],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_code_import.h", "stdio.h", "string.h"],
+    "allowed_header_includes": ["stddef.h"],
+    "allowed_undefined": ["snprintf", "strcmp", "strlen", "strncmp", "strrchr"],
+    "base_references": {
+        "code_import_identity": ["src/modules/db2/c/code_index.c"],
+        "code_import_resolves_path": ["src/modules/db2/c/code_index.c"],
+    },
+    "provenance": "The path/import identity definitions and required slash-normalization helper "
+                  "are promoted from src/extractors.c; every DB2 call is pinned to "
+                  "src/modules/db2/c/code_index.c.",
+    "evidence": "The descriptor owns the 4096-byte normalization boundary, Python relative-"
+                "import resolution, __init__ identity rule, separator normalization, output "
+                "truncation, and empty-input behavior. Normal and sanitizer parity cover NULL, "
+                "every non-NUL byte, POSIX and Windows separators, relative-dot levels, all "
+                "short output capacities, the internal path boundary, and a cross-product of "
+                "importer/import/target identities. Only bounded C string and formatting APIs "
+                "are imported; there is no extractor, tree-sitter, filesystem, DB, bus, "
+                "provider, pgvector, DB3, allocation, configuration, I/O, or logging edge.",
+}, {
     "path": "src/modules/db2/support/code_match_primitives.c",
     "source_sha256": "a6190eb5fc93657cf7a6e9142d99977c322c8e9765811a628c8eb70970231876",
     "header": "src/modules/db2/support/db2_code_match.h",

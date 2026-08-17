@@ -7321,6 +7321,59 @@ unit-test-db2-extractor-support-sanitize: \
                      $(TESTPREFIX)/unit-test-db2-extractor-support-sanitize
 	$<
 
+DB2_CODE_IMPORT_SUPPORT_RENAMES = \
+   -Dcode_path_import_identity=db2_support_code_path_import_identity \
+   -Dcode_import_identity=db2_support_code_import_identity \
+   -Dcode_import_resolves_path=db2_support_code_import_resolves_path
+DB2_CODE_IMPORT_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_code_import_support_impl.o: \
+                     modules/db2/support/code_import_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_IMPORT_SUPPORT_RENAMES) \
+	      $(DB2_CODE_IMPORT_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_code_import_monolith.o: extractors.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_IMPORT_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-code-import-support: \
+                     $(OBJDIR)/tests/test_db2_code_import_support.o \
+                     $(OBJDIR)/tests/db2_code_import_support_impl.o \
+                     $(OBJDIR)/tests/db2_code_import_monolith.o
+	$(CC) -Wl,--gc-sections -o $@ $^
+
+DB2_CODE_IMPORT_SANITIZE_DIR = $(OBJDIR)/tests/db2-code-import-support-sanitize
+
+$(DB2_CODE_IMPORT_SANITIZE_DIR)/test.o: tests/test_db2_code_import_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CODE_IMPORT_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/code_import_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_IMPORT_SUPPORT_RENAMES) \
+	      $(DB2_CODE_IMPORT_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CODE_IMPORT_SANITIZE_DIR)/monolith.o: extractors.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_IMPORT_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-code-import-support-sanitize: \
+                     $(DB2_CODE_IMPORT_SANITIZE_DIR)/test.o \
+                     $(DB2_CODE_IMPORT_SANITIZE_DIR)/support.o \
+                     $(DB2_CODE_IMPORT_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-code-import-support unit-test-db2-code-import-support-sanitize
+unit-test-db2-code-import-support: $(TESTPREFIX)/unit-test-db2-code-import-support
+	$<
+
+unit-test-db2-code-import-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-code-import-support-sanitize
+	$<
+
 DB2_TIME_SUPPORT_RENAMES = \
    -Dnow_utc=db2_support_now_utc \
    -Dparse_utc_ts=db2_support_parse_utc_ts

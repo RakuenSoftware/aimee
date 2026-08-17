@@ -317,7 +317,16 @@ NaN, and full-width false/true request values. Unknown tiers, credentials, low c
 remain fail-closed. This moves total debt from 190 to 189 and injected-contract debt from 51 to 50
 without imports, allocation, I/O, DB, bus, provider, pgvector, DB3, configuration, or logging edges.
 
-The remaining 50 non-system rows are sibling-contract migration debt. Session identity, briefing
+The twentieth reduction packages the import-identity pair used by DB2 code indexing together with
+its required path-identity helper. The descriptor-private `size_t` ABI and 4096-byte workspace
+preserve Python relative-import resolution, `__init__` equivalence, slash normalization, bounded
+truncation, and empty-input behavior without importing the rest of the extractor monolith. Normal
+and ASan/UBSan parity cover NULL, every non-NUL byte, POSIX and Windows separators, relative-dot
+levels, all short output capacities, the internal path boundary, and importer/import/target
+resolution matrices. This moves total debt from 189 to 187 and injected-contract debt from 50 to
+48; its five C string/format imports were already declared system dependencies.
+
+The remaining 48 non-system rows are sibling-contract migration debt. Session identity, briefing
 rendering, executable lifecycle, configuration, memory, and other host calls must close through
 their reviewed process contracts before activation; they are not portable-support candidates. Rows
 may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide
