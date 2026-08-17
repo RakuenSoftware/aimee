@@ -308,7 +308,16 @@ boundaries to `other`. This moves total debt from 191 to 190 and injected-contra
 51 without imports, shared ontology headers, allocation, I/O, DB, bus, provider, pgvector, DB3,
 configuration, or logging dependencies.
 
-The remaining 51 non-system rows are sibling-contract migration debt. Session identity, briefing
+The nineteenth reduction isolates `memory_pii_should_inject`, the final allocation-free decision in
+DB2 recall after relation sensitivity has been obtained. Its descriptor-private numeric ABI freezes
+the three sensitivity tiers and the `0.4` confidence floor without importing the memory classifier,
+ontology tables, or registration state. Normal and ASan/UBSan parity cover every signed 16-bit
+sensitivity, integer boundaries, values immediately around the floor, finite extremes, infinities,
+NaN, and full-width false/true request values. Unknown tiers, credentials, low confidence, and NaN
+remain fail-closed. This moves total debt from 190 to 189 and injected-contract debt from 51 to 50
+without imports, allocation, I/O, DB, bus, provider, pgvector, DB3, configuration, or logging edges.
+
+The remaining 50 non-system rows are sibling-contract migration debt. Session identity, briefing
 rendering, executable lifecycle, configuration, memory, and other host calls must close through
 their reviewed process contracts before activation; they are not portable-support candidates. Rows
 may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide

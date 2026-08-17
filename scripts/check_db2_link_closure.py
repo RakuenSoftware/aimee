@@ -609,6 +609,31 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "platform, pgvector, DB3, configuration, or logging dependency. Normal and "
                 "sanitizer parity cover the complete signed 16-bit partition plus int boundaries.",
 }, {
+    "path": "src/modules/db2/support/pii_inject_gate_primitives.c",
+    "source_sha256": "41096c30f976075f8f4b97a7a1825bbb53e340f5d112eb704a4a31ff4be1fef6",
+    "header": "src/modules/db2/support/db2_pii_inject_gate.h",
+    "header_sha256": "e1f544b3bd70ed8d4d012f34845f99922f219896bce0329efb9f2b687d1bd9af",
+    "defines": ["memory_pii_should_inject"],
+    "resolves": ["memory_pii_should_inject"],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_pii_inject_gate.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": [],
+    "base_references": {
+        "memory_pii_should_inject": ["src/modules/db2/c/fact_recall.c"],
+    },
+    "provenance": "The allocation-free recall decision is promoted from "
+                  "src/modules/memory/memory_pii_gate.c; the sole DB2 call is pinned to "
+                  "src/modules/db2/c/fact_recall.c.",
+    "evidence": "The descriptor owns the three-value sensitivity ABI, confidence floor, "
+                "truth-value handling, and fail-closed treatment of NaN, low confidence, "
+                "credentials, and unknown sensitivity values. The support object has no "
+                "imports or memory classifier state and no allocation, I/O, DB, event-bus, "
+                "provider, platform, pgvector, DB3, configuration, or logging edge. Normal "
+                "and sanitizer parity cover the complete signed 16-bit sensitivity partition, "
+                "int boundaries, finite confidence boundaries, infinities, NaN, and full-width "
+                "turn-request truth values.",
+}, {
     "path": "src/modules/db2/support/random_primitives.c",
     "source_sha256": "2e0182a05983d863952d080b754cb90eb4ee6dcf491f4bda7140ef205c0db69f",
     "header": "src/modules/db2/support/db2_random.h",

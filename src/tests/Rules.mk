@@ -7457,6 +7457,63 @@ unit-test-db2-node-kind-text-support-sanitize: \
       $(TESTPREFIX)/unit-test-db2-node-kind-text-support-sanitize
 	$<
 
+DB2_PII_INJECT_GATE_SUPPORT_RENAMES = \
+   -Dmemory_pii_should_inject=db2_support_memory_pii_should_inject
+DB2_PII_INJECT_GATE_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_pii_inject_gate_support_impl.o: \
+                     modules/db2/support/pii_inject_gate_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_INJECT_GATE_SUPPORT_RENAMES) \
+	      $(DB2_PII_INJECT_GATE_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_memory_pii_gate_monolith.o: modules/memory/memory_pii_gate.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_INJECT_GATE_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-pii-inject-gate-support: \
+                     $(OBJDIR)/tests/test_db2_pii_inject_gate_support.o \
+                     $(OBJDIR)/tests/db2_pii_inject_gate_support_impl.o \
+                     $(OBJDIR)/tests/db2_memory_pii_gate_monolith.o
+	$(CC) -Wl,--gc-sections -o $@ $^
+
+DB2_PII_INJECT_GATE_SANITIZE_DIR = \
+                     $(OBJDIR)/tests/db2-pii-inject-gate-support-sanitize
+
+$(DB2_PII_INJECT_GATE_SANITIZE_DIR)/test.o: \
+                     tests/test_db2_pii_inject_gate_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_PII_INJECT_GATE_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/pii_inject_gate_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_INJECT_GATE_SUPPORT_RENAMES) \
+	      $(DB2_PII_INJECT_GATE_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      -c -o $@ $<
+
+$(DB2_PII_INJECT_GATE_SANITIZE_DIR)/monolith.o: \
+                     modules/memory/memory_pii_gate.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_INJECT_GATE_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-pii-inject-gate-support-sanitize: \
+                     $(DB2_PII_INJECT_GATE_SANITIZE_DIR)/test.o \
+                     $(DB2_PII_INJECT_GATE_SANITIZE_DIR)/support.o \
+                     $(DB2_PII_INJECT_GATE_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-pii-inject-gate-support \
+        unit-test-db2-pii-inject-gate-support-sanitize
+unit-test-db2-pii-inject-gate-support: \
+      $(TESTPREFIX)/unit-test-db2-pii-inject-gate-support
+	$<
+
+unit-test-db2-pii-inject-gate-support-sanitize: \
+      $(TESTPREFIX)/unit-test-db2-pii-inject-gate-support-sanitize
+	$<
+
 $(OBJDIR)/tests/db2_runtime_config_support_impl.o: \
                      modules/db2/support/runtime_config_primitives.c
 	@mkdir -p $(dir $@)

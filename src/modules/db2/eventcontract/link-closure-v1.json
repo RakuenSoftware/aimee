@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "f3ff3241d23bd34d2d47a6078b14ae8e9325c62a",
-  "source_fingerprint": "8561b024376ca177d909dfda7800434e32ec21634e3ad023004db238b69f71ba",
+  "source_revision": "29dad84a86bba128fb9d8b86b4545329afb93dc9",
+  "source_fingerprint": "7760b1ac50943708b0c89e7b7ec1c30c741b07d2fa55adb698bb49464720ad4d",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -857,6 +857,31 @@
       },
       "provenance": "Definition promoted from the DB-free node-kind table in src/modules/memory/memory_episodes.c; the sole DB2 call is pinned to src/modules/db2/c/rel_types_store.c.",
       "evidence": "A deterministic integer-to-text switch with descriptor-owned numeric ABI and no imports, shared ontology header, allocation, I/O, DB, event-bus, provider, platform, pgvector, DB3, configuration, or logging dependency. Normal and sanitizer parity cover the complete signed 16-bit partition plus int boundaries."
+    },
+    {
+      "path": "src/modules/db2/support/pii_inject_gate_primitives.c",
+      "source_sha256": "41096c30f976075f8f4b97a7a1825bbb53e340f5d112eb704a4a31ff4be1fef6",
+      "header": "src/modules/db2/support/db2_pii_inject_gate.h",
+      "header_sha256": "e1f544b3bd70ed8d4d012f34845f99922f219896bce0329efb9f2b687d1bd9af",
+      "defines": [
+        "memory_pii_should_inject"
+      ],
+      "resolves": [
+        "memory_pii_should_inject"
+      ],
+      "resolution_disposition": "injected-module-contract",
+      "allowed_includes": [
+        "db2_pii_inject_gate.h"
+      ],
+      "allowed_header_includes": [],
+      "allowed_undefined": [],
+      "base_references": {
+        "memory_pii_should_inject": [
+          "src/modules/db2/c/fact_recall.c"
+        ]
+      },
+      "provenance": "The allocation-free recall decision is promoted from src/modules/memory/memory_pii_gate.c; the sole DB2 call is pinned to src/modules/db2/c/fact_recall.c.",
+      "evidence": "The descriptor owns the three-value sensitivity ABI, confidence floor, truth-value handling, and fail-closed treatment of NaN, low confidence, credentials, and unknown sensitivity values. The support object has no imports or memory classifier state and no allocation, I/O, DB, event-bus, provider, platform, pgvector, DB3, configuration, or logging edge. Normal and sanitizer parity cover the complete signed 16-bit sensitivity partition, int boundaries, finite confidence boundaries, infinities, NaN, and full-width turn-request truth values."
     },
     {
       "path": "src/modules/db2/support/random_primitives.c",
@@ -2368,14 +2393,6 @@
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
-      "symbol": "memory_pii_should_inject",
-      "references": [
-        "src/modules/db2/c/fact_recall.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "memory_pii_turn_requests_sensitive",
       "references": [
         "src/modules/db2/c/fact_ingest.c"
@@ -3427,16 +3444,16 @@
   ],
   "summary": {
     "translation_units": 138,
-    "descriptor_support_units": 18,
-    "unresolved_symbols": 190,
+    "descriptor_support_units": 19,
+    "unresolved_symbols": 189,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 51,
+      "injected-module-contract": 50,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "3aa713e7b46e39dfa67a14acdaf6ba3d64e125f2c3576657eb89cdd30f1304bf"
+  "fingerprint": "a80cdee275d319beecfd4e21803a84ee6d56e3b7f3ccde61fad2538b9f7567ab"
 }
