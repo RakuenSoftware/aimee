@@ -818,6 +818,130 @@ class CatalogTests(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def shaped_catalog(self, root: Path) -> dict:
+        """A family carrying the three shapes coord_jobs needed to migrate."""
+        catalog = self.catalog(root)
+        reserved = self.reserved(catalog)
+        reserved["active"] = True
+        self.route(root, reserved)
+        catalog["operations"] += [
+            {"family": reserved["name"], "id": 1, "name": "probe_claim",
+             "c_name": "db1_probe_claim", "c_params": ["probe_id", "out"],
+             "c_returns": "member", "c_member": "id",
+             "wire_format": "db1-fields-v2", "scope": "global", "transaction": "single",
+             "idempotency": "unsafe", "results": ["ok", "missing", "failed"],
+             "request": {"fields": [{"name": "probe_id", "type": "int", "required": True}]},
+             "reply": {"struct": "db1_probe_t",
+                       "fields": [{"name": "id", "type": "int"},
+                                  {"name": "label", "type": "text"}],
+                       "max_bytes": 256}},
+            {"family": reserved["name"], "id": 2, "name": "probe_dispatch",
+             "c_name": "db1_probe_dispatch",
+             "c_params": ["probe_id", "role_out", "role_cap", "note_out", "note_cap"],
+             "wire_format": "db1-fields-v2", "scope": "global", "transaction": "none",
+             "idempotency": "safe", "results": ["ok", "invalid", "failed"],
+             "request": {"fields": [{"name": "probe_id", "type": "int", "required": True}]},
+             "reply": {"scalars": True,
+                       "fields": [{"name": "role", "type": "text", "width": "DB1_PROBE_ROLE_LEN"},
+                                  {"name": "note", "type": "text", "width": "DB1_PROBE_NOTE_LEN"}],
+                       "max_bytes": 1024}},
+            {"family": reserved["name"], "id": 3, "name": "probe_conflicts",
+             "c_name": "db1_probe_conflicts", "c_params": ["probe_id"],
+             "c_returns": "found",
+             "wire_format": "db1-fields-v2", "scope": "global", "transaction": "none",
+             "idempotency": "safe", "results": ["ok", "missing", "failed"],
+             "request": {"fields": [{"name": "probe_id", "type": "int", "required": True}]},
+             "reply": {"fields": [], "max_bytes": 0}}]
+        self.write(root, catalog)
+        path = root / contract.PROCESS_CONTRACTS
+        document = json.loads(path.read_text(encoding="utf-8"))
+        for component in document["components"]:
+            if component["id"] == "db1":
+                component["stages"].append({
+                    "id": reserved["id"],
+                    "name": "db1-" + reserved["name"].replace("_", "-"),
+                    "event_kind": reserved["event_kind"]})
+        path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        return reserved["name"]
+
+    def test_a_returned_member_is_the_rows_own_value(self) -> None:
+        # A claim hands back the row AND its id. The id is not a status, so the
+        # stage must not read a positive return as a failure -- which is what
+        # the row-shaped default does, and it swallowed every claim until the
+        # end-to-end fixture caught it.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            family = self.shaped_catalog(root)
+            contract.run(root, write=True)
+            client = (root / contract.CLIENT_DIR / f"{family}.c").read_text()
+            stage = (root / contract.SOURCE_DIR / f"{family}_stage.c").read_text()
+            self.assertIn("return out->id;", client)
+            claim = stage[stage.index("PROBE_CLAIM:"):]
+            claim = claim[:claim.index("break;")]
+            self.assertIn("found = 1;", claim)
+        finally:
+            tmp.cleanup()
+
+    def test_a_text_scalar_outlives_the_case_that_produced_it(self) -> None:
+        # The reply is written after the switch closes, so a buffer declared in
+        # the case block is read after its scope ends. One allocation per call,
+        # freed once, sized by the widths the contract declares.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            family = self.shaped_catalog(root)
+            contract.run(root, write=True)
+            stage = (root / contract.SOURCE_DIR / f"{family}_stage.c").read_text()
+            self.assertIn("calloc(1u, DB1_PROBE_ROLE_LEN + DB1_PROBE_NOTE_LEN)", stage)
+            self.assertIn("char *scalar1 = scalar_owned + DB1_PROBE_ROLE_LEN;", stage)
+            self.assertIn("free(scalar_owned);", stage)
+            self.assertNotIn("char scalar0[DB1_PROBE_ROLE_LEN];", stage)
+            client = (root / contract.CLIENT_DIR / f"{family}.c").read_text()
+            self.assertIn("char *const values[] = {role_out, note_out};", client)
+            self.assertIn("const size_t caps[] = {role_cap, note_cap};", client)
+        finally:
+            tmp.cleanup()
+
+    def test_a_text_scalar_must_declare_how_wide_it_is(self) -> None:
+        # The stage cannot see the caller's buffer, so silence here would mean
+        # picking a width -- and picking one silently truncates.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            self.shaped_catalog(root)
+            catalog = json.loads((root / contract.CATALOG).read_text(encoding="utf-8"))
+            for operation in catalog["operations"]:
+                if operation["name"] == "probe_dispatch":
+                    del operation["reply"]["fields"][0]["width"]
+            self.write(root, catalog)
+            with self.assertRaises(contract.ContractError):
+                contract.run(root, write=False)
+        finally:
+            tmp.cleanup()
+
+    def test_a_yes_no_answer_keeps_all_three_answers(self) -> None:
+        # Nothing comes back but the status. Folding "no" into "failed" would
+        # report an empty result as an outage; forgetting the stage's flag
+        # answers yes to every question, which is worse.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            family = self.shaped_catalog(root)
+            contract.run(root, write=True)
+            client = (root / contract.CLIENT_DIR / f"{family}.c").read_text()
+            body = client[client.index("int db1_probe_conflicts("):]
+            body = body[:body.index("\n}")]
+            self.assertIn("AIMEE_DB1_STATUS_MISSING", body)
+            self.assertIn("return 0;", body)
+            self.assertIn("? 1 : -1;", body)
+            stage = (root / contract.SOURCE_DIR / f"{family}_stage.c").read_text()
+            case = stage[stage.index("PROBE_CONFLICTS:"):]
+            case = case[:case.index("break;")]
+            self.assertIn("found = 1;", case)
+        finally:
+            tmp.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

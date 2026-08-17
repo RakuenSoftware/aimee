@@ -95,7 +95,8 @@ DB1_MIGRATED_OBJS = $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/modules/db1/payload_rew
                     $(OBJDIR)/modules/db1/conv_context.o \
                     $(OBJDIR)/modules/db1/agent_log.o \
                     $(OBJDIR)/modules/db1/windows.o \
-                    $(OBJDIR)/modules/db1/db1_trigger.o
+                    $(OBJDIR)/modules/db1/db1_trigger.o \
+                    $(OBJDIR)/modules/db1/coord_jobs.o
 
 TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o $(OBJDIR)/modules/workspace/workspace_turn.o $(DB1_OBJS) $(DB1_MIGRATED_OBJS) \
                             $(OBJDIR)/modules/config/agent_config.o $(OBJDIR)/modules/vault/agent_credentials.o $(OBJDIR)/modules/config/agent_registry.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
@@ -5074,7 +5075,22 @@ unit-test-db1-module-bus: $(TESTPREFIX)/unit-test-db1-module-bus $(OBJDIR)/aimee
 # The module binary is produced by the bundle exporter, not this Makefile: the
 # process contract owns which sources a module compiles, and duplicating that
 # list here would let the two drift.
-$(OBJDIR)/aimee-module-db1:
+#
+# The prerequisites are deliberately a wildcard rather than the descriptor's
+# source list, for the same reason: naming the sources here is the duplication
+# the comment above refuses. A wildcard rebuilds more often than strictly
+# needed and never less, which is the safe direction. With no prerequisites at
+# all -- as this rule stood -- the binary was built once and never again, so
+# every later run of the fixture tested a stale module and reported PASS for
+# code that was not in it.
+DB1_MODULE_INPUTS = $(wildcard modules/db1/*.c) $(wildcard modules/db1/*.h) \
+                    modules/db1/module.yaml \
+                    modules/db1/eventcontract/operations.json \
+                    vendor/cJSON.c \
+                    ../scripts/export_c_repositories.py \
+                    ../scripts/build_c_module_runtime_bundle.py
+
+$(OBJDIR)/aimee-module-db1: $(DB1_MODULE_INPUTS)
 	@rm -rf $(OBJDIR)/module-bundle
 	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/module-bundle >/dev/null
 	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/module-bundle --output $(abspath $(OBJDIR)) --placement server >/dev/null
@@ -5107,6 +5123,7 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/agent_log.o \
                                        $(OBJDIR)/modules/db1/windows.o \
                                        $(OBJDIR)/modules/db1/db1_trigger.o \
+                                       $(OBJDIR)/modules/db1/coord_jobs.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(OBJDIR)/core/event_bus/module_runtime.o \
                                        $(OBJDIR)/core/event_bus/module_protocol.o \

@@ -22,6 +22,7 @@
 /* clang-format off */
 #include "agent_log.h"
 #include "cognify_jobs.h"
+#include "coord_jobs.h"
 #include "db1_trigger.h"
 
 #include "db1_module_api.h"
@@ -1058,6 +1059,400 @@ char *db1_trigger_list_json(const char *status_filter)
    }
    char *shrunk = realloc(value, strlen(value) + 1u);
    return shrunk ? shrunk : value;
+}
+
+int db1_coord_job_create(int plan_id, int max_concurrent)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", plan_id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max_concurrent);
+   const char *fields[] = {arg0, arg1};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int status = call_stage(AIMEE_DB1_OP_COORD_JOB_CREATE, fields, 2, values, caps, 1, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int64_t)strtoll(slot0, NULL, 10);
+}
+
+int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, const char *role, const char *prompt, const char *cwd, const char *persona)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", job_id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", step_id);
+   const char *fields[] = {arg0, arg1, files_json ? files_json : "", role ? role : "", prompt ? prompt : "", cwd ? cwd : "", persona ? persona : ""};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int status = call_stage(AIMEE_DB1_OP_COORD_TASK_ADD, fields, 7, values, caps, 1, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int64_t)strtoll(slot0, NULL, 10);
+}
+
+int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_task_t *out)
+{
+   if (!delegate_name || !delegate_name[0] || !out)
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", job_id);
+   const char *fields[] = {arg0, delegate_name};
+   char slot0[32];
+   char slot1[32];
+   char slot2[32];
+   char slot9[32];
+   char *const values[] = {slot0, slot1, slot2, out->status, out->claimed_by, out->claimed_at, out->files, out->result, out->error, slot9, out->created_at};
+   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof out->status, sizeof out->claimed_by, sizeof out->claimed_at, sizeof out->files, sizeof out->result, sizeof out->error, sizeof slot9, sizeof out->created_at};
+   memset(out, 0, sizeof *out);
+   int status = call_stage(AIMEE_DB1_OP_COORD_TASK_CLAIM_NEXT, fields, 2, values, caps, 11, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   out->id = (int)strtol(slot0, NULL, 10);
+   out->job_id = (int)strtol(slot1, NULL, 10);
+   out->step_id = (int)strtol(slot2, NULL, 10);
+   out->preempt_requeues = (int)strtol(slot9, NULL, 10);
+   return out->id;
+}
+
+int db1_coord_job_complete_task(int task_id, const char *result)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   const char *fields[] = {arg0, result ? result : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_TASK_COMPLETE, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_fail_task(int task_id, const char *error)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   const char *fields[] = {arg0, error ? error : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_TASK_FAIL, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_complete_task_owned(int task_id, const char *claimed_by, const char *result)
+{
+   if (!claimed_by || !claimed_by[0])
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   const char *fields[] = {arg0, claimed_by, result ? result : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_TASK_COMPLETE_OWNED, fields, 3, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_fail_task_owned(int task_id, const char *claimed_by, const char *error)
+{
+   if (!claimed_by || !claimed_by[0])
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   const char *fields[] = {arg0, claimed_by, error ? error : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_TASK_FAIL_OWNED, fields, 3, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_release_task(int task_id)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   const char *fields[] = {arg0};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_TASK_RELEASE, fields, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_release_task_bounded(int task_id, int max_requeues)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max_requeues);
+   const char *fields[] = {arg0, arg1};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_TASK_RELEASE_BOUNDED, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_release_task_bounded_owned(int task_id, const char *claimed_by, int max_requeues)
+{
+   if (!claimed_by || !claimed_by[0])
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", max_requeues);
+   const char *fields[] = {arg0, claimed_by, arg2};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_TASK_RELEASE_BOUNDED_OWNED, fields, 3, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_recover_owner(const char *claimed_by, int max_requeues, int *requeued_out, int *failed_out)
+{
+   if (!claimed_by || !claimed_by[0] || !requeued_out || !failed_out)
+      return -1;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max_requeues);
+   const char *fields[] = {claimed_by, arg1};
+   char slot0[32];
+   char slot1[32];
+   char *const values[] = {slot0, slot1};
+   const size_t caps[] = {sizeof slot0, sizeof slot1};
+   int status = call_stage(AIMEE_DB1_OP_COORD_OWNER_RECOVER, fields, 2, values, caps, 2, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   *requeued_out = (int)strtol(slot0, NULL, 10);
+   *failed_out = (int)strtol(slot1, NULL, 10);
+   return 0;
+}
+
+int db1_coord_job_get(int job_id, db1_coord_job_t *out)
+{
+   if (!out)
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", job_id);
+   const char *fields[] = {arg0};
+   char slot0[32];
+   char slot1[32];
+   char slot3[32];
+   char slot6[32];
+   char slot7[32];
+   char slot8[32];
+   char slot9[32];
+   char *const values[] = {slot0, slot1, out->status, slot3, out->created_at, out->updated_at, slot6, slot7, slot8, slot9};
+   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof out->status, sizeof slot3, sizeof out->created_at, sizeof out->updated_at, sizeof slot6, sizeof slot7, sizeof slot8, sizeof slot9};
+   memset(out, 0, sizeof *out);
+   int status = call_stage(AIMEE_DB1_OP_COORD_JOB_GET, fields, 1, values, caps, 10, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   out->id = (int)strtol(slot0, NULL, 10);
+   out->plan_id = (int)strtol(slot1, NULL, 10);
+   out->max_concurrent = (int)strtol(slot3, NULL, 10);
+   out->total_tasks = (int)strtol(slot6, NULL, 10);
+   out->done_tasks = (int)strtol(slot7, NULL, 10);
+   out->failed_tasks = (int)strtol(slot8, NULL, 10);
+   out->running_tasks = (int)strtol(slot9, NULL, 10);
+   return 0;
+}
+
+int db1_coord_job_list_tasks(int job_id, db1_coord_task_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", job_id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {arg0, arg1};
+   char **values = malloc((size_t)max * 11u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 11u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 4u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 11u + 0u] = scratch[row * 4u + 0u];
+      caps[row * 11u + 0u] = sizeof scratch[row * 4u + 0u];
+      values[row * 11u + 1u] = scratch[row * 4u + 1u];
+      caps[row * 11u + 1u] = sizeof scratch[row * 4u + 1u];
+      values[row * 11u + 2u] = scratch[row * 4u + 2u];
+      caps[row * 11u + 2u] = sizeof scratch[row * 4u + 2u];
+      values[row * 11u + 3u] = out[row].status;
+      caps[row * 11u + 3u] = sizeof out[row].status;
+      values[row * 11u + 4u] = out[row].claimed_by;
+      caps[row * 11u + 4u] = sizeof out[row].claimed_by;
+      values[row * 11u + 5u] = out[row].claimed_at;
+      caps[row * 11u + 5u] = sizeof out[row].claimed_at;
+      values[row * 11u + 6u] = out[row].files;
+      caps[row * 11u + 6u] = sizeof out[row].files;
+      values[row * 11u + 7u] = out[row].result;
+      caps[row * 11u + 7u] = sizeof out[row].result;
+      values[row * 11u + 8u] = out[row].error;
+      caps[row * 11u + 8u] = sizeof out[row].error;
+      values[row * 11u + 9u] = scratch[row * 4u + 3u];
+      caps[row * 11u + 9u] = sizeof scratch[row * 4u + 3u];
+      values[row * 11u + 10u] = out[row].created_at;
+      caps[row * 11u + 10u] = sizeof out[row].created_at;
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_COORD_TASK_LIST, fields, 2, values, caps,
+                           (uint32_t)(max * 11), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 11u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 11u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].id = (int)strtol(scratch[row * 4u + 0u], NULL, 10);
+      out[row].job_id = (int)strtol(scratch[row * 4u + 1u], NULL, 10);
+      out[row].step_id = (int)strtol(scratch[row * 4u + 2u], NULL, 10);
+      out[row].preempt_requeues = (int)strtol(scratch[row * 4u + 3u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_coord_job_cancel(int job_id)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", job_id);
+   const char *fields[] = {arg0};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_JOB_CANCEL, fields, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_refresh_status(int job_id)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", job_id);
+   const char *fields[] = {arg0};
+   return write_result(call_stage(AIMEE_DB1_OP_COORD_JOB_REFRESH_STATUS, fields, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_coord_job_has_file_conflict(int job_id, const char *files_json)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", job_id);
+   const char *fields[] = {arg0, files_json ? files_json : ""};
+   int status = call_stage(AIMEE_DB1_OP_COORD_JOB_FILE_CONFLICT, fields, 2, NULL, NULL, 0, NULL);
+   if (status == (int)AIMEE_DB1_STATUS_MISSING)
+      return 0;
+   return status == (int)AIMEE_DB1_STATUS_OK ? 1 : -1;
+}
+
+int db1_coord_job_list_recent(db1_coord_job_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max);
+   const char *fields[] = {arg0};
+   char **values = malloc((size_t)max * 10u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 10u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 7u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 10u + 0u] = scratch[row * 7u + 0u];
+      caps[row * 10u + 0u] = sizeof scratch[row * 7u + 0u];
+      values[row * 10u + 1u] = scratch[row * 7u + 1u];
+      caps[row * 10u + 1u] = sizeof scratch[row * 7u + 1u];
+      values[row * 10u + 2u] = out[row].status;
+      caps[row * 10u + 2u] = sizeof out[row].status;
+      values[row * 10u + 3u] = scratch[row * 7u + 2u];
+      caps[row * 10u + 3u] = sizeof scratch[row * 7u + 2u];
+      values[row * 10u + 4u] = out[row].created_at;
+      caps[row * 10u + 4u] = sizeof out[row].created_at;
+      values[row * 10u + 5u] = out[row].updated_at;
+      caps[row * 10u + 5u] = sizeof out[row].updated_at;
+      values[row * 10u + 6u] = scratch[row * 7u + 3u];
+      caps[row * 10u + 6u] = sizeof scratch[row * 7u + 3u];
+      values[row * 10u + 7u] = scratch[row * 7u + 4u];
+      caps[row * 10u + 7u] = sizeof scratch[row * 7u + 4u];
+      values[row * 10u + 8u] = scratch[row * 7u + 5u];
+      caps[row * 10u + 8u] = sizeof scratch[row * 7u + 5u];
+      values[row * 10u + 9u] = scratch[row * 7u + 6u];
+      caps[row * 10u + 9u] = sizeof scratch[row * 7u + 6u];
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_COORD_JOB_LIST_RECENT, fields, 1, values, caps,
+                           (uint32_t)(max * 10), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 10u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 10u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].id = (int)strtol(scratch[row * 7u + 0u], NULL, 10);
+      out[row].plan_id = (int)strtol(scratch[row * 7u + 1u], NULL, 10);
+      out[row].max_concurrent = (int)strtol(scratch[row * 7u + 2u], NULL, 10);
+      out[row].total_tasks = (int)strtol(scratch[row * 7u + 3u], NULL, 10);
+      out[row].done_tasks = (int)strtol(scratch[row * 7u + 4u], NULL, 10);
+      out[row].failed_tasks = (int)strtol(scratch[row * 7u + 5u], NULL, 10);
+      out[row].running_tasks = (int)strtol(scratch[row * 7u + 6u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_coord_job_list_active_ids(int *out_ids, int max)
+{
+   if (!out_ids || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max);
+   const char *fields[] = {arg0};
+   char **values = malloc((size_t)max * 1u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 1u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 1u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out_ids, 0, (size_t)max * sizeof *out_ids);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 1u + 0u] = scratch[row * 1u + 0u];
+      caps[row * 1u + 0u] = sizeof scratch[row * 1u + 0u];
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_COORD_JOB_LIST_ACTIVE_IDS, fields, 1, values, caps,
+                           (uint32_t)(max * 1), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 1u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 1u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out_ids[row] = (int)strtol(scratch[row * 1u + 0u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, char *prompt_out, size_t prompt_cap, char *files_out, size_t files_cap, char *cwd_out, size_t cwd_cap, char *persona_out, size_t persona_cap)
+{
+   if (!role_out || role_cap == 0 || !prompt_out || prompt_cap == 0 || !files_out || files_cap == 0 || !cwd_out || cwd_cap == 0 || !persona_out || persona_cap == 0)
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", task_id);
+   const char *fields[] = {arg0};
+   char *const values[] = {role_out, prompt_out, files_out, cwd_out, persona_out};
+   const size_t caps[] = {role_cap, prompt_cap, files_cap, cwd_cap, persona_cap};
+   int status = call_stage(AIMEE_DB1_OP_COORD_TASK_GET_DISPATCH, fields, 1, values, caps, 5, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return 0;
 }
 
 /* clang-format on */
