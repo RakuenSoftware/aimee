@@ -43,26 +43,26 @@ function esc(s: unknown): string {
 }
 
 const AUDIT_COLUMNS: Column<AuditRow>[] = [
-  { key: 'ts', label: 'Time', render: r => <span style={{ whiteSpace: 'nowrap', color: '#888' }}>{esc(r.ts).replace('T', ' ').replace('Z', '')}</span> },
+  { key: 'ts', label: 'Time', render: r => <span style={{ whiteSpace: 'nowrap', color: 'var(--sg-text-faint)' }}>{esc(r.ts).replace('T', ' ').replace('Z', '')}</span> },
   { key: 'actor', label: 'Actor', render: r => esc(r.actor) },
   {
     key: 'tool', label: 'Tool',
     render: r => (
       <span style={{ fontFamily: 'monospace' }}>
         {esc(r.tool)}
-        {r.command ? <span style={{ color: '#999' }}> · {esc(r.command)}</span> : null}
+        {r.command ? <span style={{ color: 'var(--sg-text-hint)' }}> · {esc(r.command)}</span> : null}
       </span>
     ),
   },
   { key: 'verdict', label: 'Verdict', render: r => <Badge label={esc(r.verdict)} variant={verdictVariant(r.verdict)} /> },
-  { key: 'mode', label: 'Mode', render: r => <span style={{ color: '#888' }}>{esc(r.mode)}</span> },
-  { key: 'reason_code', label: 'Reason', render: r => <span style={{ color: '#888' }}>{esc(r.reason_code)}</span> },
-  { key: 'task_id', label: 'Task', align: 'right', render: r => <span style={{ color: '#aaa' }}>{r.task_id || ''}</span> },
+  { key: 'mode', label: 'Mode', render: r => <span style={{ color: 'var(--sg-text-faint)' }}>{esc(r.mode)}</span> },
+  { key: 'reason_code', label: 'Reason', render: r => <span style={{ color: 'var(--sg-text-faint)' }}>{esc(r.reason_code)}</span> },
+  { key: 'task_id', label: 'Task', align: 'right', render: r => <span style={{ color: 'var(--sg-text-pale)' }}>{r.task_id || ''}</span> },
 ];
 
 const selectStyle: React.CSSProperties = {
-  padding: '4px 8px', borderRadius: 4, border: '1px solid #ddd', background: '#fff',
-  color: '#444', fontSize: 12,
+  padding: '4px 8px', borderRadius: 4, border: '1px solid var(--sg-border-medium)', background: 'var(--sg-surface)',
+  color: 'var(--sg-text-muted)', fontSize: 12,
 };
 
 const PAGE = 500; // rows per request (matches the server's dashboard.audit page size)
@@ -117,18 +117,18 @@ export default function Logs() {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxSizing: 'border-box' }}>
       {/* Header / controls */}
       <div style={{
-        padding: '8px 16px', background: '#fafafa', borderBottom: '1px solid #e0e0e0',
+        padding: '8px 16px', background: 'var(--sg-surface-alt)', borderBottom: '1px solid var(--sg-border)',
         display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', flexShrink: 0,
       }}>
-        <span style={{ fontSize: 14, fontWeight: 600, color: '#555' }}>Logs</span>
-        <span style={{ fontSize: 12, color: '#999' }}>tool-action audit</span>
-        <span style={{ fontSize: 12, color: '#999' }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--sg-text-muted)' }}>Logs</span>
+        <span style={{ fontSize: 12, color: 'var(--sg-text-hint)' }}>tool-action audit</span>
+        <span style={{ fontSize: 12, color: 'var(--sg-text-hint)' }}>
           loaded {rows.length.toLocaleString()} of {total.toLocaleString()}
         </span>
         <div style={{ display: 'flex', gap: 6, marginLeft: 8 }}>
           {(['allow', 'block', 'rewrite', 'approval_required'] as const).map(v => (
-            <span key={v} style={{ fontSize: 11, color: '#777' }}>
-              {v}: <b style={{ color: '#444' }}>{counts[v] || 0}</b>
+            <span key={v} style={{ fontSize: 11, color: 'var(--sg-text-faint)' }}>
+              {v}: <b style={{ color: 'var(--sg-text-muted)' }}>{counts[v] || 0}</b>
             </span>
           ))}
         </div>
@@ -146,7 +146,7 @@ export default function Logs() {
             {['all', 'primary', 'delegate'].map(a => <option key={a} value={a}>{a}</option>)}
           </select>
           <Button size="sm" onClick={load} title="Reload the newest page of audit rows.">Refresh</Button>
-          {loading && <span style={{ fontSize: 12, color: '#aaa' }}>Loading…</span>}
+          {loading && <span style={{ fontSize: 12, color: 'var(--sg-text-pale)' }}>Loading…</span>}
         </div>
       </div>
 
@@ -154,7 +154,7 @@ export default function Logs() {
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         {filtered.length === 0 ? (
           loading ? (
-            <div style={{ padding: 16, color: '#aaa', fontSize: 13 }}>Loading…</div>
+            <div style={{ padding: 16, color: 'var(--sg-text-pale)', fontSize: 13 }}>Loading…</div>
           ) : (
             <EmptyState message="No audit rows" inline />
           )
@@ -192,10 +192,10 @@ export default function Logs() {
           {DETAIL_FIELDS.map(f => {
             const v = selected[f.key];
             return (
-              <div key={f.key} style={{ display: 'flex', gap: 12, padding: '7px 0', borderBottom: '1px solid #f4f4f4' }}>
-                <span style={{ width: 130, flexShrink: 0, color: '#888', fontSize: 12 }}>{f.label}</span>
+              <div key={f.key} style={{ display: 'flex', gap: 12, padding: '7px 0', borderBottom: '1px solid var(--sg-surface-alt)' }}>
+                <span style={{ width: 130, flexShrink: 0, color: 'var(--sg-text-faint)', fontSize: 12 }}>{f.label}</span>
                 <span style={{ fontSize: 13, fontFamily: 'monospace', overflowWrap: 'anywhere', minWidth: 0 }}>
-                  {v == null || v === '' ? <span style={{ color: '#bbb' }}>—</span> : String(v)}
+                  {v == null || v === '' ? <span style={{ color: 'var(--sg-text-pale)' }}>—</span> : String(v)}
                 </span>
               </div>
             );

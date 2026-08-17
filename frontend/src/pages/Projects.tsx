@@ -42,16 +42,16 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
 }
 
 const input: React.CSSProperties = {
-  padding: '6px 8px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '13px',
+  padding: '6px 8px', borderRadius: '4px', border: '1px solid var(--sg-border-medium)', fontSize: '13px',
 };
 const modalBackdrop: React.CSSProperties = {
   position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(10,10,18,0.55)',
   display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px',
 };
 const modalCard: React.CSSProperties = {
-  width: 'min(560px, 100%)', maxHeight: '86vh', overflow: 'auto', background: '#fff',
-  borderRadius: '12px', border: '1px solid #dde', boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
-  padding: '20px 22px', fontFamily: 'system-ui', color: '#233',
+  width: 'min(560px, 100%)', maxHeight: '86vh', overflow: 'auto', background: 'var(--sg-surface)',
+  borderRadius: '12px', border: '1px solid var(--sg-border-medium)', boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
+  padding: '20px 22px', fontFamily: 'system-ui', color: 'var(--sg-text)',
 };
 
 export default function Projects() {
@@ -279,25 +279,25 @@ export default function Projects() {
                   {orgRef.host}/{orgRef.owner}: {orgRepos.length} repositor{orgRepos.length === 1 ? 'y' : 'ies'}
                   {orgProvider ? ` · ${orgProvider}` : ''}
                 </div>
-                <Button variant="ghost" size="sm" style={{ color: '#3a6ea5', padding: 0 }}
+                <Button variant="ghost" size="sm" style={{ color: 'var(--sg-info)', padding: 0 }}
                   title="Select every repository that is not already cloned."
                   onClick={() => setOrgSelected(Object.fromEntries(orgRepos.map(r =>
                     [r.name, !repoAlreadyCloned(r, orgRef.owner, projects, details)])))}>all</Button>
-                <Button variant="ghost" size="sm" style={{ color: '#3a6ea5', padding: 0 }}
+                <Button variant="ghost" size="sm" style={{ color: 'var(--sg-info)', padding: 0 }}
                   title="Deselect all repositories."
                   onClick={() => setOrgSelected({})}>none</Button>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxHeight: '220px', overflow: 'auto',
-                            border: '1px solid #ddd', borderRadius: '6px', padding: '8px' }}>
+                            border: '1px solid var(--sg-border-medium)', borderRadius: '6px', padding: '8px' }}>
                 {orgRepos.map(repo => {
                   const already = repoAlreadyCloned(repo, orgRef.owner, projects, details);
                   return (
                     <label key={repo.name} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: already ? 'default' : 'pointer' }}>
                       <input type="checkbox" disabled={already} checked={!already && !!orgSelected[repo.name]}
                         onChange={e => setOrgSelected(p => ({ ...p, [repo.name]: e.target.checked }))} />
-                      <span style={{ fontFamily: 'monospace', flex: 1, color: already ? '#999' : undefined }}>{repo.name}</span>
-                      {repo.private && <span style={{ fontSize: '10.5px', color: '#8a5a00' }}>private</span>}
-                      {already && <span style={{ fontSize: '11px', color: '#2a7' }}>cloned</span>}
+                      <span style={{ fontFamily: 'monospace', flex: 1, color: already ? 'var(--sg-text-hint)' : undefined }}>{repo.name}</span>
+                      {repo.private && <span style={{ fontSize: '10.5px', color: 'var(--sg-warning-dark)' }}>private</span>}
+                      {already && <span style={{ fontSize: '11px', color: 'var(--sg-success-dark)' }}>cloned</span>}
                     </label>
                   );
                 })}
@@ -318,17 +318,17 @@ export default function Projects() {
                 <div key={res.name} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px' }}>
                   <span aria-hidden>{res.ok ? '✅' : '⛔'}</span>
                   <span style={{ fontFamily: 'monospace', flex: 1 }}>{res.name}</span>
-                  {res.ok && res.org_note && <span style={{ fontSize: '11px', color: '#8a5a00' }}>{res.org_note}</span>}
+                  {res.ok && res.org_note && <span style={{ fontSize: '11px', color: 'var(--sg-warning-dark)' }}>{res.org_note}</span>}
                   {res.ok && res.kb_indexed === false &&
-                    <span style={{ fontSize: '11px', color: '#8a5a00' }}>not indexed — {res.kb_reason || 'knowledge service unavailable'}</span>}
-                  {!res.ok && <span style={{ color: '#c62828' }}>{res.error || 'failed'}</span>}
+                    <span style={{ fontSize: '11px', color: 'var(--sg-warning-dark)' }}>not indexed — {res.kb_reason || 'knowledge service unavailable'}</span>}
+                  {!res.ok && <span style={{ color: 'var(--sg-danger-dark)' }}>{res.error || 'failed'}</span>}
                 </div>
               ))}
             </div>
           )}
           {cloneNotes.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-              {cloneNotes.map(n => <div key={n} style={{ fontSize: '12px', color: '#8a5a00' }}>{n}</div>)}
+              {cloneNotes.map(n => <div key={n} style={{ fontSize: '12px', color: 'var(--sg-warning-dark)' }}>{n}</div>)}
             </div>
           )}
         </div>
@@ -340,7 +340,7 @@ export default function Projects() {
             <Button variant="primary" size="sm"
               title="Connect a git account (OAuth, access token, or SSH key) via the setup wizard."
               onClick={() => setConnectOpen(true)}>+ Connect git account</Button>
-            <span style={{ color: '#888', fontSize: '12px' }}>
+            <span style={{ color: 'var(--sg-text-faint)', fontSize: '12px' }}>
               OAuth sign-in, an access token, or an SSH key — stored server-side, never shown again.
             </span>
           </div>
@@ -349,7 +349,7 @@ export default function Projects() {
               {hosts.map(h => (
                 <div key={h} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ fontSize: '13px', fontFamily: 'monospace', flex: 1 }}>{h}</span>
-                  <span style={{ fontSize: '11px', color: '#2a7' }}>● token set</span>
+                  <span style={{ fontSize: '11px', color: 'var(--sg-success-dark)' }}>● token set</span>
                   <Button variant="danger" size="sm" disabled={busy}
                     title="Delete the stored access token for this git host."
                     onClick={() => removeCred(h)}>remove</Button>
@@ -363,12 +363,12 @@ export default function Projects() {
       <Panel title="Projects" count={projects.length}>
         <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {projects.length === 0 ? (
-            <div style={{ color: '#888', fontSize: '13px' }}>No projects yet — connect a repository above.</div>
+            <div style={{ color: 'var(--sg-text-faint)', fontSize: '13px' }}>No projects yet — connect a repository above.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {groupProjectsByOrg(projects, details).map(g => (
                 <div key={g.org || '(ungrouped)'} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--sg-text-faint)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                     {g.org || 'ungrouped'}
                   </div>
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -393,12 +393,12 @@ export default function Projects() {
           )}
 
           {delRef && (
-            <div style={{ border: '1px solid #d99', borderRadius: '6px', padding: '10px', background: '#fff7f7',
+            <div style={{ border: '1px solid var(--sg-danger)', borderRadius: '6px', padding: '10px', background: 'var(--sg-danger-bg)',
                           display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: '#c33' }}>Delete {delRef}?</div>
-              <div style={{ fontSize: '12px', color: '#844' }}>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--sg-danger)' }}>Delete {delRef}?</div>
+              <div style={{ fontSize: '12px', color: 'var(--sg-danger-dark)' }}>
                 This removes the clone from this server. Type{' '}
-                <code style={{ background: '#fee', padding: '1px 5px', borderRadius: '4px' }}>{delRef}</code> to confirm.
+                <code style={{ background: 'var(--sg-danger-bg)', padding: '1px 5px', borderRadius: '4px' }}>{delRef}</code> to confirm.
               </div>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                 <input style={{ ...input, flex: 1, minWidth: '180px', fontFamily: 'monospace' }} placeholder={delRef}
@@ -418,7 +418,7 @@ export default function Projects() {
                   <Button key={op} size="sm" disabled={busy} title={OP_HELP[op]} onClick={() => runOp(op)}>{op}</Button>
                 ))}
                 {REMOTE_OPS.map(op => (
-                  <Button key={op} size="sm" style={{ borderColor: '#a96' }} disabled={busy} title={OP_HELP[op]} onClick={() => runOp(op)}>{op}</Button>
+                  <Button key={op} size="sm" style={{ borderColor: 'var(--sg-warning-dark)' }} disabled={busy} title={OP_HELP[op]} onClick={() => runOp(op)}>{op}</Button>
                 ))}
               </div>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -437,22 +437,22 @@ export default function Projects() {
                 <input style={{ ...input, flex: 1, minWidth: '180px' }}
                   placeholder="PR title (optional — empty fills from commits)"
                   value={prTitle} onChange={e => setPrTitle(e.target.value)} />
-                <Button size="sm" style={{ borderColor: '#7a7' }} disabled={busy}
+                <Button size="sm" style={{ borderColor: 'var(--sg-success)' }} disabled={busy}
                   title="Open a GitHub pull request for the pushed branch"
                   onClick={async () => { if (await runOp('pr', { message: prTitle })) setPrTitle(''); }}>open PR</Button>
               </div>
             </div>
           )}
 
-          {err && <div style={{ color: '#c62828', fontSize: '12px' }}>{err}</div>}
-          {notice && <div style={{ color: '#2a7', fontSize: '12px' }}>{notice}</div>}
+          {err && <div style={{ color: 'var(--sg-danger-dark)', fontSize: '12px' }}>{err}</div>}
+          {notice && <div style={{ color: 'var(--sg-success-dark)', fontSize: '12px' }}>{notice}</div>}
           {output && (
-            <pre style={{ fontSize: '12px', background: '#0d1117', color: '#c9d1d9', padding: '10px',
+            <pre style={{ fontSize: '12px', background: 'var(--sg-dark-surface)', color: 'var(--sg-border-medium)', padding: '10px',
                           borderRadius: '6px', overflow: 'auto', maxHeight: '320px', whiteSpace: 'pre-wrap' }}>
               {output}
             </pre>
           )}
-          {busy && <div style={{ color: '#888', fontSize: '12px' }}>working…</div>}
+          {busy && <div style={{ color: 'var(--sg-text-faint)', fontSize: '12px' }}>working…</div>}
         </div>
       </Panel>
 
@@ -463,7 +463,7 @@ export default function Projects() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
               <strong style={{ fontSize: '17px' }}>Connect a git account</strong>
               <button aria-label="Close" title="Close" onClick={() => setConnectOpen(false)}
-                style={{ background: 'none', border: 'none', color: '#9aa', cursor: 'pointer', fontSize: '20px', lineHeight: 1 }}>×</button>
+                style={{ background: 'none', border: 'none', color: 'var(--sg-text-hint)', cursor: 'pointer', fontSize: '20px', lineHeight: 1 }}>×</button>
             </div>
             <ConnectHosts
               doneLabel="Done"

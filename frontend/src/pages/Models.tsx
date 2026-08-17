@@ -207,7 +207,7 @@ export default function Models() {
 
       <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
         {models.length === 0 && !loading && (
-          <div style={{ color: "#888", fontSize: 14 }}>
+          <div style={{ color: "var(--sg-text-faint)", fontSize: 14 }}>
             No models configured. Add one to get started.
           </div>
         )}
@@ -256,12 +256,12 @@ function ModelCard({
   const pstate = probe?.status || "idle";
   const dot =
     pstate === "ok"
-      ? { c: "#22a06b", t: "available" }
+      ? { c: "var(--sg-success-dark)", t: "available" }
       : pstate === "down"
-        ? { c: "#d4564f", t: "unavailable" }
+        ? { c: "var(--sg-danger)", t: "unavailable" }
         : pstate === "probing"
-          ? { c: "#e0a800", t: "probing…" }
-          : { c: "#bbb", t: "unknown" };
+          ? { c: "var(--sg-warning)", t: "probing…" }
+          : { c: "var(--sg-text-pale)", t: "unknown" };
 
   const successPct =
     stats && stats.total_calls > 0
@@ -311,16 +311,16 @@ function ModelCard({
                 display: "inline-block",
               }}
             />
-            <span style={{ fontSize: 13, color: "#444" }}>{dot.t}</span>
+            <span style={{ fontSize: 13, color: "var(--sg-text-muted)" }}>{dot.t}</span>
           </div>
           {probe?.latency_ms != null && pstate === "ok" && (
-            <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>
+            <div style={{ fontSize: 12, color: "var(--sg-text-faint)", marginTop: 2 }}>
               {probe.latency_ms} ms
             </div>
           )}
           {probe?.msg && pstate === "down" && (
             <div
-              style={{ fontSize: 11, color: "#c66", marginTop: 2, wordBreak: "break-word" }}
+              style={{ fontSize: 11, color: "var(--sg-danger)", marginTop: 2, wordBreak: "break-word" }}
               title={probe.msg}
             >
               {probe.msg.slice(0, 80)}
@@ -339,7 +339,7 @@ function ModelCard({
 
         {/* right: run stats */}
         <div style={{ flex: "1 1 220px", minWidth: 200 }}>
-          <div style={{ fontSize: 12, color: "#999", marginBottom: 2 }}>run stats</div>
+          <div style={{ fontSize: 12, color: "var(--sg-text-hint)", marginBottom: 2 }}>run stats</div>
           {stats && stats.total_calls > 0 ? (
             <>
               <KeyValue label="runs" value={String(stats.total_calls)} />
@@ -363,7 +363,7 @@ function ModelCard({
         </div>
       </div>
 
-      <div style={{ marginTop: 8, borderTop: "1px solid #eee", paddingTop: 8 }}>
+      <div style={{ marginTop: 8, borderTop: "1px solid var(--sg-border-light)", paddingTop: 8 }}>
         <Button
           variant="primary"
           size="sm"
@@ -474,7 +474,7 @@ function ModelEditModal({
       open
       onClose={onClose}
       title="Edit model"
-      headerExtra={<span style={{ fontSize: 13, color: "#667", fontFamily: "monospace" }}>{cfg.name}</span>}
+      headerExtra={<span style={{ fontSize: 13, color: "var(--sg-text-secondary)", fontFamily: "monospace" }}>{cfg.name}</span>}
       size="lg"
     >
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -528,21 +528,21 @@ function ModelEditModal({
 
       <div style={{ display: "flex", gap: 20, marginTop: 10 }}>
         <label
-          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}
+          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--sg-text-muted)" }}
           title="Whether this model is available for routing."
         >
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} disabled={busy} />
           enabled
         </label>
         <label
-          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}
+          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--sg-text-muted)" }}
           title="Whether this model is allowed to use tools."
         >
           <input type="checkbox" checked={tools} onChange={(e) => setTools(e.target.checked)} disabled={busy} />
           tools enabled
         </label>
         <label
-          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}
+          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--sg-text-muted)" }}
           title="When on, this model can only be the primary — it is never routed as a delegate. Recommended for a Claude subscription (ToS)."
         >
           <input type="checkbox" checked={primaryOnly} onChange={(e) => setPrimaryOnly(e.target.checked)} disabled={busy} />
@@ -566,7 +566,7 @@ function ModelEditModal({
         hint="Toggle whether this model is bound to this persona (none set = all)."
       />
 
-      {err && <div style={{ fontSize: 12, color: "#c00", marginTop: 8 }}>{err}</div>}
+      {err && <div style={{ fontSize: 12, color: "var(--sg-danger-dark)", marginTop: 8 }}>{err}</div>}
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
         <Button
@@ -644,9 +644,9 @@ function ChipSelect({
   return (
     <div style={{ margin: "10px 0 2px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ color: "#888", fontSize: 12 }}>{label}</span>
+        <span style={{ color: "var(--sg-text-faint)", fontSize: 12 }}>{label}</span>
         {selected.length === 0 && emptyHint && (
-          <span style={{ color: "#aaa", fontSize: 11 }}>{emptyHint}</span>
+          <span style={{ color: "var(--sg-text-pale)", fontSize: 11 }}>{emptyHint}</span>
         )}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3 }}>
@@ -660,8 +660,8 @@ function ChipSelect({
               style={{
                 ...btnSmall,
                 padding: "1px 7px",
-                background: on ? (r === "all" ? "#a15" : "#1f7a3d") : "#fff",
-                color: on ? "#fff" : "#555",
+                background: on ? (r === "all" ? "var(--sg-danger-dark)" : "var(--sg-success-dark)") : "var(--sg-surface)",
+                color: on ? "var(--sg-surface)" : "var(--sg-text-muted)",
                 fontWeight: r === "all" ? 600 : 400,
               }}
             >
@@ -678,10 +678,10 @@ function ChipSelect({
 function StaticChips({ label, values, emptyHint }: { label: string; values: string[]; emptyHint?: string }) {
   return (
     <div style={{ margin: "6px 0" }}>
-      <span style={{ color: "#888", fontSize: 12 }}>{label}</span>
+      <span style={{ color: "var(--sg-text-faint)", fontSize: 12 }}>{label}</span>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3 }}>
         {values.length === 0 ? (
-          <span style={{ color: "#aaa", fontSize: 11 }}>{emptyHint || "—"}</span>
+          <span style={{ color: "var(--sg-text-pale)", fontSize: 11 }}>{emptyHint || "—"}</span>
         ) : (
           values.map((r) => (
             <span
@@ -690,9 +690,9 @@ function StaticChips({ label, values, emptyHint }: { label: string; values: stri
                 fontSize: 12,
                 padding: "1px 7px",
                 borderRadius: 4,
-                border: "1px solid #dfe6ef",
-                background: "#f4f7fb",
-                color: "#556",
+                border: "1px solid var(--sg-border-medium)",
+                background: "var(--sg-surface-alt)",
+                color: "var(--sg-text-muted)",
               }}
             >
               {r}
@@ -708,7 +708,7 @@ function StaticChips({ label, values, emptyHint }: { label: string; values: stri
 function L({ label, title, children }: { label: string; title?: string; children: React.ReactNode }) {
   return (
     <label style={{ display: "block", fontSize: 12 }} title={title}>
-      <span style={{ color: "#888", display: "block", marginBottom: 2 }}>{label}</span>
+      <span style={{ color: "var(--sg-text-faint)", display: "block", marginBottom: 2 }}>{label}</span>
       {children}
     </label>
   );
@@ -724,16 +724,16 @@ function fmt(n: number): string {
 const btn: React.CSSProperties = {
   fontSize: 13,
   padding: "4px 10px",
-  border: "1px solid #ccc",
+  border: "1px solid var(--sg-border-medium)",
   borderRadius: 4,
-  background: "#fff",
+  background: "var(--sg-surface)",
   cursor: "pointer",
 };
 const btnSmall: React.CSSProperties = { ...btn, padding: "2px 8px", fontSize: 12 };
 const inp: React.CSSProperties = {
   fontSize: 13,
   padding: "4px 6px",
-  border: "1px solid #ccc",
+  border: "1px solid var(--sg-border-medium)",
   borderRadius: 4,
   width: "100%",
   boxSizing: "border-box",

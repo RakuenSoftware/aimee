@@ -57,12 +57,12 @@ export default function HealthBanner() {
       role="status"
       aria-live="polite"
       style={{
-        flexShrink: 0, background: '#3a2416', borderBottom: '1px solid #6b4423',
-        color: '#f0c088', padding: '8px 14px', fontSize: 13, lineHeight: 1.45,
+        flexShrink: 0, background: 'var(--sg-warning-bg)', borderBottom: '1px solid var(--sg-warning-dark)',
+        color: 'var(--sg-warning)', padding: '8px 14px', fontSize: 13, lineHeight: 1.45,
       }}
     >
-      <strong style={{ color: '#ffd9a0' }}>{banner.title}</strong>
-      <div style={{ color: '#d8b48a', marginTop: 2 }}>{banner.detail}</div>
+      <strong style={{ color: 'var(--sg-warning-border)' }}>{banner.title}</strong>
+      <div style={{ color: 'var(--sg-warning)', marginTop: 2 }}>{banner.detail}</div>
     </div>
   );
 }

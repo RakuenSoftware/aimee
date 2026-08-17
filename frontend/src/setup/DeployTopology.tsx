@@ -233,7 +233,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
   }
 
   if (!loaded) {
-    return <div style={{ fontSize: 13, color: '#667', padding: '8px 0' }}>Loading…</div>;
+    return <div style={{ fontSize: 13, color: 'var(--sg-text-secondary)', padding: '8px 0' }}>Loading…</div>;
   }
 
   return (
@@ -241,7 +241,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       <section style={{ display: 'grid', gap: 10 }}>
         <div style={sectionTitle}>Embedder</div>
         <div style={roleCard}>
-          <div style={{ fontSize: 11.5, color: '#778', marginBottom: 4 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)', marginBottom: 4 }}>
             Turns text into vectors. Runs inside the knowledge base unless you point it elsewhere.
           </div>
           <select
@@ -268,7 +268,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
           </select>
 
           {/* The one-way door, stated at the point of choice rather than in a tooltip. */}
-          <div style={{ fontSize: 11, color: '#8a5a00', marginTop: 6 }}>
+          <div style={{ fontSize: 11, color: 'var(--sg-warning-dark)', marginTop: 6 }}>
             This choice is effectively permanent for this install: the database records the
             vector width and refuses to start if it changes. Moving between a 384-dim and a
             768-dim embedder later means re-embedding everything.
@@ -282,14 +282,14 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
                 placeholder="API key (blank if the endpoint needs none)" aria-label="embedder api key" />
               <input style={input} value={embedDims} onChange={(e) => setEmbedDims(e.target.value)}
                 placeholder="embedding dimension (required)" inputMode="numeric" aria-label="embedder dimension" />
-              <div style={{ fontSize: 11, color: '#889' }}>
+              <div style={{ fontSize: 11, color: 'var(--sg-text-faint)' }}>
                 Required: the kb cannot derive the width of an endpoint it does not serve, and it
                 sizes the vector columns from this. Up to 4000.
               </div>
             </div>
           )}
           {embedRoute === 'bundled' && (
-            <div style={{ fontSize: 11, color: '#889', marginTop: 6 }}>
+            <div style={{ fontSize: 11, color: 'var(--sg-text-faint)', marginTop: 6 }}>
               Dimension comes from the selected model; the kb derives it at runtime.
             </div>
           )}
@@ -299,7 +299,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       <section style={{ display: 'grid', gap: 10 }}>
         <div style={sectionTitle}>Synthesis</div>
         <div style={roleCard}>
-          <div style={{ fontSize: 11.5, color: '#778', marginBottom: 4 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)', marginBottom: 4 }}>
             Writes the knowledge base’s curation and summaries. Search, recall and indexing work
             without it.
           </div>
@@ -319,13 +319,13 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
           </select>
 
           {synthRoute === 'off' && (
-            <div style={{ fontSize: 11, color: '#889', marginTop: 6 }}>
+            <div style={{ fontSize: 11, color: 'var(--sg-text-faint)', marginTop: 6 }}>
               Supported, not a gap: embedding, search, recall and indexing never call this.
               An embedder, by contrast, is required.
             </div>
           )}
           {synthRoute !== 'off' && synthRoute !== 'external' && (
-            <div style={{ fontSize: 11, color: '#889', marginTop: 6 }}>
+            <div style={{ fontSize: 11, color: 'var(--sg-text-faint)', marginTop: 6 }}>
               {SYNTHESIS_MODELS.find((m) => m.id === synthRoute)?.blurb}{' '}
               Deployed as a sidecar beside the kb and reached over mutual TLS. Its weights are
               baked into that image, so nothing is downloaded at deploy or at run time. Switching
@@ -338,7 +338,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
                 placeholder="https://llm.example/v1" aria-label="synthesis endpoint" />
               <input style={input} value={synthKey} onChange={(e) => setSynthKey(e.target.value)}
                 placeholder="API key (blank if the endpoint needs none)" aria-label="synthesis api key" />
-              <div style={{ fontSize: 11, color: '#889' }}>
+              <div style={{ fontSize: 11, color: 'var(--sg-text-faint)' }}>
                 Your notes are sent to whatever answers this URL.
               </div>
             </div>
@@ -347,7 +347,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
       </section>
 
       {needsConfirm && (
-        <div style={{ fontSize: 12.5, color: '#8a5a00', background: '#fff8e6', border: '1px solid #f0dca8', borderRadius: 6, padding: '8px 10px', display: 'grid', gap: 6 }}>
+        <div style={{ fontSize: 12.5, color: 'var(--sg-warning-dark)', background: 'var(--sg-warning-bg)', border: '1px solid var(--sg-warning-border)', borderRadius: 6, padding: '8px 10px', display: 'grid', gap: 6 }}>
           <div>
             <strong>Changing the embedder invalidates the existing corpus.</strong>{' '}
             {embedModelSaved || '(none)'} → {(embedRoute === 'bundled' ? embedModel : '') || '(none)'}.{' '}
@@ -361,13 +361,13 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
         </div>
       )}
       {error && (
-        <div style={{ fontSize: 12.5, color: '#a33', background: '#fdeaea', border: '1px solid #f2c4c4', borderRadius: 6, padding: '8px 10px' }}>
+        <div style={{ fontSize: 12.5, color: 'var(--sg-danger)', background: 'var(--sg-danger-bg)', border: '1px solid var(--sg-danger-bg)', borderRadius: 6, padding: '8px 10px' }}>
           {error}
         </div>
       )}
 
       {!embedderChosen && (
-        <div style={{ fontSize: 12.5, color: '#a33' }}>
+        <div style={{ fontSize: 12.5, color: 'var(--sg-danger)' }}>
           {embedRoute === 'bundled'
             ? 'Choose an embedder. This image bakes none, so use an external endpoint.'
             : 'An external embedder needs both an endpoint and its dimension.'}
@@ -383,11 +383,11 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
   );
 }
 
-const sectionTitle: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: '#233' };
+const sectionTitle: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: 'var(--sg-text)' };
 const roleCard: React.CSSProperties = {
-  display: 'grid', gap: 2, padding: '10px 12px', borderRadius: 9, border: '1px solid #dde', background: '#fbfcfe',
+  display: 'grid', gap: 2, padding: '10px 12px', borderRadius: 9, border: '1px solid var(--sg-border-medium)', background: 'var(--sg-surface-alt)',
 };
 const input: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
-  border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
+  border: '1px solid var(--sg-border-medium)', fontSize: 13, fontFamily: 'ui-monospace, monospace',
 };

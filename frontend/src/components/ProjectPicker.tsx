@@ -24,7 +24,7 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
   });
 }
 
-const input: React.CSSProperties = { padding: '5px 8px', borderRadius: 4, border: '1px solid #ccc', fontSize: 13 };
+const input: React.CSSProperties = { padding: '5px 8px', borderRadius: 4, border: '1px solid var(--sg-border-medium)', fontSize: 13 };
 
 export default function ProjectPicker({ storageKey, onChange }: {
   storageKey: string;
@@ -93,7 +93,7 @@ export default function ProjectPicker({ storageKey, onChange }: {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 12px', background: '#f6f7f9', borderBottom: '1px solid #e3e6ea' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 12px', background: 'var(--sg-surface-alt)', borderBottom: '1px solid var(--sg-border)' }}>
       <Picker
         label="Project"
         emptyLabel="— none —"

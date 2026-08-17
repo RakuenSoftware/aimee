@@ -65,7 +65,7 @@ export default function SetupChip() {
       style={{
         display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px',
         borderRadius: 12, cursor: 'pointer', fontSize: 12.5, whiteSpace: 'nowrap',
-        background: '#3a2a12', color: '#f4b860', border: '1px solid #6a4a1a',
+        background: 'var(--sg-warning-bg)', color: 'var(--sg-warning)', border: '1px solid var(--sg-warning-bg)',
       }}
     >
       <span aria-hidden>⚙️</span> Setup — {n} left
