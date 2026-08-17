@@ -1407,6 +1407,21 @@
     },
     {
       "consumers": [
+        "src/tests/test_witness_checkpoint_produce_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_vault_witness_provider.h",
+          "line": 33
+        }
+      ],
+      "signature": "void aimee_db2_register_vault_witness_provider ( const db2_vault_witness_provider_t * provider )",
+      "signature_sha256": "89a9422c9f7546f066acb0fb0e521be300f08e4d9c5a117acbee3135083908b1",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_vault_witness_provider"
+    },
+    {
+      "consumers": [
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/test_kb_vault_rewrap_live.c",
         "src/tests/test_management_status_key_ctx.c",
@@ -21945,6 +21960,168 @@
     },
     {
       "consumers": [
+        "src/tests/test_witness_checkpoint_produce_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_vault_witness_provider.h",
+          "line": 35
+        }
+      ],
+      "signature": "int db2_vault_witness_checkpoint_digest ( const vault_witness_checkpoint_t * checkpoint , uint8_t digest [ 32 ] )",
+      "signature_sha256": "2a7f6bc560b226ea53649c21788845b230c79a0110553fb0eabbf0654bc4514a",
+      "status": "private-test-only",
+      "symbol": "db2_vault_witness_checkpoint_digest"
+    },
+    {
+      "consumers": [
+        "src/tests/test_witness_checkpoint_produce_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_vault_witness_provider.h",
+          "line": 37
+        }
+      ],
+      "signature": "int db2_vault_witness_checkpoint_encode ( const vault_witness_checkpoint_t * checkpoint , uint8_t * out , size_t cap , size_t * out_len )",
+      "signature_sha256": "680b2c76d48547888483af29120ae6a735eab77284f644703bba447b549fb73e",
+      "status": "private-test-only",
+      "symbol": "db2_vault_witness_checkpoint_encode"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_vault_witness_provider.h",
+          "line": 39
+        }
+      ],
+      "signature": "int db2_vault_witness_checkpoint_sign ( vault_witness_checkpoint_t * checkpoint )",
+      "signature_sha256": "423f823c9576da3a515df05f5318d864958da11d059d1fec89966cc6ca7b4e15",
+      "status": "internal-unconsumed",
+      "symbol": "db2_vault_witness_checkpoint_sign"
+    },
+    {
+      "consumers": [
+        "src/tests/test_witness_checkpoint_produce_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_vault_witness_provider.h",
+          "line": 40
+        }
+      ],
+      "signature": "int db2_vault_witness_checkpoint_verify ( const vault_witness_checkpoint_t * checkpoint , const vault_witness_anchor_t * anchors , size_t anchor_count )",
+      "signature_sha256": "2005a2994e7c62a502e287586ff916391578e91ac78cd39fe2e5f035b4d06fa9",
+      "status": "private-test-only",
+      "symbol": "db2_vault_witness_checkpoint_verify"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_vault_witness_provider.h",
+          "line": 42
+        }
+      ],
+      "signature": "int db2_vault_witness_export_frame ( int kind , const uint8_t * payload , size_t payload_len , uint8_t * out , size_t cap , size_t * out_len )",
+      "signature_sha256": "d37a5378af096c0993cce81ef325d032891dc291c84c118604f21b56cffa5fbf",
+      "status": "internal-unconsumed",
+      "symbol": "db2_vault_witness_export_frame"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_vault_witness_provider.h",
+          "line": 44
+        }
+      ],
+      "signature": "int db2_vault_witness_leaf_hash ( const char * tenant , const char * provider , uint64_t sequence , const uint8_t head_hash [ 32 ] , uint8_t out [ 32 ] )",
+      "signature_sha256": "df2a915351a201a6cd5d0792d33402d4f617c60d9cbe5299f1fae480d4007e34",
+      "status": "internal-unconsumed",
+      "symbol": "db2_vault_witness_leaf_hash"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_vault_witness_provider.h",
+          "line": 46
+        }
+      ],
+      "signature": "int db2_vault_witness_merkle_root ( const vault_witness_leaf_t * leaves , size_t count , uint8_t root [ 32 ] )",
+      "signature_sha256": "707713424f94cca1e7ba565b8de12eebfc570e439671bad7245553b8e7e8628e",
+      "status": "internal-unconsumed",
+      "symbol": "db2_vault_witness_merkle_root"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_vault_witness_provider.h",
+          "line": 48
+        }
+      ],
+      "signature": "int db2_vault_witness_record_digest ( const vault_witness_record_t * record , uint8_t digest [ 32 ] )",
+      "signature_sha256": "aa96f1ec865a5a70b6931923f60e45e4bdeb352691b6d305d9b660640c6dcf98",
+      "status": "internal-unconsumed",
+      "symbol": "db2_vault_witness_record_digest"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_vault_witness_provider.h",
+          "line": 49
+        }
+      ],
+      "signature": "int db2_vault_witness_record_encode ( const vault_witness_record_t * record , uint8_t * out , size_t cap , size_t * out_len )",
+      "signature_sha256": "ddd4b8f4ebf43ad42a4f79db34f742cd05101ea5ff7b4ef10d263b4580c3c18f",
+      "status": "internal-unconsumed",
+      "symbol": "db2_vault_witness_record_encode"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_vault_witness_provider.h",
+          "line": 51
+        }
+      ],
+      "signature": "int db2_vault_witness_shard_key_hash ( const char * tenant , const char * provider , uint8_t out [ 8 ] )",
+      "signature_sha256": "be11cf343adab9426c2c98d09940d73b0267221c7f24fead7b0002579ce5e381",
+      "status": "internal-unconsumed",
+      "symbol": "db2_vault_witness_shard_key_hash"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_vault_witness_provider.h",
+          "line": 52
+        }
+      ],
+      "signature": "int db2_vault_witness_signer_identity ( uint8_t public_key [ 32 ] , uint8_t key_id [ 16 ] )",
+      "signature_sha256": "ed00f2cad86214840ceebbdfdb85c3ed56129bdd4a03665a32c7571c645822d9",
+      "status": "internal-unconsumed",
+      "symbol": "db2_vault_witness_signer_identity"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_vault_witness_provider.h",
+          "line": 53
+        }
+      ],
+      "signature": "int db2_vault_witness_verify_checkpoint_run ( const vault_witness_checkpoint_t * checkpoints , size_t count , size_t * gap_after_index )",
+      "signature_sha256": "1f99f0ab7051124f2b781873bf62d0d533aa40e222a088c70ba25fe3d305907d",
+      "status": "internal-unconsumed",
+      "symbol": "db2_vault_witness_verify_checkpoint_run"
+    },
+    {
+      "consumers": [
         "src/kb/kb.c",
         "src/modules/memory/memory_core_helpers_b.c",
         "src/tests/test_kb_http_routes.c"
@@ -24214,15 +24391,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "bcdab3f05e53fe93b4ee1a49195c888bd61a0177c6996b00a52e5384524c3ac5",
+  "fingerprint": "71465bb9e9b26a4aece1996e33d5529ac0add7256bf8490c5d50a9e962d226a3",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 895,
-    "declarations": 1384,
-    "headers": 136,
-    "internal_unconsumed": 144,
-    "private_test_only": 283,
+    "declarations": 1397,
+    "headers": 137,
+    "internal_unconsumed": 153,
+    "private_test_only": 287,
     "reviewed": 62
   }
 }

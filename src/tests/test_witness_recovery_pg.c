@@ -43,6 +43,7 @@
 #include "modules/vault/vault_witness_offline.h"
 #include "modules/vault/vault_witness_signer.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
+#include "vault_witness_provider_fixture.h"
 
 #define MUST(cond, ...)                                                                            \
    do                                                                                              \
@@ -111,6 +112,7 @@ static int append_record(void *conn, const char *sid)
 
 int main(void)
 {
+   test_register_vault_witness_provider();
    const char *url = getenv("AIMEE_TEST_PG_URL");
    if (!url || !url[0])
    {

@@ -6,8 +6,8 @@
   closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
   support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
   deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
-  link remains blocked by 12 sibling contracts. Its closure records 151 external symbols: 139
-  declared system links and those 12 injected contracts; portable API debt is zero. This is
+  link closure is complete. Its closure records 139 external symbols, all declared system links;
+  packaging, injected-contract, portable API, private-implementation, and dead-code debt are zero. This is
   explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
@@ -603,6 +603,13 @@ functions through one copied vault-owner vtable. DB2 clips the returned absolute
 own monotonic per-call window, re-parses lowercase operation IDs and compares the provider's bytes,
 and clears failed receipt and digest outputs. Missing or inconsistent providers stop the database
 operation before it can advance the reseal state machine.
+
+Witness database paths now receive canonical checkpoint/record encoding, hashing, sparse-Merkle,
+export framing, signer identity, signing, and verification through one copied vault-owner vtable.
+DB2 validates enum ranges, encoded lengths, frame sizes, shard ceilings, and exact success, and it
+cleanses partial hashes, identities, signatures, and wire outputs when the provider is absent or
+malformed. This closes the final 12 sibling calls: the standalone C closure now contains only its
+139 declared system links.
 
 The closure compiler now matches the production standalone mode by disabling DB1 and the DB2
 SQLite test shim. SQLite compatibility remains tested separately, but its weak DB1 cache hook and

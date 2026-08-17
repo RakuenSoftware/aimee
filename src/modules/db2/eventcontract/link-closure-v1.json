@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "09e5068c8fe698ff5994bc732b0eb2e0296278f4",
-  "source_fingerprint": "ea317b3559209b0ecf97c6ef8fbcfde8a0ebf326e430d0e9beab035e422bcf7d",
+  "source_revision": "3afb99def0867a676b99c6157874594225748bdd",
+  "source_fingerprint": "7ef227f8a40d5d55fe9af9a588c09e4cac423984007fb34e897467523ad3e2d3",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -3178,102 +3178,6 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "vault_witness_checkpoint_digest",
-      "references": [
-        "src/modules/db2/c/db2_witness_checkpoint.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_witness_checkpoint_encode",
-      "references": [
-        "src/modules/db2/c/db2_witness_emit.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_witness_checkpoint_sign",
-      "references": [
-        "src/modules/db2/c/db2_witness_checkpoint.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_witness_checkpoint_verify",
-      "references": [
-        "src/modules/db2/c/db2_witness_checkpoint.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_witness_export_frame",
-      "references": [
-        "src/modules/db2/c/db2_witness_emit.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_witness_leaf_hash",
-      "references": [
-        "src/modules/db2/c/db2_witness_checkpoint.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_witness_merkle_root",
-      "references": [
-        "src/modules/db2/c/db2_witness_checkpoint.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_witness_record_digest",
-      "references": [
-        "src/modules/db2/c/db2_witness_emit.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_witness_record_encode",
-      "references": [
-        "src/modules/db2/c/db2_witness_emit.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_witness_shard_key_hash",
-      "references": [
-        "src/modules/db2/c/db2_witness_checkpoint.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_witness_signer_identity",
-      "references": [
-        "src/modules/db2/c/db2_witness_checkpoint.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_witness_verify_checkpoint_run",
-      "references": [
-        "src/modules/db2/c/db2_witness_checkpoint.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "vsnprintf",
       "references": [
         "src/modules/db2/c/db2_reembed.c",
@@ -3287,15 +3191,15 @@
   "summary": {
     "translation_units": 138,
     "descriptor_support_units": 22,
-    "unresolved_symbols": 151,
+    "unresolved_symbols": 139,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 12,
+      "injected-module-contract": 0,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "847015f1637c989558ba9cbe4156e277e2e9b5891fe6c086a095a4b762f5386f"
+  "fingerprint": "15576353f7b42b2a08bf35a4603b788c42227e56f9e68738b4e874bdafffb076"
 }

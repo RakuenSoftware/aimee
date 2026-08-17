@@ -222,6 +222,39 @@ extern "C"
     * operations. The value is copied; NULL removes it and DB2 fails closed. */
    void aimee_db2_register_vault_reseal_provider(const aimee_db2_vault_reseal_provider_t *provider);
 
+   struct vault_witness_checkpoint;
+   struct vault_witness_anchor;
+   struct vault_witness_leaf;
+   struct vault_witness_record;
+   typedef struct
+   {
+      int (*checkpoint_digest)(const struct vault_witness_checkpoint *checkpoint,
+                               uint8_t digest[32]);
+      int (*checkpoint_encode)(const struct vault_witness_checkpoint *checkpoint, uint8_t *out,
+                               size_t cap, size_t *out_len);
+      int (*checkpoint_sign)(struct vault_witness_checkpoint *checkpoint);
+      int (*checkpoint_verify)(const struct vault_witness_checkpoint *checkpoint,
+                               const struct vault_witness_anchor *anchors, size_t anchor_count);
+      int (*export_frame)(int kind, const uint8_t *payload, size_t payload_len, uint8_t *out,
+                          size_t cap, size_t *out_len);
+      int (*leaf_hash)(const char *tenant, const char *provider, uint64_t sequence,
+                       const uint8_t head_hash[32], uint8_t out[32]);
+      int (*merkle_root)(const struct vault_witness_leaf *leaves, size_t count, uint8_t root[32]);
+      int (*record_digest)(const struct vault_witness_record *record, uint8_t digest[32]);
+      int (*record_encode)(const struct vault_witness_record *record, uint8_t *out, size_t cap,
+                           size_t *out_len);
+      int (*shard_key_hash)(const char *tenant, const char *provider, uint8_t out[8]);
+      int (*signer_identity)(uint8_t public_key[32], uint8_t key_id[16]);
+      int (*verify_checkpoint_run)(const struct vault_witness_checkpoint *checkpoints, size_t count,
+                                   size_t *gap_after_index);
+   } aimee_db2_vault_witness_provider_t;
+
+   /* Install the vault owner's canonical witness codec, hashing, signing, and
+    * verification operations at startup. The value is copied; NULL removes it,
+    * and absent or malformed provider results fail closed. */
+   void
+   aimee_db2_register_vault_witness_provider(const aimee_db2_vault_witness_provider_t *provider);
+
 #ifdef __cplusplus
 }
 #endif

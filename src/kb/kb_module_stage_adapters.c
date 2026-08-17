@@ -16,6 +16,12 @@
 #include "vault_kek_check.h"
 #include "vault_mutation_budget.h"
 #include "vault_reseal_receipt.h"
+#include "vault_witness_checkpoint.h"
+#include "vault_witness_export.h"
+#include "vault_witness_merkle.h"
+#include "vault_witness_record.h"
+#include "vault_witness_signer.h"
+#include "vault_witness_verify.h"
 
 #include <aimee/audit/audit_worm_chain.h>
 #include <aimee/audit/obs_bus.h>
@@ -70,6 +76,44 @@ static const aimee_db2_vault_reseal_provider_t vault_reseal_provider = {
     .operation_id_from_hex = vault_reseal_operation_id_from_hex,
     .receipt_decode = vault_reseal_receipt_decode,
     .receipt_digest = vault_reseal_receipt_digest,
+};
+
+static int vault_witness_checkpoint_verify_contract(const vault_witness_checkpoint_t *checkpoint,
+                                                    const vault_witness_anchor_t *anchors,
+                                                    size_t anchor_count)
+{
+   return (int)vault_witness_checkpoint_verify(checkpoint, anchors, anchor_count);
+}
+
+static int vault_witness_export_frame_contract(int kind, const uint8_t *payload, size_t payload_len,
+                                               uint8_t *out, size_t cap, size_t *out_len)
+{
+   if (kind < VAULT_WITNESS_EXPORT_RECORD || kind > VAULT_WITNESS_EXPORT_SNAPSHOT)
+      return -1;
+   return vault_witness_export_frame((vault_witness_export_kind_t)kind, payload, payload_len, out,
+                                     cap, out_len);
+}
+
+static int
+vault_witness_verify_checkpoint_run_contract(const vault_witness_checkpoint_t *checkpoints,
+                                             size_t count, size_t *gap_after_index)
+{
+   return (int)vault_witness_verify_checkpoint_run(checkpoints, count, gap_after_index);
+}
+
+static const aimee_db2_vault_witness_provider_t vault_witness_provider = {
+    .checkpoint_digest = vault_witness_checkpoint_digest,
+    .checkpoint_encode = vault_witness_checkpoint_encode,
+    .checkpoint_sign = vault_witness_checkpoint_sign,
+    .checkpoint_verify = vault_witness_checkpoint_verify_contract,
+    .export_frame = vault_witness_export_frame_contract,
+    .leaf_hash = vault_witness_leaf_hash,
+    .merkle_root = vault_witness_merkle_root,
+    .record_digest = vault_witness_record_digest,
+    .record_encode = vault_witness_record_encode,
+    .shard_key_hash = vault_witness_shard_key_hash,
+    .signer_identity = vault_witness_signer_identity,
+    .verify_checkpoint_run = vault_witness_verify_checkpoint_run_contract,
 };
 
 static int css_render_compare(const char *before_json, const char *after_json, int *before_valid,
@@ -509,6 +553,7 @@ void kb_module_stage_adapters_configure(void)
                                              css_extract_class_tokens);
    aimee_db2_register_vault_crypto_provider(&vault_crypto_provider);
    aimee_db2_register_vault_reseal_provider(&vault_reseal_provider);
+   aimee_db2_register_vault_witness_provider(&vault_witness_provider);
    kb_curator_grounding_register_provider(grounding_decide);
    kb_route_acl_register_authorization_provider(control_web_authorize);
 }

@@ -421,11 +421,16 @@ deadline by its local monotonic per-call window, independently validates lowerca
 against decoded bytes, and cleanses failed receipt/digest output. This moves total debt from 157 to
 151 and injected-contract debt from 18 to 12.
 
-The remaining 12 non-system rows are sibling-contract migration debt. Session identity, briefing
-rendering, executable lifecycle, configuration, memory, and other host calls must close through
-their reviewed process contracts before activation; they are not portable-support candidates. Rows
-may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide
-host coupling inside support copies.
+The thirty-fourth reduction moves DB2's 12 witness hashing, canonical encoding, framing, signing,
+and verification calls behind one startup-installed vault-owner vtable. DB2 independently bounds
+wire and Merkle inputs, validates every provider verdict and encoded length, and cleanses hashes,
+signatures, identities, and partial frames after absence or failure. This moves total debt from 151
+to 139 and injected-contract debt from 12 to zero.
+
+The remaining 139 unresolved rows are declared system links. The standalone C closure therefore
+has zero packaging, injection, promotion, private-implementation, or dead-code debt. This completes
+the S2 C closure gate; it does not activate the process owner or complete the S4/S6 ownership and Go
+provider transitions.
 
 The gate rejects legacy source additions or omissions, support path escape, symlinks, content drift,
 new unresolved symbols, non-system reference growth, missing evidence, and any attempt to make the
