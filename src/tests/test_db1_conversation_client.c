@@ -21,6 +21,8 @@
 /* --- the stubbed bus ------------------------------------------------------ */
 
 #define WM_LIST_WIDTH 8u
+/* A column is a list one value wide. */
+#define WM_COLUMN_WIDTH 1u
 
 static int stub_available = 1;
 static aimee_module_call_result_t stub_result = AIMEE_MODULE_CALL_OK;
@@ -35,6 +37,8 @@ static int stub_extra_values;
 /* When set, the reply is this single value rather than rows: the returned
    string path answers with one. */
 static const char *stub_text;
+/* Rows are this many values wide; a column reply is one. */
+static uint32_t stub_width = WM_LIST_WIDTH;
 
 int obs_bus_module_available(uint32_t event_kind)
 {
@@ -86,14 +90,14 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
       *response_len = 12u + n;
       return AIMEE_MODULE_CALL_OK;
    }
-   uint32_t values = stub_rows * WM_LIST_WIDTH + (uint32_t)stub_extra_values;
+   uint32_t values = stub_rows * stub_width + (uint32_t)stub_extra_values;
    aimee_db1_put_u32(out, stub_status);
    aimee_db1_put_u32(out + 4u, values);
    uint32_t at = 8u;
    for (uint32_t i = 0; i < values; ++i)
    {
       char text[64];
-      cell_text(text, sizeof text, i / WM_LIST_WIDTH, i % WM_LIST_WIDTH);
+      cell_text(text, sizeof text, i / stub_width, i % stub_width);
       uint32_t n = (uint32_t)strlen(text);
       if (response_capacity < at + 4u + n)
          return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
@@ -116,6 +120,7 @@ static void reset(void)
    stub_rows = 0;
    stub_extra_values = 0;
    stub_text = NULL;
+   stub_width = WM_LIST_WIDTH;
 }
 
 /* --- reading back the frame the client emitted ---------------------------- */
@@ -319,9 +324,59 @@ static void test_an_unreachable_store_returns_no_string(void)
    printf("  PASS: test_an_unreachable_store_returns_no_string\n");
 }
 
+/* A column is a list whose row is one value rather than a struct: the same
+   frame and the same arithmetic, width one. The value lands in the caller's
+   fixed-width row directly, with no member to name. */
+static void test_a_column_fills_the_callers_rows(void)
+{
+   reset();
+   stub_width = WM_COLUMN_WIDTH;
+   stub_rows = 3u;
+   char ids[8][WM_SESSION_ID_LEN];
+   int found = db1_wm_search_session_ids("needle", ids, 8);
+   assert(found == 3);
+   /* member 0 of each row, because a column has only member 0. */
+   assert(strcmp(ids[0], "1000") == 0);
+   assert(strcmp(ids[1], "1001") == 0);
+   assert(strcmp(ids[2], "1002") == 0);
+   assert(ids[3][0] == '\0');
+   printf("  PASS: test_a_column_fills_the_callers_rows\n");
+}
+
+/* The same refusals a struct list makes, because it is the same code path:
+   an empty column is zero rows, and a reply longer than the caller's array is
+   refused rather than truncated. */
+static void test_a_column_refuses_what_a_row_list_refuses(void)
+{
+   reset();
+   stub_width = WM_COLUMN_WIDTH;
+   char ids[4][WM_SESSION_ID_LEN];
+   assert(db1_wm_search_session_ids("needle", ids, 4) == 0);
+
+   reset();
+   stub_width = WM_COLUMN_WIDTH;
+   stub_rows = 9u;
+   assert(db1_wm_search_session_ids("needle", ids, 4) == -1);
+
+   reset();
+   stub_width = WM_COLUMN_WIDTH;
+   stub_status = AIMEE_DB1_STATUS_FAILED;
+   stub_rows = 1u;
+   assert(db1_wm_search_session_ids("needle", ids, 4) == -1);
+
+   reset();
+   assert(db1_wm_search_session_ids(NULL, ids, 4) == -1);
+   assert(db1_wm_search_session_ids("needle", NULL, 4) == -1);
+   assert(db1_wm_search_session_ids("needle", ids, 0) == -1);
+   assert(stub_calls == 0);
+   printf("  PASS: test_a_column_refuses_what_a_row_list_refuses\n");
+}
+
 int main(void)
 {
    printf("db1_conversation_client:\n");
+   test_a_column_fills_the_callers_rows();
+   test_a_column_refuses_what_a_row_list_refuses();
    test_a_returned_string_is_the_callers_to_free();
    test_an_empty_returned_string_is_a_miss();
    test_an_unreachable_store_returns_no_string();

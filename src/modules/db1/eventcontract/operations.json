@@ -1047,6 +1047,58 @@
     "fields": [],
     "max_bytes": 0
    }
+  },
+  {
+   "family": "conversation",
+   "id": 8,
+   "name": "wm_search_session_ids",
+   "c_name": "db1_wm_search_session_ids",
+   "c_params": [
+    "query",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "query",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64,
+     "column": {
+      "kind": "text",
+      "width": "WM_SESSION_ID_LEN"
+     }
+    },
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
   }
  ]
 }

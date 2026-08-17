@@ -103,18 +103,18 @@ LARGE = re.compile(r"(json|metadata|content|prompt|body|payload|text|summary|blo
 # What a tag still needs from the wire. A tag absent from this map needs
 # nothing: text, int, out_text, out_num, struct_in and struct_out all cross
 # today, the last two since struct flattening.
-# Rows of a struct cross today. Rows of a single value do not: the generator
-# builds a row out of a declared member list, and a bare int64_t or a
-# char (*)[N] has no members to declare. Same shape, width one -- but it is
-# generator work that has not been done, so it is counted as missing.
+# Rows cross today, struct or column: a column is a list one value wide, and
+# char (*out)[N] lands straight in the caller's fixed-width row. The NUMERIC
+# column -- int64_t *out -- is the one that does not, only because no family
+# that can be activated yet has one to prove it against.
 NEEDS = {
-    "out_column": "column",
+    "out_column_numeric": "column",
     "alloc_out": "alloc",
     "json_in": "json",
     "other": "unknown",
 }
 CAPABILITY = {
-    "column": "column -- a list whose row is one value rather than a struct",
+    "column": "column -- a list of one NUMERIC value per row (text columns cross)",
     "alloc": "alloc -- a callee-allocated out-parameter, T ** or char **",
     "json": "json -- a cJSON tree, which the wire carries but the client must build",
     "status": "status -- a return contract beyond ok/miss/fail, per operation",
@@ -212,15 +212,15 @@ def classify(params: str, enums: frozenset[str] = frozenset()) -> list[str]:
             # int64_t matches the _t pattern too, so a column of integers would
             # otherwise be counted as a struct it has no members for.
             row = STRUCT_OUT.search(current).group(1)
-            tags.append("out_column" if row in SCALAR_TYPES else "out_rows")
+            tags.append("out_column_numeric" if row in SCALAR_TYPES else "out_rows")
             index += 2
             continue
         if following and OUT_TEXT_ROWS.search(current) and ARRAY_LEN.search(following):
-            tags.append("out_column")
+            tags.append("out_rows")
             index += 2
             continue
         if OUT_TEXT_ROWS.search(current):
-            tags.append("out_column")
+            tags.append("out_rows")
         elif JSON_IN.search(current):
             tags.append("json_in")
         elif ALLOC_OUT.search(current):

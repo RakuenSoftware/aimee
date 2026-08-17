@@ -332,8 +332,48 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
             # the rows, which one bounds them, and how many the stage will build.
             # The bound is the caller's, and it is also the allocation: a stage
             # that trusted it would let a caller ask for an arbitrary array.
-            listed = keys(reply["list"], {"out", "bound", "max_rows"}, f"{name}.reply.list")
-            if "struct" not in reply:
+            allowed_list = {"out", "bound", "max_rows"}
+            if "column" in reply["list"]:
+                allowed_list = allowed_list | {"column"}
+            listed = keys(reply["list"], allowed_list, f"{name}.reply.list")
+            # A column is a list whose row is ONE value rather than a struct:
+            # int64_t *out, or char (*out)[WIDTH]. Same frame, same arithmetic,
+            # width one -- the only difference is that the row has no member to
+            # name, so the catalog says what the row's C type is instead.
+            if "column" in listed:
+                column = keys(listed["column"], {"kind", "width"}
+                              if "width" in listed["column"] else {"kind"},
+                              f"{name}.reply.list.column")
+                if "struct" in reply:
+                    fail("reply-column", f"{name} is a column, so it declares no row struct")
+                # Text only, deliberately. The numeric column -- int64_t *out --
+                # exists in the survey but in no family that can be activated
+                # yet, so generating for it would ship a path nothing exercises.
+                # The generator already handles it; lifting this check and
+                # declaring the operation is the whole change when a family
+                # arrives that has one.
+                if str(column["kind"]) != "text":
+                    fail("reply-column",
+                         f"{name} column kind must be text: a numeric column has no operation "
+                         f"to prove it yet")
+                if (str(column["kind"]) == "text") != ("width" in column):
+                    fail("reply-column",
+                         f"{name} column of text needs a width, and a numeric one has none")
+                if "width" in column and not re.fullmatch(r"[A-Z][A-Z0-9_]*", str(column["width"])):
+                    fail("reply-column",
+                         f"{name} column width must be a C identifier, not a literal: the row is "
+                         f"as wide as the header says it is")
+                # reply["fields"] rather than the reply_fields local, which is
+                # not assigned until below: reading it here would validate the
+                # PREVIOUS operation's reply and pass or fail for its reasons.
+                declared_fields = reply["fields"]
+                if not isinstance(declared_fields, list) or len(declared_fields) != 1:
+                    fail("reply-column", f"{name} column declares exactly one value per row")
+                if str(declared_fields[0]["type"]) != str(column["kind"]):
+                    fail("reply-column",
+                         f"{name} column kind {column['kind']!r} disagrees with its declared "
+                         f"field type {declared_fields[0]['type']!r}")
+            elif "struct" not in reply:
                 fail("reply-list", f"{name} declares a list but no row struct")
             if "c_params" not in operation:
                 fail("reply-list", f"{name} declares a list but names no C parameters")
@@ -943,8 +983,12 @@ def client_bytes(catalog: dict[str, object], family: dict[str, object],
     # A returned string maps its own miss (NULL) and never goes through this,
     # so a family of writes, rows and returned strings has no use for it -- and
     # an unused static is a -Werror failure.
-    plain_read = any("struct" not in o["reply"] and o["reply"]["fields"]
-                     and o.get("c_returns") != "text" for o in operations)
+    # A plain read is the only shape that goes through read_result: not a row,
+    # not a list (a COLUMN has fields and no struct, so it looks like a read
+    # until you ask), and not a returned string, which maps its own miss.
+    plain_read = any("struct" not in o["reply"] and "list" not in o["reply"]
+                     and o["reply"]["fields"] and o.get("c_returns") != "text"
+                     for o in operations)
     reader = ("""/* A read answers found(1) / not-found(0) / error(-1), which is what the direct
    implementation returns and what its callers already branch on. */
 static int read_result(int status, const char *value_out)
@@ -981,6 +1025,7 @@ static int read_result(int status, const char *value_out)
             # only the remaining parameters map onto the fields, in order.
             row_out = str(listed["out"])
             bound = str(listed["bound"])
+            column = listed.get("column")
             inputs = [p for p in names if p != row_out]
             outputs = [row_out]
         else:
@@ -1004,7 +1049,14 @@ static int read_result(int status, const char *value_out)
             # Re-order to the C signature: the declarations above are in field
             # order, which is the same order minus the rows parameter.
             declared = dict(zip(inputs, params))
-            declared[row_out] = f"{out_struct} *{row_out}"
+            if column:
+                # char (*out)[WIDTH] for a text column, int64_t *out for a
+                # numeric one: the row's own C type, spelled as the header does.
+                declared[row_out] = (
+                    f"char (*{row_out})[{column['width']}]" if str(column["kind"]) == "text"
+                    else f"{'int64_t' if column['kind'] == 'int64' else 'int'} *{row_out}")
+            else:
+                declared[row_out] = f"{out_struct} *{row_out}"
             params = [declared[p] for p in names]
             guards += [f"!{row_out}", f"{bound} <= 0"]
         elif out_struct:
@@ -1102,8 +1154,10 @@ static int read_result(int status, const char *value_out)
                     body.append(f"      caps[{at}] = sizeof {cell};")
                     slot += 1
                 else:
-                    body.append(f"      values[{at}] = {row_out}[row].{member};")
-                    body.append(f"      caps[{at}] = sizeof {row_out}[row].{member};")
+                    cell = (f"{row_out}[row]" if column
+                            else f"{row_out}[row].{member}")
+                    body.append(f"      values[{at}] = {cell};")
+                    body.append(f"      caps[{at}] = sizeof {cell};")
             body.append("   }")
             body.append("   uint32_t filled = 0;")
             body.append(f"   int status = call_stage({op_symbol}, fields, {arity}, values, caps,")
@@ -1126,7 +1180,9 @@ static int read_result(int status, const char *value_out)
                     if kind in ("int", "int64"):
                         cell = f"scratch[row * {len(numeric)}u + {slot}u]"
                         conv = ("(int)strtol" if kind == "int" else "(int64_t)strtoll")
-                        body.append(f"      {row_out}[row].{member} = {conv}({cell}, NULL, 10);")
+                        target = (f"{row_out}[row]" if column
+                                  else f"{row_out}[row].{member}")
+                        body.append(f"      {target} = {conv}({cell}, NULL, 10);")
                         slot += 1
                 body.append("   }")
                 body.append("   free(scratch);")
@@ -1493,6 +1549,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             numeric = [i for i, (_, k) in enumerate(members) if k in ("int", "int64")]
             row_out = str(listed["out"])
             bound = str(listed["bound"])
+            column = listed.get("column")
             inputs = [p for p in operation["c_params"] if p != row_out]
             at = inputs.index(bound)
             held = args[at]
@@ -1502,7 +1559,11 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             parse.append(f"      if ({held} <= 0 || {held} > {listed['max_rows']})\n"
                          f"      {{\n         free(scratch);\n"
                          f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n      }}\n")
-            parse.append(f"      {out_struct} *found = calloc((size_t){held}, sizeof *found);\n"
+            row_decl = (
+                (f"char (*found)[{column['width']}]" if str(column["kind"]) == "text"
+                 else f"{'int64_t' if column['kind'] == 'int64' else 'int'} *found")
+                if column else f"{out_struct} *found")
+            parse.append(f"      {row_decl} = calloc((size_t){held}, sizeof *found);\n"
                          f"      if (!found)\n"
                          f"      {{\n         free(scratch);\n"
                          f"         return AIMEE_MODULE_STATUS_INTERNAL;\n      }}\n"
@@ -1513,12 +1574,14 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             assigns = "".join(
                 f"            cells[row * {width}u + {i}u] = "
                 + (f"numbers[row * {len(numeric)}u + {numeric.index(i)}u];\n"
-                   if kind in ("int", "int64") else f"found[row].{member};\n")
+                   if kind in ("int", "int64")
+                   else (f"found[row];\n" if column else f"found[row].{member};\n"))
                 for i, (member, kind) in enumerate(members))
             converts = "".join(
                 f"            snprintf(numbers[row * {len(numeric)}u + {numeric.index(i)}u], 24,\n"
                 f"                     \"{'%lld' if kind == 'int64' else '%d'}\", "
-                f"{'(long long)' if kind == 'int64' else ''}found[row].{member});\n"
+                f"{'(long long)' if kind == 'int64' else ''}"
+                f"{'found[row]' if column else f'found[row].{member}'});\n"
                 for i, (member, kind) in enumerate(members) if kind in ("int", "int64"))
             numbers = (f"         char (*numbers)[24] = malloc((size_t)produced * "
                        f"{len(numeric)}u * sizeof *numbers);\n" if numeric else "")

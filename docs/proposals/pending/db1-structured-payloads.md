@@ -104,8 +104,14 @@ Three things stay outside the wire, and none of them are payload shapes:
    value* rather than a struct — `int64_t *out, int max`, or
    `char (*out)[N], int max`. Same shape, width one, but the generator builds a
    row from a declared member list and a bare scalar has no members to declare.
-   Five operations across four sources; the survey now counts it separately as
-   `column`.
+
+   The text form is now done: a column declares its row's C type instead of a
+   member list, and the value lands straight in the caller's fixed-width row.
+   It was a smaller change than the name suggests, because a column is a list
+   of width one and the arithmetic was already right. The NUMERIC form
+   (`int64_t *out`) is generated but not enabled — no family that can be
+   activated yet has one, and shipping a path nothing exercises is how the
+   unreachable stage happened. Lifting one check enables it.
 4. **Migrate**, now by whole source, since that is the unit that can move.
 
 Steps 1 and 2 are each a day's work of the kind already done twice — the integer

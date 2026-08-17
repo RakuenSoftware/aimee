@@ -449,6 +449,65 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
       rc = db1_payload_rewrite_record(field[0], parsed1, parsed2, parsed3, field[4], field[5]);
       break;
    }
+   case AIMEE_DB1_OP_WM_SEARCH_SESSION_IDS:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed1 <= 0 || parsed1 > 64)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      char (*found)[WM_SESSION_ID_LEN] = calloc((size_t)parsed1, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_wm_search_session_ids(field[0], found, parsed1);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed1)
+                                 ? (uint32_t)rc : (uint32_t)parsed1;
+         const char **cells = malloc((size_t)produced * 1u * sizeof *cells);
+         if (!cells)
+         {
+            free(cells);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            cells[row * 1u + 0u] = found[row];
+         }
+         rows = cells;
+         row_count = produced * 1u;
+      }
+      listed = 1;
+      break;
+   }
    default:
       free(scratch);
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
