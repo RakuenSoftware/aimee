@@ -6,8 +6,8 @@
   closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
   support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
   deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
-  link remains blocked by 59 sibling contracts. Its closure records 198 external symbols: 139
-  declared system links and those 59 injected contracts; portable API debt is zero. This is
+  link remains blocked by 57 sibling contracts. Its closure records 196 external symbols: 139
+  declared system links and those 57 injected contracts; portable API debt is zero. This is
   explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
@@ -483,6 +483,13 @@ reproducibly generated fallback parser. It preserves the default no-tree-sitter 
 shared C system-header policy, and omits the separate import-identity helpers. Normal and hardened
 parity replay all supported language families against the authoritative monolith. Process lifecycle,
 session, and briefing helpers remain sibling-contract work rather than support-copy candidates.
+
+The next bounded injected contract owns the two deterministic co-change policy functions consumed
+by canonical indexing. Its private pair ABI, lowercase object-id validation, deduplication,
+bulk-commit gate, lexical ordering, and output cap are pinned against the authoritative monolith in
+normal and hardened parity tests. The implementation imports only four C runtime functions and has
+no git, DB, bus, provider, pgvector, DB3, allocation, configuration, or logging edge. This resolves
+two sibling calls without giving the future standalone process a callback into KB.
 
 The three former `kb_service_backend_{memory,agent,export}.c` units are not support candidates or DB2
 implementation. They compose KB JSON/RPC responses while invoking high-level memory, dashboard,

@@ -371,6 +371,28 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "dependencies while exporting the complete canonical API and importing only its "
                 "reviewed C runtime surface; it contains no DB2, bus, provider, or database code.",
 }, {
+    "path": "src/modules/db2/support/cochange_primitives.c",
+    "source_sha256": "26bf099472cd22f26ced227013f0fb7ec056ff8d20099a13e68e550c27da4cb1",
+    "header": "src/modules/db2/support/db2_cochange.h",
+    "header_sha256": "27c4c5592af28510e924a26adcd77de8a4847ba4cef17df89e3deab60e1deb03",
+    "defines": ["cochange_is_hex_sha", "cochange_pairs_for_commit"],
+    "resolves": ["cochange_is_hex_sha", "cochange_pairs_for_commit"],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_cochange.h", "stdio.h", "stdlib.h", "string.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": ["memcpy", "qsort", "snprintf", "strcmp"],
+    "base_references": {
+        "cochange_is_hex_sha": ["src/modules/db2/c/canonical_index.c"],
+        "cochange_pairs_for_commit": ["src/modules/db2/c/canonical_index.c"],
+    },
+    "provenance": "The two pure co-change policy definitions are promoted from src/cochange.c; "
+                  "both DB2 calls are pinned to canonical_index.c.",
+    "evidence": "The descriptor owns the fixed pair ABI, lowercase object-id validator, "
+                "deduplication, bulk-commit gate, lexical ordering, and output cap. Monolith "
+                "parity and sanitizer tests cover boundary inputs; the implementation imports "
+                "only C runtime functions and contains no git, DB, bus, provider, pgvector, "
+                "DB3, allocation, configuration, or logging dependency.",
+}, {
     "path": "src/modules/db2/support/dstr_primitives.c",
     "source_sha256": "ae448e0ae6e0464922042536b77ab396ea230d5ba16ec977e003ecd614cf22ab",
     "header": "src/modules/db2/support/db2_dstr.h",

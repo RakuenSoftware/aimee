@@ -110,9 +110,9 @@ the process boundary while their storage calls migrate to generated DB2 clients.
 calls as injected DB2 callbacks would recreate the monolith inside the module. The
 probe compiles each unit plus exact descriptor-owned support, combines only those objects with a
 relocatable link, supplies no archive, shared library, helper stub, or weak definition, and records
-the 198 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
+the 196 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
 disposition and rationale. The current ledger contains 139 explicit system-link dependencies, zero
-remaining vendored/generated inputs, 59 sibling or KB contracts to inject, and zero support APIs to
+remaining vendored/generated inputs, 57 sibling or KB contracts to inject, and zero support APIs to
 promote. The standalone-link exit condition requires zero entries in the latter three groups; a
 classified ledger alone is not enough.
 
@@ -274,7 +274,14 @@ and spans, and calls for all sixteen supported language families plus an unknown
 moves total debt from 203 to 198 and portable promotion debt from 5 to 0 without adding DB, bus,
 provider, pgvector, process, filesystem, network, logging, or configuration imports.
 
-The remaining 59 non-system rows are sibling-contract migration debt. Session identity, briefing
+The fourteenth reduction realizes the two pure co-change calls as one bounded injected contract.
+Its private pair ABI preserves object-id validation, deduplication, the bulk-commit gate, lexical
+ordering, and output truncation. Normal and ASan/UBSan parity cover empty, duplicate, unordered,
+boundary-length, hostile object-id, gated, and capped inputs against the authoritative monolith.
+This moves total debt from 198 to 196 and injected-contract debt from 59 to 57 without adding git,
+DB, bus, provider, pgvector, DB3, allocation, configuration, or logging dependencies.
+
+The remaining 57 non-system rows are sibling-contract migration debt. Session identity, briefing
 rendering, executable lifecycle, configuration, memory, and other host calls must close through
 their reviewed process contracts before activation; they are not portable-support candidates. Rows
 may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide

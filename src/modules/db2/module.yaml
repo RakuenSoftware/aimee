@@ -14,6 +14,7 @@
     "src/modules/db2/db3_route.c",
     "src/modules/db2/module_adapter.c",
     "src/modules/db2/support/cjson.c",
+    "src/modules/db2/support/cochange_primitives.c",
     "src/modules/db2/support/dstr_primitives.c",
     "src/modules/db2/support/extractor_primitives.c",
     "src/modules/db2/support/log_primitives.c",
@@ -43,6 +44,7 @@
   "private_headers": [
     "src/modules/db2/module_adapter.h",
     "src/modules/db2/support/cJSON.h",
+    "src/modules/db2/support/db2_cochange.h",
     "src/modules/db2/support/db2_dstr.h",
     "src/modules/db2/support/db2_extractors.h",
     "src/modules/db2/support/db2_log.h",
@@ -60,6 +62,7 @@
     "src/tests/test_bus_db2_module.c",
     "src/tests/test_bus_db3.c",
     "src/tests/test_db2_cjson_support.c",
+    "src/tests/test_db2_cochange_support.c",
     "src/tests/test_db2_dstr_support.c",
     "src/tests/test_db2_extractor_support.c",
     "src/tests/test_db2_log_support.c",
