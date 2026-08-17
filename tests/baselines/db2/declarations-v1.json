@@ -1301,6 +1301,21 @@
     },
     {
       "consumers": [
+        "src/tests/test_kb.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_tenant.h",
+          "line": 66
+        }
+      ],
+      "signature": "void aimee_db2_register_identity_key_provider ( db2_identity_key_fn provider )",
+      "signature_sha256": "d448312cb8c977de2f4ec84e24b403686315382b4fab8179bd18b32da55c1b07",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_identity_key_provider"
+    },
+    {
+      "consumers": [
         "src/tests/test_artifacts.c"
       ],
       "locations": [
@@ -12871,7 +12886,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_tenant.h",
-          "line": 95
+          "line": 114
         }
       ],
       "signature": "int db2_maintenance_context_apply_current ( void )",
@@ -12886,7 +12901,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_tenant.h",
-          "line": 86
+          "line": 105
         }
       ],
       "signature": "int db2_maintenance_job_active ( void )",
@@ -12906,7 +12921,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_tenant.h",
-          "line": 84
+          "line": 103
         }
       ],
       "signature": "int db2_maintenance_job_enter ( db2_maintenance_worker_t worker , const char * project )",
@@ -12926,7 +12941,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_tenant.h",
-          "line": 85
+          "line": 104
         }
       ],
       "signature": "void db2_maintenance_job_leave ( void )",
@@ -12942,7 +12957,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_tenant.h",
-          "line": 76
+          "line": 95
         }
       ],
       "signature": "int db2_maintenance_scope_begin ( db2_maintenance_worker_t worker , const char * project )",
@@ -12962,7 +12977,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_tenant.h",
-          "line": 94
+          "line": 113
         }
       ],
       "signature": "int db2_maintenance_scope_begin_current ( void )",
@@ -12981,7 +12996,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_tenant.h",
-          "line": 77
+          "line": 96
         }
       ],
       "signature": "int db2_maintenance_scope_commit ( void )",
@@ -12998,7 +13013,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_tenant.h",
-          "line": 78
+          "line": 97
         }
       ],
       "signature": "void db2_maintenance_scope_rollback ( void )",
@@ -20013,6 +20028,21 @@
     },
     {
       "consumers": [
+        "src/tests/test_kb.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/db2_tenant.h",
+          "line": 67
+        }
+      ],
+      "signature": "int db2_tenant_identity_key ( const kb_principal_t * principal , char * out , size_t cap )",
+      "signature_sha256": "5758becb898b720ddc0c9645d78be79fc9a72bb42ff13184082ad68cd69c4c5b",
+      "status": "private-test-only",
+      "symbol": "db2_tenant_identity_key"
+    },
+    {
+      "consumers": [
         "src/tests/test_kb_tenancy_shim_guard.c",
         "src/tests/test_management_client_instance.c",
         "src/tests/test_org_model_catalog_target.c"
@@ -20020,7 +20050,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_tenant.h",
-          "line": 53
+          "line": 72
         }
       ],
       "signature": "int db2_tenant_require_pg ( void )",
@@ -20063,7 +20093,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_tenant.h",
-          "line": 63
+          "line": 82
         }
       ],
       "signature": "int db2_tenant_scope_begin ( const kb_principal_t * p , int64_t team )",
@@ -20105,7 +20135,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_tenant.h",
-          "line": 68
+          "line": 87
         }
       ],
       "signature": "int db2_tenant_scope_commit ( void )",
@@ -20143,7 +20173,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/db2_tenant.h",
-          "line": 69
+          "line": 88
         }
       ],
       "signature": "void db2_tenant_scope_rollback ( void )",
@@ -23814,15 +23844,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "6f7af39565097397a554afd4793960204fb554564972c8fd089826bc42683834",
+  "fingerprint": "b07670c56364254bdbeee5b2fb4036d0942502aed66fa9d60098399967e79976",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 895,
-    "declarations": 1357,
+    "declarations": 1359,
     "headers": 136,
     "internal_unconsumed": 141,
-    "private_test_only": 259,
+    "private_test_only": 261,
     "reviewed": 62
   }
 }

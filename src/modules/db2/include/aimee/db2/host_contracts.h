@@ -2,6 +2,8 @@
 #ifndef AIMEE_DB2_HOST_CONTRACTS_H
 #define AIMEE_DB2_HOST_CONTRACTS_H 1
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -94,6 +96,26 @@ extern "C"
    /* Install the memory embedding adapter. NULL removes it; DB2 then fails
     * embedding closed instead of linking or falling back to memory internals. */
    void aimee_db2_register_embed_provider(aimee_db2_embed_fn provider);
+
+   enum
+   {
+      AIMEE_DB2_PRINCIPAL_NONE = 0,
+      AIMEE_DB2_PRINCIPAL_OIDC = 1,
+      AIMEE_DB2_PRINCIPAL_CERT = 2,
+      AIMEE_DB2_PRINCIPAL_OWNER = 3,
+      AIMEE_DB2_PRINCIPAL_HOST = 4,
+   };
+
+   /* Derive the canonical tenant identity from verifier-owned principal fields.
+    * The provider returns 0 and writes one NUL-terminated key on success. DB2
+    * independently validates the returned owner/OIDC/certificate/host grammar;
+    * an absent provider or malformed answer leaves tenant entry fail closed. */
+   typedef int (*aimee_db2_identity_key_fn)(int kind, const char *issuer, const char *subject,
+                                            int authenticated, char *out, size_t cap);
+
+   /* Install the KB identity owner's canonical key adapter during process
+    * startup. NULL removes it. */
+   void aimee_db2_register_identity_key_provider(aimee_db2_identity_key_fn provider);
 
 #ifdef __cplusplus
 }

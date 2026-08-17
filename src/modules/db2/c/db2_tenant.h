@@ -16,6 +16,7 @@
 #ifndef DEC_DB2_TENANT_H
 #define DEC_DB2_TENANT_H 1
 
+#include <stddef.h>
 #include <stdint.h>
 #include "kb_identity.h"
 
@@ -46,6 +47,24 @@ extern "C"
       DB2_MAINTENANCE_CURATOR,
       DB2_MAINTENANCE_CODE_INDEXER,
    } db2_maintenance_worker_t;
+
+   enum
+   {
+      DB2_HOST_PRINCIPAL_NONE = 0,
+      DB2_HOST_PRINCIPAL_OIDC = 1,
+      DB2_HOST_PRINCIPAL_CERT = 2,
+      DB2_HOST_PRINCIPAL_OWNER = 3,
+      DB2_HOST_PRINCIPAL_HOST = 4,
+   };
+
+   typedef int (*db2_identity_key_fn)(int kind, const char *issuer, const char *subject,
+                                      int authenticated, char *out, size_t cap);
+
+   /* Internal declarations of the identity host contract exported publicly
+    * through <aimee/db2/host_contracts.h>. The helper is exposed here only for
+    * fail-closed contract tests; tenant entry is its production consumer. */
+   void aimee_db2_register_identity_key_provider(db2_identity_key_fn provider);
+   int db2_tenant_identity_key(const kb_principal_t *principal, char *out, size_t cap);
 
    /* Fail-closed guard: 0 when the live backend is Postgres (RLS-enforcing),
     * DB2_ERR_TENANT_REQUIRES_PG when it is the SQLite shim or DB2 is down. Called

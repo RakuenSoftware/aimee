@@ -3,6 +3,7 @@
 #include "kb_module_stage_adapters.h"
 
 #include "kb_curator_grounding.h"
+#include "kb_identity.h"
 #include "kb_mdl.h"
 #include "kb_route_acl.h"
 #include "aimee.h"
@@ -32,6 +33,13 @@
 #define KB_MODULE_EMBED_DEADLINE_NS (25ULL * 1000000000ULL)
 
 static atomic_uint_fast64_t next_trace = 1;
+
+_Static_assert((int)AIMEE_DB2_PRINCIPAL_NONE == (int)KB_PRIN_NONE, "DB2 principal NONE ABI drift");
+_Static_assert((int)AIMEE_DB2_PRINCIPAL_OIDC == (int)KB_PRIN_OIDC, "DB2 principal OIDC ABI drift");
+_Static_assert((int)AIMEE_DB2_PRINCIPAL_CERT == (int)KB_PRIN_CERT, "DB2 principal CERT ABI drift");
+_Static_assert((int)AIMEE_DB2_PRINCIPAL_OWNER == (int)KB_PRIN_OWNER,
+               "DB2 principal OWNER ABI drift");
+_Static_assert((int)AIMEE_DB2_PRINCIPAL_HOST == (int)KB_PRIN_HOST, "DB2 principal HOST ABI drift");
 
 static uint64_t monotonic_ns(void)
 {
@@ -344,6 +352,39 @@ static int embed_text(const char *text, const char *command, int input_type, flo
    return embed_over_module(text, command, input_type, out, max_dim);
 }
 
+static int identity_key(int kind, const char *issuer, const char *subject, int authenticated,
+                        char *out, size_t cap)
+{
+   kb_principal_t principal;
+   memset(&principal, 0, sizeof(principal));
+   if (!issuer || !subject || !out || cap < 2 || authenticated != 1 ||
+       strnlen(issuer, sizeof(principal.issuer)) == sizeof(principal.issuer) ||
+       strnlen(subject, sizeof(principal.subject)) == sizeof(principal.subject))
+      return -1;
+
+   switch (kind)
+   {
+   case AIMEE_DB2_PRINCIPAL_OIDC:
+      principal.kind = KB_PRIN_OIDC;
+      break;
+   case AIMEE_DB2_PRINCIPAL_CERT:
+      principal.kind = KB_PRIN_CERT;
+      break;
+   case AIMEE_DB2_PRINCIPAL_OWNER:
+      principal.kind = KB_PRIN_OWNER;
+      break;
+   case AIMEE_DB2_PRINCIPAL_HOST:
+      principal.kind = KB_PRIN_HOST;
+      break;
+   default:
+      return -1;
+   }
+   memcpy(principal.issuer, issuer, strlen(issuer) + 1);
+   memcpy(principal.subject, subject, strlen(subject) + 1);
+   principal.authenticated = 1;
+   return kb_identity_key(&principal, out, cap);
+}
+
 int kb_module_postgres_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_tables_ok)
 {
    uint8_t request[AIMEE_POSTGRES_REQUEST_LEN];
@@ -385,6 +426,7 @@ void kb_module_stage_adapters_configure(void)
    aimee_db2_register_fact_extract_provider(extract_facts);
    aimee_db2_register_fact_scan_provider(scan_fact_turn);
    aimee_db2_register_embed_provider(embed_text);
+   aimee_db2_register_identity_key_provider(identity_key);
    kb_curator_grounding_register_provider(grounding_decide);
    kb_route_acl_register_authorization_provider(control_web_authorize);
 }

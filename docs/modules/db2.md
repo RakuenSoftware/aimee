@@ -69,13 +69,13 @@ only lifecycle is active and granted. Later operations must be typed, bounded ca
 Declaration audit:
 
 `declaration-review.json` is the reviewed source for transitions from the legacy C surface. Its
-generated ledger accounts for all 1,351 non-static function declarations in all 137 DB2 headers,
+generated ledger accounts for all 1,359 non-static function declarations in all 136 DB2 headers,
 records identical duplicate declarations by location, and fails on conflicting signatures. The
 ledger also tokenizes every frozen consumer so test-only and production references cannot be
-confused. At this checkpoint 166 declarations are unconsumed implementation details, 273 are used
+confused. At this checkpoint 141 declarations are unconsumed implementation details, 261 are used
 only by private implementation tests, 61 externally referenced `pgvec_*` declarations are
 explicitly private and retained in DB2, lifecycle health is a reviewed retained-DB2 wire operation,
-and 850 production-consumed declarations remain
+and 895 production-consumed declarations remain
 without a reviewed disposition.
 
 The separate `vector-portability.json` audit covers all 76 declared `pgvec_*` symbols, including
@@ -380,7 +380,15 @@ because the Go module declines them without touching its breaker. DB2 independen
 absent provider, invalid dimensions, and non-finite components. This moves total debt from 177 to
 176, injected-contract debt from 38 to 37, and outbound source-boundary includes from 167 to 166.
 
-The remaining 37 non-system rows are sibling-contract migration debt. Session identity, briefing
+The twenty-eighth reduction replaces DB2 tenant setup's direct canonical identity-key call with a
+startup-installed identity-owner contract. The callback receives only the principal fields the key
+derivation consumes; DB2 pins the principal-kind ABI and independently revalidates the returned
+owner, issuer-scoped OIDC, normalized certificate, or bounded host-account grammar before opening a
+transaction or setting tenant GUCs. Missing, failed, unterminated, or noncanonical answers remain
+unauthenticated failures. This moves total debt from 176 to 175 and injected-contract debt from 37
+to 36 without copying identity canonicalization into DB2.
+
+The remaining 36 non-system rows are sibling-contract migration debt. Session identity, briefing
 rendering, executable lifecycle, configuration, memory, and other host calls must close through
 their reviewed process contracts before activation; they are not portable-support candidates. Rows
 may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide

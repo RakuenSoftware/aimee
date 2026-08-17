@@ -4,6 +4,7 @@
 #include "db2_internal.h"
 #include "db_postgres.h"
 #include "db2.h" /* db2_lease_begin/_end */
+#include "management_intent_fields.h"
 #include "../support/db2_log.h"
 
 #include <string.h>
@@ -15,6 +16,58 @@ typedef struct
 } maintenance_job_t;
 
 static _Thread_local maintenance_job_t g_maintenance_job;
+static db2_identity_key_fn g_identity_key_provider;
+
+_Static_assert((int)KB_PRIN_NONE == (int)DB2_HOST_PRINCIPAL_NONE, "principal NONE ABI drift");
+_Static_assert((int)KB_PRIN_OIDC == (int)DB2_HOST_PRINCIPAL_OIDC, "principal OIDC ABI drift");
+_Static_assert((int)KB_PRIN_CERT == (int)DB2_HOST_PRINCIPAL_CERT, "principal CERT ABI drift");
+_Static_assert((int)KB_PRIN_OWNER == (int)DB2_HOST_PRINCIPAL_OWNER, "principal OWNER ABI drift");
+_Static_assert((int)KB_PRIN_HOST == (int)DB2_HOST_PRINCIPAL_HOST, "principal HOST ABI drift");
+
+void aimee_db2_register_identity_key_provider(db2_identity_key_fn provider)
+{
+   g_identity_key_provider = provider;
+}
+
+int db2_tenant_identity_key(const kb_principal_t *principal, char *out, size_t cap)
+{
+   if (out && cap)
+      out[0] = '\0';
+   if (!principal || !out || cap < 2 || cap > DB2_INTENT_ACTOR_MAX ||
+       principal->authenticated != 1 ||
+       strnlen(principal->issuer, sizeof(principal->issuer)) == sizeof(principal->issuer) ||
+       strnlen(principal->subject, sizeof(principal->subject)) == sizeof(principal->subject) ||
+       !g_identity_key_provider)
+      return -1;
+
+   switch (principal->kind)
+   {
+   case KB_PRIN_OIDC:
+   case KB_PRIN_CERT:
+   case KB_PRIN_OWNER:
+   case KB_PRIN_HOST:
+      break;
+   default:
+      return -1;
+   }
+
+   if (g_identity_key_provider((int)principal->kind, principal->issuer, principal->subject,
+                               principal->authenticated, out, cap) != 0)
+      goto invalid;
+
+   size_t n = strnlen(out, cap);
+   if (!n || n == cap)
+      goto invalid;
+   char canonical[DB2_INTENT_ACTOR_MAX + 1] = {0};
+   memcpy(canonical, out, n + 1);
+   if (!db2_intent_canonical_actor(canonical, sizeof(canonical)))
+      goto invalid;
+   return 0;
+
+invalid:
+   memset(out, 0, cap);
+   return -1;
+}
 
 int db2_tenant_require_pg(void)
 {
@@ -148,7 +201,7 @@ int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
       return DB2_ERR_TENANT_UNAUTHENTICATED;
 
    char key[576];
-   if (kb_identity_key(p, key, sizeof(key)) != 0)
+   if (db2_tenant_identity_key(p, key, sizeof(key)) != 0)
       return DB2_ERR_TENANT_UNAUTHENTICATED;
 
    db2_lease_begin(); /* eager lease so the whole unit rides one connection */
