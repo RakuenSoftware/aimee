@@ -1,8 +1,8 @@
-/* db2/kb_service_backend_agent.c: aimee-kb RPC backends for the
+/* kb/db2_adapters/kb_service_backend_agent.c: caller-side aimee-kb RPC adapters for the
  * agent + rules domain (rules.list / rules.generate, collab_rules.*,
  * agent.outcome_record, agent.hint_consume, learning.propose_signal).
- * Split out of kb_service_backend.c so the file stays under the
- * per-file line cap. */
+ * This policy/JSON composition layer remains with aimee-kb while its storage
+ * calls migrate to the generated DB2 client. */
 
 #include "kb_service_backend.h"
 
@@ -10,20 +10,20 @@
 
 #include "agent_coord.h"
 #include "agent_eval.h"
-#include "agent_hints.h"
+#include "modules/db2/c/agent_hints.h"
 #include "dashboard.h"
-#include "agent_outcomes.h"
-#include "anti_patterns.h"
-#include "collab_rules.h"
-#include "decision_log.h"
-#include "entity_edges.h"
-#include "db2_learning.h"
+#include "modules/db2/c/agent_outcomes.h"
+#include "modules/db2/c/anti_patterns.h"
+#include "modules/db2/c/collab_rules.h"
+#include "modules/db2/c/decision_log.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/db2_learning.h"
 #include "modules/learning/learning_evidence.h" /* learning_evidence_write_event — session_summary emission */
 #include "modules/learning/learning_implicit.h"
 #include "memory.h"
-#include "feedback.h"
-#include "rules.h"
-#include "tool_registry.h"
+#include "modules/db2/c/feedback.h"
+#include "modules/db2/c/rules.h"
+#include "modules/db2/c/tool_registry.h"
 #include "trace_analysis.h"
 
 #include <stdlib.h>

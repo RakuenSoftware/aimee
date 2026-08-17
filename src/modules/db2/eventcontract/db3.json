@@ -45,6 +45,10 @@
     "scope_bytes": 64,
     "record_type_bytes": 32,
     "collection_bytes": 32,
+    "label_count": 16,
+    "label_key_bytes": 32,
+    "label_value_bytes": 256,
+    "labels_bytes": 4096,
     "dimension": 4096,
     "top_k": 256
   },
@@ -65,6 +69,12 @@
     "apply": {
       "magic": 1093878340,
       "header_bytes": 36
+    },
+    "apply_v2": {
+      "magic": 1093878340,
+      "wire_version": 2,
+      "header_bytes": 40,
+      "label_header_bytes": 4
     },
     "apply_chunk": {
       "magic": 1261650500,

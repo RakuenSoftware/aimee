@@ -2,7 +2,7 @@
 
 #include "db2_hardening.h"
 #include "db_postgres.h"
-#include "log.h"
+#include "../support/db2_log.h"
 
 #include <libpq-fe.h>
 #include <stdio.h>

@@ -1101,9 +1101,15 @@ static db2_kb_service_async_queue_stats_t g_queue_status = {
 static db2_kb_service_async_queue_stats_t g_drain_status = {
     .pending = 1, .running = 0, .done = 10, .failed = 1, .total = 12, .processed = 3};
 static char g_drain_embed_cmd[64];
+static char g_drain_claimed_by[128];
 static int g_drain_timeout;
 static const char *g_drain_collection;
 static int g_drain_rc;
+
+const char *session_id(void)
+{
+   return "test-http-session";
+}
 static int g_job_get_rc = 1;
 static int64_t g_job_get_id;
 static int g_db_initialized = 1;
@@ -1205,14 +1211,15 @@ int db2_kb_service_async_queue_status(db2_kb_service_async_queue_stats_t *out)
    return 0;
 }
 
-int db2_kb_service_async_queue_drain(const char *embedding_cmd, int timeout_secs,
-                                     const char *vector_collection,
+int db2_kb_service_async_queue_drain(const char *claimed_by, const char *embedding_cmd,
+                                     int timeout_secs, const char *vector_collection,
                                      db2_kb_service_vector_upsert_fn vector_upsert,
                                      void *vector_upsert_ctx,
                                      db2_kb_service_async_queue_stats_t *out)
 {
    (void)vector_upsert;
    (void)vector_upsert_ctx;
+   snprintf(g_drain_claimed_by, sizeof(g_drain_claimed_by), "%s", claimed_by);
    snprintf(g_drain_embed_cmd, sizeof(g_drain_embed_cmd), "%s", embedding_cmd);
    g_drain_timeout = timeout_secs;
    g_drain_collection = vector_collection;
@@ -5767,6 +5774,7 @@ static void test_drain_ok(void)
                             sizeof(buf));
    assert(s == 200);
    assert(strcmp(g_drain_embed_cmd, "test-embed") == 0);
+   assert(strcmp(g_drain_claimed_by, "test-http-session") == 0);
    assert(g_drain_timeout == 9);
    assert(strcmp(g_drain_collection, "kb-test") == 0);
    assert(strstr(buf, "\"processed\":3") != NULL);

@@ -8,7 +8,7 @@
 #include <time.h>
 
 #include <aimee/audit/audit_worm_chain.h>
-#include "config.h"
+#include "../support/db2_runtime_config.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
 #include "kb_audit_worm.h"

@@ -359,8 +359,8 @@ extern "C"
    int db2_kb_service_async_queue_spawn_worker(void);
    typedef int (*db2_kb_service_vector_upsert_fn)(int64_t document_id, const float *vec, int dim,
                                                   const char *payload_json, void *ctx);
-   int db2_kb_service_async_queue_drain(const char *embedding_cmd, int timeout_secs,
-                                        const char *vector_collection,
+   int db2_kb_service_async_queue_drain(const char *claimed_by, const char *embedding_cmd,
+                                        int timeout_secs, const char *vector_collection,
                                         db2_kb_service_vector_upsert_fn vector_upsert,
                                         void *vector_upsert_ctx,
                                         db2_kb_service_async_queue_stats_t *out);

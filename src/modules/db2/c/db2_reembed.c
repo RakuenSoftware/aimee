@@ -15,7 +15,7 @@
 #include "artifacts.h"        /* db2_curator_reembed_all */
 #include "evidence_vectors.h" /* db2_evidence_reembed_all */
 #include "kb_payload.h"       /* db2_kb_pdf_reembed_project */
-#include "../headers/log.h"
+#include "../support/db2_log.h"
 
 #include <stdarg.h>
 #include <stdlib.h>

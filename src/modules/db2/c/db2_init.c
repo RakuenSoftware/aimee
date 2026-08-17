@@ -14,7 +14,7 @@
 #include "db2_pool.h"
 #include "db_postgres.h"
 #include "db_schema.h"
-#include "../headers/log.h" /* LOG_WARN */
+#include "../support/db2_log.h" /* LOG_WARN */
 #include "entity_edges.h"
 #include "eval_support.h"
 

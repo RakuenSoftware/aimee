@@ -42,6 +42,22 @@
     },
     {
       "classification": "kb-generated-client",
+      "path": "src/kb/db2_adapters/kb_service_backend_agent.c"
+    },
+    {
+      "classification": "kb-generated-client",
+      "path": "src/kb/db2_adapters/kb_service_backend_export.c"
+    },
+    {
+      "classification": "kb-generated-client",
+      "path": "src/kb/db2_adapters/kb_service_backend_memory.c"
+    },
+    {
+      "classification": "kb-generated-client",
+      "path": "src/kb/db2_adapters/kb_service_backend_runtime.c"
+    },
+    {
+      "classification": "kb-generated-client",
       "path": "src/kb/http/kb_http.c"
     },
     {
@@ -786,11 +802,27 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_db2_extractor_support.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_db2_hardening.c"
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_db2_log_support.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_db2_pool.c"
+    },
+    {
+      "classification": "private-implementation-test",
+      "path": "src/tests/test_db2_rel_seed_support.c"
+    },
+    {
+      "classification": "private-implementation-test",
+      "path": "src/tests/test_db2_runtime_config_support.c"
     },
     {
       "classification": "private-implementation-test",
@@ -883,10 +915,6 @@
     {
       "classification": "private-implementation-test",
       "path": "src/tests/test_kb_doc_pdf.c"
-    },
-    {
-      "classification": "private-implementation-test",
-      "path": "src/tests/test_kb_export.c"
     },
     {
       "classification": "private-implementation-test",
@@ -1320,6 +1348,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_memory_facts.c",
@@ -1478,6 +1507,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_reasoning.c",
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/test_db2.c",
@@ -1538,6 +1568,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_memory_facts.c",
         "src/kb/kb_mining.c",
@@ -1625,6 +1656,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
@@ -1801,6 +1833,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_memory_facts.c",
@@ -1989,6 +2022,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_memory_facts.c",
@@ -2158,6 +2192,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_memory_facts.c",
@@ -2281,7 +2316,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 68
+          "line": 81
         }
       ],
       "signature": "int canonical_index_blast_radius ( const char * project , const char * file_path , blast_radius_t * out )",
@@ -2297,7 +2332,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 86
+          "line": 99
         }
       ],
       "signature": "int canonical_index_code_search ( const char * query , const char * project , code_search_hit_t * out , int max , int enrich )",
@@ -2314,7 +2349,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 88
+          "line": 101
         }
       ],
       "signature": "int canonical_index_code_search_excluding_project ( const char * query , const char * excluded_project , code_search_hit_t * out , int max , int enrich )",
@@ -2365,7 +2400,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 56
+          "line": 69
         }
       ],
       "signature": "int canonical_index_find ( const char * identifier , term_hit_t * out , int max )",
@@ -2381,7 +2416,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 76
+          "line": 89
         }
       ],
       "signature": "int canonical_index_find_callers ( const char * project , const char * symbol , caller_hit_t * out , int max )",
@@ -2397,7 +2432,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 78
+          "line": 91
         }
       ],
       "signature": "int canonical_index_find_callers_excluding_project ( const char * excluded_project , const char * symbol , caller_hit_t * out , int max )",
@@ -2414,7 +2449,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 64
+          "line": 77
         }
       ],
       "signature": "int canonical_index_find_excluding_project ( const char * excluded_project , const char * identifier , term_hit_t * out , int max )",
@@ -2431,7 +2466,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 60
+          "line": 73
         }
       ],
       "signature": "int canonical_index_find_project ( const char * project , const char * identifier , term_hit_t * out , int max )",
@@ -2448,7 +2483,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 53
+          "line": 66
         }
       ],
       "signature": "int canonical_index_list_projects ( project_info_t * out , int max )",
@@ -2464,7 +2499,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 101
+          "line": 114
         }
       ],
       "signature": "int canonical_index_project_lang_breakdown ( const char * project , char * buf , size_t bufsz )",
@@ -2480,7 +2515,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 96
+          "line": 109
         }
       ],
       "signature": "int canonical_index_project_stats ( const char * project , int * files_out , int * defs_out )",
@@ -2497,7 +2532,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 48
+          "line": 61
         }
       ],
       "signature": "int canonical_index_scan_files ( const char * name , const char * root_label , const canonical_index_file_input_t * files , int file_count , int force , int * inspected_out )",
@@ -2515,13 +2550,29 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 35
+          "line": 48
         }
       ],
       "signature": "int canonical_index_scan_project ( const char * name , const char * root , int force , int * inspected_out )",
       "signature_sha256": "232f44534846c471254c0ac494352659384a124701cffd5eff60d8415214c4be",
       "status": "audit-pending",
       "symbol": "canonical_index_scan_project"
+    },
+    {
+      "consumers": [
+        "src/kb/kb_service_workers.c",
+        "src/tests/test_index.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/canonical_index.h",
+          "line": 37
+        }
+      ],
+      "signature": "void canonical_index_set_exec_capture ( canonical_index_exec_capture_fn capture )",
+      "signature_sha256": "1e99a1701424fe709b6626d44151681f875541924a23045c4226c93dfe964cac",
+      "status": "audit-pending",
+      "symbol": "canonical_index_set_exec_capture"
     },
     {
       "consumers": [
@@ -2533,7 +2584,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 72
+          "line": 85
         }
       ],
       "signature": "int canonical_index_structure ( const char * project , const char * file_path , definition_t * out , int max )",
@@ -2602,7 +2653,9 @@
       "symbol": "db2_admin_grant_revoke"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/agent_hints.h",
@@ -2611,7 +2664,7 @@
       ],
       "signature": "char * db2_agent_hint_find_and_consume ( const char * role , const char * prompt )",
       "signature_sha256": "8869b322c827df6b62d961465e40d4f3c3f2c16392b4b1c53ebf24819a35b547",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_agent_hint_find_and_consume"
     },
     {
@@ -2628,7 +2681,9 @@
       "symbol": "db2_agent_outcome_recent_failures"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/agent_outcomes.h",
@@ -2637,7 +2692,7 @@
       ],
       "signature": "int db2_agent_outcome_record ( const char * agent_name , const char * role , const char * outcome_kind , const char * reason , int turns_used , int tools_called , int64_t tokens_used , const char * tool_error_pattern )",
       "signature_sha256": "9e17166bb8ceca1bad93c583d06937a92f589bc7d0678ff0d0d5959c8ca7c96e",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_agent_outcome_record"
     },
     {
@@ -2655,6 +2710,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/tests/test_memory_advanced.c"
       ],
       "locations": [
@@ -2665,11 +2721,12 @@
       ],
       "signature": "int db2_anti_pattern_bump ( int64_t id )",
       "signature_sha256": "7dcb238fd67595c2cab8ed4f626ccecff7bd5f7e8c9a4d2b9f5742e8e5c0d4a0",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_anti_pattern_bump"
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/tests/test_memory_advanced.c"
       ],
       "locations": [
@@ -2680,11 +2737,12 @@
       ],
       "signature": "int db2_anti_pattern_check ( const char * file_path , const char * command , anti_pattern_t * out , int max )",
       "signature_sha256": "ace6347971d7de660ff96c70441d89aea7d6078a3f17feca5aa4d31dade317b1",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_anti_pattern_check"
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/tests/test_guardrails.c",
         "src/tests/test_memory_advanced.c"
       ],
@@ -2696,7 +2754,7 @@
       ],
       "signature": "int db2_anti_pattern_delete ( int64_t id )",
       "signature_sha256": "7677e71319eff0d6d44ac4c77713123208bdfc1ec5b87180b538d0b202e683c3",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_anti_pattern_delete"
     },
     {
@@ -2732,6 +2790,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/modules/learning/learning_evidence.c",
         "src/modules/memory/memory_advanced.c",
         "src/tests/test_context_assembly.c",
@@ -2752,6 +2811,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/modules/memory/memory_assemble.c",
         "src/tests/test_guardrails.c",
         "src/tests/test_memory_advanced.c"
@@ -4407,6 +4467,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/tests/test_collab_rules.c"
       ],
       "locations": [
@@ -4417,7 +4478,7 @@
       ],
       "signature": "int db2_collab_rules_approve ( int rule_id )",
       "signature_sha256": "b6e9612570e57c9c81402a5306feee8aa83bc405a8932f07ada06653cfc4272c",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_collab_rules_approve"
     },
     {
@@ -4437,6 +4498,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/tests/test_collab_rules.c"
       ],
       "locations": [
@@ -4447,11 +4509,12 @@
       ],
       "signature": "char * db2_collab_rules_inject ( int agent_last_epoch )",
       "signature_sha256": "86e8336d5a98cc24bcba477cc548e6c9ab6abd9c5f7a2eecef42862d233c6077",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_collab_rules_inject"
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/tests/test_collab_rules.c"
       ],
       "locations": [
@@ -4462,11 +4525,12 @@
       ],
       "signature": "char * db2_collab_rules_json_active ( void )",
       "signature_sha256": "2cb631d58a828756b393b11e1b9c448256f12cd4b4ed811a628d6ecb2885f13f",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_collab_rules_json_active"
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/tests/test_collab_rules.c"
       ],
       "locations": [
@@ -4477,7 +4541,7 @@
       ],
       "signature": "char * db2_collab_rules_json_all ( void )",
       "signature_sha256": "3a2ce93bc4efca321c6fbbaf0a759051e5a24b8591f6ff8a8577f72bff73baee",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_collab_rules_json_all"
     },
     {
@@ -4512,6 +4576,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/modules/learning/learning_router.c",
         "src/tests/test_collab_rules.c"
       ],
@@ -4528,6 +4593,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/tests/test_collab_rules.c"
       ],
       "locations": [
@@ -4538,11 +4604,12 @@
       ],
       "signature": "int db2_collab_rules_reject ( int rule_id )",
       "signature_sha256": "e0fbe128c23e6394ff61ea2f5bf23ab3a787b5d2acbaf77c2d02de26234ce052",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_collab_rules_reject"
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/tests/test_collab_rules.c"
       ],
       "locations": [
@@ -4553,11 +4620,12 @@
       ],
       "signature": "int db2_collab_rules_retire ( int rule_id )",
       "signature_sha256": "0010c23f48bfc35cf63272c6bb6a0d048f67043a1b0081da77165b1210f9f2e3",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_collab_rules_retire"
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_memory_facts.c",
@@ -5898,6 +5966,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/tests/test_memory_advanced.c",
         "src/tests/test_tasks.c"
       ],
@@ -5909,12 +5978,13 @@
       ],
       "signature": "int db2_decision_log_insert ( int64_t task_id , const char * options , const char * chosen , const char * rationale , const char * assumptions , const char * created_at , db2_decision_log_row_t * out )",
       "signature_sha256": "9e8984173cbcb55472bb057262ed6bffaeb7d51384abaed3e06102b3f17e204f",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_decision_log_insert"
     },
     {
       "consumers": [
         "src/dashboard_kb.c",
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/modules/memory/memory_advanced.c",
         "src/tests/test_memory_advanced.c"
       ],
@@ -7986,6 +8056,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/tests/test_fact_recall.c"
       ],
       "locations": [
@@ -7996,7 +8067,7 @@
       ],
       "signature": "int db2_fact_recall_in_query ( const char * query , int turn_requests_sensitive , char * out , size_t cap )",
       "signature_sha256": "c864371d3808b265f70d10bfab427eeef37deab3924eebf6313551f61ef102f3",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_fact_recall_in_query"
     },
     {
@@ -8087,6 +8158,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/modules/memory/memory_advanced.c",
         "src/modules/memory/memory_improve.c",
         "src/tests/test_feedback.c"
@@ -8522,6 +8594,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb.c",
         "src/kb/kb_doc_pdf.c",
         "src/modules/kb-synthesis/kb_curator_queue.c",
@@ -9759,6 +9832,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -9774,6 +9848,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -9789,6 +9864,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -9804,6 +9880,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -9819,6 +9896,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -9834,6 +9912,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -9849,6 +9928,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -9864,6 +9944,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -9879,6 +9960,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -9894,6 +9976,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -9936,13 +10019,15 @@
           "line": 362
         }
       ],
-      "signature": "int db2_kb_service_async_queue_drain ( const char * embedding_cmd , int timeout_secs , const char * vector_collection , db2_kb_service_vector_upsert_fn vector_upsert , void * vector_upsert_ctx , db2_kb_service_async_queue_stats_t * out )",
-      "signature_sha256": "94c0ae77d01b0809086d5e54135ae4c1c70812333b5924b9a320bb643151b8ec",
+      "signature": "int db2_kb_service_async_queue_drain ( const char * claimed_by , const char * embedding_cmd , int timeout_secs , const char * vector_collection , db2_kb_service_vector_upsert_fn vector_upsert , void * vector_upsert_ctx , db2_kb_service_async_queue_stats_t * out )",
+      "signature_sha256": "caa8a6c6c631c80aacb4a513f14d095ed5afb4e734429ae9020d7d3c507095c8",
       "status": "audit-pending",
       "symbol": "db2_kb_service_async_queue_drain"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_runtime.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
@@ -9951,7 +10036,7 @@
       ],
       "signature": "int db2_kb_service_async_queue_spawn_worker ( void )",
       "signature_sha256": "c0680308a865304631e5ecd404a242f2a36a7cde44bcfdd9a2db3f92dabef1b8",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_kb_service_async_queue_spawn_worker"
     },
     {
@@ -10026,6 +10111,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10041,6 +10127,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10056,6 +10143,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10071,6 +10159,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10086,6 +10175,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10101,6 +10191,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10116,6 +10207,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10313,6 +10405,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10328,6 +10421,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10343,6 +10437,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10358,6 +10453,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10373,6 +10469,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10388,6 +10485,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10403,6 +10501,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10433,6 +10532,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10508,6 +10608,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10584,6 +10685,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -10674,6 +10776,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10689,6 +10792,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10704,6 +10808,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10719,6 +10824,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10734,6 +10840,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10749,6 +10856,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10764,6 +10872,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10779,6 +10888,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10794,6 +10904,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10809,6 +10920,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10824,6 +10936,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10839,6 +10952,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10854,6 +10968,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10869,6 +10984,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10884,6 +11000,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10899,21 +11016,7 @@
     },
     {
       "consumers": [
-        "src/kb/kb_service_kb.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/kb_service_backend_export.h",
-          "line": 20
-        }
-      ],
-      "signature": "cJSON * db2_kb_service_memory_export_filtered_json ( const char * workspace , const char * kind , const char * since_iso , int include_archived )",
-      "signature_sha256": "6ac2367fb80a924be4a2cdc0a32f9e73010ebea2f7839b9824eb9dff2af3a287",
-      "status": "audit-pending",
-      "symbol": "db2_kb_service_memory_export_filtered_json"
-    },
-    {
-      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10929,6 +11032,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10944,6 +11048,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10959,6 +11064,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10974,6 +11080,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -10989,6 +11096,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11004,6 +11112,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11019,6 +11128,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -11034,6 +11144,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11049,6 +11160,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11064,6 +11176,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11079,22 +11192,7 @@
     },
     {
       "consumers": [
-        "src/kb/kb_service_kb.c",
-        "src/tests/test_kb_export.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/kb_service_backend_export.h",
-          "line": 29
-        }
-      ],
-      "signature": "int db2_kb_service_memory_import_json ( cJSON * memories_arr , const char * workspace_override , int dry_run , int * imported_out )",
-      "signature_sha256": "2013bc6eb6e0c7a8a653603f9f5ff4a968391fad435f0f8037e8c26dd4fb772e",
-      "status": "audit-pending",
-      "symbol": "db2_kb_service_memory_import_json"
-    },
-    {
-      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11110,6 +11208,8 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_export.c",
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/modules/learning/learning_evidence.c",
         "src/tests/test_artifacts.c"
       ],
@@ -11126,6 +11226,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11141,6 +11242,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -11156,6 +11258,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11171,6 +11274,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11186,6 +11290,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11201,6 +11306,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11216,6 +11322,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11231,6 +11338,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11246,6 +11354,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11261,6 +11370,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11276,6 +11386,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11291,6 +11402,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11306,6 +11418,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11321,6 +11434,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11336,6 +11450,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11351,6 +11466,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11366,6 +11482,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11381,6 +11498,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11396,6 +11514,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11411,6 +11530,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11426,6 +11546,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11441,6 +11562,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11456,6 +11578,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11471,6 +11594,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11502,6 +11626,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11517,6 +11642,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -11532,6 +11658,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11547,6 +11674,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11562,6 +11690,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11577,6 +11706,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11592,6 +11722,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11607,6 +11738,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11622,6 +11754,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11637,6 +11770,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11652,6 +11786,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11667,6 +11802,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11682,6 +11818,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11697,6 +11834,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11712,6 +11850,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11727,6 +11866,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11802,6 +11942,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -11832,6 +11973,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -11847,6 +11989,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -11862,6 +12005,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -11877,6 +12021,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -11892,6 +12037,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -11907,6 +12053,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -11922,6 +12069,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -11967,6 +12115,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -11982,6 +12131,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -12012,6 +12162,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -12027,6 +12178,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -12042,6 +12194,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -12057,6 +12210,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -12072,6 +12226,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -12087,6 +12242,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -12102,6 +12258,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -12117,6 +12274,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_service_agent.c"
       ],
       "locations": [
@@ -14254,7 +14412,9 @@
       "symbol": "db2_memory_decay_confidence"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_export.h",
@@ -14263,7 +14423,7 @@
       ],
       "signature": "int db2_memory_decisions_export_jsonl ( const char * path )",
       "signature_sha256": "b7b07138def29398e1b1811e7dbdc7029770ca6a82d7fedcd6fda74fbd8c41d5",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_memory_decisions_export_jsonl"
     },
     {
@@ -14499,7 +14659,9 @@
       "symbol": "db2_memory_event_frames_list"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_export.h",
@@ -14508,11 +14670,13 @@
       ],
       "signature": "int db2_memory_export_alloc_all ( db2_memory_export_row_t * * out , size_t * count )",
       "signature_sha256": "b8f101106842b7f2173b6ad1dea598b2be66a5a7491078f15c6500d2d12cf409",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_memory_export_alloc_all"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_export.h",
@@ -14521,7 +14685,7 @@
       ],
       "signature": "void db2_memory_export_row_free ( db2_memory_export_row_t * row )",
       "signature_sha256": "ba729127864e108afffe9baf8c825923f9f857206dabcdac43769c09d121f0e1",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_memory_export_row_free"
     },
     {
@@ -14588,7 +14752,9 @@
       "symbol": "db2_memory_find_facts_like"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
@@ -14597,7 +14763,7 @@
       ],
       "signature": "int64_t db2_memory_find_id_by_key_kind ( const char * key , const char * kind )",
       "signature_sha256": "702e7ac3ac2ee62f32188dc2b85e8e9df635f51cdf51b8e699e56d1948269804",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_memory_find_id_by_key_kind"
     },
     {
@@ -14986,6 +15152,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/modules/memory/memory_logic.c",
         "src/trace_analysis.c"
       ],
@@ -15486,7 +15653,9 @@
       "symbol": "db2_memory_list_kv_section"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
@@ -15495,7 +15664,7 @@
       ],
       "signature": "int db2_memory_list_low_effectiveness ( double threshold , int limit , db2_memory_low_eff_row_t * rows , int max )",
       "signature_sha256": "597215ce6155dfb239cfb309a6bcc211367d0996f873c7159e999bc049845842",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_memory_list_low_effectiveness"
     },
     {
@@ -15547,6 +15716,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
@@ -15557,11 +15727,12 @@
       ],
       "signature": "int db2_memory_list_session_scope_priority ( memory_t * out , int max )",
       "signature_sha256": "b0110278348371f632b08e96afb7a3771dd2eaaf39ee1786757de0c27c6ec0aa",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_memory_list_session_scope_priority"
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
@@ -15572,11 +15743,13 @@
       ],
       "signature": "int db2_memory_list_session_scope_priority_like ( const char * pattern , memory_t * out , int max )",
       "signature_sha256": "f98db4067f01052772b105a9b369b84a48708c5a91e7444c98a4f1acf971e0e3",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_memory_list_session_scope_priority_like"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
@@ -15585,11 +15758,13 @@
       ],
       "signature": "int db2_memory_list_superseded_keys ( int min_versions , db2_memory_superseded_row_t * rows , int max )",
       "signature_sha256": "1cddee581ed39678e5485e8781fd37a2701a2e403debdeff1d9f9b9369dd1a80",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_memory_list_superseded_keys"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
@@ -15598,11 +15773,13 @@
       ],
       "signature": "int db2_memory_list_unused_l2 ( int days , db2_memory_unused_l2_row_t * rows , int max )",
       "signature_sha256": "57e089ea96a05290a3ee0922c3c55e97fc47d05adc7485821b34a9a8645dc49a",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_memory_list_unused_l2"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
@@ -15611,7 +15788,7 @@
       ],
       "signature": "int db2_memory_load_eval_corpus ( memory_t * out , int max , char * label_out , size_t label_len )",
       "signature_sha256": "de7c0d4b67926ea284b993710763ed484437d1d4d86719426cf90ce4ed9352a5",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_memory_load_eval_corpus"
     },
     {
@@ -16367,6 +16544,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/modules/memory/memory_assemble.c",
         "src/modules/memory/memory_core_search.c",
         "src/modules/memory/memory_core_search_b.c",
@@ -16434,6 +16612,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/modules/memory/memory_core_scope_embed.c"
       ],
       "locations": [
@@ -16478,7 +16657,9 @@
       "symbol": "db2_memory_search_by_pattern"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
@@ -16487,7 +16668,7 @@
       ],
       "signature": "int db2_memory_search_facts_patterns_by_keyword ( const char * keyword , memory_t * out , int max )",
       "signature_sha256": "a9f12fdc5e57d883d3cf89e6da7971eba292f7354aa5bbd7e1c03ab8c1dbd5e3",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_memory_search_facts_patterns_by_keyword"
     },
     {
@@ -16566,7 +16747,9 @@
       "symbol": "db2_memory_session_neighbors_before"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
@@ -16575,7 +16758,7 @@
       ],
       "signature": "int db2_memory_set_artifact ( int64_t memory_id , const char * artifact_type , const char * artifact_ref , const char * artifact_hash )",
       "signature_sha256": "e47b9d38a6c66c333fefd3e95c5e05eb9a43037666fb8c99d75bfb3e81769f93",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_memory_set_artifact"
     },
     {
@@ -16670,6 +16853,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/modules/memory/memory_core_helpers_b.c",
         "src/modules/memory/memory_core_search_c.c"
       ],
@@ -16777,6 +16961,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
@@ -16787,7 +16972,7 @@
       ],
       "signature": "int db2_memory_top_l2_facts ( memory_t * out , int max )",
       "signature_sha256": "c27a355ded77ece3f4ce80e0ec4db2adda6c23276260fc0b6859d095349f403a",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_memory_top_l2_facts"
     },
     {
@@ -16974,6 +17159,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/tests/test_memory_advanced.c"
       ],
       "locations": [
@@ -16984,7 +17170,7 @@
       ],
       "signature": "int db2_memory_valid_at ( int64_t memory_id , const char * as_of )",
       "signature_sha256": "30ac433991f28055c0180963e01ef95786d77a1300b1d429f697d667d235567f",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_memory_valid_at"
     },
     {
@@ -17004,6 +17190,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/modules/memory/memory_core_scope_embed.c",
         "src/tests/test_workspace_memory.c"
       ],
@@ -18352,7 +18539,9 @@
       "symbol": "db2_rel_types_stage_provisional"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
@@ -18361,7 +18550,7 @@
       ],
       "signature": "int db2_relation_schema_list ( db2_relation_schema_row_t * out , int max )",
       "signature_sha256": "10dd91843bf251014cebe6b8fbcd5c3a603c5dba63f87320467eeff06b26275d",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_relation_schema_list"
     },
     {
@@ -18453,7 +18642,9 @@
       "symbol": "db2_rules_cache_invalidate"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/rules.h",
@@ -18462,11 +18653,13 @@
       ],
       "signature": "int db2_rules_decay ( void )",
       "signature_sha256": "146869aae9e72b950bbc51634d23fe92ed7cadcaff63e8f59ab3c320366f0ae6",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_rules_decay"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/rules.h",
@@ -18475,11 +18668,13 @@
       ],
       "signature": "int db2_rules_delete ( int id )",
       "signature_sha256": "244874fbca46d0a3731daa92ab504faf347ae3037bfbfe767835541cbd29137b",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_rules_delete"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/rules.h",
@@ -18488,11 +18683,13 @@
       ],
       "signature": "int db2_rules_delete_by_directive_type ( const char * directive_type )",
       "signature_sha256": "f639e608c35590b89bc727fbda598d8eb88f708188f15d3866d7a0a2e2441630",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_rules_delete_by_directive_type"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/rules.h",
@@ -18501,7 +18698,7 @@
       ],
       "signature": "int db2_rules_export_jsonl ( const char * path )",
       "signature_sha256": "4aaf22326116b2eeb61f0cbd1b04ac04bb56801894234ed30eee8d98291e028a",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_rules_export_jsonl"
     },
     {
@@ -18523,6 +18720,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/tests/test_rules.c"
       ],
       "locations": [
@@ -18533,7 +18731,7 @@
       ],
       "signature": "char * db2_rules_generate ( void )",
       "signature_sha256": "78eda90069e6949d0c4a35af2981922b15fafa9a0dee1c367480997260f187be",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_rules_generate"
     },
     {
@@ -18553,6 +18751,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/modules/learning/learning_evidence.c"
       ],
       "locations": [
@@ -18568,6 +18767,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/modules/memory/memory_advanced.c",
         "src/tests/test_rules.c"
       ],
@@ -18659,6 +18859,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/tests/test_rules.c"
       ],
       "locations": [
@@ -18669,11 +18870,13 @@
       ],
       "signature": "const char * db2_rules_tier ( int weight )",
       "signature_sha256": "b5a838c221d09665e332c40b1ca6f495c6d5bae4f385fb4f68ebee33603695de",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_rules_tier"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/rules.h",
@@ -18682,7 +18885,7 @@
       ],
       "signature": "int db2_rules_update_directive_type ( int id , const char * directive_type )",
       "signature_sha256": "f1ccfe382f422ded514b08cddd5111ae77411e852535761456c33ffa89e7c5d9",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_rules_update_directive_type"
     },
     {
@@ -19446,6 +19649,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/tests/test_tasks.c"
       ],
       "locations": [
@@ -19456,11 +19660,12 @@
       ],
       "signature": "int db2_task_add_edge ( int64_t source , int64_t target , const char * relation )",
       "signature_sha256": "b1acf6f9a8e743f37e4a2ea33cc9eb9c9d1fae5ac0201cceb9f216b1522e8c5a",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_task_add_edge"
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/tests/test_tasks.c"
       ],
       "locations": [
@@ -19471,11 +19676,13 @@
       ],
       "signature": "int db2_task_create ( const char * title , const char * session_id , int64_t parent_id , aimee_task_t * out )",
       "signature_sha256": "4a10d319f92002d0d7b93960322d6bfef9efe1c8f545a626497c2005156af6a9",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_task_create"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/tasks.h",
@@ -19484,7 +19691,7 @@
       ],
       "signature": "int db2_task_delete ( int64_t id )",
       "signature_sha256": "21f27fb7c710097e6ea93b0bfbe11956a8b8740863c592cabcd7b5fa33a8a3c8",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_task_delete"
     },
     {
@@ -19520,6 +19727,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/tests/test_tasks.c"
       ],
       "locations": [
@@ -19530,7 +19738,7 @@
       ],
       "signature": "int db2_task_get_edges ( int64_t task_id , task_edge_t * out , int max )",
       "signature_sha256": "6023e3af0fb1f29570fe8401fc7bb4474daee77db47b72ebdfa2f3416dc0ad36",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_task_get_edges"
     },
     {
@@ -19550,7 +19758,9 @@
       "symbol": "db2_task_get_subtasks"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/tasks.h",
@@ -19559,11 +19769,12 @@
       ],
       "signature": "int db2_task_list ( const char * state , const char * session_id , int limit , aimee_task_t * out , int max )",
       "signature_sha256": "756ebe7ec7ea82d3fa59db8e962bd595fd831439b782682bdc0fb641581ef4b4",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_task_list"
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/tests/test_tasks.c"
       ],
       "locations": [
@@ -19574,7 +19785,7 @@
       ],
       "signature": "int db2_task_update_state ( int64_t id , const char * state )",
       "signature_sha256": "d342203f1fca006d6b4556f56fc0f77abc19a53e4b141001930a1ec2b080b6a9",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_task_update_state"
     },
     {
@@ -20108,7 +20319,9 @@
       "symbol": "db2_thread_conn_open"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/tool_registry.h",
@@ -20117,11 +20330,13 @@
       ],
       "signature": "int db2_tool_registry_iter_prompts ( tool_registry_prompt_cb cb , void * user )",
       "signature_sha256": "87e8857522a982e535193216ff7938d30871f79845b3816b8a817ed9d20c524d",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_tool_registry_iter_prompts"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/tool_registry.h",
@@ -20130,7 +20345,7 @@
       ],
       "signature": "int db2_tool_registry_lookup ( const char * name , tool_registry_entry_t * out )",
       "signature_sha256": "b8068d3a48dd1282b6a8aeafe4732306ac587871fa9ba55e4799add3514d1306",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_tool_registry_lookup"
     },
     {
@@ -20207,7 +20422,9 @@
       "symbol": "db2_typed_fact_by_relation"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/fact_ingest.h",
@@ -20216,7 +20433,7 @@
       ],
       "signature": "int db2_typed_fact_ingress ( const char * query , char * facts_out , size_t facts_cap )",
       "signature_sha256": "817159ecbf73497fe49e1264536b4a4816a1472309a997dfe6b0f490b44a4fc3",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_typed_fact_ingress"
     },
     {
@@ -21634,7 +21851,9 @@
       "symbol": "kb_maintenance_run"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_lint.h",
@@ -21643,7 +21862,7 @@
       ],
       "signature": "int memory_lint_run ( memory_lint_issue_t * out , int max )",
       "signature_sha256": "caff5c88ace0ea5c51d9e6cb92a96fa579fd25b7d47e48c6ef233a1ca5e46b0a",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "memory_lint_run"
     },
     {
@@ -23484,15 +23703,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "44fab13c2035929820440965263aa1a159bf9a99cc4a281ee22324953c85796f",
+  "fingerprint": "e5efc0a9563f491b531554b46417fa5ddb3500936dd0da292ed76f892646e01f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 850,
-    "declarations": 1351,
-    "headers": 137,
-    "internal_unconsumed": 166,
-    "private_test_only": 273,
+    "audit_pending": 895,
+    "declarations": 1350,
+    "headers": 136,
+    "internal_unconsumed": 141,
+    "private_test_only": 252,
     "reviewed": 62
   }
 }

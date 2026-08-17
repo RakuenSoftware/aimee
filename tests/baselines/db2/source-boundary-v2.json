@@ -1,17 +1,17 @@
 {
   "schema_version": 2,
-  "source_revision": "5e25927805cbc87738afcfda28dfabcf5c62ca55",
+  "source_revision": "bcae23e9be3b6b8b6e87b436178366d1a128544c",
   "source_boundary": "src/modules/db2/c",
   "summary": {
-    "c_files": 141,
-    "headers": 137,
+    "c_files": 138,
+    "headers": 136,
     "sql_files": 6,
-    "consumer_files": 297,
-    "production_consumers": 147,
-    "test_consumers": 150,
-    "include_directives": 967,
-    "outbound_dependency_rows": 187,
-    "outbound_include_directives": 187
+    "consumer_files": 304,
+    "production_consumers": 151,
+    "test_consumers": 153,
+    "include_directives": 992,
+    "outbound_dependency_rows": 169,
+    "outbound_include_directives": 169
   },
   "source_files": {
     "c": [
@@ -79,10 +79,7 @@
       "src/modules/db2/c/kb_releases.c",
       "src/modules/db2/c/kb_runtime_state.c",
       "src/modules/db2/c/kb_service_backend.c",
-      "src/modules/db2/c/kb_service_backend_agent.c",
-      "src/modules/db2/c/kb_service_backend_export.c",
       "src/modules/db2/c/kb_service_backend_ingest.c",
-      "src/modules/db2/c/kb_service_backend_memory.c",
       "src/modules/db2/c/kb_vectors.c",
       "src/modules/db2/c/kind_lifecycle.c",
       "src/modules/db2/c/learning.c",
@@ -223,7 +220,6 @@
       "src/modules/db2/c/kb_releases.h",
       "src/modules/db2/c/kb_runtime_state.h",
       "src/modules/db2/c/kb_service_backend.h",
-      "src/modules/db2/c/kb_service_backend_export.h",
       "src/modules/db2/c/kb_vectors.h",
       "src/modules/db2/c/kind_lifecycle.h",
       "src/modules/db2/c/learning_synth_ops.h",
@@ -446,6 +442,122 @@
         },
         {
           "header": "modules/db2/c/kb_runtime_state.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/kb/db2_adapters/kb_service_backend_agent.c",
+      "classification": "kb-generated-client",
+      "includes": [
+        {
+          "header": "modules/db2/c/agent_hints.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/agent_outcomes.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/anti_patterns.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/collab_rules.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/db2_learning.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/decision_log.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/entity_edges.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/feedback.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/rules.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/tool_registry.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/kb/db2_adapters/kb_service_backend_export.c",
+      "classification": "kb-generated-client",
+      "includes": [
+        {
+          "header": "db2_internal.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/kb/db2_adapters/kb_service_backend_memory.c",
+      "classification": "kb-generated-client",
+      "includes": [
+        {
+          "header": "modules/db2/c/decision_log.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/fact_ingest.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/fact_recall.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/kb_payload.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/memory_export.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/memory_lifecycle.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/memory_lint.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/memory_payload.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/memory_query.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/memory_scope_query.h",
+          "count": 1
+        },
+        {
+          "header": "modules/db2/c/tasks.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/kb/db2_adapters/kb_service_backend_runtime.c",
+      "classification": "kb-generated-client",
+      "includes": [
+        {
+          "header": "modules/db2/c/kb_service_backend.h",
           "count": 1
         }
       ]
@@ -1658,10 +1770,6 @@
         },
         {
           "header": "modules/db2/c/kb_service_backend.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/kb_service_backend_export.h",
           "count": 1
         },
         {
@@ -4139,6 +4247,16 @@
       ]
     },
     {
+      "path": "src/tests/test_db2_extractor_support.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "../modules/db2/support/db2_extractors.h",
+          "count": 1
+        }
+      ]
+    },
+    {
       "path": "src/tests/test_db2_hardening.c",
       "classification": "private-implementation-test",
       "includes": [
@@ -4149,11 +4267,41 @@
       ]
     },
     {
+      "path": "src/tests/test_db2_log_support.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "../modules/db2/support/db2_log.h",
+          "count": 1
+        }
+      ]
+    },
+    {
       "path": "src/tests/test_db2_pool.c",
       "classification": "private-implementation-test",
       "includes": [
         {
           "header": "modules/db2/c/db2_pool.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/tests/test_db2_rel_seed_support.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "../modules/db2/support/db2_rel_seed.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/tests/test_db2_runtime_config_support.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "../modules/db2/support/db2_runtime_config.h",
           "count": 1
         }
       ]
@@ -4616,16 +4764,6 @@
         },
         {
           "header": "modules/db2/c/db2_test_shim.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/tests/test_kb_export.c",
-      "classification": "private-implementation-test",
-      "includes": [
-        {
-          "header": "../modules/db2/c/kb_service_backend_export.h",
           "count": 1
         }
       ]
@@ -5960,9 +6098,9 @@
   "outbound_dependencies": [
     {
       "source": "src/modules/db2/c/admin_grant.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6016,16 +6154,23 @@
     },
     {
       "source": "src/modules/db2/c/canonical_index.c",
-      "header": "aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
       "source": "src/modules/db2/c/canonical_index.c",
-      "header": "config.h",
-      "resolved": "src/modules/config/config.h",
+      "header": "../support/db2_runtime_config.h",
+      "resolved": "src/modules/db2/support/db2_runtime_config.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/canonical_index.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
       "count": 1
     },
     {
@@ -6037,23 +6182,9 @@
     },
     {
       "source": "src/modules/db2/c/canonical_index.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/canonical_index.c",
       "header": "modules/memory/memory_ontology.h",
       "resolved": "src/modules/memory/memory_ontology.h",
       "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/canonical_index.c",
-      "header": "util.h",
-      "resolved": "src/headers/util.h",
-      "classification": "host-api",
       "count": 1
     },
     {
@@ -6100,9 +6231,9 @@
     },
     {
       "source": "src/modules/db2/c/code_index.c",
-      "header": "../headers/log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6184,20 +6315,13 @@
     },
     {
       "source": "src/modules/db2/c/cross_repo_build.c",
-      "header": "aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
       "source": "src/modules/db2/c/cross_repo_build.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/cross_repo_deps.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
@@ -6205,15 +6329,22 @@
     },
     {
       "source": "src/modules/db2/c/cross_repo_deps.c",
-      "header": "config.h",
-      "resolved": "src/modules/config/config.h",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
       "classification": "module-private-api",
       "count": 1
     },
     {
       "source": "src/modules/db2/c/cross_repo_deps.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
+      "header": "../support/db2_runtime_config.h",
+      "resolved": "src/modules/db2/support/db2_runtime_config.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_deps.c",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
       "classification": "host-api",
       "count": 1
     },
@@ -6226,15 +6357,15 @@
     },
     {
       "source": "src/modules/db2/c/cross_repo_identity.c",
-      "header": "aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
       "source": "src/modules/db2/c/cross_repo_identity.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
       "classification": "host-api",
       "count": 1
     },
@@ -6247,16 +6378,23 @@
     },
     {
       "source": "src/modules/db2/c/cross_repo_review.c",
-      "header": "aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
       "source": "src/modules/db2/c/cross_repo_review.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/cross_repo_route.c",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6267,23 +6405,16 @@
       "count": 1
     },
     {
-      "source": "src/modules/db2/c/cross_repo_route.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "source": "src/modules/db2/c/cross_repo_stats.c",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
       "source": "src/modules/db2/c/cross_repo_stats.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/cross_repo_stats.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
       "classification": "host-api",
       "count": 1
     },
@@ -6303,8 +6434,8 @@
     },
     {
       "source": "src/modules/db2/c/css_migration.c",
-      "header": "config.h",
-      "resolved": "src/modules/config/config.h",
+      "header": "../support/db2_runtime_config.h",
+      "resolved": "src/modules/db2/support/db2_runtime_config.h",
       "classification": "module-private-api",
       "count": 1
     },
@@ -6317,8 +6448,8 @@
     },
     {
       "source": "src/modules/db2/c/css_render.c",
-      "header": "config.h",
-      "resolved": "src/modules/config/config.h",
+      "header": "../support/db2_runtime_config.h",
+      "resolved": "src/modules/db2/support/db2_runtime_config.h",
       "classification": "module-private-api",
       "count": 1
     },
@@ -6338,16 +6469,16 @@
     },
     {
       "source": "src/modules/db2/c/db2_hardening.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
       "source": "src/modules/db2/c/db2_init.c",
-      "header": "../headers/log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6366,16 +6497,16 @@
     },
     {
       "source": "src/modules/db2/c/db2_reembed.c",
-      "header": "../headers/log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
       "source": "src/modules/db2/c/db2_tenant.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6485,15 +6616,15 @@
     },
     {
       "source": "src/modules/db2/c/enrollments.c",
-      "header": "kb_identity.h",
-      "resolved": "src/headers/kb_identity.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
       "source": "src/modules/db2/c/enrollments.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
+      "header": "kb_identity.h",
+      "resolved": "src/headers/kb_identity.h",
       "classification": "host-api",
       "count": 1
     },
@@ -6534,15 +6665,15 @@
     },
     {
       "source": "src/modules/db2/c/fact_ingest.c",
-      "header": "../headers/log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
       "source": "src/modules/db2/c/fact_ingest.c",
-      "header": "config.h",
-      "resolved": "src/modules/config/config.h",
+      "header": "../support/db2_runtime_config.h",
+      "resolved": "src/modules/db2/support/db2_runtime_config.h",
       "classification": "module-private-api",
       "count": 1
     },
@@ -6618,16 +6749,16 @@
     },
     {
       "source": "src/modules/db2/c/kb_audit_worm.c",
-      "header": "aimee/audit/audit_worm_chain.h",
-      "resolved": "src/modules/audit/include/aimee/audit/audit_worm_chain.h",
-      "classification": "module-public-api",
+      "header": "../support/db2_runtime_config.h",
+      "resolved": "src/modules/db2/support/db2_runtime_config.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
       "source": "src/modules/db2/c/kb_audit_worm.c",
-      "header": "config.h",
-      "resolved": "src/modules/config/config.h",
-      "classification": "module-private-api",
+      "header": "aimee/audit/audit_worm_chain.h",
+      "resolved": "src/modules/audit/include/aimee/audit/audit_worm_chain.h",
+      "classification": "module-public-api",
       "count": 1
     },
     {
@@ -6639,9 +6770,16 @@
     },
     {
       "source": "src/modules/db2/c/kb_payload.c",
-      "header": "../headers/log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_payload.c",
+      "header": "../support/db2_runtime_config.h",
+      "resolved": "src/modules/db2/support/db2_runtime_config.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6655,13 +6793,6 @@
       "source": "src/modules/db2/c/kb_payload.c",
       "header": "cJSON.h",
       "resolved": "src/modules/db2/support/cJSON.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_payload.c",
-      "header": "config.h",
-      "resolved": "src/modules/config/config.h",
       "classification": "module-private-api",
       "count": 1
     },
@@ -6681,8 +6812,15 @@
     },
     {
       "source": "src/modules/db2/c/kb_runtime_state.c",
-      "header": "config.h",
-      "resolved": "src/modules/config/config.h",
+      "header": "../support/db2_runtime_config.h",
+      "resolved": "src/modules/db2/support/db2_runtime_config.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/kb_service_backend.c",
+      "header": "../support/db2_runtime_config.h",
+      "resolved": "src/modules/db2/support/db2_runtime_config.h",
       "classification": "module-private-api",
       "count": 1
     },
@@ -6690,102 +6828,11 @@
       "source": "src/modules/db2/c/kb_service_backend.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend.c",
-      "header": "config.h",
-      "resolved": "src/modules/config/config.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend.c",
-      "header": "platform_process.h",
-      "resolved": "src/headers/platform_process.h",
       "classification": "host-api",
       "count": 1
     },
     {
       "source": "src/modules/db2/c/kb_service_backend.h",
-      "header": "cJSON.h",
-      "resolved": "src/modules/db2/support/cJSON.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_agent.c",
-      "header": "agent_coord.h",
-      "resolved": "src/headers/agent_coord.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_agent.c",
-      "header": "agent_eval.h",
-      "resolved": "src/modules/benchmarks/agent_eval.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_agent.c",
-      "header": "aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_agent.c",
-      "header": "dashboard.h",
-      "resolved": "src/headers/dashboard.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_agent.c",
-      "header": "memory.h",
-      "resolved": "src/headers/memory.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_agent.c",
-      "header": "modules/learning/learning_evidence.h",
-      "resolved": "src/modules/learning/learning_evidence.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_agent.c",
-      "header": "modules/learning/learning_implicit.h",
-      "resolved": "src/modules/learning/learning_implicit.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_agent.c",
-      "header": "trace_analysis.h",
-      "resolved": "src/headers/trace_analysis.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_export.c",
-      "header": "../headers/aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_export.c",
-      "header": "cJSON.h",
-      "resolved": "src/modules/db2/support/cJSON.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_export.h",
       "header": "cJSON.h",
       "resolved": "src/modules/db2/support/cJSON.h",
       "classification": "module-private-api",
@@ -6799,41 +6846,6 @@
       "count": 1
     },
     {
-      "source": "src/modules/db2/c/kb_service_backend_memory.c",
-      "header": "aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_memory.c",
-      "header": "config.h",
-      "resolved": "src/modules/config/config.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_memory.c",
-      "header": "memory.h",
-      "resolved": "src/headers/memory.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_memory.c",
-      "header": "modules/memory/memory_pii_gate.h",
-      "resolved": "src/modules/memory/memory_pii_gate.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_service_backend_memory.c",
-      "header": "session_briefing.h",
-      "resolved": "src/headers/session_briefing.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
       "source": "src/modules/db2/c/kind_lifecycle.c",
       "header": "../headers/aimee.h",
       "resolved": "src/headers/aimee.h",
@@ -6842,9 +6854,9 @@
     },
     {
       "source": "src/modules/db2/c/learning.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -6926,9 +6938,9 @@
     },
     {
       "source": "src/modules/db2/c/membership.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -7017,9 +7029,9 @@
     },
     {
       "source": "src/modules/db2/c/oidc_jwks.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -7066,23 +7078,23 @@
     },
     {
       "source": "src/modules/db2/c/pgvec_transport.c",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/pgvec_transport.c",
       "header": "cJSON.h",
       "resolved": "src/modules/db2/support/cJSON.h",
       "classification": "module-private-api",
       "count": 1
     },
     {
-      "source": "src/modules/db2/c/pgvec_transport.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
       "source": "src/modules/db2/c/project.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -7143,6 +7155,13 @@
     },
     {
       "source": "src/modules/db2/c/rules.c",
+      "header": "../support/db2_runtime_config.h",
+      "resolved": "src/modules/db2/support/db2_runtime_config.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/rules.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
@@ -7152,13 +7171,6 @@
       "source": "src/modules/db2/c/rules.c",
       "header": "cJSON.h",
       "resolved": "src/modules/db2/support/cJSON.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/rules.c",
-      "header": "config.h",
-      "resolved": "src/modules/config/config.h",
       "classification": "module-private-api",
       "count": 1
     },
@@ -7178,9 +7190,9 @@
     },
     {
       "source": "src/modules/db2/c/team.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -7206,9 +7218,9 @@
     },
     {
       "source": "src/modules/db2/c/vault_pg.c",
-      "header": "log.h",
-      "resolved": "src/headers/log.h",
-      "classification": "host-api",
+      "header": "../support/db2_log.h",
+      "resolved": "src/modules/db2/support/db2_log.h",
+      "classification": "module-private-api",
       "count": 1
     },
     {
@@ -7268,5 +7280,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "94266215a3bb170f94e7e0e7a9c0d320f0a872b9fbddb002a91d3bbe156464da"
+  "fingerprint": "7c2a06ceaaf470593de8e04bcb4bbb2f0648c16d0394d013cb182b9236f38880"
 }

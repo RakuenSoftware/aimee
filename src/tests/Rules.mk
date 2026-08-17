@@ -760,12 +760,25 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
 TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-bus-db2-module \
+                $(TESTPREFIX)/unit-test-db2-cert-serial-support \
                 $(TESTPREFIX)/unit-test-db2-cjson-support \
+                $(TESTPREFIX)/unit-test-db2-cochange-support \
+                $(TESTPREFIX)/unit-test-db2-code-audit-graph-support \
+                $(TESTPREFIX)/unit-test-db2-code-import-support \
+                $(TESTPREFIX)/unit-test-db2-code-match-support \
                 $(TESTPREFIX)/unit-test-db2-dstr-support \
+                $(TESTPREFIX)/unit-test-db2-extractor-support \
+                $(TESTPREFIX)/unit-test-db2-log-support \
                 $(TESTPREFIX)/unit-test-db2-management-read-support \
+                $(TESTPREFIX)/unit-test-db2-model-validation-support \
+                $(TESTPREFIX)/unit-test-db2-node-kind-text-support \
+                $(TESTPREFIX)/unit-test-db2-pii-classifier-support \
+                $(TESTPREFIX)/unit-test-db2-pii-inject-gate-support \
                 $(TESTPREFIX)/unit-test-db2-random-support \
                 $(TESTPREFIX)/unit-test-db2-rel-enum-text-support \
+                $(TESTPREFIX)/unit-test-db2-rel-seed-support \
                 $(TESTPREFIX)/unit-test-db2-rel-type-support \
+                $(TESTPREFIX)/unit-test-db2-runtime-config-support \
                 $(TESTPREFIX)/unit-test-db2-sketch-support \
                 $(TESTPREFIX)/unit-test-db2-text-support \
                 $(TESTPREFIX)/unit-test-db2-time-support \
@@ -840,11 +853,24 @@ UNIT_TEST_SHARD_INDEX ?= 0
 UNIT_TEST_SKIP_P1 ?= 0
 ifeq ($(UNIT_TEST_SHARD_INDEX),0)
 UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-cert-serial-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-cjson-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-cochange-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-code-audit-graph-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-code-import-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-code-match-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-extractor-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-log-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-model-validation-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-node-kind-text-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-pii-classifier-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-pii-inject-gate-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-random-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-rel-seed-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-type-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-runtime-config-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-text-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-time-support-sanitize
@@ -6884,6 +6910,162 @@ unit-test-db2-random-support: $(TESTPREFIX)/unit-test-db2-random-support
 unit-test-db2-random-support-sanitize: $(TESTPREFIX)/unit-test-db2-random-support-sanitize
 	$<
 
+DB2_CERT_SERIAL_SUPPORT_RENAMES = -DAIMEE_DB2_CERT_SERIAL_PREFIX
+DB2_CERT_SERIAL_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_cert_serial_support_impl.o: \
+                     modules/db2/support/cert_serial_primitives.c \
+                     modules/db2/support/db2_cert_serial.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CERT_SERIAL_SUPPORT_RENAMES) \
+	      $(DB2_CERT_SERIAL_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_cert_serial_monolith.o: kb/kb_identity.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CERT_SERIAL_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-cert-serial-support: \
+                     $(OBJDIR)/tests/test_db2_cert_serial_support.o \
+                     $(OBJDIR)/tests/db2_cert_serial_support_impl.o \
+                     $(OBJDIR)/tests/db2_cert_serial_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_CERT_SERIAL_SANITIZE_DIR = $(OBJDIR)/tests/db2-cert-serial-support-sanitize
+
+$(DB2_CERT_SERIAL_SANITIZE_DIR)/test.o: tests/test_db2_cert_serial_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CERT_SERIAL_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/cert_serial_primitives.c \
+                     modules/db2/support/db2_cert_serial.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CERT_SERIAL_SUPPORT_RENAMES) \
+	      $(DB2_CERT_SERIAL_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CERT_SERIAL_SANITIZE_DIR)/monolith.o: kb/kb_identity.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CERT_SERIAL_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-cert-serial-support-sanitize: \
+                     $(DB2_CERT_SERIAL_SANITIZE_DIR)/test.o \
+                     $(DB2_CERT_SERIAL_SANITIZE_DIR)/support.o \
+                     $(DB2_CERT_SERIAL_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-cert-serial-support unit-test-db2-cert-serial-support-sanitize
+unit-test-db2-cert-serial-support: $(TESTPREFIX)/unit-test-db2-cert-serial-support
+	$<
+
+unit-test-db2-cert-serial-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-cert-serial-support-sanitize
+	$<
+
+DB2_COCHANGE_SUPPORT_RENAMES = -DAIMEE_DB2_COCHANGE_PREFIX
+DB2_COCHANGE_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_cochange_support_impl.o: \
+                     modules/db2/support/cochange_primitives.c \
+                     modules/db2/support/db2_cochange.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_COCHANGE_SUPPORT_RENAMES) \
+	      $(DB2_COCHANGE_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_cochange_monolith.o: cochange.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_COCHANGE_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-cochange-support: \
+                     $(OBJDIR)/tests/test_db2_cochange_support.o \
+                     $(OBJDIR)/tests/db2_cochange_support_impl.o \
+                     $(OBJDIR)/tests/db2_cochange_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_COCHANGE_SANITIZE_DIR = $(OBJDIR)/tests/db2-cochange-support-sanitize
+
+$(DB2_COCHANGE_SANITIZE_DIR)/test.o: tests/test_db2_cochange_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_COCHANGE_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/cochange_primitives.c \
+                     modules/db2/support/db2_cochange.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_COCHANGE_SUPPORT_RENAMES) \
+	      $(DB2_COCHANGE_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_COCHANGE_SANITIZE_DIR)/monolith.o: cochange.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_COCHANGE_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-cochange-support-sanitize: \
+                     $(DB2_COCHANGE_SANITIZE_DIR)/test.o \
+                     $(DB2_COCHANGE_SANITIZE_DIR)/support.o \
+                     $(DB2_COCHANGE_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-cochange-support unit-test-db2-cochange-support-sanitize
+unit-test-db2-cochange-support: $(TESTPREFIX)/unit-test-db2-cochange-support
+	$<
+
+unit-test-db2-cochange-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-cochange-support-sanitize
+	$<
+
+DB2_CODE_MATCH_SUPPORT_RENAMES = -DAIMEE_DB2_CODE_MATCH_PREFIX
+DB2_CODE_MATCH_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_code_match_support_impl.o: \
+                     modules/db2/support/code_match_primitives.c \
+                     modules/db2/support/db2_code_match.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_MATCH_SUPPORT_RENAMES) \
+	      $(DB2_CODE_MATCH_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_code_match_monolith.o: code_match.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_MATCH_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-code-match-support: \
+                     $(OBJDIR)/tests/test_db2_code_match_support.o \
+                     $(OBJDIR)/tests/db2_code_match_support_impl.o \
+                     $(OBJDIR)/tests/db2_code_match_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_CODE_MATCH_SANITIZE_DIR = $(OBJDIR)/tests/db2-code-match-support-sanitize
+
+$(DB2_CODE_MATCH_SANITIZE_DIR)/test.o: tests/test_db2_code_match_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CODE_MATCH_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/code_match_primitives.c \
+                     modules/db2/support/db2_code_match.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_MATCH_SUPPORT_RENAMES) \
+	      $(DB2_CODE_MATCH_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CODE_MATCH_SANITIZE_DIR)/monolith.o: code_match.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_MATCH_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-code-match-support-sanitize: \
+                     $(DB2_CODE_MATCH_SANITIZE_DIR)/test.o \
+                     $(DB2_CODE_MATCH_SANITIZE_DIR)/support.o \
+                     $(DB2_CODE_MATCH_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-code-match-support unit-test-db2-code-match-support-sanitize
+unit-test-db2-code-match-support: $(TESTPREFIX)/unit-test-db2-code-match-support
+	$<
+
+unit-test-db2-code-match-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-code-match-support-sanitize
+	$<
+
 DB2_DSTR_SUPPORT_RENAMES = \
    -Ddstr_appendf=db2_support_dstr_appendf \
    -Ddstr_init=db2_support_dstr_init \
@@ -6986,6 +7168,60 @@ unit-test-db2-management-read-support-sanitize: \
                      $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize
 	$<
 
+DB2_MODEL_VALIDATION_SUPPORT_RENAMES = -DAIMEE_DB2_MODEL_VALIDATION_PREFIX
+DB2_MODEL_VALIDATION_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_model_validation_support_impl.o: \
+                     modules/db2/support/model_validation_primitives.c \
+                     modules/db2/support/db2_model_validation.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_MODEL_VALIDATION_SUPPORT_RENAMES) \
+	      $(DB2_MODEL_VALIDATION_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_model_validation_monolith.o: kb/http/kb_models_validate.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_MODEL_VALIDATION_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-model-validation-support: \
+                     $(OBJDIR)/tests/test_db2_model_validation_support.o \
+                     $(OBJDIR)/tests/db2_model_validation_support_impl.o \
+                     $(OBJDIR)/tests/db2_model_validation_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_MODEL_VALIDATION_SANITIZE_DIR = $(OBJDIR)/tests/db2-model-validation-support-sanitize
+
+$(DB2_MODEL_VALIDATION_SANITIZE_DIR)/test.o: tests/test_db2_model_validation_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_MODEL_VALIDATION_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/model_validation_primitives.c \
+                     modules/db2/support/db2_model_validation.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_MODEL_VALIDATION_SUPPORT_RENAMES) \
+	      $(DB2_MODEL_VALIDATION_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_MODEL_VALIDATION_SANITIZE_DIR)/monolith.o: kb/http/kb_models_validate.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_MODEL_VALIDATION_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-model-validation-support-sanitize: \
+                     $(DB2_MODEL_VALIDATION_SANITIZE_DIR)/test.o \
+                     $(DB2_MODEL_VALIDATION_SANITIZE_DIR)/support.o \
+                     $(DB2_MODEL_VALIDATION_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-model-validation-support \
+        unit-test-db2-model-validation-support-sanitize
+unit-test-db2-model-validation-support: \
+                     $(TESTPREFIX)/unit-test-db2-model-validation-support
+	$<
+
+unit-test-db2-model-validation-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-model-validation-support-sanitize
+	$<
+
 DB2_TEXT_SUPPORT_RENAMES = -Dtext_sanitize_utf8=db2_support_text_sanitize_utf8
 DB2_TEXT_SECTION_FLAGS = -ffunction-sections -fdata-sections
 
@@ -7031,6 +7267,179 @@ unit-test-db2-text-support: $(TESTPREFIX)/unit-test-db2-text-support
 	$<
 
 unit-test-db2-text-support-sanitize: $(TESTPREFIX)/unit-test-db2-text-support-sanitize
+	$<
+
+DB2_EXTRACTOR_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_extractor_support_impl.o: modules/db2/support/extractor_primitives.c \
+                                            modules/db2/support/db2_extractors.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -DAIMEE_DB2_EXTRACTOR_PREFIX $(DB2_EXTRACTOR_SECTION_FLAGS) \
+	      -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-extractor-support: \
+                     $(OBJDIR)/tests/test_db2_extractor_support.o \
+                     $(OBJDIR)/tests/db2_extractor_support_impl.o \
+                     $(OBJDIR)/extractors.o $(OBJDIR)/extractors_extra.o \
+                     $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_EXTRACTOR_SANITIZE_DIR = $(OBJDIR)/tests/db2-extractor-support-sanitize
+
+$(DB2_EXTRACTOR_SANITIZE_DIR)/test.o: tests/test_db2_extractor_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_EXTRACTOR_SANITIZE_DIR)/support.o: modules/db2/support/extractor_primitives.c \
+                                               modules/db2/support/db2_extractors.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -DAIMEE_DB2_EXTRACTOR_PREFIX $(DB2_EXTRACTOR_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_EXTRACTOR_SANITIZE_DIR)/extractors.o: extractors.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_EXTRACTOR_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      -c -o $@ $<
+
+$(DB2_EXTRACTOR_SANITIZE_DIR)/extra.o: extractors_extra.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_EXTRACTOR_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      -c -o $@ $<
+
+$(DB2_EXTRACTOR_SANITIZE_DIR)/new-langs.o: extractors_new_langs.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_EXTRACTOR_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      -c -o $@ $<
+
+$(DB2_EXTRACTOR_SANITIZE_DIR)/tree-sitter.o: code_treesitter.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_EXTRACTOR_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-extractor-support-sanitize: \
+                     $(DB2_EXTRACTOR_SANITIZE_DIR)/test.o \
+                     $(DB2_EXTRACTOR_SANITIZE_DIR)/support.o \
+                     $(DB2_EXTRACTOR_SANITIZE_DIR)/extractors.o \
+                     $(DB2_EXTRACTOR_SANITIZE_DIR)/extra.o \
+                     $(DB2_EXTRACTOR_SANITIZE_DIR)/new-langs.o \
+                     $(DB2_EXTRACTOR_SANITIZE_DIR)/tree-sitter.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-extractor-support unit-test-db2-extractor-support-sanitize
+unit-test-db2-extractor-support: $(TESTPREFIX)/unit-test-db2-extractor-support
+	$<
+
+unit-test-db2-extractor-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-extractor-support-sanitize
+	$<
+
+DB2_CODE_IMPORT_SUPPORT_RENAMES = \
+   -Dcode_path_import_identity=db2_support_code_path_import_identity \
+   -Dcode_import_identity=db2_support_code_import_identity \
+   -Dcode_import_resolves_path=db2_support_code_import_resolves_path
+DB2_CODE_IMPORT_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_code_import_support_impl.o: \
+                     modules/db2/support/code_import_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_IMPORT_SUPPORT_RENAMES) \
+	      $(DB2_CODE_IMPORT_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_code_import_monolith.o: extractors.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_IMPORT_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-code-import-support: \
+                     $(OBJDIR)/tests/test_db2_code_import_support.o \
+                     $(OBJDIR)/tests/db2_code_import_support_impl.o \
+                     $(OBJDIR)/tests/db2_code_import_monolith.o
+	$(CC) -Wl,--gc-sections -o $@ $^
+
+DB2_CODE_IMPORT_SANITIZE_DIR = $(OBJDIR)/tests/db2-code-import-support-sanitize
+
+$(DB2_CODE_IMPORT_SANITIZE_DIR)/test.o: tests/test_db2_code_import_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CODE_IMPORT_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/code_import_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_IMPORT_SUPPORT_RENAMES) \
+	      $(DB2_CODE_IMPORT_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CODE_IMPORT_SANITIZE_DIR)/monolith.o: extractors.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_IMPORT_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-code-import-support-sanitize: \
+                     $(DB2_CODE_IMPORT_SANITIZE_DIR)/test.o \
+                     $(DB2_CODE_IMPORT_SANITIZE_DIR)/support.o \
+                     $(DB2_CODE_IMPORT_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-code-import-support unit-test-db2-code-import-support-sanitize
+unit-test-db2-code-import-support: $(TESTPREFIX)/unit-test-db2-code-import-support
+	$<
+
+unit-test-db2-code-import-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-code-import-support-sanitize
+	$<
+
+DB2_CODE_AUDIT_GRAPH_SUPPORT_RENAMES = \
+   -Dcode_audit_dead_exports=db2_support_code_audit_dead_exports \
+   -Dcode_audit_find_cycles=db2_support_code_audit_find_cycles
+DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_code_audit_graph_support_impl.o: \
+                     modules/db2/support/code_audit_graph_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_AUDIT_GRAPH_SUPPORT_RENAMES) \
+	      $(DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_code_audit_graph_monolith.o: code_audit_graph.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-code-audit-graph-support: \
+                     $(OBJDIR)/tests/test_db2_code_audit_graph_support.o \
+                     $(OBJDIR)/tests/db2_code_audit_graph_support_impl.o \
+                     $(OBJDIR)/tests/db2_code_audit_graph_monolith.o
+	$(CC) -Wl,--gc-sections -o $@ $^
+
+DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR = \
+                     $(OBJDIR)/tests/db2-code-audit-graph-support-sanitize
+
+$(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/test.o: \
+                     tests/test_db2_code_audit_graph_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/code_audit_graph_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_AUDIT_GRAPH_SUPPORT_RENAMES) \
+	      $(DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/monolith.o: code_audit_graph.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-code-audit-graph-support-sanitize: \
+                     $(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/test.o \
+                     $(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/support.o \
+                     $(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-code-audit-graph-support \
+        unit-test-db2-code-audit-graph-support-sanitize
+unit-test-db2-code-audit-graph-support: \
+                     $(TESTPREFIX)/unit-test-db2-code-audit-graph-support
+	$<
+
+unit-test-db2-code-audit-graph-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-code-audit-graph-support-sanitize
 	$<
 
 DB2_TIME_SUPPORT_RENAMES = \
@@ -7121,6 +7530,257 @@ unit-test-db2-rel-enum-text-support-sanitize: \
       $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize
 	$<
 
+DB2_NODE_KIND_TEXT_SUPPORT_RENAMES = \
+   -Dmemory_ontology_node_kind_to_text=db2_support_memory_ontology_node_kind_to_text
+
+$(OBJDIR)/tests/db2_node_kind_text_support_impl.o: \
+                     modules/db2/support/node_kind_text_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_NODE_KIND_TEXT_SUPPORT_RENAMES) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_memory_episodes_monolith.o: modules/memory/memory_episodes.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-node-kind-text-support: \
+                     $(OBJDIR)/tests/test_db2_node_kind_text_support.o \
+                     $(OBJDIR)/tests/db2_node_kind_text_support_impl.o \
+                     $(OBJDIR)/tests/db2_memory_episodes_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_NODE_KIND_TEXT_SANITIZE_DIR = $(OBJDIR)/tests/db2-node-kind-text-support-sanitize
+
+$(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/test.o: tests/test_db2_node_kind_text_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/node_kind_text_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_NODE_KIND_TEXT_SUPPORT_RENAMES) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/monolith.o: modules/memory/memory_episodes.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-node-kind-text-support-sanitize: \
+                     $(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/test.o \
+                     $(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/support.o \
+                     $(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-node-kind-text-support unit-test-db2-node-kind-text-support-sanitize
+unit-test-db2-node-kind-text-support: $(TESTPREFIX)/unit-test-db2-node-kind-text-support
+	$<
+
+unit-test-db2-node-kind-text-support-sanitize: \
+      $(TESTPREFIX)/unit-test-db2-node-kind-text-support-sanitize
+	$<
+
+DB2_PII_INJECT_GATE_SUPPORT_RENAMES = \
+   -Dmemory_pii_should_inject=db2_support_memory_pii_should_inject
+DB2_PII_INJECT_GATE_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_pii_inject_gate_support_impl.o: \
+                     modules/db2/support/pii_inject_gate_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_INJECT_GATE_SUPPORT_RENAMES) \
+	      $(DB2_PII_INJECT_GATE_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_memory_pii_gate_monolith.o: modules/memory/memory_pii_gate.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_INJECT_GATE_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-pii-inject-gate-support: \
+                     $(OBJDIR)/tests/test_db2_pii_inject_gate_support.o \
+                     $(OBJDIR)/tests/db2_pii_inject_gate_support_impl.o \
+                     $(OBJDIR)/tests/db2_memory_pii_gate_monolith.o
+	$(CC) -Wl,--gc-sections -o $@ $^
+
+DB2_PII_INJECT_GATE_SANITIZE_DIR = \
+                     $(OBJDIR)/tests/db2-pii-inject-gate-support-sanitize
+
+$(DB2_PII_INJECT_GATE_SANITIZE_DIR)/test.o: \
+                     tests/test_db2_pii_inject_gate_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_PII_INJECT_GATE_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/pii_inject_gate_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_INJECT_GATE_SUPPORT_RENAMES) \
+	      $(DB2_PII_INJECT_GATE_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      -c -o $@ $<
+
+$(DB2_PII_INJECT_GATE_SANITIZE_DIR)/monolith.o: \
+                     modules/memory/memory_pii_gate.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_INJECT_GATE_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-pii-inject-gate-support-sanitize: \
+                     $(DB2_PII_INJECT_GATE_SANITIZE_DIR)/test.o \
+                     $(DB2_PII_INJECT_GATE_SANITIZE_DIR)/support.o \
+                     $(DB2_PII_INJECT_GATE_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-pii-inject-gate-support \
+        unit-test-db2-pii-inject-gate-support-sanitize
+unit-test-db2-pii-inject-gate-support: \
+      $(TESTPREFIX)/unit-test-db2-pii-inject-gate-support
+	$<
+
+unit-test-db2-pii-inject-gate-support-sanitize: \
+      $(TESTPREFIX)/unit-test-db2-pii-inject-gate-support-sanitize
+	$<
+
+DB2_PII_CLASSIFIER_SUPPORT_RENAMES = \
+   -Dmemory_pii_register_turn_classifier=db2_support_memory_pii_register_turn_classifier \
+   -Dmemory_pii_turn_requests_sensitive=db2_support_memory_pii_turn_requests_sensitive \
+   -Dmemory_pii_rel_sensitivity=db2_support_memory_pii_rel_sensitivity \
+   -Dmemory_pii_register_sensitivity_batch=db2_support_memory_pii_register_sensitivity_batch \
+   -Dmemory_pii_rel_sensitivity_batch=db2_support_memory_pii_rel_sensitivity_batch
+DB2_PII_CLASSIFIER_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_pii_classifier_support_impl.o: \
+                     modules/db2/support/pii_classifier_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SUPPORT_RENAMES) \
+	      $(DB2_PII_CLASSIFIER_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_pii_classifier_monolith.o: modules/memory/memory_pii_gate.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_pii_classifier_rel_type.o: modules/db2/support/rel_type_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_pii_classifier_rel_seed.o: modules/db2/support/rel_seed_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-pii-classifier-support: \
+                     $(OBJDIR)/tests/test_db2_pii_classifier_support.o \
+                     $(OBJDIR)/tests/db2_pii_classifier_support_impl.o \
+                     $(OBJDIR)/tests/db2_pii_classifier_monolith.o \
+                     $(OBJDIR)/tests/db2_pii_classifier_rel_type.o \
+                     $(OBJDIR)/tests/db2_pii_classifier_rel_seed.o
+	$(CC) -Wl,--gc-sections -o $@ $^
+
+DB2_PII_CLASSIFIER_SANITIZE_DIR = $(OBJDIR)/tests/db2-pii-classifier-support-sanitize
+
+$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/test.o: tests/test_db2_pii_classifier_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/pii_classifier_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SUPPORT_RENAMES) \
+	      $(DB2_PII_CLASSIFIER_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/monolith.o: modules/memory/memory_pii_gate.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/rel-type.o: \
+                     modules/db2/support/rel_type_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/rel-seed.o: \
+                     modules/db2/support/rel_seed_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-pii-classifier-support-sanitize: \
+                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/test.o \
+                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/support.o \
+                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/monolith.o \
+                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/rel-type.o \
+                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/rel-seed.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-pii-classifier-support unit-test-db2-pii-classifier-support-sanitize
+unit-test-db2-pii-classifier-support: \
+                     $(TESTPREFIX)/unit-test-db2-pii-classifier-support
+	$<
+
+unit-test-db2-pii-classifier-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-pii-classifier-support-sanitize
+	$<
+
+$(OBJDIR)/tests/db2_runtime_config_support_impl.o: \
+                     modules/db2/support/runtime_config_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-runtime-config-support: \
+                     $(OBJDIR)/tests/test_db2_runtime_config_support.o \
+                     $(OBJDIR)/tests/db2_runtime_config_support_impl.o
+	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_RUNTIME_CONFIG_SANITIZE_DIR = $(OBJDIR)/tests/db2-runtime-config-support-sanitize
+
+$(DB2_RUNTIME_CONFIG_SANITIZE_DIR)/test.o: tests/test_db2_runtime_config_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_RUNTIME_CONFIG_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/runtime_config_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-runtime-config-support-sanitize: \
+                     $(DB2_RUNTIME_CONFIG_SANITIZE_DIR)/test.o \
+                     $(DB2_RUNTIME_CONFIG_SANITIZE_DIR)/support.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -o $@ $^
+
+.PHONY: unit-test-db2-runtime-config-support \
+        unit-test-db2-runtime-config-support-sanitize
+unit-test-db2-runtime-config-support: $(TESTPREFIX)/unit-test-db2-runtime-config-support
+	$<
+
+unit-test-db2-runtime-config-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-runtime-config-support-sanitize
+	$<
+
+$(OBJDIR)/tests/db2_log_support_impl.o: modules/db2/support/log_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-log-support: \
+                     $(OBJDIR)/tests/test_db2_log_support.o \
+                     $(OBJDIR)/tests/db2_log_support_impl.o
+	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_LOG_SANITIZE_DIR = $(OBJDIR)/tests/db2-log-support-sanitize
+
+$(DB2_LOG_SANITIZE_DIR)/test.o: tests/test_db2_log_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_LOG_SANITIZE_DIR)/support.o: modules/db2/support/log_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-log-support-sanitize: \
+                     $(DB2_LOG_SANITIZE_DIR)/test.o \
+                     $(DB2_LOG_SANITIZE_DIR)/support.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -o $@ $^
+
+.PHONY: unit-test-db2-log-support unit-test-db2-log-support-sanitize
+unit-test-db2-log-support: $(TESTPREFIX)/unit-test-db2-log-support
+	$<
+
+unit-test-db2-log-support-sanitize: $(TESTPREFIX)/unit-test-db2-log-support-sanitize
+	$<
+
 DB2_REL_TYPE_SUPPORT_RENAMES = \
    -Drel_type_is_functional=db2_support_rel_type_is_functional \
    -Drel_type_normalize=db2_support_rel_type_normalize
@@ -7168,6 +7828,49 @@ unit-test-db2-rel-type-support: $(TESTPREFIX)/unit-test-db2-rel-type-support
 	$<
 
 unit-test-db2-rel-type-support-sanitize: $(TESTPREFIX)/unit-test-db2-rel-type-support-sanitize
+	$<
+
+DB2_REL_SEED_SUPPORT_RENAMES = \
+   -Drel_type_normalize=db2_support_rel_type_normalize \
+   -Drel_types_seed_at=db2_support_rel_types_seed_at \
+   -Drel_types_seed_count=db2_support_rel_types_seed_count \
+   -Drel_types_seed_lookup=db2_support_rel_types_seed_lookup
+
+$(OBJDIR)/tests/db2_rel_seed_support_impl.o: modules/db2/support/rel_seed_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_REL_SEED_SUPPORT_RENAMES) \
+	      $(DB2_REL_TYPE_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-rel-seed-support: \
+                     $(OBJDIR)/tests/test_db2_rel_seed_support.o \
+                     $(OBJDIR)/tests/db2_rel_seed_support_impl.o \
+                     $(OBJDIR)/tests/db2_rel_type_support_impl.o \
+                     $(OBJDIR)/tests/db2_rel_type_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_REL_SEED_SANITIZE_DIR = $(OBJDIR)/tests/db2-rel-seed-support-sanitize
+
+$(DB2_REL_SEED_SANITIZE_DIR)/test.o: tests/test_db2_rel_seed_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_REL_SEED_SANITIZE_DIR)/support.o: modules/db2/support/rel_seed_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_REL_SEED_SUPPORT_RENAMES) $(DB2_REL_TYPE_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-rel-seed-support-sanitize: \
+                     $(DB2_REL_SEED_SANITIZE_DIR)/test.o \
+                     $(DB2_REL_SEED_SANITIZE_DIR)/support.o \
+                     $(DB2_REL_TYPE_SANITIZE_DIR)/support.o \
+                     $(DB2_REL_TYPE_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-rel-seed-support unit-test-db2-rel-seed-support-sanitize
+unit-test-db2-rel-seed-support: $(TESTPREFIX)/unit-test-db2-rel-seed-support
+	$<
+
+unit-test-db2-rel-seed-support-sanitize: $(TESTPREFIX)/unit-test-db2-rel-seed-support-sanitize
 	$<
 
 DB2_SKETCH_SUPPORT_RENAMES = \

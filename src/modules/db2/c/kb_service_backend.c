@@ -3,7 +3,7 @@
 #include "kb_service_backend.h"
 
 #include "aimee.h"
-#include "config.h"
+#include "../support/db2_runtime_config.h"
 #include "curiosity.h"
 #include "epistemic_directives.h"
 #include "notes.h"
@@ -15,7 +15,6 @@
 #include "code_index_ops.h"
 #include "db_postgres.h"
 #include "memory_scenes.h"
-#include "platform_process.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -35,6 +34,16 @@
  * dispatch branch fails those jobs; adding a dispatch branch without adding it
  * here leaves them unclaimed forever. */
 #define KBS_ASYNC_DRAIN_KINDS_SQL "('embed_raw', 'embed_pdf')"
+
+static int db2_worker_identity_valid(const char *claimed_by)
+{
+   if (!claimed_by || !claimed_by[0])
+      return 0;
+   for (size_t i = 1; i < 128; i++)
+      if (claimed_by[i] == '\0')
+         return 1;
+   return 0;
+}
 
 static const char *DB2_KB_DIRECTIVE_SELECT_COLS =
     "id, question, topic, anchor_entity, anchor_file, cause, priority, state,"
@@ -283,21 +292,12 @@ int db2_kb_service_async_job_get(int64_t job_id, db2_kb_service_async_job_t *out
    return 1;
 }
 
-int db2_kb_service_async_queue_spawn_worker(void)
-{
-   char exe[MAX_PATH_LEN];
-   if (platform_get_exe_path(exe, sizeof(exe)) != 0)
-      return -1;
-
-   const char *argv[] = {exe, "memory", "drain", NULL};
-   return platform_spawn_daemon(argv) > 0 ? 0 : -1;
-}
-
-static int db2_kb_service_async_queue_claim_next(int64_t *job_id, int64_t *document_id, char *kind,
-                                                 size_t kind_len)
+static int db2_kb_service_async_queue_claim_next(const char *claimed_by, int64_t *job_id,
+                                                 int64_t *document_id, char *kind, size_t kind_len)
 {
    void *conn = db2_conn();
-   if (!conn || !job_id || !document_id || !kind || kind_len == 0)
+   if (!conn || !db2_worker_identity_valid(claimed_by) || !job_id || !document_id || !kind ||
+       kind_len == 0)
       return -1;
 
    char err[KBS_ERRBUF] = "";
@@ -350,7 +350,7 @@ static int db2_kb_service_async_queue_claim_next(int64_t *job_id, int64_t *docum
       return -1;
    }
 
-   aimee_pg_bind_text(upd, "?1", session_id());
+   aimee_pg_bind_text(upd, "?1", claimed_by);
    aimee_pg_bind_int64(upd, "?2", id);
    aimee_pg_step_t urc = aimee_pg_step(upd, err, sizeof(err));
    int changes = aimee_pg_stmt_changes(upd);
@@ -589,12 +589,14 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
    return 0;
 }
 
-int db2_kb_service_async_queue_drain(const char *embedding_cmd, int timeout_secs,
-                                     const char *vector_collection,
+int db2_kb_service_async_queue_drain(const char *claimed_by, const char *embedding_cmd,
+                                     int timeout_secs, const char *vector_collection,
                                      db2_kb_service_vector_upsert_fn vector_upsert,
                                      void *vector_upsert_ctx,
                                      db2_kb_service_async_queue_stats_t *out)
 {
+   if (!db2_worker_identity_valid(claimed_by))
+      return -1;
    const char *effective_cmd = config_embedder_command_current(embedding_cmd);
    int processed = 0;
 
@@ -608,7 +610,8 @@ int db2_kb_service_async_queue_drain(const char *embedding_cmd, int timeout_secs
       int64_t document_id = 0;
       char kind[32];
       kind[0] = '\0';
-      int claim = db2_kb_service_async_queue_claim_next(&job_id, &document_id, kind, sizeof(kind));
+      int claim = db2_kb_service_async_queue_claim_next(claimed_by, &job_id, &document_id, kind,
+                                                        sizeof(kind));
       if (claim < 0)
          return -1;
       if (claim == 0)

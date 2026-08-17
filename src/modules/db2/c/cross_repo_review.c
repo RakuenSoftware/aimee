@@ -7,7 +7,7 @@
 #include "db2.h"
 #include "db2_internal.h" /* db2_now_utc */
 #include "db_postgres.h"
-#include "log.h"
+#include "../support/db2_log.h"
 
 #include <math.h>
 #include <stdio.h>

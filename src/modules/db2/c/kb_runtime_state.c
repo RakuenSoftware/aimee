@@ -6,7 +6,7 @@
 
 #include "kb_runtime_state.h"
 
-#include "config.h"
+#include "../support/db2_runtime_config.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
 

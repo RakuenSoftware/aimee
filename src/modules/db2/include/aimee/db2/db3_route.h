@@ -58,6 +58,12 @@ typedef struct
 
 typedef struct
 {
+   char key[AIMEE_DB3_MAX_LABEL_KEY];
+   char value[AIMEE_DB3_MAX_LABEL_VALUE];
+} aimee_db3_exact_label_t;
+
+typedef struct
+{
    uint64_t operation_id;
    uint64_t generation;
    int64_t point_id;
@@ -65,6 +71,8 @@ typedef struct
    char collection[AIMEE_DB3_MAX_COLLECTION];
    uint32_t dimension;
    float vector[AIMEE_DB3_MAX_DIM];
+   uint32_t label_count;
+   aimee_db3_exact_label_t labels[AIMEE_DB3_MAX_LABELS];
 } aimee_db3_apply_t;
 
 typedef int (*aimee_db3_search_fn)(void *context, const aimee_db3_search_request_t *request,

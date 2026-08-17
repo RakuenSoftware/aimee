@@ -11,6 +11,7 @@ standalone process.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
@@ -39,14 +40,27 @@ SYMBOL = re.compile(r"^[A-Za-z_][A-Za-z0-9_.$@]*$")
 REVISION = re.compile(r"^[0-9a-f]{40}$")
 # Measure source-level ABI dependencies, not distro-specific compiler hardening
 # thunks. Production builds retain their normal fortify and stack-protector policy.
-PROBE_FLAGS = (
+LEGACY_PROBE_FLAGS = (
     "-fno-lto -fno-common -fno-stack-protector "
     "-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0"
 )
+PROBE_FLAGS = LEGACY_PROBE_FLAGS + " -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM"
 SUPPORT_COMPILE_FLAGS = (
     "-std=c11 -Os -Wall -Wextra -Werror " + PROBE_FLAGS
 )
+LEGACY_SUPPORT_COMPILE_FLAGS = (
+    "-std=c11 -Os -Wall -Wextra -Werror " + LEGACY_PROBE_FLAGS
+)
 SUPPORT_INCLUDE_ROOTS = ["src/modules/db2/support"]
+GENERATED_REL_SEED = Path("src/modules/db2/support/rel_seed_primitives.c")
+HOST_ADAPTER_REHOMES = {
+    "src/modules/db2/c/kb_service_backend_agent.c":
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
+    "src/modules/db2/c/kb_service_backend_export.c":
+        "src/kb/db2_adapters/kb_service_backend_export.c",
+    "src/modules/db2/c/kb_service_backend_memory.c":
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
+}
 CJSON_DEFINES = [
     "cJSON_AddArrayToObject",
     "cJSON_AddBoolToObject",
@@ -327,7 +341,33 @@ CJSON_BASE_REFERENCES = {
         "src/modules/db2/c/rules.c",
     ],
 }
+for _references in CJSON_BASE_REFERENCES.values():
+    _references[:] = [
+        path for path in _references if path not in HOST_ADAPTER_REHOMES
+    ]
 SUPPORT_UNITS: list[dict[str, object]] = [{
+    "path": "src/modules/db2/support/cert_serial_primitives.c",
+    "source_sha256": "9104b934e60e7f5d72ced9f4dee60feb8fa2d26ea48d51dafea05ecdbb8ff057",
+    "header": "src/modules/db2/support/db2_cert_serial.h",
+    "header_sha256": "8075795205e0e4dd9fd05d81ac7a06ad27159d149fc55dc7403c9a6be98add91",
+    "defines": ["kb_cert_serial_normalize"],
+    "resolves": ["kb_cert_serial_normalize"],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_cert_serial.h", "ctype.h", "string.h"],
+    "allowed_header_includes": ["stddef.h"],
+    "allowed_undefined": ["__ctype_tolower_loc", "memcpy", "strlen"],
+    "base_references": {
+        "kb_cert_serial_normalize": ["src/modules/db2/c/enrollments.c"],
+    },
+    "provenance": "The certificate-serial canonicalizer is promoted from "
+                  "src/kb/kb_identity.c; the sole DB2 call is pinned to enrollments.c.",
+    "evidence": "The descriptor owns prefix and separator removal, process-locale lowercase, "
+                "leading-zero collapse, bounded output, and fail-with-empty-output behavior. "
+                "Normal and sanitizer parity cover NULL, every non-NUL byte, all short output "
+                "capacities, and input lengths across the internal 512-byte boundary. Only "
+                "ctype, memcpy, and strlen are imported; there is no identity object, DB, bus, "
+                "provider, pgvector, DB3, allocation, configuration, I/O, or logging edge.",
+}, {
     "path": "src/modules/db2/support/cjson.c",
     "source_sha256": "c17f53aaa58dddb899f452b02dc313b98af9111c81d87797c72607c1f6d6b4d4",
     "header": "src/modules/db2/support/cJSON.h",
@@ -353,6 +393,107 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "dependencies while exporting the complete canonical API and importing only its "
                 "reviewed C runtime surface; it contains no DB2, bus, provider, or database code.",
 }, {
+    "path": "src/modules/db2/support/cochange_primitives.c",
+    "source_sha256": "26bf099472cd22f26ced227013f0fb7ec056ff8d20099a13e68e550c27da4cb1",
+    "header": "src/modules/db2/support/db2_cochange.h",
+    "header_sha256": "27c4c5592af28510e924a26adcd77de8a4847ba4cef17df89e3deab60e1deb03",
+    "defines": ["cochange_is_hex_sha", "cochange_pairs_for_commit"],
+    "resolves": ["cochange_is_hex_sha", "cochange_pairs_for_commit"],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_cochange.h", "stdio.h", "stdlib.h", "string.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": ["memcpy", "qsort", "snprintf", "strcmp"],
+    "base_references": {
+        "cochange_is_hex_sha": ["src/modules/db2/c/canonical_index.c"],
+        "cochange_pairs_for_commit": ["src/modules/db2/c/canonical_index.c"],
+    },
+    "provenance": "The two pure co-change policy definitions are promoted from src/cochange.c; "
+                  "both DB2 calls are pinned to canonical_index.c.",
+    "evidence": "The descriptor owns the fixed pair ABI, lowercase object-id validator, "
+                "deduplication, bulk-commit gate, lexical ordering, and output cap. Monolith "
+                "parity and sanitizer tests cover boundary inputs; the implementation imports "
+                "only C runtime functions and contains no git, DB, bus, provider, pgvector, "
+                "DB3, allocation, configuration, or logging dependency.",
+}, {
+    "path": "src/modules/db2/support/code_audit_graph_primitives.c",
+    "source_sha256": "902153774ae34755e87bb8d1935e209ab00c14e57d11d7ddba393575ad2ec9a4",
+    "header": "src/modules/db2/support/db2_code_audit_graph.h",
+    "header_sha256": "e098b60c7fada7f866c075bd787ac04a1305a87bbcacd995d0f8d47d7b285887",
+    "defines": ["code_audit_dead_exports", "code_audit_find_cycles"],
+    "resolves": ["code_audit_dead_exports", "code_audit_find_cycles"],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_code_audit_graph.h", "stdio.h", "stdlib.h", "string.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": [
+        "calloc", "free", "malloc", "memcpy", "realloc", "snprintf", "strcmp", "strlen",
+        "strncmp",
+    ],
+    "base_references": {
+        "code_audit_dead_exports": ["src/modules/db2/c/code_audit.c"],
+        "code_audit_find_cycles": ["src/modules/db2/c/code_audit.c"],
+    },
+    "provenance": "Both pure graph algorithms and their required static helpers are promoted "
+                  "from src/code_audit_graph.c; every DB2 call is pinned to "
+                  "src/modules/db2/c/code_audit.c.",
+    "evidence": "The descriptor owns export/import/reference tail matching, borrowed-pointer "
+                "output, the 4096-node cap, deterministic DFS traversal, duplicate suppression, "
+                "cycle rendering, result limits, and cleanup. Normal and sanitizer parity cover "
+                "NULL and negative bounds, prefix variants, duplicate exports and edges, DAGs, "
+                "self/two/three-node and overlapping cycles, null endpoints, disconnected graphs, "
+                "limits, and a generated 64-node graph. Only bounded allocation, string, and "
+                "formatting APIs are imported; there is no DB, JSON, bus, provider, pgvector, "
+                "DB3, filesystem, network, configuration, or logging edge.",
+}, {
+    "path": "src/modules/db2/support/code_import_primitives.c",
+    "source_sha256": "747342db5ec2b2f8cb2f66aa20c87c9f8aee27a2707a5cdb41e0a3051ab8ace4",
+    "header": "src/modules/db2/support/db2_code_import.h",
+    "header_sha256": "67f300db20b72e013894d6c6271e64015d66729da1064dea5c000646b2b4375b",
+    "defines": [
+        "code_import_identity", "code_import_resolves_path", "code_path_import_identity",
+    ],
+    "resolves": ["code_import_identity", "code_import_resolves_path"],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_code_import.h", "stdio.h", "string.h"],
+    "allowed_header_includes": ["stddef.h"],
+    "allowed_undefined": ["snprintf", "strcmp", "strlen", "strncmp", "strrchr"],
+    "base_references": {
+        "code_import_identity": ["src/modules/db2/c/code_index.c"],
+        "code_import_resolves_path": ["src/modules/db2/c/code_index.c"],
+    },
+    "provenance": "The path/import identity definitions and required slash-normalization helper "
+                  "are promoted from src/extractors.c; every DB2 call is pinned to "
+                  "src/modules/db2/c/code_index.c.",
+    "evidence": "The descriptor owns the 4096-byte normalization boundary, Python relative-"
+                "import resolution, __init__ identity rule, separator normalization, output "
+                "truncation, and empty-input behavior. Normal and sanitizer parity cover NULL, "
+                "every non-NUL byte, POSIX and Windows separators, relative-dot levels, all "
+                "short output capacities, the internal path boundary, and a cross-product of "
+                "importer/import/target identities. Only bounded C string and formatting APIs "
+                "are imported; there is no extractor, tree-sitter, filesystem, DB, bus, "
+                "provider, pgvector, DB3, allocation, configuration, I/O, or logging edge.",
+}, {
+    "path": "src/modules/db2/support/code_match_primitives.c",
+    "source_sha256": "a6190eb5fc93657cf7a6e9142d99977c322c8e9765811a628c8eb70970231876",
+    "header": "src/modules/db2/support/db2_code_match.h",
+    "header_sha256": "e1a2da6d369a3519405f980f703ec4325a07ced6426408d167d084b741e23d3a",
+    "defines": ["code_match_line"],
+    "resolves": ["code_match_line"],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_code_match.h", "string.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": ["strncmp", "strstr"],
+    "base_references": {
+        "code_match_line": ["src/modules/db2/c/code_index.c"],
+    },
+    "provenance": "The string-only line-enrichment definition is promoted from "
+                  "src/code_match.c; the sole DB2 call is pinned to code_index.c.",
+    "evidence": "The descriptor owns marker extraction, empty-token rejection, first-verbatim-"
+                "match selection, and one-based line counting. Normal and sanitizer parity cover "
+                "NULL, malformed and repeated markers, every non-NUL byte, 256 lines, and token "
+                "lengths through 2048. Only strncmp and strstr are imported; there is no FTS, "
+                "DB, bus, provider, pgvector, DB3, allocation, configuration, I/O, or logging "
+                "edge.",
+}, {
     "path": "src/modules/db2/support/dstr_primitives.c",
     "source_sha256": "ae448e0ae6e0464922042536b77ab396ea230d5ba16ec977e003ecd614cf22ab",
     "header": "src/modules/db2/support/db2_dstr.h",
@@ -372,6 +513,90 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
     "evidence": "Three deterministic dynamic-string lifecycle functions with only realloc and "
                 "vsnprintf imports; no DB2, event-bus, provider, I/O, or platform dependency.",
 }, {
+    "path": "src/modules/db2/support/extractor_primitives.c",
+    "source_sha256": "a45293cfe677b6dbe091784cd0664a7730b673eb26a2789d33995732431b9fad",
+    "header": "src/modules/db2/support/db2_extractors.h",
+    "header_sha256": "025041d001c95f10cc3c69796f2104eda877a7a5c7aee35763fb97574b09c1a6",
+    "defines": [
+        "add_call", "add_def", "add_str", "c_call_line", "c_def_line", "c_export_line",
+        "c_import_line", "c_macro_def_line", "code_def_end_line", "cs_def_line",
+        "cs_export_line", "cs_import_line", "cs_route_line", "css_export_line",
+        "css_import_line", "dart_def_line", "dart_export_line", "dart_import_line",
+        "extract_calls", "extract_definitions", "extract_exports", "extract_ident",
+        "extract_imports", "extract_imports_sys", "extract_quoted", "extract_routes",
+        "for_each_line", "generic_call_line", "go_call_line", "index_has_extractor",
+        "java_def_line", "java_export_line", "java_import_line", "java_route_line",
+        "js_call_line", "kotlin_def_line", "kotlin_export_line", "kotlin_import_line",
+        "kotlin_route_line", "lua_def_line", "lua_export_line", "lua_import_line",
+        "php_def_line", "php_export_line", "php_import_line", "py_call_line",
+        "ruby_def_line", "ruby_export_line", "ruby_import_line", "ruby_route_line",
+        "rust_def_line", "rust_export_line", "rust_import_line", "sh_def_line",
+        "sh_import_line", "skip_ws", "swift_def_line", "swift_export_line",
+        "swift_import_line",
+    ],
+    "resolves": [
+        "extract_calls", "extract_definitions", "extract_exports", "extract_imports_sys",
+        "extract_routes",
+    ],
+    "allowed_includes": [
+        "db2_extractors.h", "ctype.h", "stdio.h", "stdlib.h", "string.h",
+    ],
+    "allowed_header_includes": ["stddef.h"],
+    "allowed_undefined": [
+        "__ctype_b_loc", "malloc", "memcpy", "memset", "snprintf", "strchr", "strcmp",
+        "strlen", "strncmp", "strrchr", "strstr",
+    ],
+    "base_references": {
+        "extract_calls": ["src/modules/db2/c/canonical_index.c"],
+        "extract_definitions": ["src/modules/db2/c/canonical_index.c"],
+        "extract_exports": ["src/modules/db2/c/canonical_index.c"],
+        "extract_imports_sys": ["src/modules/db2/c/canonical_index.c"],
+        "extract_routes": ["src/modules/db2/c/canonical_index.c"],
+    },
+    "provenance": "Generated from the fallback parser bodies in src/extractors.c, "
+                  "src/extractors_extra.c, and src/extractors_new_langs.c; import-identity "
+                  "helpers remain outside this unit and the C system-header table is embedded.",
+    "evidence": "One reproducible, database-free parser cluster resolves all five canonical-index "
+                "entry points. Private ABI mirrors isolate index.h; the default tree-sitter seam "
+                "remains unavailable exactly as in the normal build. No DB, bus, provider, "
+                "pgvector, process, filesystem, network, logging, or configuration import.",
+}, {
+    "path": "src/modules/db2/support/log_primitives.c",
+    "source_sha256": "67a6e3bc54ee59c6fe47c5741ee36bb2c5c7776c293d34ae319f8033ad633131",
+    "header": "src/modules/db2/support/db2_log.h",
+    "header_sha256": "124c268149b35dd6236b90ff7503e37e0588b27995a2715bc5f4b99cba2ef186",
+    "defines": ["aimee_log", "db2_log_install"],
+    "resolves": ["aimee_log"],
+    "allowed_includes": ["db2_log.h", "stdio.h"],
+    "allowed_header_includes": ["stdarg.h"],
+    "allowed_undefined": ["vsnprintf"],
+    "base_references": {
+        "aimee_log": [
+            "src/modules/db2/c/canonical_index.c",
+            "src/modules/db2/c/code_index.c",
+            "src/modules/db2/c/cross_repo_build.c",
+            "src/modules/db2/c/cross_repo_deps.c",
+            "src/modules/db2/c/cross_repo_identity.c",
+            "src/modules/db2/c/cross_repo_review.c",
+            "src/modules/db2/c/cross_repo_route.c",
+            "src/modules/db2/c/cross_repo_stats.c",
+            "src/modules/db2/c/db2_init.c",
+            "src/modules/db2/c/db2_reembed.c",
+            "src/modules/db2/c/db2_tenant.c",
+            "src/modules/db2/c/enrollments.c",
+            "src/modules/db2/c/fact_ingest.c",
+            "src/modules/db2/c/kb_payload.c",
+            "src/modules/db2/c/learning.c",
+            "src/modules/db2/c/pgvec_transport.c",
+            "src/modules/db2/c/vault_pg.c",
+        ],
+    },
+    "provenance": "The monolithic logger is replaced by a process-startup-installed sink; all "
+                  "seventeen DB2 logging translation units are pinned to this bounded surface.",
+    "evidence": "One formatting export and one startup installer preserve DB2 log level, module, "
+                "and message semantics with a bounded message buffer and only vsnprintf imported. "
+                "The sink carries no KB logger state, database, bus, provider, or allocation edge.",
+}, {
     "path": "src/modules/db2/support/management_read_primitives.c",
     "source_sha256": "2b1799442b2d57c6088eaa8fbcff744d6422bd3011b816bf78f3faefde4b8058",
     "header": "src/modules/db2/support/db2_management_read.h",
@@ -390,6 +615,121 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                   "audited in management_read_journal.c.",
     "evidence": "Deterministic two-value selector mapping with no imports, allocation, I/O, DB, "
                 "event-bus, provider, platform, pgvector, or DB3 dependency; ABI parity tested.",
+}, {
+    "path": "src/modules/db2/support/model_validation_primitives.c",
+    "source_sha256": "a7d77ac228ab363f2b3c8b5381c5e9e09897f80574f8b6f07c223027439f47ba",
+    "header": "src/modules/db2/support/db2_model_validation.h",
+    "header_sha256": "e7bbdb2c7238692047cd7144b5592779add14c636c0ee9e7dae1adcc5df6eb99",
+    "defines": [
+        "kb_models_endpoint_valid", "kb_models_name_clean", "kb_models_wire_valid",
+    ],
+    "resolves": [
+        "kb_models_endpoint_valid", "kb_models_name_clean", "kb_models_wire_valid",
+    ],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_model_validation.h", "string.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": ["strcmp", "strlen", "strncmp"],
+    "base_references": {
+        "kb_models_endpoint_valid": ["src/modules/db2/c/org_model_catalog.c"],
+        "kb_models_name_clean": ["src/modules/db2/c/org_model_catalog.c"],
+        "kb_models_wire_valid": ["src/modules/db2/c/org_model_catalog.c"],
+    },
+    "provenance": "The three pure model-catalog admission definitions are promoted from "
+                  "src/kb/http/kb_models_validate.c; all DB2 calls are pinned to "
+                  "org_model_catalog.c.",
+    "evidence": "The descriptor owns the exact wire whitelist, printable-name bounds, and "
+                "HTTP(S) endpoint grammar used by DB2's pre-database storage choke point. "
+                "Normal and sanitizer parity cover NULL, every non-NUL byte, length boundaries, "
+                "schemes, and legacy empty-endpoint behavior. Only strcmp, strlen, and strncmp "
+                "are imported; there is no HTTP, JSON, DB, bus, provider, pgvector, DB3, "
+                "allocation, configuration, I/O, or logging dependency.",
+}, {
+    "path": "src/modules/db2/support/node_kind_text_primitives.c",
+    "source_sha256": "0b733803311e92c8baad98e3a14f8d43eac0819f82f83ab3a08a7b52eaa08116",
+    "header": "src/modules/db2/support/db2_node_kind_text.h",
+    "header_sha256": "890b4eb247c73135cb0df53fc67f520d16d2d032429f397e2665522ce6898668",
+    "defines": ["memory_ontology_node_kind_to_text"],
+    "resolves": ["memory_ontology_node_kind_to_text"],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_node_kind_text.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": [],
+    "base_references": {
+        "memory_ontology_node_kind_to_text": ["src/modules/db2/c/rel_types_store.c"],
+    },
+    "provenance": "Definition promoted from the DB-free node-kind table in "
+                  "src/modules/memory/memory_episodes.c; the sole DB2 call is pinned to "
+                  "src/modules/db2/c/rel_types_store.c.",
+    "evidence": "A deterministic integer-to-text switch with descriptor-owned numeric ABI and "
+                "no imports, shared ontology header, allocation, I/O, DB, event-bus, provider, "
+                "platform, pgvector, DB3, configuration, or logging dependency. Normal and "
+                "sanitizer parity cover the complete signed 16-bit partition plus int boundaries.",
+}, {
+    "path": "src/modules/db2/support/pii_classifier_primitives.c",
+    "source_sha256": "b910e5470f542b43d463b89d172769e47675af228abd419b61a9d5267b1ff9bd",
+    "header": "src/modules/db2/support/db2_pii_classifier.h",
+    "header_sha256": "26bdb1c2abf6e8647a572ea4a49652ebdd373c3d2393afb198f801bd9899c078",
+    "defines": [
+        "memory_pii_register_sensitivity_batch", "memory_pii_register_turn_classifier",
+        "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
+        "memory_pii_turn_requests_sensitive",
+    ],
+    "resolves": [
+        "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
+        "memory_pii_turn_requests_sensitive",
+    ],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": [
+        "db2_pii_classifier.h", "db2_rel_seed.h", "db2_rel_type_helpers.h", "ctype.h",
+        "string.h",
+    ],
+    "allowed_header_includes": [],
+    "allowed_undefined": [
+        "__ctype_tolower_loc", "rel_type_normalize", "rel_types_seed_lookup", "strlen",
+    ],
+    "base_references": {
+        "memory_pii_rel_sensitivity": ["src/modules/db2/c/rel_types_store.c"],
+        "memory_pii_rel_sensitivity_batch": ["src/modules/db2/c/fact_recall.c"],
+        "memory_pii_turn_requests_sensitive": ["src/modules/db2/c/fact_ingest.c"],
+    },
+    "provenance": "The remaining PII turn, relation, and batch classifiers plus both provider "
+                  "registration seams are promoted from src/modules/memory/memory_pii_gate.c; "
+                  "all three DB2 calls are pinned to their sole translation units.",
+    "evidence": "The descriptor owns local cue scanning, unknown sensitive-name heuristics, "
+                "seed sensitivity lookup, whole-batch classification, and authoritative provider "
+                "failure semantics. Registered failures remain fail closed and never fall back "
+                "silently. Normal and sanitizer parity cover NULL, every non-NUL byte, all seed "
+                "relations, case and length boundaries, local and provider paths, non-Boolean "
+                "provider values, provider failures after writes, invalid batches, and output "
+                "canaries. Only the adjacent admitted relationship support, ctype, and strlen "
+                "are imported; there is no DB, bus transport, provider implementation, pgvector, "
+                "DB3, allocation, I/O, configuration, or logging edge.",
+}, {
+    "path": "src/modules/db2/support/pii_inject_gate_primitives.c",
+    "source_sha256": "41096c30f976075f8f4b97a7a1825bbb53e340f5d112eb704a4a31ff4be1fef6",
+    "header": "src/modules/db2/support/db2_pii_inject_gate.h",
+    "header_sha256": "e1f544b3bd70ed8d4d012f34845f99922f219896bce0329efb9f2b687d1bd9af",
+    "defines": ["memory_pii_should_inject"],
+    "resolves": ["memory_pii_should_inject"],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_pii_inject_gate.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": [],
+    "base_references": {
+        "memory_pii_should_inject": ["src/modules/db2/c/fact_recall.c"],
+    },
+    "provenance": "The allocation-free recall decision is promoted from "
+                  "src/modules/memory/memory_pii_gate.c; the sole DB2 call is pinned to "
+                  "src/modules/db2/c/fact_recall.c.",
+    "evidence": "The descriptor owns the three-value sensitivity ABI, confidence floor, "
+                "truth-value handling, and fail-closed treatment of NaN, low confidence, "
+                "credentials, and unknown sensitivity values. The support object has no "
+                "imports or memory classifier state and no allocation, I/O, DB, event-bus, "
+                "provider, platform, pgvector, DB3, configuration, or logging edge. Normal "
+                "and sanitizer parity cover the complete signed 16-bit sensitivity partition, "
+                "int boundaries, finite confidence boundaries, infinities, NaN, and full-width "
+                "turn-request truth values.",
 }, {
     "path": "src/modules/db2/support/random_primitives.c",
     "source_sha256": "2e0182a05983d863952d080b754cb90eb4ee6dcf491f4bda7140ef205c0db69f",
@@ -435,6 +775,29 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "imports, shared ontology header, allocation, I/O, DB, event-bus, provider, "
                 "platform, pgvector, DB3, or logging dependency; enum ABI and parity tested.",
 }, {
+    "path": "src/modules/db2/support/rel_seed_primitives.c",
+    "source_sha256": "2794ca2836bcd26f6849165750abb8c6689f65b6073e7df602dafff7d892241c",
+    "header": "src/modules/db2/support/db2_rel_seed.h",
+    "header_sha256": "a9fdcb84c1dca6d8fa295fe0586be5e2ac43eb1ba17e53bb2197d47175307423",
+    "defines": ["rel_types_seed_at", "rel_types_seed_count", "rel_types_seed_lookup"],
+    "resolves": ["rel_types_seed_at", "rel_types_seed_count", "rel_types_seed_lookup"],
+    "allowed_includes": ["db2_rel_seed.h", "db2_rel_type_helpers.h", "string.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": ["rel_type_normalize", "strcmp"],
+    "base_references": {
+        "rel_types_seed_at": ["src/modules/db2/c/rel_types_store.c"],
+        "rel_types_seed_count": ["src/modules/db2/c/rel_types_store.c"],
+        "rel_types_seed_lookup": [
+            "src/modules/db2/c/entity_edges.c", "src/modules/db2/c/fact_lifecycle.c",
+        ],
+    },
+    "provenance": "Full relationship seed rows generated by walking the compiled canonical "
+                  "SEED_ONTOLOGY in src/rel_types.c; all four DB2 references are pinned.",
+    "evidence": "The descriptor owns the generated database-free table and a private ABI mirror; "
+                "size, offsets, enum widths, every field, iteration bounds, pointer identity, "
+                "normalization, misses, and sanitizer behavior are compared with the monolith. "
+                "Only the adjacent normalization support API and strcmp are imported.",
+}, {
     "path": "src/modules/db2/support/rel_type_primitives.c",
     "source_sha256": "a3a9e88f2a90c0de5d09f952c60ff90843f4f332a9c2a411e2dc1e081f31cce1",
     "header": "src/modules/db2/support/db2_rel_type_helpers.h",
@@ -459,6 +822,85 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "functional classification; only ctype and strcmp are imported. No ontology "
                 "enum/header, DB, event-bus, provider, platform, pgvector, DB3, allocation, I/O, "
                 "or logging dependency.",
+}, {
+    "path": "src/modules/db2/support/runtime_config_primitives.c",
+    "source_sha256": "392a2271241a13046b61bc49a99f3e4efe22edbe8becf2290f13dcb3052400ed",
+    "header": "src/modules/db2/support/db2_runtime_config.h",
+    "header_sha256": "e8dd532f6729eb7ae42929168c1faa7abf423ea49da9632ae1a7977f0c48d2cc",
+    "defines": [
+        "config_audit_worm_enabled", "config_cache_disabled",
+        "config_code_cochange_git_enabled", "config_css_style_graph_enabled",
+        "config_embedder_command_current",
+        "config_kb_curator_cross_repo_caller_collision_c",
+        "config_kb_curator_cross_repo_distinctiveness_v",
+        "config_kb_curator_cross_repo_graph_enabled", "config_kb_curator_cross_repo_k",
+        "config_kb_curator_cross_repo_len_min", "config_kb_curator_cross_repo_m",
+        "config_kb_curator_cross_repo_max_candidates",
+        "config_kb_curator_cross_repo_p_pct",
+        "config_kb_curator_cross_repo_review_queue_max", "config_kb_pdf_vector_enabled",
+        "config_kb_purge_fence_ttl_s", "config_present", "config_typed_facts_enabled",
+        "db2_runtime_config_install",
+    ],
+    "resolves": [
+        "config_audit_worm_enabled", "config_cache_disabled",
+        "config_code_cochange_git_enabled", "config_css_style_graph_enabled",
+        "config_embedder_command_current",
+        "config_kb_curator_cross_repo_caller_collision_c",
+        "config_kb_curator_cross_repo_distinctiveness_v",
+        "config_kb_curator_cross_repo_graph_enabled", "config_kb_curator_cross_repo_k",
+        "config_kb_curator_cross_repo_len_min", "config_kb_curator_cross_repo_m",
+        "config_kb_curator_cross_repo_max_candidates",
+        "config_kb_curator_cross_repo_p_pct",
+        "config_kb_curator_cross_repo_review_queue_max", "config_kb_pdf_vector_enabled",
+        "config_kb_purge_fence_ttl_s", "config_present", "config_typed_facts_enabled",
+    ],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_runtime_config.h", "string.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": ["memchr"],
+    "base_references": {
+        "config_audit_worm_enabled": ["src/modules/db2/c/kb_audit_worm.c"],
+        "config_cache_disabled": ["src/modules/db2/c/rules.c"],
+        "config_code_cochange_git_enabled": ["src/modules/db2/c/canonical_index.c"],
+        "config_css_style_graph_enabled": [
+            "src/modules/db2/c/canonical_index.c", "src/modules/db2/c/css_migration.c",
+            "src/modules/db2/c/css_render.c",
+        ],
+        "config_embedder_command_current": [
+            "src/modules/db2/c/kb_payload.c", "src/modules/db2/c/kb_service_backend.c",
+        ],
+        "config_kb_curator_cross_repo_caller_collision_c": [
+            "src/modules/db2/c/cross_repo_deps.c",
+        ],
+        "config_kb_curator_cross_repo_distinctiveness_v": [
+            "src/modules/db2/c/cross_repo_deps.c",
+        ],
+        "config_kb_curator_cross_repo_graph_enabled": [
+            "src/modules/db2/c/cross_repo_deps.c",
+        ],
+        "config_kb_curator_cross_repo_k": ["src/modules/db2/c/cross_repo_deps.c"],
+        "config_kb_curator_cross_repo_len_min": ["src/modules/db2/c/cross_repo_deps.c"],
+        "config_kb_curator_cross_repo_m": ["src/modules/db2/c/cross_repo_deps.c"],
+        "config_kb_curator_cross_repo_max_candidates": [
+            "src/modules/db2/c/cross_repo_deps.c",
+        ],
+        "config_kb_curator_cross_repo_p_pct": ["src/modules/db2/c/cross_repo_deps.c"],
+        "config_kb_curator_cross_repo_review_queue_max": [
+            "src/modules/db2/c/cross_repo_deps.c",
+        ],
+        "config_kb_pdf_vector_enabled": ["src/modules/db2/c/kb_payload.c"],
+        "config_kb_purge_fence_ttl_s": ["src/modules/db2/c/kb_runtime_state.c"],
+        "config_present": ["src/modules/db2/c/canonical_index.c"],
+        "config_typed_facts_enabled": [
+            "src/modules/db2/c/css_migration.c", "src/modules/db2/c/fact_ingest.c",
+        ],
+    },
+    "provenance": "The complete DB2 config read set is captured once as a versioned immutable "
+                  "startup snapshot; every legacy call site is pinned to the matching field.",
+    "evidence": "Nineteen exact exports replace eighteen live host getters with one bounded "
+                "install operation. Invalid ABI, NULL, and unterminated snapshots fail atomically; "
+                "the implementation imports only memchr and contains no file, DB, bus, vector, "
+                "provider, allocation, or reload dependency.",
 }, {
     "path": "src/modules/db2/support/sketch_primitives.c",
     "source_sha256": "20318d4f9c92894892ef9475f95c1542602f3a7d2b4d9fe6df2b8d63b4986280",
@@ -766,6 +1208,7 @@ def probe(
             fail("probe-object", f"compiler did not create expected objects: {missing[:3]}")
 
         support_objects: list[Path] = []
+        support_definitions: set[str] = set()
         for unit in support_units:
             raw = str(unit["path"])
             source = _safe_file(root, raw, SUPPORT_BOUNDARY)
@@ -785,6 +1228,7 @@ def probe(
                      f"actual={sorted(definitions)}")
             if weak:
                 fail("support-weak", f"{raw} defines weak symbols: {sorted(weak)}")
+            support_definitions.update(definitions)
             undefined = _nm_undefined(
                 _run(["nm", "-u", "--format=posix", str(obj)], root)
             )
@@ -793,6 +1237,12 @@ def probe(
                 fail("support-undefined", f"{raw}: forbidden undefined symbols "
                      f"{sorted(undefined - allowed_undefined)}")
             support_objects.append(obj)
+
+        # An allowlist is not provenance by itself. Every non-system import
+        # admitted by one support object must be supplied by another object in
+        # this same descriptor-owned closure; otherwise an arbitrary project
+        # dependency could be hidden behind allowed_undefined.
+        _validate_support_import_provenance(support_units, support_definitions)
 
         aggregate = tmp / "db2-link-closure.o"
         # A relocatable link resolves DB2-to-DB2 references but accepts external
@@ -812,6 +1262,20 @@ def probe(
         if missing_references:
             fail("probe-reference", f"symbols have no referencing unit: {missing_references}")
         return {symbol: sorted(rows) for symbol, rows in sorted(references.items())}
+
+
+def _validate_support_import_provenance(
+    support_units: list[dict[str, object]], support_definitions: set[str]
+) -> None:
+    for unit in support_units:
+        raw = str(unit["path"])
+        unowned = sorted(
+            symbol for symbol in unit["allowed_undefined"]
+            if symbol not in support_definitions and classify(symbol)[0] != "system-link"
+        )
+        if unowned:
+            fail("support-undefined-provenance", f"{raw}: imports have no descriptor-owned "
+                 f"provider or system-link classification: {unowned}")
 
 
 def classify(symbol: str) -> tuple[str, str]:
@@ -895,6 +1359,8 @@ def descriptor_support_policy(root: Path, descriptor: object) -> list[dict[str, 
         actual_sha256 = hashlib.sha256(support_source.read_bytes()).hexdigest()
         if actual_sha256 != unit["source_sha256"]:
             fail("support-source-hash", f"{raw}: reviewed source content changed")
+        if Path(raw) == GENERATED_REL_SEED:
+            _verify_generated_rel_seed(root, support_source)
         header_raw = str(unit["header"])
         support_header = _safe_file(root, header_raw, SUPPORT_BOUNDARY)
         actual_header_sha256 = hashlib.sha256(support_header.read_bytes()).hexdigest()
@@ -922,6 +1388,30 @@ def descriptor_support_policy(root: Path, descriptor: object) -> list[dict[str, 
             fail("support-header-include", f"{header_raw}: "
                  f"expected={unit['allowed_header_includes']}, actual={header_includes}")
     return policy
+
+
+def _verify_generated_rel_seed(root: Path, checked_in: Path) -> None:
+    """Regenerate the DB2 ontology copy inside the closure gate itself."""
+    generator_source = _safe_file(
+        root, "scripts/gen-memory-ontology-seed.c", Path("scripts")
+    )
+    canonical_source = _safe_file(root, "src/rel_types.c", Path("src"))
+    with tempfile.TemporaryDirectory(prefix="db2-rel-seed-generate-") as raw_tmp:
+        tmp = Path(raw_tmp)
+        generator = tmp / "gen-memory-ontology-seed"
+        _run([
+            "cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+            f"-I{root / 'src'}", f"-I{root / 'src/headers'}",
+            "-o", str(generator), str(generator_source), str(canonical_source),
+        ], root)
+        generated = tmp / "rel_seed_primitives.c"
+        _run([
+            str(generator), str(tmp / "ontology_seed.go"),
+            str(tmp / "ontology_seed.tsv"), str(generated),
+        ], root)
+        if generated.read_bytes() != checked_in.read_bytes():
+            fail("support-generated-drift", f"{GENERATED_REL_SEED}: compiled canonical seed "
+                 "does not reproduce the checked-in source")
 
 
 def build_contract(root: Path) -> dict[str, object]:
@@ -1010,10 +1500,16 @@ def _validate_support_units(
         "provenance", "evidence", "source_sha256", "header_sha256",
     }
     origin_fields = {"origin_source", "origin_header"}
+    disposition_fields = {"resolution_disposition"}
     for index, unit in enumerate(value):
         keys = frozenset(unit) if isinstance(unit, dict) else frozenset()
         if (not isinstance(unit, dict) or
-                keys not in {frozenset(required), frozenset(required | origin_fields)}):
+                keys not in {
+                    frozenset(required),
+                    frozenset(required | origin_fields),
+                    frozenset(required | disposition_fields),
+                    frozenset(required | origin_fields | disposition_fields),
+                }):
             fail("support-shape", f"descriptor_support_units[{index}] has invalid keys")
         path = unit["path"]
         if not isinstance(path, str) or path <= previous:
@@ -1039,6 +1535,16 @@ def _validate_support_units(
                     fail("support-origin", f"{path}: {field} must be a path")
                 if check_files:
                     _safe_file(root, origin, Path("src/vendor"))
+        resolution_disposition = unit.get(
+            "resolution_disposition",
+            "descriptor-owned-copy/generated-input" if origin_fields <= set(unit)
+            else "portable-core-promotion",
+        )
+        if resolution_disposition not in {
+            "portable-core-promotion", "descriptor-owned-copy/generated-input",
+            "injected-module-contract",
+        }:
+            fail("support-disposition", f"{path}: invalid resolution_disposition")
         defines = _string_list(unit["defines"], f"support[{index}].defines", symbols=True)
         resolves = _string_list(unit["resolves"], f"support[{index}].resolves", symbols=True)
         includes = _ordered_string_list(unit["allowed_includes"],
@@ -1106,7 +1612,11 @@ def validate_contract(
             "support_compile_flags": SUPPORT_COMPILE_FLAGS,
             "support_include_roots": SUPPORT_INCLUDE_ROOTS,
         })
-    if probe_value != expected_probe:
+    legacy_probe = dict(expected_probe)
+    legacy_probe["extra_c_flags"] = LEGACY_PROBE_FLAGS
+    if version == SCHEMA_VERSION:
+        legacy_probe["support_compile_flags"] = LEGACY_SUPPORT_COMPILE_FLAGS
+    if probe_value != expected_probe and (check_files or probe_value != legacy_probe):
         fail("probe-policy", "probe must use the frozen no-library/no-helper policy")
     units = _string_list(value["translation_units"], "translation_units")
     if check_files:
@@ -1225,16 +1735,37 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
     if added_units:
         fail("previous-source-growth", f"new DB2 translation units are forbidden: {added_units}")
     removed_units = sorted(set(previous_units) - set(current_units))
-    if removed_units:
-        fail("previous-source-removal", f"legacy DB2 translation units disappeared: {removed_units}")
+    unexpected_removals = sorted(set(removed_units) - set(HOST_ADAPTER_REHOMES))
+    if unexpected_removals:
+        fail("previous-source-removal", "legacy DB2 translation units disappeared without a "
+             f"reviewed host-adapter rehome: {unexpected_removals}")
+    for old_path in removed_units:
+        new_path = HOST_ADAPTER_REHOMES[old_path]
+        _safe_file(root, new_path, Path("src/kb/db2_adapters"))
     previous_support_by_path = {str(unit["path"]): unit for unit in previous_support}
     current_support_by_path = {str(unit["path"]): unit for unit in current_support}
     removed_support = sorted(set(previous_support_by_path) - set(current_support_by_path))
     if removed_support:
         fail("previous-support-removal", f"descriptor support units disappeared: {removed_support}")
+    # A host-adapter rehome can only shrink a support unit's frozen base-call
+    # provenance. HOST_ADAPTER_REHOMES is the explicit reviewed admission list;
+    # a removed unit not named there already fails above. Preserve mapping and
+    # list order while filtering those exact paths so reordering remains drift.
+    def without_rehomed_references(unit: dict[str, object]) -> dict[str, object]:
+        normalized = copy.deepcopy(unit)
+        references = normalized.get("base_references")
+        if isinstance(references, dict):
+            for symbol, paths in references.items():
+                if isinstance(paths, list):
+                    references[symbol] = [
+                        path for path in paths if path not in HOST_ADAPTER_REHOMES
+                    ]
+        return normalized
+
     changed_support = sorted(
         path for path in set(previous_support_by_path) & set(current_support_by_path)
-        if previous_support_by_path[path] != current_support_by_path[path]
+        if without_rehomed_references(previous_support_by_path[path]) !=
+        without_rehomed_references(current_support_by_path[path])
     )
     if changed_support:
         fail("previous-support-change", f"reviewed support policy changed: {changed_support}")
@@ -1245,14 +1776,18 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
     for unit in added_support:
         base_references = unit["base_references"]
         assert isinstance(base_references, dict)
-        expected_disposition = (
+        expected_disposition = unit.get(
+            "resolution_disposition",
             "descriptor-owned-copy/generated-input"
-            if "origin_source" in unit else "portable-core-promotion"
+            if "origin_source" in unit else "portable-core-promotion",
         )
         for symbol in unit["resolves"]:
             before = previous_rows.get(str(symbol))
+            before_references = [
+                path for path in before["references"] if path not in HOST_ADAPTER_REHOMES
+            ] if before is not None else None
             if (before is None or before["disposition"] != expected_disposition or
-                    before["references"] != base_references[symbol]):
+                    before_references != base_references[symbol]):
                 fail("previous-support-admission",
                      f"{unit['path']}: {symbol} lacks exact {expected_disposition} base evidence")
             if symbol in current_rows:
@@ -1260,9 +1795,19 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
                      f"{unit['path']}: declared resolution {symbol} remains unresolved")
     added_symbols = sorted(set(current_rows) - set(previous_rows))
     rejected_added: list[str] = []
+    probe_mode_migrated = (
+        isinstance(previous, dict) and isinstance(current, dict) and
+        isinstance(previous.get("probe"), dict) and isinstance(current.get("probe"), dict) and
+        previous["probe"].get("extra_c_flags") == LEGACY_PROBE_FLAGS and
+        current["probe"].get("extra_c_flags") == PROBE_FLAGS
+    )
     for symbol in added_symbols:
         row = current_rows[symbol]
         references = set(row["references"])
+        if (probe_mode_migrated and symbol == "getpid" and
+                references == {"src/modules/db2/c/db2_init.c"} and
+                row["disposition"] == "system-link"):
+            continue
         permitted_paths = {
             str(unit["path"]) for unit in added_support
             if symbol in unit["allowed_undefined"]
@@ -1277,6 +1822,10 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
         before = set(previous_rows[symbol]["references"])
         after = set(current_rows[symbol]["references"])
         growth = after - before
+        if (probe_mode_migrated and symbol == "getenv" and
+                growth == {"src/modules/db2/c/db2_init.c"} and
+                current_rows[symbol]["disposition"] == "system-link"):
+            continue
         permitted_paths = {
             str(unit["path"]) for unit in added_support
             if symbol in unit["allowed_undefined"]

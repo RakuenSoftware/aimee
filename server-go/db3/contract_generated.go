@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "b95727c278d7fcc47452a1aa083aa7d5605b5adedcd58727b49a1710d2a09570"
+const ContractSHA256 = "a536a1673ff799ec3b8c289aebbad1cd7b2dedd9a0688730f8a2aa9029c262ab"
 const ProtocolID uint32 = 3
 const WireVersion uint16 = 1
 
@@ -22,6 +22,10 @@ const EventRoute uint32 = 0x80030005
 const MaxScopeBytes = 64
 const MaxRecordTypeBytes = 32
 const MaxCollectionBytes = 32
+const MaxLabelCount = 16
+const MaxLabelKeyBytes = 32
+const MaxLabelValueBytes = 256
+const MaxLabelsBytes = 4096
 const MaxDimension = 4096
 const MaxTopK = 256
 
@@ -38,6 +42,9 @@ const searchRequestHeader = 36
 const searchReplyHeader = 28
 const candidateBytes = 16
 const applyHeader = 36
+const applyV2Version uint16 = 2
+const applyV2Header = 40
+const labelHeader = 4
 const capabilitiesHeader = 48
 const applyChunkHeader = 32
 const appliedHeader = 40
@@ -76,6 +83,11 @@ type SearchReply struct {
 	Candidates []Candidate
 }
 
+type ExactLabel struct {
+	Key   string
+	Value string
+}
+
 type Apply struct {
 	OperationID uint64
 	Generation  uint64
@@ -83,6 +95,7 @@ type Apply struct {
 	Kind        ApplyKind
 	Collection  string
 	Vector      []float32
+	Labels      []ExactLabel
 }
 
 func validText(value string, capacity int, empty bool) bool {
@@ -104,6 +117,52 @@ func finite32(values []float32) bool {
 		}
 	}
 	return true
+}
+
+func validLabelKey(value string) bool {
+	if !validText(value, MaxLabelKeyBytes, false) || value[0] < 'a' || value[0] > 'z' {
+		return false
+	}
+	for i := 1; i < len(value); i++ {
+		char := value[i]
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') &&
+			char != '_' && char != '.' && char != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func validLabelValue(value string) bool {
+	if len(value) >= MaxLabelValueBytes {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] < 0x20 || value[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+func labelsSize(labels []ExactLabel) (int, bool) {
+	if len(labels) > MaxLabelCount {
+		return 0, false
+	}
+	total := 0
+	previous := ""
+	for _, label := range labels {
+		if !validLabelKey(label.Key) || !validLabelValue(label.Value) ||
+			(previous != "" && label.Key <= previous) {
+			return 0, false
+		}
+		total += labelHeader + len(label.Key) + len(label.Value)
+		if total > MaxLabelsBytes {
+			return 0, false
+		}
+		previous = label.Key
+	}
+	return total, true
 }
 
 func (request SearchRequest) Validate() error {
@@ -150,13 +209,16 @@ func (apply Apply) Validate() error {
 		!validText(apply.Collection, MaxCollectionBytes, false) {
 		return ErrMalformed
 	}
+	if _, ok := labelsSize(apply.Labels); !ok {
+		return ErrMalformed
+	}
 	switch apply.Kind {
 	case ApplyUpsert:
 		if len(apply.Vector) == 0 || len(apply.Vector) > MaxDimension || !finite32(apply.Vector) {
 			return ErrMalformed
 		}
 	case ApplyDelete, ApplyTombstone:
-		if len(apply.Vector) != 0 {
+		if len(apply.Vector) != 0 || len(apply.Labels) != 0 {
 			return ErrMalformed
 		}
 	default:
@@ -279,31 +341,65 @@ func EncodeApply(apply Apply) ([]byte, error) {
 	if apply.Validate() != nil {
 		return nil, ErrMalformed
 	}
-	out := make([]byte, applyHeader+len(apply.Collection)+4*len(apply.Vector))
+	labelsBytes, _ := labelsSize(apply.Labels)
+	header := applyHeader
+	version := WireVersion
+	if len(apply.Labels) != 0 {
+		header = applyV2Header
+		version = applyV2Version
+	}
+	out := make([]byte, header+len(apply.Collection)+4*len(apply.Vector)+labelsBytes)
 	binary.LittleEndian.PutUint32(out[0:4], applyMagic)
-	binary.LittleEndian.PutUint16(out[4:6], WireVersion)
+	binary.LittleEndian.PutUint16(out[4:6], version)
 	out[6] = byte(apply.Kind)
 	binary.LittleEndian.PutUint64(out[8:16], apply.OperationID)
 	binary.LittleEndian.PutUint64(out[16:24], apply.Generation)
 	binary.LittleEndian.PutUint64(out[24:32], uint64(apply.PointID))
 	binary.LittleEndian.PutUint16(out[32:34], uint16(len(apply.Collection)))
 	binary.LittleEndian.PutUint16(out[34:36], uint16(len(apply.Vector)))
-	offset := applyHeader
+	if version == applyV2Version {
+		binary.LittleEndian.PutUint16(out[36:38], uint16(len(apply.Labels)))
+		binary.LittleEndian.PutUint16(out[38:40], uint16(labelsBytes))
+	}
+	offset := header
 	offset += copy(out[offset:], apply.Collection)
 	for _, value := range apply.Vector {
 		binary.LittleEndian.PutUint32(out[offset:offset+4], math.Float32bits(value))
 		offset += 4
+	}
+	for _, label := range apply.Labels {
+		binary.LittleEndian.PutUint16(out[offset:offset+2], uint16(len(label.Key)))
+		binary.LittleEndian.PutUint16(out[offset+2:offset+4], uint16(len(label.Value)))
+		offset += labelHeader
+		offset += copy(out[offset:], label.Key)
+		offset += copy(out[offset:], label.Value)
 	}
 	return out, nil
 }
 
 func DecodeApply(input []byte) (Apply, error) {
 	if len(input) < applyHeader || binary.LittleEndian.Uint32(input[0:4]) != applyMagic ||
-		binary.LittleEndian.Uint16(input[4:6]) != WireVersion || input[7] != 0 {
+		input[7] != 0 {
+		return Apply{}, ErrMalformed
+	}
+	version := binary.LittleEndian.Uint16(input[4:6])
+	header, labelCount, labelsBytes := applyHeader, 0, 0
+	if version == applyV2Version {
+		if len(input) < applyV2Header {
+			return Apply{}, ErrMalformed
+		}
+		header = applyV2Header
+		labelCount = int(binary.LittleEndian.Uint16(input[36:38]))
+		labelsBytes = int(binary.LittleEndian.Uint16(input[38:40]))
+		if labelCount == 0 || labelCount > MaxLabelCount || labelsBytes > MaxLabelsBytes {
+			return Apply{}, ErrMalformed
+		}
+	} else if version != WireVersion {
 		return Apply{}, ErrMalformed
 	}
 	collection, dim := int(binary.LittleEndian.Uint16(input[32:34])), int(binary.LittleEndian.Uint16(input[34:36]))
-	if collection == 0 || collection >= MaxCollectionBytes || dim > MaxDimension || len(input) != applyHeader+collection+4*dim {
+	if collection == 0 || collection >= MaxCollectionBytes || dim > MaxDimension ||
+		len(input) != header+collection+4*dim+labelsBytes {
 		return Apply{}, ErrMalformed
 	}
 	point := binary.LittleEndian.Uint64(input[24:32])
@@ -311,7 +407,7 @@ func DecodeApply(input []byte) (Apply, error) {
 		return Apply{}, ErrMalformed
 	}
 	apply := Apply{OperationID: binary.LittleEndian.Uint64(input[8:16]), Generation: binary.LittleEndian.Uint64(input[16:24]), PointID: int64(point), Kind: ApplyKind(input[6])}
-	offset := applyHeader
+	offset := header
 	apply.Collection = string(input[offset : offset+collection])
 	offset += collection
 	if dim > 0 {
@@ -319,6 +415,28 @@ func DecodeApply(input []byte) (Apply, error) {
 		for i := range apply.Vector {
 			apply.Vector[i] = math.Float32frombits(binary.LittleEndian.Uint32(input[offset : offset+4]))
 			offset += 4
+		}
+	}
+	if labelCount != 0 {
+		end := offset + labelsBytes
+		apply.Labels = make([]ExactLabel, labelCount)
+		for i := range apply.Labels {
+			if offset+labelHeader > end {
+				return Apply{}, ErrMalformed
+			}
+			keyBytes := int(binary.LittleEndian.Uint16(input[offset : offset+2]))
+			valueBytes := int(binary.LittleEndian.Uint16(input[offset+2 : offset+4]))
+			offset += labelHeader
+			if keyBytes == 0 || offset+keyBytes+valueBytes > end {
+				return Apply{}, ErrMalformed
+			}
+			apply.Labels[i] = ExactLabel{Key: string(input[offset : offset+keyBytes])}
+			offset += keyBytes
+			apply.Labels[i].Value = string(input[offset : offset+valueBytes])
+			offset += valueBytes
+		}
+		if offset != end {
+			return Apply{}, ErrMalformed
 		}
 	}
 	if apply.Validate() != nil {

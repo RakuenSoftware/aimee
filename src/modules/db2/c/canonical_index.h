@@ -23,6 +23,19 @@ extern "C"
 {
 #endif
 
+   /* Host-owned process capability used only by scan_project's local filesystem
+    * and git discovery. DB2 constructs a fixed, NULL-terminated argv for each
+    * operation. The callback must execute argv[0] directly without a shell, put
+    * at most max_out captured stdout/stderr bytes in one malloc-owned *out_buf,
+    * and return the child exit code (negative for host failure). Environment
+    * isolation is host policy: the current KB safe_exec_capture implementation
+    * inherits the service environment but never places it in argv. Install once
+    * at KB service initialization, before HTTP routing or ingest workers start.
+    * Passing NULL disables local discovery (scan_files remains available). */
+   typedef int (*canonical_index_exec_capture_fn)(const char *const argv[], char **out_buf,
+                                                  size_t max_out);
+   void canonical_index_set_exec_capture(canonical_index_exec_capture_fn capture);
+
    /* Scan a project rooted at `root`, registering it as `name`.
     * Skips files unchanged since their stored scanned_at unless force=1.
     * Returns count of files (re)indexed, or -1 on error.
@@ -61,8 +74,8 @@ extern "C"
                                     int max);
    /* Search all current projects except |excluded_project|. The exclusion is
     * applied before LIMIT so a local-heavy corpus cannot crowd out the tail. */
-   int canonical_index_find_excluding_project(const char *excluded_project,
-                                              const char *identifier, term_hit_t *out, int max);
+   int canonical_index_find_excluding_project(const char *excluded_project, const char *identifier,
+                                              term_hit_t *out, int max);
 
    /* Compute blast radius for a file. Returns 0 on success, -1 on error. */
    int canonical_index_blast_radius(const char *project, const char *file_path,

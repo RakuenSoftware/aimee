@@ -29,7 +29,9 @@ that provider ships.
 
 Committed vector mutations are idempotent notifications from the DB2 outbox. Every admitted
 write observer receives the same operation and reports its own watermark. A duplicate operation or
-generation must be recognized without duplicating an effect. One failed or lagging observer never
+generation must be recognized without duplicating an effect. The provider capability generation is
+the shared corpus epoch; the operation ID is the monotonically replayed delivery watermark. One
+failed or lagging observer never
 changes which provider serves reads.
 
 Portable reads are request/reply, never observer fanout. Exactly one admitted and ready external
@@ -46,7 +48,7 @@ DB3 returns bounded opaque point IDs and finite scores. DB2 rehydrates every can
 tenant, project, lifecycle, quarantine, and classification checks. Provider responses never confer
 authority and never contain SQL, table names, connection data, provider query JSON, or source rows.
 
-## Version-one provider frames
+## Provider frames and the compatible apply-v2 extension
 
 Every multibyte integer and float is little-endian. Each payload starts with its own magic, wire
 version, and fixed header length; unknown flags, unknown closed-enum values, nonzero reserved bytes,
@@ -56,24 +58,28 @@ malformed. Provider identity is never a payload field.
 | Payload | Required semantics |
 | --- | --- |
 | `capabilities` | Generation; ready flag; search/apply operation bits; cosine/L2/dot metric bits; exact-filter bit; maximum dimension, batch, and top-K. Ready evidence requires a nonzero generation. Search requires a metric and nonzero dimension/top-K; apply requires a nonzero batch limit. |
-| `apply` | Nonzero operation and generation, positive opaque point ID, upsert/delete/tombstone kind, bounded collection, and a finite vector only for upsert. The operation is emitted only after DB2's canonical transaction commits. |
+| `apply` v1 | Nonzero operation and corpus generation, positive opaque point ID, upsert/delete/tombstone kind, bounded collection, and a finite vector only for upsert. V1 remains decodable for compatibility but cannot represent filter-correct external projections. |
+| `apply` v2 | The v1 fields plus one to 16 canonically sorted exact labels. Keys are unique lowercase identifiers of at most 31 bytes; values are printable ASCII of at most 255 bytes; the encoded label section is at most 4096 bytes. Deletes and tombstones carry no labels. DB2 uses v2 for every external upsert. |
 | `apply_chunk` | Operation ID, total encoded apply length, exact offset, and a nonempty chunk. Offset zero restarts an incomplete retry; every subsequent chunk must be contiguous and retain the same total. |
-| `applied` | Operation and generation, durable provider watermark, lag, and `ok`, `retryable`, `rejected`, or `internal`. An `ok` watermark cannot precede the acknowledged generation. |
+| `applied` | Operation and corpus generation, durable provider watermark, lag, and `ok`, `retryable`, `rejected`, or `internal`. An `ok` watermark cannot precede the acknowledged operation ID. |
 | `search` request | Request ID, exact required generation, workspace/project scope, record type, bounded top-K, and finite vector. At least one scope is present. Request/reply fragmentation and cancellation use the bus directly. |
 | `search` success | Matching request ID and exact generation, then at most requested top-K unique positive point IDs with finite scores. |
 | `search` failure | Matching request ID and `invalid_request`, `unavailable`, `retryable`, or `internal`; provider prose and backend details never cross the boundary. |
 | `route` request | `query`, `select`, or `clear`, a request ID, and, only for select, the authenticated provider principal, observed capability generation, and explicit-fallback bit. `clear` removes an explicit override and restores the deterministic deployed-provider default. |
 | `route` reply | Typed result (`ok`, `not_found`, `not_ready`, `generation_conflict`, or `invalid`) plus the current selected principal, provider generation, and fallback bit. A failed selection leaves the previous route intact. |
 
-Version one is additive only. A new closed bit or operation needs a catalog update and conformance
-fixtures; reusing a bit, changing an existing field, or weakening validation requires a new wire
-version and a dual-version compatibility window. Provider implementations must pass the shared
+The non-apply frames remain version one. Apply v2 reuses the apply event kind and magic but has its
+own version and longer fixed header; decoders accept both versions and encoders retain byte-identical
+v1 output when no labels are present. A new closed bit or operation needs a catalog update and
+conformance fixtures; reusing a bit, changing an existing field, or weakening validation requires a
+new wire version and a dual-version compatibility window. Provider implementations must pass the shared
 codec, malformed-frame, duplicate-apply, multi-observer, selected-search, cancellation, and
 revalidation suite before receiving a production grant.
 
 ## Current executable slice
 
-The provider contract and DB2-side router now have an executable Go implementation. The public
+The provider contract, durable projection ledger, and DB2-side router now have executable Go
+implementations. The public
 `server-go/db3` package contains every version-one provider frame plus a provider runner. The
 DB2-owned policy in `server-go/modules/db2` keeps an authenticated capability registry, accepts an
 explicit compare-and-select route request, sends search to one selected principal, performs
@@ -83,7 +89,7 @@ connection.
 
 This does not activate an external provider in production. There is still no provider descriptor or
 grant, and the C DB2 process is still the activation oracle until its standalone closure and
-outbox/real-row adapters land. The cross-process conformance harness supplies strict test-only grants
+real-row search adapters land. The cross-process conformance harness supplies strict test-only grants
 to a C host and runs the DB2 router plus two independent Go providers over the real shared-memory
 bus. Production activation remains ordered behind the C DB2 ownership cutover and database-effect
 parity gates.
@@ -102,7 +108,9 @@ Candidate IDs must be positive and unique, generations and request IDs must matc
 must be finite, and every result passes the injected DB2 authorization check.
 
 The catalog at `src/modules/db2/eventcontract/db3.json` generates the public C constants and Go
-package identity. The shared `db3-wire-v1.json` fixture now pins all nine payload shapes:
+package identity. The shared `db3-wire-v1.json` fixture pins the byte-compatible v1 payloads while
+the Go mutation suite pins canonical apply-v2 labels and malformed encodings. The nine event
+payload shapes are:
 capabilities, apply, apply chunk, applied acknowledgement, search request, search success, typed
 search failure, route request, and route reply. A direct apply frame is retained when it fits one
 inline slot. Larger committed operations use an ordered, bounded notification chunk envelope,
@@ -116,9 +124,45 @@ operation, metric, and exact-filter bits, and dimension/top-K limits. Selection 
 search and exact scope filtering. Ready admission refreshes the deterministic deployed default unless
 control has installed an override. Explicit route selection is a compare-and-select against the
 observed generation, which remains bound until another successful select or clear; a later capability
-generation makes the explicit selection unavailable rather than silently advancing it. Removing an
+generation makes the explicit selection unavailable rather than silently advancing it.
+An apply-capable principal is durable after admission; an attachment loss does not discard its
+delivery obligations. Admission installs durable per-projection cursors under the same PostgreSQL
+transaction lock used by live vector triggers, then a Go worker advances at most 128 rows in each
+short transaction. Live writes also target backfilling principals, so releasing the lock between
+chunks cannot lose a mutation; a later snapshot duplicate carries the current row and remains
+idempotent. It may advertise `ready=false` while applying that snapshot, but `ready=true` is rejected
+from routing until every backfill delivery is acknowledged.
+Retirement is an explicit durable control operation, not an inference from a lost heartbeat.
+Removing an
 automatic default advances to the next eligible principal; losing an explicitly selected provider
 does not silently clear the route, so searches fail closed or take its explicit pgvector fallback.
+
+`db3_projection` is the single reviewed catalog for relation, collection, vector-column, and exact
+label mappings. The same rows install live triggers and drive resumable snapshot cursors, preventing
+capture and backfill coverage from drifting apart. Multiple vector columns on one relational row
+are independent collection consistency domains: their zero-padded trigger order is deterministic,
+but no portable search joins those collections or assumes cross-collection atomic visibility.
+
+`db3_provider`, `db3_backfill`, `db3_outbox`, and `db3_delivery` are separate from the existing
+`vector_index_ops` pgvector retry table. AFTER ROW triggers cover each relation behind the 32
+reviewed committed-mutation APIs, including row-wise effects of project/bulk deletes. The trigger
+insert shares the pgvector transaction, so an outbox contract failure rolls the vector write back.
+TRUNCATE is rejected because PostgreSQL exposes no transition rows from which to construct portable
+point deletes. The Go dispatcher claims committed rows with `FOR UPDATE SKIP LOCKED`, broadcasts
+them, records the publish timestamp, releases its lease, and schedules an unacknowledged operation
+for replay after five seconds. Its per-principal snapshot worker retries transient driver,
+connection, rollback, resource, failover, operator-intervention, and system failures with bounded
+exponential backoff; cancellation stops the worker, terminal SQL errors stop retrying, and
+`LastBackfillError` retains the most recent failure for operator diagnostics. Only an authenticated
+per-principal `applied` frame completes a
+delivery. Retryable/internal results remain pending, rejected results remain quarantined, and one
+provider's acknowledgement cannot complete another provider's obligation.
+
+The pre-activation rebuild procedure is intentionally schema-owner-only: retire every external
+provider, remove the relation's DB3 capture/reject triggers in the maintenance transaction, perform
+the destructive rebuild, reapply the schema to reinstall catalog-driven triggers, advance the
+corpus generation, and re-admit providers for a full snapshot. Ordinary `TRUNCATE` remains rejected;
+there is no application-level switch that can silently discard projection obligations.
 
 The authenticated event-bus tests admit DB2 plus two distinct provider observers, deliver one
 committed operation and its duplicate to both, prove each provider records only one effect, route a

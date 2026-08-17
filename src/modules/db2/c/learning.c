@@ -5,7 +5,7 @@
 #include "db2.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
-#include "log.h"
+#include "../support/db2_log.h"
 
 #include <stddef.h>
 #include <stdio.h>

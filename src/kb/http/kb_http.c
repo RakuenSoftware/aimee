@@ -1933,9 +1933,9 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
          timeout = 0;
 
       db2_kb_service_async_queue_stats_t stats;
-      int rc =
-          db2_kb_service_async_queue_drain(embed_cmd, timeout, pgvec_kb_vector_collection_name(),
-                                           kb_http_vector_upsert_document, NULL, &stats);
+      int rc = db2_kb_service_async_queue_drain(session_id(), embed_cmd, timeout,
+                                                pgvec_kb_vector_collection_name(),
+                                                kb_http_vector_upsert_document, NULL, &stats);
       if (rc != 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"queue drain failed\"}");

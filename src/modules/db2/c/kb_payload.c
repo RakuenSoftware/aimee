@@ -5,14 +5,14 @@
 #include "kb_payload.h"
 #include "aimee.h"
 #include "artifacts.h"
-#include "config.h"
+#include "../support/db2_runtime_config.h"
 #include "memory.h"
 #include "pgvec_transport.h"
 
 #include "db_postgres.h"
 #include "cJSON.h"
 #include "db2_internal.h"
-#include "../headers/log.h"
+#include "../support/db2_log.h"
 
 #include <ctype.h>
 #include <stddef.h>
