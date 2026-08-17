@@ -116,14 +116,12 @@ LARGE = re.compile(r"(json|metadata|content|prompt|body|payload|text|summary|blo
 # that can be activated yet has one to prove it against.
 NEEDS = {
     "repeated_text": "repeated",
-    "out_column_numeric": "column",
     "alloc_out": "alloc",
     "json_in": "json",
     "other": "unknown",
 }
 CAPABILITY = {
     "repeated": "repeated -- a variable-length list of strings as an argument",
-    "column": "column -- a list of one NUMERIC value per row (text columns cross)",
     "alloc": "alloc -- a callee-allocated out-parameter, T ** or char **",
     "json": "json -- a cJSON tree, which the wire carries but the client must build",
     "status": "status -- a return contract beyond ok/miss/fail, per operation",
@@ -286,7 +284,7 @@ def classify(params: str, enums: frozenset[str] = frozenset()) -> list[str]:
             # int64_t matches the _t pattern too, so a column of integers would
             # otherwise be counted as a struct it has no members for.
             row = STRUCT_OUT.search(current).group(1)
-            tags.append("out_column_numeric" if row in SCALAR_TYPES else "out_rows")
+            tags.append("out_column" if row in SCALAR_TYPES else "out_rows")
             index += 2
             continue
         if following and OUT_TEXT_ROWS.search(current) and ARRAY_LEN.search(following):

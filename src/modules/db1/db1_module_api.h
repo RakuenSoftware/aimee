@@ -62,23 +62,38 @@
 #define AIMEE_DB1_EVENT_CONVERSATION 11779u
 #define AIMEE_DB1_STAGE_CONVERSATION 3u
 
-#define AIMEE_DB1_OP_REWRITE_STATE_GET     1u
-#define AIMEE_DB1_OP_REWRITE_STATE_SET     2u
-#define AIMEE_DB1_OP_WM_SET                3u
-#define AIMEE_DB1_OP_WM_GET                4u
-#define AIMEE_DB1_OP_WM_LIST               5u
-#define AIMEE_DB1_OP_WM_ASSEMBLE_CONTEXT   6u
-#define AIMEE_DB1_OP_REWRITE_RECORD        7u
-#define AIMEE_DB1_OP_WM_SEARCH_SESSION_IDS 8u
-#define AIMEE_DB1_OP_CONV_RECORD_EVENT     9u
-#define AIMEE_DB1_OP_CONV_SET_CHAIN_ID     10u
-#define AIMEE_DB1_OP_CONV_INSERT_CHAIN     11u
-#define AIMEE_DB1_OP_CONV_PENDING_EVENTS   12u
-#define AIMEE_DB1_OP_CONV_LIST_CHAINS      13u
-#define AIMEE_DB1_OP_CONV_CHAIN_EVENTS     14u
-#define AIMEE_DB1_OP_CONV_SEARCH_CHAINS    15u
-#define AIMEE_DB1_OP_CONV_STATE_GET        16u
-#define AIMEE_DB1_OP_CONV_STATE_UPDATE     17u
+#define AIMEE_DB1_OP_REWRITE_STATE_GET          1u
+#define AIMEE_DB1_OP_REWRITE_STATE_SET          2u
+#define AIMEE_DB1_OP_WM_SET                     3u
+#define AIMEE_DB1_OP_WM_GET                     4u
+#define AIMEE_DB1_OP_WM_LIST                    5u
+#define AIMEE_DB1_OP_WM_ASSEMBLE_CONTEXT        6u
+#define AIMEE_DB1_OP_REWRITE_RECORD             7u
+#define AIMEE_DB1_OP_WM_SEARCH_SESSION_IDS      8u
+#define AIMEE_DB1_OP_CONV_RECORD_EVENT          9u
+#define AIMEE_DB1_OP_CONV_SET_CHAIN_ID          10u
+#define AIMEE_DB1_OP_CONV_INSERT_CHAIN          11u
+#define AIMEE_DB1_OP_CONV_PENDING_EVENTS        12u
+#define AIMEE_DB1_OP_CONV_LIST_CHAINS           13u
+#define AIMEE_DB1_OP_CONV_CHAIN_EVENTS          14u
+#define AIMEE_DB1_OP_CONV_SEARCH_CHAINS         15u
+#define AIMEE_DB1_OP_CONV_STATE_GET             16u
+#define AIMEE_DB1_OP_CONV_STATE_UPDATE          17u
+#define AIMEE_DB1_OP_WINDOW_SCAN_STATE          18u
+#define AIMEE_DB1_OP_WINDOW_SESSION_ID          19u
+#define AIMEE_DB1_OP_WINDOW_CREATE_RAW          20u
+#define AIMEE_DB1_OP_WINDOW_ADD_TERM            21u
+#define AIMEE_DB1_OP_WINDOW_ADD_FILE            22u
+#define AIMEE_DB1_OP_WINDOW_IDS_BY_TIER         23u
+#define AIMEE_DB1_OP_WINDOW_CANDIDATES_BY_TERMS 24u
+#define AIMEE_DB1_OP_WINDOW_LIST_FILES          25u
+#define AIMEE_DB1_OP_WINDOW_INDEX_SUMMARY       26u
+#define AIMEE_DB1_OP_WINDOW_LEXICAL_HITS        27u
+#define AIMEE_DB1_OP_WINDOW_SET_TIER            28u
+#define AIMEE_DB1_OP_WINDOW_PRUNE_TERMS         29u
+#define AIMEE_DB1_OP_WINDOW_DELETE_ALL_FILES    30u
+#define AIMEE_DB1_OP_WINDOW_PRUNE_FILES         31u
+#define AIMEE_DB1_OP_WINDOWS_DELETE_AFTER_TURN  32u
 
 /* Family 4: queued agent work: logs, coordination jobs and the cron that
  * drives them. */
@@ -113,7 +128,7 @@
    frame already bounds what arrived. */
 #define AIMEE_DB1_STATE_MAX  6144u
 #define AIMEE_DB1_VALUE_MAX  8192u
-#define AIMEE_DB1_FIELDS_MAX 11u
+#define AIMEE_DB1_FIELDS_MAX 33u
 
 #define AIMEE_DB1_STATUS_OK       0u
 #define AIMEE_DB1_STATUS_MISSING  1u

@@ -35,6 +35,7 @@
 #include "cognify_jobs.h"
 #include "agent_log.h"
 #include "conv_context.h"
+#include "db1_windows.h"
 #include "db1_module_api.h"
 #include "git_ownership.h"
 #include "platform_test_util.h"
@@ -251,6 +252,51 @@ static void test_agent_log_carries_every_shape(void)
    printf("  PASS: agent_log carries every shape\n");
 }
 
+/* A variable-length list of strings as an ARGUMENT, and a column of numbers.
+   The terms ride at the end of the frame and the stage recovers how many there
+   are by subtracting its own arity -- nothing is sent to say the count, so a
+   miscount would silently search for the wrong words. */
+static void test_repeated_terms_and_a_numeric_column(void)
+{
+   /* Dated explicitly rather than "now": the tier query asks for rows older
+      than N days, and racing the clock at second granularity is not a
+      property of the wire. */
+   int64_t window =
+       db1_window_create_raw("sess-win", 1, "a summary of the turn", "2020-01-01 00:00:00");
+   must(window > 0, "create a window and learn its id");
+   must(db1_window_add_term(window, "alpha") == 0, "index one term");
+   must(db1_window_add_term(window, "beta") == 0, "index another");
+   must(db1_window_set_tier(window, "raw") == 0, "set the tier");
+
+   /* Two terms, then one, then the maximum: the arity varies per call. */
+   const char *two[] = {"alpha", "beta"};
+   db1_window_search_candidate_t hits[8];
+   int found = db1_windows_find_candidates_by_terms(two, 2, hits, 8);
+   must(found >= 1, "find the window by two terms");
+   must(hits[0].window_id == window, "the candidate is the window just created");
+
+   const char *one[] = {"alpha"};
+   must(db1_windows_find_candidates_by_terms(one, 1, hits, 8) >= 1,
+        "a one-term search is a different arity and still works");
+
+   const char *absent[] = {"nosuchterm"};
+   must(db1_windows_find_candidates_by_terms(absent, 1, hits, 8) == 0,
+        "a term nobody indexed finds nothing rather than everything");
+
+   /* A column of int64 ids: one number per row, no struct. */
+   int64_t ids[16];
+   int listed = db1_windows_list_ids_by_tier_before_days("raw", 1, ids, 16);
+   must(listed >= 1, "list window ids by tier");
+   must(ids[0] > 0, "the numeric column carried a real id");
+
+   /* Two loose scalars from the same source. */
+   int count = -1, max_seq = -1;
+   must(db1_windows_session_scan_state("sess-win", &count, &max_seq) == 0, "read scan state");
+   must(count >= 1, "the scan state counted the window");
+
+   printf("  PASS: repeated terms and a numeric column\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -287,6 +333,7 @@ int main(int argc, char **argv)
    test_branch_ownership_round_trips();
    test_ids_and_scalars_cross_the_bus();
    test_agent_log_carries_every_shape();
+   test_repeated_terms_and_a_numeric_column();
 
    stop_module();
    obs_bus_stop();

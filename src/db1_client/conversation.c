@@ -17,6 +17,7 @@
  * catalog permanently one reformat apart. */
 /* clang-format off */
 #include "conv_context.h"
+#include "db1_windows.h"
 #include "payload_rewrite_state.h"
 #include "wm.h"
 
@@ -208,6 +209,16 @@ static int write_result(int status)
    return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
 }
 
+/* A read answers found(1) / not-found(0) / error(-1), which is what the direct
+   implementation returns and what its callers already branch on. */
+static int read_result(int status, const char *value_out)
+{
+   if (status == (int)AIMEE_DB1_STATUS_OK)
+      return (value_out && value_out[0]) ? 1 : 0;
+   if (status == (int)AIMEE_DB1_STATUS_MISSING)
+      return 0;
+   return -1;
+}
 
 int db1_payload_rewrite_state_get(const char *session_id, payload_rewrite_state_t *out)
 {
@@ -744,6 +755,321 @@ int db1_conv_state_update(const char *session_id, int64_t last_event_id, int cha
    snprintf(arg3, sizeof arg3, "%d", event_count);
    const char *fields[] = {session_id, arg1, arg2, arg3};
    return write_result(call_stage(AIMEE_DB1_OP_CONV_STATE_UPDATE, fields, 4, NULL, NULL, 0, NULL));
+}
+
+int db1_windows_session_scan_state(const char *session_id, int *count_out, int *max_seq_out)
+{
+   if (!session_id || !session_id[0] || !count_out || !max_seq_out)
+      return -1;
+   const char *fields[] = {session_id};
+   char slot0[32];
+   char slot1[32];
+   char *const values[] = {slot0, slot1};
+   const size_t caps[] = {sizeof slot0, sizeof slot1};
+   int status = call_stage(AIMEE_DB1_OP_WINDOW_SCAN_STATE, fields, 1, values, caps, 2, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   *count_out = (int)strtol(slot0, NULL, 10);
+   *max_seq_out = (int)strtol(slot1, NULL, 10);
+   return 0;
+}
+
+int db1_window_session_id(int64_t window_id, char *out, size_t out_sz)
+{
+   if (!out || out_sz == 0)
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)window_id);
+   const char *fields[] = {arg0};
+   char *const values[] = {out};
+   const size_t caps[] = {out_sz};
+   int status = call_stage(AIMEE_DB1_OP_WINDOW_SESSION_ID, fields, 1, values, caps, 1, NULL);
+   return read_result(status, out);
+}
+
+int64_t db1_window_create_raw(const char *session_id, int seq, const char *summary, const char *created_at)
+{
+   if (!session_id || !session_id[0])
+      return -1;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", seq);
+   const char *fields[] = {session_id, arg1, summary ? summary : "", created_at ? created_at : ""};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int status = call_stage(AIMEE_DB1_OP_WINDOW_CREATE_RAW, fields, 4, values, caps, 1, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int64_t)strtoll(slot0, NULL, 10);
+}
+
+int db1_window_add_term(int64_t window_id, const char *term)
+{
+   if (!term || !term[0])
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)window_id);
+   const char *fields[] = {arg0, term};
+   return write_result(call_stage(AIMEE_DB1_OP_WINDOW_ADD_TERM, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_window_add_file(int64_t window_id, const char *file_path)
+{
+   if (!file_path || !file_path[0])
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)window_id);
+   const char *fields[] = {arg0, file_path};
+   return write_result(call_stage(AIMEE_DB1_OP_WINDOW_ADD_FILE, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_windows_list_ids_by_tier_before_days(const char *tier, int older_than_days, int64_t *out_ids, int max)
+{
+   if (!tier || !tier[0] || !out_ids || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", older_than_days);
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", max);
+   const char *fields[] = {tier, arg1, arg2};
+   char **values = malloc((size_t)max * 1u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 1u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 1u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out_ids, 0, (size_t)max * sizeof *out_ids);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 1u + 0u] = scratch[row * 1u + 0u];
+      caps[row * 1u + 0u] = sizeof scratch[row * 1u + 0u];
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_WINDOW_IDS_BY_TIER, fields, 3, values, caps,
+                           (uint32_t)(max * 1), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 1u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 1u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out_ids[row] = (int64_t)strtoll(scratch[row * 1u + 0u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_windows_find_candidates_by_terms(const char *const *terms, int term_count, db1_window_search_candidate_t *out, int max)
+{
+   if (!terms || term_count <= 0 || term_count > 32 || !out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max);
+   const char *fields[33];
+   fields[0] = arg0;
+   for (int at = 0; at < term_count; ++at)
+      fields[1 + at] = terms[at] ? terms[at] : "";
+   char **values = malloc((size_t)max * 6u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 6u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 3u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 6u + 0u] = scratch[row * 3u + 0u];
+      caps[row * 6u + 0u] = sizeof scratch[row * 3u + 0u];
+      values[row * 6u + 1u] = out[row].session_id;
+      caps[row * 6u + 1u] = sizeof out[row].session_id;
+      values[row * 6u + 2u] = scratch[row * 3u + 1u];
+      caps[row * 6u + 2u] = sizeof scratch[row * 3u + 1u];
+      values[row * 6u + 3u] = out[row].summary;
+      caps[row * 6u + 3u] = sizeof out[row].summary;
+      values[row * 6u + 4u] = out[row].created_at;
+      caps[row * 6u + 4u] = sizeof out[row].created_at;
+      values[row * 6u + 5u] = scratch[row * 3u + 2u];
+      caps[row * 6u + 5u] = sizeof scratch[row * 3u + 2u];
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_WINDOW_CANDIDATES_BY_TERMS, fields, (uint32_t)(1 + term_count), values, caps,
+                           (uint32_t)(max * 6), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 6u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 6u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].window_id = (int64_t)strtoll(scratch[row * 3u + 0u], NULL, 10);
+      out[row].seq = (int)strtol(scratch[row * 3u + 1u], NULL, 10);
+      out[row].match_count = (int)strtol(scratch[row * 3u + 2u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_window_list_files(int64_t window_id, char (*out)[MAX_PATH_LEN], int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)window_id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {arg0, arg1};
+   char **values = malloc((size_t)max * 1u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 1u * sizeof *caps);
+   if (!values || !caps)
+   {
+      free(values);
+      free(caps);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 1u + 0u] = out[row];
+      caps[row * 1u + 0u] = sizeof out[row];
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_WINDOW_LIST_FILES, fields, 2, values, caps,
+                           (uint32_t)(max * 1), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 1u != 0u)
+   {
+      return -1;
+   }
+   int rows = (int)(filled / 1u);
+   return rows;
+}
+
+int db1_window_index_summary(int64_t window_id, const char *summary)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)window_id);
+   const char *fields[] = {arg0, summary ? summary : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_WINDOW_INDEX_SUMMARY, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_windows_find_lexical_hits(const char *const *terms, int term_count, db1_window_lexical_hit_t *out, int max)
+{
+   if (!terms || term_count <= 0 || term_count > 32 || !out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", max);
+   const char *fields[33];
+   fields[0] = arg0;
+   for (int at = 0; at < term_count; ++at)
+      fields[1 + at] = terms[at] ? terms[at] : "";
+   char **values = malloc((size_t)max * 2u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 2u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 2u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 2u + 0u] = scratch[row * 2u + 0u];
+      caps[row * 2u + 0u] = sizeof scratch[row * 2u + 0u];
+      values[row * 2u + 1u] = scratch[row * 2u + 1u];
+      caps[row * 2u + 1u] = sizeof scratch[row * 2u + 1u];
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_WINDOW_LEXICAL_HITS, fields, (uint32_t)(1 + term_count), values, caps,
+                           (uint32_t)(max * 2), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 2u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 2u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].window_id = (int64_t)strtoll(scratch[row * 2u + 0u], NULL, 10);
+      out[row].rank = strtod(scratch[row * 2u + 1u], NULL);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_window_set_tier(int64_t window_id, const char *tier)
+{
+   if (!tier || !tier[0])
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)window_id);
+   const char *fields[] = {arg0, tier};
+   return write_result(call_stage(AIMEE_DB1_OP_WINDOW_SET_TIER, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_window_prune_terms_keep_top(int64_t window_id, int keep)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)window_id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", keep);
+   const char *fields[] = {arg0, arg1};
+   return write_result(call_stage(AIMEE_DB1_OP_WINDOW_PRUNE_TERMS, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_window_delete_all_files(int64_t window_id)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)window_id);
+   const char *fields[] = {arg0};
+   return write_result(call_stage(AIMEE_DB1_OP_WINDOW_DELETE_ALL_FILES, fields, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_window_prune_files_keep_top(int64_t window_id, int keep)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)window_id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", keep);
+   const char *fields[] = {arg0, arg1};
+   return write_result(call_stage(AIMEE_DB1_OP_WINDOW_PRUNE_FILES, fields, 2, NULL, NULL, 0, NULL));
+}
+
+int db1_windows_delete_after_turn(const char *session_id, int turn)
+{
+   if (!session_id || !session_id[0])
+      return -1;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", turn);
+   const char *fields[] = {session_id, arg1};
+   return write_result(call_stage(AIMEE_DB1_OP_WINDOWS_DELETE_AFTER_TURN, fields, 2, NULL, NULL, 0, NULL));
 }
 
 /* clang-format on */
