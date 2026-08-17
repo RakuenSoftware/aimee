@@ -274,7 +274,6 @@ static int write_delegate_output_file(const char *path, const char *text)
    return 0;
 }
 
-
 /* The remote-endpoint resolvers below are portable (env + aimee.yaml, no UDS)
  * and MUST compile on Windows too: cli_v1_forward calls them unconditionally
  * and the Windows thin client always takes the remote /v1 path. */

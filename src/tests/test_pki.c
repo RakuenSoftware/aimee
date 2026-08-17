@@ -459,8 +459,8 @@ int main(void)
              EVP_PKEY_keygen(c, &ec2) == 1);
       EVP_PKEY_CTX_free(c);
       c = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
-      assert(c && EVP_PKEY_keygen_init(c) == 1 &&
-             EVP_PKEY_CTX_set_rsa_keygen_bits(c, 2048) == 1 && EVP_PKEY_keygen(c, &rsa) == 1);
+      assert(c && EVP_PKEY_keygen_init(c) == 1 && EVP_PKEY_CTX_set_rsa_keygen_bits(c, 2048) == 1 &&
+             EVP_PKEY_keygen(c, &rsa) == 1);
       EVP_PKEY_CTX_free(c);
 
       assert(EVP_PKEY_eq(ec1, ec1) == 1);  /* same key -> collision */
