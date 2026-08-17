@@ -78,6 +78,23 @@ extern "C"
    void aimee_db2_register_fact_extract_provider(aimee_db2_fact_extract_fn provider);
    void aimee_db2_register_fact_scan_provider(aimee_db2_fact_scan_fn provider);
 
+   enum
+   {
+      AIMEE_DB2_EMBED_DOCUMENT = 0,
+      AIMEE_DB2_EMBED_QUERY = 1,
+   };
+
+   /* Embed one text through the process-owned memory stage. A successful
+    * provider returns a dimension in [1,max_dim] and fills exactly that many
+    * finite floats. Zero means unavailable or failed; it is never a lexical
+    * substitute. */
+   typedef int (*aimee_db2_embed_fn)(const char *text, const char *command, int input_type,
+                                     float *out, int max_dim);
+
+   /* Install the memory embedding adapter. NULL removes it; DB2 then fails
+    * embedding closed instead of linking or falling back to memory internals. */
+   void aimee_db2_register_embed_provider(aimee_db2_embed_fn provider);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,5 +1,6 @@
 /* test_kb.c: unit tests for the project knowledge base (kb.c) */
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,6 +31,32 @@
 /* ------------------------------------------------------------------ */
 /* Test utilities                                                       */
 /* ------------------------------------------------------------------ */
+
+static int test_db2_embed_provider(const char *text, const char *command, int input_type,
+                                   float *out, int max_dim)
+{
+   if (strcmp(command, "test-invalid-dim") == 0)
+      return max_dim + 1;
+   if (strcmp(command, "test-nonfinite") == 0)
+   {
+      out[0] = NAN;
+      return 1;
+   }
+   return memory_embed_text(text, command, (embed_input_type_t)input_type, out, max_dim);
+}
+
+static void test_db2_embed_contract(void)
+{
+   float vec[8] = {0};
+   aimee_db2_register_embed_provider(NULL);
+   assert(db2_kb_embed_text("hello", MEMORY_EMBED_TEST_FIXTURE, DB2_EMBED_QUERY, vec, 8) == 0);
+   aimee_db2_register_embed_provider(test_db2_embed_provider);
+   assert(db2_kb_embed_text("hello", "test-invalid-dim", DB2_EMBED_QUERY, vec, 8) == 0);
+   assert(db2_kb_embed_text("hello", "test-nonfinite", DB2_EMBED_QUERY, vec, 8) == 0);
+   assert(db2_kb_embed_text("hello", MEMORY_EMBED_TEST_FIXTURE, -1, vec, 8) == 0);
+   assert(db2_kb_embed_text("hello", MEMORY_EMBED_TEST_FIXTURE, DB2_EMBED_QUERY, vec, 8) > 0);
+   printf("  PASS: DB2 embedding contract fails closed on unavailable or malformed answers\n");
+}
 
 static int test_kb_vector_upsert_document(int64_t document_id, const float *vec, int dim,
                                           const char *payload_json, void *ctx)
@@ -1218,6 +1245,8 @@ static void test_excludes_node_modules(void)
 int main(void)
 {
    printf("test_kb:\n");
+
+   test_db2_embed_contract();
 
    /* kb_resolve_project tests */
    test_resolve_project_explicit();

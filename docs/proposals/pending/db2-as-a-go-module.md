@@ -6,8 +6,8 @@
   closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
   support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
   deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
-  link remains blocked by 38 sibling contracts. Its closure records 177 external symbols: 139
-  declared system links and those 38 injected contracts; portable API debt is zero. This is
+  link remains blocked by 37 sibling contracts. Its closure records 176 external symbols: 139
+  declared system links and those 37 injected contracts; portable API debt is zero. This is
   explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
@@ -561,6 +561,12 @@ well. The KB adapters carry both bounded request shapes over the memory module's
 DB2 validates candidate counts, fixed-field termination, node kinds, binary scan flags, and
 attribute consistency before acting. An unavailable extractor returns an error instead of claiming
 the turn held zero facts, and an unavailable scanner cannot trigger deletion.
+
+Single-text embedding in DB2 now uses a startup-installed host contract too. HTTP embedding calls
+cross the memory module's served `embedding` event-bus stage, where the process-owned circuit
+breaker lives; the adapter preserves the module's explicit C-host path for program commands that
+the Go owner intentionally declines. DB2 accepts only a dimension within the caller's bound and
+finite vector components, so an absent or malformed answer cannot become a stored vector.
 
 The closure compiler now matches the production standalone mode by disabling DB1 and the DB2
 SQLite test shim. SQLite compatibility remains tested separately, but its weak DB1 cache hook and

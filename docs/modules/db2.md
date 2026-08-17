@@ -373,7 +373,14 @@ extraction is an error rather than a false zero-fact answer, while missing or fa
 deletes a fact. This moves total debt from 179 to 177, injected-contract debt from 40 to 38, and
 outbound source-boundary includes from 168 to 167.
 
-The remaining 38 non-system rows are sibling-contract migration debt. Session identity, briefing
+The twenty-seventh reduction moves DB2's single-text embedding dependency behind a startup-installed
+host contract. HTTP embedders now traverse the memory module's served `embedding` stage and use its
+process-owned circuit breaker; program-based embedders retain the explicitly documented C host path
+because the Go module declines them without touching its breaker. DB2 independently rejects an
+absent provider, invalid dimensions, and non-finite components. This moves total debt from 177 to
+176, injected-contract debt from 38 to 37, and outbound source-boundary includes from 167 to 166.
+
+The remaining 37 non-system rows are sibling-contract migration debt. Session identity, briefing
 rendering, executable lifecycle, configuration, memory, and other host calls must close through
 their reviewed process contracts before activation; they are not portable-support candidates. Rows
 may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide
