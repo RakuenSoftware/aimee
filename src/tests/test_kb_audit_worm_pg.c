@@ -18,10 +18,11 @@
  * hash (audit_worm_row_hash over its stored fields + stored prev_hash) equals the row
  * hash the SQL function stored — direct byte-identity, not merely self-consistency. */
 #include <aimee/audit/audit_worm_chain.h> /* audit_worm_row_hash, AUDIT_WORM_GENESIS_PREV */
-#include "modules/db2/c/db2.h"            /* db2_init / db2_shutdown */
-#include "modules/db2/c/db2_internal.h"   /* db2_conn */
-#include "modules/db2/c/db_postgres.h"    /* aimee_pg_* */
-#include "kb_audit_worm.h"                /* db2_kb_audit_append / verify / count */
+#include <aimee/db2/host_contracts.h>
+#include "modules/db2/c/db2.h"          /* db2_init / db2_shutdown */
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
+#include "modules/db2/c/db_postgres.h"  /* aimee_pg_* */
+#include "kb_audit_worm.h"              /* db2_kb_audit_append / verify / count */
 
 #include <assert.h>
 #include <stdio.h>
@@ -179,6 +180,7 @@ int main(void)
       return 1;
    }
 
+   aimee_db2_register_audit_hash_provider(audit_worm_row_hash);
    run();
 
    db2_shutdown();
