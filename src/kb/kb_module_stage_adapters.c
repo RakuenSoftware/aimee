@@ -5,10 +5,12 @@
 #include "kb_curator_grounding.h"
 #include "kb_route_acl.h"
 
+#include <aimee/audit/audit_worm_chain.h>
 #include <aimee/audit/obs_bus.h>
 #include <aimee/control-web/module_api.h>
 #include <aimee/core/event_bus/module_protocol.h>
 #include <aimee/db2/client.h>
+#include <aimee/db2/host_contracts.h>
 #include <aimee/kb-synthesis/module_api.h>
 #include <aimee/postgres/module_api.h>
 
@@ -122,6 +124,7 @@ int kb_module_db2_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_tables
 
 void kb_module_stage_adapters_configure(void)
 {
+   aimee_db2_register_audit_hash_provider(audit_worm_row_hash);
    kb_curator_grounding_register_provider(grounding_decide);
    kb_route_acl_register_authorization_provider(control_web_authorize);
 }

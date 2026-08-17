@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "bcae23e9be3b6b8b6e87b436178366d1a128544c",
-  "source_fingerprint": "de4712dfef5182feb1c9f87990208ff2b1dfdd55d432126b2106a1cc9f224ea3",
+  "source_revision": "3710f2f2868d4eb23e6b2569fbc6ba330e60ee9b",
+  "source_fingerprint": "3830b8a7a4010366f3c6d7a35b942cde975b1fe7ddaa7c6054474af843a610fd",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -2059,14 +2059,6 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "audit_worm_row_hash",
-      "references": [
-        "src/modules/db2/c/kb_audit_worm.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "calloc",
       "references": [
         "src/modules/db2/c/code_audit.c",
@@ -3534,15 +3526,15 @@
   "summary": {
     "translation_units": 138,
     "descriptor_support_units": 22,
-    "unresolved_symbols": 182,
+    "unresolved_symbols": 181,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 43,
+      "injected-module-contract": 42,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "f1e12d9cc1baaefcbf23346dc239eb68d7cd295ee19cb59848352344a466c4a7"
+  "fingerprint": "1b1d2440c91161d43569671da2854299c0cba5b8de5e55268896454dcd8709b7"
 }

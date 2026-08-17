@@ -4641,6 +4641,10 @@ $(TESTPREFIX)/unit-test-kb-audit-worm: $(OBJDIR)/tests/test_kb_audit_worm.o \
                                $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(OBJDIR)/tests/test_kb_audit_worm.o \
+$(OBJDIR)/tests/test_kb_audit_worm_pg.o \
+$(OBJDIR)/tests/test_code_project_lifecycle.o: C_FLAGS += -Imodules/db2/include
+
 $(TESTPREFIX)/unit-test-decision-log: $(OBJDIR)/tests/test_decision_log.o \
                                $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

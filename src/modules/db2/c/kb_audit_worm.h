@@ -11,6 +11,15 @@ extern "C"
 {
 #endif
 
+   typedef void (*db2_audit_hash_fn)(long long seq, const char *actor_role,
+                                     const char *actor_principal, const char *action,
+                                     const char *subject, const char *verdict, const char *key_id,
+                                     const char *detail, const char *prev_hash, char out_hex[65]);
+
+   /* Internal declaration of the host contract exported publicly through
+    * <aimee/db2/host_contracts.h>. NULL removes the provider. */
+   void aimee_db2_register_audit_hash_provider(db2_audit_hash_fn provider);
+
    /* Append one governed kb action, hash-chained to the current head. detail is
     * bounded to AUDIT_WORM_DETAIL_MAX. Returns 0 on success, -1 on failure. */
    int db2_kb_audit_append(const char *actor_role, const char *actor_principal, const char *action,
@@ -19,9 +28,9 @@ extern "C"
    /* Transaction-owned variant used when a destructive mutation and its audit
     * row must commit atomically. |conn| must already be inside BEGIN; this
     * function neither commits nor rolls back. */
-   int db2_kb_audit_append_in_txn(void *conn, const char *actor_role,
-                                  const char *actor_principal, const char *action,
-                                  const char *subject, const char *verdict, const char *detail);
+   int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *actor_principal,
+                                  const char *action, const char *subject, const char *verdict,
+                                  const char *detail);
 
    /* Recompute the whole chain (row_hash + prev linkage + gap-free seq). 0 if intact,
     * -1 on the first break (reason in err). */
