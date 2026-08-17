@@ -117,6 +117,16 @@ case "$AIMEE_WFE_ENGINE" in
 esac
 export AIMEE_WFE_HTTP_SOCKET="${AIMEE_WFE_HTTP_SOCKET:-$AIMEE_HOME/aimee-wfe-http.sock}"
 export AIMEE_MODULE_BUS_SOCKET="${AIMEE_MODULE_BUS_SOCKET:-$AIMEE_HOME/server-module-bus.sock}"
+# The DB1 module is a separate process and cannot read the daemon's config, so
+# it is told which database to open and refuses to start without it. That is
+# deliberate: a module that guessed a default would serve a DIFFERENT, empty
+# store whenever an operator moved the database, and an empty store answers
+# every read with "no such row" rather than an error.
+#
+# This default matches config's own default. An operator who overrides db1_path
+# in the configuration MUST set AIMEE_DB1_PATH to match, or the module will
+# refuse to start -- loudly, which is the point.
+export AIMEE_DB1_PATH="${AIMEE_DB1_PATH:-$AIMEE_HOME/aimee.db}"
 MODULE_MANIFEST="${AIMEE_MODULE_MANIFEST:-/opt/aimee/module-grants/server.modules}"
 # Existing appliances may need to recover SQLite WAL state and refresh seeded
 # workflow definitions before the C resource socket appears.  A real upgraded

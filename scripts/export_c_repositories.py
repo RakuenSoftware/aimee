@@ -222,11 +222,32 @@ def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[st
     return result
 
 
+NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def c_process_init_symbol(module_id: str, descriptor: dict) -> str | None:
+    """The symbol the process must call before it serves, if it declares one.
+
+    A module owning process-wide state -- an open database, a cache -- has to
+    build it before the runtime registers its stages. Declaring the symbol here
+    rather than hard-coding a call keeps the generated main the same shape for
+    every module, and makes "this module needs setting up" a reviewable line in
+    its descriptor instead of something the reader has to infer from absence.
+    """
+    symbol = descriptor.get("c_init")
+    if symbol is None:
+        return None
+    if not isinstance(symbol, str) or not NAME_PATTERN.fullmatch(symbol):
+        raise ExportError(f"{module_id}: c_init must be a C identifier")
+    return symbol
+
+
 def module_main(
     module_id: str,
     principal_ref: int,
     stages: list[dict[str, object]],
     has_handler: bool = False,
+    init_symbol: str | None = None,
 ) -> str:
     entries = "\n".join(
         f"   {{{stage['event_kind']}u, {stage['id']}u}},"
@@ -238,10 +259,24 @@ extern aimee_module_status_t aimee_module_handler(
     uint32_t *, void *);
 """ if has_handler else ""
     handler_value = "aimee_module_handler" if has_handler else "NULL"
+    # A module that owns process-wide state has to open it before it serves.
+    # Without this the process attaches, registers its stages and answers every
+    # one of them against an unopened store -- which reads to a caller as "the
+    # row is not there" rather than "this module cannot serve", so the failure
+    # is invisible exactly where it matters.
+    init_declaration = f"""
+extern int {init_symbol}(void);
+""" if init_symbol else ""
+    init_call = f"""   if ({init_symbol}() != 0)
+   {{
+      fprintf(stderr, "{module_id}: {init_symbol} failed; refusing to serve\\n");
+      return 1;
+   }}
+""" if init_symbol else ""
     return f"""#include <aimee/core/event_bus/module_runtime.h>
 
 #include <stdio.h>
-{handler_declaration}
+{handler_declaration}{init_declaration}
 
 static const aimee_module_stage_t stages[] = {{
 {entries}
@@ -254,7 +289,7 @@ int main(int argc, char **argv)
       fprintf(stderr, "usage: %s DAEMON_MODULE_BUS_SOCKET\\n", argv[0]);
       return 2;
    }}
-   const aimee_module_process_config_t config = {{
+{init_call}   const aimee_module_process_config_t config = {{
        .socket_path = argv[1],
        .module_name = "{module_id}",
        .principal_class = {PRINCIPAL_CLASS}u,
@@ -500,6 +535,7 @@ def export_module(
     declared_sources = descriptor.get("sources", [])
     assert isinstance(declared_sources, list)
     has_handler = c_process_has_handler(declared_sources)
+    init_symbol = c_process_init_symbol(module_id, descriptor)
     repository = output_root / f"aimee-module-{module_id}"
     repository.mkdir()
     for relative in owned:
@@ -529,7 +565,7 @@ serve={serve}
         if runtime == "c":
             write_text(
                 repository / "runtime/main.c",
-                module_main(module_id, principal_ref, stages, has_handler),
+                module_main(module_id, principal_ref, stages, has_handler, init_symbol),
             )
             write_text(
                 repository / "CMakeLists.txt",
@@ -771,10 +807,11 @@ def export_runtime_bundle(output_root: Path) -> int:
                 module_id, descriptor
             )
             has_handler = c_process_has_handler(sources)
+            init_symbol = c_process_init_symbol(module_id, descriptor)
             main_path = f"src/{binary}.c"
             write_text(
                 output_root / main_path,
-                module_main(module_id, principal_ref, stages, has_handler),
+                module_main(module_id, principal_ref, stages, has_handler, init_symbol),
             )
             c_builds.append({
                 "id": module_id,

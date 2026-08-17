@@ -39,8 +39,9 @@ STAGES_HEADER = Path("src/modules/db1/db1_stages.h")
 # absence from DB1_SRCS is the design rather than evidence of a migration.
 # db1_time.c supplies now_utc, which every process defines for itself -- the
 # daemon from util.c. In DB1_SRCS it would be a duplicate symbol there; out of
-# the module it is an undefined one here.
-MODULE_ONLY_SOURCES = frozenset({"module_adapter.c", "db1_time.c"})
+# the module it is an undefined one here. db1_module_init.c opens the store the
+# module serves from, which the daemon opens for itself.
+MODULE_ONLY_SOURCES = frozenset({"module_adapter.c", "db1_time.c", "db1_module_init.c"})
 
 # DB1's principal ref. Event kinds are carved 4096 + ref*256 + stage, and a
 # family's id IS its future stage id, so the arithmetic is fixed here too.
