@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "01ffc2c800174085c43a6ac46fc9c3f7c732a477",
-  "source_fingerprint": "d163b4707f6e4bee79dd4436f8f4c283b6b5c8794ea4b09ce99deb593b67e2ce",
+  "source_revision": "93512ce7c5e552d4afb4b29258fd12d2fe3538b7",
+  "source_fingerprint": "07ea3191a6478c3390225ae8c51d988226d1efe285ae5a566932bf1e4ba342f8",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -730,6 +730,46 @@
       },
       "provenance": "Definition promoted from src/shared/management_read.c; the sole DB2 call was audited in management_read_journal.c.",
       "evidence": "Deterministic two-value selector mapping with no imports, allocation, I/O, DB, event-bus, provider, platform, pgvector, or DB3 dependency; ABI parity tested."
+    },
+    {
+      "path": "src/modules/db2/support/model_validation_primitives.c",
+      "source_sha256": "a7d77ac228ab363f2b3c8b5381c5e9e09897f80574f8b6f07c223027439f47ba",
+      "header": "src/modules/db2/support/db2_model_validation.h",
+      "header_sha256": "e7bbdb2c7238692047cd7144b5592779add14c636c0ee9e7dae1adcc5df6eb99",
+      "defines": [
+        "kb_models_endpoint_valid",
+        "kb_models_name_clean",
+        "kb_models_wire_valid"
+      ],
+      "resolves": [
+        "kb_models_endpoint_valid",
+        "kb_models_name_clean",
+        "kb_models_wire_valid"
+      ],
+      "resolution_disposition": "injected-module-contract",
+      "allowed_includes": [
+        "db2_model_validation.h",
+        "string.h"
+      ],
+      "allowed_header_includes": [],
+      "allowed_undefined": [
+        "strcmp",
+        "strlen",
+        "strncmp"
+      ],
+      "base_references": {
+        "kb_models_endpoint_valid": [
+          "src/modules/db2/c/org_model_catalog.c"
+        ],
+        "kb_models_name_clean": [
+          "src/modules/db2/c/org_model_catalog.c"
+        ],
+        "kb_models_wire_valid": [
+          "src/modules/db2/c/org_model_catalog.c"
+        ]
+      },
+      "provenance": "The three pure model-catalog admission definitions are promoted from src/kb/http/kb_models_validate.c; all DB2 calls are pinned to org_model_catalog.c.",
+      "evidence": "The descriptor owns the exact wire whitelist, printable-name bounds, and HTTP(S) endpoint grammar used by DB2's pre-database storage choke point. Normal and sanitizer parity cover NULL, every non-NUL byte, length boundaries, schemes, and legacy empty-endpoint behavior. Only strcmp, strlen, and strncmp are imported; there is no HTTP, JSON, DB, bus, provider, pgvector, DB3, allocation, configuration, I/O, or logging dependency."
     },
     {
       "path": "src/modules/db2/support/random_primitives.c",
@@ -2143,30 +2183,6 @@
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
-      "symbol": "kb_models_endpoint_valid",
-      "references": [
-        "src/modules/db2/c/org_model_catalog.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "kb_models_name_clean",
-      "references": [
-        "src/modules/db2/c/org_model_catalog.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "kb_models_wire_valid",
-      "references": [
-        "src/modules/db2/c/org_model_catalog.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "log10",
       "references": [
         "src/modules/db2/c/curiosity.c"
@@ -2771,6 +2787,7 @@
         "src/modules/db2/support/cjson.c",
         "src/modules/db2/support/cochange_primitives.c",
         "src/modules/db2/support/extractor_primitives.c",
+        "src/modules/db2/support/model_validation_primitives.c",
         "src/modules/db2/support/rel_seed_primitives.c",
         "src/modules/db2/support/rel_type_primitives.c"
       ],
@@ -2904,7 +2921,8 @@
         "src/modules/db2/c/vault_operator_status_runtime.c",
         "src/modules/db2/c/vault_pg.c",
         "src/modules/db2/support/cjson.c",
-        "src/modules/db2/support/extractor_primitives.c"
+        "src/modules/db2/support/extractor_primitives.c",
+        "src/modules/db2/support/model_validation_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2946,7 +2964,8 @@
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_pg.c",
         "src/modules/db2/support/cjson.c",
-        "src/modules/db2/support/extractor_primitives.c"
+        "src/modules/db2/support/extractor_primitives.c",
+        "src/modules/db2/support/model_validation_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3341,16 +3360,16 @@
   ],
   "summary": {
     "translation_units": 138,
-    "descriptor_support_units": 14,
-    "unresolved_symbols": 196,
+    "descriptor_support_units": 15,
+    "unresolved_symbols": 193,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 57,
+      "injected-module-contract": 54,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "77ecc3ea06d627693dd324434fbeb6f6b150487cd0715939e1a48f48bbc4833a"
+  "fingerprint": "52f7fa3e59b986cd1aca3597798bf41df2004f45d065a0bb5b41c319c0dc0252"
 }

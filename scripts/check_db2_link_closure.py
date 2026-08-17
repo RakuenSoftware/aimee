@@ -515,6 +515,35 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
     "evidence": "Deterministic two-value selector mapping with no imports, allocation, I/O, DB, "
                 "event-bus, provider, platform, pgvector, or DB3 dependency; ABI parity tested.",
 }, {
+    "path": "src/modules/db2/support/model_validation_primitives.c",
+    "source_sha256": "a7d77ac228ab363f2b3c8b5381c5e9e09897f80574f8b6f07c223027439f47ba",
+    "header": "src/modules/db2/support/db2_model_validation.h",
+    "header_sha256": "e7bbdb2c7238692047cd7144b5592779add14c636c0ee9e7dae1adcc5df6eb99",
+    "defines": [
+        "kb_models_endpoint_valid", "kb_models_name_clean", "kb_models_wire_valid",
+    ],
+    "resolves": [
+        "kb_models_endpoint_valid", "kb_models_name_clean", "kb_models_wire_valid",
+    ],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_model_validation.h", "string.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": ["strcmp", "strlen", "strncmp"],
+    "base_references": {
+        "kb_models_endpoint_valid": ["src/modules/db2/c/org_model_catalog.c"],
+        "kb_models_name_clean": ["src/modules/db2/c/org_model_catalog.c"],
+        "kb_models_wire_valid": ["src/modules/db2/c/org_model_catalog.c"],
+    },
+    "provenance": "The three pure model-catalog admission definitions are promoted from "
+                  "src/kb/http/kb_models_validate.c; all DB2 calls are pinned to "
+                  "org_model_catalog.c.",
+    "evidence": "The descriptor owns the exact wire whitelist, printable-name bounds, and "
+                "HTTP(S) endpoint grammar used by DB2's pre-database storage choke point. "
+                "Normal and sanitizer parity cover NULL, every non-NUL byte, length boundaries, "
+                "schemes, and legacy empty-endpoint behavior. Only strcmp, strlen, and strncmp "
+                "are imported; there is no HTTP, JSON, DB, bus, provider, pgvector, DB3, "
+                "allocation, configuration, I/O, or logging dependency.",
+}, {
     "path": "src/modules/db2/support/random_primitives.c",
     "source_sha256": "2e0182a05983d863952d080b754cb90eb4ee6dcf491f4bda7140ef205c0db69f",
     "header": "src/modules/db2/support/db2_random.h",

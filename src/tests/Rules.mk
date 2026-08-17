@@ -765,6 +765,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-db2-extractor-support \
                 $(TESTPREFIX)/unit-test-db2-log-support \
                 $(TESTPREFIX)/unit-test-db2-management-read-support \
+                $(TESTPREFIX)/unit-test-db2-model-validation-support \
                 $(TESTPREFIX)/unit-test-db2-random-support \
                 $(TESTPREFIX)/unit-test-db2-rel-enum-text-support \
                 $(TESTPREFIX)/unit-test-db2-rel-seed-support \
@@ -849,6 +850,7 @@ UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-extractor-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-log-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-model-validation-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-random-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-seed-support-sanitize \
@@ -7044,6 +7046,60 @@ unit-test-db2-management-read-support: $(TESTPREFIX)/unit-test-db2-management-re
 
 unit-test-db2-management-read-support-sanitize: \
                      $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize
+	$<
+
+DB2_MODEL_VALIDATION_SUPPORT_RENAMES = -DAIMEE_DB2_MODEL_VALIDATION_PREFIX
+DB2_MODEL_VALIDATION_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_model_validation_support_impl.o: \
+                     modules/db2/support/model_validation_primitives.c \
+                     modules/db2/support/db2_model_validation.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_MODEL_VALIDATION_SUPPORT_RENAMES) \
+	      $(DB2_MODEL_VALIDATION_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_model_validation_monolith.o: kb/http/kb_models_validate.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_MODEL_VALIDATION_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-model-validation-support: \
+                     $(OBJDIR)/tests/test_db2_model_validation_support.o \
+                     $(OBJDIR)/tests/db2_model_validation_support_impl.o \
+                     $(OBJDIR)/tests/db2_model_validation_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_MODEL_VALIDATION_SANITIZE_DIR = $(OBJDIR)/tests/db2-model-validation-support-sanitize
+
+$(DB2_MODEL_VALIDATION_SANITIZE_DIR)/test.o: tests/test_db2_model_validation_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_MODEL_VALIDATION_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/model_validation_primitives.c \
+                     modules/db2/support/db2_model_validation.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_MODEL_VALIDATION_SUPPORT_RENAMES) \
+	      $(DB2_MODEL_VALIDATION_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_MODEL_VALIDATION_SANITIZE_DIR)/monolith.o: kb/http/kb_models_validate.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_MODEL_VALIDATION_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-model-validation-support-sanitize: \
+                     $(DB2_MODEL_VALIDATION_SANITIZE_DIR)/test.o \
+                     $(DB2_MODEL_VALIDATION_SANITIZE_DIR)/support.o \
+                     $(DB2_MODEL_VALIDATION_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-model-validation-support \
+        unit-test-db2-model-validation-support-sanitize
+unit-test-db2-model-validation-support: \
+                     $(TESTPREFIX)/unit-test-db2-model-validation-support
+	$<
+
+unit-test-db2-model-validation-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-model-validation-support-sanitize
 	$<
 
 DB2_TEXT_SUPPORT_RENAMES = -Dtext_sanitize_utf8=db2_support_text_sanitize_utf8
