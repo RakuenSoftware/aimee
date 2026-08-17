@@ -98,14 +98,14 @@ export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps
   }
 
   if (!loaded) {
-    return <div style={{ fontSize: 13, color: '#667', padding: '8px 0' }}>Loading…</div>;
+    return <div style={{ fontSize: 13, color: 'var(--sg-text-secondary)', padding: '8px 0' }}>Loading…</div>;
   }
 
   const remote = kbMode === 'remote';
 
   return (
     <div style={{ display: 'grid', gap: 14, marginBottom: 8 }}>
-      <div style={{ fontSize: 12.5, color: '#556', lineHeight: 1.5 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--sg-text-muted)', lineHeight: 1.5 }}>
         aimee needs a knowledge base for memory + search. Deploy one here, or point at an existing one.
       </div>
 
@@ -121,7 +121,7 @@ export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps
 
         {remote ? (
           <div style={{ display: 'grid', gap: 8, paddingLeft: 24 }}>
-            <div style={{ fontSize: 11.5, color: '#778' }}>
+            <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)' }}>
               A remote KB deploys nothing here — aimee-server just connects to it. The deploy-topology
               and shared-store steps are skipped.
             </div>
@@ -135,14 +135,14 @@ export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps
             </Field>
           </div>
         ) : (
-          <div style={{ fontSize: 11.5, color: '#778', paddingLeft: 24 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)', paddingLeft: 24 }}>
             The next steps place the embedder + synthesizer and set the shared store.
           </div>
         )}
       </section>
 
       {error && (
-        <div style={{ fontSize: 12.5, color: '#a33', background: '#fdeaea', border: '1px solid #f2c4c4', borderRadius: 6, padding: '8px 10px' }}>
+        <div style={{ fontSize: 12.5, color: 'var(--sg-danger)', background: 'var(--sg-danger-bg)', border: '1px solid var(--sg-danger-bg)', borderRadius: 6, padding: '8px 10px' }}>
           {error}
         </div>
       )}
@@ -159,7 +159,7 @@ export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps
 const radioRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' };
 const input: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
-  border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
+  border: '1px solid var(--sg-border-medium)', fontSize: 13, fontFamily: 'ui-monospace, monospace',
 };
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

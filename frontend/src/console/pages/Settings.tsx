@@ -91,29 +91,29 @@ export default function Settings() {
     return out;
   }, [fields]);
 
-  if (!loaded) return <div style={{ padding: 24, color: "#888" }}>Loading settings…</div>;
+  if (!loaded) return <div style={{ padding: 24, color: "var(--sg-text-faint)" }}>Loading settings…</div>;
 
   return (
     <div style={{ padding: "18px 24px", maxWidth: 860, margin: "0 auto", fontFamily: "system-ui" }}>
       <h2 style={{ margin: "0 0 4px" }}>Settings</h2>
-      <p style={{ color: "#777", fontSize: 13, margin: "0 0 18px" }}>
+      <p style={{ color: "var(--sg-text-faint)", fontSize: 13, margin: "0 0 18px" }}>
         The options aimee-kb owns — the embedder, the synth tier, and the knowledge
         base itself. Changes persist to <code>aimee.yaml</code>; rows marked <em>restart</em> are
         bound when the kb starts and take effect on its next restart. Options aimee-server owns stay
         on its own Settings page.
       </p>
-      {err && <p style={{ color: "#b00", fontSize: 13 }}>{err}</p>}
-      {notice && <p style={{ color: "#1f7a3d", fontSize: 13 }}>{notice}</p>}
+      {err && <p style={{ color: "var(--sg-danger-dark)", fontSize: 13 }}>{err}</p>}
+      {notice && <p style={{ color: "var(--sg-success-dark)", fontSize: 13 }}>{notice}</p>}
       {fields.length === 0 && !err && (
-        <div style={{ color: "#888" }}>No settings reported by the kb.</div>
+        <div style={{ color: "var(--sg-text-faint)" }}>No settings reported by the kb.</div>
       )}
 
       {sections.map(([name, fs]) => (
         <div
           key={name}
-          style={{ marginBottom: 22, border: "1px solid #e2e2e2", borderRadius: 8, overflow: "hidden" }}
+          style={{ marginBottom: 22, border: "1px solid var(--sg-border)", borderRadius: 8, overflow: "hidden" }}
         >
-          <div style={{ padding: "8px 12px", background: "#fafafa", borderBottom: "1px solid #e2e2e2", fontWeight: 700, color: "#555" }}>
+          <div style={{ padding: "8px 12px", background: "var(--sg-surface-alt)", borderBottom: "1px solid var(--sg-border)", fontWeight: 700, color: "var(--sg-text-muted)" }}>
             {name}
           </div>
           {fs.map((f) => {
@@ -121,16 +121,16 @@ export default function Settings() {
             return (
               <div
                 key={f.key}
-                style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", borderBottom: "1px solid #eee", flexWrap: "wrap" }}
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", borderBottom: "1px solid var(--sg-border-light)", flexWrap: "wrap" }}
               >
                 <div style={{ flex: "1 1 280px", minWidth: 200 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>
                     {humanize(f.key)}{" "}
-                    <code style={{ color: "#aaa", fontSize: 11, fontWeight: 400 }}>{f.key}</code>
+                    <code style={{ color: "var(--sg-text-pale)", fontSize: 11, fontWeight: 400 }}>{f.key}</code>
                     {f.restart && (
                       <span
                         title="Takes effect only after aimee-kb restarts."
-                        style={{ marginLeft: 8, fontSize: 10, color: "#a60", background: "#fff6e6", border: "1px solid #f0d9a8", borderRadius: 4, padding: "0 5px" }}
+                        style={{ marginLeft: 8, fontSize: 10, color: "var(--sg-warning-dark)", background: "var(--sg-warning-bg)", border: "1px solid var(--sg-warning-border)", borderRadius: 4, padding: "0 5px" }}
                       >
                         restart
                       </span>
@@ -143,9 +143,9 @@ export default function Settings() {
                       onClick={() => setDraft((p) => ({ ...p, [f.key]: !p[f.key] }))}
                       style={{
                         minWidth: 44, padding: "4px 10px", borderRadius: 6, cursor: "pointer",
-                        border: "1px solid " + (draft[f.key] ? "#1f7a3d" : "#ccc"),
-                        background: draft[f.key] ? "#1f7a3d" : "#fff",
-                        color: draft[f.key] ? "#fff" : "#666",
+                        border: "1px solid " + (draft[f.key] ? "var(--sg-success-dark)" : "var(--sg-border-medium)"),
+                        background: draft[f.key] ? "var(--sg-success-dark)" : "var(--sg-surface)",
+                        color: draft[f.key] ? "var(--sg-surface)" : "var(--sg-text-secondary)",
                       }}
                     >
                       {draft[f.key] ? "on" : "off"}
@@ -169,14 +169,14 @@ export default function Settings() {
                       <button
                         disabled={busy === f.key}
                         onClick={() => save(f)}
-                        style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #2563eb", background: "#2563eb", color: "#fff", cursor: "pointer" }}
+                        style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid var(--sg-info)", background: "var(--sg-info)", color: "var(--sg-surface)", cursor: "pointer" }}
                       >
                         save
                       </button>
                       <button
                         onClick={() => setDraft((p) => ({ ...p, [f.key]: f.value }))}
                         title="discard change"
-                        style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #ccc", background: "#fff", cursor: "pointer" }}
+                        style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid var(--sg-border-medium)", background: "var(--sg-surface)", cursor: "pointer" }}
                       >
                         ↺
                       </button>
@@ -197,7 +197,7 @@ const inputStyle: React.CSSProperties = {
   fontSize: 12,
   padding: "3px 6px",
   borderRadius: 6,
-  border: "1px solid #ccc",
+  border: "1px solid var(--sg-border-medium)",
   width: 120,
   boxSizing: "border-box",
 };

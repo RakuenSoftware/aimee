@@ -86,14 +86,14 @@ export default function SharedStore({ onSaved, fetchImpl }: SharedStoreProps) {
   }
 
   if (!loaded) {
-    return <div style={{ fontSize: 13, color: '#667', padding: '8px 0' }}>Loading…</div>;
+    return <div style={{ fontSize: 13, color: 'var(--sg-text-secondary)', padding: '8px 0' }}>Loading…</div>;
   }
 
   const existing = mode === 'existing';
 
   return (
     <div style={{ display: 'grid', gap: 14, marginBottom: 8 }}>
-      <div style={{ fontSize: 12.5, color: '#556', lineHeight: 1.5 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--sg-text-muted)', lineHeight: 1.5 }}>
         A local knowledge base stores its memory + embeddings in Postgres (DB2). Let the deploy
         spawn its own, or connect one you already run.
       </div>
@@ -110,7 +110,7 @@ export default function SharedStore({ onSaved, fetchImpl }: SharedStoreProps) {
 
         {existing ? (
           <div style={{ display: 'grid', gap: 8, paddingLeft: 24 }}>
-            <div style={{ fontSize: 11.5, color: '#778' }}>
+            <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)' }}>
               Point the knowledge base at a Postgres (with the <code>vector</code> + <code>pg_trgm</code>{' '}
               extensions) you already run. Changing this needs a server restart.
             </div>
@@ -121,14 +121,14 @@ export default function SharedStore({ onSaved, fetchImpl }: SharedStoreProps) {
             </label>
           </div>
         ) : (
-          <div style={{ fontSize: 11.5, color: '#778', paddingLeft: 24 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)', paddingLeft: 24 }}>
             The deploy stack brings up its own Postgres automatically — no connection URL needed.
           </div>
         )}
       </section>
 
       {error && (
-        <div style={{ fontSize: 12.5, color: '#a33', background: '#fdeaea', border: '1px solid #f2c4c4', borderRadius: 6, padding: '8px 10px' }}>
+        <div style={{ fontSize: 12.5, color: 'var(--sg-danger)', background: 'var(--sg-danger-bg)', border: '1px solid var(--sg-danger-bg)', borderRadius: 6, padding: '8px 10px' }}>
           {error}
         </div>
       )}
@@ -145,5 +145,5 @@ export default function SharedStore({ onSaved, fetchImpl }: SharedStoreProps) {
 const radioRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' };
 const input: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
-  border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
+  border: '1px solid var(--sg-border-medium)', fontSize: 13, fontFamily: 'ui-monospace, monospace',
 };

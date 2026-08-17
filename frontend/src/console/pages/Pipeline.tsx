@@ -60,8 +60,8 @@ async function setKey(key: string, value: Val): Promise<string> {
 }
 
 const LANE_META: Record<Lane, { title: string; hint: string; color: string }> = {
-  llm: { title: "LLM lane · GPU", hint: "One unit per pass — extraction/reasoning on the GPU model.", color: "#8cf" },
-  index: { title: "Index lane · CPU", hint: "Drains its queue each pass — embedding + SQL, concurrent with the GPU lane.", color: "#7d7" },
+  llm: { title: "LLM lane · GPU", hint: "One unit per pass — extraction/reasoning on the GPU model.", color: "var(--sg-primary)" },
+  index: { title: "Index lane · CPU", hint: "Drains its queue each pass — embedding + SQL, concurrent with the GPU lane.", color: "var(--sg-success)" },
 };
 
 const DEFAULT_DESC = "Active whenever an embedder is configured (no individual toggle).";
@@ -326,8 +326,8 @@ export default function Pipeline() {
       title={title}
       style={{
         width: 22, height: 20, fontSize: 11, lineHeight: "18px", padding: 0, borderRadius: 4,
-        border: "1px solid #ccc", cursor: enabled ? "pointer" : "default",
-        background: "#fff", color: enabled ? "#555" : "#ccc",
+        border: "1px solid var(--sg-border-medium)", cursor: enabled ? "pointer" : "default",
+        background: "var(--sg-surface)", color: enabled ? "var(--sg-text-muted)" : "var(--sg-border-medium)",
       }}
     >
       {glyph}
@@ -341,24 +341,24 @@ export default function Pipeline() {
     return (
       <div key={s.name} style={{
         display: "flex", alignItems: "center", gap: 12, padding: "8px 12px",
-        borderBottom: "1px solid #eee", opacity: gated ? 0.75 : 1,
+        borderBottom: "1px solid var(--sg-border-light)", opacity: gated ? 0.75 : 1,
       }}>
         <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {arrowBtn(i > 0, "▲", "Move earlier in this lane", () => move(s.name, -1))}
           {arrowBtn(i < laneCount - 1, "▼", "Move later in this lane", () => move(s.name, 1))}
         </span>
-        <span style={{ width: 18, color: "#aaa", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>{i + 1}</span>
+        <span style={{ width: 18, color: "var(--sg-text-pale)", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>{i + 1}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 14 }}>{s.label}
-            {gated && <span style={{ marginLeft: 8, fontSize: 11, color: "#999" }}>(embedder-gated)</span>}
+            {gated && <span style={{ marginLeft: 8, fontSize: 11, color: "var(--sg-text-hint)" }}>(embedder-gated)</span>}
             {s.requires.length > 0 && (
-              <span style={{ marginLeft: 8, fontSize: 11, color: "#aaa" }}>after: {s.requires.join(", ")}</span>
+              <span style={{ marginLeft: 8, fontSize: 11, color: "var(--sg-text-pale)" }}>after: {s.requires.join(", ")}</span>
             )}
           </div>
-          <div style={{ fontSize: 12, color: "#777" }}>{desc}</div>
+          <div style={{ fontSize: 12, color: "var(--sg-text-faint)" }}>{desc}</div>
         </div>
         {gated ? (
-          <span style={{ fontSize: 12, color: "#7d7", whiteSpace: "nowrap" }}>● active</span>
+          <span style={{ fontSize: 12, color: "var(--sg-success)", whiteSpace: "nowrap" }}>● active</span>
         ) : (
           <span title={on ? "Disable stage" : "Enable stage"} style={{ display: "inline-flex" }}>
             <Switch
@@ -373,19 +373,19 @@ export default function Pipeline() {
     );
   };
 
-  if (!loaded) return <div style={{ padding: 24, color: "#888" }}>Loading pipeline…</div>;
+  if (!loaded) return <div style={{ padding: 24, color: "var(--sg-text-faint)" }}>Loading pipeline…</div>;
 
   return (
     <div style={{ padding: "18px 24px", maxWidth: 860, margin: "0 auto", fontFamily: "system-ui" }}>
       <h2 style={{ margin: "0 0 4px" }}>Curator pipeline</h2>
-      <p style={{ color: "#777", fontSize: 13, margin: "0 0 18px" }}>
+      <p style={{ color: "var(--sg-text-faint)", fontSize: 13, margin: "0 0 18px" }}>
         Ingested content flows through these stages into curated knowledge (claims, entities,
         contradictions, graph). Toggle a stage to include/exclude it, or reorder within a lane with ▲▼
         (dependencies are enforced). Changes persist to aimee.yaml and take effect on the KB's next
         config load. This view is generated live from the backend stage registry.
       </p>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>Presets:</span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--sg-text-muted)" }}>Presets:</span>
         {presets.map((p) => (
           <span key={p.name} style={{ display: "inline-flex", alignItems: "center" }}>
             <button
@@ -393,9 +393,9 @@ export default function Pipeline() {
               onClick={() => applyPreset(p)}
               title={p.description}
               style={{
-                padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid #cbd5e1",
+                padding: "5px 12px", fontSize: 13, cursor: "pointer", border: "1px solid var(--sg-border-medium)",
                 borderRadius: p.builtin === false ? "14px 0 0 14px" : 14,
-                background: busy === `preset:${p.name}` ? "#eef" : "#f8fafc",
+                background: busy === `preset:${p.name}` ? "var(--sg-surface-sunken)" : "var(--sg-surface-alt)",
               }}
             >
               {p.name}
@@ -407,7 +407,7 @@ export default function Pipeline() {
                 title={`Delete preset "${p.name}"`}
                 style={{
                   padding: "5px 8px", fontSize: 13, borderRadius: "0 14px 14px 0", cursor: "pointer",
-                  border: "1px solid #cbd5e1", borderLeft: "none", background: "#f8fafc", color: "#b00",
+                  border: "1px solid var(--sg-border-medium)", borderLeft: "none", background: "var(--sg-surface-alt)", color: "var(--sg-danger-dark)",
                 }}
               >
                 ×
@@ -421,37 +421,37 @@ export default function Pipeline() {
           title="Save the current stage toggles as a named preset"
           style={{
             padding: "5px 12px", fontSize: 13, borderRadius: 14, cursor: "pointer",
-            border: "1px dashed #cbd5e1", background: "#fff", color: "#555",
+            border: "1px dashed var(--sg-border-medium)", background: "var(--sg-surface)", color: "var(--sg-text-muted)",
           }}
         >
           ＋ Save current
         </button>
-        <span style={{ fontSize: 12, color: "#999" }}>apply a profile, save your own, then fine-tune below</span>
+        <span style={{ fontSize: 12, color: "var(--sg-text-hint)" }}>apply a profile, save your own, then fine-tune below</span>
       </div>
       <div style={{
         display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 18,
-        padding: "10px 12px", border: "1px solid #e2e2e2", borderRadius: 8, background: "#fafafa",
+        padding: "10px 12px", border: "1px solid var(--sg-border)", borderRadius: 8, background: "var(--sg-surface-alt)",
       }}>
         <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}
           title="Stage preset: 'full' runs every stage, 'lite' only the core extract/index stages, 'off' none. Selecting one rewrites every stage toggle below.">
-          <span style={{ fontWeight: 600, color: "#555" }}>Tier</span>
+          <span style={{ fontWeight: 600, color: "var(--sg-text-muted)" }}>Tier</span>
           <select
             value={tier}
             disabled={busy === "kb_curator_tier"}
             onChange={(e) => setRuntimeKey("kb_curator_tier", e.target.value, `tier set to ${e.target.value}`)}
-            style={{ fontSize: 13, padding: "3px 6px", borderRadius: 6, border: "1px solid #ccc" }}
+            style={{ fontSize: 13, padding: "3px 6px", borderRadius: 6, border: "1px solid var(--sg-border-medium)" }}
           >
             {["full", "lite", "off"].map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </label>
-        <span style={{ fontSize: 12, color: "#999" }}>rewrites every stage toggle below</span>
+        <span style={{ fontSize: 12, color: "var(--sg-text-hint)" }}>rewrites every stage toggle below</span>
         {[
           { key: "kb_curator_extract_docs_workers", label: "Doc extract workers" },
           { key: "kb_curator_extract_code_workers", label: "Code extract workers" },
         ].map((w) => (
           <label key={w.key} style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}
             title="Concurrent workers the drain runs for this extract stage. 1 = no extra workers.">
-            <span style={{ fontWeight: 600, color: "#555" }}>{w.label}</span>
+            <span style={{ fontWeight: 600, color: "var(--sg-text-muted)" }}>{w.label}</span>
             <input
               type="number"
               min={1}
@@ -461,7 +461,7 @@ export default function Pipeline() {
                 const n = Math.max(1, Math.floor(Number(e.target.value) || 1));
                 setRuntimeKey(w.key, n, `${w.label.toLowerCase()} set to ${n}`);
               }}
-              style={{ width: 64, fontSize: 13, padding: "3px 6px", borderRadius: 6, border: "1px solid #ccc" }}
+              style={{ width: 64, fontSize: 13, padding: "3px 6px", borderRadius: 6, border: "1px solid var(--sg-border-medium)" }}
             />
           </label>
         ))}
@@ -473,10 +473,10 @@ export default function Pipeline() {
         const laneStages = stages.filter((s) => s.lane === lane && !s.custom);
         if (!laneStages.length) return null;
         return (
-          <div key={lane} style={{ marginBottom: 22, border: "1px solid #e2e2e2", borderRadius: 8, overflow: "hidden" }}>
-            <div style={{ padding: "8px 12px", background: "#fafafa", borderBottom: "1px solid #e2e2e2" }}>
+          <div key={lane} style={{ marginBottom: 22, border: "1px solid var(--sg-border)", borderRadius: 8, overflow: "hidden" }}>
+            <div style={{ padding: "8px 12px", background: "var(--sg-surface-alt)", borderBottom: "1px solid var(--sg-border)" }}>
               <span style={{ fontWeight: 700, color: meta.color }}>{meta.title}</span>
-              <span style={{ marginLeft: 10, fontSize: 12, color: "#999" }}>{meta.hint}</span>
+              <span style={{ marginLeft: 10, fontSize: 12, color: "var(--sg-text-hint)" }}>{meta.hint}</span>
             </div>
             {laneStages.map((s, i) => row(s, i, laneStages.length))}
           </div>
@@ -485,10 +485,10 @@ export default function Pipeline() {
       {(() => {
         const customs = stages.filter((s) => s.custom);
         return (
-          <div style={{ marginBottom: 22, border: "1px dashed #cbd5e1", borderRadius: 8, overflow: "hidden" }}>
-            <div style={{ padding: "8px 12px", background: "#fafafa", borderBottom: "1px solid #e2e2e2", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <span style={{ fontWeight: 700, color: "#a67" }}>Custom stages</span>
-              <span style={{ fontSize: 12, color: "#999", flex: 1, minWidth: 160 }}>
+          <div style={{ marginBottom: 22, border: "1px dashed var(--sg-border-medium)", borderRadius: 8, overflow: "hidden" }}>
+            <div style={{ padding: "8px 12px", background: "var(--sg-surface-alt)", borderBottom: "1px solid var(--sg-border)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontWeight: 700, color: "var(--sg-purple)" }}>Custom stages</span>
+              <span style={{ fontSize: 12, color: "var(--sg-text-hint)", flex: 1, minWidth: 160 }}>
                 Recompose a built-in op under a new name/budget. Runs on the base op's lane (re-laning is not supported).
               </span>
               <button
@@ -497,14 +497,14 @@ export default function Pipeline() {
                 title="Add a custom stage that recomposes a built-in op"
                 style={{
                   padding: "5px 12px", fontSize: 13, borderRadius: 14, cursor: "pointer",
-                  border: "1px dashed #cbd5e1", background: "#fff", color: "#555",
+                  border: "1px dashed var(--sg-border-medium)", background: "var(--sg-surface)", color: "var(--sg-text-muted)",
                 }}
               >
                 ＋ Add custom stage
               </button>
             </div>
             {customs.length === 0 ? (
-              <div style={{ padding: "10px 12px", fontSize: 12, color: "#999" }}>
+              <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--sg-text-hint)" }}>
                 None yet — add one to run an existing op a second time (e.g. a larger-budget pass) under its own name.
               </div>
             ) : (
@@ -513,16 +513,16 @@ export default function Pipeline() {
                 return (
                   <div key={s.name} style={{
                     display: "flex", alignItems: "center", gap: 12, padding: "8px 12px",
-                    borderBottom: "1px solid #eee",
+                    borderBottom: "1px solid var(--sg-border-light)",
                   }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>{s.label}
-                        <span style={{ marginLeft: 8, fontSize: 11, color: "#a67" }}>custom</span>
-                        <span style={{ marginLeft: 8, fontSize: 11, color: "#aaa" }}>
+                        <span style={{ marginLeft: 8, fontSize: 11, color: "var(--sg-purple)" }}>custom</span>
+                        <span style={{ marginLeft: 8, fontSize: 11, color: "var(--sg-text-pale)" }}>
                           {s.base_op} · {s.lane} lane · budget {s.budget}
                         </span>
                       </div>
-                      <div style={{ fontSize: 12, color: "#777" }}>Recomposes {s.base_op} on the {s.lane} lane.</div>
+                      <div style={{ fontSize: 12, color: "var(--sg-text-faint)" }}>Recomposes {s.base_op} on the {s.lane} lane.</div>
                     </div>
                     <span title={on ? "Disable stage" : "Enable stage"} style={{ display: "inline-flex" }}>
                       <Switch
@@ -550,7 +550,7 @@ export default function Pipeline() {
         );
       })()}
       {!stages.length && (
-        <div style={{ color: "#888" }}>No stages reported (the kb has no curator registry, or the request failed).</div>
+        <div style={{ color: "var(--sg-text-faint)" }}>No stages reported (the kb has no curator registry, or the request failed).</div>
       )}
       {status && (
         <div style={{ marginTop: 8 }}>

@@ -16,8 +16,8 @@ function renderInline(s: string): string {
   s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/\*(?!\*)([^*]+)\*(?!\*)/g, '<em>$1</em>');
   s = s.replace(/_([^_]+)_/g, '<em>$1</em>');
-  s = s.replace(/`([^`]+)`/g, '<code style="background:#1e2a1e;padding:1px 5px;border-radius:3px;font-family:monospace;font-size:0.9em;color:#8f8">$1</code>');
-  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:#8cf">$1</a>');
+  s = s.replace(/`([^`]+)`/g, '<code style="background:var(--sg-success-bg);padding:1px 5px;border-radius:3px;font-family:monospace;font-size:0.9em;color:var(--sg-success)">$1</code>');
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:var(--sg-primary)">$1</a>');
   return s;
 }
 
@@ -57,10 +57,10 @@ export function renderMd(text: string): string {
         const langAttr = codeLang ? ` class="language-${escHtml(codeLang)}"` : '';
         const codeContent = codeLines.map(l => escHtml(l)).join('\n');
         out.push(
-          `<div style="margin:8px 0;border-radius:6px;overflow:hidden;border:1px solid #333">` +
-          `<div style="background:#1a1a1a;padding:4px 10px;font-size:11px;color:#666;display:flex;justify-content:space-between">` +
+          `<div style="margin:8px 0;border-radius:6px;overflow:hidden;border:1px solid var(--sg-text)">` +
+          `<div style="background:var(--sg-text);padding:4px 10px;font-size:11px;color:var(--sg-text-secondary);display:flex;justify-content:space-between">` +
           `<span>${codeLang ? escHtml(codeLang) : 'code'}</span></div>` +
-          `<pre style="margin:0;padding:10px 12px;background:#111;overflow-x:auto;font-size:13px;line-height:1.4">` +
+          `<pre style="margin:0;padding:10px 12px;background:var(--sg-text);overflow-x:auto;font-size:13px;line-height:1.4">` +
           `<code${langAttr} style="font-family:monospace">${codeContent}</code></pre></div>`
         );
         inCode = false;
@@ -85,20 +85,20 @@ export function renderMd(text: string): string {
     const h1 = line.match(/^#\s+(.+)/);
     const h2 = line.match(/^##\s+(.+)/);
     const h3 = line.match(/^###\s+(.+)/);
-    if (h3) { flushList(); out.push(`<h3 style="margin:10px 0 4px;font-size:15px;color:#9cf">${renderInline(h3[1])}</h3>`); continue; }
-    if (h2) { flushList(); out.push(`<h2 style="margin:12px 0 4px;font-size:17px;color:#8cf">${renderInline(h2[1])}</h2>`); continue; }
-    if (h1) { flushList(); out.push(`<h1 style="margin:12px 0 6px;font-size:20px;color:#8cf">${renderInline(h1[1])}</h1>`); continue; }
+    if (h3) { flushList(); out.push(`<h3 style="margin:10px 0 4px;font-size:15px;color:var(--sg-primary)">${renderInline(h3[1])}</h3>`); continue; }
+    if (h2) { flushList(); out.push(`<h2 style="margin:12px 0 4px;font-size:17px;color:var(--sg-primary)">${renderInline(h2[1])}</h2>`); continue; }
+    if (h1) { flushList(); out.push(`<h1 style="margin:12px 0 6px;font-size:20px;color:var(--sg-primary)">${renderInline(h1[1])}</h1>`); continue; }
 
     if (/^(-{3,}|\*{3,}|={3,})$/.test(raw)) {
       flushList();
-      out.push('<hr style="border:none;border-top:1px solid #333;margin:12px 0"/>');
+      out.push('<hr style="border:none;border-top:1px solid var(--sg-text);margin:12px 0"/>');
       continue;
     }
 
     const bq = line.match(/^&gt;\s?(.*)/);
     if (bq) {
       flushList();
-      out.push(`<blockquote style="border-left:3px solid #456;margin:4px 0;padding:4px 12px;color:#aaa;font-style:italic">${renderInline(bq[1])}</blockquote>`);
+      out.push(`<blockquote style="border-left:3px solid var(--sg-text-muted);margin:4px 0;padding:4px 12px;color:var(--sg-text-pale);font-style:italic">${renderInline(bq[1])}</blockquote>`);
       continue;
     }
 
@@ -135,10 +135,10 @@ export function renderMd(text: string): string {
     const codeContent = codeLines.map(l => escHtml(l)).join('\n');
     const langAttr = codeLang ? ` class="language-${escHtml(codeLang)}"` : '';
     out.push(
-      `<div style="margin:8px 0;border-radius:6px;overflow:hidden;border:1px solid #333">` +
-      `<div style="background:#1a1a1a;padding:4px 10px;font-size:11px;color:#666">` +
+      `<div style="margin:8px 0;border-radius:6px;overflow:hidden;border:1px solid var(--sg-text)">` +
+      `<div style="background:var(--sg-text);padding:4px 10px;font-size:11px;color:var(--sg-text-secondary)">` +
       `<span>${codeLang ? escHtml(codeLang) : 'code'}</span></div>` +
-      `<pre style="margin:0;padding:10px 12px;background:#111;overflow-x:auto;font-size:13px;line-height:1.4">` +
+      `<pre style="margin:0;padding:10px 12px;background:var(--sg-text);overflow-x:auto;font-size:13px;line-height:1.4">` +
       `<code${langAttr} style="font-family:monospace">${codeContent}</code></pre></div>`
     );
   }
@@ -149,5 +149,5 @@ export function renderMd(text: string): string {
 
 export function renderWithMentions(text: string): string {
   return escHtml(text).replace(/@([A-Za-z0-9._-]+)/g,
-    '<span style="color:#7c9ef8;font-weight:600">@$1</span>');
+    '<span style="color:var(--sg-info-border);font-weight:600">@$1</span>');
 }

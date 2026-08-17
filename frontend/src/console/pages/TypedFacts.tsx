@@ -95,7 +95,7 @@ export default function TypedFacts() {
     }
   };
 
-  if (!loaded) return <div style={{ padding: 24, color: "#888" }}>Loading typed facts…</div>;
+  if (!loaded) return <div style={{ padding: 24, color: "var(--sg-text-faint)" }}>Loading typed facts…</div>;
 
   const cfg = data?.config;
   const cands = data?.promotion_candidates ?? [];
@@ -104,16 +104,16 @@ export default function TypedFacts() {
   return (
     <div style={{ padding: "18px 24px", maxWidth: 860, margin: "0 auto", fontFamily: "system-ui" }}>
       <h2 style={{ margin: "0 0 4px" }}>Typed facts</h2>
-      <p style={{ color: "#777", fontSize: 13, margin: "0 0 18px" }}>
+      <p style={{ color: "var(--sg-text-faint)", fontSize: 13, margin: "0 0 18px" }}>
         The typed-fact layer turns observed relations into structured knowledge. New relations start
         provisional; once one has been observed enough times it can be promoted into the ontology —
         automatically, or by you from the queue below.
       </p>
-      {err && <p style={{ color: "#b00", fontSize: 13 }}>{err}</p>}
-      {notice && <p style={{ color: "#1f7a3d", fontSize: 13 }}>{notice}</p>}
+      {err && <p style={{ color: "var(--sg-danger-dark)", fontSize: 13 }}>{err}</p>}
+      {notice && <p style={{ color: "var(--sg-success-dark)", fontSize: 13 }}>{notice}</p>}
 
       {cfg && (
-        <div style={{ marginBottom: 22, border: "1px solid #e2e2e2", borderRadius: 8, overflow: "hidden" }}>
+        <div style={{ marginBottom: 22, border: "1px solid var(--sg-border)", borderRadius: 8, overflow: "hidden" }}>
           <div style={panelHead}>Configuration</div>
           <div style={{ padding: "10px 12px", display: "grid", gap: 12 }}>
             <label style={rowStyle}>
@@ -190,35 +190,35 @@ export default function TypedFacts() {
         </div>
       )}
 
-      <div style={{ border: "1px solid #e2e2e2", borderRadius: 8, overflow: "hidden" }}>
+      <div style={{ border: "1px solid var(--sg-border)", borderRadius: 8, overflow: "hidden" }}>
         <div style={panelHead}>
           Promotion queue{" "}
-          <span style={{ fontWeight: 400, color: "#999", fontSize: 12 }}>
+          <span style={{ fontWeight: 400, color: "var(--sg-text-hint)", fontSize: 12 }}>
             {cands.length} provisional relation{cands.length === 1 ? "" : "s"}
           </span>
         </div>
         {cands.length === 0 ? (
-          <div style={{ padding: "10px 12px", fontSize: 12, color: "#999" }}>
+          <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--sg-text-hint)" }}>
             Nothing waiting — no provisional relations have been observed yet.
           </div>
         ) : (
           cands.map((c) => (
             <div
               key={c.relation}
-              style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", borderBottom: "1px solid #eee", flexWrap: "wrap" }}
+              style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", borderBottom: "1px solid var(--sg-border-light)", flexWrap: "wrap" }}
             >
               <div style={{ flex: "1 1 240px", minWidth: 180 }}>
                 <div style={{ fontWeight: 600, fontSize: 14, fontFamily: "ui-monospace, monospace" }}>
                   {c.relation}
                 </div>
-                <div style={{ fontSize: 12, color: "#777" }}>
+                <div style={{ fontSize: 12, color: "var(--sg-text-faint)" }}>
                   {c.observations} observation{c.observations === 1 ? "" : "s"}
                   {c.status ? ` · ${c.status}` : ""}
                   {c.ready ? " · clears the threshold" : ""}
                 </div>
               </div>
               {c.ready && (
-                <span style={{ fontSize: 11, color: "#1f7a3d", background: "#eaf6ee", border: "1px solid #bfe0cb", borderRadius: 4, padding: "0 6px" }}>
+                <span style={{ fontSize: 11, color: "var(--sg-success-dark)", background: "var(--sg-success-bg)", border: "1px solid var(--sg-success-bg)", borderRadius: 4, padding: "0 6px" }}>
                   ready
                 </span>
               )}
@@ -232,7 +232,7 @@ export default function TypedFacts() {
                 <button
                   disabled={busy === c.relation}
                   onClick={() => act("reject", c.relation)}
-                  style={{ ...plainBtn, color: "#b00", borderColor: "#e0b4b4" }}
+                  style={{ ...plainBtn, color: "var(--sg-danger-dark)", borderColor: "var(--sg-danger-bg)" }}
                 >
                   reject
                 </button>
@@ -247,36 +247,36 @@ export default function TypedFacts() {
 
 const panelHead: React.CSSProperties = {
   padding: "8px 12px",
-  background: "#fafafa",
-  borderBottom: "1px solid #e2e2e2",
+  background: "var(--sg-surface-alt)",
+  borderBottom: "1px solid var(--sg-border)",
   fontWeight: 700,
-  color: "#555",
+  color: "var(--sg-text-muted)",
 };
 const rowStyle: React.CSSProperties = { display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13 };
-const helpStyle: React.CSSProperties = { fontSize: 12, color: "#777", lineHeight: 1.4 };
+const helpStyle: React.CSSProperties = { fontSize: 12, color: "var(--sg-text-faint)", lineHeight: 1.4 };
 const numStyle: React.CSSProperties = {
   width: 80,
   fontFamily: "ui-monospace, monospace",
   fontSize: 12,
   padding: "3px 6px",
   borderRadius: 6,
-  border: "1px solid #ccc",
+  border: "1px solid var(--sg-border-medium)",
 };
 const primaryBtn: React.CSSProperties = {
   padding: "4px 10px",
   borderRadius: 6,
-  border: "1px solid #2563eb",
-  background: "#2563eb",
-  color: "#fff",
+  border: "1px solid var(--sg-info)",
+  background: "var(--sg-info)",
+  color: "var(--sg-surface)",
   cursor: "pointer",
   fontSize: 12,
 };
 const plainBtn: React.CSSProperties = {
   padding: "4px 10px",
   borderRadius: 6,
-  border: "1px solid #ccc",
-  background: "#fff",
-  color: "#555",
+  border: "1px solid var(--sg-border-medium)",
+  background: "var(--sg-surface)",
+  color: "var(--sg-text-muted)",
   cursor: "pointer",
   fontSize: 12,
 };

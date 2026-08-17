@@ -274,151 +274,6 @@ static int write_delegate_output_file(const char *path, const char *text)
    return 0;
 }
 
-#if !defined(_WIN32) && !defined(_WIN64)
-/* cli_v1_http_request: minimal HTTP/1.1 request (any verb) over aimee-server's
- * /v1 Unix socket (<aimee_home>/aimee-http.sock). Kept local to the thin client
- * so the api.client_transport cutover adds no new link dependency
- * (http_uds_client.c is not linked into the CLI). Returns the response body
- * (heap; caller frees) and sets *status_out to the HTTP status; NULL on
- * transport failure. Mirrors http_uds_client.c, which serves the same role for
- * the TUI.
- *
- * timeout_ms bounds the WAIT FOR A REPLY. It used not to take one at all: the
- * caller's budget was honoured on the remote branch of cli_v1_send and silently
- * dropped here, and the read loop below had no timeout of any kind. A
- * co-located server that accepted the connection and then went quiet -- or died
- * between accept and reply -- hung the CLI forever, with no way for the caller
- * to bound it. That is the default transport for a co-located install. */
-static char *cli_v1_http_request(const char *verb, const char *path, const char *body,
-                                 int timeout_ms, int *status_out)
-{
-   if (status_out)
-      *status_out = 0;
-   if (timeout_ms <= 0)
-      timeout_ms = CLIENT_DEFAULT_TIMEOUT_MS;
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return NULL;
-
-   char sock_path[512];
-   snprintf(sock_path, sizeof(sock_path), "%s/aimee-http.sock", home);
-
-   int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-   if (fd < 0)
-      return NULL;
-   struct sockaddr_un addr;
-   memset(&addr, 0, sizeof(addr));
-   addr.sun_family = AF_UNIX;
-   snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", sock_path);
-   if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0)
-   {
-      close(fd);
-      return NULL;
-   }
-
-   int blen = body ? (int)strlen(body) : 0;
-   char head[512];
-   int hlen = snprintf(head, sizeof(head),
-                       "%s %s HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n"
-                       "Content-Length: %d\r\nConnection: close\r\n\r\n",
-                       verb, path, blen);
-   if (hlen <= 0 || hlen >= (int)sizeof(head))
-   {
-      close(fd);
-      return NULL;
-   }
-
-   int off = 0;
-   while (off < hlen)
-   {
-      int n = (int)write(fd, head + off, (size_t)(hlen - off));
-      if (n <= 0)
-      {
-         close(fd);
-         return NULL;
-      }
-      off += n;
-   }
-   off = 0;
-   while (off < blen)
-   {
-      int n = (int)write(fd, body + off, (size_t)(blen - off));
-      if (n <= 0)
-      {
-         close(fd);
-         return NULL;
-      }
-      off += n;
-   }
-
-   const long long deadline_ms = util_now_ms() + timeout_ms;
-   size_t cap = 8192, len = 0;
-   char *resp = malloc(cap);
-   if (!resp)
-   {
-      close(fd);
-      return NULL;
-   }
-   for (;;)
-   {
-      if (len + 4096 > cap)
-      {
-         cap *= 2;
-         char *grown = realloc(resp, cap);
-         if (!grown)
-         {
-            free(resp);
-            close(fd);
-            return NULL;
-         }
-         resp = grown;
-      }
-      /* Wait for readability against the caller's deadline rather than
-       * blocking in read(). A server that accepts and never answers must cost
-       * the budget, not the session. */
-      long long left = deadline_ms - util_now_ms();
-      if (left <= 0)
-      {
-         free(resp);
-         close(fd);
-         return NULL;
-      }
-      struct pollfd readable = {.fd = fd, .events = POLLIN};
-      int pr = poll(&readable, 1, (int)left);
-      if (pr <= 0 || !(readable.revents & POLLIN))
-      {
-         free(resp);
-         close(fd);
-         return NULL;
-      }
-      int n = (int)read(fd, resp + len, 4096);
-      if (n <= 0)
-         break;
-      len += (size_t)n;
-   }
-   close(fd);
-   resp[len] = '\0';
-
-   int status = 0;
-   if (sscanf(resp, "HTTP/1.%*d %d", &status) != 1)
-   {
-      free(resp);
-      return NULL;
-   }
-   if (status_out)
-      *status_out = status;
-   char *bstart = strstr(resp, "\r\n\r\n");
-   char *out = bstart ? strdup(bstart + 4) : strdup("");
-   free(resp);
-   return out;
-}
-
-/* The thin client is a strict /v1 consumer: there is no socket/auto transport
- * selection any more (the legacy NDJSON transport was removed). One-shot
- * commands go over the local aimee-http.sock, or a configured remote /v1
- * endpoint (cli_v1_client_endpoint) — see cli_v1_forward below. */
-#endif /* !_WIN32 — the aimee-http.sock helpers above are POSIX-only */
-
 /* The remote-endpoint resolvers below are portable (env + aimee.yaml, no UDS)
  * and MUST compile on Windows too: cli_v1_forward calls them unconditionally
  * and the Windows thin client always takes the remote /v1 path. */
@@ -567,6 +422,29 @@ char *cli_v1_client_bearer(void)
    if (aimee_client_remote_token(tok, sizeof(tok)) && tok[0])
       return strdup(tok);
    return NULL;
+}
+
+/* cli_v1_warn_no_endpoint: one clear line when a command needs an aimee-server
+ * and none is configured. Emitted ONCE per process: the dispatch surface is
+ * called in loops (the gateway, mcp serve, workspace poll), and a per-call line
+ * would bury the first one under thousands.
+ *
+ * This replaces a silent fall-through to a co-located server. Saying "no
+ * endpoint" is the whole point of the change — the previous behaviour answered
+ * the command from whatever server was on this machine, which is unfailingly
+ * wrong on a thin client and, being silent, looked like success. */
+void cli_v1_warn_no_endpoint(const char *method)
+{
+   static int warned = 0;
+   if (warned)
+      return;
+   warned = 1;
+   fprintf(stderr,
+           "aimee: no remote aimee-server is configured, so '%s' cannot run.\n"
+           "  aimee is a thin client: there is no co-located server to fall back to.\n"
+           "  set one with: aimee remote set https://<host>:8743\n"
+           "  (or aimee.api.client_endpoint in aimee.yaml, or AIMEE_API_ENDPOINT)\n",
+           method ? method : "this command");
 }
 
 /* cli_v1_has_remote_endpoint: true when the thin client is configured to reach
@@ -1071,19 +949,15 @@ static cJSON *cli_v1_send(const char *remote, const char *bearer, const char *ve
    int status = 0;
    cJSON *resp = NULL;
 #if !defined(_WIN32) && !defined(_WIN64)
+   /* Remote-only topology: aimee is a thin client against a remote aimee-server
+    * and there is NEVER a co-located one. A NULL endpoint used to fall back to
+    * <aimee_home>/aimee-http.sock, which silently bound the client to whichever
+    * server happened to be running on the same box. That is worse than an
+    * outage: a misconfigured or unreachable remote presented as a WORKING tool
+    * reading the WRONG machine's state, and every answer it gave was confidently
+    * about the wrong host. No endpoint, no request — the caller reports it. */
    if (remote)
-   {
       resp = cli_http_request(remote, verb, path, body, bearer, timeout_ms, &status);
-   }
-   else
-   {
-      char *r = cli_v1_http_request(verb, path, body, timeout_ms, &status);
-      if (r)
-      {
-         resp = cJSON_Parse(r);
-         free(r);
-      }
-   }
 #else
    (void)remote;
    (void)bearer;
@@ -1928,13 +1802,19 @@ static int cli_v1_mirror_sync_chunked(cJSON *req, int timeout, int json_output)
    return rc;
 }
 
-/* cli_v1_dispatch_local: dispatch a pre-marshalled {method, ...params} request to its
- * first-class /v1 route over the co-located transport — the local aimee-http.sock
- * on POSIX, or the configured remote on Windows (no UDS). Interactive
- * co-located callers (chat, launch, mcp serve, hooks, triggers, gateway,
- * workspace serve) reach the dispatch surface via dedicated routes (async
- * methods are polled to completion). Returns the parsed response (caller frees)
- * or NULL. */
+/* cli_v1_dispatch_local: dispatch a pre-marshalled {method, ...params} request to
+ * its first-class /v1 route on the CONFIGURED REMOTE aimee-server. Callers
+ * (chat, launch, mcp serve, hooks, triggers, gateway, workspace serve) reach the
+ * dispatch surface via dedicated routes (async methods are polled to
+ * completion). Returns the parsed response (caller frees) or NULL.
+ *
+ * The name is historical: this used to mean "over the co-located transport",
+ * and it resolved no endpoint at all — it passed NULL to cli_v1_send, which
+ * reached the local aimee-http.sock. In the only topology aimee supports there
+ * is no server on this box, so every one of those callers was either failing or,
+ * worse, answering from a stray local server. It now resolves the same remote
+ * endpoint cli_v1_dispatch does. (Renaming it is a mechanical follow-up, kept
+ * out of this commit so the behaviour change stands on its own.) */
 cJSON *cli_v1_dispatch_local(cJSON *req, int timeout_ms)
 {
    if (!req)
@@ -1959,14 +1839,20 @@ cJSON *cli_v1_dispatch_local(cJSON *req, int timeout_ms)
    char *body = cJSON_PrintUnformatted(req);
    if (!body)
       return NULL;
+   char *remote = cli_v1_client_endpoint();
+   char *bearer = remote ? cli_v1_client_bearer() : NULL;
    cJSON *resp = NULL;
    int status = 0;
-   if (async_path)
-      resp = cli_v1_run_and_poll(NULL, NULL, async_verb, async_path, body, timeout_ms);
+   if (!remote)
+      cli_v1_warn_no_endpoint(method);
+   else if (async_path)
+      resp = cli_v1_run_and_poll(remote, bearer, async_verb, async_path, body, timeout_ms);
    else if (rest_path)
-      resp = cli_v1_send(NULL, NULL, rest_verb, rest_path, body, timeout_ms, &status);
+      resp = cli_v1_send(remote, bearer, rest_verb, rest_path, body, timeout_ms, &status);
    /* else: no first-class route (e.g. the fire-and-forget chat.graceful_cancel,
     * which has no dispatch handler) — return NULL; callers already tolerate it. */
+   free(remote);
+   free(bearer);
    free(body);
    return resp;
 }

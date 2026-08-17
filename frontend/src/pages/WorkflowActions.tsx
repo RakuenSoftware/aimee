@@ -509,7 +509,7 @@ export default function WorkflowActions() {
         style={{
           width: 300,
           flexShrink: 0,
-          borderRight: "1px solid #eee",
+          borderRight: "1px solid var(--sg-border-light)",
           overflowY: "auto",
           padding: 12,
         }}
@@ -529,14 +529,14 @@ export default function WorkflowActions() {
           style={{
             width: "100%",
             marginBottom: 8,
-            ...(composing ? { background: "#eef4ff", color: "#2563eb" } : {}),
+            ...(composing ? { background: "var(--sg-info-bg)", color: "var(--sg-info)" } : {}),
           }}
         >
           + New proposal
         </Button>
         {workflowOperator && (
           <label
-            style={{ fontSize: 12, color: "#666", display: "flex", alignItems: "center", gap: 6 }}
+            style={{ fontSize: 12, color: "var(--sg-text-secondary)", display: "flex", alignItems: "center", gap: 6 }}
             title="Show every run across all users, not just your own."
           >
             <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
@@ -579,9 +579,9 @@ export default function WorkflowActions() {
                   borderRadius: 6,
                   cursor: "pointer",
                   marginBottom: 4,
-                  background: selId === it.id ? "#eef4ff" : "transparent",
+                  background: selId === it.id ? "var(--sg-info-bg)" : "transparent",
                   border: "1px solid",
-                  borderColor: selId === it.id ? "#bcd4ff" : "#f0f0f0",
+                  borderColor: selId === it.id ? "var(--sg-info-border)" : "var(--sg-surface-active)",
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
@@ -591,7 +591,7 @@ export default function WorkflowActions() {
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
                   <Badge label={s.label} variant={s.variant} />
-                  <span style={{ fontSize: 11, color: "#999" }}>{it.workflow}</span>
+                  <span style={{ fontSize: 11, color: "var(--sg-text-hint)" }}>{it.workflow}</span>
                 </div>
               </div>
             );
@@ -613,7 +613,7 @@ export default function WorkflowActions() {
           />
         )}
         {!composing && !detail && (
-          <div style={{ color: "#888", fontSize: 14, marginTop: 20 }}>
+          <div style={{ color: "var(--sg-text-faint)", fontSize: 14, marginTop: 20 }}>
             Select a proposal to see its status and history, or start a new one.
             <Spinner loading={loading} text="loading…" />
           </div>
@@ -662,7 +662,7 @@ export default function WorkflowActions() {
               >
                 🗑 Delete
               </Button>
-              {actMsg && <span style={{ fontSize: 12, color: "#c00", flexBasis: "100%" }}>{actMsg}</span>}
+              {actMsg && <span style={{ fontSize: 12, color: "var(--sg-danger-dark)", flexBasis: "100%" }}>{actMsg}</span>}
             </div>
 
             {canDecide && (
@@ -679,7 +679,7 @@ export default function WorkflowActions() {
                   >
                     Reject
                   </Button>
-                  {gateMsg && <span style={{ fontSize: 12, color: "#667" }}>{gateMsg}</span>}
+                  {gateMsg && <span style={{ fontSize: 12, color: "var(--sg-text-secondary)" }}>{gateMsg}</span>}
                 </div>
               </Panel>
             )}
@@ -690,7 +690,7 @@ export default function WorkflowActions() {
 
             <Panel title="Proposal">
               {proposalTrunc && (
-                <div style={{ fontSize: 12, color: "#a60", marginBottom: 6 }}>
+                <div style={{ fontSize: 12, color: "var(--sg-warning-dark)", marginBottom: 6 }}>
                   ⚠ Proposal truncated (over the size cap); showing the first part.
                 </div>
               )}
@@ -804,24 +804,24 @@ function RunPolicyPanel({ editable }: { editable: boolean }) {
     else setErr(`${key}: ${r.error}`);
   };
   return (
-    <div style={{ marginTop: 10, borderTop: "1px solid #eee", paddingTop: 8 }}>
+    <div style={{ marginTop: 10, borderTop: "1px solid var(--sg-border-light)", paddingTop: 8 }}>
       <div
         onClick={() => setOpen((v) => !v)}
         style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}
       >
-        <span style={{ fontSize: 11, color: "#999", width: 10 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ fontSize: 11, color: "var(--sg-text-hint)", width: 10 }}>{open ? "▾" : "▸"}</span>
         <span style={{ fontWeight: 600, fontSize: 13 }}>⚙ Run policy</span>
-        <span style={{ marginLeft: "auto", fontSize: 11, color: "#aaa" }}>admission + autonomy caps</span>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--sg-text-pale)" }}>admission + autonomy caps</span>
       </div>
       {open && (
         <div style={{ marginTop: 6 }}>
           {cfg === null && !err ? (
-            <div style={{ fontSize: 12, color: "#999" }}>Loading…</div>
+            <div style={{ fontSize: 12, color: "var(--sg-text-hint)" }}>Loading…</div>
           ) : cfg === null ? (
-            <div style={{ fontSize: 11, color: "#c00" }}>{err}</div>
+            <div style={{ fontSize: 11, color: "var(--sg-danger-dark)" }}>{err}</div>
           ) : (
             <>
-              <div style={{ fontSize: 11, color: "#999", lineHeight: 1.4, marginBottom: 6 }}>
+              <div style={{ fontSize: 11, color: "var(--sg-text-hint)", lineHeight: 1.4, marginBottom: 6 }}>
                 {editable
                   ? "Admission, safety caps, and auto-resume for autonomous runs. Changes apply live."
                   : "Read-only. Administrator access is required to change global run policy."}
@@ -868,10 +868,10 @@ function RunPolicyPanel({ editable }: { editable: boolean }) {
                       }}
                     />
                   )}
-                  {saving === f.key && <span style={{ fontSize: 11, color: "#999" }}>saving…</span>}
+                  {saving === f.key && <span style={{ fontSize: 11, color: "var(--sg-text-hint)" }}>saving…</span>}
                 </div>
               ))}
-              {err && <div style={{ fontSize: 11, color: "#c00", marginTop: 4 }}>{err}</div>}
+              {err && <div style={{ fontSize: 11, color: "var(--sg-danger-dark)", marginTop: 4 }}>{err}</div>}
             </>
           )}
         </div>
@@ -1037,19 +1037,19 @@ export function TriggersPanel({
   const atLimit = configCount >= maxRules;
 
   return (
-    <div style={{ marginTop: 10, borderTop: "1px solid #eee", paddingTop: 8 }}>
+    <div style={{ marginTop: 10, borderTop: "1px solid var(--sg-border-light)", paddingTop: 8 }}>
       <div
         onClick={onToggle}
         style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}
       >
-        <span style={{ fontSize: 11, color: "#999", width: 10 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ fontSize: 11, color: "var(--sg-text-hint)", width: 10 }}>{open ? "▾" : "▸"}</span>
         <span style={{ fontWeight: 600, fontSize: 13 }}>⚡ Triggers</span>
         <Badge label={`${triggers.length}`} variant="neutral" />
-        <span style={{ marginLeft: "auto", fontSize: 11, color: "#aaa" }}>automatic starts</span>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--sg-text-pale)" }}>automatic starts</span>
       </div>
       {open && (
         <div style={{ marginTop: 6 }}>
-          <div style={{ fontSize: 11, color: "#777", lineHeight: 1.45, marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: "var(--sg-text-faint)", lineHeight: 1.45, marginBottom: 8 }}>
             Watch a Git repository folder for committed Markdown files and start a saved workflow for each new proposal.
           </div>
           {loadError && <div role="alert" style={triggerErrorStyle}>{loadError}</div>}
@@ -1064,12 +1064,12 @@ export function TriggersPanel({
             </div>
           )}
           {!editable && !loadError && (
-            <div style={{ fontSize: 11, color: "#777", marginBottom: 8 }}>
+            <div style={{ fontSize: 11, color: "var(--sg-text-faint)", marginBottom: 8 }}>
               Only the appliance administrator can change automatic triggers. You can still inspect what is active.
             </div>
           )}
           {triggers.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#999", lineHeight: 1.4 }}>
+            <div style={{ fontSize: 12, color: "var(--sg-text-hint)", lineHeight: 1.4 }}>
               No triggers configured — runs start from a manual submit (+ New proposal).
             </div>
           ) : (
@@ -1077,7 +1077,7 @@ export function TriggersPanel({
               <div key={`${trigger.origin || "config"}-${trigger.source}-${trigger.workspace}-${trigger.template}-${index}`} style={{ marginBottom: 8 }}>
                 <TriggerCard t={trigger} />
                 {trigger.origin === "workflow" ? (
-                  <div style={{ fontSize: 11, color: "#777", marginTop: 4 }}>
+                  <div style={{ fontSize: 11, color: "var(--sg-text-faint)", marginTop: 4 }}>
                     Owned by this workflow’s <code>trigger.watch-dir</code> start node. Edit that node in Edit Workflows to change or disarm it.
                   </div>
                 ) : canEdit && editing !== index ? (
@@ -1116,8 +1116,8 @@ export function TriggersPanel({
               + New trigger
             </Button>
           )}
-          {atLimit && canEdit && <div style={{ fontSize: 11, color: "#777", marginTop: 4 }}>The {maxRules}-trigger safety limit has been reached.</div>}
-          {notice && <div role="status" style={{ color: "#287a3f", fontSize: 11, marginTop: 5 }}>{notice}</div>}
+          {atLimit && canEdit && <div style={{ fontSize: 11, color: "var(--sg-text-faint)", marginTop: 4 }}>The {maxRules}-trigger safety limit has been reached.</div>}
+          {notice && <div role="status" style={{ color: "var(--sg-success-dark)", fontSize: 11, marginTop: 5 }}>{notice}</div>}
           {error && <div role="alert" style={triggerErrorStyle}>{error}</div>}
         </div>
       )}
@@ -1147,7 +1147,7 @@ function TriggerEditor({
     ? workflows
     : [draft.template, ...workflows];
   return (
-    <div style={{ border: "1px solid #dbe5f4", background: "#f8fbff", borderRadius: 6, padding: 9, marginTop: 6 }}>
+    <div style={{ border: "1px solid var(--sg-info-border)", background: "var(--sg-surface-alt)", borderRadius: 6, padding: 9, marginTop: 6 }}>
       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 7 }}>Watch for committed Markdown proposals</div>
       <div style={{ display: "grid", gap: 8 }}>
         {workspaces.length > 0 && (
@@ -1201,7 +1201,7 @@ function TriggerEditor({
           </TriggerField>
         </div>
       </div>
-      <div style={{ fontSize: 11, color: "#777", lineHeight: 1.4, marginTop: 8 }}>
+      <div style={{ fontSize: 11, color: "var(--sg-text-faint)", lineHeight: 1.4, marginTop: 8 }}>
         The scanner reads committed files from Git. Uncommitted files do not fire, and unchanged proposal content is deduplicated.
       </div>
       <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
@@ -1214,15 +1214,15 @@ function TriggerEditor({
 
 function TriggerField({ label, help, children }: { label: string; help: string; children: React.ReactNode }) {
   return (
-    <label title={help} style={{ display: "grid", gap: 3, fontSize: 11, color: "#555" }}>
+    <label title={help} style={{ display: "grid", gap: 3, fontSize: 11, color: "var(--sg-text-muted)" }}>
       <span style={{ fontWeight: 600 }}>{label}</span>
       {children}
-      <span style={{ color: "#8a8a8a", lineHeight: 1.25 }}>{help}</span>
+      <span style={{ color: "var(--sg-text-faint)", lineHeight: 1.25 }}>{help}</span>
     </label>
   );
 }
 
-const triggerErrorStyle: React.CSSProperties = { color: "#a51d1d", background: "#fff3f3", border: "1px solid #ffd2d2", borderRadius: 4, padding: "5px 7px", fontSize: 11, marginTop: 5, marginBottom: 5 };
+const triggerErrorStyle: React.CSSProperties = { color: "var(--sg-danger-dark)", background: "var(--sg-danger-bg)", border: "1px solid var(--sg-danger-bg)", borderRadius: 4, padding: "5px 7px", fontSize: 11, marginTop: 5, marginBottom: 5 };
 
 // One trigger rule as a compact card: what fires it (source + event/schedule),
 // which workflow it starts, how it runs (mode), and where (workspace).
@@ -1239,28 +1239,28 @@ function TriggerCard({ t }: { t: Trigger }) {
   return (
     <div
       style={{
-        border: "1px solid #f0f0f0",
+        border: "1px solid var(--sg-surface-active)",
         borderRadius: 6,
         padding: "6px 8px",
         marginBottom: 4,
-        background: "#fafbfc",
+        background: "var(--sg-surface-alt)",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <Badge label={t.source} variant="running" />
-        <span style={{ fontSize: 12, color: "#555", overflowWrap: "anywhere" }}>{fires}</span>
+        <span style={{ fontSize: 12, color: "var(--sg-text-muted)", overflowWrap: "anywhere" }}>{fires}</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 11, color: "#999" }}>→</span>
+        <span style={{ fontSize: 11, color: "var(--sg-text-hint)" }}>→</span>
         <span style={{ fontSize: 12, fontWeight: 600 }}>{t.template || "(no workflow)"}</span>
         <Badge
           label={interactive ? "interactive" : "autonomous"}
           variant={interactive ? "warning" : "success"}
         />
       </div>
-      {t.last_error && <div style={{ marginTop: 4, color: "#c00", fontSize: 11 }}>{t.last_error}</div>}
+      {t.last_error && <div style={{ marginTop: 4, color: "var(--sg-danger-dark)", fontSize: 11 }}>{t.last_error}</div>}
       {t.workspace && (
-        <div style={{ fontSize: 11, color: "#aaa", fontFamily: "monospace", marginTop: 3, overflowWrap: "anywhere" }}>
+        <div style={{ fontSize: 11, color: "var(--sg-text-pale)", fontFamily: "monospace", marginTop: 3, overflowWrap: "anywhere" }}>
           {t.workspace}
           {typeof t.max_spend_usd === "number" && t.max_spend_usd > 0
             ? ` · cap $${t.max_spend_usd.toFixed(2)}`
@@ -1386,7 +1386,7 @@ function Composer({
   return (
     <div style={{ maxWidth: 820 }}>
       <strong style={{ fontSize: 18 }}>New proposal</strong>
-      <div style={{ fontSize: 12, color: "#888", margin: "4px 0 12px" }}>
+      <div style={{ fontSize: 12, color: "var(--sg-text-faint)", margin: "4px 0 12px" }}>
         Describe the change; aimee runs the chosen workflow end-to-end and parks at human
         gates. Draft is saved locally on this device (cleared on logout).
       </div>
@@ -1457,8 +1457,8 @@ function Composer({
       {preview !== null && (
         <div
           style={{
-            border: "1px solid #bcd4ff",
-            background: "#f6f9ff",
+            border: "1px solid var(--sg-info-border)",
+            background: "var(--sg-surface-alt)",
             borderRadius: 6,
             padding: 10,
             marginTop: 10,
@@ -1480,7 +1480,7 @@ function Composer({
             <Button onClick={() => setPreview(null)} size="md" title="Discard this draft preview and keep your current body.">
               Discard
             </Button>
-            <span style={{ fontSize: 11, color: "#888" }}>Replaces the body above.</span>
+            <span style={{ fontSize: 11, color: "var(--sg-text-faint)" }}>Replaces the body above.</span>
           </div>
           <div
             style={{ fontSize: 13, lineHeight: 1.5, maxHeight: 320, overflow: "auto" }}
@@ -1515,15 +1515,15 @@ function Composer({
         >
           {browsing ? "Close browser" : "📂 Load from project"}
         </Button>
-        {submitMsg && <span style={{ fontSize: 12, color: "#c00" }}>{submitMsg}</span>}
-        {draftErr && <span style={{ fontSize: 12, color: "#c00" }}>{draftErr}</span>}
+        {submitMsg && <span style={{ fontSize: 12, color: "var(--sg-danger-dark)" }}>{submitMsg}</span>}
+        {draftErr && <span style={{ fontSize: 12, color: "var(--sg-danger-dark)" }}>{draftErr}</span>}
       </div>
 
       {browsing && (
         <div
           style={{
-            border: "1px solid #d9e2ef",
-            background: "#fbfdff",
+            border: "1px solid var(--sg-info-border)",
+            background: "var(--sg-surface-alt)",
             borderRadius: 6,
             padding: 10,
             marginTop: 10,
@@ -1531,21 +1531,21 @@ function Composer({
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
             <strong style={{ fontSize: 13 }}>Project</strong>
-            <span style={{ fontSize: 12, color: "#667", fontFamily: "monospace", overflowWrap: "anywhere" }}>
+            <span style={{ fontSize: 12, color: "var(--sg-text-secondary)", fontFamily: "monospace", overflowWrap: "anywhere" }}>
               /{browsePath}
             </span>
-            {browseLoading && <span style={{ fontSize: 11, color: "#aaa" }}>loading…</span>}
-            <span style={{ marginLeft: "auto", fontSize: 11, color: "#888" }}>
+            {browseLoading && <span style={{ fontSize: 11, color: "var(--sg-text-pale)" }}>loading…</span>}
+            <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--sg-text-faint)" }}>
               Pick a .md file to load it as the proposal.
             </span>
           </div>
-          {browseErr && <div style={{ fontSize: 12, color: "#c00", marginBottom: 6 }}>{browseErr}</div>}
-          <div style={{ maxHeight: 280, overflow: "auto", border: "1px solid #eef2f7", borderRadius: 4 }}>
+          {browseErr && <div style={{ fontSize: 12, color: "var(--sg-danger-dark)", marginBottom: 6 }}>{browseErr}</div>}
+          <div style={{ maxHeight: 280, overflow: "auto", border: "1px solid var(--sg-surface-sunken)", borderRadius: 4 }}>
             {browsePath && (
               <BrowseRow icon="↩" label=".." onClick={() => void loadTree(parentPath(browsePath))} />
             )}
             {entries.length === 0 && !browseLoading && (
-              <div style={{ padding: "8px 10px", color: "#999", fontSize: 13 }}>
+              <div style={{ padding: "8px 10px", color: "var(--sg-text-hint)", fontSize: 13 }}>
                 No sub-folders or .md files here.
               </div>
             )}
@@ -1578,10 +1578,10 @@ function BrowseRow({ icon, label, onClick }: { icon: string; label: string; onCl
         gap: 8,
         padding: "6px 10px",
         cursor: "pointer",
-        borderBottom: "1px solid #f4f7fb",
+        borderBottom: "1px solid var(--sg-surface-alt)",
         fontSize: 13,
       }}
-      onMouseEnter={(ev) => (ev.currentTarget.style.background = "#eef4ff")}
+      onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--sg-info-bg)")}
       onMouseLeave={(ev) => (ev.currentTarget.style.background = "transparent")}
     >
       <span style={{ width: 16, textAlign: "center" }}>{icon}</span>
@@ -1593,7 +1593,7 @@ function BrowseRow({ icon, label, onClick }: { icon: string; label: string; onCl
 function L({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label style={{ display: "block", marginTop: 8 }}>
-      <span style={{ color: "#888", fontSize: 12, display: "block", marginBottom: 2 }}>
+      <span style={{ color: "var(--sg-text-faint)", fontSize: 12, display: "block", marginBottom: 2 }}>
         {label}
       </span>
       {children}
@@ -1628,9 +1628,9 @@ function StatusHeader({ item }: { item: Item }) {
       )}
       {item.pr_ref ? (
         <div style={{ display: "flex", gap: 8 }}>
-          <span style={{ color: "#888" }}>PR</span>
+          <span style={{ color: "var(--sg-text-faint)" }}>PR</span>
           {pr ? (
-            <a href={pr} target="_blank" rel="noreferrer" style={{ color: "#2563eb" }}>
+            <a href={pr} target="_blank" rel="noreferrer" style={{ color: "var(--sg-info)" }}>
               {item.pr_ref}
             </a>
           ) : (
@@ -1655,20 +1655,20 @@ function Timeline({ events }: { events: WfEvent[] }) {
             display: "flex",
             gap: 10,
             padding: "6px 0",
-            borderBottom: "1px solid #f3f3f3",
+            borderBottom: "1px solid var(--sg-surface-alt)",
             fontSize: 13,
           }}
         >
-          <span style={{ color: "#aaa", fontSize: 11, width: 130, flexShrink: 0 }}>
+          <span style={{ color: "var(--sg-text-pale)", fontSize: 11, width: 130, flexShrink: 0 }}>
             {e.created_at}
           </span>
           <span style={{ flexShrink: 0, width: 120 }}>
             <Badge label={KIND_LABEL[e.kind] || e.kind} variant="neutral" />
           </span>
           <span style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ color: "#555" }}>{e.stage}</span>
-            {e.detail ? <span style={{ color: "#888" }}> — {e.detail}</span> : null}
-            <span style={{ color: "#bbb", fontSize: 11 }}>
+            <span style={{ color: "var(--sg-text-muted)" }}>{e.stage}</span>
+            {e.detail ? <span style={{ color: "var(--sg-text-faint)" }}> — {e.detail}</span> : null}
+            <span style={{ color: "var(--sg-text-pale)", fontSize: 11 }}>
               {" "}
               ({e.actor}
               {e.cost_usd ? `, $${e.cost_usd.toFixed(4)}` : ""})
@@ -1683,7 +1683,7 @@ function Timeline({ events }: { events: WfEvent[] }) {
 function Field({ k, v }: { k: string; v: string }) {
   return (
     <div style={{ display: "flex", gap: 8 }}>
-      <span style={{ color: "#888" }}>{k}</span>
+      <span style={{ color: "var(--sg-text-faint)" }}>{k}</span>
       <span style={{ overflowWrap: "anywhere" }}>{v}</span>
     </div>
   );
@@ -1692,7 +1692,7 @@ function Field({ k, v }: { k: string; v: string }) {
 const inp: React.CSSProperties = {
   fontSize: 13,
   padding: "5px 7px",
-  border: "1px solid #ccc",
+  border: "1px solid var(--sg-border-medium)",
   borderRadius: 4,
   width: "100%",
   boxSizing: "border-box",

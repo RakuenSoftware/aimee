@@ -743,7 +743,7 @@ export default function EditWorkflows() {
             + New
           </Button>
           {!editable && (
-            <div style={{ fontSize: 11, color: "#777", lineHeight: 1.4, marginTop: 6 }}>
+            <div style={{ fontSize: 11, color: "var(--sg-text-faint)", lineHeight: 1.4, marginTop: 6 }}>
               Administrator access is required to save workflows or custom blocks. You can still inspect and validate definitions.
             </div>
           )}
@@ -846,7 +846,7 @@ export default function EditWorkflows() {
                 >
                   {editBlock.isNew ? "Cancel" : "Delete"}
                 </Button>
-                {blockStatus && <span style={{ fontSize: 12, color: "#b00" }}>{blockStatus}</span>}
+                {blockStatus && <span style={{ fontSize: 12, color: "var(--sg-danger-dark)" }}>{blockStatus}</span>}
               </div>
             </div>
           </Panel>
@@ -888,10 +888,10 @@ export default function EditWorkflows() {
         <div
           style={{
             flex: 1,
-            border: "1px solid #ddd",
+            border: "1px solid var(--sg-border-medium)",
             borderRadius: 6,
             overflow: "auto",
-            background: "#fafafa",
+            background: "var(--sg-surface-alt)",
           }}
           onClick={() => setSelected(null)}
         >
@@ -905,7 +905,7 @@ export default function EditWorkflows() {
                 refY="3"
                 orient="auto"
               >
-                <path d="M0,0 L7,3 L0,6 Z" fill="#888" />
+                <path d="M0,0 L7,3 L0,6 Z" fill="var(--sg-text-faint)" />
               </marker>
             </defs>
             {graph?.nodes.map((n) =>
@@ -916,10 +916,10 @@ export default function EditWorkflows() {
                   b = center(t);
                 const color =
                   edge === "on_pass"
-                    ? "#22a06b"
+                    ? "var(--sg-success-dark)"
                     : edge === "on_fail"
-                      ? "#d4564f"
-                      : "#888";
+                      ? "var(--sg-danger)"
+                      : "var(--sg-text-faint)";
                 return (
                   <line
                     key={`${n.id}-${edge}`}
@@ -947,7 +947,7 @@ export default function EditWorkflows() {
                     y1={a.y}
                     x2={c.x}
                     y2={c.y}
-                    stroke="#bbb"
+                    stroke="var(--sg-text-pale)"
                     strokeWidth={1}
                     strokeDasharray="2,3"
                   />
@@ -975,8 +975,8 @@ export default function EditWorkflows() {
                       width={NODE_W}
                       height={NODE_H}
                       rx={6}
-                      fill="#e0e7ff"
-                      stroke="#a5b4fc"
+                      fill="var(--sg-info-bg)"
+                      stroke="var(--sg-info-border)"
                       strokeWidth={1}
                     />
                   )}
@@ -984,15 +984,15 @@ export default function EditWorkflows() {
                     width={NODE_W}
                     height={NODE_H}
                     rx={6}
-                    fill={isCallout ? "#eef2ff" : "#fff"}
-                    stroke={isSel ? "#2563eb" : isCallout ? "#6366f1" : "#ccc"}
+                    fill={isCallout ? "var(--sg-info-bg)" : "var(--sg-surface)"}
+                    stroke={isSel ? "var(--sg-info)" : isCallout ? "var(--sg-purple)" : "var(--sg-border-medium)"}
                     strokeWidth={isSel ? 2 : 1}
                     strokeDasharray={isCallout ? "6,3" : undefined}
                   />
-                  <text x={8} y={20} fontSize={13} fontWeight={600} fill="#222">
+                  <text x={8} y={20} fontSize={13} fontWeight={600} fill="var(--sg-text)">
                     {nodeTitle(n)}
                   </text>
-                  <text x={8} y={38} fontSize={11} fill={isCallout ? "#4f46e5" : "#777"}>
+                  <text x={8} y={38} fontSize={11} fill={isCallout ? "var(--sg-purple)" : "var(--sg-text-faint)"}>
                     {isCallout ? `↳ workflow: ${child || "(unset)"}` : n.block}
                     {n.custom ? " ⚙" : ""}
                   </text>
@@ -1001,7 +1001,7 @@ export default function EditWorkflows() {
                       x={8}
                       y={50}
                       fontSize={10}
-                      fill="#4f46e5"
+                      fill="var(--sg-purple)"
                       style={{ cursor: "pointer", textDecoration: "underline" }}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1011,12 +1011,12 @@ export default function EditWorkflows() {
                       open {child} ↗
                     </text>
                   ) : (
-                    <text x={8} y={50} fontSize={10} fill="#aaa">
+                    <text x={8} y={50} fontSize={10} fill="var(--sg-text-pale)">
                       {participantSummary(n) || `→ ${n.produces}`}
                     </text>
                   )}
                   {n.id === graph?.start && (
-                    <circle cx={NODE_W - 10} cy={10} r={4} fill="#22a06b" />
+                    <circle cx={NODE_W - 10} cy={10} r={4} fill="var(--sg-success-dark)" />
                   )}
                 </g>
               );
@@ -1029,7 +1029,7 @@ export default function EditWorkflows() {
       <div style={{ width: 270, flexShrink: 0, overflowY: "auto" }}>
         <Panel title={sel ? `Node · ${sel.id}` : "Inspector"}>
           {!sel && (
-            <div style={{ color: "#888", fontSize: 13 }}>
+            <div style={{ color: "var(--sg-text-faint)", fontSize: 13 }}>
               Select a node, or click a block to add one.
             </div>
           )}
@@ -1474,7 +1474,7 @@ function NodeInspector({
         </div>
       )}
 
-      <div style={{ borderTop: "1px solid #eee", margin: "10px 0 6px" }} />
+      <div style={{ borderTop: "1px solid var(--sg-border-light)", margin: "10px 0 6px" }} />
       <KeyValue label="block" value={node.block + (node.custom ? " (custom)" : "")} mono />
       <KeyValue label="produces" value={node.produces} mono />
       <div style={{ margin: "6px 0" }}>
@@ -1569,9 +1569,9 @@ function NodeInspector({
             }}
           />
           {paramsErr && (
-            <div style={{ color: "#c00", fontSize: 12 }}>{paramsErr}</div>
+            <div style={{ color: "var(--sg-danger-dark)", fontSize: 12 }}>{paramsErr}</div>
           )}
-          <div style={{ color: "#999", fontSize: 11, marginTop: 2 }}>
+          <div style={{ color: "var(--sg-text-hint)", fontSize: 11, marginTop: 2 }}>
             Editing raw params? Reselect the step to refresh the fields above.
           </div>
         </>
@@ -1601,13 +1601,13 @@ const row: React.CSSProperties = {
 };
 const lbl: React.CSSProperties = {
   display: "block",
-  color: "#888",
+  color: "var(--sg-text-faint)",
   fontSize: 12,
   margin: "4px 0 2px",
 };
 const inp: React.CSSProperties = {
   fontSize: 13,
   padding: "3px 5px",
-  border: "1px solid #ccc",
+  border: "1px solid var(--sg-border-medium)",
   borderRadius: 4,
 };

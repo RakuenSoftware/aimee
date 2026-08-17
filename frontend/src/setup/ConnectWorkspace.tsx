@@ -169,7 +169,7 @@ export default function ConnectWorkspace({ onDone, onProjectsChanged }: ConnectW
 
   return (
     <div style={{ display: 'grid', gap: 14, marginBottom: 8 }}>
-      <div style={{ fontSize: 12.5, color: '#556', lineHeight: 1.5 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--sg-text-muted)', lineHeight: 1.5 }}>
         A <b>workspace</b> is your collection of projects — the repositories under an owner or org.
         Point at one, pick the repos, and clone them in.
       </div>
@@ -198,16 +198,16 @@ export default function ConnectWorkspace({ onDone, onProjectsChanged }: ConnectW
             <button style={linkBtn} onClick={() => toggleAll(true)}>all</button>
             <button style={linkBtn} onClick={() => toggleAll(false)}>none</button>
           </div>
-          <div style={{ display: 'grid', gap: 2, maxHeight: 220, overflow: 'auto', border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
+          <div style={{ display: 'grid', gap: 2, maxHeight: 220, overflow: 'auto', border: '1px solid var(--sg-border-light)', borderRadius: 6, padding: 8 }}>
             {repos.map((repo) => {
               const already = repoAlreadyCloned(repo, ownerName, projects, details);
               return (
                 <label key={repo.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: already ? 'default' : 'pointer' }}>
                   <input type="checkbox" disabled={already} checked={!already && !!selected[repo.name]}
                     onChange={(e) => setSelected((p) => ({ ...p, [repo.name]: e.target.checked }))} />
-                  <span style={{ fontFamily: 'monospace', flex: 1, color: already ? '#99a' : undefined }}>{repo.name}</span>
-                  {repo.private && <span style={{ fontSize: 10.5, color: '#8a5a00', background: '#fff6e6', border: '1px solid #f0d8a8', borderRadius: 4, padding: '0 5px' }}>private</span>}
-                  {already && <span style={{ fontSize: 11, color: '#2a7' }}>cloned</span>}
+                  <span style={{ fontFamily: 'monospace', flex: 1, color: already ? 'var(--sg-text-hint)' : undefined }}>{repo.name}</span>
+                  {repo.private && <span style={{ fontSize: 10.5, color: 'var(--sg-warning-dark)', background: 'var(--sg-warning-bg)', border: '1px solid var(--sg-warning-border)', borderRadius: 4, padding: '0 5px' }}>private</span>}
+                  {already && <span style={{ fontSize: 11, color: 'var(--sg-success-dark)' }}>cloned</span>}
                 </label>
               );
             })}
@@ -227,22 +227,22 @@ export default function ConnectWorkspace({ onDone, onProjectsChanged }: ConnectW
             <div key={res.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
               <span aria-hidden>{res.ok ? '✅' : '⛔'}</span>
               <span style={{ fontFamily: 'monospace', flex: 1 }}>{res.name}</span>
-              {res.ok && res.org_note && <span style={{ fontSize: 11, color: '#8a5a00' }}>{res.org_note}</span>}
+              {res.ok && res.org_note && <span style={{ fontSize: 11, color: 'var(--sg-warning-dark)' }}>{res.org_note}</span>}
               {res.ok && res.kb_indexed === false &&
-                <span style={{ fontSize: 11, color: '#8a5a00' }}>not indexed — {res.kb_reason || 'knowledge service unavailable'}</span>}
-              {!res.ok && <span style={{ color: '#c62828' }}>{res.error || 'failed'}</span>}
+                <span style={{ fontSize: 11, color: 'var(--sg-warning-dark)' }}>not indexed — {res.kb_reason || 'knowledge service unavailable'}</span>}
+              {!res.ok && <span style={{ color: 'var(--sg-danger-dark)' }}>{res.error || 'failed'}</span>}
             </div>
           ))}
         </section>
       )}
 
       {projects.length > 0 && (
-        <div style={{ fontSize: 12, color: '#667' }}>
+        <div style={{ fontSize: 12, color: 'var(--sg-text-secondary)' }}>
           Workspace has {projects.length} project{projects.length > 1 ? 's' : ''}: {projects.join(', ')}
         </div>
       )}
 
-      {err && <div style={{ fontSize: 12.5, color: '#c62828' }}>{err}</div>}
+      {err && <div style={{ fontSize: 12.5, color: 'var(--sg-danger-dark)' }}>{err}</div>}
 
       <div>
         <Button variant="primary" onClick={onDone}>
@@ -255,8 +255,8 @@ export default function ConnectWorkspace({ onDone, onProjectsChanged }: ConnectW
 
 const input: React.CSSProperties = {
   boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
-  border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
+  border: '1px solid var(--sg-border-medium)', fontSize: 13, fontFamily: 'ui-monospace, monospace',
 };
 const linkBtn: React.CSSProperties = {
-  background: 'none', border: 'none', color: '#3a6ea5', cursor: 'pointer', fontSize: 12, padding: 0,
+  background: 'none', border: 'none', color: 'var(--sg-info)', cursor: 'pointer', fontSize: 12, padding: 0,
 };

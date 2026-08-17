@@ -209,6 +209,18 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
   useEffect(() => {
     if (!pending) return;
     let alive = true;
+    // Only a 2xx {status:"pending"} keeps us waiting. Everything else stops the
+    // poll and SAYS something.
+    //
+    // This used to branch on d.status alone and ignore the HTTP status entirely.
+    // Server refusals (writeJSONError) have the shape {error:"..."} with no
+    // `status` field, so a 403/500/503 parsed cleanly, matched neither "done"
+    // nor "error", and fell through to "keep polling" — leaving the user on
+    // "waiting…" forever with the real reason ("GitHub sign-in is not
+    // configured", "git sign-in requires a webchat user") sitting unread in the
+    // response body. A sign-in that cannot possibly complete must not look
+    // identical to one that is about to.
+    let consecutiveNetworkErrors = 0;
     const id = setInterval(async () => {
       try {
         const r =
@@ -218,18 +230,34 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
                 method: 'POST',
                 body: JSON.stringify({ provider: pending.provider, host: pending.host }),
               });
-        const d = await r.json();
+        const d = await r.json().catch(() => ({}) as Record<string, unknown>);
         if (!alive) return;
+        if (!r.ok) {
+          setPending(null);
+          setErr(String(d.error || `sign-in failed (${r.status})`));
+          return;
+        }
+        consecutiveNetworkErrors = 0;
         if (d.status === 'done') {
           setPending(null);
           setMsg(`${PROVIDERS[pending.provider].label} connected.`);
           await loadHosts();
         } else if (d.status === 'error') {
           setPending(null);
-          setErr(d.error || 'sign-in failed');
+          setErr(String(d.error || 'sign-in failed'));
+        } else if (d.status !== 'pending') {
+          // An unrecognised body is a contract break, not progress.
+          setPending(null);
+          setErr('unexpected response from the sign-in poll');
         }
       } catch {
-        /* transient; keep polling */
+        // Genuinely transient (server restart, dropped connection): retry, but
+        // do not retry forever in silence.
+        if (!alive) return;
+        if (++consecutiveNetworkErrors >= 12) {
+          setPending(null);
+          setErr('lost contact with the server while waiting for sign-in');
+        }
       }
     }, 5000);
     return () => {
@@ -398,7 +426,7 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
 
   return (
     <div style={{ display: 'grid', gap: 14, marginBottom: 8 }}>
-      <div style={{ fontSize: 12.5, color: '#556', lineHeight: 1.5 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--sg-text-muted)', lineHeight: 1.5 }}>
         Connect the git hosts aimee should clone from. You can skip this and still clone public
         repositories — connect private hosts here or later. Tokens and keys are stored server-side
         and never shown again.
@@ -420,7 +448,7 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
             </button>
           ))}
         </div>
-        <div style={{ fontSize: 11.5, color: '#778' }}>
+        <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)' }}>
           {METHODS.find((m) => m.id === authMethod)?.hint}
         </div>
       </div>
@@ -443,7 +471,7 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
           )}
           <Button
             variant="primary"
-            style={configured ? undefined : { background: '#888', borderColor: '#888' }}
+            style={configured ? undefined : { background: 'var(--sg-text-faint)', borderColor: 'var(--sg-text-faint)' }}
             disabled={busy || !!pending || !configured}
             onClick={provider === 'github' && webAvailable ? startWebSignIn : startSignIn}
           >
@@ -451,19 +479,19 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
           </Button>
         </div>
         {!configured && !pending && (
-          <div style={{ fontSize: 11.5, color: '#a67c00' }}>
+          <div style={{ fontSize: 11.5, color: 'var(--sg-warning-dark)' }}>
             No {meta.label} sign-in is configured on this server yet — set an OAuth App Client ID
             below to enable it.
           </div>
         )}
         {pending && (
-          <div style={{ fontSize: 12.5, color: '#444' }}>
+          <div style={{ fontSize: 12.5, color: 'var(--sg-text-muted)' }}>
             Go to <a href={pending.uri} target="_blank" rel="noreferrer">{pending.uri}</a> and enter{' '}
-            <code style={{ background: '#eee', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>{pending.code}</code>
-            <span style={{ color: '#888' }}> — waiting…</span>
+            <code style={{ background: 'var(--sg-border-light)', padding: '2px 6px', borderRadius: 4, fontWeight: 600 }}>{pending.code}</code>
+            <span style={{ color: 'var(--sg-text-faint)' }}> — waiting…</span>
           </div>
         )}
-        <details style={{ fontSize: 12, color: '#666' }} open={!configured}>
+        <details style={{ fontSize: 12, color: 'var(--sg-text-secondary)' }} open={!configured}>
           <summary style={{ cursor: 'pointer' }}>
             {meta.label} OAuth App {configured ? '(configured ✓ — click to change)' : '— set this to enable sign-in'}
           </summary>
@@ -489,7 +517,7 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
       {authMethod === 'token' && (
       <section style={{ display: 'grid', gap: 8 }}>
         <div style={sectionTitle}>Access token</div>
-        <div style={{ fontSize: 11.5, color: '#778' }}>
+        <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)' }}>
           An HTTPS access token for any host/provider (GitHub, GitLab, Gitea, Bitbucket…). One per host.
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -504,7 +532,7 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
             {hosts.map((h) => (
               <div key={h} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 13, fontFamily: 'monospace', flex: 1 }}>{h}</span>
-                <span style={{ fontSize: 11, color: '#2a7' }}>● token set</span>
+                <span style={{ fontSize: 11, color: 'var(--sg-success-dark)' }}>● token set</span>
                 <Button variant="danger" disabled={busy}
                   onClick={() => removeCred(h)}>remove</Button>
               </div>
@@ -518,7 +546,7 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
       {authMethod === 'ssh' && (
       <section style={{ display: 'grid', gap: 8 }}>
         <div style={sectionTitle}>SSH private key</div>
-        <div style={{ fontSize: 11.5, color: '#778' }}>
+        <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)' }}>
           Paste an <b>unencrypted</b> OpenSSH/PEM private key (no passphrase). It is sealed
           server-side in your encrypted vault and never shown again. Add the repo by its{' '}
           <b>SSH URL</b> (<code>git@host:owner/repo.git</code>) so this key is used.
@@ -534,8 +562,8 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
       </section>
       )}
 
-      {err && <div style={{ fontSize: 12.5, color: '#c62828' }}>{err}</div>}
-      {msg && <div style={{ fontSize: 12.5, color: '#2c8f56' }}>{msg}</div>}
+      {err && <div style={{ fontSize: 12.5, color: 'var(--sg-danger-dark)' }}>{err}</div>}
+      {msg && <div style={{ fontSize: 12.5, color: 'var(--sg-success-dark)' }}>{msg}</div>}
 
       <div>
         <Button variant="primary" onClick={onDone}>
@@ -546,15 +574,15 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
   );
 }
 
-const sectionTitle: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: '#233' };
+const sectionTitle: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: 'var(--sg-text)' };
 const input: React.CSSProperties = {
   boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
-  border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
+  border: '1px solid var(--sg-border-medium)', fontSize: 13, fontFamily: 'ui-monospace, monospace',
 };
 const methodTab: React.CSSProperties = {
-  padding: '6px 14px', borderRadius: 7, border: '1px solid #ccd', background: '#f4f6fb',
-  color: '#446', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+  padding: '6px 14px', borderRadius: 7, border: '1px solid var(--sg-border-medium)', background: 'var(--sg-surface-alt)',
+  color: 'var(--sg-text-muted)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
 };
 const methodTabActive: React.CSSProperties = {
-  ...methodTab, background: '#2c8f56', borderColor: '#2c6', color: '#fff',
+  ...methodTab, background: 'var(--sg-success-dark)', borderColor: 'var(--sg-success-dark)', color: 'var(--sg-surface)',
 };

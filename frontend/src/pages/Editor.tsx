@@ -65,7 +65,7 @@ export default function Editor() {
           allow="clipboard-read; clipboard-write"
         />
       ) : (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', fontFamily: 'system-ui' }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--sg-text-faint)', fontFamily: 'system-ui' }}>
           Select or clone a project for this session to open it in the editor.
         </div>
       )}

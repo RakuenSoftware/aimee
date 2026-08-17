@@ -17,6 +17,13 @@ SERVICE_SERVER="$SERVICE_BIN_DIR/aimee-server"
 SOCKET="$AIMEE_HOME/aimee.sock"
 HTTP_SOCK="$AIMEE_HOME/aimee-http.sock"
 export AIMEE_SOCK="$SOCKET"
+# The client reaches a server ONLY through an explicitly configured endpoint —
+# it no longer discovers a co-located one by probing the filesystem, because a
+# stray local server silently answering for the wrong host is worse than an
+# outage. This harness deliberately runs both halves on one box, so it has to
+# say so. Same form the server itself uses when it spawns delegate CLIs
+# (server/provider_cli_adapter.c).
+export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
 SERVER_PID=""
 PASS=0
 FAIL=0

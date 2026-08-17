@@ -13,9 +13,19 @@
 #include "modules/memory/memory_fact_gate.h"  /* FACT_GATE_NOVEL */
 #include "modules/memory/memory_ontology.h"   /* NODE_PERSON, NODE_OTHER */
 
+static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict)
+{
+   if (!verdict)
+      return -1;
+   *verdict = (int)memory_fact_gate_check((memory_node_kind_t)head_kind, rel_type,
+                                          (memory_node_kind_t)tail_kind, NULL);
+   return 0;
+}
+
 int main(void)
 {
    db2_test_shim_open();
+   aimee_db2_register_fact_gate_provider(check_fact_gate);
 
    const char *T = "2026-01-01T00:00:00Z";
 

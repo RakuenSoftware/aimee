@@ -1636,6 +1636,45 @@ else
     fail "codex plugin must declare hooks/codex-hooks.json in the manifest AND write it (decl=$hooks_decl cmd=$hooks_cmd)"
 fi
 
+# ── No co-located aimee-server ──────────────────────────────────────────────
+# aimee is a thin client against a REMOTE aimee-server running in its own
+# container. There is no co-located topology. The client used to fall back to
+# <aimee_home>/aimee-http.sock whenever no remote was configured, which meant a
+# stray locally-started server silently captured the client and every answer
+# described the wrong host. That failure is invisible at the call site -- the
+# command succeeds -- so it needs a build-time guard, not a runtime one.
+#
+# The rule enforced here: the client may reach a co-located server only when an
+# operator EXPLICITLY configures a unix: endpoint (which is how the CLI inside
+# the server's own container talks to it). Discovery and silent fallback are
+# banned.
+
+# 1. The /v1 transport must not construct a local socket path of its own.
+if grep -nE '"unix:%s/aimee-http\.sock"|/aimee-http\.sock"' cli_v1_routes_d.c >/dev/null 2>&1; then
+    fail "cli_v1_routes_d.c builds a co-located aimee-http.sock path; the /v1 transport must use the configured endpoint only"
+else
+    pass "/v1 transport has no co-located socket path"
+fi
+
+# 2. Liveness must be about the CONFIGURED server, not "any server on this box".
+if grep -nE 'cli_http_health_ok' -A6 posix/cli_client.c | grep -qE 'cli_http_sock_path'; then
+    fail "cli_http_health_ok probes the local UDS; liveness must target the configured endpoint"
+else
+    pass "liveness probe targets the configured endpoint"
+fi
+
+# 3. No user-facing message may tell an operator to start a server locally.
+#    This is how the anti-pattern spread: the advice appeared exactly when
+#    someone was stuck, and following it "fixed" the symptom.
+#    Comment lines are skipped so the note explaining WHY this is banned (which
+#    necessarily quotes the old advice) does not trip its own guard.
+if grep -nE 'systemctl --user start aimee-server|aimee server start' cli_main.c \
+        | grep -qvE '^[0-9]+: *(\*|/\*|//)'; then
+    fail "cli_main.c still advises starting a local aimee-server"
+else
+    pass "no remediation text advises a local aimee-server"
+fi
+
 if [ "$FAIL" = "0" ]; then
     if [ "$MODE" = "--build-variants" ]; then
         echo "All build variant checks passed."

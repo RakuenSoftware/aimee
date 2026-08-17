@@ -707,9 +707,9 @@ function PluginsPanel({ open, plugins, loading, error, onToggle, onRefresh, onPl
                 onClick={() => onPluginToggle(plugin.name)}
                 style={{
                   padding: '4px 10px', fontSize: '11px', borderRadius: '999px',
-                  cursor: 'pointer', border: `1px solid ${plugin.enabled ? '#2c5b3b' : tokens.borderMedium}`,
-                  background: plugin.enabled ? '#1b3a26' : 'transparent',
-                  color: plugin.enabled ? '#8fd3a8' : tokens.textSecondary,
+                  cursor: 'pointer', border: `1px solid ${plugin.enabled ? 'var(--sg-success-dark)' : tokens.borderMedium}`,
+                  background: plugin.enabled ? 'var(--sg-success-bg)' : 'transparent',
+                  color: plugin.enabled ? 'var(--sg-success)' : tokens.textSecondary,
                   whiteSpace: 'nowrap',
                 }}
               >
@@ -765,9 +765,9 @@ function WorkflowStatusCard({
             padding: '2px 8px',
             borderRadius: '999px',
             fontSize: '10px',
-            background: '#1b3a26',
-            color: '#8fd3a8',
-            border: '1px solid #2c5b3b',
+            background: 'var(--sg-success-bg)',
+            color: 'var(--sg-success)',
+            border: '1px solid var(--sg-success-dark)',
           }}>
             Updated
           </span>
@@ -828,8 +828,8 @@ function WorkflowStatusCard({
               padding: '2px 8px',
               borderRadius: '999px',
               fontSize: '10px',
-              background: session.status === 'active' ? '#193226' : session.status === 'paused' ? '#3a3017' : '#1f2b3a',
-              color: session.status === 'active' ? '#7bd9a2' : session.status === 'paused' ? '#f2d06b' : '#9ec7ff',
+              background: session.status === 'active' ? 'var(--sg-success-bg)' : session.status === 'paused' ? 'var(--sg-warning-bg)' : 'var(--sg-info-bg)',
+              color: session.status === 'active' ? 'var(--sg-success)' : session.status === 'paused' ? 'var(--sg-warning)' : 'var(--sg-info-border)',
               border: `1px solid ${tokens.borderMedium}`,
               textTransform: 'uppercase',
             }}>
@@ -960,7 +960,7 @@ function ChannelSidebar({
               </span>
               {unread > 0 && (
                 <span style={{
-                  background: tokens.primary, color: '#fff',
+                  background: tokens.primary, color: 'var(--sg-surface)',
                   borderRadius: '10px', fontSize: '10px', fontWeight: 700,
                   padding: '1px 6px', minWidth: '18px', textAlign: 'center',
                 }}>
@@ -1007,8 +1007,8 @@ interface ChannelViewProps {
 }
 
 function mentionStateColor(state: string): string {
-  if (state === 'active') return '#8fd3a8';
-  if (state === 'idle') return '#f0c36a';
+  if (state === 'active') return 'var(--sg-success)';
+  if (state === 'idle') return 'var(--sg-warning)';
   return tokens.textPale;
 }
 
@@ -3099,7 +3099,7 @@ export default function Chat() {
               {lspDiag.errors > 0 && (
                 <span style={{
                   padding: '1px 5px', borderRadius: '8px', fontSize: '10px',
-                  background: '#3a1a1a', color: '#ff6b6b', border: '1px solid #5a2a2a',
+                  background: 'var(--sg-danger-bg)', color: 'var(--sg-danger-light)', border: '1px solid var(--sg-danger-bg)',
                 }} title="LSP errors">
                   ✕ {lspDiag.errors}
                 </span>
@@ -3107,7 +3107,7 @@ export default function Chat() {
               {lspDiag.warnings > 0 && (
                 <span style={{
                   padding: '1px 5px', borderRadius: '8px', fontSize: '10px',
-                  background: '#2a2a1a', color: '#ffd93d', border: '1px solid #4a4a2a',
+                  background: 'var(--sg-warning-bg)', color: 'var(--sg-warning)', border: '1px solid var(--sg-warning-bg)',
                 }} title="LSP warnings">
                   ⚠ {lspDiag.warnings}
                 </span>
