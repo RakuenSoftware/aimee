@@ -47,14 +47,14 @@ interface PersonaDef {
   builtin?: boolean;
 }
 
-const lbl: React.CSSProperties = { fontSize: 12, color: "#666", display: "block", marginBottom: 2 };
+const lbl: React.CSSProperties = { fontSize: 12, color: "var(--sg-text-secondary)", display: "block", marginBottom: 2 };
 const ta: React.CSSProperties = {
   width: "100%",
   fontFamily: "ui-monospace, monospace",
   fontSize: 12,
   padding: 6,
   borderRadius: 6,
-  border: "1px solid #ccc",
+  border: "1px solid var(--sg-border-medium)",
   boxSizing: "border-box",
 };
 const nameOk = (s: string) => /^[a-z0-9][a-z0-9_-]*$/i.test(s);
@@ -159,7 +159,7 @@ export default function Personas() {
 
       <div style={{ maxWidth: 720 }}>
         <Panel title="Personas" count={personas.length}>
-          <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+          <p style={{ fontSize: 12, color: "var(--sg-text-secondary)", margin: "0 0 8px" }}>
             A persona is a delegate identity plus the roles it may use. Roles (and their per-role turn caps) are
             edited on the <strong>Roles</strong> tab.
           </p>
@@ -169,7 +169,7 @@ export default function Personas() {
                 key={p.name}
                 size="md"
                 onClick={() => openPersona(p.name)}
-                style={{ background: form?.name === p.name ? "#e8eef9" : "#fff" }}
+                style={{ background: form?.name === p.name ? "var(--sg-info-bg)" : "var(--sg-surface)" }}
                 title={p.description || ""}
               >
                 {p.name}
@@ -216,8 +216,8 @@ export default function Personas() {
                         size="sm"
                         onClick={() => toggleRole(r)}
                         style={{
-                          background: on ? "#1f7a3d" : "#fff",
-                          color: on ? "#fff" : r === "all" ? "#a15" : "#333",
+                          background: on ? "var(--sg-success-dark)" : "var(--sg-surface)",
+                          color: on ? "var(--sg-surface)" : r === "all" ? "var(--sg-danger-dark)" : "var(--sg-text)",
                           fontWeight: r === "all" ? 600 : 400,
                         }}
                       >

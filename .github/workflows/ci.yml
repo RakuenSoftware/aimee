@@ -272,7 +272,13 @@ jobs:
             [ -S "$sock" ] && break
             sleep 0.1
           done
-          AIMEE_SOCK="$sock" AIMEE_BUNDLED_SKILLS_DIR="$PWD/skills" ./aimee skill lint --all
+          # The client only ever talks to an EXPLICITLY configured endpoint; it
+          # no longer discovers a co-located server. aimee-server publishes its
+          # /v1 socket under its config dir (config_default_dir()/aimee-http.sock),
+          # not next to --socket, so point at that.
+          AIMEE_SOCK="$sock" \
+            AIMEE_API_ENDPOINT="unix:$HOME/.config/aimee/aimee-http.sock" \
+            AIMEE_BUNDLED_SKILLS_DIR="$PWD/skills" ./aimee skill lint --all
       - name: Smoke test
         run: |
           ./aimee version

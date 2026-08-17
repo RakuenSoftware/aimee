@@ -87,12 +87,12 @@ export default function GitIdentity({ onSaved, onSkip, fetchImpl = fetch }: {
 
   const input: React.CSSProperties = {
     width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 6,
-    border: '1px solid #ccd3dc', fontSize: 13,
+    border: '1px solid var(--sg-border-medium)', fontSize: 13,
   };
 
   return (
     <div style={{ display: 'grid', gap: 11 }}>
-      <p style={{ fontSize: 12.5, color: '#667', margin: 0, lineHeight: 1.45 }}>
+      <p style={{ fontSize: 12.5, color: 'var(--sg-text-secondary)', margin: 0, lineHeight: 1.45 }}>
         Aimee refuses to invent a commit author. This identity is sealed in the Vault and used by
         CLI, delegate, and workflow commits; it is never written to container environment config.
         Existing installations show one Setup item until both fields are stored. If you skip,
@@ -111,7 +111,7 @@ export default function GitIdentity({ onSaved, onSkip, fetchImpl = fetch }: {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
         <button type="button" onClick={onSkip} disabled={saving}
           title="Commits will be refused until both fields are stored"
-          style={{ border: 0, background: 'none', color: '#778', cursor: 'pointer', padding: 0 }}>
+          style={{ border: 0, background: 'none', color: 'var(--sg-text-faint)', cursor: 'pointer', padding: 0 }}>
           Skip for now — commits will be refused
         </button>
         <Button variant="primary" disabled={saving} onClick={save}>

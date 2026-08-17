@@ -19,9 +19,9 @@ export function BootstrapBanner({ onGenerate, onDismiss, stacks }: BannerProps) 
       : 'No stack detected.';
 
   return (
-    <div style={{ margin: '8px 16px 0', padding: '10px 14px', background: '#1a2a1a', border: '1px solid #2d4d2d', borderRadius: '6px', color: '#adb', flexShrink: 0 }}>
-      <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#8c8' }}>No .aimee-rules file found</div>
-      <div style={{ fontSize: '12px', color: '#bbb', margin: '3px 0' }}>{stackText}</div>
+    <div style={{ margin: '8px 16px 0', padding: '10px 14px', background: 'var(--sg-success-bg)', border: '1px solid var(--sg-success-bg)', borderRadius: '6px', color: 'var(--sg-success)', flexShrink: 0 }}>
+      <div style={{ fontWeight: 'bold', fontSize: '13px', color: 'var(--sg-success)' }}>No .aimee-rules file found</div>
+      <div style={{ fontSize: '12px', color: 'var(--sg-text-pale)', margin: '3px 0' }}>{stackText}</div>
       <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
         <Button variant="primary" size="sm" onClick={onGenerate}>
           Generate .aimee-rules
@@ -59,8 +59,8 @@ export const Message = memo(function Message({ role, text, streaming }: { role: 
     wordBreak: 'normal',
     hyphens: 'none',
     alignSelf: role === 'user' ? 'flex-end' : 'flex-start',
-    background: role === 'user' ? '#1a3a5c' : tokens.surface,
-    color: role === 'user' ? '#cdf' : tokens.text,
+    background: role === 'user' ? 'var(--sg-info-bg)' : tokens.surface,
+    color: role === 'user' ? 'var(--sg-info-border)' : tokens.text,
     border: role === 'assistant' ? `1px solid ${tokens.border}` : 'none',
     borderBottomRightRadius: role === 'user' ? 2 : 10,
     borderBottomLeftRadius: role === 'assistant' ? 2 : 10,
@@ -107,8 +107,8 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ text }: { text: s
 
 export const DiffBlock = memo(function DiffBlock({ path, diff }: { path?: string; diff: string }) {
   return (
-    <details style={{ margin: '4px 0', padding: '8px 10px', background: '#0d1117', borderLeft: '3px solid #444', borderRadius: '4px', fontSize: '12px', alignSelf: 'flex-start', maxWidth: '90%' }}>
-      <summary style={{ cursor: 'pointer', color: '#8bf', fontSize: '12px', fontFamily: 'monospace' }}>{path ? `diff: ${path}` : 'diff'}</summary>
+    <details style={{ margin: '4px 0', padding: '8px 10px', background: 'var(--sg-dark-surface)', borderLeft: '3px solid var(--sg-text-muted)', borderRadius: '4px', fontSize: '12px', alignSelf: 'flex-start', maxWidth: '90%' }}>
+      <summary style={{ cursor: 'pointer', color: 'var(--sg-primary)', fontSize: '12px', fontFamily: 'monospace' }}>{path ? `diff: ${path}` : 'diff'}</summary>
       <DiffViewer diff={diff} />
     </details>
   );
@@ -141,8 +141,8 @@ export function RewindMarker({ snapshotId, sid }: { snapshotId: number; sid: str
         </button>
       )}
       {status === 'pending' && <span style={{ color: tokens.textHint }}>Rewinding…</span>}
-      {status === 'done' && <span style={{ color: '#4ec94e' }}>Restored - conversation cleared</span>}
-      {status === 'error' && <span style={{ color: '#f87171' }}>Rewind failed</span>}
+      {status === 'done' && <span style={{ color: 'var(--sg-success)' }}>Restored - conversation cleared</span>}
+      {status === 'error' && <span style={{ color: 'var(--sg-danger-light)' }}>Rewind failed</span>}
     </div>
   );
 }
