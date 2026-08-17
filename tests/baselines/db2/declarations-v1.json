@@ -1205,6 +1205,10 @@
       "path": "src/tests/test_workspace_memory.c"
     },
     {
+      "classification": "private-implementation-test",
+      "path": "src/tests/vault_witness_provider_fixture.h"
+    },
+    {
       "classification": "host-generated-client",
       "path": "src/tools/witness_boot_tpm_harness.c"
     },
@@ -1407,7 +1411,8 @@
     },
     {
       "consumers": [
-        "src/tests/test_witness_checkpoint_produce_pg.c"
+        "src/tests/test_witness_checkpoint_produce_pg.c",
+        "src/tests/vault_witness_provider_fixture.h"
       ],
       "locations": [
         {
@@ -24391,7 +24396,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "71465bb9e9b26a4aece1996e33d5529ac0add7256bf8490c5d50a9e962d226a3",
+  "fingerprint": "24e2112eafed1a098e654a321b7e8968d8ed3986098f37b3c621fc476a74174d",
   "module": "db2",
   "schema_version": 1,
   "summary": {

@@ -67,6 +67,16 @@ static int kb_health_probe(int *kb_tables_ok)
    return 0;
 }
 
+int db2_health_probe(int *schema_ok, int *have_pg_trgm)
+{
+   return health_probe(schema_ok, have_pg_trgm);
+}
+
+int db2_kb_health_probe(int *kb_tables_ok)
+{
+   return kb_health_probe(kb_tables_ok);
+}
+
 static void *run_process(void *argument)
 {
    process_thread_t *thread = argument;

@@ -221,8 +221,9 @@ def compiler_command(module: dict[str, object], root: Path, bundle: Path, output
     # sections db1 has to satisfy every symbol its 62 sources mention, which
     # drags in another module's config.c and the yaml parser behind it.
     return [
-        cc, "-std=c11", "-D_GNU_SOURCE=", "-O2", "-Wall", "-Wextra", "-Werror",
-        "-Wno-format-truncation", "-ffunction-sections", "-fdata-sections",
+        cc, "-std=c11", "-D_GNU_SOURCE=", "-Os", "-Wall", "-Wextra", "-Werror",
+        "-Wno-unused-parameter", "-Wno-format-truncation", "-Wno-unused-result",
+        "-ffunction-sections", "-fdata-sections",
         *(f"-I{path}" for path in include_paths), *(f"-D{item}" for item in definitions),
         *cflags, str(main),
         *(str(path) for path in owned_sources), *(str(path) for path in core_sources),

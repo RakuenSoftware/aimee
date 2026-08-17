@@ -2,11 +2,11 @@
 
 ## Purpose and non-goals
 
-`db2` is the KB-local process boundary for the shared PostgreSQL knowledge store. The first
-increment registers a separately buildable C process and freezes its lifecycle-health wire format
-while the existing implementation remains authoritative in the KB process. It does not activate a
-second store owner, send SQL over the bus, or claim that the C implementation has already been
-carved out of the KB link.
+`db2` is the KB-local process boundary for the shared PostgreSQL knowledge store. Its
+disabled-by-default C process now compiles the complete descriptor-owned DB2 implementation and
+freezes the lifecycle-health wire format while the same implementation remains authoritative in the
+KB process. It does not activate a second store owner or send SQL over the bus; replay and the atomic
+consumer cutover still precede activation.
 
 ## Public contracts
 
@@ -18,8 +18,8 @@ so C, Go, `aimee-kb`, and parity harnesses exercise the same bytes and contract 
 package is caller-side only during phase one: it does not read the DB2 DSN, open PostgreSQL, serve a
 stage, or become a second DB2 owner. The fixed eight-byte request carries only magic and wire version. The
 fixed sixteen-byte response carries schema, `pg_trgm`, and KB-table evidence; unknown flags and
-non-zero reserved bytes fail closed. Until the descriptor includes the complete DB2 C closure, an
-exported standalone process returns typed `capability_absent` instead of reporting false readiness.
+non-zero reserved bytes fail closed. The exported process now binds that response to the strong
+production DB2 health probes; explicit injected backends are confined to tests.
 
 ## Dependencies and consumers
 
@@ -446,22 +446,24 @@ callbacks, and composite transactions still require an explicit provider-neutral
 
 ## Data and migrations
 
-This increment performs no reads, writes, schema changes, or migrations in `aimee-module-db2`.
-The existing C DB2 owner retains those responsibilities until its complete source and dependency
-closure is packaged and replay-tested behind this process boundary.
+When explicitly launched, `aimee-module-db2` opens PostgreSQL through the existing `db2_init`
+lifecycle and applies or validates the unchanged DB2 schema. It remains disabled by default, so the
+existing in-process owner retains deployed responsibility until replay passes and S4 transfers the
+DSN, startup order, callers, and link ownership atomically.
 
 ## Security and privacy
 
 The wire contains capability bits only. DSNs, SQL, row contents, identities, and driver errors do
 not cross the bus. Runtime admission continues to pin the executable path, UID, principal class,
-principal reference, and event-kind grant. The `AIMEE_DB2_URL` secret remains with the current owner
-until the activation image transfers it exclusively to the module process.
+principal reference, and event-kind grant. The process reads `AIMEE_DB2_URL` during initialization,
+never echoes it or a libpq diagnostic, and refuses bus attachment on missing or failed initialization.
 
 ## Supported journeys
 
-Build tooling exports and compiles `aimee-module-db2` from its descriptor. A test backend can prove
-the complete health encode-handler-decode path. A production bundle without the still-unmigrated C
-closure returns `capability_absent`, making partial packaging visible and non-authoritative.
+Build tooling exports and compiles `aimee-module-db2` from all 138 descriptor-owned DB2 translation
+units plus its reviewed support closure. The generated main opens the real backend before attaching;
+the health handler then reports the real schema, extension, and KB-table evidence. Test injection
+continues to cover every response and failure shape without providing a production fallback.
 
 ## Tests and failure behavior
 
@@ -494,9 +496,9 @@ fork safety, descriptor closure, and sanitizer-clean execution.
 
 ## Operational diagnostics
 
-Before activation this process is a packaging and contract probe only. `capability_absent` means the
-standalone runtime has not yet acquired the complete DB2 backend; it is not a database-health
-verdict. Existing KB health remains unchanged.
+Before activation this real process remains disabled by default. A startup failure means its DSN is
+absent or DB2 initialization failed; a served lifecycle response is the strong DB2/KB health verdict.
+Existing deployed KB health remains unchanged until the S4 ownership cutover.
 
 ## Compatibility
 

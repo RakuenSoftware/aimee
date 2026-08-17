@@ -124,7 +124,9 @@ class RuntimeBundleBuildTests(unittest.TestCase):
                 self.assertEqual(arguments.count(str(source)), 1)
             for flag in ("-I/pkg/include", "-L/pkg/lib", "-lpq", "-lcrypto",
                          "-pthread", "-lz", "-lm", "-lzstd", "-DAIMEE_DB1_DISABLED",
-                         "-DAIMEE_DISABLE_DB2_SQLITE_SHIM"):
+                         "-DAIMEE_DISABLE_DB2_SQLITE_SHIM", "-Os",
+                         "-Wno-unused-parameter", "-Wno-format-truncation",
+                         "-Wno-unused-result"):
                 self.assertIn(flag, arguments)
         finally:
             temporary.cleanup()

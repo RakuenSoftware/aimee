@@ -2,27 +2,15 @@
 
 #include <aimee/db2/module_api.h>
 
-#if defined(__GNUC__) || defined(__clang__)
-extern int db2_health_probe(int *, int *) __attribute__((weak));
-extern int db2_kb_health_probe(int *) __attribute__((weak));
-#define AIMEE_DB2_WEAK_BACKEND 1
-#else
-#define AIMEE_DB2_WEAK_BACKEND 0
-#endif
+#include "c/db2.h"
 
 static const aimee_db2_module_backend_t *production_backend(void)
 {
-#if AIMEE_DB2_WEAK_BACKEND
    static const aimee_db2_module_backend_t backend = {
        .health_probe = db2_health_probe,
        .kb_health_probe = db2_kb_health_probe,
    };
-   if (!db2_health_probe || !db2_kb_health_probe)
-      return NULL;
    return &backend;
-#else
-   return NULL;
-#endif
 }
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

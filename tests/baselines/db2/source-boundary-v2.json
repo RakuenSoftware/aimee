@@ -1,17 +1,17 @@
 {
   "schema_version": 2,
-  "source_revision": "bcae23e9be3b6b8b6e87b436178366d1a128544c",
+  "source_revision": "9c431e01de78a8725efc0b093e2544a4fc855a14",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 138,
-    "headers": 136,
+    "headers": 137,
     "sql_files": 6,
-    "consumer_files": 304,
+    "consumer_files": 305,
     "production_consumers": 151,
-    "test_consumers": 153,
-    "include_directives": 992,
-    "outbound_dependency_rows": 169,
-    "outbound_include_directives": 169
+    "test_consumers": 154,
+    "include_directives": 994,
+    "outbound_dependency_rows": 164,
+    "outbound_include_directives": 164
   },
   "source_files": {
     "c": [
@@ -192,6 +192,7 @@
       "src/modules/db2/c/db2_pool.h",
       "src/modules/db2/c/db2_tenant.h",
       "src/modules/db2/c/db2_test_shim.h",
+      "src/modules/db2/c/db2_vault_witness_provider.h",
       "src/modules/db2/c/db2_witness_checkpoint.h",
       "src/modules/db2/c/db2_witness_emit.h",
       "src/modules/db2/c/db_postgres.h",
@@ -4659,6 +4660,10 @@
           "count": 1
         },
         {
+          "header": "../modules/db2/c/db2_tenant.h",
+          "count": 1
+        },
+        {
           "header": "../modules/db2/c/db_postgres.h",
           "count": 1
         },
@@ -6041,6 +6046,16 @@
       ]
     },
     {
+      "path": "src/tests/vault_witness_provider_fixture.h",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "modules/db2/c/db2_vault_witness_provider.h",
+          "count": 1
+        }
+      ]
+    },
+    {
       "path": "src/tools/witness_boot_tpm_harness.c",
       "classification": "host-generated-client",
       "includes": [
@@ -6119,13 +6134,6 @@
     },
     {
       "source": "src/modules/db2/c/artifacts.c",
-      "header": "kb_mdl.h",
-      "resolved": "src/kb_mdl.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/artifacts.c",
       "header": "platform_random.h",
       "resolved": "src/headers/platform_random.h",
       "classification": "host-api",
@@ -6184,6 +6192,13 @@
       "source": "src/modules/db2/c/canonical_index.c",
       "header": "modules/memory/memory_ontology.h",
       "resolved": "src/modules/memory/memory_ontology.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/canonical_index.h",
+      "header": "css_analyze.h",
+      "resolved": "src/modules/css/css_analyze.h",
       "classification": "module-private-api",
       "count": 1
     },
@@ -6454,13 +6469,6 @@
       "count": 1
     },
     {
-      "source": "src/modules/db2/c/css_render.c",
-      "header": "css_render_oracle.h",
-      "resolved": "src/modules/css/css_render_oracle.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
       "source": "src/modules/db2/c/curiosity.c",
       "header": "util.h",
       "resolved": "src/headers/util.h",
@@ -6524,9 +6532,37 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/db2_vault_witness_provider.h",
+      "header": "modules/vault/vault_witness_checkpoint.h",
+      "resolved": "src/modules/vault/vault_witness_checkpoint.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_vault_witness_provider.h",
+      "header": "modules/vault/vault_witness_merkle.h",
+      "resolved": "src/modules/vault/vault_witness_merkle.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_vault_witness_provider.h",
+      "header": "modules/vault/vault_witness_record.h",
+      "resolved": "src/modules/vault/vault_witness_record.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/db2_witness_checkpoint.c",
       "header": "modules/vault/vault_witness_checkpoint.h",
       "resolved": "src/modules/vault/vault_witness_checkpoint.h",
+      "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/db2_witness_checkpoint.c",
+      "header": "modules/vault/vault_witness_export.h",
+      "resolved": "src/modules/vault/vault_witness_export.h",
       "classification": "module-private-api",
       "count": 1
     },
@@ -6545,20 +6581,6 @@
       "count": 1
     },
     {
-      "source": "src/modules/db2/c/db2_witness_checkpoint.c",
-      "header": "modules/vault/vault_witness_signer.h",
-      "resolved": "src/modules/vault/vault_witness_signer.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/db2_witness_checkpoint.c",
-      "header": "modules/vault/vault_witness_verify.h",
-      "resolved": "src/modules/vault/vault_witness_verify.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
       "source": "src/modules/db2/c/db2_witness_emit.c",
       "header": "modules/vault/vault_witness_checkpoint.h",
       "resolved": "src/modules/vault/vault_witness_checkpoint.h",
@@ -6569,13 +6591,6 @@
       "source": "src/modules/db2/c/db2_witness_emit.c",
       "header": "modules/vault/vault_witness_record.h",
       "resolved": "src/modules/vault/vault_witness_record.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/db2_witness_emit.c",
-      "header": "modules/vault/vault_witness_signer.h",
-      "resolved": "src/modules/vault/vault_witness_signer.h",
       "classification": "module-private-api",
       "count": 1
     },
@@ -6674,13 +6689,6 @@
       "source": "src/modules/db2/c/fact_ingest.c",
       "header": "../support/db2_runtime_config.h",
       "resolved": "src/modules/db2/support/db2_runtime_config.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/fact_ingest.c",
-      "header": "modules/memory/memory_extract_patterns.h",
-      "resolved": "src/modules/memory/memory_extract_patterns.h",
       "classification": "module-private-api",
       "count": 1
     },
@@ -6794,13 +6802,6 @@
       "header": "cJSON.h",
       "resolved": "src/modules/db2/support/cJSON.h",
       "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/kb_payload.c",
-      "header": "memory.h",
-      "resolved": "src/headers/memory.h",
-      "classification": "host-api",
       "count": 1
     },
     {
@@ -7203,20 +7204,6 @@
       "count": 1
     },
     {
-      "source": "src/modules/db2/c/vault_operator_rewrap_runtime.c",
-      "header": "vault_mutation_budget.h",
-      "resolved": "src/modules/vault/vault_mutation_budget.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/vault_operator_rewrap_runtime.c",
-      "header": "vault_reseal_receipt.h",
-      "resolved": "src/modules/vault/vault_reseal_receipt.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
       "source": "src/modules/db2/c/vault_pg.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
@@ -7227,13 +7214,6 @@
       "source": "src/modules/db2/c/vault_pg.c",
       "header": "vault_crypto.h",
       "resolved": "src/modules/vault/vault_crypto.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/vault_pg.c",
-      "header": "vault_kek_check.h",
-      "resolved": "src/modules/vault/vault_kek_check.h",
       "classification": "module-private-api",
       "count": 1
     },
@@ -7280,5 +7260,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "7c2a06ceaaf470593de8e04bcb4bbb2f0648c16d0394d013cb182b9236f38880"
+  "fingerprint": "ad9eba03a9a2f086d0a51347d7733ab751655f91c6dd78490338c7cf99dd7192"
 }

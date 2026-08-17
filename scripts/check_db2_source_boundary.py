@@ -63,6 +63,10 @@ HOST_ADAPTER_REHOMES = {
 }
 ADMITTED_SUPPORT_TEST_INCLUDES = {
     (
+        "src/tests/test_kb.c",
+        "../modules/db2/c/db2_tenant.h",
+    ),
+    (
         "src/tests/test_db2_extractor_support.c",
         "../modules/db2/support/db2_extractors.h",
     ),
@@ -78,12 +82,47 @@ ADMITTED_SUPPORT_TEST_INCLUDES = {
         "src/tests/test_db2_runtime_config_support.c",
         "../modules/db2/support/db2_runtime_config.h",
     ),
+    (
+        "src/tests/vault_witness_provider_fixture.h",
+        "modules/db2/c/db2_vault_witness_provider.h",
+    ),
 }
 ADMITTED_HOST_ADAPTER_INCLUDES = {
     (
         "src/kb/db2_adapters/kb_service_backend_runtime.c",
         "modules/db2/c/kb_service_backend.h",
     ),
+}
+# Reviewed S2 dependency inversions may introduce only these exact private
+# contract imports. They replace broader host/vault/CSS implementation edges;
+# pinning source, spelling, resolution, class, and count keeps this exception
+# from becoming a general dependency-growth escape hatch.
+ADMITTED_OUTBOUND_DEPENDENCIES = {
+    (
+        "src/modules/db2/c/canonical_index.h",
+        "css_analyze.h",
+        "src/modules/css/css_analyze.h",
+    ): (1, "module-private-api"),
+    (
+        "src/modules/db2/c/db2_vault_witness_provider.h",
+        "modules/vault/vault_witness_checkpoint.h",
+        "src/modules/vault/vault_witness_checkpoint.h",
+    ): (1, "module-private-api"),
+    (
+        "src/modules/db2/c/db2_vault_witness_provider.h",
+        "modules/vault/vault_witness_merkle.h",
+        "src/modules/vault/vault_witness_merkle.h",
+    ): (1, "module-private-api"),
+    (
+        "src/modules/db2/c/db2_vault_witness_provider.h",
+        "modules/vault/vault_witness_record.h",
+        "src/modules/vault/vault_witness_record.h",
+    ): (1, "module-private-api"),
+    (
+        "src/modules/db2/c/db2_witness_checkpoint.c",
+        "modules/vault/vault_witness_export.h",
+        "src/modules/vault/vault_witness_export.h",
+    ): (1, "module-private-api"),
 }
 
 
@@ -528,7 +567,11 @@ def enforce_shrink_only(previous: object, current: object) -> None:
     for key, (count, classification) in current_rows.items():
         prior = previous_rows.get(key)
         if prior is None:
-            if key in ADMITTED_SUPPORT_TEST_INCLUDES or key in ADMITTED_HOST_ADAPTER_INCLUDES:
+            if (key in ADMITTED_SUPPORT_TEST_INCLUDES and count <= 1 and
+                    classification == "private-implementation-test"):
+                continue
+            if (key in ADMITTED_HOST_ADAPTER_INCLUDES and count <= 1 and
+                    classification == "kb-generated-client"):
                 continue
             old_source = rehome_origins.get(key[0])
             if old_source in previous_source_paths:
@@ -556,6 +599,9 @@ def enforce_shrink_only(previous: object, current: object) -> None:
         prior = previous_dependencies.get(key)
         if prior is None:
             source, header, resolved = key
+            admitted = ADMITTED_OUTBOUND_DEPENDENCIES.get(key)
+            if admitted is not None and count <= admitted[0] and classification == admitted[1]:
+                continue
             # A private KB contract may move to the host's public header boundary
             # without becoming new dependency debt. Require the same source and
             # basename, a directional src/kb -> src/headers move, a narrower

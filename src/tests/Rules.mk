@@ -761,6 +761,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
 TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-bus-db2-module \
+                $(TESTPREFIX)/unit-test-db2-module-init \
                 $(TESTPREFIX)/unit-test-db2-cert-serial-support \
                 $(TESTPREFIX)/unit-test-db2-cjson-support \
                 $(TESTPREFIX)/unit-test-db2-cochange-support \
@@ -3317,6 +3318,16 @@ $(TESTPREFIX)/unit-test-db2-module-contract: \
 unit-test-db2-module-contract: $(TESTPREFIX)/unit-test-db2-module-contract
 	$<
 
+$(OBJDIR)/tests/test_db2_module_init.o: C_FLAGS += -Imodules/db2
+$(OBJDIR)/modules/db2/module_init.o: C_FLAGS += -Imodules/db2 -Imodules/db2/c
+$(TESTPREFIX)/unit-test-db2-module-init: $(OBJDIR)/tests/test_db2_module_init.o \
+                                        $(OBJDIR)/modules/db2/module_init.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+.PHONY: unit-test-db2-module-init
+unit-test-db2-module-init: $(TESTPREFIX)/unit-test-db2-module-init
+	$<
+
 $(OBJDIR)/tests/test_bus_db2_module.o: C_FLAGS += -Icore/event_bus/include \
                                                    -Imodules/db2 \
                                                    -Imodules/db2/include
@@ -5083,6 +5094,31 @@ $(OBJDIR)/aimee-module-db1:
 	@rm -rf $(OBJDIR)/module-bundle
 	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/module-bundle >/dev/null
 	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/module-bundle --output $(abspath $(OBJDIR)) --placement server >/dev/null
+
+# DB2 is granted but not started by default in the KB image. This target proves
+# that its complete descriptor-owned source set still produces the executable
+# the grant names; schema_data.h is the ordinary tree-owned generated input.
+$(OBJDIR)/aimee-module-db2: schema_data.h
+	@rm -rf $(OBJDIR)/db2-module-bundle
+	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/db2-module-bundle >/dev/null
+	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/db2-module-bundle --output $(abspath $(OBJDIR)) --placement kb >/dev/null
+
+.PHONY: check-db2-module-runtime
+check-db2-module-runtime: $(OBJDIR)/aimee-module-db2
+	@log="$$(mktemp)"; trap 'rm -f "$$log"' EXIT; \
+	if env -u AIMEE_DB2_URL $(abspath $<) /tmp/aimee-db2-no-bus.sock > /dev/null 2>"$$log"; then \
+	  echo "DB2 module attached without AIMEE_DB2_URL" >&2; exit 1; \
+	fi; \
+	grep -q '^db2: AIMEE_DB2_URL is unset; refusing to serve$$' "$$log"; \
+	if AIMEE_DB2_URL='postgresql://db2:sentinel-secret@127.0.0.1:1/aimee?connect_timeout=1' \
+	     $(abspath $<) /tmp/aimee-db2-no-bus.sock > /dev/null 2>"$$log"; then \
+	  echo "DB2 module attached after failed initialization" >&2; exit 1; \
+	fi; \
+	grep -q '^db2: database initialization failed; refusing to serve$$' "$$log"; \
+	if grep -q 'sentinel-secret' "$$log"; then \
+	  echo "DB2 module leaked its DSN" >&2; exit 1; \
+	fi; \
+	echo "DB2 module runtime: complete link and fail-closed initialization ok"
 
 $(TESTPREFIX)/unit-test-db1-agent-work-client: \
                                        $(OBJDIR)/tests/test_db1_agent_work_client.o \

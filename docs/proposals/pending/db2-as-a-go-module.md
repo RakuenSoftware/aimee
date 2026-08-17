@@ -1,13 +1,16 @@
 # Proposal: put DB2 behind a module boundary, then port it to Go
 
-- **State:** PENDING — residual scope only. S1 is complete, S2 is in progress, and S4/S6 remain open.
+- **State:** PENDING — residual scope only. S1 and S2 are complete, S3 is in progress, and S4/S6 remain open.
 - **Completed slices:** The C source boundary, separately buildable process shell, generated health
   contract/client, declaration and
   closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
   support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
   deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
   link closure is complete. Its closure records 139 external symbols, all declared system links;
-  packaging, injected-contract, portable API, private-implementation, and dead-code debt are zero. This is
+  packaging, injected-contract, portable API, private-implementation, and dead-code debt are zero.
+  The disabled-by-default runtime bundle now compiles all 138 DB2 owner translation units into a
+  real `aimee-module-db2`, opens only from `AIMEE_DB2_URL`, and serves health through strong backend
+  symbols; missing or failed initialization refuses attachment without logging the DSN. This is
   explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
