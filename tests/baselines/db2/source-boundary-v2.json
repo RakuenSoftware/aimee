@@ -1,15 +1,15 @@
 {
   "schema_version": 2,
-  "source_revision": "ef432c9f4229957557a99e35ae3ace119719bc18",
+  "source_revision": "d97ab98e6093b06cb5a32ece2bcf6e563b3b43e5",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 138,
     "headers": 136,
     "sql_files": 6,
-    "consumer_files": 303,
+    "consumer_files": 304,
     "production_consumers": 151,
-    "test_consumers": 152,
-    "include_directives": 991,
+    "test_consumers": 153,
+    "include_directives": 992,
     "outbound_dependency_rows": 169,
     "outbound_include_directives": 169
   },
@@ -4247,6 +4247,16 @@
       ]
     },
     {
+      "path": "src/tests/test_db2_extractor_support.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "../modules/db2/support/db2_extractors.h",
+          "count": 1
+        }
+      ]
+    },
+    {
       "path": "src/tests/test_db2_hardening.c",
       "classification": "private-implementation-test",
       "includes": [
@@ -7270,5 +7280,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "83df03f733aa2a79843d55db7fe7090ca9f39a079c691975a83f5737ecbced45"
+  "fingerprint": "7c2a06ceaaf470593de8e04bcb4bbb2f0648c16d0394d013cb182b9236f38880"
 }

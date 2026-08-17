@@ -1992,6 +1992,7 @@ module-inventory-check:
 
 db2-contract-check:
 	@cd .. && python3 -I -S scripts/gen_db2_contract.py
+	@cd .. && python3 -I -S scripts/gen_db2_extractor_support.py --check
 
 db3-contract-check:
 	@cd .. && python3 -I -S scripts/gen_db3_contract.py

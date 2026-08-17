@@ -802,6 +802,10 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_db2_extractor_support.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_db2_hardening.c"
     },
     {
@@ -23699,7 +23703,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "4c41d4e4e406aa393fb61f5dcd68b4758a4879f8444a53d3e6ec783bf03e4122",
+  "fingerprint": "587de3b8afa2b24c5238605d8c56f240364afa6b6c74f8c67620c7b675af1fd6",
   "module": "db2",
   "schema_version": 1,
   "summary": {

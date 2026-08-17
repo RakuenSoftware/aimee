@@ -6,8 +6,8 @@
   closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
   support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
   deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
-  closure currently records 203 external symbols: 139 declared system links, 59 sibling contracts
-  to inject, and 5 portable APIs to close. This is explicitly not the S4 atomic ownership cutover or
+  closure currently records 198 external symbols: 139 declared system links, 59 sibling contracts
+  to inject, and zero portable APIs left to close. This is explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
 - **Date:** 2026-08-15.
@@ -476,11 +476,12 @@ normal and hardened builds. The unit has no imports and does not change DB2 or D
 Later admitted units now own the pinned cJSON input, portable randomness, and the generated full-field
 relationship seed. Process logging now crosses one bounded, startup-installed sink that preserves
 level, module, and a capped formatted message without linking the host logger into DB2; normal and
-hardened tests cover startup absence, formatting, truncation, invalid calls, and removal. The
-only remaining portable support cluster is the five canonical-index language-extractor entry
-points, which bring a broad parser/helper closure. Process lifecycle, session, and briefing helpers
-are sibling-contract work rather than support-copy candidates. Each requires its own coherent
-contract and parity slice rather than being folded into an unrelated unit.
+hardened tests cover startup absence, formatting, truncation, invalid calls, and removal. The final
+portable cluster now packages the five canonical-index language-extractor entry points as one
+reproducibly generated fallback parser. It preserves the default no-tree-sitter behavior, embeds the
+shared C system-header policy, and omits the separate import-identity helpers. Normal and hardened
+parity replay all supported language families against the authoritative monolith. Process lifecycle,
+session, and briefing helpers remain sibling-contract work rather than support-copy candidates.
 
 The three former `kb_service_backend_{memory,agent,export}.c` units are not support candidates or DB2
 implementation. They compose KB JSON/RPC responses while invoking high-level memory, dashboard,

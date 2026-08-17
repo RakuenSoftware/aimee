@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "ef432c9f4229957557a99e35ae3ace119719bc18",
-  "source_fingerprint": "664efe7cd122cc191d8e4d5cf0b9a5cb987211c94b5b9b66b5d209c2f2c12134",
+  "source_revision": "d97ab98e6093b06cb5a32ece2bcf6e563b3b43e5",
+  "source_fingerprint": "c5ce3d01d162721b0d0ddc4d4f9bebdd1e29a7903f78cf6b8113ff73687e6a43",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -506,6 +506,122 @@
       },
       "provenance": "Definitions and required static helpers promoted from src/dstr.c; all DB2 calls audited in src/modules/db2/c/collab_rules.c.",
       "evidence": "Three deterministic dynamic-string lifecycle functions with only realloc and vsnprintf imports; no DB2, event-bus, provider, I/O, or platform dependency."
+    },
+    {
+      "path": "src/modules/db2/support/extractor_primitives.c",
+      "source_sha256": "a45293cfe677b6dbe091784cd0664a7730b673eb26a2789d33995732431b9fad",
+      "header": "src/modules/db2/support/db2_extractors.h",
+      "header_sha256": "025041d001c95f10cc3c69796f2104eda877a7a5c7aee35763fb97574b09c1a6",
+      "defines": [
+        "add_call",
+        "add_def",
+        "add_str",
+        "c_call_line",
+        "c_def_line",
+        "c_export_line",
+        "c_import_line",
+        "c_macro_def_line",
+        "code_def_end_line",
+        "cs_def_line",
+        "cs_export_line",
+        "cs_import_line",
+        "cs_route_line",
+        "css_export_line",
+        "css_import_line",
+        "dart_def_line",
+        "dart_export_line",
+        "dart_import_line",
+        "extract_calls",
+        "extract_definitions",
+        "extract_exports",
+        "extract_ident",
+        "extract_imports",
+        "extract_imports_sys",
+        "extract_quoted",
+        "extract_routes",
+        "for_each_line",
+        "generic_call_line",
+        "go_call_line",
+        "index_has_extractor",
+        "java_def_line",
+        "java_export_line",
+        "java_import_line",
+        "java_route_line",
+        "js_call_line",
+        "kotlin_def_line",
+        "kotlin_export_line",
+        "kotlin_import_line",
+        "kotlin_route_line",
+        "lua_def_line",
+        "lua_export_line",
+        "lua_import_line",
+        "php_def_line",
+        "php_export_line",
+        "php_import_line",
+        "py_call_line",
+        "ruby_def_line",
+        "ruby_export_line",
+        "ruby_import_line",
+        "ruby_route_line",
+        "rust_def_line",
+        "rust_export_line",
+        "rust_import_line",
+        "sh_def_line",
+        "sh_import_line",
+        "skip_ws",
+        "swift_def_line",
+        "swift_export_line",
+        "swift_import_line"
+      ],
+      "resolves": [
+        "extract_calls",
+        "extract_definitions",
+        "extract_exports",
+        "extract_imports_sys",
+        "extract_routes"
+      ],
+      "allowed_includes": [
+        "db2_extractors.h",
+        "ctype.h",
+        "stdio.h",
+        "stdlib.h",
+        "string.h"
+      ],
+      "allowed_header_includes": [
+        "stddef.h"
+      ],
+      "allowed_undefined": [
+        "__ctype_b_loc",
+        "malloc",
+        "memcpy",
+        "memset",
+        "snprintf",
+        "strchr",
+        "strcmp",
+        "strlen",
+        "strncmp",
+        "strrchr",
+        "strstr"
+      ],
+      "base_references": {
+        "extract_calls": [
+          "src/modules/db2/c/canonical_index.c"
+        ],
+        "extract_definitions": [
+          "src/modules/db2/c/canonical_index.c"
+        ],
+        "extract_exports": [
+          "src/modules/db2/c/canonical_index.c"
+        ],
+        "extract_imports_sys": [
+          "src/modules/db2/c/canonical_index.c"
+        ],
+        "extract_routes": [
+          "src/modules/db2/c/canonical_index.c"
+        ]
+      },
+      "provenance": "Generated from the fallback parser bodies in src/extractors.c, src/extractors_extra.c, and src/extractors_new_langs.c; import-identity helpers remain outside this unit and the C system-header table is embedded.",
+      "evidence": "One reproducible, database-free parser cluster resolves all five canonical-index entry points. Private ABI mirrors isolate index.h; the default tree-sitter seam remains unavailable exactly as in the normal build. No DB, bus, provider, pgvector, process, filesystem, network, logging, or configuration import."
     },
     {
       "path": "src/modules/db2/support/log_primitives.c",
@@ -1506,6 +1622,7 @@
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/notes.c",
         "src/modules/db2/c/prospective_memories.c",
+        "src/modules/db2/support/extractor_primitives.c",
         "src/modules/db2/support/rel_type_primitives.c"
       ],
       "disposition": "system-link",
@@ -1792,46 +1909,6 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "extract_calls",
-      "references": [
-        "src/modules/db2/c/canonical_index.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "extract_definitions",
-      "references": [
-        "src/modules/db2/c/canonical_index.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "extract_exports",
-      "references": [
-        "src/modules/db2/c/canonical_index.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "extract_imports_sys",
-      "references": [
-        "src/modules/db2/c/canonical_index.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "extract_routes",
-      "references": [
-        "src/modules/db2/c/canonical_index.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
       "symbol": "fclose",
       "references": [
         "src/modules/db2/c/canonical_index.c",
@@ -2089,7 +2166,8 @@
         "src/modules/db2/c/pgvec_transport.c",
         "src/modules/db2/c/rules.c",
         "src/modules/db2/c/vault_pg.c",
-        "src/modules/db2/support/cjson.c"
+        "src/modules/db2/support/cjson.c",
+        "src/modules/db2/support/extractor_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2524,6 +2602,7 @@
         "src/modules/db2/c/vector_index_ops.c",
         "src/modules/db2/c/workflow_patterns.c",
         "src/modules/db2/c/write_tier_grant.c",
+        "src/modules/db2/support/extractor_primitives.c",
         "src/modules/db2/support/random_primitives.c"
       ],
       "disposition": "system-link",
@@ -2587,7 +2666,8 @@
         "src/modules/db2/c/management_action_journal.c",
         "src/modules/db2/c/management_identity_journal.c",
         "src/modules/db2/c/org_model_catalog.c",
-        "src/modules/db2/c/vault_operator_status_runtime.c"
+        "src/modules/db2/c/vault_operator_status_runtime.c",
+        "src/modules/db2/support/extractor_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2665,6 +2745,7 @@
         "src/modules/db2/c/vault_pg.c",
         "src/modules/db2/c/write_tier_grant.c",
         "src/modules/db2/support/cjson.c",
+        "src/modules/db2/support/extractor_primitives.c",
         "src/modules/db2/support/rel_seed_primitives.c",
         "src/modules/db2/support/rel_type_primitives.c"
       ],
@@ -2797,7 +2878,8 @@
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_operator_status_runtime.c",
         "src/modules/db2/c/vault_pg.c",
-        "src/modules/db2/support/cjson.c"
+        "src/modules/db2/support/cjson.c",
+        "src/modules/db2/support/extractor_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2838,7 +2920,8 @@
         "src/modules/db2/c/org_vault_rewrap.c",
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_pg.c",
-        "src/modules/db2/support/cjson.c"
+        "src/modules/db2/support/cjson.c",
+        "src/modules/db2/support/extractor_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2875,7 +2958,8 @@
         "src/modules/db2/c/corpus_structural.c",
         "src/modules/db2/c/cross_repo_build.c",
         "src/modules/db2/c/cross_repo_deps.c",
-        "src/modules/db2/c/cross_repo_identity.c"
+        "src/modules/db2/c/cross_repo_identity.c",
+        "src/modules/db2/support/extractor_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2901,7 +2985,8 @@
         "src/modules/db2/c/org_spend.c",
         "src/modules/db2/c/org_telemetry.c",
         "src/modules/db2/c/org_vault_key_use.c",
-        "src/modules/db2/c/vault_operator_status_runtime.c"
+        "src/modules/db2/c/vault_operator_status_runtime.c",
+        "src/modules/db2/support/extractor_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3231,16 +3316,16 @@
   ],
   "summary": {
     "translation_units": 138,
-    "descriptor_support_units": 12,
-    "unresolved_symbols": 203,
+    "descriptor_support_units": 13,
+    "unresolved_symbols": 198,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
       "injected-module-contract": 59,
-      "portable-core-promotion": 5,
+      "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "d96e0ce0b2b5eba73707ec43d0036e12f1d6c292c866ccc8dbbc8a7a8d622a87"
+  "fingerprint": "5bb43d0c465aa65ed0d62964d601e851ed2931439afe22323b06832c734f9031"
 }

@@ -63,6 +63,10 @@ HOST_ADAPTER_REHOMES = {
 }
 ADMITTED_SUPPORT_TEST_INCLUDES = {
     (
+        "src/tests/test_db2_extractor_support.c",
+        "../modules/db2/support/db2_extractors.h",
+    ),
+    (
         "src/tests/test_db2_log_support.c",
         "../modules/db2/support/db2_log.h",
     ),

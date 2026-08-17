@@ -110,9 +110,9 @@ the process boundary while their storage calls migrate to generated DB2 clients.
 calls as injected DB2 callbacks would recreate the monolith inside the module. The
 probe compiles each unit plus exact descriptor-owned support, combines only those objects with a
 relocatable link, supplies no archive, shared library, helper stub, or weak definition, and records
-the 203 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
+the 198 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
 disposition and rationale. The current ledger contains 139 explicit system-link dependencies, zero
-remaining vendored/generated inputs, 59 sibling or KB contracts to inject, and 5 support APIs to
+remaining vendored/generated inputs, 59 sibling or KB contracts to inject, and zero support APIs to
 promote. The standalone-link exit condition requires zero entries in the latter three groups; a
 classified ledger alone is not enough.
 
@@ -264,13 +264,20 @@ git root containing a space, including incremental co-change replay. This moves 
 to 203 and portable promotion debt from 7 to 5, removes one host-header dependency, and eliminates
 both `run_cmd` and `shell_escape` without adding shell parsing to the module.
 
-The remaining portable rows are named migration debt, not an assertion that copying is always the
-right answer. All five belong to the canonical-index language-extractor cluster, whose parser and
-helper closure must be admitted or replaced coherently with replay evidence before activation.
-Session identity, briefing rendering, executable lifecycle, and other remaining host calls are
-already classified as sibling contracts rather than portable support. Rows may be reclassified only
-with a reviewed contract and replay evidence, so later slices do not repeatedly guess between
-support copying and injection.
+The thirteenth reduction closes the portable ledger with one generated fallback-parser cluster. Its
+private ABI mirrors only definitions and call references; the generator derives the parser bodies
+from the three authoritative extractor sources, embeds the shared C system-header policy, removes
+the separately owned import-identity span, and supplies the normal build's unavailable tree-sitter
+fallback. Normal and ASan/UBSan parity replay imports and system flags, exports, routes, definitions
+and spans, and calls for all sixteen supported language families plus an unknown extension. This
+moves total debt from 203 to 198 and portable promotion debt from 5 to 0 without adding DB, bus,
+provider, pgvector, process, filesystem, network, logging, or configuration imports.
+
+The remaining 59 non-system rows are sibling-contract migration debt. Session identity, briefing
+rendering, executable lifecycle, configuration, memory, and other host calls must close through
+their reviewed process contracts before activation; they are not portable-support candidates. Rows
+may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide
+host coupling inside support copies.
 
 The gate rejects legacy source additions or omissions, support path escape, symlinks, content drift,
 new unresolved symbols, non-system reference growth, missing evidence, and any attempt to make the

@@ -761,6 +761,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-bus-db2-module \
                 $(TESTPREFIX)/unit-test-db2-cjson-support \
                 $(TESTPREFIX)/unit-test-db2-dstr-support \
+                $(TESTPREFIX)/unit-test-db2-extractor-support \
                 $(TESTPREFIX)/unit-test-db2-log-support \
                 $(TESTPREFIX)/unit-test-db2-management-read-support \
                 $(TESTPREFIX)/unit-test-db2-random-support \
@@ -843,6 +844,7 @@ UNIT_TEST_SKIP_P1 ?= 0
 ifeq ($(UNIT_TEST_SHARD_INDEX),0)
 UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-cjson-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-extractor-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-log-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-random-support-sanitize \
@@ -7035,6 +7037,70 @@ unit-test-db2-text-support: $(TESTPREFIX)/unit-test-db2-text-support
 	$<
 
 unit-test-db2-text-support-sanitize: $(TESTPREFIX)/unit-test-db2-text-support-sanitize
+	$<
+
+DB2_EXTRACTOR_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_extractor_support_impl.o: modules/db2/support/extractor_primitives.c \
+                                            modules/db2/support/db2_extractors.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -DAIMEE_DB2_EXTRACTOR_PREFIX $(DB2_EXTRACTOR_SECTION_FLAGS) \
+	      -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-extractor-support: \
+                     $(OBJDIR)/tests/test_db2_extractor_support.o \
+                     $(OBJDIR)/tests/db2_extractor_support_impl.o \
+                     $(OBJDIR)/extractors.o $(OBJDIR)/extractors_extra.o \
+                     $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_EXTRACTOR_SANITIZE_DIR = $(OBJDIR)/tests/db2-extractor-support-sanitize
+
+$(DB2_EXTRACTOR_SANITIZE_DIR)/test.o: tests/test_db2_extractor_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_EXTRACTOR_SANITIZE_DIR)/support.o: modules/db2/support/extractor_primitives.c \
+                                               modules/db2/support/db2_extractors.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -DAIMEE_DB2_EXTRACTOR_PREFIX $(DB2_EXTRACTOR_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_EXTRACTOR_SANITIZE_DIR)/extractors.o: extractors.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_EXTRACTOR_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      -c -o $@ $<
+
+$(DB2_EXTRACTOR_SANITIZE_DIR)/extra.o: extractors_extra.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_EXTRACTOR_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      -c -o $@ $<
+
+$(DB2_EXTRACTOR_SANITIZE_DIR)/new-langs.o: extractors_new_langs.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_EXTRACTOR_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      -c -o $@ $<
+
+$(DB2_EXTRACTOR_SANITIZE_DIR)/tree-sitter.o: code_treesitter.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_EXTRACTOR_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	      -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-extractor-support-sanitize: \
+                     $(DB2_EXTRACTOR_SANITIZE_DIR)/test.o \
+                     $(DB2_EXTRACTOR_SANITIZE_DIR)/support.o \
+                     $(DB2_EXTRACTOR_SANITIZE_DIR)/extractors.o \
+                     $(DB2_EXTRACTOR_SANITIZE_DIR)/extra.o \
+                     $(DB2_EXTRACTOR_SANITIZE_DIR)/new-langs.o \
+                     $(DB2_EXTRACTOR_SANITIZE_DIR)/tree-sitter.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-extractor-support unit-test-db2-extractor-support-sanitize
+unit-test-db2-extractor-support: $(TESTPREFIX)/unit-test-db2-extractor-support
+	$<
+
+unit-test-db2-extractor-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-extractor-support-sanitize
 	$<
 
 DB2_TIME_SUPPORT_RENAMES = \

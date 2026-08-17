@@ -390,6 +390,54 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
     "evidence": "Three deterministic dynamic-string lifecycle functions with only realloc and "
                 "vsnprintf imports; no DB2, event-bus, provider, I/O, or platform dependency.",
 }, {
+    "path": "src/modules/db2/support/extractor_primitives.c",
+    "source_sha256": "a45293cfe677b6dbe091784cd0664a7730b673eb26a2789d33995732431b9fad",
+    "header": "src/modules/db2/support/db2_extractors.h",
+    "header_sha256": "025041d001c95f10cc3c69796f2104eda877a7a5c7aee35763fb97574b09c1a6",
+    "defines": [
+        "add_call", "add_def", "add_str", "c_call_line", "c_def_line", "c_export_line",
+        "c_import_line", "c_macro_def_line", "code_def_end_line", "cs_def_line",
+        "cs_export_line", "cs_import_line", "cs_route_line", "css_export_line",
+        "css_import_line", "dart_def_line", "dart_export_line", "dart_import_line",
+        "extract_calls", "extract_definitions", "extract_exports", "extract_ident",
+        "extract_imports", "extract_imports_sys", "extract_quoted", "extract_routes",
+        "for_each_line", "generic_call_line", "go_call_line", "index_has_extractor",
+        "java_def_line", "java_export_line", "java_import_line", "java_route_line",
+        "js_call_line", "kotlin_def_line", "kotlin_export_line", "kotlin_import_line",
+        "kotlin_route_line", "lua_def_line", "lua_export_line", "lua_import_line",
+        "php_def_line", "php_export_line", "php_import_line", "py_call_line",
+        "ruby_def_line", "ruby_export_line", "ruby_import_line", "ruby_route_line",
+        "rust_def_line", "rust_export_line", "rust_import_line", "sh_def_line",
+        "sh_import_line", "skip_ws", "swift_def_line", "swift_export_line",
+        "swift_import_line",
+    ],
+    "resolves": [
+        "extract_calls", "extract_definitions", "extract_exports", "extract_imports_sys",
+        "extract_routes",
+    ],
+    "allowed_includes": [
+        "db2_extractors.h", "ctype.h", "stdio.h", "stdlib.h", "string.h",
+    ],
+    "allowed_header_includes": ["stddef.h"],
+    "allowed_undefined": [
+        "__ctype_b_loc", "malloc", "memcpy", "memset", "snprintf", "strchr", "strcmp",
+        "strlen", "strncmp", "strrchr", "strstr",
+    ],
+    "base_references": {
+        "extract_calls": ["src/modules/db2/c/canonical_index.c"],
+        "extract_definitions": ["src/modules/db2/c/canonical_index.c"],
+        "extract_exports": ["src/modules/db2/c/canonical_index.c"],
+        "extract_imports_sys": ["src/modules/db2/c/canonical_index.c"],
+        "extract_routes": ["src/modules/db2/c/canonical_index.c"],
+    },
+    "provenance": "Generated from the fallback parser bodies in src/extractors.c, "
+                  "src/extractors_extra.c, and src/extractors_new_langs.c; import-identity "
+                  "helpers remain outside this unit and the C system-header table is embedded.",
+    "evidence": "One reproducible, database-free parser cluster resolves all five canonical-index "
+                "entry points. Private ABI mirrors isolate index.h; the default tree-sitter seam "
+                "remains unavailable exactly as in the normal build. No DB, bus, provider, "
+                "pgvector, process, filesystem, network, logging, or configuration import.",
+}, {
     "path": "src/modules/db2/support/log_primitives.c",
     "source_sha256": "67a6e3bc54ee59c6fe47c5741ee36bb2c5c7776c293d34ae319f8033ad633131",
     "header": "src/modules/db2/support/db2_log.h",
