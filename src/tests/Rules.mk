@@ -7409,6 +7409,54 @@ unit-test-db2-rel-enum-text-support-sanitize: \
       $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize
 	$<
 
+DB2_NODE_KIND_TEXT_SUPPORT_RENAMES = \
+   -Dmemory_ontology_node_kind_to_text=db2_support_memory_ontology_node_kind_to_text
+
+$(OBJDIR)/tests/db2_node_kind_text_support_impl.o: \
+                     modules/db2/support/node_kind_text_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_NODE_KIND_TEXT_SUPPORT_RENAMES) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_memory_episodes_monolith.o: modules/memory/memory_episodes.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-node-kind-text-support: \
+                     $(OBJDIR)/tests/test_db2_node_kind_text_support.o \
+                     $(OBJDIR)/tests/db2_node_kind_text_support_impl.o \
+                     $(OBJDIR)/tests/db2_memory_episodes_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_NODE_KIND_TEXT_SANITIZE_DIR = $(OBJDIR)/tests/db2-node-kind-text-support-sanitize
+
+$(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/test.o: tests/test_db2_node_kind_text_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/node_kind_text_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_NODE_KIND_TEXT_SUPPORT_RENAMES) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/monolith.o: modules/memory/memory_episodes.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-node-kind-text-support-sanitize: \
+                     $(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/test.o \
+                     $(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/support.o \
+                     $(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-node-kind-text-support unit-test-db2-node-kind-text-support-sanitize
+unit-test-db2-node-kind-text-support: $(TESTPREFIX)/unit-test-db2-node-kind-text-support
+	$<
+
+unit-test-db2-node-kind-text-support-sanitize: \
+      $(TESTPREFIX)/unit-test-db2-node-kind-text-support-sanitize
+	$<
+
 $(OBJDIR)/tests/db2_runtime_config_support_impl.o: \
                      modules/db2/support/runtime_config_primitives.c
 	@mkdir -p $(dir $@)

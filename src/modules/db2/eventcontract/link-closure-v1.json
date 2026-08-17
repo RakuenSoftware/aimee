@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "f3edffba341e3039fd2606fcb09fac230ad7a76b",
-  "source_fingerprint": "0312148578d597d802297d3a8e507f9622714b43134ba716b32c5d573046fa0c",
+  "source_revision": "f3ff3241d23bd34d2d47a6078b14ae8e9325c62a",
+  "source_fingerprint": "8561b024376ca177d909dfda7800434e32ec21634e3ad023004db238b69f71ba",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -832,6 +832,31 @@
       },
       "provenance": "The three pure model-catalog admission definitions are promoted from src/kb/http/kb_models_validate.c; all DB2 calls are pinned to org_model_catalog.c.",
       "evidence": "The descriptor owns the exact wire whitelist, printable-name bounds, and HTTP(S) endpoint grammar used by DB2's pre-database storage choke point. Normal and sanitizer parity cover NULL, every non-NUL byte, length boundaries, schemes, and legacy empty-endpoint behavior. Only strcmp, strlen, and strncmp are imported; there is no HTTP, JSON, DB, bus, provider, pgvector, DB3, allocation, configuration, I/O, or logging dependency."
+    },
+    {
+      "path": "src/modules/db2/support/node_kind_text_primitives.c",
+      "source_sha256": "0b733803311e92c8baad98e3a14f8d43eac0819f82f83ab3a08a7b52eaa08116",
+      "header": "src/modules/db2/support/db2_node_kind_text.h",
+      "header_sha256": "890b4eb247c73135cb0df53fc67f520d16d2d032429f397e2665522ce6898668",
+      "defines": [
+        "memory_ontology_node_kind_to_text"
+      ],
+      "resolves": [
+        "memory_ontology_node_kind_to_text"
+      ],
+      "resolution_disposition": "injected-module-contract",
+      "allowed_includes": [
+        "db2_node_kind_text.h"
+      ],
+      "allowed_header_includes": [],
+      "allowed_undefined": [],
+      "base_references": {
+        "memory_ontology_node_kind_to_text": [
+          "src/modules/db2/c/rel_types_store.c"
+        ]
+      },
+      "provenance": "Definition promoted from the DB-free node-kind table in src/modules/memory/memory_episodes.c; the sole DB2 call is pinned to src/modules/db2/c/rel_types_store.c.",
+      "evidence": "A deterministic integer-to-text switch with descriptor-owned numeric ABI and no imports, shared ontology header, allocation, I/O, DB, event-bus, provider, platform, pgvector, DB3, configuration, or logging dependency. Normal and sanitizer parity cover the complete signed 16-bit partition plus int boundaries."
     },
     {
       "path": "src/modules/db2/support/random_primitives.c",
@@ -2319,14 +2344,6 @@
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
-      "symbol": "memory_ontology_node_kind_to_text",
-      "references": [
-        "src/modules/db2/c/rel_types_store.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "memory_pattern_scan_turn",
       "references": [
         "src/modules/db2/c/fact_ingest.c"
@@ -3410,16 +3427,16 @@
   ],
   "summary": {
     "translation_units": 138,
-    "descriptor_support_units": 17,
-    "unresolved_symbols": 191,
+    "descriptor_support_units": 18,
+    "unresolved_symbols": 190,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 52,
+      "injected-module-contract": 51,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "f56e3651b17d79921dbcfa96df68f5623abf43a261cb3577c8b52b403da47680"
+  "fingerprint": "3aa713e7b46e39dfa67a14acdaf6ba3d64e125f2c3576657eb89cdd30f1304bf"
 }

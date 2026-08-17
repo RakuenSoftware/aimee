@@ -588,6 +588,27 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "are imported; there is no HTTP, JSON, DB, bus, provider, pgvector, DB3, "
                 "allocation, configuration, I/O, or logging dependency.",
 }, {
+    "path": "src/modules/db2/support/node_kind_text_primitives.c",
+    "source_sha256": "0b733803311e92c8baad98e3a14f8d43eac0819f82f83ab3a08a7b52eaa08116",
+    "header": "src/modules/db2/support/db2_node_kind_text.h",
+    "header_sha256": "890b4eb247c73135cb0df53fc67f520d16d2d032429f397e2665522ce6898668",
+    "defines": ["memory_ontology_node_kind_to_text"],
+    "resolves": ["memory_ontology_node_kind_to_text"],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_node_kind_text.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": [],
+    "base_references": {
+        "memory_ontology_node_kind_to_text": ["src/modules/db2/c/rel_types_store.c"],
+    },
+    "provenance": "Definition promoted from the DB-free node-kind table in "
+                  "src/modules/memory/memory_episodes.c; the sole DB2 call is pinned to "
+                  "src/modules/db2/c/rel_types_store.c.",
+    "evidence": "A deterministic integer-to-text switch with descriptor-owned numeric ABI and "
+                "no imports, shared ontology header, allocation, I/O, DB, event-bus, provider, "
+                "platform, pgvector, DB3, configuration, or logging dependency. Normal and "
+                "sanitizer parity cover the complete signed 16-bit partition plus int boundaries.",
+}, {
     "path": "src/modules/db2/support/random_primitives.c",
     "source_sha256": "2e0182a05983d863952d080b754cb90eb4ee6dcf491f4bda7140ef205c0db69f",
     "header": "src/modules/db2/support/db2_random.h",
