@@ -67,7 +67,7 @@ MAKEFILE = Path("src/Makefile")
 # Split so a value return still requires the space that separates it from the
 # name, and a pointer return does not.
 DECL = re.compile(
-    r"\b(?:(?P<value>int|void|int64_t|double|size_t)\s+"
+    r"\b(?:(?P<value>int|void|int64_t|long long|long|unsigned|double|size_t)\s+"
     r"|(?P<pointer>char\s*\*|const\s+char\s*\*)\s*)"
     r"(?P<name>[a-z][a-z0-9_]{3,})\s*\((?P<params>[^;{]*)\)\s*;", re.S)
 CALL = re.compile(r"\b([a-z][a-z0-9_]{2,})\s*\(")
@@ -119,7 +119,31 @@ CAPABILITY = {
     "json": "json -- a cJSON tree, which the wire carries but the client must build",
     "status": "status -- a return contract beyond ok/miss/fail, per operation",
     "unknown": "unknown -- a parameter shape the classifier does not recognise",
+    "member": "member -- a reply struct carries a member type the wire has no field for",
 }
+
+# A struct crosses as its members, so a member the wire has no type for blocks
+# the operation just as surely as an unsupported parameter would. The survey
+# classified PARAMETERS only and never looked inside the struct a parameter
+# points at, so an operation taking a perfectly ordinary "T *out" reported
+# ready while T carried a double. Twenty-eight structs do.
+STRUCT_BODIES = re.compile(r"typedef\s+struct\s*\{(.*?)\}\s*([a-z_0-9]+_t)\s*;", re.S)
+UNSUPPORTED_MEMBER = re.compile(r"^\s*(float)\b")
+
+
+def struct_members(root: Path) -> dict[str, list[str]]:
+    """Member type names per reply struct, for the types the wire must carry."""
+    found: dict[str, list[str]] = {}
+    for header in sorted((root / SOURCE_DIR).glob("*.h")):
+        for body, name in STRUCT_BODIES.findall(header.read_text(errors="ignore")):
+            kinds = []
+            for member in body.split(";"):
+                member = re.sub(r"/\*.*?\*/", "", member, flags=re.S).strip()
+                if UNSUPPORTED_MEMBER.match(member):
+                    kinds.append(member.split()[0])
+            found[name] = kinds
+    return found
+
 
 # A contract that answers with more than success/failure or found/not-found.
 # The wire maps a write to 0/-1 and a read to 1/0/-1, so an operation that
@@ -298,6 +322,7 @@ def survey(root: Path) -> dict:
 
     operations = {}
     enums = frozenset(enum_types(root))
+    members = struct_members(root)
     for name, sites in callers.items():
         entry = dict(declared[name], callers=sorted(sites))
         entry["tags"] = classify(entry["params"], enums)
@@ -313,6 +338,13 @@ def survey(root: Path) -> dict:
         # per operation, which is why this stays a blocker and not a feature.
         if RICH_RETURN.search(entry.get("contract", "")):
             needs.add("status")
+        # A struct crosses as its members. An operation whose row carries a
+        # member type the wire cannot spell is blocked by that, however
+        # ordinary its own parameter list looks.
+        for struct in re.findall(r"\b([a-z_0-9]+_t)\b", entry["params"]):
+            if members.get(struct):
+                needs.add("member")
+                entry["blocking_members"] = sorted(set(members[struct]))
         # Zero arguments and a second out buffer were both blockers under the
         # single-value reply. The counted reply carried them: a request may
         # declare no fields, and a reply may carry as many as it needs.
