@@ -89,7 +89,7 @@ async function postArgs<T>(url: string, args: string[]): Promise<T> {
 const inp: React.CSSProperties = {
   width: "100%",
   padding: "6px 8px",
-  border: "1px solid #ccd",
+  border: "1px solid var(--sg-border-medium)",
   borderRadius: 4,
   fontSize: 13,
 };
@@ -223,16 +223,16 @@ function ModelEditor({
 
   const L = ({ label, hint, children }: { label: string; hint: string; children: React.ReactNode }) => (
     <label style={{ display: "block", marginBottom: 10 }} title={hint}>
-      <div style={{ fontSize: 12, color: "#556", marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 12, color: "var(--sg-text-muted)", marginBottom: 3 }}>{label}</div>
       {children}
     </label>
   );
 
   return (
     <Modal open onClose={onClose} title="Model settings" headerExtra={
-      <span style={{ fontSize: 13, color: "#667", fontFamily: "monospace" }}>{agent.model}</span>
+      <span style={{ fontSize: 13, color: "var(--sg-text-secondary)", fontFamily: "monospace" }}>{agent.model}</span>
     } size="lg">
-      <p style={{ fontSize: 12, color: "#667", marginTop: 0 }}>
+      <p style={{ fontSize: 12, color: "var(--sg-text-secondary)", marginTop: 0 }}>
         Leave a field empty to say nothing about it — the provider's own figure is used where it
         publishes one. A price of <code>0</code> is a statement that this seat costs nothing per
         token, which is different from leaving it empty.
@@ -354,7 +354,7 @@ function AddModel({
 
   return (
     <Modal open onClose={onClose} title={`Add a model to ${group.provider}`} size="md">
-      <p style={{ fontSize: 12, color: "#667", marginTop: 0 }}>
+      <p style={{ fontSize: 12, color: "var(--sg-text-secondary)", marginTop: 0 }}>
         Uses this provider's existing endpoint and credentials. You can set its limits and prices
         afterwards.
       </p>
@@ -364,17 +364,17 @@ function AddModel({
           {discovering ? "Asking…" : "Show models this provider offers"}
         </Button>
         {discoverNote && (
-          <div style={{ fontSize: 12, color: "#775", marginTop: 6 }}>{discoverNote}</div>
+          <div style={{ fontSize: 12, color: "var(--sg-warning-dark)", marginTop: 6 }}>{discoverNote}</div>
         )}
         {found && found.length > 0 && (
-          <div style={{ maxHeight: 190, overflowY: "auto", marginTop: 8, border: "1px solid #eef", borderRadius: 4 }}>
+          <div style={{ maxHeight: 190, overflowY: "auto", marginTop: 8, border: "1px solid var(--sg-surface-sunken)", borderRadius: 4 }}>
             {found.map((f) => (
               <div key={f.id}
                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
-                            padding: "5px 8px", borderBottom: "1px solid #f4f4fa" }}>
+                            padding: "5px 8px", borderBottom: "1px solid var(--sg-surface-alt)" }}>
                 <div>
                   <div style={{ fontFamily: "monospace", fontSize: 12 }}>{f.id}</div>
-                  <div style={{ fontSize: 11, color: "#889" }}>
+                  <div style={{ fontSize: 11, color: "var(--sg-text-faint)" }}>
                     {f.display_name ? `${f.display_name} · ` : ""}
                     {/* Absent means the provider did not publish it, which the
                         operator needs to know: they will have to state it. */}
@@ -391,7 +391,7 @@ function AddModel({
         )}
       </div>
       <label style={{ display: "block", marginBottom: 10 }}>
-        <div style={{ fontSize: 12, color: "#556", marginBottom: 3 }}>model id</div>
+        <div style={{ fontSize: 12, color: "var(--sg-text-muted)", marginBottom: 3 }}>model id</div>
         <input value={model} onChange={(e) => setModel(e.target.value)} style={inp} disabled={busy}
                placeholder="e.g. claude-sonnet-5" autoFocus />
       </label>
@@ -446,12 +446,12 @@ export default function Providers() {
 
       {groups.map((g) => (
         <Panel key={`${g.provider} ${g.endpoint}`} title={g.provider}>
-          <div style={{ fontSize: 12, color: "#667", fontFamily: "monospace", marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: "var(--sg-text-secondary)", fontFamily: "monospace", marginBottom: 8 }}>
             {g.endpoint || "(no endpoint — CLI seat)"}
           </div>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
-              <tr style={{ textAlign: "left", color: "#556" }}>
+              <tr style={{ textAlign: "left", color: "var(--sg-text-muted)" }}>
                 <th style={{ padding: "4px 6px" }}>model</th>
                 <th style={{ padding: "4px 6px" }}>context window</th>
                 <th style={{ padding: "4px 6px" }}>max output</th>
@@ -461,11 +461,11 @@ export default function Providers() {
             </thead>
             <tbody>
               {g.models.map((m) => (
-                <tr key={m.name} style={{ borderTop: "1px solid #eef" }}>
+                <tr key={m.name} style={{ borderTop: "1px solid var(--sg-surface-sunken)" }}>
                   <td style={{ padding: "6px" }}>
                     <div style={{ fontFamily: "monospace" }}>{m.model || "(none)"}</div>
                     {m.model_display_name && (
-                      <div style={{ fontSize: 11, color: "#889" }}>{m.model_display_name}</div>
+                      <div style={{ fontSize: 11, color: "var(--sg-text-faint)" }}>{m.model_display_name}</div>
                     )}
                     {!m.enabled && <Badge label="disabled" variant="warning" />}
                   </td>

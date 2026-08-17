@@ -94,19 +94,30 @@ static const char *cli_http_sock_path(void)
 }
 
 #ifdef AIMEE_POSIX
-/* True iff a co-located aimee-server answers GET /v1/health over the local HTTP
- * UDS within timeout_ms. The local UDS is filesystem-trusted (no token); a 2xx
- * response means the server is up and serving /v1. This is the liveness probe
- * that replaced the NDJSON `server.info` handshake — health-only by design (the
- * first-class /v1 surface makes per-method/version gating unnecessary, and
- * strict version matching historically caused dev-vs-installed restart loops). */
+/* True iff THE CONFIGURED aimee-server answers GET /v1/health within
+ * timeout_ms. A 2xx means the server this client actually talks to is up and
+ * serving /v1. Health-only by design (the first-class /v1 surface makes
+ * per-method/version gating unnecessary, and strict version matching
+ * historically caused dev-vs-installed restart loops).
+ *
+ * This probed "unix:<local aimee-http.sock>" unconditionally, so liveness meant
+ * "is SOME aimee-server running on this machine?" — a question whose answer is
+ * irrelevant on a thin client, whose server is remote and containerised. A
+ * developer with a stray local server got "healthy" while the real server was
+ * unreachable, and every subsequent command silently addressed the wrong host.
+ * An unconfigured client is now simply not healthy: there is nothing local to
+ * fall back to, by design. */
 static int cli_http_health_ok(int timeout_ms)
 {
-   char endpoint[4200];
-   snprintf(endpoint, sizeof(endpoint), "unix:%s", cli_http_sock_path());
+   char *endpoint = cli_v1_client_endpoint();
+   if (!endpoint)
+      return 0;
+   char *bearer = cli_v1_client_bearer();
    int status = 0;
-   cJSON *resp = cli_http_request(endpoint, "GET", "/v1/health", NULL, NULL,
+   cJSON *resp = cli_http_request(endpoint, "GET", "/v1/health", NULL, bearer,
                                   timeout_ms > 0 ? timeout_ms : CLIENT_CONNECT_TIMEOUT_MS, &status);
+   free(endpoint);
+   free(bearer);
    int ok = 0;
    if (resp)
    {
@@ -1134,37 +1145,6 @@ static int try_server(const char *socket_path, int timeout_ms, const char *requi
    return cli_http_health_ok(timeout_ms);
 }
 
-/* Same as try_server but returns 0/1 AND populates *restart_reason
- * (caller-allocated, may be NULL) when the server is alive but
- * incompatible. Used by the orchestration layer to distinguish
- * "no server" from "old server" so the user gets a helpful message
- * pointing at `aimee server restart`.
- *
- * NULL-response semantics: if connect succeeds but server.info doesn't
- * reply within timeout_ms, return ok=1 (tentatively compatible). The
- * server is busy — most likely its accept/dispatch loop is mid-handler
- * for a long forwarded job (e.g. `make build-integrity` from a delegate
- * verify). Treating that as "alive but rejecting" was wrong: the real
- * request below uses CLIENT_DEFAULT_TIMEOUT_MS (5s) and will either
- * succeed once the server frees up, or fail with a specific error.
- * Telling the user to `aimee server restart` for transient backpressure
- * was misleading and noisy in PreToolUse hooks. */
-static int try_server_diag(const char *socket_path, int timeout_ms, const char *required_method,
-                           int *out_alive, char *restart_reason, size_t reason_len)
-{
-   (void)socket_path;
-   (void)required_method;
-   if (restart_reason && reason_len > 0)
-      restart_reason[0] = '\0';
-   /* Health-only: lifecycle is owned by systemd/launchd/SCM and version-drift
-    * auto-detection is gone (it caused dev-vs-installed restart loops). A server
-    * that answers /v1/health is usable; otherwise it is simply not running. */
-   int ok = cli_http_health_ok(timeout_ms);
-   if (out_alive)
-      *out_alive = ok;
-   return ok;
-}
-
 /* Wait for a server to become ready at sock_path with exponential backoff.
  * Returns 1 if ready, 0 on timeout. */
 static int wait_for_ready(const char *sock_path, int timeout_ms, const char *required_method)
@@ -1453,30 +1433,23 @@ const char *cli_existing_server_for_method(const char *method)
       cleanup_stale_socket(env_sock);
    }
 
-   /* 2. Try well-known socket. Use try_server_diag so we can tell
-    * "no server" (alive=0 → fall through to spawn) from
-    * "old/incompatible server" (alive=1 → surface a clear message and
-    * return NULL). The latter case used to silently SIGTERM the peer;
-    * now we tell the user to run `aimee server restart` explicitly. */
-   const char *well_known = cli_default_socket_path();
-   int alive = 0;
-   char restart_reason[256] = "";
-   if (try_server_diag(well_known, 200, method, &alive, restart_reason, sizeof(restart_reason)))
-      return well_known;
-
-   if (alive)
-   {
-      if (restart_reason[0])
-         fprintf(stderr, "aimee: server is incompatible (%s); run: aimee server restart\n",
-                 restart_reason);
-      else
-         fprintf(stderr,
-                 "aimee: server responded but rejected this client; run: aimee server restart\n");
-      return NULL;
-   }
-
-   /* Server isn't alive — clean stale socket before attempting spawn */
-   cleanup_stale_socket(well_known);
+   /* 2. There is no step 2 any more.
+    *
+    * This used to probe the well-known socket (<aimee_home>/aimee.sock) and use
+    * whatever answered. That is DISCOVERY of a co-located server, and aimee's
+    * only supported topology is a thin client against a REMOTE aimee-server —
+    * the server runs in its own container, never beside the client. Discovery
+    * meant that any stray locally-started aimee-server silently captured the
+    * client: commands "worked", and every answer described the wrong machine.
+    * Diagnosing the wrong host is worse than a clean failure, because nothing
+    * about the output says which host it came from.
+    *
+    * AIMEE_SOCK above is kept deliberately: it is an EXPLICIT operator/entrypoint
+    * choice, not discovery. That is what lets the CLI inside the server's own
+    * container reach its co-located server (the delegate path), while a
+    * workstation client with nothing configured now fails loudly instead of
+    * binding to a neighbour. Same rule as the /v1 transport: explicit
+    * configuration yes, silent fallback never. */
    return NULL;
 }
 

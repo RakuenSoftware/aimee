@@ -70,7 +70,7 @@ const input: React.CSSProperties = {
   fontSize: 12,
   padding: "3px 6px",
   borderRadius: 6,
-  border: "1px solid #ccc",
+  border: "1px solid var(--sg-border-medium)",
   boxSizing: "border-box",
 };
 
@@ -240,30 +240,30 @@ export default function Settings() {
         </Button>
         <InlineStatus status={status} />
       </div>
-      <p style={{ fontSize: 12, color: "#666", margin: "0 0 12px" }}>
+      <p style={{ fontSize: 12, color: "var(--sg-text-secondary)", margin: "0 0 12px" }}>
         Changes persist to <code>aimee.yaml</code> and take effect on the next turn, unless a row is
         marked <em>restart</em>. The everyday runtime options are shown by default; deploy-time,
         advanced-tuning, and dev-only options are hidden behind <em>Show advanced</em> (still
         settable, and any of them surfaces when you search). Each option is described below.
       </p>
       {movedOwners.length > 0 && (
-        <p style={{ fontSize: 12, color: "#666", margin: "0 0 12px" }}>
+        <p style={{ fontSize: 12, color: "var(--sg-text-secondary)", margin: "0 0 12px" }}>
           Options owned by another tab are configured there, not here:{" "}
           <strong>{movedOwners.join(" · ")}</strong>. Each option has one owner, so a value set in
           its own tab is never silently overwritten by an edit made here.
         </p>
       )}
 
-      {!loaded && <div style={{ color: "#888" }}>loading…</div>}
+      {!loaded && <div style={{ color: "var(--sg-text-faint)" }}>loading…</div>}
       {loaded && Object.keys(values).length === 0 && (
-        <div style={{ color: "#888" }}>No configurable options available (aimee-server unreachable?).</div>
+        <div style={{ color: "var(--sg-text-faint)" }}>No configurable options available (aimee-server unreachable?).</div>
       )}
 
       <div style={{ display: "grid", gap: 12 }}>
         {groups.map(([cat, keys]) => (
           <Panel key={cat} title={cat} count={keys.length}>
             {SECTION_HELP[cat] && (
-              <p style={{ fontSize: 12, color: "#777", margin: "0 0 10px", lineHeight: 1.4 }}>
+              <p style={{ fontSize: 12, color: "var(--sg-text-faint)", margin: "0 0 10px", lineHeight: 1.4 }}>
                 {SECTION_HELP[cat]}
               </p>
             )}
@@ -321,14 +321,14 @@ function SettingRow({
       <div style={{ flex: "1 1 300px", minWidth: 220 }}>
         <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }} title={fieldKey}>
           {humanize(fieldKey)}
-          <span style={{ color: "#aaa", fontSize: 11 }}>{fieldKey}</span>
+          <span style={{ color: "var(--sg-text-pale)", fontSize: 11 }}>{fieldKey}</span>
           {group && (
             <span
               style={{
                 fontSize: 10,
-                color: "#555",
-                background: "#eef0f4",
-                border: "1px solid #d5d9e0",
+                color: "var(--sg-text-muted)",
+                background: "var(--sg-surface-sunken)",
+                border: "1px solid var(--sg-border-medium)",
                 borderRadius: 4,
                 padding: "0 5px",
               }}
@@ -341,9 +341,9 @@ function SettingRow({
             <span
               style={{
                 fontSize: 10,
-                color: "#a60",
-                background: "#fff6e6",
-                border: "1px solid #f0d9a8",
+                color: "var(--sg-warning-dark)",
+                background: "var(--sg-warning-bg)",
+                border: "1px solid var(--sg-warning-border)",
                 borderRadius: 4,
                 padding: "0 5px",
               }}
@@ -354,7 +354,7 @@ function SettingRow({
           )}
         </label>
         {help && (
-          <div style={{ fontSize: 12, color: "#777", marginTop: 2, lineHeight: 1.4 }}>{help}</div>
+          <div style={{ fontSize: 12, color: "var(--sg-text-faint)", marginTop: 2, lineHeight: 1.4 }}>{help}</div>
         )}
       </div>
       <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 6, marginTop: 1 }}>
@@ -378,7 +378,7 @@ function SettingRow({
             onClick={() => onChange(!value)}
             style={
               value
-                ? { minWidth: 44, background: "#1f7a3d", color: "#fff", borderColor: "#1f7a3d" }
+                ? { minWidth: 44, background: "var(--sg-success-dark)", color: "var(--sg-surface)", borderColor: "var(--sg-success-dark)" }
                 : { minWidth: 44 }
             }
           >

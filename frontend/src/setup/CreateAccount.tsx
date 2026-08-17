@@ -70,7 +70,7 @@ export default function CreateAccount({ onCreated }: { onCreated: (username: str
 
   return (
     <div style={{ display: 'grid', gap: 12, marginBottom: 8 }}>
-      <div style={{ fontSize: 12.5, color: '#556', lineHeight: 1.5 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--sg-text-muted)', lineHeight: 1.5 }}>
         Replace the temporary bootstrap login before configuring this instance. Its plaintext is
         removed after this step; the new login is stored on the persistent volume and survives image updates.
       </div>
@@ -90,7 +90,7 @@ export default function CreateAccount({ onCreated }: { onCreated: (username: str
           onChange={(event) => setConfirmation(event.target.value)}
           onKeyDown={(event) => { if (event.key === 'Enter' && !saving) create(); }} />
       </label>
-      {error && <div style={{ color: '#c62828', fontSize: 12.5 }}>{error}</div>}
+      {error && <div style={{ color: 'var(--sg-danger-dark)', fontSize: 12.5 }}>{error}</div>}
       <div>
         <Button variant="primary" disabled={saving || !username.trim() || !password || !confirmation}
           onClick={create}>
@@ -107,5 +107,5 @@ const labelStyle: React.CSSProperties = {
 
 const inputStyle: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
-  border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
+  border: '1px solid var(--sg-border-medium)', fontSize: 13, fontFamily: 'ui-monospace, monospace',
 };

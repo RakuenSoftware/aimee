@@ -378,7 +378,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={value}>
       {restored ? children : (
-        <div style={{ padding: 24, fontFamily: 'system-ui', color: '#888' }}>Loading chats…</div>
+        <div style={{ padding: 24, fontFamily: 'system-ui', color: 'var(--sg-text-faint)' }}>Loading chats…</div>
       )}
     </Ctx.Provider>
   );

@@ -13,6 +13,10 @@ AIMEE_SERVER="$REPO_ROOT/aimee-server"
 TEST_HOME=$(mktemp -d /tmp/aimee-test-home-XXXXXX)
 export HOME="$TEST_HOME"
 export AIMEE_HOME="$HOME/.config/aimee"
+# The client reaches a server ONLY through an explicitly configured endpoint; it
+# no longer discovers a co-located one. This harness runs both halves on one box
+# on purpose, so it states the endpoint rather than relying on a fallback.
+export AIMEE_API_ENDPOINT="unix:$AIMEE_HOME/aimee-http.sock"
 export AIMEE_SOCK="$AIMEE_HOME/aimee.sock"
 unset AIMEE_PROFILE
 mkdir -p "$AIMEE_HOME"

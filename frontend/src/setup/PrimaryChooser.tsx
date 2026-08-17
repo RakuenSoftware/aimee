@@ -88,7 +88,7 @@ const SUB_SPECS: SubSpec[] = [
 
 const input: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
-  border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
+  border: '1px solid var(--sg-border-medium)', fontSize: 13, fontFamily: 'ui-monospace, monospace',
 };
 
 function csrf(): string {
@@ -294,7 +294,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
   if (!selected) {
     return (
       <div style={{ display: 'grid', gap: 10, marginBottom: 14 }}>
-        <p style={{ fontSize: 13, color: '#556', margin: '0 0 2px' }}>
+        <p style={{ fontSize: 13, color: 'var(--sg-text-muted)', margin: '0 0 2px' }}>
           {delegate
             ? 'Pick the provider for this delegate.'
             : 'Pick the primary model aimee drives. You can change it later on the Models tab.'}
@@ -345,7 +345,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
             <input style={input} type="password" autoComplete="off" value={apiKey}
               onChange={(e) => setApiKey(e.target.value)} placeholder={apiSpec.keyHint} />
           </Field>
-          <div style={{ fontSize: 11.5, color: '#778' }}>
+          <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)' }}>
             The key is sealed into aimee-server’s vault — it is never stored in the browser or in agents.json.
           </div>
           <PrimaryOnlyToggle checked={primaryOnly} disabled={busy} onChange={setPrimaryOnly} />
@@ -362,7 +362,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
           <div style={{ fontSize: 15, fontWeight: 700 }}>{subSpec.label}</div>
           {!oauth ? (
             <>
-              <p style={{ fontSize: 13, color: '#556', margin: 0, lineHeight: 1.5 }}>
+              <p style={{ fontSize: 13, color: 'var(--sg-text-muted)', margin: 0, lineHeight: 1.5 }}>
                 aimee installs the {subSpec.vendor} CLI on the server and starts a login. You’ll get a
                 link to authorize in your browser. This can take up to a minute on first run.
               </p>
@@ -375,23 +375,23 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
             </>
           ) : (
             <div style={{ display: 'grid', gap: 10 }}>
-              <div style={{ fontSize: 13, color: '#556' }}>
+              <div style={{ fontSize: 13, color: 'var(--sg-text-muted)' }}>
                 1. Open this link and authorize:
                 <div style={{ marginTop: 4 }}>
-                  <a href={oauth.url} target="_blank" rel="noreferrer" style={{ color: '#2c6', wordBreak: 'break-all' }}>
+                  <a href={oauth.url} target="_blank" rel="noreferrer" style={{ color: 'var(--sg-success-dark)', wordBreak: 'break-all' }}>
                     {oauth.url}
                   </a>
                 </div>
               </div>
               {oauth.code && (
-                <div style={{ fontSize: 13, color: '#556' }}>
+                <div style={{ fontSize: 13, color: 'var(--sg-text-muted)' }}>
                   2. Enter this one-time code on that page:{' '}
-                  <code style={{ background: '#f1f4f9', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>{oauth.code}</code>
+                  <code style={{ background: 'var(--sg-surface-sunken)', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>{oauth.code}</code>
                 </div>
               )}
               {oauth.needsCodeBack && !polling && (
                 <div style={{ display: 'grid', gap: 6 }}>
-                  <div style={{ fontSize: 13, color: '#556' }}>
+                  <div style={{ fontSize: 13, color: 'var(--sg-text-muted)' }}>
                     {oauth.code ? '3.' : '2.'} After authorizing, paste the code shown back here:
                   </div>
                   <input style={input} value={codeBack} onChange={(e) => setCodeBack(e.target.value)} placeholder="paste code" />
@@ -403,7 +403,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
                 </div>
               )}
               {polling && (
-                <div style={{ fontSize: 13, color: '#2c8f56' }}>⏳ Waiting for sign-in to complete…</div>
+                <div style={{ fontSize: 13, color: 'var(--sg-success-dark)' }}>⏳ Waiting for sign-in to complete…</div>
               )}
             </div>
           )}
@@ -411,7 +411,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
       )}
 
       {error && (
-        <div style={{ marginTop: 12, fontSize: 12.5, color: '#a33', background: '#fdeaea', border: '1px solid #f2c4c4', borderRadius: 6, padding: '8px 10px' }}>
+        <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--sg-danger)', background: 'var(--sg-danger-bg)', border: '1px solid var(--sg-danger-bg)', borderRadius: 6, padding: '8px 10px' }}>
           {error}
         </div>
       )}
@@ -421,10 +421,10 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
 
 const cardStyle: React.CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 3, textAlign: 'left', padding: '11px 13px',
-  borderRadius: 9, border: '1px solid #dde', background: '#fbfcfe', cursor: 'pointer',
+  borderRadius: 9, border: '1px solid var(--sg-border-medium)', background: 'var(--sg-surface-alt)', cursor: 'pointer',
 };
-const cardTitle: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: '#233' };
-const cardBlurb: React.CSSProperties = { fontSize: 12, color: '#667' };
+const cardTitle: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: 'var(--sg-text)' };
+const cardBlurb: React.CSSProperties = { fontSize: 12, color: 'var(--sg-text-secondary)' };
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -443,11 +443,11 @@ function PrimaryOnlyToggle(
   { checked: boolean; disabled?: boolean; onChange: (v: boolean) => void },
 ) {
   return (
-    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: '#556', cursor: disabled ? 'default' : 'pointer' }}>
+    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: 'var(--sg-text-muted)', cursor: disabled ? 'default' : 'pointer' }}>
       <input type="checkbox" checked={checked} disabled={disabled}
         onChange={(e) => onChange(e.target.checked)} style={{ marginTop: 2 }} />
       <span>
-        <strong style={{ color: '#334' }}>Primary Agent Only</strong> — use only as the primary,
+        <strong style={{ color: 'var(--sg-text)' }}>Primary Agent Only</strong> — use only as the primary,
         never as a delegate. Recommended for a Claude subscription: driving a personal Claude plan as
         an automated delegate may breach Anthropic’s terms.
       </span>

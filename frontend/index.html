@@ -4,6 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>aimee</title>
+    <!-- Apply a stored theme choice BEFORE first paint. A visitor who follows the
+         OS is already handled by prefers-color-scheme in smoothgui's stylesheet
+         and needs no JS; this exists only so an explicit override doesn't flash
+         the other palette first. Mirrors themePreloadScript() in
+         @rakuensoftware/smoothgui (lib/theme.ts) — the storage key and attribute
+         below must match it. Inlined because index.html is static and the script
+         has to run ahead of the bundle. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('sg-theme');
+          if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      /* The viewer paints its own ground behind the page, so give the document an
+         explicit token background — otherwise the dark palette renders on white. */
+      html, body { background: var(--sg-bg); color: var(--sg-text); }
+    </style>
   </head>
   <body>
     <div id="root"></div>

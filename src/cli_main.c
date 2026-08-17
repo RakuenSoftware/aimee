@@ -93,22 +93,34 @@ static void print_server_unavailable(void)
       return;
    }
 
-   fprintf(stderr, "aimee: server unavailable (client version %s)\n", AIMEE_VERSION);
+   /* Remediation points at the REMOTE endpoint, never at starting a server here.
+    *
+    * This used to say "systemctl --user start aimee-server" (and `aimee server
+    * start`). aimee is a thin client whose server runs in its own container on
+    * another host, so that advice was wrong every time it was printed — and it
+    * was printed exactly when someone was stuck and looking for something to
+    * try. Following it produced a stray local aimee-server that then satisfied
+    * the client's liveness probe, so the tooling came back to life while
+    * silently answering from the wrong machine. The message taught the failure
+    * mode it appeared to solve. */
+   char *configured = cli_v1_client_endpoint();
+   fprintf(stderr, "aimee: aimee-server unavailable (client version %s)\n", AIMEE_VERSION);
+   if (configured)
+   {
+      fprintf(stderr, "  endpoint   : %s (configured, not answering)\n", configured);
+      fprintf(stderr, "  remediation: start/repair aimee-server on that host, or repoint with\n");
+      fprintf(stderr, "               aimee remote set https://<host>:8743\n");
+      free(configured);
+   }
+   else
+   {
+      fprintf(stderr, "  endpoint   : none configured\n");
+      fprintf(stderr, "  remediation: aimee remote set https://<host>:8743\n");
+   }
+   fprintf(stderr, "  note       : aimee is a thin client. Do NOT start a local aimee-server —\n");
+   fprintf(stderr, "               there is no co-located topology, and a local one would\n");
+   fprintf(stderr, "               answer for the wrong host.\n");
    fprintf(stderr, "  server log : %s\n", log_path);
-#if defined(__linux__)
-   fprintf(stderr, "  remediation: systemctl --user start aimee-server\n");
-   fprintf(stderr, "               or `aimee server start` if not using systemd\n");
-#elif defined(__APPLE__)
-   fprintf(stderr, "  remediation: launchctl bootstrap gui/$(id -u) "
-                   "~/Library/LaunchAgents/com.aimee.server.plist\n");
-   fprintf(stderr, "               or `aimee server start` if not using launchd\n");
-#elif defined(_WIN32) || defined(_WIN64)
-   fprintf(stderr, "  remediation: net start aimee-server\n");
-   fprintf(stderr, "               or `aimee server start` if the\n"
-                   "               service is not registered (portable install)\n");
-#else
-   fprintf(stderr, "  remediation: aimee server start\n");
-#endif
 }
 
 typedef enum

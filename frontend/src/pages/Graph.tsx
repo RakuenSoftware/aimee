@@ -89,7 +89,7 @@ export default function Graph() {
     return (
       <div>
         {picker}
-        <div style={{ padding: 24, color: '#666' }}>Select a project above to explore its code graph.</div>
+        <div style={{ padding: 24, color: 'var(--sg-text-secondary)' }}>Select a project above to explore its code graph.</div>
       </div>
     );
   }
@@ -101,10 +101,10 @@ export default function Graph() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <strong>Code graph — {project}</strong>
         {edgeCount != null && <Badge label={`${edgeCount} edges`} variant="neutral" />}
-        {loading && <span style={{ color: '#888', fontSize: 12 }}>loading…</span>}
+        {loading && <span style={{ color: 'var(--sg-text-faint)', fontSize: 12 }}>loading…</span>}
         <Button size="sm" onClick={loadHubs} style={{ marginLeft: 'auto' }} title="Reload the ranked hub list for this project's code graph.">↻ refresh</Button>
       </div>
-      {err && <div style={{ color: '#b00', fontSize: 13 }}>{err}</div>}
+      {err && <div style={{ color: 'var(--sg-danger-dark)', fontSize: 13 }}>{err}</div>}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         <Panel title="Hubs" count={hubs.length}>
@@ -112,7 +112,7 @@ export default function Graph() {
             {hubs.length === 0 && <div style={empty}>No projection graph yet — index this project first.</div>}
             {hubs.map(h => (
               <button key={h.node} onClick={() => loadNeighbors(h.node)} title={h.node}
-                style={{ ...row, fontWeight: h.node === node ? 600 : 400, background: h.node === node ? '#eef4ff' : '#fff' }}>
+                style={{ ...row, fontWeight: h.node === node ? 600 : 400, background: h.node === node ? 'var(--sg-info-bg)' : 'var(--sg-surface)' }}>
                 <span style={ellipsis}>{h.node}</span>
                 <Badge label={String(h.degree)} variant="info" />
               </button>
@@ -127,7 +127,7 @@ export default function Graph() {
             {neighbors.map((nb, i) => (
               <button key={`${nb.neighbor}-${i}`} onClick={() => loadNeighbors(nb.neighbor)} title={nb.neighbor} style={row}>
                 <Badge label={nb.direction} variant={dirVariant(nb.direction)} />
-                <span style={{ color: '#888', fontSize: 11 }}>{nb.relation}</span>
+                <span style={{ color: 'var(--sg-text-faint)', fontSize: 11 }}>{nb.relation}</span>
                 <span style={{ ...ellipsis, flex: 1 }}>{nb.neighbor}</span>
                 <Badge label={nb.provenance} variant="neutral" />
               </button>
@@ -139,19 +139,19 @@ export default function Graph() {
       <Panel title="Surprising links" count={links.length}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <Button size="sm" onClick={loadSurprising} title="Find file pairs that are semantically close yet structurally far apart.">find</Button>
-          <label style={{ fontSize: 12, color: '#555' }} title="Run an LLM to confirm or reject each surprising link (slower).">
+          <label style={{ fontSize: 12, color: 'var(--sg-text-muted)' }} title="Run an LLM to confirm or reject each surprising link (slower).">
             <input type="checkbox" checked={judge} onChange={e => setJudge(e.target.checked)} /> LLM confirm
           </label>
-          <span style={{ fontSize: 11, color: '#999' }}>semantically close yet structurally far</span>
+          <span style={{ fontSize: 11, color: 'var(--sg-text-hint)' }}>semantically close yet structurally far</span>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 300, overflowY: 'auto' }}>
           {links.map((l, i) => (
             <div key={i} style={{ ...row, cursor: 'default', alignItems: 'baseline', flexWrap: 'wrap' }}>
-              <span style={ellipsis}>{l.a}</span><span style={{ color: '#bbb' }}>↔</span><span style={ellipsis}>{l.b}</span>
+              <span style={ellipsis}>{l.a}</span><span style={{ color: 'var(--sg-text-pale)' }}>↔</span><span style={ellipsis}>{l.b}</span>
               <Badge label={`cos ${l.cosine.toFixed(2)}`} variant="info" />
               <Badge label={l.disconnected ? 'disconnected' : `${l.hops} hops`} variant="neutral" />
               {l.confirmed != null && <Badge label={l.confirmed ? 'confirmed' : 'rejected'} variant={l.confirmed ? 'success' : 'neutral'} />}
-              {l.reason && <span style={{ fontSize: 11, color: '#888' }}>{l.reason}</span>}
+              {l.reason && <span style={{ fontSize: 11, color: 'var(--sg-text-faint)' }}>{l.reason}</span>}
             </div>
           ))}
         </div>
@@ -166,6 +166,6 @@ function shortNode(n: string): string {
   return i >= 0 ? n.slice(i + 1) : n;
 }
 
-const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px', borderRadius: 4, border: 'none', background: '#fff', cursor: 'pointer', fontSize: 12, textAlign: 'left', width: '100%' };
+const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px', borderRadius: 4, border: 'none', background: 'var(--sg-surface)', cursor: 'pointer', fontSize: 12, textAlign: 'left', width: '100%' };
 const ellipsis: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 240 };
-const empty: React.CSSProperties = { color: '#999', fontSize: 12, padding: 8 };
+const empty: React.CSSProperties = { color: 'var(--sg-text-hint)', fontSize: 12, padding: 8 };

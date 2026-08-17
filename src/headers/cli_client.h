@@ -243,6 +243,11 @@ int cli_v1_remote_endpoint_is_network(void);
 char *cli_v1_client_endpoint(void);
 char *cli_v1_client_bearer(void);
 
+/* Report (once per process, on stderr) that a command needs an aimee-server and
+ * none is configured. There is no co-located fallback to take instead — see
+ * cli_v1_send. */
+void cli_v1_warn_no_endpoint(const char *method);
+
 /* Thin-client workspace push: when the configured endpoint is a remote
  * "tcp:host:port" the server cannot see this host's filesystem, so
  * `aimee workspace add <path>` resolves the path locally, registers it as a

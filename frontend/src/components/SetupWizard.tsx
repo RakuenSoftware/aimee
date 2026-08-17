@@ -237,13 +237,13 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
     display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
   };
   const card: React.CSSProperties = {
-    width: 'min(560px, 100%)', maxHeight: '86vh', overflow: 'auto', background: '#fff',
-    borderRadius: 12, border: '1px solid #dde', boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
-    padding: '20px 22px', fontFamily: 'system-ui', color: '#233',
+    width: 'min(560px, 100%)', maxHeight: '86vh', overflow: 'auto', background: 'var(--sg-surface)',
+    borderRadius: 12, border: '1px solid var(--sg-border-medium)', boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
+    padding: '20px 22px', fontFamily: 'system-ui', color: 'var(--sg-text)',
   };
   const input: React.CSSProperties = {
     width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
-    border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
+    border: '1px solid var(--sg-border-medium)', fontSize: 13, fontFamily: 'ui-monospace, monospace',
   };
 
   const stepNum = safeIdx + 1;
@@ -254,14 +254,14 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
           <strong style={{ fontSize: 17 }}>Set up this instance</strong>
           <button aria-label="Close setup" title="Close" onClick={close}
-            style={{ background: 'none', border: 'none', color: '#9aa', cursor: 'pointer', fontSize: 20, lineHeight: 1 }}>×</button>
+            style={{ background: 'none', border: 'none', color: 'var(--sg-text-hint)', cursor: 'pointer', fontSize: 20, lineHeight: 1 }}>×</button>
         </div>
 
         {!booted ? (
-          <div style={{ fontSize: 13, color: '#667', padding: '10px 0' }}>Loading…</div>
+          <div style={{ fontSize: 13, color: 'var(--sg-text-secondary)', padding: '10px 0' }}>Loading…</div>
         ) : showSummary || !step ? (
           <div>
-            <p style={{ fontSize: 13, color: '#556', margin: '4px 0 12px' }}>
+            <p style={{ fontSize: 13, color: 'var(--sg-text-muted)', margin: '4px 0 12px' }}>
               {readiness.ready ? 'Everything required is configured. 🎉' : 'Here’s what’s left:'}
             </p>
             <div style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
@@ -271,12 +271,12 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
                 <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                   <span aria-hidden>{s.ok ? '✅' : s.optional ? '⚪' : '⛔'}</span>
                   <span style={{ fontWeight: 600, textTransform: 'capitalize', minWidth: 92 }}>{id.replace(/_/g, ' ')}</span>
-                  <span style={{ color: '#667' }}>{s.detail}{s.optional && !s.ok ? ' (optional)' : ''}</span>
+                  <span style={{ color: 'var(--sg-text-secondary)' }}>{s.detail}{s.optional && !s.ok ? ' (optional)' : ''}</span>
                 </div>
               ))}
             </div>
             {pendingRestart.length > 0 && (
-              <div style={{ fontSize: 12.5, color: '#8a5a00', background: '#fff6e6', border: '1px solid #f0d8a8', borderRadius: 6, padding: '8px 10px', marginBottom: 14 }}>
+              <div style={{ fontSize: 12.5, color: 'var(--sg-warning-dark)', background: 'var(--sg-warning-bg)', border: '1px solid var(--sg-warning-border)', borderRadius: 6, padding: '8px 10px', marginBottom: 14 }}>
                 ⏳ Restart required for: {pendingRestart.map(humanize).join(', ')} — these take effect after the server restarts.
               </div>
             )}
@@ -293,9 +293,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
           </div>
         ) : (
           <div>
-            <div style={{ fontSize: 12, color: '#8899aa', marginBottom: 4 }}>Step {stepNum} of {total}</div>
+            <div style={{ fontSize: 12, color: 'var(--sg-text-faint)', marginBottom: 4 }}>Step {stepNum} of {total}</div>
             <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>
-              {step.title}{step.optional ? <span style={{ color: '#9aa', fontWeight: 400, fontSize: 12 }}> · optional</span> : null}
+              {step.title}{step.optional ? <span style={{ color: 'var(--sg-text-hint)', fontWeight: 400, fontSize: 12 }}> · optional</span> : null}
             </div>
 
             {step.kind === 'account' ? (
@@ -320,9 +320,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
                   <label key={key} style={{ display: 'block' }}>
                     <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 3 }}>
                       {humanize(key)}
-                      {isRestartKey(key) ? <span style={{ color: '#8a5a00', fontWeight: 400 }}> · needs restart</span> : null}
+                      {isRestartKey(key) ? <span style={{ color: 'var(--sg-warning-dark)', fontWeight: 400 }}> · needs restart</span> : null}
                     </div>
-                    {helpFor(key) && <div style={{ fontSize: 11.5, color: '#778', marginBottom: 4, lineHeight: 1.4 }}>{helpFor(key)}</div>}
+                    {helpFor(key) && <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)', marginBottom: 4, lineHeight: 1.4 }}>{helpFor(key)}</div>}
                     <input
                       style={input}
                       value={draft[key] ?? ''}
