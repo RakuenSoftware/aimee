@@ -326,7 +326,16 @@ levels, all short output capacities, the internal path boundary, and importer/im
 resolution matrices. This moves total debt from 189 to 187 and injected-contract debt from 50 to
 48; its five C string/format imports were already declared system dependencies.
 
-The remaining 48 non-system rows are sibling-contract migration debt. Session identity, briefing
+The twenty-first reduction packages the complete pure code-audit graph owner: dead-export selection
+and bounded cycle discovery. Its descriptor-private edge ABI preserves borrowed export pointers,
+import/reference tail matching, the 4096-node cap, deterministic traversal and rendering, duplicate
+suppression, result limits, and cleanup without importing DB fetch or JSON assembly. Normal and
+ASan/UBSan parity cover NULL and negative bounds, prefix variants, duplicates, DAGs, self/two/three-
+node and overlapping cycles, null endpoints, disconnected graphs, limits, and a generated 64-node
+graph. This moves total debt from 187 to 185 and injected-contract debt from 48 to 46; its allocation,
+string, and formatting imports were already declared system dependencies.
+
+The remaining 46 non-system rows are sibling-contract migration debt. Session identity, briefing
 rendering, executable lifecycle, configuration, memory, and other host calls must close through
 their reviewed process contracts before activation; they are not portable-support candidates. Rows
 may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide

@@ -415,6 +415,35 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "only C runtime functions and contains no git, DB, bus, provider, pgvector, "
                 "DB3, allocation, configuration, or logging dependency.",
 }, {
+    "path": "src/modules/db2/support/code_audit_graph_primitives.c",
+    "source_sha256": "902153774ae34755e87bb8d1935e209ab00c14e57d11d7ddba393575ad2ec9a4",
+    "header": "src/modules/db2/support/db2_code_audit_graph.h",
+    "header_sha256": "e098b60c7fada7f866c075bd787ac04a1305a87bbcacd995d0f8d47d7b285887",
+    "defines": ["code_audit_dead_exports", "code_audit_find_cycles"],
+    "resolves": ["code_audit_dead_exports", "code_audit_find_cycles"],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_code_audit_graph.h", "stdio.h", "stdlib.h", "string.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": [
+        "calloc", "free", "malloc", "memcpy", "realloc", "snprintf", "strcmp", "strlen",
+        "strncmp",
+    ],
+    "base_references": {
+        "code_audit_dead_exports": ["src/modules/db2/c/code_audit.c"],
+        "code_audit_find_cycles": ["src/modules/db2/c/code_audit.c"],
+    },
+    "provenance": "Both pure graph algorithms and their required static helpers are promoted "
+                  "from src/code_audit_graph.c; every DB2 call is pinned to "
+                  "src/modules/db2/c/code_audit.c.",
+    "evidence": "The descriptor owns export/import/reference tail matching, borrowed-pointer "
+                "output, the 4096-node cap, deterministic DFS traversal, duplicate suppression, "
+                "cycle rendering, result limits, and cleanup. Normal and sanitizer parity cover "
+                "NULL and negative bounds, prefix variants, duplicate exports and edges, DAGs, "
+                "self/two/three-node and overlapping cycles, null endpoints, disconnected graphs, "
+                "limits, and a generated 64-node graph. Only bounded allocation, string, and "
+                "formatting APIs are imported; there is no DB, JSON, bus, provider, pgvector, "
+                "DB3, filesystem, network, configuration, or logging edge.",
+}, {
     "path": "src/modules/db2/support/code_import_primitives.c",
     "source_sha256": "747342db5ec2b2f8cb2f66aa20c87c9f8aee27a2707a5cdb41e0a3051ab8ace4",
     "header": "src/modules/db2/support/db2_code_import.h",

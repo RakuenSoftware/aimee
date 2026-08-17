@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "b5c4f05278681a0f9f0886d192de3f46f196d6a6",
-  "source_fingerprint": "c28955ceb2f9c5c5b6e0a9fc39d7c359ca1014f6676a43fff6ee4fe3ad4e2607",
+  "source_revision": "9fded2d51598905db12b099c036bc7f5ed65d1a1",
+  "source_fingerprint": "303ef0300e9946bbf3929594ddd3ee0aef5b5f6237dfa83958652db0287aaf69",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -535,6 +535,49 @@
       },
       "provenance": "The two pure co-change policy definitions are promoted from src/cochange.c; both DB2 calls are pinned to canonical_index.c.",
       "evidence": "The descriptor owns the fixed pair ABI, lowercase object-id validator, deduplication, bulk-commit gate, lexical ordering, and output cap. Monolith parity and sanitizer tests cover boundary inputs; the implementation imports only C runtime functions and contains no git, DB, bus, provider, pgvector, DB3, allocation, configuration, or logging dependency."
+    },
+    {
+      "path": "src/modules/db2/support/code_audit_graph_primitives.c",
+      "source_sha256": "902153774ae34755e87bb8d1935e209ab00c14e57d11d7ddba393575ad2ec9a4",
+      "header": "src/modules/db2/support/db2_code_audit_graph.h",
+      "header_sha256": "e098b60c7fada7f866c075bd787ac04a1305a87bbcacd995d0f8d47d7b285887",
+      "defines": [
+        "code_audit_dead_exports",
+        "code_audit_find_cycles"
+      ],
+      "resolves": [
+        "code_audit_dead_exports",
+        "code_audit_find_cycles"
+      ],
+      "resolution_disposition": "injected-module-contract",
+      "allowed_includes": [
+        "db2_code_audit_graph.h",
+        "stdio.h",
+        "stdlib.h",
+        "string.h"
+      ],
+      "allowed_header_includes": [],
+      "allowed_undefined": [
+        "calloc",
+        "free",
+        "malloc",
+        "memcpy",
+        "realloc",
+        "snprintf",
+        "strcmp",
+        "strlen",
+        "strncmp"
+      ],
+      "base_references": {
+        "code_audit_dead_exports": [
+          "src/modules/db2/c/code_audit.c"
+        ],
+        "code_audit_find_cycles": [
+          "src/modules/db2/c/code_audit.c"
+        ]
+      },
+      "provenance": "Both pure graph algorithms and their required static helpers are promoted from src/code_audit_graph.c; every DB2 call is pinned to src/modules/db2/c/code_audit.c.",
+      "evidence": "The descriptor owns export/import/reference tail matching, borrowed-pointer output, the 4096-node cap, deterministic DFS traversal, duplicate suppression, cycle rendering, result limits, and cleanup. Normal and sanitizer parity cover NULL and negative bounds, prefix variants, duplicate exports and edges, DAGs, self/two/three-node and overlapping cycles, null endpoints, disconnected graphs, limits, and a generated 64-node graph. Only bounded allocation, string, and formatting APIs are imported; there is no DB, JSON, bus, provider, pgvector, DB3, filesystem, network, configuration, or logging edge."
     },
     {
       "path": "src/modules/db2/support/code_import_primitives.c",
@@ -1990,7 +2033,8 @@
         "src/modules/db2/c/org_vault_rewrap.c",
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_operator_status_runtime.c",
-        "src/modules/db2/c/vault_pg.c"
+        "src/modules/db2/c/vault_pg.c",
+        "src/modules/db2/support/code_audit_graph_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2007,22 +2051,6 @@
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
-    },
-    {
-      "symbol": "code_audit_dead_exports",
-      "references": [
-        "src/modules/db2/c/code_audit.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "code_audit_find_cycles",
-      "references": [
-        "src/modules/db2/c/code_audit.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
       "symbol": "css_analyze",
@@ -2204,7 +2232,8 @@
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_operator_status_runtime.c",
         "src/modules/db2/c/vault_pg.c",
-        "src/modules/db2/support/cjson.c"
+        "src/modules/db2/support/cjson.c",
+        "src/modules/db2/support/code_audit_graph_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2327,6 +2356,7 @@
         "src/modules/db2/c/rules.c",
         "src/modules/db2/c/vault_pg.c",
         "src/modules/db2/support/cjson.c",
+        "src/modules/db2/support/code_audit_graph_primitives.c",
         "src/modules/db2/support/extractor_primitives.c"
       ],
       "disposition": "system-link",
@@ -2611,6 +2641,7 @@
         "src/modules/db2/c/memory_export.c",
         "src/modules/db2/c/memory_query.c",
         "src/modules/db2/support/cjson.c",
+        "src/modules/db2/support/code_audit_graph_primitives.c",
         "src/modules/db2/support/dstr_primitives.c"
       ],
       "disposition": "system-link",
@@ -2748,6 +2779,7 @@
         "src/modules/db2/c/workflow_patterns.c",
         "src/modules/db2/c/write_tier_grant.c",
         "src/modules/db2/support/cochange_primitives.c",
+        "src/modules/db2/support/code_audit_graph_primitives.c",
         "src/modules/db2/support/code_import_primitives.c",
         "src/modules/db2/support/extractor_primitives.c",
         "src/modules/db2/support/random_primitives.c"
@@ -2893,6 +2925,7 @@
         "src/modules/db2/c/write_tier_grant.c",
         "src/modules/db2/support/cjson.c",
         "src/modules/db2/support/cochange_primitives.c",
+        "src/modules/db2/support/code_audit_graph_primitives.c",
         "src/modules/db2/support/code_import_primitives.c",
         "src/modules/db2/support/extractor_primitives.c",
         "src/modules/db2/support/model_validation_primitives.c",
@@ -3030,6 +3063,7 @@
         "src/modules/db2/c/vault_pg.c",
         "src/modules/db2/support/cert_serial_primitives.c",
         "src/modules/db2/support/cjson.c",
+        "src/modules/db2/support/code_audit_graph_primitives.c",
         "src/modules/db2/support/code_import_primitives.c",
         "src/modules/db2/support/extractor_primitives.c",
         "src/modules/db2/support/model_validation_primitives.c"
@@ -3074,6 +3108,7 @@
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_pg.c",
         "src/modules/db2/support/cjson.c",
+        "src/modules/db2/support/code_audit_graph_primitives.c",
         "src/modules/db2/support/code_import_primitives.c",
         "src/modules/db2/support/code_match_primitives.c",
         "src/modules/db2/support/extractor_primitives.c",
@@ -3474,16 +3509,16 @@
   ],
   "summary": {
     "translation_units": 138,
-    "descriptor_support_units": 20,
-    "unresolved_symbols": 187,
+    "descriptor_support_units": 21,
+    "unresolved_symbols": 185,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 48,
+      "injected-module-contract": 46,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "1cabcc606dc19fe254f2055bd2d1885f36a821943b9746bc69dbf0dced3ff2af"
+  "fingerprint": "378d06a07a7d167b6f610710032bbdfbf0d479e30d859fe04909d49a2f1d740e"
 }

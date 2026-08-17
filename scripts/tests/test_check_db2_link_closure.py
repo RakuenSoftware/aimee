@@ -730,7 +730,7 @@ class LinkClosureTest(unittest.TestCase):
 
     def test_real_repository_reduces_owned_input_and_bounded_contract_debt(self) -> None:
         contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
-        self.assertEqual(contract["summary"]["unresolved_symbols"], 187)
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 185)
         self.assertEqual(
             contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 0
         )
@@ -739,7 +739,7 @@ class LinkClosureTest(unittest.TestCase):
             contract["summary"]["dispositions"]["portable-core-promotion"], 0
         )
         self.assertEqual(
-            contract["summary"]["dispositions"]["injected-module-contract"], 48
+            contract["summary"]["dispositions"]["injected-module-contract"], 46
         )
         self.assertFalse(any(
             row["symbol"].startswith("cJSON_") for row in contract["unresolved"]
@@ -786,6 +786,10 @@ class LinkClosureTest(unittest.TestCase):
         ))
         self.assertFalse(any(
             row["symbol"] in {"code_import_identity", "code_import_resolves_path"}
+            for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] in {"code_audit_dead_exports", "code_audit_find_cycles"}
             for row in contract["unresolved"]
         ))
         cjson = next(
@@ -844,6 +848,26 @@ class LinkClosureTest(unittest.TestCase):
         )
         self.assertIn(
             code_import_support["path"],
+            json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
+        )
+        code_audit_support = next(
+            unit for unit in contract["descriptor_support_units"]
+            if unit["path"] == "src/modules/db2/support/code_audit_graph_primitives.c"
+        )
+        self.assertEqual(code_audit_support["defines"], [
+            "code_audit_dead_exports", "code_audit_find_cycles",
+        ])
+        self.assertEqual(code_audit_support["resolves"], code_audit_support["defines"])
+        self.assertEqual(code_audit_support["allowed_undefined"], [
+            "calloc", "free", "malloc", "memcpy", "realloc", "snprintf", "strcmp", "strlen",
+            "strncmp",
+        ])
+        self.assertEqual(
+            code_audit_support["source_sha256"],
+            hashlib.sha256((REPO / code_audit_support["path"]).read_bytes()).hexdigest(),
+        )
+        self.assertIn(
+            code_audit_support["path"],
             json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
         )
         node_kind_support = next(

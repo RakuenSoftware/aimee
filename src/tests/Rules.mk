@@ -7374,6 +7374,62 @@ unit-test-db2-code-import-support-sanitize: \
                      $(TESTPREFIX)/unit-test-db2-code-import-support-sanitize
 	$<
 
+DB2_CODE_AUDIT_GRAPH_SUPPORT_RENAMES = \
+   -Dcode_audit_dead_exports=db2_support_code_audit_dead_exports \
+   -Dcode_audit_find_cycles=db2_support_code_audit_find_cycles
+DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_code_audit_graph_support_impl.o: \
+                     modules/db2/support/code_audit_graph_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_AUDIT_GRAPH_SUPPORT_RENAMES) \
+	      $(DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_code_audit_graph_monolith.o: code_audit_graph.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-code-audit-graph-support: \
+                     $(OBJDIR)/tests/test_db2_code_audit_graph_support.o \
+                     $(OBJDIR)/tests/db2_code_audit_graph_support_impl.o \
+                     $(OBJDIR)/tests/db2_code_audit_graph_monolith.o
+	$(CC) -Wl,--gc-sections -o $@ $^
+
+DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR = \
+                     $(OBJDIR)/tests/db2-code-audit-graph-support-sanitize
+
+$(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/test.o: \
+                     tests/test_db2_code_audit_graph_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/code_audit_graph_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_AUDIT_GRAPH_SUPPORT_RENAMES) \
+	      $(DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/monolith.o: code_audit_graph.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-code-audit-graph-support-sanitize: \
+                     $(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/test.o \
+                     $(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/support.o \
+                     $(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-code-audit-graph-support \
+        unit-test-db2-code-audit-graph-support-sanitize
+unit-test-db2-code-audit-graph-support: \
+                     $(TESTPREFIX)/unit-test-db2-code-audit-graph-support
+	$<
+
+unit-test-db2-code-audit-graph-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-code-audit-graph-support-sanitize
+	$<
+
 DB2_TIME_SUPPORT_RENAMES = \
    -Dnow_utc=db2_support_now_utc \
    -Dparse_utc_ts=db2_support_parse_utc_ts
