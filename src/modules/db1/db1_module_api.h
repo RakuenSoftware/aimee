@@ -70,6 +70,15 @@
 #define AIMEE_DB1_OP_WM_ASSEMBLE_CONTEXT   6u
 #define AIMEE_DB1_OP_REWRITE_RECORD        7u
 #define AIMEE_DB1_OP_WM_SEARCH_SESSION_IDS 8u
+#define AIMEE_DB1_OP_CONV_RECORD_EVENT     9u
+#define AIMEE_DB1_OP_CONV_SET_CHAIN_ID     10u
+#define AIMEE_DB1_OP_CONV_INSERT_CHAIN     11u
+#define AIMEE_DB1_OP_CONV_PENDING_EVENTS   12u
+#define AIMEE_DB1_OP_CONV_LIST_CHAINS      13u
+#define AIMEE_DB1_OP_CONV_CHAIN_EVENTS     14u
+#define AIMEE_DB1_OP_CONV_SEARCH_CHAINS    15u
+#define AIMEE_DB1_OP_CONV_STATE_GET        16u
+#define AIMEE_DB1_OP_CONV_STATE_UPDATE     17u
 
 /* Family 4: queued agent work: logs, coordination jobs and the cron that
  * drives them. */

@@ -69,6 +69,7 @@
     "wm"
    ],
    "retired_sources": [
+    "conv_context.c",
     "payload_rewrite_state.c",
     "wm.c"
    ]
@@ -1101,6 +1102,610 @@
      }
     ],
     "max_bytes": 8192
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 9,
+   "name": "conv_record_event",
+   "c_name": "db1_conv_record_event",
+   "c_params": [
+    "session_id",
+    "tool_name",
+    "tool_input",
+    "tool_result",
+    "result_bytes"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "tool_name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "tool_input",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "tool_result",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "result_bytes",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "event_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 10,
+   "name": "conv_set_chain_id",
+   "c_name": "db1_conv_set_chain_id",
+   "c_params": [
+    "event_id_first",
+    "event_id_last",
+    "chain_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "event_id_first",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "event_id_last",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "chain_id",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 11,
+   "name": "conv_insert_chain",
+   "c_name": "db1_conv_insert_chain",
+   "c_params": [
+    "session_id",
+    "event_id_first",
+    "event_id_last",
+    "tools",
+    "stub",
+    "raw_bytes",
+    "stub_bytes"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "event_id_first",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "event_id_last",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "tools",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "stub",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "raw_bytes",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "stub_bytes",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "chain_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 12,
+   "name": "conv_pending_events",
+   "c_name": "db1_conv_pending_events",
+   "c_params": [
+    "session_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "conv_tool_event_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "tool_name",
+      "type": "text"
+     },
+     {
+      "name": "tool_input",
+      "type": "text"
+     },
+     {
+      "name": "tool_result",
+      "type": "text"
+     },
+     {
+      "name": "result_bytes",
+      "type": "int"
+     },
+     {
+      "name": "chain_id",
+      "type": "int64"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 13,
+   "name": "conv_list_chains",
+   "c_name": "db1_conv_list_chains",
+   "c_params": [
+    "session_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "conv_tool_chain_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "event_id_first",
+      "type": "int64"
+     },
+     {
+      "name": "event_id_last",
+      "type": "int64"
+     },
+     {
+      "name": "tools",
+      "type": "text"
+     },
+     {
+      "name": "stub",
+      "type": "text"
+     },
+     {
+      "name": "raw_bytes",
+      "type": "int"
+     },
+     {
+      "name": "stub_bytes",
+      "type": "int"
+     },
+     {
+      "name": "state",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 14,
+   "name": "conv_chain_events",
+   "c_name": "db1_conv_chain_events",
+   "c_params": [
+    "chain_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "chain_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "conv_tool_event_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "tool_name",
+      "type": "text"
+     },
+     {
+      "name": "tool_input",
+      "type": "text"
+     },
+     {
+      "name": "tool_result",
+      "type": "text"
+     },
+     {
+      "name": "result_bytes",
+      "type": "int"
+     },
+     {
+      "name": "chain_id",
+      "type": "int64"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 15,
+   "name": "conv_search_chains",
+   "c_name": "db1_conv_search_chains",
+   "c_params": [
+    "session_id",
+    "query",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "query",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "conv_tool_chain_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "event_id_first",
+      "type": "int64"
+     },
+     {
+      "name": "event_id_last",
+      "type": "int64"
+     },
+     {
+      "name": "tools",
+      "type": "text"
+     },
+     {
+      "name": "stub",
+      "type": "text"
+     },
+     {
+      "name": "raw_bytes",
+      "type": "int"
+     },
+     {
+      "name": "stub_bytes",
+      "type": "int"
+     },
+     {
+      "name": "state",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 16,
+   "name": "conv_state_get",
+   "c_name": "db1_conv_state_get",
+   "c_params": [
+    "session_id",
+    "last_event_id_out",
+    "chain_count_out",
+    "event_count_out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "single",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "last_event_id",
+      "type": "int64"
+     },
+     {
+      "name": "chain_count",
+      "type": "int"
+     },
+     {
+      "name": "event_count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 128
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 17,
+   "name": "conv_state_update",
+   "c_name": "db1_conv_state_update",
+   "c_params": [
+    "session_id",
+    "last_event_id",
+    "chain_count",
+    "event_count"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "last_event_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "chain_count",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "event_count",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
    }
   },
   {

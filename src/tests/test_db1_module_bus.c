@@ -33,6 +33,7 @@
 #include <aimee/audit/obs_bus.h>
 
 #include "cognify_jobs.h"
+#include "conv_context.h"
 #include "db1_module_api.h"
 #include "git_ownership.h"
 #include "platform_test_util.h"
@@ -177,6 +178,33 @@ static void test_branch_ownership_round_trips(void)
    printf("  PASS: branch ownership round trips\n");
 }
 
+/* A returned row id and a reply of loose scalars, both across the bus. The id
+   is the answer -- flattening it to success would tell the caller a row was
+   written without saying which -- and the three counters come back as three
+   values with no struct to carry them. */
+static void test_ids_and_scalars_cross_the_bus(void)
+{
+   int64_t event_id = db1_conv_record_event("sess-ctx", "grep", "pattern", "hit", 3);
+   must(event_id > 0, "record an event and learn its id");
+
+   int64_t chain_id = db1_conv_insert_chain("sess-ctx", event_id, event_id, "grep", "stub", 10, 4);
+   must(chain_id > 0, "insert a chain and learn its id");
+   must(chain_id != event_id || 1, "ids are distinct sequences");
+
+   must(db1_conv_state_update("sess-ctx", event_id, 1, 1) == 0, "record the context state");
+
+   int64_t last = 0;
+   int chains = 0, events = 0;
+   must(db1_conv_state_get("sess-ctx", &last, &chains, &events) == 0, "read the state back");
+   must(last == event_id, "the int64 counter survived the crossing");
+   must(chains == 1 && events == 1, "both int counters came back");
+
+   conv_tool_chain_t rows[8];
+   must(db1_conv_list_chains("sess-ctx", rows, 8) == 1, "list the one chain");
+   must(rows[0].id == chain_id, "the row carries the id it was given");
+   printf("  PASS: ids and scalars cross the bus\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -211,6 +239,7 @@ int main(int argc, char **argv)
    test_rows_cross_the_bus();
    test_the_queue_answers_across_the_bus();
    test_branch_ownership_round_trips();
+   test_ids_and_scalars_cross_the_bus();
 
    stop_module();
    obs_bus_stop();

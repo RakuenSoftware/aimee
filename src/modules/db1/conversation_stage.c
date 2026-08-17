@@ -13,6 +13,7 @@
 #include "db1_stages.h"
 
 #include "db1_module_api.h"
+#include "conv_context.h"
 #include "payload_rewrite_state.h"
 #include "wm.h"
 
@@ -525,6 +526,546 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
          row_count = produced * 1u;
       }
       listed = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_CONV_RECORD_EVENT:
+   {
+      if (count != 5u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[4][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed4;
+      if (parse_int(field[4], &parsed4) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t produced = db1_conv_record_event(field[0], field[1], field[2], field[3], parsed4);
+      rc = (produced >= 0) ? 0 : -1;
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
+      row_slots[0] = row_text[0];
+      rows = row_slots;
+      row_count = 1u;
+      break;
+   }
+   case AIMEE_DB1_OP_CONV_SET_CHAIN_ID:
+   {
+      if (count != 3u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[2][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t parsed0;
+      if (parse_int64(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t parsed1;
+      if (parse_int64(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t parsed2;
+      if (parse_int64(field[2], &parsed2) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_conv_set_chain_id(parsed0, parsed1, parsed2);
+      break;
+   }
+   case AIMEE_DB1_OP_CONV_INSERT_CHAIN:
+   {
+      if (count != 7u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[2][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[5][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[6][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t parsed1;
+      if (parse_int64(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t parsed2;
+      if (parse_int64(field[2], &parsed2) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed5;
+      if (parse_int(field[5], &parsed5) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed6;
+      if (parse_int(field[6], &parsed6) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t produced = db1_conv_insert_chain(field[0], parsed1, parsed2, field[3], field[4], parsed5, parsed6);
+      rc = (produced >= 0) ? 0 : -1;
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
+      row_slots[0] = row_text[0];
+      rows = row_slots;
+      row_count = 1u;
+      break;
+   }
+   case AIMEE_DB1_OP_CONV_PENDING_EVENTS:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed1 <= 0 || parsed1 > 64)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      conv_tool_event_t *found = calloc((size_t)parsed1, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_conv_pending_events(field[0], found, parsed1);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed1)
+                                 ? (uint32_t)rc : (uint32_t)parsed1;
+         const char **cells = malloc((size_t)produced * 8u * sizeof *cells);
+         char (*numbers)[32] = malloc((size_t)produced * 3u * sizeof *numbers);
+         if (!cells || !numbers)
+         {
+            free(cells);
+            free(numbers);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         numeric_owned = numbers;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            snprintf(numbers[row * 3u + 0u], 32,
+                     "%lld", (long long)found[row].id);
+            snprintf(numbers[row * 3u + 1u], 32,
+                     "%d", found[row].result_bytes);
+            snprintf(numbers[row * 3u + 2u], 32,
+                     "%lld", (long long)found[row].chain_id);
+            cells[row * 8u + 0u] = numbers[row * 3u + 0u];
+            cells[row * 8u + 1u] = found[row].session_id;
+            cells[row * 8u + 2u] = found[row].tool_name;
+            cells[row * 8u + 3u] = found[row].tool_input;
+            cells[row * 8u + 4u] = found[row].tool_result;
+            cells[row * 8u + 5u] = numbers[row * 3u + 1u];
+            cells[row * 8u + 6u] = numbers[row * 3u + 2u];
+            cells[row * 8u + 7u] = found[row].created_at;
+         }
+         rows = cells;
+         row_count = produced * 8u;
+      }
+      listed = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_CONV_LIST_CHAINS:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed1 <= 0 || parsed1 > 64)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      conv_tool_chain_t *found = calloc((size_t)parsed1, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_conv_list_chains(field[0], found, parsed1);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed1)
+                                 ? (uint32_t)rc : (uint32_t)parsed1;
+         const char **cells = malloc((size_t)produced * 10u * sizeof *cells);
+         char (*numbers)[32] = malloc((size_t)produced * 5u * sizeof *numbers);
+         if (!cells || !numbers)
+         {
+            free(cells);
+            free(numbers);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         numeric_owned = numbers;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            snprintf(numbers[row * 5u + 0u], 32,
+                     "%lld", (long long)found[row].id);
+            snprintf(numbers[row * 5u + 1u], 32,
+                     "%lld", (long long)found[row].event_id_first);
+            snprintf(numbers[row * 5u + 2u], 32,
+                     "%lld", (long long)found[row].event_id_last);
+            snprintf(numbers[row * 5u + 3u], 32,
+                     "%d", found[row].raw_bytes);
+            snprintf(numbers[row * 5u + 4u], 32,
+                     "%d", found[row].stub_bytes);
+            cells[row * 10u + 0u] = numbers[row * 5u + 0u];
+            cells[row * 10u + 1u] = found[row].session_id;
+            cells[row * 10u + 2u] = numbers[row * 5u + 1u];
+            cells[row * 10u + 3u] = numbers[row * 5u + 2u];
+            cells[row * 10u + 4u] = found[row].tools;
+            cells[row * 10u + 5u] = found[row].stub;
+            cells[row * 10u + 6u] = numbers[row * 5u + 3u];
+            cells[row * 10u + 7u] = numbers[row * 5u + 4u];
+            cells[row * 10u + 8u] = found[row].state;
+            cells[row * 10u + 9u] = found[row].created_at;
+         }
+         rows = cells;
+         row_count = produced * 10u;
+      }
+      listed = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_CONV_CHAIN_EVENTS:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t parsed0;
+      if (parse_int64(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed1 <= 0 || parsed1 > 64)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      conv_tool_event_t *found = calloc((size_t)parsed1, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_conv_chain_events(parsed0, found, parsed1);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed1)
+                                 ? (uint32_t)rc : (uint32_t)parsed1;
+         const char **cells = malloc((size_t)produced * 8u * sizeof *cells);
+         char (*numbers)[32] = malloc((size_t)produced * 3u * sizeof *numbers);
+         if (!cells || !numbers)
+         {
+            free(cells);
+            free(numbers);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         numeric_owned = numbers;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            snprintf(numbers[row * 3u + 0u], 32,
+                     "%lld", (long long)found[row].id);
+            snprintf(numbers[row * 3u + 1u], 32,
+                     "%d", found[row].result_bytes);
+            snprintf(numbers[row * 3u + 2u], 32,
+                     "%lld", (long long)found[row].chain_id);
+            cells[row * 8u + 0u] = numbers[row * 3u + 0u];
+            cells[row * 8u + 1u] = found[row].session_id;
+            cells[row * 8u + 2u] = found[row].tool_name;
+            cells[row * 8u + 3u] = found[row].tool_input;
+            cells[row * 8u + 4u] = found[row].tool_result;
+            cells[row * 8u + 5u] = numbers[row * 3u + 1u];
+            cells[row * 8u + 6u] = numbers[row * 3u + 2u];
+            cells[row * 8u + 7u] = found[row].created_at;
+         }
+         rows = cells;
+         row_count = produced * 8u;
+      }
+      listed = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_CONV_SEARCH_CHAINS:
+   {
+      if (count != 3u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[2][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed2;
+      if (parse_int(field[2], &parsed2) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed2 <= 0 || parsed2 > 64)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      conv_tool_chain_t *found = calloc((size_t)parsed2, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_conv_search_chains(field[0], field[1], found, parsed2);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed2)
+                                 ? (uint32_t)rc : (uint32_t)parsed2;
+         const char **cells = malloc((size_t)produced * 10u * sizeof *cells);
+         char (*numbers)[32] = malloc((size_t)produced * 5u * sizeof *numbers);
+         if (!cells || !numbers)
+         {
+            free(cells);
+            free(numbers);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         numeric_owned = numbers;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            snprintf(numbers[row * 5u + 0u], 32,
+                     "%lld", (long long)found[row].id);
+            snprintf(numbers[row * 5u + 1u], 32,
+                     "%lld", (long long)found[row].event_id_first);
+            snprintf(numbers[row * 5u + 2u], 32,
+                     "%lld", (long long)found[row].event_id_last);
+            snprintf(numbers[row * 5u + 3u], 32,
+                     "%d", found[row].raw_bytes);
+            snprintf(numbers[row * 5u + 4u], 32,
+                     "%d", found[row].stub_bytes);
+            cells[row * 10u + 0u] = numbers[row * 5u + 0u];
+            cells[row * 10u + 1u] = found[row].session_id;
+            cells[row * 10u + 2u] = numbers[row * 5u + 1u];
+            cells[row * 10u + 3u] = numbers[row * 5u + 2u];
+            cells[row * 10u + 4u] = found[row].tools;
+            cells[row * 10u + 5u] = found[row].stub;
+            cells[row * 10u + 6u] = numbers[row * 5u + 3u];
+            cells[row * 10u + 7u] = numbers[row * 5u + 4u];
+            cells[row * 10u + 8u] = found[row].state;
+            cells[row * 10u + 9u] = found[row].created_at;
+         }
+         rows = cells;
+         row_count = produced * 10u;
+      }
+      listed = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_CONV_STATE_GET:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t scalar0 = 0;
+      int scalar1 = 0;
+      int scalar2 = 0;
+      rc = db1_conv_state_get(field[0], &scalar0, &scalar1, &scalar2);
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)scalar0);
+      row_slots[0] = row_text[0];
+      snprintf(row_text[1], sizeof row_text[1], "%d", scalar1);
+      row_slots[1] = row_text[1];
+      snprintf(row_text[2], sizeof row_text[2], "%d", scalar2);
+      row_slots[2] = row_text[2];
+      rows = row_slots;
+      row_count = 3u;
+      break;
+   }
+   case AIMEE_DB1_OP_CONV_STATE_UPDATE:
+   {
+      if (count != 4u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[2][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[3][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t parsed1;
+      if (parse_int64(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed2;
+      if (parse_int(field[2], &parsed2) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed3;
+      if (parse_int(field[3], &parsed3) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_conv_state_update(field[0], parsed1, parsed2, parsed3);
       break;
    }
    default:
