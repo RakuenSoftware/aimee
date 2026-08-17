@@ -434,6 +434,51 @@ int main(void)
    assert(pki_mtls_ramp_init(1) == -1); /* never fall back to optional on DB failure */
    printf("pki: P8a authority-down -> ERROR (fail-closed) ok\n");
 
+   /* (h) Identity-separation comparison semantics.
+    *
+    * server_tls.c proves the listener identity is distinct from the KB client
+    * identity via EVP_PKEY_eq. Its return values are NOT a boolean:
+    *   1 = same key, 0 = different key, -1 = different key TYPES, -2 = unsupported.
+    * A test of `== 0` therefore folds -1 ("provably different algorithms") into
+    * "collides". That is the exact field failure this guards: the server issues
+    * an EC identity (gen_ec_key) while a managed KB enrollment issues RSA, so
+    * the pair is maximally separated -- and was rejected as a reused key, which
+    * disabled the TLS listener permanently with no configuration-level fix.
+    *
+    * Pin the three cases the separation gate depends on. */
+   {
+      EVP_PKEY *ec1 = NULL, *ec2 = NULL, *rsa = NULL;
+      EVP_PKEY_CTX *c = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
+      assert(c && EVP_PKEY_keygen_init(c) == 1 &&
+             EVP_PKEY_CTX_set_ec_paramgen_curve_nid(c, NID_X9_62_prime256v1) == 1 &&
+             EVP_PKEY_keygen(c, &ec1) == 1);
+      EVP_PKEY_CTX_free(c);
+      c = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
+      assert(c && EVP_PKEY_keygen_init(c) == 1 &&
+             EVP_PKEY_CTX_set_ec_paramgen_curve_nid(c, NID_X9_62_prime256v1) == 1 &&
+             EVP_PKEY_keygen(c, &ec2) == 1);
+      EVP_PKEY_CTX_free(c);
+      c = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+      assert(c && EVP_PKEY_keygen_init(c) == 1 &&
+             EVP_PKEY_CTX_set_rsa_keygen_bits(c, 2048) == 1 && EVP_PKEY_keygen(c, &rsa) == 1);
+      EVP_PKEY_CTX_free(c);
+
+      assert(EVP_PKEY_eq(ec1, ec1) == 1);  /* same key -> collision */
+      assert(EVP_PKEY_eq(ec1, ec2) == 0);  /* different EC keys -> distinct */
+      assert(EVP_PKEY_eq(ec1, rsa) == -1); /* EC vs RSA -> distinct, and NOT 0 */
+
+      /* The mapping server_tls.c must implement: distinct unless provably equal,
+       * with -2/unknown staying fail-closed. */
+      assert((EVP_PKEY_eq(ec1, ec1) == 0 || EVP_PKEY_eq(ec1, ec1) == -1) == 0);
+      assert((EVP_PKEY_eq(ec1, ec2) == 0 || EVP_PKEY_eq(ec1, ec2) == -1) == 1);
+      assert((EVP_PKEY_eq(ec1, rsa) == 0 || EVP_PKEY_eq(ec1, rsa) == -1) == 1);
+
+      EVP_PKEY_free(ec1);
+      EVP_PKEY_free(ec2);
+      EVP_PKEY_free(rsa);
+      printf("pki: identity-separation key comparison semantics ok\n");
+   }
+
    snprintf(cmd, sizeof(cmd), "rm -rf %s", home);
    (void)system(cmd);
    printf("pki: all tests passed\n");

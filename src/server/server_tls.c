@@ -278,7 +278,24 @@ static int distinct_from_kb_client_identity(X509 *server_cert)
    X509 *client_cert = client_bio ? PEM_read_bio_X509(client_bio, NULL, NULL, NULL) : NULL;
    EVP_PKEY *server_key = server_cert ? X509_get_pubkey(server_cert) : NULL;
    EVP_PKEY *client_key = client_cert ? X509_get_pubkey(client_cert) : NULL;
-   int distinct = server_key && client_key && EVP_PKEY_eq(server_key, client_key) == 0;
+   /* EVP_PKEY_eq: 1 = same key, 0 = different key, -1 = different key TYPES,
+    * -2 = comparison unsupported for this type. Only 1 is a genuine collision.
+    *
+    * This tested `== 0`, which silently folded -1 into "collides". -1 is the
+    * STRONGEST evidence of separation there is — an EC key cannot be an RSA key
+    * — so a correctly-separated identity pair was rejected as a reused key. It
+    * was also unrecoverable: pki_ensure_self_signed_server_cert always issues EC
+    * (gen_ec_key), while a managed KB enrollment issues RSA, so every
+    * reprovisioning produced the same EC-vs-RSA mismatch and TLS stayed off
+    * permanently. Observed in the field as "tls_port set but TLS cert/key not
+    * loadable; TLS DISABLED" on a server whose cert and key were both fine,
+    * which takes the whole remote /v1 surface down and leaves no way to fix it
+    * from configuration.
+    *
+    * -2 and an unreadable/unparseable client identity remain fail-closed: the
+    * point of this gate is to PROVE separation, and unproven is not proven. */
+   int cmp = (server_key && client_key) ? EVP_PKEY_eq(server_key, client_key) : -2;
+   int distinct = (cmp == 0 || cmp == -1);
    EVP_PKEY_free(server_key);
    EVP_PKEY_free(client_key);
    X509_free(client_cert);
