@@ -57,7 +57,9 @@ static void warn_unreachable(int reason)
    bus bounds the message instead. */
 static int frame_size(const char *const *fields, uint32_t count, size_t *need_out)
 {
-   if (count == 0u || count > AIMEE_DB1_FIELDS_MAX)
+   /* Zero fields is a legal request: an operation that takes no arguments
+      sends the header alone. The upper bound still applies. */
+   if (count > AIMEE_DB1_FIELDS_MAX)
       return -1;
    size_t need = 8u;
    for (uint32_t i = 0; i < count; ++i)

@@ -195,9 +195,14 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
                 fail("c-name", f"operations[{index}] c_name {symbol!r} must be a db1_ symbol")
         if ("c_params" in operation) != ("c_name" in operation):
             fail("c-params", f"operations[{index}] must name c_params exactly with c_name")
-        if operation.get("c_returns", "int") not in ("int", "text"):
+        # "int"   0 succeeded, negative failed -- a write, or a read whose
+        #          absence is indistinguishable from an error
+        # "found"  1 found, 0 nothing there, negative failed -- the domain makes
+        #          the distinction, so the wire has to carry it
+        # "text"   a malloc'd string, NULL for nothing
+        if operation.get("c_returns", "int") not in ("int", "found", "text"):
             fail("c-returns",
-                 f"operations[{index}] c_returns must be \"int\" or \"text\"")
+                 f"operations[{index}] c_returns must be \"int\", \"found\" or \"text\"")
         if "c_returns" in operation and "c_name" not in operation:
             fail("c-returns", f"operations[{index}] names a return but no C symbol")
         if "c_params" in operation:
@@ -274,8 +279,15 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
         if "struct" in request and not re.fullmatch(r"[a-z][a-z0-9_]*_t", str(request["struct"])):
             fail("request-struct", f"{name} request struct must be a _t type name")
         raw_fields = request["fields"]
-        if not isinstance(raw_fields, list) or not raw_fields:
-            fail("request-fields", f"{name} request must declare at least one field")
+        # An operation may take nothing at all -- "what is the queue's status"
+        # names no row. It must then say global out loud, because a scoped
+        # operation is scoped BY its first field and there is no field to scope
+        # by; declaring that is the audit trail.
+        if not isinstance(raw_fields, list):
+            fail("request-fields", f"{name} request fields must be an array")
+        if not raw_fields and operation["scope"] != "global":
+            fail("request-fields",
+                 f"{name} takes no arguments, so it cannot be scoped: say global")
         fields = []
         for position, entry_field in enumerate(raw_fields):
             declared = keys(entry_field, {"name", "type", "required"},
@@ -307,6 +319,8 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
         # first, and reviewing that is reading which member comes first.
         if "struct" in request:
             pass
+        elif not fields:
+            pass  # nothing to scope by; the global declaration above is the rule
         elif operation["scope"] == "global":
             if fields[0] == "key":
                 fail("request-global",
@@ -407,6 +421,9 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
                      f"{name} reply field type must be one of {[p for p in PAYLOADS if p != 'none']}")
             if not NAME.fullmatch(str(shape["name"])):
                 fail("reply-field-name", f"{name} invalid reply field {shape['name']!r}")
+        if operation.get("c_returns") == "found" and "missing" not in results:
+            fail("c-returns",
+                 f"{name} distinguishes found from nothing, so it must declare missing")
         if operation.get("c_returns") == "text":
             # The reply is the return value, so there is exactly one of it and
             # its declared size is what the client allocates before it calls.
@@ -795,7 +812,9 @@ static void warn_unreachable(int reason)
    bus bounds the message instead. */
 static int frame_size(const char *const *fields, uint32_t count, size_t *need_out)
 {{
-   if (count == 0u || count > AIMEE_DB1_FIELDS_MAX)
+   /* Zero fields is a legal request: an operation that takes no arguments
+      sends the header alone. The upper bound still applies. */
+   if (count > AIMEE_DB1_FIELDS_MAX)
       return -1;
    size_t need = 8u;
    for (uint32_t i = 0; i < count; ++i)
@@ -1037,7 +1056,12 @@ static int read_result(int status, const char *value_out)
             params = [f"const {in_struct} *{inputs[0]}"]
             guards = [f"!{inputs[0]}"]
         else:
-            params = [(f"int {p}" if t in ("int", "int64") else f"const char *{p}")
+            # int64 is its own C type here. It only ever appeared as a struct
+            # member before, where the struct's own declaration carried the
+            # width; as a direct parameter, "int" is a different function.
+            params = [(f"int {p}" if t == "int"
+                       else f"int64_t {p}" if t == "int64"
+                       else f"const char *{p}")
                       for p, t in zip(inputs, types)]
             # An int cannot be null and has no empty case, so only text is
             # guarded -- and only where the operation says it must be there.
@@ -1099,7 +1123,11 @@ static int read_result(int status, const char *value_out)
                 carried.append(local)
             else:
                 carried.append(source)
-        body.append(f"   const char *fields[] = {{{', '.join(carried)}}};")
+        if carried:
+            body.append(f"   const char *fields[] = {{{', '.join(carried)}}};")
+        else:
+            # A zero-length array is not valid C; the frame carries no fields.
+            body.append("   const char *const *fields = NULL;")
         op_symbol = f"AIMEE_DB1_OP_{str(operation['name']).upper()}"
         arity = len(fields)
         if returns_text:
@@ -1207,17 +1235,28 @@ static int read_result(int status, const char *value_out)
             body.append(f"   memset({target}, 0, sizeof *{target});")
             body.append(f"   int status = call_stage({op_symbol}, fields, {arity}, values, caps, "
                         f"{len(members)}, NULL);")
-            # The domain answers 0 or -1 here: a miss and a failure are the
-            # same answer to its callers, and the wire does not invent a
-            # distinction the contract never had.
-            body.append("   if (status != (int)AIMEE_DB1_STATUS_OK)")
-            body.append("      return -1;")
+            if operation.get("c_returns") == "found":
+                # This domain DOES distinguish, so the client hands back the
+                # same three answers rather than folding nothing-there into
+                # failure: a caller polling a queue would otherwise treat an
+                # empty queue as a broken one and back off from it.
+                body.append("   if (status == (int)AIMEE_DB1_STATUS_MISSING)")
+                body.append("      return 0;")
+                body.append("   if (status != (int)AIMEE_DB1_STATUS_OK)")
+                body.append("      return -1;")
+            else:
+                # The domain answers 0 or -1 here: a miss and a failure are the
+                # same answer to its callers, and the wire does not invent a
+                # distinction the contract never had.
+                body.append("   if (status != (int)AIMEE_DB1_STATUS_OK)")
+                body.append("      return -1;")
             for index, (member, kind) in enumerate(members):
                 if kind == "int":
                     body.append(f"   {target}->{member} = (int)strtol(slot{index}, NULL, 10);")
                 elif kind == "int64":
                     body.append(f"   {target}->{member} = (int64_t)strtoll(slot{index}, NULL, 10);")
-            body.append("   return 0;")
+            body.append("   return 1;" if operation.get("c_returns") == "found"
+                        else "   return 0;")
         elif reads:
             body.append(f"   char *const values[] = {{{outputs[0]}}};")
             body.append(f"   const size_t caps[] = {{{outputs[1]}}};")
@@ -1346,8 +1385,10 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
    uint32_t op = aimee_db1_get_u32(request_body);
    uint32_t count = aimee_db1_get_u32(request_body + 4u);
    /* Bounds the fixed array below. Without it a well-formed frame declaring
-      more fields than any operation takes writes past it. */
-   if (count == 0u || count > AIMEE_DB1_FIELDS_MAX)
+      more fields than any operation takes writes past it. Zero is allowed:
+      an operation that takes no arguments decodes no fields, and the arity
+      check in its own case is what refuses a frame that carries some. */
+   if (count > AIMEE_DB1_FIELDS_MAX)
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
 
    /* One allocation for every field, sized by the frame that carried them: the
@@ -1388,7 +1429,12 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
       them. Declared unconditionally so this stays one readable flow -- unlike
       the static helpers above, an unused local costs nothing. */
    int listed = 0;
-   /* A domain that returns a string hands over the allocation with it. The
+   /* Set by an operation whose C return says 1 found / 0 nothing / negative
+      failed. A row-returning domain usually answers 0 or -1 and has no such
+      distinction; one that does must not have it flattened, or "the queue is
+      empty" and "the queue is broken" reach the caller as the same answer. */
+   int found = 0;
+{row_locals}   /* A domain that returns a string hands over the allocation with it. The
       reply is written straight out of it rather than copied into value: the
       stack buffer is sized for identifiers and these carry documents. */
    char *text_owned = NULL;
@@ -1414,9 +1460,12 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
          only a negative return is a failure. Zero rows is an empty list, not a
          miss: the caller asked what was there and the answer was nothing. */
       status = (rc >= 0) ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_FAILED;
+   else if (found)
+      status = (rc > 0) ? AIMEE_DB1_STATUS_OK
+                        : (rc == 0 ? AIMEE_DB1_STATUS_MISSING : AIMEE_DB1_STATUS_FAILED);
    else if (rows)
-      /* A row-returning domain answers 0 or -1: there is no found/not-found
-         distinction to preserve, so neither is invented. */
+      /* A row-returning domain usually answers 0 or -1: there is no
+         found/not-found distinction to preserve, so neither is invented. */
       status = (rc == 0) ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_FAILED;
    else if (reads)
    {{
@@ -1620,19 +1669,34 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 "      listed = 1;\n")
         elif out_struct:
             members = [(str(f["name"]), str(f["type"])) for f in reply["fields"]]
-            parse.append(f"      {out_struct} out;\n      memset(&out, 0, sizeof out);\n")
-            args.append("&out")
+            # Function scope, not case scope. `rows` escapes the switch and is
+            # read by write_reply below, so anything it points at has to still
+            # exist there: the row struct itself, the text a numeric member was
+            # rendered into, and the pointer array. Declared inside the case
+            # these are dead the moment it breaks, and the compiler is free to
+            # put the locals that follow in the same stack slots -- which is
+            # exactly what it did.
+            slot = f"row_{out_struct}"
+            parse.append(f"      memset(&{slot}, 0, sizeof {slot});\n")
+            args.append(f"&{slot}")
+            numeric = 0
             for index, (member, kind) in enumerate(members):
                 if kind in ("int", "int64"):
                     spec = "%lld" if kind == "int64" else "%d"
                     cast = "(long long)" if kind == "int64" else ""
-                    tail.append(f"      char text{index}[24];\n"
-                                f"      snprintf(text{index}, sizeof text{index}, \"{spec}\", "
-                                f"{cast}out.{member});\n")
-            emitted = ", ".join(f"text{index}" if kind in ("int", "int64") else f"out.{member}"
-                                for index, (member, kind) in enumerate(members))
-            tail.append(f"      const char *const row_values[] = {{{emitted}}};\n")
-            tail.append(f"      rows = row_values;\n      row_count = {len(members)}u;\n")
+                    tail.append(f"      snprintf(row_text[{numeric}], sizeof row_text[{numeric}], "
+                                f"\"{spec}\", {cast}{slot}.{member});\n")
+                    numeric += 1
+            numeric = 0
+            for index, (member, kind) in enumerate(members):
+                if kind in ("int", "int64"):
+                    tail.append(f"      row_slots[{index}] = row_text[{numeric}];\n")
+                    numeric += 1
+                else:
+                    tail.append(f"      row_slots[{index}] = {slot}.{member};\n")
+            tail.append(f"      rows = row_slots;\n      row_count = {len(members)}u;\n")
+            if operation.get("c_returns") == "found":
+                tail.append("      found = 1;\n")
         elif reads and not returns_text:
             args += ["value", "sizeof value"]
         # Braced only when a parsed integer needs scoping: an empty block around
@@ -1667,7 +1731,29 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         cases.append(head + (f"   {{\n{body}   }}\n" if parse or returns_text else body))
     used = {str(f["type"]) for o in operations for f in o["request"]["fields"]}
     typed = bool(used & {"int", "int64"})
+    # Storage for a single row's reply, at function scope because write_reply
+    # reads it after the switch. One variable per distinct row type the family
+    # answers with; a union would save stack but would have to invent member
+    # names for types that already have them.
+    row_types, widest, most_numeric = [], 0, 0
+    for operation in operations:
+        reply = operation["reply"]
+        if "struct" not in reply or "list" in reply:
+            continue
+        struct = str(reply["struct"])
+        if struct not in row_types:
+            row_types.append(struct)
+        widest = max(widest, len(reply["fields"]))
+        most_numeric = max(most_numeric, sum(1 for f in reply["fields"]
+                                             if str(f["type"]) in ("int", "int64")))
+    row_locals = ""
+    if row_types:
+        row_locals = "".join(f"   {struct} row_{struct};\n" for struct in row_types)
+        row_locals += f"   const char *row_slots[{widest}];\n"
+        if most_numeric:
+            row_locals += f"   char row_text[{most_numeric}][24];\n"
     return STAGE_SCAFFOLD.format(stem=name, family=name.replace("_", " "),
+                                 row_locals=row_locals,
                                  headers="\n".join(f'#include "{h}"' for h in headers),
                                  cases="".join(cases),
                                  parse_int=PARSE_INT if "int" in used else "",

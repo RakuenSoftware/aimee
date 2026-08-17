@@ -111,8 +111,10 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
    uint32_t op = aimee_db1_get_u32(request_body);
    uint32_t count = aimee_db1_get_u32(request_body + 4u);
    /* Bounds the fixed array below. Without it a well-formed frame declaring
-      more fields than any operation takes writes past it. */
-   if (count == 0u || count > AIMEE_DB1_FIELDS_MAX)
+      more fields than any operation takes writes past it. Zero is allowed:
+      an operation that takes no arguments decodes no fields, and the arity
+      check in its own case is what refuses a frame that carries some. */
+   if (count > AIMEE_DB1_FIELDS_MAX)
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
 
    /* One allocation for every field, sized by the frame that carried them: the
@@ -153,6 +155,15 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
       them. Declared unconditionally so this stays one readable flow -- unlike
       the static helpers above, an unused local costs nothing. */
    int listed = 0;
+   /* Set by an operation whose C return says 1 found / 0 nothing / negative
+      failed. A row-returning domain usually answers 0 or -1 and has no such
+      distinction; one that does must not have it flattened, or "the queue is
+      empty" and "the queue is broken" reach the caller as the same answer. */
+   int found = 0;
+   payload_rewrite_state_t row_payload_rewrite_state_t;
+   wm_entry_t row_wm_entry_t;
+   const char *row_slots[11];
+   char row_text[6][24];
    /* A domain that returns a string hands over the allocation with it. The
       reply is written straight out of it rather than copied into value: the
       stack buffer is sized for identifiers and these carry documents. */
@@ -175,23 +186,26 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      payload_rewrite_state_t out;
-      memset(&out, 0, sizeof out);
-      rc = db1_payload_rewrite_state_get(field[0], &out);
-      char text1[24];
-      snprintf(text1, sizeof text1, "%lld", (long long)out.payload_epoch);
-      char text2[24];
-      snprintf(text2, sizeof text2, "%lld", (long long)out.compaction_epoch);
-      char text4[24];
-      snprintf(text4, sizeof text4, "%d", out.last_payload_tokens);
-      char text6[24];
-      snprintf(text6, sizeof text6, "%d", out.deferred_rewrite_count);
-      char text7[24];
-      snprintf(text7, sizeof text7, "%d", out.consecutive_deferred_count);
-      char text8[24];
-      snprintf(text8, sizeof text8, "%d", out.bytes_saved_pending);
-      const char *const row_values[] = {out.session_id, text1, text2, out.last_prefix_hash, text4, out.last_rewrite_at, text6, text7, text8, out.rewrite_reason, out.updated_at};
-      rows = row_values;
+      memset(&row_payload_rewrite_state_t, 0, sizeof row_payload_rewrite_state_t);
+      rc = db1_payload_rewrite_state_get(field[0], &row_payload_rewrite_state_t);
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)row_payload_rewrite_state_t.payload_epoch);
+      snprintf(row_text[1], sizeof row_text[1], "%lld", (long long)row_payload_rewrite_state_t.compaction_epoch);
+      snprintf(row_text[2], sizeof row_text[2], "%d", row_payload_rewrite_state_t.last_payload_tokens);
+      snprintf(row_text[3], sizeof row_text[3], "%d", row_payload_rewrite_state_t.deferred_rewrite_count);
+      snprintf(row_text[4], sizeof row_text[4], "%d", row_payload_rewrite_state_t.consecutive_deferred_count);
+      snprintf(row_text[5], sizeof row_text[5], "%d", row_payload_rewrite_state_t.bytes_saved_pending);
+      row_slots[0] = row_payload_rewrite_state_t.session_id;
+      row_slots[1] = row_text[0];
+      row_slots[2] = row_text[1];
+      row_slots[3] = row_payload_rewrite_state_t.last_prefix_hash;
+      row_slots[4] = row_text[2];
+      row_slots[5] = row_payload_rewrite_state_t.last_rewrite_at;
+      row_slots[6] = row_text[3];
+      row_slots[7] = row_text[4];
+      row_slots[8] = row_text[5];
+      row_slots[9] = row_payload_rewrite_state_t.rewrite_reason;
+      row_slots[10] = row_payload_rewrite_state_t.updated_at;
+      rows = row_slots;
       row_count = 11u;
       reads = 1;
       break;
@@ -301,13 +315,18 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      wm_entry_t out;
-      memset(&out, 0, sizeof out);
-      rc = db1_wm_get(field[0], field[1], &out);
-      char text0[24];
-      snprintf(text0, sizeof text0, "%lld", (long long)out.id);
-      const char *const row_values[] = {text0, out.session_id, out.key, out.value, out.category, out.created_at, out.updated_at, out.expires_at};
-      rows = row_values;
+      memset(&row_wm_entry_t, 0, sizeof row_wm_entry_t);
+      rc = db1_wm_get(field[0], field[1], &row_wm_entry_t);
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)row_wm_entry_t.id);
+      row_slots[0] = row_text[0];
+      row_slots[1] = row_wm_entry_t.session_id;
+      row_slots[2] = row_wm_entry_t.key;
+      row_slots[3] = row_wm_entry_t.value;
+      row_slots[4] = row_wm_entry_t.category;
+      row_slots[5] = row_wm_entry_t.created_at;
+      row_slots[6] = row_wm_entry_t.updated_at;
+      row_slots[7] = row_wm_entry_t.expires_at;
+      rows = row_slots;
       row_count = 8u;
       reads = 1;
       break;
@@ -524,9 +543,12 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
          only a negative return is a failure. Zero rows is an empty list, not a
          miss: the caller asked what was there and the answer was nothing. */
       status = (rc >= 0) ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_FAILED;
+   else if (found)
+      status = (rc > 0) ? AIMEE_DB1_STATUS_OK
+                        : (rc == 0 ? AIMEE_DB1_STATUS_MISSING : AIMEE_DB1_STATUS_FAILED);
    else if (rows)
-      /* A row-returning domain answers 0 or -1: there is no found/not-found
-         distinction to preserve, so neither is invented. */
+      /* A row-returning domain usually answers 0 or -1: there is no
+         found/not-found distinction to preserve, so neither is invented. */
       status = (rc == 0) ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_FAILED;
    else if (reads)
    {

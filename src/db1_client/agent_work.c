@@ -1,4 +1,4 @@
-/* db1_client/git_ownership.c: the git_ownership family, reached over the bus.
+/* db1_client/agent_work.c: the agent_work family, reached over the bus.
  *
  * GENERATED from src/modules/db1/eventcontract/operations.json by
  * scripts/gen_db1_contract.py. Do not edit.
@@ -13,15 +13,14 @@
  * not have it -- once as the caller and once as the implementation.
 
  *
- * A failure returns -1, never "no owner". branch_own_check() reads a negative
- * as "no enforcement" and allows the operation, which is what it has always
- * done without a database, whereas a fabricated 0 would assert the branch is
- * unowned and let a caller take one somebody else holds. *
+ * Background work queues: the cognify queue's claim/mark bookkeeping is
+ * machine-local runtime state, which is why it is DB1's even when the memory
+ * it points at lives in DB2. *
  * clang-format is off for the body below: its canonical form is whatever this
  * generator emits, and reflowing generated output would put the file and the
  * catalog permanently one reformat apart. */
 /* clang-format off */
-#include "git_ownership.h"
+#include "cognify_jobs.h"
 
 #include "db1_module_api.h"
 
@@ -36,7 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define DB1_GIT_OWNERSHIP_CALL_TIMEOUT_MS 2000
+#define DB1_AGENT_WORK_CALL_TIMEOUT_MS 2000
 
 static void warn_unreachable(int reason)
 {
@@ -48,7 +47,7 @@ static void warn_unreachable(int reason)
       is quiet, without one line per call. The numeric
       aimee_module_call_result_t, not its name, so this does not pull the whole
       event-bus library in behind the client for one string. */
-   LOG_WARN("db1.git_ownership", "DB1 %s is unreachable (module call result %d)", "git ownership",
+   LOG_WARN("db1.agent_work", "DB1 %s is unreachable (module call result %d)", "agent work",
             reason);
 }
 
@@ -119,7 +118,7 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
          values[i][0] = '\0';
    /* A local check, not a probe: with nothing serving the stage there is no
       call to make, and saying so beats waiting out a deadline. */
-   if (!obs_bus_module_available(AIMEE_DB1_EVENT_GIT_OWNERSHIP))
+   if (!obs_bus_module_available(AIMEE_DB1_EVENT_AGENT_WORK))
    {
       warn_unreachable(AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
       return -1;
@@ -144,9 +143,9 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
    encode(request, op, fields, count);
 
    uint32_t response_len = 0;
-   uint64_t deadline = aimee_module_call_deadline_ns(DB1_GIT_OWNERSHIP_CALL_TIMEOUT_MS);
+   uint64_t deadline = aimee_module_call_deadline_ns(DB1_AGENT_WORK_CALL_TIMEOUT_MS);
    aimee_module_call_result_t rc =
-       obs_bus_module_call(AIMEE_DB1_EVENT_GIT_OWNERSHIP, AIMEE_DB1_STAGE_GIT_OWNERSHIP, 0, deadline,
+       obs_bus_module_call(AIMEE_DB1_EVENT_AGENT_WORK, AIMEE_DB1_STAGE_AGENT_WORK, 0, deadline,
                            request, (uint32_t)request_len, response, (uint32_t)response_cap,
                            &response_len, NULL, NULL);
    free(request);
@@ -211,83 +210,71 @@ static int write_result(int status)
    return status == (int)AIMEE_DB1_STATUS_OK ? 0 : -1;
 }
 
-/* A read answers found(1) / not-found(0) / error(-1), which is what the direct
-   implementation returns and what its callers already branch on. */
-static int read_result(int status, const char *value_out)
+
+int db1_cognify_job_enqueue(int64_t memory_id)
 {
-   if (status == (int)AIMEE_DB1_STATUS_OK)
-      return (value_out && value_out[0]) ? 1 : 0;
+   char arg0[24];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)memory_id);
+   const char *fields[] = {arg0};
+   return write_result(call_stage(AIMEE_DB1_OP_COGNIFY_ENQUEUE, fields, 1, NULL, NULL, 0, NULL));
+}
+
+int db1_cognify_job_status(db1_cognify_job_stats_t *out)
+{
+   if (!out)
+      return -1;
+   const char *const *fields = NULL;
+   char slot0[24];
+   char slot1[24];
+   char slot2[24];
+   char slot3[24];
+   char slot4[24];
+   char *const values[] = {slot0, slot1, slot2, slot3, slot4};
+   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof slot4};
+   memset(out, 0, sizeof *out);
+   int status = call_stage(AIMEE_DB1_OP_COGNIFY_STATUS, fields, 0, values, caps, 5, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   out->pending = (int)strtol(slot0, NULL, 10);
+   out->running = (int)strtol(slot1, NULL, 10);
+   out->done = (int)strtol(slot2, NULL, 10);
+   out->failed = (int)strtol(slot3, NULL, 10);
+   out->total = (int)strtol(slot4, NULL, 10);
+   return 0;
+}
+
+int db1_cognify_job_claim_next(db1_cognify_job_t *out)
+{
+   if (!out)
+      return -1;
+   const char *const *fields = NULL;
+   char slot0[24];
+   char slot1[24];
+   char slot2[24];
+   char slot3[24];
+   char *const values[] = {slot0, slot1, slot2, slot3, out->kind, out->status, out->claimed_by, out->claimed_at, out->last_error};
+   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof out->kind, sizeof out->status, sizeof out->claimed_by, sizeof out->claimed_at, sizeof out->last_error};
+   memset(out, 0, sizeof *out);
+   int status = call_stage(AIMEE_DB1_OP_COGNIFY_CLAIM_NEXT, fields, 0, values, caps, 9, NULL);
    if (status == (int)AIMEE_DB1_STATUS_MISSING)
       return 0;
-   return -1;
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   out->id = (int64_t)strtoll(slot0, NULL, 10);
+   out->memory_id = (int64_t)strtoll(slot1, NULL, 10);
+   out->attempts = (int)strtol(slot2, NULL, 10);
+   out->max_attempts = (int)strtol(slot3, NULL, 10);
+   return 1;
 }
 
-int db1_git_ownership_upsert(const char *repo_path, const char *branch_name, const char *session_id)
+int db1_cognify_job_mark(int64_t job_id, const char *status, const char *error)
 {
-   if (!repo_path || !repo_path[0] || !branch_name || !branch_name[0] || !session_id || !session_id[0])
+   if (!status || !status[0])
       return -1;
-   const char *fields[] = {repo_path, branch_name, session_id};
-   return write_result(call_stage(AIMEE_DB1_OP_OWNERSHIP_UPSERT, fields, 3, NULL, NULL, 0, NULL));
-}
-
-int db1_git_ownership_delete(const char *repo_path, const char *branch_name)
-{
-   if (!repo_path || !repo_path[0] || !branch_name || !branch_name[0])
-      return -1;
-   const char *fields[] = {repo_path, branch_name};
-   return write_result(call_stage(AIMEE_DB1_OP_OWNERSHIP_DELETE, fields, 2, NULL, NULL, 0, NULL));
-}
-
-int db1_git_ownership_get_owner(const char *repo_path, const char *branch_name, char *owner_out, size_t owner_len)
-{
-   if (!repo_path || !repo_path[0] || !branch_name || !branch_name[0] || !owner_out || owner_len == 0)
-      return -1;
-   const char *fields[] = {repo_path, branch_name};
-   char *const values[] = {owner_out};
-   const size_t caps[] = {owner_len};
-   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_OWNER_GET, fields, 2, values, caps, 1, NULL);
-   return read_result(status, owner_out);
-}
-
-int db1_git_ownership_get_branch_for_session(const char *repo_path, const char *session_id, char *branch_out, size_t branch_len)
-{
-   if (!repo_path || !repo_path[0] || !session_id || !session_id[0] || !branch_out || branch_len == 0)
-      return -1;
-   const char *fields[] = {repo_path, session_id};
-   char *const values[] = {branch_out};
-   const size_t caps[] = {branch_len};
-   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION, fields, 2, values, caps, 1, NULL);
-   return read_result(status, branch_out);
-}
-
-int db1_git_ownership_find_session_by_prefix(const char *session_prefix, char *session_out, size_t session_len)
-{
-   if (!session_prefix || !session_prefix[0] || !session_out || session_len == 0)
-      return -1;
-   const char *fields[] = {session_prefix};
-   char *const values[] = {session_out};
-   const size_t caps[] = {session_len};
-   int status = call_stage(AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX, fields, 1, values, caps, 1, NULL);
-   return read_result(status, session_out);
-}
-
-int db1_session_feature_branch_upsert(const char *repo_path, const char *session_id, const char *feature_branch)
-{
-   if (!repo_path || !repo_path[0] || !session_id || !session_id[0] || !feature_branch || !feature_branch[0])
-      return -1;
-   const char *fields[] = {repo_path, session_id, feature_branch};
-   return write_result(call_stage(AIMEE_DB1_OP_FEATURE_BRANCH_UPSERT, fields, 3, NULL, NULL, 0, NULL));
-}
-
-int db1_session_feature_branch_get(const char *repo_path, const char *session_id, char *branch_out, size_t branch_len)
-{
-   if (!repo_path || !repo_path[0] || !session_id || !session_id[0] || !branch_out || branch_len == 0)
-      return -1;
-   const char *fields[] = {repo_path, session_id};
-   char *const values[] = {branch_out};
-   const size_t caps[] = {branch_len};
-   int status = call_stage(AIMEE_DB1_OP_FEATURE_BRANCH_GET, fields, 2, values, caps, 1, NULL);
-   return read_result(status, branch_out);
+   char arg0[24];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)job_id);
+   const char *fields[] = {arg0, status, error ? error : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_COGNIFY_MARK, fields, 3, NULL, NULL, 0, NULL));
 }
 
 /* clang-format on */

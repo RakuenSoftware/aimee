@@ -664,6 +664,11 @@
           "id": 3,
           "name": "db1-conversation",
           "event_kind": 11779
+        },
+        {
+          "id": 4,
+          "name": "db1-agent-work",
+          "event_kind": 11780
         }
       ]
     }
