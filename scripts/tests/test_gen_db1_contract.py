@@ -478,9 +478,18 @@ class CatalogTests(unittest.TestCase):
         tmp = sandbox()
         try:
             root = Path(tmp.name)
-            self.integer_catalog(root)
+            catalog = self.integer_catalog(root)
             contract.run(root, write=True)
-            stage = next((root / contract.SOURCE_DIR).glob("*_stage.c"))
+            # The stage this test generated, named rather than globbed. A glob
+            # yields whatever readdir does, so "the first *_stage.c" was really
+            # "whichever the filesystem lists first" -- it passed for as long as
+            # every family happened to take an int somewhere, then found a
+            # family whose arguments are all int64 and read a file with no
+            # parse_int in it at all.
+            reserved = next(f for f in catalog["families"]
+                            if any(o["family"] == f["name"] and o["name"] == "probe_forget_if_job"
+                                   for o in catalog["operations"]))
+            stage = root / contract.SOURCE_DIR / f"{reserved['name']}_stage.c"
             text = stage.read_text(encoding="utf-8")
             self.assertIn("*end != '\\0'", text)
             self.assertIn("errno != 0", text)

@@ -71,6 +71,17 @@
 #define AIMEE_DB1_OP_REWRITE_RECORD        7u
 #define AIMEE_DB1_OP_WM_SEARCH_SESSION_IDS 8u
 
+/* Family 4: queued agent work: logs, coordination jobs and the cron that
+ * drives them. */
+
+#define AIMEE_DB1_EVENT_AGENT_WORK 11780u
+#define AIMEE_DB1_STAGE_AGENT_WORK 4u
+
+#define AIMEE_DB1_OP_COGNIFY_ENQUEUE    1u
+#define AIMEE_DB1_OP_COGNIFY_STATUS     2u
+#define AIMEE_DB1_OP_COGNIFY_CLAIM_NEXT 3u
+#define AIMEE_DB1_OP_COGNIFY_MARK       4u
+
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
    sizes the decoder's pointer array. Requests are NOT capped: they carry

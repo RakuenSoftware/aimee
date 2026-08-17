@@ -18,6 +18,7 @@
 #include "db1_module_api.h"
 
 #include "checkpoints.h"
+#include "cognify_jobs.h"
 #include "db1.h"
 #include "git_ownership.h"
 #include "platform_test_util.h"
@@ -689,9 +690,134 @@ static void test_a_column_bound_is_still_checked(void)
    printf("  PASS: test_a_column_bound_is_still_checked\n");
 }
 
+/* An operation that takes no arguments decodes no fields. The frame is the
+   header alone, and the stage has to accept a count of zero without reading
+   field[0] -- which is uninitialised for exactly this request. */
+static void test_a_zero_argument_operation_is_served(void)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-test-db1-cog-%d.db", platform_tmpdir(), (int)getpid());
+   remove(path);
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   assert(db1_cognify_job_enqueue(4294967297LL) == 0);
+
+   uint8_t req[256], resp[4096];
+   uint32_t resp_len = 0;
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_COGNIFY_STATUS, NULL, 0);
+   assert(len == 8u);
+   assert(call_stage(AIMEE_DB1_STAGE_AGENT_WORK, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+   assert(aimee_db1_get_u32(resp + 4u) == 5u); /* five members of the stats row */
+   uint32_t n = 0;
+   const char *pending = reply_value(resp, resp_len, 0u, &n);
+   assert(n == 1 && pending[0] == '1'); /* the one job just enqueued */
+
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_a_zero_argument_operation_is_served\n");
+}
+
+/* Taking no arguments is a contract, not an absence of one: a frame that
+   carries fields for such an operation is a caller and a module disagreeing
+   about the request, and is refused rather than ignored. */
+static void test_a_zero_argument_operation_refuses_arguments(void)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-test-db1-cog2-%d.db", platform_tmpdir(), (int)getpid());
+   remove(path);
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   uint8_t req[256], resp[4096];
+   uint32_t resp_len = 0;
+   const char *uninvited[] = {"extra"};
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_COGNIFY_STATUS, uninvited, 1);
+   assert(call_stage(AIMEE_DB1_STAGE_AGENT_WORK, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   /* And an operation that DOES take arguments still refuses an empty frame. */
+   len = fields_frame(req, AIMEE_DB1_OP_COGNIFY_ENQUEUE, NULL, 0);
+   assert(call_stage(AIMEE_DB1_STAGE_AGENT_WORK, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_a_zero_argument_operation_refuses_arguments\n");
+}
+
+/* An int64 argument survives the round trip whole. Truncating it to int would
+   point the queue at a different memory. */
+static void test_an_int64_argument_is_not_truncated_by_the_stage(void)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-test-db1-cog3-%d.db", platform_tmpdir(), (int)getpid());
+   remove(path);
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   uint8_t req[256], resp[4096];
+   uint32_t resp_len = 0;
+   const char *big[] = {"4294967297"};
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_COGNIFY_ENQUEUE, big, 1);
+   assert(call_stage(AIMEE_DB1_STAGE_AGENT_WORK, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+
+   /* Claim it back and read the id the queue actually stored. */
+   len = fields_frame(req, AIMEE_DB1_OP_COGNIFY_CLAIM_NEXT, NULL, 0);
+   assert(call_stage(AIMEE_DB1_STAGE_AGENT_WORK, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+   uint32_t n = 0;
+   const char *memory_id = reply_value(resp, resp_len, 1u, &n); /* member 1 */
+   assert(n == strlen("4294967297") && memcmp(memory_id, "4294967297", n) == 0);
+
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_an_int64_argument_is_not_truncated_by_the_stage\n");
+}
+
+/* An empty queue is nothing to claim, which is not the same as a broken store.
+   The domain says so with 1/0/-1 and the wire has to carry all three: a worker
+   that read "empty" as "broken" would back off from a queue that is simply
+   idle, and one that read "broken" as "empty" would stop retrying. */
+static void test_claiming_from_an_empty_queue_is_missing_not_failed(void)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-test-db1-cog4-%d.db", platform_tmpdir(), (int)getpid());
+   remove(path);
+   db1_shutdown();
+   assert(db1_init(path) == 0);
+
+   uint8_t req[256], resp[4096];
+   uint32_t resp_len = 0;
+   uint32_t len = fields_frame(req, AIMEE_DB1_OP_COGNIFY_CLAIM_NEXT, NULL, 0);
+   assert(call_stage(AIMEE_DB1_STAGE_AGENT_WORK, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_MISSING);
+
+   /* And with a job waiting, the same call says OK and carries the row. */
+   assert(db1_cognify_job_enqueue(77) == 0);
+   assert(call_stage(AIMEE_DB1_STAGE_AGENT_WORK, req, len, resp, &resp_len) ==
+          AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db1_get_u32(resp) == AIMEE_DB1_STATUS_OK);
+   assert(aimee_db1_get_u32(resp + 4u) == 9u);
+
+   db1_shutdown();
+   remove(path);
+   printf("  PASS: test_claiming_from_an_empty_queue_is_missing_not_failed\n");
+}
+
 int main(void)
 {
    printf("db1_module_stage:\n");
+   test_claiming_from_an_empty_queue_is_missing_not_failed();
+   test_a_zero_argument_operation_is_served();
+   test_a_zero_argument_operation_refuses_arguments();
+   test_an_int64_argument_is_not_truncated_by_the_stage();
    test_a_column_of_session_ids_crosses();
    test_a_column_bound_is_still_checked();
    test_assembled_context_crosses_and_is_released();

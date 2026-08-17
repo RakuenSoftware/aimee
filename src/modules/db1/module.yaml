@@ -12,6 +12,7 @@
   "sources": [
     "src/modules/db1/agent_jobs.c",
     "src/modules/db1/agent_log.c",
+    "src/modules/db1/agent_work_stage.c",
     "src/modules/db1/caches.c",
     "src/modules/db1/checkpoints.c",
     "src/modules/db1/clarify.c",

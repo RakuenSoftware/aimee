@@ -1,4 +1,4 @@
-/* modules/db1/git_ownership_stage.c: the git ownership stage handler.
+/* modules/db1/agent_work_stage.c: the agent work stage handler.
  *
  * GENERATED from src/modules/db1/eventcontract/operations.json by
  * scripts/gen_db1_contract.py. Do not edit.
@@ -13,8 +13,11 @@
 #include "db1_stages.h"
 
 #include "db1_module_api.h"
-#include "git_ownership.h"
+#include "cognify_jobs.h"
 
+#include <errno.h>
+#include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +47,20 @@ static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, cha
    return 0;
 }
 
+/* The same, for a member the catalog declared as a 64-bit integer. */
+static int parse_int64(const char *text, int64_t *out)
+{
+   if (!text || !text[0])
+      return 1;
+   char *end = NULL;
+   errno = 0;
+   long long value = strtoll(text, &end, 10);
+   if (errno != 0 || !end || *end != '\0')
+      return 1;
+   *out = (int64_t)value;
+   return 0;
+}
+
 /* status(u32) | field_count(u32) | (len(u32) | bytes) * count. A write answers
    with no values, a read with one, a row with a value per member. */
 static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
@@ -69,7 +86,7 @@ static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint3
    return status;
 }
 
-aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body, uint32_t request_len,
+aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, uint32_t request_len,
                                              uint8_t *response_body, uint32_t response_capacity,
                                              uint32_t *response_len)
 {
@@ -127,6 +144,10 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
       distinction; one that does must not have it flattened, or "the queue is
       empty" and "the queue is broken" reach the caller as the same answer. */
    int found = 0;
+   db1_cognify_job_stats_t row_db1_cognify_job_stats_t;
+   db1_cognify_job_t row_db1_cognify_job_t;
+   const char *row_slots[9];
+   char row_text[5][24];
    /* A domain that returns a string hands over the allocation with it. The
       reply is written straight out of it rather than copied into value: the
       stack buffer is sized for identifiers and these carry documents. */
@@ -137,86 +158,8 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
 
    switch (op)
    {
-   case AIMEE_DB1_OP_OWNERSHIP_UPSERT:
-      if (count != 3u)
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[0][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[1][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[2][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      rc = db1_git_ownership_upsert(field[0], field[1], field[2]);
-      break;
-   case AIMEE_DB1_OP_OWNERSHIP_DELETE:
-      if (count != 2u)
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[0][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[1][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      rc = db1_git_ownership_delete(field[0], field[1]);
-      break;
-   case AIMEE_DB1_OP_OWNERSHIP_OWNER_GET:
-      if (count != 2u)
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[0][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[1][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      rc = db1_git_ownership_get_owner(field[0], field[1], value, sizeof value);
-      reads = 1;
-      break;
-   case AIMEE_DB1_OP_OWNERSHIP_BRANCH_FOR_SESSION:
-      if (count != 2u)
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[0][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[1][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      rc = db1_git_ownership_get_branch_for_session(field[0], field[1], value, sizeof value);
-      reads = 1;
-      break;
-   case AIMEE_DB1_OP_OWNERSHIP_SESSION_BY_PREFIX:
+   case AIMEE_DB1_OP_COGNIFY_ENQUEUE:
+   {
       if (count != 1u)
       {
          free(scratch);
@@ -227,10 +170,69 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      rc = db1_git_ownership_find_session_by_prefix(field[0], value, sizeof value);
+      int64_t parsed0;
+      if (parse_int64(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_cognify_job_enqueue(parsed0);
+      break;
+   }
+   case AIMEE_DB1_OP_COGNIFY_STATUS:
+   {
+      if (count != 0u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      memset(&row_db1_cognify_job_stats_t, 0, sizeof row_db1_cognify_job_stats_t);
+      rc = db1_cognify_job_status(&row_db1_cognify_job_stats_t);
+      snprintf(row_text[0], sizeof row_text[0], "%d", row_db1_cognify_job_stats_t.pending);
+      snprintf(row_text[1], sizeof row_text[1], "%d", row_db1_cognify_job_stats_t.running);
+      snprintf(row_text[2], sizeof row_text[2], "%d", row_db1_cognify_job_stats_t.done);
+      snprintf(row_text[3], sizeof row_text[3], "%d", row_db1_cognify_job_stats_t.failed);
+      snprintf(row_text[4], sizeof row_text[4], "%d", row_db1_cognify_job_stats_t.total);
+      row_slots[0] = row_text[0];
+      row_slots[1] = row_text[1];
+      row_slots[2] = row_text[2];
+      row_slots[3] = row_text[3];
+      row_slots[4] = row_text[4];
+      rows = row_slots;
+      row_count = 5u;
       reads = 1;
       break;
-   case AIMEE_DB1_OP_FEATURE_BRANCH_UPSERT:
+   }
+   case AIMEE_DB1_OP_COGNIFY_CLAIM_NEXT:
+   {
+      if (count != 0u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      memset(&row_db1_cognify_job_t, 0, sizeof row_db1_cognify_job_t);
+      rc = db1_cognify_job_claim_next(&row_db1_cognify_job_t);
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)row_db1_cognify_job_t.id);
+      snprintf(row_text[1], sizeof row_text[1], "%lld", (long long)row_db1_cognify_job_t.memory_id);
+      snprintf(row_text[2], sizeof row_text[2], "%d", row_db1_cognify_job_t.attempts);
+      snprintf(row_text[3], sizeof row_text[3], "%d", row_db1_cognify_job_t.max_attempts);
+      row_slots[0] = row_text[0];
+      row_slots[1] = row_text[1];
+      row_slots[2] = row_text[2];
+      row_slots[3] = row_text[3];
+      row_slots[4] = row_db1_cognify_job_t.kind;
+      row_slots[5] = row_db1_cognify_job_t.status;
+      row_slots[6] = row_db1_cognify_job_t.claimed_by;
+      row_slots[7] = row_db1_cognify_job_t.claimed_at;
+      row_slots[8] = row_db1_cognify_job_t.last_error;
+      rows = row_slots;
+      row_count = 9u;
+      found = 1;
+      reads = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_COGNIFY_MARK:
+   {
       if (count != 3u)
       {
          free(scratch);
@@ -246,32 +248,15 @@ aimee_module_status_t aimee_db1_stage_git_ownership(const uint8_t *request_body,
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      if (!field[2][0])
+      int64_t parsed0;
+      if (parse_int64(field[0], &parsed0) != 0)
       {
          free(scratch);
          return AIMEE_MODULE_STATUS_INVALID_REQUEST;
       }
-      rc = db1_session_feature_branch_upsert(field[0], field[1], field[2]);
+      rc = db1_cognify_job_mark(parsed0, field[1], field[2]);
       break;
-   case AIMEE_DB1_OP_FEATURE_BRANCH_GET:
-      if (count != 2u)
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[0][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      if (!field[1][0])
-      {
-         free(scratch);
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      }
-      rc = db1_session_feature_branch_get(field[0], field[1], value, sizeof value);
-      reads = 1;
-      break;
+   }
    default:
       free(scratch);
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

@@ -76,9 +76,9 @@
    "id": 4,
    "name": "agent_work",
    "event_kind": 11780,
-   "active": false,
+   "active": true,
    "doc": "queued agent work: logs, coordination jobs and the cron that drives them.",
-   "client_doc": "",
+   "client_doc": "Background work queues: the cognify queue's claim/mark bookkeeping is machine-local runtime state, which is why it is DB1's even when the memory it points at lives in DB2.",
    "covers": "agent_log, coord_jobs, cognify_jobs, db1_cron_jobs, db1_trigger",
    "sources": [
     "agent_log",
@@ -87,7 +87,9 @@
     "db1_cron_jobs",
     "db1_trigger"
    ],
-   "retired_sources": []
+   "retired_sources": [
+    "cognify_jobs.c"
+   ]
   },
   {
    "id": 5,
@@ -1098,6 +1100,191 @@
      }
     ],
     "max_bytes": 8192
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 1,
+   "name": "cognify_enqueue",
+   "c_name": "db1_cognify_job_enqueue",
+   "c_params": [
+    "memory_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "memory_id",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 2,
+   "name": "cognify_status",
+   "c_name": "db1_cognify_job_status",
+   "c_params": [
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "struct": "db1_cognify_job_stats_t",
+    "fields": [
+     {
+      "name": "pending",
+      "type": "int"
+     },
+     {
+      "name": "running",
+      "type": "int"
+     },
+     {
+      "name": "done",
+      "type": "int"
+     },
+     {
+      "name": "failed",
+      "type": "int"
+     },
+     {
+      "name": "total",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 3,
+   "name": "cognify_claim_next",
+   "c_name": "db1_cognify_job_claim_next",
+   "c_params": [
+    "out"
+   ],
+   "c_returns": "found",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "struct": "db1_cognify_job_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "memory_id",
+      "type": "int64"
+     },
+     {
+      "name": "attempts",
+      "type": "int"
+     },
+     {
+      "name": "max_attempts",
+      "type": "int"
+     },
+     {
+      "name": "kind",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "claimed_by",
+      "type": "text"
+     },
+     {
+      "name": "claimed_at",
+      "type": "text"
+     },
+     {
+      "name": "last_error",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 4,
+   "name": "cognify_mark",
+   "c_name": "db1_cognify_job_mark",
+   "c_params": [
+    "job_id",
+    "status",
+    "error"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
    }
   }
  ]
