@@ -213,7 +213,7 @@ static int write_result(int status)
 
 int db1_cognify_job_enqueue(int64_t memory_id)
 {
-   char arg0[24];
+   char arg0[32];
    snprintf(arg0, sizeof arg0, "%lld", (long long)memory_id);
    const char *fields[] = {arg0};
    return write_result(call_stage(AIMEE_DB1_OP_COGNIFY_ENQUEUE, fields, 1, NULL, NULL, 0, NULL));
@@ -224,11 +224,11 @@ int db1_cognify_job_status(db1_cognify_job_stats_t *out)
    if (!out)
       return -1;
    const char *const *fields = NULL;
-   char slot0[24];
-   char slot1[24];
-   char slot2[24];
-   char slot3[24];
-   char slot4[24];
+   char slot0[32];
+   char slot1[32];
+   char slot2[32];
+   char slot3[32];
+   char slot4[32];
    char *const values[] = {slot0, slot1, slot2, slot3, slot4};
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof slot4};
    memset(out, 0, sizeof *out);
@@ -248,10 +248,10 @@ int db1_cognify_job_claim_next(db1_cognify_job_t *out)
    if (!out)
       return -1;
    const char *const *fields = NULL;
-   char slot0[24];
-   char slot1[24];
-   char slot2[24];
-   char slot3[24];
+   char slot0[32];
+   char slot1[32];
+   char slot2[32];
+   char slot3[32];
    char *const values[] = {slot0, slot1, slot2, slot3, out->kind, out->status, out->claimed_by, out->claimed_at, out->last_error};
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof out->kind, sizeof out->status, sizeof out->claimed_by, sizeof out->claimed_at, sizeof out->last_error};
    memset(out, 0, sizeof *out);
@@ -271,7 +271,7 @@ int db1_cognify_job_mark(int64_t job_id, const char *status, const char *error)
 {
    if (!status || !status[0])
       return -1;
-   char arg0[24];
+   char arg0[32];
    snprintf(arg0, sizeof arg0, "%lld", (long long)job_id);
    const char *fields[] = {arg0, status, error ? error : ""};
    return write_result(call_stage(AIMEE_DB1_OP_COGNIFY_MARK, fields, 3, NULL, NULL, 0, NULL));

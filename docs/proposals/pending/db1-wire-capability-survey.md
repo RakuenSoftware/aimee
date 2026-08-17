@@ -231,6 +231,24 @@ sources, and all four together unlock fourteen.
 
 The migration is no longer waiting on the wire. It is waiting on cutovers.
 
+## Two more blind spots, and the one that mattered
+
+A fifth and sixth counting mistake, found while sizing `agent_log`:
+
+**The survey classified parameters and never looked inside the struct a
+parameter points at.** A struct crosses as its members, so a member type the
+wire cannot spell blocks the operation exactly as an unsupported parameter
+would — and `T *out` looks perfectly ordinary while `T` carries a `double`.
+**Twenty-eight reply structs did.** Every one reported ready.
+
+**A `long long` return was invisible.** The alternation spelled
+`int|void|int64_t|double|size_t`, so `db1_agent_log_insert` — which returns the
+new row id — appeared in no count at all.
+
+`double` is now a reply payload type, which clears all twenty-eight. What is
+left of this class is `float`, in four `clarify` operations that are cJSON-
+blocked regardless.
+
 ## The first cutover failed, and it was worth failing
 
 `wm` measured ready, so it was cut over: dropped from `DB1_SRCS`, with the

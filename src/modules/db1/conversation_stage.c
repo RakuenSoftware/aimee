@@ -163,7 +163,7 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
    payload_rewrite_state_t row_payload_rewrite_state_t;
    wm_entry_t row_wm_entry_t;
    const char *row_slots[11];
-   char row_text[6][24];
+   char row_text[6][32];
    /* A domain that returns a string hands over the allocation with it. The
       reply is written straight out of it rather than copied into value: the
       stack buffer is sized for identifiers and these carry documents. */
@@ -372,7 +372,7 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
          uint32_t produced = ((uint32_t)rc < (uint32_t)parsed2)
                                  ? (uint32_t)rc : (uint32_t)parsed2;
          const char **cells = malloc((size_t)produced * 8u * sizeof *cells);
-         char (*numbers)[24] = malloc((size_t)produced * 1u * sizeof *numbers);
+         char (*numbers)[32] = malloc((size_t)produced * 1u * sizeof *numbers);
          if (!cells || !numbers)
          {
             free(cells);
@@ -385,7 +385,7 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
          numeric_owned = numbers;
          for (uint32_t row = 0; row < produced; ++row)
          {
-            snprintf(numbers[row * 1u + 0u], 24,
+            snprintf(numbers[row * 1u + 0u], 32,
                      "%lld", (long long)found[row].id);
             cells[row * 8u + 0u] = numbers[row * 1u + 0u];
             cells[row * 8u + 1u] = found[row].session_id;

@@ -147,7 +147,7 @@ aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, ui
    db1_cognify_job_stats_t row_db1_cognify_job_stats_t;
    db1_cognify_job_t row_db1_cognify_job_t;
    const char *row_slots[9];
-   char row_text[5][24];
+   char row_text[5][32];
    /* A domain that returns a string hands over the allocation with it. The
       reply is written straight out of it rather than copied into value: the
       stack buffer is sized for identifiers and these carry documents. */

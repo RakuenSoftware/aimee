@@ -213,12 +213,12 @@ int db1_payload_rewrite_state_get(const char *session_id, payload_rewrite_state_
    if (!session_id || !session_id[0] || !out)
       return -1;
    const char *fields[] = {session_id};
-   char slot1[24];
-   char slot2[24];
-   char slot4[24];
-   char slot6[24];
-   char slot7[24];
-   char slot8[24];
+   char slot1[32];
+   char slot2[32];
+   char slot4[32];
+   char slot6[32];
+   char slot7[32];
+   char slot8[32];
    char *const values[] = {out->session_id, slot1, slot2, out->last_prefix_hash, slot4, out->last_rewrite_at, slot6, slot7, slot8, out->rewrite_reason, out->updated_at};
    const size_t caps[] = {sizeof out->session_id, sizeof slot1, sizeof slot2, sizeof out->last_prefix_hash, sizeof slot4, sizeof out->last_rewrite_at, sizeof slot6, sizeof slot7, sizeof slot8, sizeof out->rewrite_reason, sizeof out->updated_at};
    memset(out, 0, sizeof *out);
@@ -238,17 +238,17 @@ int db1_payload_rewrite_state_set(const payload_rewrite_state_t *state)
 {
    if (!state)
       return -1;
-   char arg1[24];
+   char arg1[32];
    snprintf(arg1, sizeof arg1, "%lld", (long long)state->payload_epoch);
-   char arg2[24];
+   char arg2[32];
    snprintf(arg2, sizeof arg2, "%lld", (long long)state->compaction_epoch);
-   char arg4[24];
+   char arg4[32];
    snprintf(arg4, sizeof arg4, "%d", state->last_payload_tokens);
-   char arg6[24];
+   char arg6[32];
    snprintf(arg6, sizeof arg6, "%d", state->deferred_rewrite_count);
-   char arg7[24];
+   char arg7[32];
    snprintf(arg7, sizeof arg7, "%d", state->consecutive_deferred_count);
-   char arg8[24];
+   char arg8[32];
    snprintf(arg8, sizeof arg8, "%d", state->bytes_saved_pending);
    const char *fields[] = {state->session_id, arg1, arg2, state->last_prefix_hash, arg4, state->last_rewrite_at, arg6, arg7, arg8, state->rewrite_reason, state->updated_at};
    return write_result(call_stage(AIMEE_DB1_OP_REWRITE_STATE_SET, fields, 11, NULL, NULL, 0, NULL));
@@ -258,7 +258,7 @@ int db1_wm_set(const char *session_id, const char *key, const char *value, const
 {
    if (!session_id || !session_id[0] || !key || !key[0] || !value || !value[0])
       return -1;
-   char arg4[24];
+   char arg4[32];
    snprintf(arg4, sizeof arg4, "%d", ttl_seconds);
    const char *fields[] = {session_id, key, value, category ? category : "", arg4};
    return write_result(call_stage(AIMEE_DB1_OP_WM_SET, fields, 5, NULL, NULL, 0, NULL));
@@ -269,7 +269,7 @@ int db1_wm_get(const char *session_id, const char *key, wm_entry_t *out)
    if (!session_id || !session_id[0] || !key || !key[0] || !out)
       return -1;
    const char *fields[] = {session_id, key};
-   char slot0[24];
+   char slot0[32];
    char *const values[] = {slot0, out->session_id, out->key, out->value, out->category, out->created_at, out->updated_at, out->expires_at};
    const size_t caps[] = {sizeof slot0, sizeof out->session_id, sizeof out->key, sizeof out->value, sizeof out->category, sizeof out->created_at, sizeof out->updated_at, sizeof out->expires_at};
    memset(out, 0, sizeof *out);
@@ -286,12 +286,12 @@ int db1_wm_list(const char *session_id, const char *category, wm_entry_t *out, i
       return -1;
    if (max > 64)
       max = 64;
-   char arg2[24];
+   char arg2[32];
    snprintf(arg2, sizeof arg2, "%d", max);
    const char *fields[] = {session_id, category ? category : "", arg2};
    char **values = malloc((size_t)max * 8u * sizeof *values);
    size_t *caps = malloc((size_t)max * 8u * sizeof *caps);
-   char (*scratch)[24] = malloc((size_t)max * 1u * sizeof *scratch);
+   char (*scratch)[32] = malloc((size_t)max * 1u * sizeof *scratch);
    if (!values || !caps || !scratch)
    {
       free(values);
@@ -362,11 +362,11 @@ int db1_payload_rewrite_record(const char *session_id, int deferred, int bytes_s
 {
    if (!session_id || !session_id[0])
       return -1;
-   char arg1[24];
+   char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", deferred);
-   char arg2[24];
+   char arg2[32];
    snprintf(arg2, sizeof arg2, "%d", bytes_saved);
-   char arg3[24];
+   char arg3[32];
    snprintf(arg3, sizeof arg3, "%d", new_payload_tokens);
    const char *fields[] = {session_id, arg1, arg2, arg3, reason ? reason : "", new_prefix_hash ? new_prefix_hash : ""};
    return write_result(call_stage(AIMEE_DB1_OP_REWRITE_RECORD, fields, 6, NULL, NULL, 0, NULL));
@@ -378,7 +378,7 @@ int db1_wm_search_session_ids(const char *query, char (*out)[WM_SESSION_ID_LEN],
       return -1;
    if (max > 64)
       max = 64;
-   char arg1[24];
+   char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", max);
    const char *fields[] = {query, arg1};
    char **values = malloc((size_t)max * 1u * sizeof *values);

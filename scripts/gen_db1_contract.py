@@ -55,8 +55,45 @@ SCOPES = ("none", "conversation", "session", "repository", "global")
 TRANSACTIONS = ("none", "single")
 IDEMPOTENCY = ("safe", "idempotent", "unsafe")
 WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v2")
-PAYLOADS = ("none", "state", "text", "int", "int64")
+PAYLOADS = ("none", "state", "text", "int", "int64", "double")
 FIELD_TYPES = ("text", "int", "int64")
+# Members that travel as decimal text and convert back on arrival.
+NUMERIC = ("int", "int64", "double")
+
+
+# Widest decimal text a member can become, with room for the NUL. A %.17g
+# double reaches 24 characters, which is exactly what a 24-byte slot cannot
+# hold: the value would arrive truncated into a different number.
+NUMERIC_TEXT = 32
+
+
+def numeric_format(kind: str) -> tuple[str, str]:
+    """printf spec and cast for a member that travels as decimal text.
+
+    %.17g for a double because that is the shortest form guaranteed to read
+    back as the same IEEE-754 value; %g alone rounds to six significant digits
+    and would quietly change a cost or a rate on its way across.
+    """
+    if kind == "int64":
+        return "%lld", "(long long)"
+    if kind == "double":
+        return "%.17g", "(double)"
+    return "%d", ""
+
+
+def numeric_parse(kind: str, cell: str) -> str:
+    """The whole C call that converts one such member back.
+
+    The call, not just the function: strtod takes two arguments where strtol
+    and strtoll take three, and a helper that returned only the name invited
+    pairing it with the wrong tail -- which compiles nowhere but was generated
+    once anyway.
+    """
+    if kind == "int64":
+        return f"(int64_t)strtoll({cell}, NULL, 10)"
+    if kind == "double":
+        return f"strtod({cell}, NULL)"
+    return f"(int)strtol({cell}, NULL, 10)"
 
 
 class ContractError(ValueError):
@@ -1116,10 +1153,9 @@ static int read_result(int status, const char *value_out)
                 # rather than refusing a caller that leaves a value out.
                 carried.append(f"{source} ? {source} : \"\"")
                 continue
-            if kind in ("int", "int64"):
-                spec = "%lld" if kind == "int64" else "%d"
-                cast = "(long long)" if kind == "int64" else ""
-                body.append(f"   char {local}[24];")
+            if kind in NUMERIC:
+                spec, cast = numeric_format(kind)
+                body.append(f"   char {local}[{NUMERIC_TEXT}];")
                 body.append(f'   snprintf({local}, sizeof {local}, "{spec}", {cast}{source});')
                 carried.append(local)
             else:
@@ -1157,11 +1193,11 @@ static int read_result(int status, const char *value_out)
         elif listed:
             members = [(str(f["name"]), str(f["type"])) for f in reply["fields"]]
             width = len(members)
-            numeric = [i for i, (_, k) in enumerate(members) if k in ("int", "int64")]
+            numeric = [i for i, (_, k) in enumerate(members) if k in NUMERIC]
             body.append(f"   char **values = malloc((size_t){bound} * {width}u * sizeof *values);")
             body.append(f"   size_t *caps = malloc((size_t){bound} * {width}u * sizeof *caps);")
             if numeric:
-                body.append(f"   char (*scratch)[24] = malloc((size_t){bound} * {len(numeric)}u * "
+                body.append(f"   char (*scratch)[{NUMERIC_TEXT}] = malloc((size_t){bound} * {len(numeric)}u * "
                             "sizeof *scratch);")
             owned = "values, caps" + (", scratch" if numeric else "")
             checks = " || ".join(f"!{o}" for o in owned.split(", "))
@@ -1177,7 +1213,7 @@ static int read_result(int status, const char *value_out)
             slot = 0
             for index, (member, kind) in enumerate(members):
                 at = f"row * {width}u + {index}u"
-                if kind in ("int", "int64"):
+                if kind in NUMERIC:
                     cell = f"scratch[row * {len(numeric)}u + {slot}u]"
                     body.append(f"      values[{at}] = {cell};")
                     body.append(f"      caps[{at}] = sizeof {cell};")
@@ -1206,12 +1242,11 @@ static int read_result(int status, const char *value_out)
                 body.append("   {")
                 slot = 0
                 for member, kind in members:
-                    if kind in ("int", "int64"):
+                    if kind in NUMERIC:
                         cell = f"scratch[row * {len(numeric)}u + {slot}u]"
-                        conv = ("(int)strtol" if kind == "int" else "(int64_t)strtoll")
                         target = (f"{row_out}[row]" if column
                                   else f"{row_out}[row].{member}")
-                        body.append(f"      {target} = {conv}({cell}, NULL, 10);")
+                        body.append(f"      {target} = {numeric_parse(kind, cell)};")
                         slot += 1
                 body.append("   }")
                 body.append("   free(scratch);")
@@ -1222,13 +1257,13 @@ static int read_result(int status, const char *value_out)
             # A numeric member is read as text and converted, the same way it was
             # sent: the frame carries bytes, and a row is only its members.
             for index, (member, kind) in enumerate(members):
-                if kind in ("int", "int64"):
-                    body.append(f"   char slot{index}[24];")
+                if kind in NUMERIC:
+                    body.append(f"   char slot{index}[{NUMERIC_TEXT}];")
             slots = ", ".join(
-                f"slot{index}" if kind in ("int", "int64") else f"{target}->{member}"
+                f"slot{index}" if kind in NUMERIC else f"{target}->{member}"
                 for index, (member, kind) in enumerate(members))
             caps = ", ".join(
-                f"sizeof slot{index}" if kind in ("int", "int64")
+                f"sizeof slot{index}" if kind in NUMERIC
                 else f"sizeof {target}->{member}"
                 for index, (member, kind) in enumerate(members))
             body.append(f"   char *const values[] = {{{slots}}};")
@@ -1253,9 +1288,11 @@ static int read_result(int status, const char *value_out)
                 body.append("      return -1;")
             for index, (member, kind) in enumerate(members):
                 if kind == "int":
-                    body.append(f"   {target}->{member} = (int)strtol(slot{index}, NULL, 10);")
-                elif kind == "int64":
-                    body.append(f"   {target}->{member} = (int64_t)strtoll(slot{index}, NULL, 10);")
+                    body.append(f"   {target}->{member} = "
+                                f"{numeric_parse(kind, f'slot{index}')};")
+                elif kind in ("int64", "double"):
+                    body.append(f"   {target}->{member} = "
+                                f"{numeric_parse(kind, f'slot{index}')};")
             body.append("   return 1;" if operation.get("c_returns") == "found"
                         else "   return 0;")
         elif reads:
@@ -1560,7 +1597,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             # struct it has always taken.
             parse.append(f"      {in_struct} row;\n      memset(&row, 0, sizeof row);\n")
             for position, (member, kind) in enumerate(zip(names, types)):
-                if kind in ("int", "int64"):
+                if kind in NUMERIC:
                     conv = "parse_int" if kind == "int" else "parse_int64"
                     parse.append(f"      if ({conv}(field[{position}], &row.{member}) != 0)\n"
                                  f"      {{\n         free(scratch);\n"
@@ -1572,7 +1609,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             args.append("&row")
         else:
             for position, kind in enumerate(types):
-                if kind in ("int", "int64"):
+                if kind in NUMERIC:
                     conv = "parse_int" if kind == "int" else "parse_int64"
                     ctype = "int" if kind == "int" else "int64_t"
                     args.append(f"parsed{position}")
@@ -1596,7 +1633,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         if listed:
             members = [(str(f["name"]), str(f["type"])) for f in reply["fields"]]
             width = len(members)
-            numeric = [i for i, (_, k) in enumerate(members) if k in ("int", "int64")]
+            numeric = [i for i, (_, k) in enumerate(members) if k in NUMERIC]
             row_out = str(listed["out"])
             bound = str(listed["bound"])
             column = listed.get("column")
@@ -1624,16 +1661,16 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             assigns = "".join(
                 f"            cells[row * {width}u + {i}u] = "
                 + (f"numbers[row * {len(numeric)}u + {numeric.index(i)}u];\n"
-                   if kind in ("int", "int64")
+                   if kind in NUMERIC
                    else (f"found[row];\n" if column else f"found[row].{member};\n"))
                 for i, (member, kind) in enumerate(members))
             converts = "".join(
-                f"            snprintf(numbers[row * {len(numeric)}u + {numeric.index(i)}u], 24,\n"
-                f"                     \"{'%lld' if kind == 'int64' else '%d'}\", "
-                f"{'(long long)' if kind == 'int64' else ''}"
+                f"            snprintf(numbers[row * {len(numeric)}u + {numeric.index(i)}u], {NUMERIC_TEXT},\n"
+                f"                     \"{numeric_format(kind)[0]}\", "
+                f"{numeric_format(kind)[1]}"
                 f"{'found[row]' if column else f'found[row].{member}'});\n"
-                for i, (member, kind) in enumerate(members) if kind in ("int", "int64"))
-            numbers = (f"         char (*numbers)[24] = malloc((size_t)produced * "
+                for i, (member, kind) in enumerate(members) if kind in NUMERIC)
+            numbers = (f"         char (*numbers)[{NUMERIC_TEXT}] = malloc((size_t)produced * "
                        f"{len(numeric)}u * sizeof *numbers);\n" if numeric else "")
             guard = "!cells" + (" || !numbers" if numeric else "")
             release = "            free(cells);\n" + ("            free(numbers);\n" if numeric else "")
@@ -1682,15 +1719,14 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             args.append(f"&{slot}")
             numeric = 0
             for index, (member, kind) in enumerate(members):
-                if kind in ("int", "int64"):
-                    spec = "%lld" if kind == "int64" else "%d"
-                    cast = "(long long)" if kind == "int64" else ""
+                if kind in NUMERIC:
+                    spec, cast = numeric_format(kind)
                     tail.append(f"      snprintf(row_text[{numeric}], sizeof row_text[{numeric}], "
                                 f"\"{spec}\", {cast}{slot}.{member});\n")
                     numeric += 1
             numeric = 0
             for index, (member, kind) in enumerate(members):
-                if kind in ("int", "int64"):
+                if kind in NUMERIC:
                     tail.append(f"      row_slots[{index}] = row_text[{numeric}];\n")
                     numeric += 1
                 else:
@@ -1752,7 +1788,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         row_locals = "".join(f"   {struct} row_{struct};\n" for struct in row_types)
         row_locals += f"   const char *row_slots[{widest}];\n"
         if most_numeric:
-            row_locals += f"   char row_text[{most_numeric}][24];\n"
+            row_locals += f"   char row_text[{most_numeric}][{NUMERIC_TEXT}];\n"
     return STAGE_SCAFFOLD.format(stem=name, family=name.replace("_", " "),
                                  row_locals=row_locals,
                                  headers="\n".join(f'#include "{h}"' for h in headers),

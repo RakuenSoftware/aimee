@@ -742,5 +742,75 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("calloc((size_t)parsed2, sizeof *found)", stage)
 
 
+    def double_catalog(self, root: Path) -> dict:
+        """Activate a reserved family with one row carrying a double member."""
+        catalog = self.catalog(root)
+        reserved = self.reserved(catalog)
+        reserved["active"] = True
+        self.route(root, reserved)
+        catalog["operations"].append({
+            "family": reserved["name"], "id": 1, "name": "probe_rate_get",
+            "c_name": "db1_probe_rate_get", "c_params": ["probe_id", "out"],
+            "wire_format": "db1-fields-v2", "scope": "session", "transaction": "none",
+            "idempotency": "safe", "results": ["ok", "missing", "invalid", "failed"],
+            "request": {"fields": [{"name": "key", "type": "text", "required": True}]},
+            "reply": {"struct": "db1_probe_rate_t",
+                      "fields": [{"name": "label", "type": "text"},
+                                 {"name": "rate", "type": "double"}],
+                      "max_bytes": 256}})
+        self.write(root, catalog)
+        path = root / contract.PROCESS_CONTRACTS
+        document = json.loads(path.read_text(encoding="utf-8"))
+        for component in document["components"]:
+            if component["id"] == "db1":
+                component["stages"].append({
+                    "id": reserved["id"],
+                    "name": "db1-" + reserved["name"].replace("_", "-"),
+                    "event_kind": reserved["event_kind"]})
+        path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        return catalog
+
+    def test_a_double_member_round_trips_through_text(self) -> None:
+        # A cost or a rate crosses as decimal text like every other number. The
+        # spec has to be %.17g: %g rounds to six significant digits, so a value
+        # would arrive as a DIFFERENT number while looking entirely plausible.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            catalog = self.double_catalog(root)
+            contract.run(root, write=True)
+            reserved = next(f for f in catalog["families"]
+                            if any(o["family"] == f["name"] and o["name"] == "probe_rate_get"
+                                   for o in catalog["operations"]))
+            client = (root / contract.CLIENT_DIR / f"{reserved['name']}.c").read_text()
+            stage = (root / contract.SOURCE_DIR / f"{reserved['name']}_stage.c").read_text()
+
+            self.assertIn('"%.17g"', stage)
+            # strtod takes two arguments. Pairing it with strtol's base is the
+            # mistake this pins: it compiles nowhere but was generated once.
+            self.assertIn("strtod(slot1, NULL)", client)
+            self.assertNotIn("strtod(slot1, NULL, 10)", client)
+        finally:
+            tmp.cleanup()
+
+    def test_a_numeric_slot_has_room_for_the_widest_double(self) -> None:
+        # "-1.2345678901234567e-308" is 24 characters, so a 24-byte slot has no
+        # room for the terminator and the value arrives truncated -- as a
+        # different, still-parseable number.
+        widest = len("-1.2345678901234567e-308") + 1
+        self.assertGreaterEqual(contract.NUMERIC_TEXT, widest)
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            self.double_catalog(root)
+            contract.run(root, write=True)
+            for path in list((root / contract.SOURCE_DIR).glob("*_stage.c")) + \
+                    list((root / contract.CLIENT_DIR).glob("*.c")):
+                self.assertNotIn("[24]", path.read_text(),
+                                 f"{path.name} still sizes a numeric slot at 24")
+        finally:
+            tmp.cleanup()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
