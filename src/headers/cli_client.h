@@ -76,6 +76,12 @@ cli_transport_t cli_transport_parse(const char *s);
  * reads are mapped. */
 const char *cli_v1_route_for_method(const char *method, const char **verb_out);
 
+/* The queued sibling: a method whose POST returns a run handle to poll at
+ * GET /v1/runs/{id} rather than a final response. NULL when the method is not
+ * async. A method is in exactly one of the two, so a caller cannot mistake a run
+ * handle for a result. */
+const char *cli_v1_async_route_for_method(const char *method, const char **verb_out);
+
 /* {id}-bearing /v1 routes (PREFIX{id}SUFFIX, e.g. /v1/workspaces/{path},
  * /v1/sessions/{id}/attach). Returns the static prefix and fills the verb, the
  * suffix after {id}, and the request field carrying the id ("session_id"; NULL
@@ -247,6 +253,11 @@ char *cli_v1_client_bearer(void);
  * none is configured. There is no co-located fallback to take instead — see
  * cli_v1_send. */
 void cli_v1_warn_no_endpoint(const char *method);
+
+/* TEST ONLY. Install a command manifest instead of fetching one from the server,
+ * so a unit test can exercise route lookup without a server. Takes ownership of
+ * `doc`. Never called outside tests; real invocations always fetch. */
+void cli_v1_manifest_set_for_test(struct cJSON *doc);
 
 /* Thin-client workspace push: when the configured endpoint is a remote
  * "tcp:host:port" the server cannot see this host's filesystem, so

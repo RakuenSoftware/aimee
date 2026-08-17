@@ -168,38 +168,41 @@ static void test_http_stream(void)
    printf("  http_stream: ok\n");
 }
 
-/* ---- method -> first-class /v1 REST route map ---- */
+/* ---- method -> /v1 route lookup, over a server-supplied manifest ---- */
 static void test_v1_route_map(void)
 {
    const char *verb = NULL;
 
-   /* POST routes carry the full body. */
-   assert(strcmp(cli_v1_route_for_method("index.find", &verb), "/v1/index/find") == 0);
-   assert(strcmp(verb, "POST") == 0);
-   assert(strcmp(cli_v1_route_for_method("memory.store", &verb), "/v1/memory/store") == 0);
-   assert(strcmp(cli_v1_route_for_method("workspace.add", &verb), "/v1/workspaces") == 0 &&
-          strcmp(verb, "POST") == 0);
-   assert(strcmp(verb, "POST") == 0);
-   assert(strcmp(cli_v1_route_for_method("collab_rules.approve", &verb),
-                 "/v1/collab_rules/approve") == 0);
+   /* Which method maps to which path is the SERVER's property now: the client
+    * fetches the map (GET /v1/cli/manifest) instead of carrying one. Asserting
+    * specific paths here would re-create the second copy this removed, and it is
+    * already covered where the map lives -- server-api-conformance-check and the
+    * route descriptor.
+    *
+    * What is still the client's, and what this covers, is the LOOKUP: the
+    * sync/async split, the verb, and unknown methods resolving to nothing. */
+   cJSON *doc = cJSON_Parse("{\"manifest_version\":1,\"routes\":["
+                            "{\"op\":\"thing.get\",\"verb\":\"GET\",\"path\":\"/v1/thing\"},"
+                            "{\"op\":\"thing.put\",\"verb\":\"POST\",\"path\":\"/v1/thing/put\"},"
+                            "{\"op\":\"slow.build\",\"verb\":\"POST\",\"path\":\"/v1/slow/build\","
+                            "\"async\":true}]}");
+   assert(doc);
+   cli_v1_manifest_set_for_test(doc);
+
+   assert(strcmp(cli_v1_route_for_method("thing.get", &verb), "/v1/thing") == 0);
+   assert(strcmp(verb, "GET") == 0);
+   assert(strcmp(cli_v1_route_for_method("thing.put", &verb), "/v1/thing/put") == 0);
    assert(strcmp(verb, "POST") == 0);
 
-   /* No-argument reads map to GET. */
-   assert(strcmp(cli_v1_route_for_method("hud.status", &verb), "/v1/hud") == 0);
-   assert(strcmp(verb, "GET") == 0);
-   assert(strcmp(cli_v1_route_for_method("collab_rules.list", &verb), "/v1/collab_rules") == 0);
-   assert(strcmp(verb, "GET") == 0);
+   /* The async split: a queued row is NOT a synchronous route and vice versa, so
+    * a caller cannot accidentally treat a run handle as a final response. */
+   assert(cli_v1_route_for_method("slow.build", &verb) == NULL);
+   assert(strcmp(cli_v1_async_route_for_method("slow.build", &verb), "/v1/slow/build") == 0);
+   assert(strcmp(verb, "POST") == 0);
+   assert(cli_v1_async_route_for_method("thing.get", &verb) == NULL);
 
-   /* Param-bearing GET reads are mapped too: the client now sends the body on
-    * GET (the server reads it via Content-Length), so filters survive. */
-   assert(strcmp(cli_v1_route_for_method("skill.list", &verb), "/v1/skills") == 0 &&
-          strcmp(verb, "GET") == 0);
-   /* Durable session history is distinct from GET /v1/sessions, which lists
-    * ephemeral live presences and deliberately returns a bare array. */
-   assert(strcmp(cli_v1_route_for_method("session.list", &verb), "/v1/sessions/list") == 0 &&
-          strcmp(verb, "POST") == 0);
-   /* {id}-bearing path routes resolve via the path-id map, not cli_v1_route_for_method. */
-   assert(cli_v1_route_for_method("workspace.get", &verb) == NULL);
+   /* {id}-bearing routes still resolve through the path-id map, which is a
+    * different marshalling contract and is not carried in the manifest. */
    const char *suffix = NULL, *id_field = NULL;
    assert(strcmp(cli_v1_pathid_route_for_method("workspace.get", &verb, &suffix, &id_field),
                  "/v1/workspaces/") == 0 &&
@@ -213,10 +216,6 @@ static void test_v1_route_map(void)
           strcmp(verb, "POST") == 0 && strcmp(suffix, "/attach") == 0 &&
           strcmp(id_field, "session_id") == 0);
    assert(cli_v1_pathid_route_for_method("memory.search", &verb, &suffix, &id_field) == NULL);
-
-   /* delegate runs over POST /v1/delegate/run (forced background remotely). */
-   assert(strcmp(cli_v1_route_for_method("delegate", &verb), "/v1/delegate/run") == 0 &&
-          strcmp(verb, "POST") == 0);
 
    /* Unknown / unmapped methods return NULL with verb defaulted to POST. */
    verb = NULL;

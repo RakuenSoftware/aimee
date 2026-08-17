@@ -547,8 +547,20 @@ static const cJSON *cli_v1_manifest(void)
    if (!doc || status < 200 || status >= 300)
    {
       cJSON_Delete(doc);
-      fprintf(stderr, "aimee: this server does not describe its commands "
-                      "(GET /v1/cli/manifest failed); it is older than this client.\n");
+      /* Say which of the two it is. status == 0 means the transport never got an
+       * answer (server down, wrong endpoint); a 4xx means it answered and has no
+       * such route, i.e. it predates the manifest. Reporting "your server is old"
+       * for an unreachable server would be the same misattribution this endpoint
+       * exists to remove — the caller otherwise falls through to "has no /v1
+       * route", which blames the command. */
+      if (status == 0)
+         fprintf(stderr, "aimee: cannot reach aimee-server to ask what commands it "
+                         "has (GET /v1/cli/manifest).\n");
+      else
+         fprintf(stderr,
+                 "aimee: this server does not describe its commands "
+                 "(GET /v1/cli/manifest -> %d); it is older than this client.\n",
+                 status);
       return NULL;
    }
    cJSON *ver = cJSON_GetObjectItemCaseSensitive(doc, "manifest_version");
@@ -564,6 +576,22 @@ static const cJSON *cli_v1_manifest(void)
    }
    g_cli_manifest = doc;
    return g_cli_manifest;
+}
+
+/* Test seam: install a manifest directly instead of fetching one. Unit tests
+ * have no server to ask, and the mapping they used to assert (method -> path) is
+ * the SERVER's property now — covered by server-api-conformance-check and by the
+ * manifest itself. What still belongs to the client, and what this lets a test
+ * exercise, is the lookup: the sync/async split, the verb, and an unknown method
+ * resolving to nothing.
+ *
+ * This is not a way around the server. It installs an in-process table and is
+ * called from tests only; every real invocation still fetches. Takes ownership. */
+void cli_v1_manifest_set_for_test(cJSON *doc)
+{
+   cJSON_Delete(g_cli_manifest);
+   g_cli_manifest = doc;
+   g_cli_manifest_fetched = 1;
 }
 
 /* Look `method` up in the manifest. want_async selects between the queued

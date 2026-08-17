@@ -25,16 +25,22 @@ the transport or the wire contract itself changes — a large upgrade, not a rou
 
 Most of the machinery is present. This proposal is mostly deletion plus one endpoint.
 
-- **`command_registry.h` already states the invariant**, and states it correctly:
+- **`command_registry.h` states the right invariant, but it is not in force yet:**
 
   > "A capability is registered ONCE, here, by the module that owns it. CLI, the v1 RPC
   > routes, MCP and ACP all route from this table. … A surface enumerates the registry; it
   > does not keep a list of its own."
 
-  The registry already replaced four hand-maintained tables. The invariant is right; its
-  **scope** is wrong. `command_registry.c` is in `CORE_SRCS`, compiled into *both* binaries, so
-  the client enumerates a registry baked into its own binary — a snapshot of server capability
-  frozen at client build time.
+  **Measured 2026-08-17: nothing registers.** `aimee_command_register` and
+  `aimee_command_register_many` are called only from `tests/test_command_registry.c`. The one
+  production reader, `modules/protocols/mcp/mcp_group_tool.c`, therefore enumerates an empty
+  table. The registry is a correct design with no data in it, and the four hand-maintained
+  tables it was written to replace are still the live sources.
+
+  This matters for phasing: **the registry cannot be the thing the server serves definitions
+  from until something populates it.** Either populate it first, or serve each kind of
+  definition from wherever it actually lives today (§1). Assuming the registry is authoritative
+  is the mistake to avoid — its docstring reads as though it already is.
 
 - **The server already publishes its own API**: `/v1/openapi.json` and `/v1/openapi.yaml`.
 - **The workspace reverse-channel already exists** (`cli_workspace_reverse_channel_start`,

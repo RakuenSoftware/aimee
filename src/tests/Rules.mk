@@ -1411,12 +1411,18 @@ $(TESTPREFIX)/unit-test-server-mcp-roundtable: \
 # production response finisher that this test now calls directly.
 # --gc-sections still drops the rest of the transport closure that this
 # marshalling/response-contract test never invokes.
+# cli_v1_route_for_method now FETCHES the route map from the server, so this
+# test needs the HTTP transport (cli_http_request) linked in even though it
+# never reaches a server: the lookup calls through it. The route sources
+# themselves are #included by the test, so their objects stay out.
 $(TESTPREFIX)/unit-test-cli-v1-delegate: $(OBJDIR)/tests/test_cli_v1_delegate.o \
                                   $(OBJDIR)/modules/workspace/workspace_client_diff.o \
                                   $(OBJDIR)/cJSON.o $(OBJDIR)/posix/util.o $(OBJDIR)/aimee_client.o \
                                   $(OBJDIR)/codex_auth.o $(OBJDIR)/posix/platform_path.o \
+                                  $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_client.o \
+                                  $(OBJDIR)/aimee_tls.o \
                                   $(CORE_CONNECTION_LIB)
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # The test INCLUDES cli_v1_routes_b.c to reach a static marshaller, so that
 # object must not also be linked here or every symbol in it is duplicate.
