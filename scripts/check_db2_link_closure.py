@@ -666,6 +666,46 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "platform, pgvector, DB3, configuration, or logging dependency. Normal and "
                 "sanitizer parity cover the complete signed 16-bit partition plus int boundaries.",
 }, {
+    "path": "src/modules/db2/support/pii_classifier_primitives.c",
+    "source_sha256": "b910e5470f542b43d463b89d172769e47675af228abd419b61a9d5267b1ff9bd",
+    "header": "src/modules/db2/support/db2_pii_classifier.h",
+    "header_sha256": "26bdb1c2abf6e8647a572ea4a49652ebdd373c3d2393afb198f801bd9899c078",
+    "defines": [
+        "memory_pii_register_sensitivity_batch", "memory_pii_register_turn_classifier",
+        "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
+        "memory_pii_turn_requests_sensitive",
+    ],
+    "resolves": [
+        "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
+        "memory_pii_turn_requests_sensitive",
+    ],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": [
+        "db2_pii_classifier.h", "db2_rel_seed.h", "db2_rel_type_helpers.h", "ctype.h",
+        "string.h",
+    ],
+    "allowed_header_includes": [],
+    "allowed_undefined": [
+        "__ctype_tolower_loc", "rel_type_normalize", "rel_types_seed_lookup", "strlen",
+    ],
+    "base_references": {
+        "memory_pii_rel_sensitivity": ["src/modules/db2/c/rel_types_store.c"],
+        "memory_pii_rel_sensitivity_batch": ["src/modules/db2/c/fact_recall.c"],
+        "memory_pii_turn_requests_sensitive": ["src/modules/db2/c/fact_ingest.c"],
+    },
+    "provenance": "The remaining PII turn, relation, and batch classifiers plus both provider "
+                  "registration seams are promoted from src/modules/memory/memory_pii_gate.c; "
+                  "all three DB2 calls are pinned to their sole translation units.",
+    "evidence": "The descriptor owns local cue scanning, unknown sensitive-name heuristics, "
+                "seed sensitivity lookup, whole-batch classification, and authoritative provider "
+                "failure semantics. Registered failures remain fail closed and never fall back "
+                "silently. Normal and sanitizer parity cover NULL, every non-NUL byte, all seed "
+                "relations, case and length boundaries, local and provider paths, non-Boolean "
+                "provider values, provider failures after writes, invalid batches, and output "
+                "canaries. Only the adjacent admitted relationship support, ctype, and strlen "
+                "are imported; there is no DB, bus transport, provider implementation, pgvector, "
+                "DB3, allocation, I/O, configuration, or logging edge.",
+}, {
     "path": "src/modules/db2/support/pii_inject_gate_primitives.c",
     "source_sha256": "41096c30f976075f8f4b97a7a1825bbb53e340f5d112eb704a4a31ff4be1fef6",
     "header": "src/modules/db2/support/db2_pii_inject_gate.h",

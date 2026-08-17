@@ -7623,6 +7623,86 @@ unit-test-db2-pii-inject-gate-support-sanitize: \
       $(TESTPREFIX)/unit-test-db2-pii-inject-gate-support-sanitize
 	$<
 
+DB2_PII_CLASSIFIER_SUPPORT_RENAMES = \
+   -Dmemory_pii_register_turn_classifier=db2_support_memory_pii_register_turn_classifier \
+   -Dmemory_pii_turn_requests_sensitive=db2_support_memory_pii_turn_requests_sensitive \
+   -Dmemory_pii_rel_sensitivity=db2_support_memory_pii_rel_sensitivity \
+   -Dmemory_pii_register_sensitivity_batch=db2_support_memory_pii_register_sensitivity_batch \
+   -Dmemory_pii_rel_sensitivity_batch=db2_support_memory_pii_rel_sensitivity_batch
+DB2_PII_CLASSIFIER_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_pii_classifier_support_impl.o: \
+                     modules/db2/support/pii_classifier_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SUPPORT_RENAMES) \
+	      $(DB2_PII_CLASSIFIER_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_pii_classifier_monolith.o: modules/memory/memory_pii_gate.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_pii_classifier_rel_type.o: modules/db2/support/rel_type_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_pii_classifier_rel_seed.o: modules/db2/support/rel_seed_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-pii-classifier-support: \
+                     $(OBJDIR)/tests/test_db2_pii_classifier_support.o \
+                     $(OBJDIR)/tests/db2_pii_classifier_support_impl.o \
+                     $(OBJDIR)/tests/db2_pii_classifier_monolith.o \
+                     $(OBJDIR)/tests/db2_pii_classifier_rel_type.o \
+                     $(OBJDIR)/tests/db2_pii_classifier_rel_seed.o
+	$(CC) -Wl,--gc-sections -o $@ $^
+
+DB2_PII_CLASSIFIER_SANITIZE_DIR = $(OBJDIR)/tests/db2-pii-classifier-support-sanitize
+
+$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/test.o: tests/test_db2_pii_classifier_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/pii_classifier_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SUPPORT_RENAMES) \
+	      $(DB2_PII_CLASSIFIER_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/monolith.o: modules/memory/memory_pii_gate.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/rel-type.o: \
+                     modules/db2/support/rel_type_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/rel-seed.o: \
+                     modules/db2/support/rel_seed_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-pii-classifier-support-sanitize: \
+                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/test.o \
+                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/support.o \
+                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/monolith.o \
+                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/rel-type.o \
+                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/rel-seed.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-pii-classifier-support unit-test-db2-pii-classifier-support-sanitize
+unit-test-db2-pii-classifier-support: \
+                     $(TESTPREFIX)/unit-test-db2-pii-classifier-support
+	$<
+
+unit-test-db2-pii-classifier-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-pii-classifier-support-sanitize
+	$<
+
 $(OBJDIR)/tests/db2_runtime_config_support_impl.o: \
                      modules/db2/support/runtime_config_primitives.c
 	@mkdir -p $(dir $@)

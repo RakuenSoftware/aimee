@@ -335,7 +335,16 @@ node and overlapping cycles, null endpoints, disconnected graphs, limits, and a 
 graph. This moves total debt from 187 to 185 and injected-contract debt from 48 to 46; its allocation,
 string, and formatting imports were already declared system dependencies.
 
-The remaining 46 non-system rows are sibling-contract migration debt. Session identity, briefing
+The twenty-second reduction packages the remaining memory PII classifier owner while keeping the
+already-isolated final injection decision separate. It includes turn cue scanning, direct and batched
+relation sensitivity, plus both provider-registration seams; registered provider failures remain
+authoritative and fail closed instead of silently falling back. The relation classifier composes only
+with DB2's admitted seed and normalization support. Normal and ASan/UBSan parity cover every seed
+relation, every non-NUL byte, sensitive-name and case/length boundaries, local and provider paths,
+provider failures after partial writes, invalid batches, and output canaries. This moves total debt
+from 185 to 182 and injected-contract debt from 46 to 43 without adding a system dependency.
+
+The remaining 43 non-system rows are sibling-contract migration debt. Session identity, briefing
 rendering, executable lifecycle, configuration, memory, and other host calls must close through
 their reviewed process contracts before activation; they are not portable-support candidates. Rows
 may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide

@@ -730,7 +730,7 @@ class LinkClosureTest(unittest.TestCase):
 
     def test_real_repository_reduces_owned_input_and_bounded_contract_debt(self) -> None:
         contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
-        self.assertEqual(contract["summary"]["unresolved_symbols"], 185)
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 182)
         self.assertEqual(
             contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 0
         )
@@ -739,7 +739,7 @@ class LinkClosureTest(unittest.TestCase):
             contract["summary"]["dispositions"]["portable-core-promotion"], 0
         )
         self.assertEqual(
-            contract["summary"]["dispositions"]["injected-module-contract"], 46
+            contract["summary"]["dispositions"]["injected-module-contract"], 43
         )
         self.assertFalse(any(
             row["symbol"].startswith("cJSON_") for row in contract["unresolved"]
@@ -782,6 +782,13 @@ class LinkClosureTest(unittest.TestCase):
         ))
         self.assertFalse(any(
             row["symbol"] == "memory_pii_should_inject"
+            for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] in {
+                "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
+                "memory_pii_turn_requests_sensitive",
+            }
             for row in contract["unresolved"]
         ))
         self.assertFalse(any(
@@ -902,6 +909,30 @@ class LinkClosureTest(unittest.TestCase):
         )
         self.assertIn(
             pii_gate_support["path"],
+            json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
+        )
+        pii_classifier_support = next(
+            unit for unit in contract["descriptor_support_units"]
+            if unit["path"] == "src/modules/db2/support/pii_classifier_primitives.c"
+        )
+        self.assertEqual(pii_classifier_support["defines"], [
+            "memory_pii_register_sensitivity_batch", "memory_pii_register_turn_classifier",
+            "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
+            "memory_pii_turn_requests_sensitive",
+        ])
+        self.assertEqual(pii_classifier_support["resolves"], [
+            "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
+            "memory_pii_turn_requests_sensitive",
+        ])
+        self.assertEqual(pii_classifier_support["allowed_undefined"], [
+            "__ctype_tolower_loc", "rel_type_normalize", "rel_types_seed_lookup", "strlen",
+        ])
+        self.assertEqual(
+            pii_classifier_support["source_sha256"],
+            hashlib.sha256((REPO / pii_classifier_support["path"]).read_bytes()).hexdigest(),
+        )
+        self.assertIn(
+            pii_classifier_support["path"],
             json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
         )
 

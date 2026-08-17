@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "9fded2d51598905db12b099c036bc7f5ed65d1a1",
-  "source_fingerprint": "303ef0300e9946bbf3929594ddd3ee0aef5b5f6237dfa83958652db0287aaf69",
+  "source_revision": "bcae23e9be3b6b8b6e87b436178366d1a128544c",
+  "source_fingerprint": "de4712dfef5182feb1c9f87990208ff2b1dfdd55d432126b2106a1cc9f224ea3",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -941,6 +941,52 @@
       },
       "provenance": "Definition promoted from the DB-free node-kind table in src/modules/memory/memory_episodes.c; the sole DB2 call is pinned to src/modules/db2/c/rel_types_store.c.",
       "evidence": "A deterministic integer-to-text switch with descriptor-owned numeric ABI and no imports, shared ontology header, allocation, I/O, DB, event-bus, provider, platform, pgvector, DB3, configuration, or logging dependency. Normal and sanitizer parity cover the complete signed 16-bit partition plus int boundaries."
+    },
+    {
+      "path": "src/modules/db2/support/pii_classifier_primitives.c",
+      "source_sha256": "b910e5470f542b43d463b89d172769e47675af228abd419b61a9d5267b1ff9bd",
+      "header": "src/modules/db2/support/db2_pii_classifier.h",
+      "header_sha256": "26bdb1c2abf6e8647a572ea4a49652ebdd373c3d2393afb198f801bd9899c078",
+      "defines": [
+        "memory_pii_register_sensitivity_batch",
+        "memory_pii_register_turn_classifier",
+        "memory_pii_rel_sensitivity",
+        "memory_pii_rel_sensitivity_batch",
+        "memory_pii_turn_requests_sensitive"
+      ],
+      "resolves": [
+        "memory_pii_rel_sensitivity",
+        "memory_pii_rel_sensitivity_batch",
+        "memory_pii_turn_requests_sensitive"
+      ],
+      "resolution_disposition": "injected-module-contract",
+      "allowed_includes": [
+        "db2_pii_classifier.h",
+        "db2_rel_seed.h",
+        "db2_rel_type_helpers.h",
+        "ctype.h",
+        "string.h"
+      ],
+      "allowed_header_includes": [],
+      "allowed_undefined": [
+        "__ctype_tolower_loc",
+        "rel_type_normalize",
+        "rel_types_seed_lookup",
+        "strlen"
+      ],
+      "base_references": {
+        "memory_pii_rel_sensitivity": [
+          "src/modules/db2/c/rel_types_store.c"
+        ],
+        "memory_pii_rel_sensitivity_batch": [
+          "src/modules/db2/c/fact_recall.c"
+        ],
+        "memory_pii_turn_requests_sensitive": [
+          "src/modules/db2/c/fact_ingest.c"
+        ]
+      },
+      "provenance": "The remaining PII turn, relation, and batch classifiers plus both provider registration seams are promoted from src/modules/memory/memory_pii_gate.c; all three DB2 calls are pinned to their sole translation units.",
+      "evidence": "The descriptor owns local cue scanning, unknown sensitive-name heuristics, seed sensitivity lookup, whole-batch classification, and authoritative provider failure semantics. Registered failures remain fail closed and never fall back silently. Normal and sanitizer parity cover NULL, every non-NUL byte, all seed relations, case and length boundaries, local and provider paths, non-Boolean provider values, provider failures after writes, invalid batches, and output canaries. Only the adjacent admitted relationship support, ctype, and strlen are imported; there is no DB, bus transport, provider implementation, pgvector, DB3, allocation, I/O, configuration, or logging edge."
     },
     {
       "path": "src/modules/db2/support/pii_inject_gate_primitives.c",
@@ -1915,6 +1961,7 @@
         "src/modules/db2/c/prospective_memories.c",
         "src/modules/db2/support/cert_serial_primitives.c",
         "src/modules/db2/support/cjson.c",
+        "src/modules/db2/support/pii_classifier_primitives.c",
         "src/modules/db2/support/rel_type_primitives.c"
       ],
       "disposition": "system-link",
@@ -2425,30 +2472,6 @@
     },
     {
       "symbol": "memory_pattern_scan_turn",
-      "references": [
-        "src/modules/db2/c/fact_ingest.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_pii_rel_sensitivity",
-      "references": [
-        "src/modules/db2/c/rel_types_store.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_pii_rel_sensitivity_batch",
-      "references": [
-        "src/modules/db2/c/fact_recall.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_pii_turn_requests_sensitive",
       "references": [
         "src/modules/db2/c/fact_ingest.c"
       ],
@@ -3066,7 +3089,8 @@
         "src/modules/db2/support/code_audit_graph_primitives.c",
         "src/modules/db2/support/code_import_primitives.c",
         "src/modules/db2/support/extractor_primitives.c",
-        "src/modules/db2/support/model_validation_primitives.c"
+        "src/modules/db2/support/model_validation_primitives.c",
+        "src/modules/db2/support/pii_classifier_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3509,16 +3533,16 @@
   ],
   "summary": {
     "translation_units": 138,
-    "descriptor_support_units": 21,
-    "unresolved_symbols": 185,
+    "descriptor_support_units": 22,
+    "unresolved_symbols": 182,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 46,
+      "injected-module-contract": 43,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "378d06a07a7d167b6f610710032bbdfbf0d479e30d859fe04909d49a2f1d740e"
+  "fingerprint": "f1e12d9cc1baaefcbf23346dc239eb68d7cd295ee19cb59848352344a466c4a7"
 }
