@@ -762,12 +762,17 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-db2-cert-serial-support \
                 $(TESTPREFIX)/unit-test-db2-cjson-support \
                 $(TESTPREFIX)/unit-test-db2-cochange-support \
+                $(TESTPREFIX)/unit-test-db2-code-audit-graph-support \
+                $(TESTPREFIX)/unit-test-db2-code-import-support \
                 $(TESTPREFIX)/unit-test-db2-code-match-support \
                 $(TESTPREFIX)/unit-test-db2-dstr-support \
                 $(TESTPREFIX)/unit-test-db2-extractor-support \
                 $(TESTPREFIX)/unit-test-db2-log-support \
                 $(TESTPREFIX)/unit-test-db2-management-read-support \
                 $(TESTPREFIX)/unit-test-db2-model-validation-support \
+                $(TESTPREFIX)/unit-test-db2-node-kind-text-support \
+                $(TESTPREFIX)/unit-test-db2-pii-classifier-support \
+                $(TESTPREFIX)/unit-test-db2-pii-inject-gate-support \
                 $(TESTPREFIX)/unit-test-db2-random-support \
                 $(TESTPREFIX)/unit-test-db2-rel-enum-text-support \
                 $(TESTPREFIX)/unit-test-db2-rel-seed-support \
@@ -850,11 +855,16 @@ UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-cert-serial-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-cjson-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-cochange-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-code-audit-graph-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-code-import-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-code-match-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-extractor-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-log-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-model-validation-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-node-kind-text-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-pii-classifier-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-pii-inject-gate-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-random-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-seed-support-sanitize \
