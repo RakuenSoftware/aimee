@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "20631a5a11f1675342abe5ec5c0862db7d601cbf",
-  "source_fingerprint": "cd568aaf893892d3387ffb21e9a402ad0963283e11a48318c330df225919c23b",
+  "source_revision": "84c88215672ee80095732f401cc68ee75ad96d4b",
+  "source_fingerprint": "17d4504347e757f8ea76c6b0f4fd6b49ce87b819a81170eb68259e7a6473247e",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -2410,14 +2410,6 @@
       "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
     },
     {
-      "symbol": "session_id",
-      "references": [
-        "src/modules/db2/c/kb_service_backend.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
       "symbol": "shell_escape",
       "references": [
         "src/modules/db2/c/canonical_index.c"
@@ -3256,15 +3248,15 @@
   "summary": {
     "translation_units": 138,
     "descriptor_support_units": 12,
-    "unresolved_symbols": 206,
+    "unresolved_symbols": 205,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
       "injected-module-contract": 59,
-      "portable-core-promotion": 8,
+      "portable-core-promotion": 7,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "d50908553bf933d77fa2fddd0d82fac2422dbef34702fce574dfd3ab1c208b56"
+  "fingerprint": "526890b1790674eaeb9f8b00983602fbf7998b41f9bab91fe4655f22eba1bd81"
 }

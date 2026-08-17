@@ -9999,8 +9999,8 @@
           "line": 362
         }
       ],
-      "signature": "int db2_kb_service_async_queue_drain ( const char * embedding_cmd , int timeout_secs , const char * vector_collection , db2_kb_service_vector_upsert_fn vector_upsert , void * vector_upsert_ctx , db2_kb_service_async_queue_stats_t * out )",
-      "signature_sha256": "94c0ae77d01b0809086d5e54135ae4c1c70812333b5924b9a320bb643151b8ec",
+      "signature": "int db2_kb_service_async_queue_drain ( const char * claimed_by , const char * embedding_cmd , int timeout_secs , const char * vector_collection , db2_kb_service_vector_upsert_fn vector_upsert , void * vector_upsert_ctx , db2_kb_service_async_queue_stats_t * out )",
+      "signature_sha256": "caa8a6c6c631c80aacb4a513f14d095ed5afb4e734429ae9020d7d3c507095c8",
       "status": "audit-pending",
       "symbol": "db2_kb_service_async_queue_drain"
     },
@@ -23683,7 +23683,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "7183657f67246dfe41052a4744e2f306a46ca0a3195e9d12288d90c179b5c009",
+  "fingerprint": "06b7615ac4a1a4c652ff69d7e97b91c78e155b9d0ee5941068378ddf8c032ef4",
   "module": "db2",
   "schema_version": 1,
   "summary": {

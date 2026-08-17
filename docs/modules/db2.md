@@ -110,9 +110,9 @@ the process boundary while their storage calls migrate to generated DB2 clients.
 calls as injected DB2 callbacks would recreate the monolith inside the module. The
 probe compiles each unit plus exact descriptor-owned support, combines only those objects with a
 relocatable link, supplies no archive, shared library, helper stub, or weak definition, and records
-the 206 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
+the 205 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
 disposition and rationale. The current ledger contains 139 explicit system-link dependencies, zero
-remaining vendored/generated inputs, 59 sibling or KB contracts to inject, and 8 support APIs to
+remaining vendored/generated inputs, 59 sibling or KB contracts to inject, and 7 support APIs to
 promote. The standalone-link exit condition requires zero entries in the latter three groups; a
 classified ledger alone is not enough.
 
@@ -247,6 +247,13 @@ Normal and hardened tests cover an absent sink, formatting, truncation, invalid 
 and uninstall. The implementation imports only `vsnprintf` and has no KB logger state, allocation,
 database, bus, pgvector, provider, or DB3 edge. This slice moves total debt from 207 to 206 and
 portable promotion debt from 9 to 8.
+
+The async-queue drain now receives a nonempty, NUL-terminated worker identity bounded to 127 bytes.
+The KB caller supplies its session attribution and DB2 persists that exact value with the atomic
+claim; DB2 no longer imports the host `session_id()` accessor. Invalid identities fail before any
+configuration or database access, and database-backed plus HTTP-adapter tests cover rejection and
+round-trip attribution. This moves total debt from 206 to 205 and portable promotion debt from 8 to
+7 while leaving durable claim/state ownership inside DB2.
 
 The remaining portable rows are named migration debt, not an assertion that copying is always the
 right answer. DB2 owns the decision and must close it before activation: canonical-index extraction

@@ -728,15 +728,15 @@ class LinkClosureTest(unittest.TestCase):
         with mock.patch.object(checker, "SUPPORT_UNITS", self.production_support):
             checker.check(REPO, run_probe=True)
 
-    def test_real_repository_reduces_owned_input_random_seed_and_log_debt(self) -> None:
+    def test_real_repository_reduces_owned_input_random_seed_log_and_session_debt(self) -> None:
         contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
-        self.assertEqual(contract["summary"]["unresolved_symbols"], 206)
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 205)
         self.assertEqual(
             contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 0
         )
         self.assertEqual(contract["summary"]["dispositions"]["system-link"], 139)
         self.assertEqual(
-            contract["summary"]["dispositions"]["portable-core-promotion"], 8
+            contract["summary"]["dispositions"]["portable-core-promotion"], 7
         )
         self.assertEqual(
             contract["summary"]["dispositions"]["injected-module-contract"], 59
@@ -756,6 +756,9 @@ class LinkClosureTest(unittest.TestCase):
         ))
         self.assertFalse(any(
             row["symbol"] == "aimee_log" for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] == "session_id" for row in contract["unresolved"]
         ))
         cjson = next(
             unit for unit in contract["descriptor_support_units"]
