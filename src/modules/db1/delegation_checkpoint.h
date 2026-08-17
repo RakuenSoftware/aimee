@@ -11,6 +11,13 @@
 #ifndef DEC_DB1_DELEGATION_CHECKPOINT_H
 #define DEC_DB1_DELEGATION_CHECKPOINT_H 1
 
+/* What a checkpoint may hand back. These cross the module boundary, so the
+   width is the contract's rather than each caller's: the stage cannot see the
+   buffer it is filling and would otherwise have to guess. */
+#define DB1_CHECKPOINT_STEPS_LEN  2048
+#define DB1_CHECKPOINT_ERROR_LEN  512
+#define DB1_CHECKPOINT_OUTPUT_LEN 2048
+
 #include <stddef.h>
 
 #ifdef __cplusplus

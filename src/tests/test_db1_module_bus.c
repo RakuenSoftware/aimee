@@ -37,6 +37,9 @@
 #include "conv_context.h"
 #include "coord_jobs.h"
 #include "db1_cron_jobs.h"
+#include "agent_jobs.h"
+#include "delegate_reservation.h"
+#include "delegations.h"
 #include "db1_windows.h"
 #include "db1_module_api.h"
 #include "git_ownership.h"
@@ -67,9 +70,9 @@ static void write_grant(const char *policy_dir, const char *executable)
     * test happens to call would hide a stage that never registered. */
    fprintf(file,
            "version=1\nprincipal_class=1\nprincipal_ref=30\nuid=self\n"
-           "executable=%s\nserve=%u,%u,%u,%u\n",
+           "executable=%s\nserve=%u,%u,%u,%u,%u\n",
            executable, AIMEE_DB1_EVENT_ECONOMIZER_STATE, AIMEE_DB1_EVENT_GIT_OWNERSHIP,
-           AIMEE_DB1_EVENT_CONVERSATION, AIMEE_DB1_EVENT_AGENT_WORK);
+           AIMEE_DB1_EVENT_CONVERSATION, AIMEE_DB1_EVENT_AGENT_WORK, AIMEE_DB1_EVENT_DELEGATION);
    must(fclose(file) == 0, "write the grant manifest");
 }
 
@@ -94,7 +97,13 @@ static void start_module(const char *executable, const char *socket_path, const 
 
    for (int tick = 0; tick < 200; tick++)
    {
-      if (obs_bus_module_available(AIMEE_DB1_EVENT_AGENT_WORK))
+      /* Every stage this fixture drives, not just the first: they register in
+         order, and waiting on an early one races the ones after it -- which
+         reads as the module answering "failed" to a call it never received. */
+      if (obs_bus_module_available(AIMEE_DB1_EVENT_AGENT_WORK) &&
+          obs_bus_module_available(AIMEE_DB1_EVENT_DELEGATION) &&
+          obs_bus_module_available(AIMEE_DB1_EVENT_CONVERSATION) &&
+          obs_bus_module_available(AIMEE_DB1_EVENT_GIT_OWNERSHIP))
          return;
       int status = 0;
       if (waitpid(child, &status, WNOHANG) == child)
@@ -405,6 +414,84 @@ static void test_a_cron_job_carries_its_array_member(void)
    printf("  PASS: a cron job carries its array member\n");
 }
 
+static void test_a_job_row_carries_what_the_store_allocated(void)
+{
+   /* A prompt is not a fixed-width member: the store allocates it, and the
+      caller frees it. Across the bus the allocation is the client's, and the
+      free is the same call it always was. */
+   int job = db1_agent_job_create("builder", "a prompt worth allocating", "agent-1", "owner-1");
+   must(job > 0, "create a job and learn its id");
+
+   db1_agent_job_t row;
+   must(db1_agent_job_get(job, &row) == 0, "read the job back");
+   must(row.id == job, "the row is the job just created");
+   must(row.prompt && strcmp(row.prompt, "a prompt worth allocating") == 0,
+        "the allocated member arrived whole");
+   must(strcmp(row.role, "builder") == 0, "and the inline members beside it");
+   db1_agent_job_free(&row);
+   must(row.prompt == NULL, "freeing the row clears what it held");
+
+   /* void: the domain answers nothing, so neither does the client. */
+   db1_agent_job_heartbeat(job);
+   db1_agent_job_set_agent(job, "agent-2");
+   db1_agent_job_update(job, "running", 3, NULL);
+
+   db1_agent_job_t after;
+   must(db1_agent_job_get(job, &after) == 0, "read it again");
+   must(strcmp(after.agent_name, "agent-2") == 0, "the void write landed");
+   must(after.cursor_turn == 3, "and so did the one beside it");
+   db1_agent_job_free(&after);
+
+   /* A cost is a double both ways: an integer here bills differently. */
+   must(db1_agent_job_complete(job, "done", 4, "the result", 1, 0.0125) == 0,
+        "complete the job with a cost");
+   must(db1_agent_job_get(job, &after) == 0, "read the completed job");
+   must(after.cost_known == 1, "the cost is known");
+   must(after.cost_usd > 0.012 && after.cost_usd < 0.013,
+        "and it is the cost that was sent, not a rounded one");
+   must(after.result && strcmp(after.result, "the result") == 0,
+        "the second allocated member arrived too");
+   db1_agent_job_free(&after);
+
+   /* A list of rows whose members the store allocated: every row's memory is
+      the caller's, and the rows past the end are nobody's. */
+   db1_agent_job_t recent[4];
+   int listed = db1_agent_job_list_recent(recent, 4, 1);
+   must(listed >= 1, "list the recent jobs");
+   must(recent[0].prompt != NULL, "a listed row carries its allocation");
+   for (int i = 0; i < listed; i++)
+      db1_agent_job_free(&recent[i]);
+
+   /* The count IS the answer here, not a status. */
+   int cancelled = db1_agent_job_cancel_stale(0, "test");
+   must(cancelled >= 0, "cancelling stale jobs answers with a count");
+
+   /* A spawn: the count IS the answer, and a plain read still says whether
+      there was anything to read. lifecycle_delegate_job and
+      delegation_checkpoints are created outside DB1's schema, so the
+      reservation and checkpoint calls guard on the table being there -- that
+      is the domain's own precondition and the wire does not change it. */
+   must(db1_delegation_spawn_record("spawn-1", "", "sess-spawn", 0, "builder") == 0,
+        "record a spawn");
+   must(db1_delegation_spawn_count_total("sess-spawn") == 1,
+        "the count crosses as a count, not as a status");
+   must(db1_delegation_spawn_is_active("spawn-1") == 1, "the spawn is active");
+
+   char state[64] = "";
+   must(db1_delegation_spawn_status("spawn-1", state, sizeof state) == 0,
+        "read the spawn's status, which answers 0 as it always did");
+   must(state[0] != '\0', "and it said something");
+
+   int active[8];
+   must(db1_delegation_spawn_list_active(active, 8) >= 1, "list the active spawns");
+
+   must(db1_delegation_spawn_complete("spawn-1") == 0, "complete it");
+   must(db1_delegation_spawn_is_active("spawn-1") == 0,
+        "a completed spawn is not active, and that is not a failure");
+
+   printf("  PASS: a job row carries what the store allocated\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -444,6 +531,7 @@ int main(int argc, char **argv)
    test_repeated_terms_and_a_numeric_column();
    test_coordination_claims_and_dispatches();
    test_a_cron_job_carries_its_array_member();
+   test_a_job_row_carries_what_the_store_allocated();
 
    stop_module();
    obs_bus_stop();

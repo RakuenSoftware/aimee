@@ -34,6 +34,7 @@
     "src/modules/db1/delegate_learning.c",
     "src/modules/db1/delegate_reservation.c",
     "src/modules/db1/delegation_checkpoint.c",
+    "src/modules/db1/delegation_stage.c",
     "src/modules/db1/delegations.c",
     "src/modules/db1/diagnose.c",
     "src/modules/db1/diagnostics.c",

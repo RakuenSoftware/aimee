@@ -49,9 +49,9 @@ void classify_delegate_exit(const dl_exit_metrics_t *metrics, dl_classification_
  * delegate_learning_record — insert a learning record into DB1.
  * Returns 0 on success, -1 on failure.
  */
-int delegate_learning_record(const char *session_id, const char *role,
-                             dl_failure_mode_t failure_mode, const char *lesson,
-                             const char *evidence_json, double confidence);
+int db1_delegate_learning_record(const char *session_id, const char *role,
+                                 const char *failure_mode, const char *lesson,
+                                 const char *evidence_json, double confidence);
 
 /*
  * delegate_learning_inject_prompt — retrieve top-N highest-confidence learnings
@@ -59,7 +59,7 @@ int delegate_learning_record(const char *session_id, const char *role,
  * Returns a newly allocated string (caller frees) or NULL on error.
  * The original system_prompt is preserved; learnings are prepended.
  */
-char *delegate_learning_inject_prompt(const char *role, const char *system_prompt, int top_n);
+char *db1_delegate_learning_inject_prompt(const char *role, const char *system_prompt, int top_n);
 
 /*
  * dl_failure_mode_to_string — convert enum to string for storage/logging.
@@ -72,6 +72,5 @@ const char *dl_failure_mode_to_string(dl_failure_mode_t mode);
 dl_failure_mode_t dl_string_to_failure_mode(const char *s);
 
 /* DB1 eviction (called internally by delegate_learning_record). */
-int delegate_learning_evict_if_needed(void);
 
 #endif /* DELEGATE_LEARNING_H */

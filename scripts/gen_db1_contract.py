@@ -56,6 +56,9 @@ TRANSACTIONS = ("none", "single")
 IDEMPOTENCY = ("safe", "idempotent", "unsafe")
 WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v2")
 PAYLOADS = ("none", "state", "text", "int", "int64", "double")
+# A request carries a double for the same reason a reply does: a cost is a
+# number, and rounding it to an integer at the boundary would bill differently
+# on each side of it. The conversion is the one the reply already uses.
 FIELD_TYPES = ("text", "int", "int64", "double")
 # Members that travel as decimal text and convert back on arrival.
 NUMERIC = ("int", "int64", "double")
@@ -237,7 +240,8 @@ def validate_families(raw: object) -> dict[str, dict[str, object]]:
     return families
 
 
-def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> list[dict[str, object]]:
+def validate_operations(raw: object, families: dict[str, dict[str, object]],
+                        root: Path) -> list[dict[str, object]]:
     if not isinstance(raw, list) or not raw:
         fail("operations", "operations must be a nonempty array")
     seen: set[tuple[str, int]] = set()
@@ -271,11 +275,19 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
         #          a claim, where the caller gets the task and its id at once.
         #          c_member says which member; nothing-there answers negative,
         #          because the domains that do this use the id as the flag.
+        # "void"   the domain answers nothing at all -- a heartbeat, a status
+        #          nudge. Inventing a return here would be a status its callers
+        #          never had and cannot check.
+        # "rc"     a read whose buffer and whose return are separate answers:
+        #          classify_stale fills in "idle" and returns whether that
+        #          counts as stale. Reconstructing one from the other -- as a
+        #          plain read does, by asking whether any text arrived -- gives
+        #          the wrong answer whenever the text is always there.
         if operation.get("c_returns", "int") not in ("int", "found", "text", "int64",
-                                                     "member"):
+                                                     "member", "void", "rc"):
             fail("c-returns",
                  f"operations[{index}] c_returns must be \"int\", \"found\", \"int64\", "
-                 f"\"member\" or \"text\"")
+                 f"\"member\", \"void\", \"rc\" or \"text\"")
         if ("c_member" in operation) != (operation.get("c_returns") == "member"):
             fail("c-returns",
                  f"operations[{index}] names c_member exactly when it returns a member")
@@ -556,6 +568,23 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
                              if scalar_reply and isinstance(declared, dict) and "width" in declared
                              else {"name", "type", "repeat"} if repeated_member
                              else {"name", "type"})
+            allocated_member = isinstance(declared, dict) and "alloc" in declared
+            if allocated_member:
+                allowed_field = allowed_field | {"alloc"}
+                if "struct" not in reply:
+                    fail("field-alloc",
+                         f"{name} reply field {declared['name']!r} allocates, which only a "
+                         f"struct member does")
+                if str(declared["type"]) != "text":
+                    fail("field-alloc",
+                         f"{name} reply field {declared['name']!r} allocates, so it "
+                         f"carries text")
+                if str(declared["name"]) not in pointer_members(root, str(reply["struct"])):
+                    fail("field-alloc",
+                         f"{name} reply field {declared['name']!r} allocates, but "
+                         f"{reply['struct']} declares it inline: an inline array is already "
+                         f"as long as it will ever be")
+                integer(declared["alloc"], f"{name}.reply.fields[{position}].alloc", 1, 1 << 20)
             if repeated_member:
                 if "struct" not in reply:
                     fail("field-repeat",
@@ -599,6 +628,22 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
         if operation.get("c_returns") == "found" and "missing" not in results:
             fail("c-returns",
                  f"{name} distinguishes found from nothing, so it must declare missing")
+        if operation.get("c_returns") == "rc":
+            if "struct" in reply or "list" in reply or "scalars" in reply:
+                fail("c-returns",
+                     f"{name} carries its return beside a read, so its reply is one value")
+            if len(reply_fields) != 1 or str(reply_fields[0]["type"]) != "text":
+                fail("c-returns",
+                     f"{name} carries its return beside a read, so its reply declares "
+                     f"exactly one text value: the buffer the caller passed")
+        if operation.get("c_returns") == "void":
+            if reply_fields:
+                fail("c-returns",
+                     f"{name} returns nothing, so its reply carries nothing: a value "
+                     f"nobody can receive is a value nobody checks")
+            if declared_return(root, str(operation["c_name"])) != "void":
+                fail("c-returns",
+                     f"{name} declares c_returns void, but its header does not")
         if operation.get("c_returns") == "member":
             if "struct" not in reply:
                 fail("c-returns", f"{name} returns a member, so its reply is a struct")
@@ -617,9 +662,16 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
         if operation.get("c_returns") == "int64":
             if "struct" in reply or "list" in reply or "scalars" in reply:
                 fail("c-returns", f"{name} returns an id, so its reply is one value")
-            if len(reply_fields) != 1 or str(reply_fields[0]["type"]) != "int64":
+            # The reply's width follows the header, not a fixed choice here: a
+            # domain that answers "how many rows changed" returns int, and
+            # declaring int64 beside it would be a second, disagreeing
+            # statement about the same function.
+            spelled = declared_return(root, str(operation["c_name"]))
+            wanted = ("int", "int64") if spelled == "int" else ("int64",)
+            if len(reply_fields) != 1 or str(reply_fields[0]["type"]) not in wanted:
                 fail("c-returns",
-                     f"{name} returns an id, so its reply must declare exactly one int64")
+                     f"{name} hands back its return value, so its reply must declare "
+                     f"exactly one of {list(wanted)}: its header returns {spelled}")
         if operation.get("c_returns") == "text":
             # The reply is the return value, so there is exactly one of it and
             # its declared size is what the client allocates before it calls.
@@ -636,7 +688,7 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
     return operations
 
 
-def validate_catalog(value: object) -> dict[str, object]:
+def validate_catalog(value: object, root: Path) -> dict[str, object]:
     catalog = keys(value, {
         "schema_version", "module", "wire_version", "catalog_complete",
         "infrastructure_sources", "coupled_sources", "families", "result_codes",
@@ -653,7 +705,7 @@ def validate_catalog(value: object) -> dict[str, object]:
     if catalog["result_codes"] != list(RESULT_CODES):
         fail("result-codes", "result_codes must equal the closed version-1 result set")
     families = validate_families(catalog["families"])
-    operations = validate_operations(catalog["operations"], families)
+    operations = validate_operations(catalog["operations"], families, root)
     # Completeness is a claim about DB1's whole surface, so it cannot be true
     # while families are still reserved for callers that have not moved.
     if catalog["catalog_complete"] and not all(f["active"] for f in families.values()):
@@ -1417,14 +1469,17 @@ static int read_result(int status, const char *value_out)
         elif reads:
             params += [f"char *{outputs[0]}", f"size_t {outputs[1]}"]
             guards += [f"!{outputs[0]}", f"{outputs[1]} == 0"]
+        returns_void = operation.get("c_returns") == "void"
         kind = ("char *" if returns_text
+                else "void " if returns_void
                 else f"{declared_return(root, str(operation['c_name']))} " if returns_id
                 else "int ")
         signature = f"{kind}{operation['c_name']}({', '.join(params)})"
         body = [signature, "{"]
-        empty = "NULL" if returns_text else "-1"
+        empty = "NULL" if returns_text else "" if returns_void else "-1"
         if guards:
-            body += [f"   if ({' || '.join(guards)})", f"      return {empty};"]
+            body += [f"   if ({' || '.join(guards)})",
+                     f"      return{' ' + empty if empty else ''};"]
         if listed:
             # Clamped rather than refused, because the domain clamps too: this
             # ceiling is the one the implementation already enforces, so a
@@ -1560,6 +1615,8 @@ static int read_result(int status, const char *value_out)
                 body.append(f"      free({item});")
             body.append("      return -1;")
             body.append("   }")
+            row_allocated = {str(f["name"]): int(f["alloc"])
+                             for f in reply["fields"] if "alloc" in f}
             body.append(f"   memset({row_out}, 0, (size_t){bound} * sizeof *{row_out});")
             body.append(f"   for (int wire_row = 0; wire_row < {bound}; ++wire_row)")
             body.append("   {")
@@ -1571,6 +1628,30 @@ static int read_result(int status, const char *value_out)
                     body.append(f"      wire_values[{at}] = {cell};")
                     body.append(f"      wire_caps[{at}] = sizeof {cell};")
                     slot += 1
+                elif member in row_allocated:
+                    # Every row's allocation is made up front, because the
+                    # frame is filled in one call: there is no point at which
+                    # only the rows that arrived could be allocated. Rows past
+                    # the reply are freed below rather than handed back.
+                    ceiling = row_allocated[member]
+                    cell = f"{row_out}[wire_row].{member}"
+                    body.append(f"      {cell} = malloc({ceiling}u);")
+                    body.append(f"      if (!{cell})")
+                    body.append("      {")
+                    body.append("         for (int wire_done = 0; wire_done < wire_row; ++wire_done)")
+                    body.append("         {")
+                    for other in row_allocated:
+                        body.append(f"            free({row_out}[wire_done].{other});")
+                        body.append(f"            {row_out}[wire_done].{other} = NULL;")
+                    body.append("         }")
+                    body.append("         free(wire_values);")
+                    body.append("         free(wire_caps);")
+                    body += ["         free(wire_scratch);"] if numeric else []
+                    body.append("         return -1;")
+                    body.append("      }")
+                    body.append(f"      {cell}[0] = '\\0';")
+                    body.append(f"      wire_values[{at}] = {cell};")
+                    body.append(f"      wire_caps[{at}] = {ceiling}u;")
                 else:
                     cell = (f"{row_out}[wire_row]" if column
                             else f"{row_out}[wire_row].{member}")
@@ -1587,9 +1668,36 @@ static int read_result(int status, const char *value_out)
             # reply, whatever its wire_status says.
             body.append(f"   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % {width}u != 0u)")
             body.append("   {" + fail_free)
+            if row_allocated:
+                # Partial failure releases what it took. The caller frees a row
+                # it was given; it cannot free one it was never told about.
+                body.append(f"      for (int wire_done = 0; wire_done < {bound}; ++wire_done)")
+                body.append("      {")
+                for other in row_allocated:
+                    body.append(f"         free({row_out}[wire_done].{other});")
+                    body.append(f"         {row_out}[wire_done].{other} = NULL;")
+                body.append("      }")
             body.append("      return -1;")
             body.append("   }")
             body.append(f"   int wire_rows = (int)(wire_filled / {width}u);")
+            if row_allocated:
+                # The rows the reply did not fill were allocated all the same.
+                # Handing them back would be memory the caller never asked for
+                # and, past the returned count, never looks at to free.
+                body.append(f"   for (int wire_row = wire_rows; wire_row < {bound}; ++wire_row)")
+                body.append("   {")
+                for member in row_allocated:
+                    body.append(f"      free({row_out}[wire_row].{member});")
+                    body.append(f"      {row_out}[wire_row].{member} = NULL;")
+                body.append("   }")
+                for member, ceiling in row_allocated.items():
+                    body.append("   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)")
+                    body.append("   {")
+                    body.append(f"      char *wire_shrunk = realloc({row_out}[wire_row].{member}, "
+                                f"strlen({row_out}[wire_row].{member}) + 1u);")
+                    body.append("      if (wire_shrunk)")
+                    body.append(f"         {row_out}[wire_row].{member} = wire_shrunk;")
+                    body.append("   }")
             if numeric:
                 body.append("   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)")
                 body.append("   {")
@@ -1607,21 +1715,37 @@ static int read_result(int status, const char *value_out)
         elif out_struct:
             members = [(str(f["name"]), str(f["type"])) for f in reply["fields"]]
             target = outputs[0]
-            # A numeric member is read as text and converted, the same way it was
-            # sent: the frame carries bytes, and a row is only its members.
+            # A member the domain allocated is a member the client allocates:
+            # the caller frees it with the same call it always did, and the
+            # memory simply comes from this side of the bus now. Allocated at
+            # the declared ceiling because the length is not known until the
+            # reply lands, then shrunk to what came back.
+            allocated = {str(f["name"]): int(f["alloc"])
+                         for f in reply["fields"] if "alloc" in f}
             for index, (member, kind) in enumerate(members):
                 if kind in NUMERIC:
                     body.append(f"   char slot{index}[{NUMERIC_TEXT}];")
+            body.append(f"   memset({target}, 0, sizeof *{target});")
+            for member, ceiling in allocated.items():
+                body.append(f"   {target}->{member} = malloc({ceiling}u);")
+                body.append(f"   if (!{target}->{member})")
+                body.append("   {")
+                for other in allocated:
+                    body.append(f"      free({target}->{other});")
+                body.append(f"      memset({target}, 0, sizeof *{target});")
+                body.append("      return -1;")
+                body.append("   }")
+                body.append(f"   {target}->{member}[0] = '\\0';")
             slots = ", ".join(
                 f"slot{index}" if kind in NUMERIC else f"{target}->{member}"
                 for index, (member, kind) in enumerate(members))
             caps = ", ".join(
                 f"sizeof slot{index}" if kind in NUMERIC
+                else f"{allocated[member]}u" if member in allocated
                 else f"sizeof {target}->{member}"
                 for index, (member, kind) in enumerate(members))
             body.append(f"   char *const values[] = {{{slots}}};")
             body.append(f"   const size_t caps[] = {{{caps}}};")
-            body.append(f"   memset({target}, 0, sizeof *{target});")
             body.append(f"   int wire_status = call_stage({op_symbol}, fields, {arity}, values, caps, "
                         f"{len(members)}, NULL);")
             if operation.get("c_returns") == "found":
@@ -1629,16 +1753,25 @@ static int read_result(int status, const char *value_out)
                 # same three answers rather than folding nothing-there into
                 # failure: a caller polling a queue would otherwise treat an
                 # empty queue as a broken one and back off from it.
-                body.append("   if (wire_status == (int)AIMEE_DB1_STATUS_MISSING)")
-                body.append("      return 0;")
                 body.append("   if (wire_status != (int)AIMEE_DB1_STATUS_OK)")
-                body.append("      return -1;")
+                body.append("   {")
+                body += [f"      free({target}->{other});" for other in allocated]
+                if allocated:
+                    body.append(f"      memset({target}, 0, sizeof *{target});")
+                body.append("      return wire_status == (int)AIMEE_DB1_STATUS_MISSING "
+                            "? 0 : -1;")
+                body.append("   }")
             else:
                 # The domain answers 0 or -1 here: a miss and a failure are the
                 # same answer to its callers, and the wire does not invent a
                 # distinction the contract never had.
                 body.append("   if (wire_status != (int)AIMEE_DB1_STATUS_OK)")
+                body.append("   {")
+                body += [f"      free({target}->{other});" for other in allocated]
+                if allocated:
+                    body.append(f"      memset({target}, 0, sizeof *{target});")
                 body.append("      return -1;")
+                body.append("   }")
             for index, (member, kind) in enumerate(members):
                 if kind == "int":
                     body.append(f"   {target}->{member} = "
@@ -1646,11 +1779,27 @@ static int read_result(int status, const char *value_out)
                 elif kind in ("int64", "double"):
                     body.append(f"   {target}->{member} = "
                                 f"{numeric_parse(kind, f'slot{index}')};")
+            for member in allocated:
+                body.append(f"   char *shrunk_{member} = realloc({target}->{member}, "
+                            f"strlen({target}->{member}) + 1u);")
+                body.append(f"   if (shrunk_{member})")
+                body.append(f"      {target}->{member} = shrunk_{member};")
             if operation.get("c_returns") == "member":
                 body.append(f"   return {target}->{operation['c_member']};")
             else:
                 body.append("   return 1;" if operation.get("c_returns") == "found"
                             else "   return 0;")
+        elif reads and operation.get("c_returns") == "rc":
+            # Two cells: what the caller asked for, and what the domain
+            # answered about it. The second is not derivable from the first.
+            body.append(f"   char slot_rc[{NUMERIC_TEXT}];")
+            body.append(f"   char *const values[] = {{{outputs[0]}, slot_rc}};")
+            body.append(f"   const size_t caps[] = {{{outputs[1]}, sizeof slot_rc}};")
+            body.append(f"   int wire_status = call_stage({op_symbol}, fields, {arity}, "
+                        "values, caps, 2, NULL);")
+            body.append("   if (wire_status != (int)AIMEE_DB1_STATUS_OK)")
+            body.append("      return -1;")
+            body.append("   return (int)strtol(slot_rc, NULL, 10);")
         elif reads:
             body.append(f"   char *const values[] = {{{outputs[0]}}};")
             body.append(f"   const size_t caps[] = {{{outputs[1]}}};")
@@ -1665,6 +1814,12 @@ static int read_result(int status, const char *value_out)
             body.append("   if (wire_status == (int)AIMEE_DB1_STATUS_MISSING)")
             body.append("      return 0;")
             body.append("   return wire_status == (int)AIMEE_DB1_STATUS_OK ? 1 : -1;")
+        elif returns_void:
+            # The status is dropped deliberately, not by omission: the domain
+            # never reported one, so there is nothing here to hand a caller and
+            # no caller written to receive it.
+            body.append(f"   (void)call_stage({op_symbol}, fields, {arity}, "
+                        f"NULL, NULL, 0, NULL);")
         else:
             body.append(f"   return write_result(call_stage({op_symbol}, fields, {arity}, "
                         f"NULL, NULL, 0, NULL));")
@@ -1754,7 +1909,7 @@ static int read_counted(const uint8_t *body, uint32_t len, uint32_t *offset, cha
    return 0;
 }}
 
-{parse_int}{parse_int64}/* status(u32) | field_count(u32) | (len(u32) | bytes) * count. A write answers
+{parse_int}{parse_int64}{parse_double}/* status(u32) | field_count(u32) | (len(u32) | bytes) * count. A write answers
    with no values, a read with one, a row with a value per member. */
 static uint32_t write_reply(uint8_t *out, uint32_t cap, uint32_t *out_len, uint32_t status,
                             const char *const *values, uint32_t count)
@@ -1844,7 +1999,7 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
    void *domain_rows = NULL;
    void *cells_owned = NULL;
    void *numeric_owned = NULL;
-{scalar_pool}
+{scalar_pool}{member_pool}
    switch (op)
    {{
 {cases}   default:
@@ -1894,7 +2049,7 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
    }}
    free(cells_owned);
    free(numeric_owned);
-{scalar_free}   free(domain_rows);
+{member_free}{scalar_free}{row_member_free}   free(domain_rows);
    free(text_owned);
    return AIMEE_MODULE_STATUS_OK;
 }}
@@ -1935,6 +2090,23 @@ static int parse_int64(const char *text, int64_t *out)
 
 """
 
+PARSE_DOUBLE = """/* The same, for a value the catalog declared as a double. A cost parsed as an
+   integer is a different number, and one that still looks like a price. */
+static int parse_double(const char *text, double *out)
+{
+   if (!text || !text[0])
+      return 1;
+   char *end = NULL;
+   errno = 0;
+   double value = strtod(text, &end);
+   if (errno != 0 || !end || *end != '\\0')
+      return 1;
+   *out = value;
+   return 0;
+}
+
+"""
+
 INT_INCLUDES = """#include <errno.h>
 #include <limits.h>
 #include <stdint.h>
@@ -1964,7 +2136,8 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             parse.append(f"      {in_struct} row;\n      memset(&row, 0, sizeof row);\n")
             for position, (member, kind) in enumerate(zip(names, types)):
                 if kind in NUMERIC:
-                    conv = "parse_int" if kind == "int" else "parse_int64"
+                    conv = ("parse_int" if kind == "int"
+                            else "parse_double" if kind == "double" else "parse_int64")
                     parse.append(f"      if ({conv}(field[{position}], &row.{member}) != 0)\n"
                                  f"      {{\n         free(scratch);\n"
                                  f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
@@ -1982,8 +2155,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         else:
             for position, kind in enumerate(types):
                 if kind in NUMERIC:
-                    conv = "parse_int" if kind == "int" else "parse_int64"
-                    ctype = "int" if kind == "int" else "int64_t"
+                    conv = ("parse_int" if kind == "int"
+                            else "parse_double" if kind == "double" else "parse_int64")
+                    ctype = ("int" if kind == "int"
+                             else "double" if kind == "double" else "int64_t")
                     args.append(f"parsed{position}")
                     parse.append(f"      {ctype} parsed{position};\n"
                                  f"      if ({conv}(field[{position}], &parsed{position}) != 0)\n"
@@ -2087,11 +2262,16 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 ordered[str(repeated["values"])] = f"&field[{len(request['fields'])}]"
                 ordered[str(repeated["count"])] = f"(int)(count - {len(request['fields'])}u)"
             args = [ordered[p] for p in operation["c_params"]]
+            listed_alloc = {str(f["name"]) for f in reply["fields"] if "alloc" in f}
             assigns = "".join(
                 f"            cells[row * {width}u + {i}u] = "
                 + (f"numbers[row * {len(numeric)}u + {numeric.index(i)}u];\n"
                    if kind in NUMERIC
-                   else (f"found[row];\n" if column else f"found[row].{member};\n"))
+                   # A member the domain allocated may be NULL, which has always
+                   # meant empty. write_reply cannot take a NULL cell.
+                   else (f"found[row].{member} ? found[row].{member} : \"\";\n"
+                         if member in listed_alloc
+                         else (f"found[row];\n" if column else f"found[row].{member};\n")))
                 for i, (member, kind) in enumerate(members))
             converts = "".join(
                 f"            snprintf(numbers[row * {len(numeric)}u + {numeric.index(i)}u], {NUMERIC_TEXT},\n"
@@ -2155,6 +2335,9 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 args = [by_name[p] for p in operation["c_params"]]
             else:
                 args.append(f"&{slot}")
+            allocated_reply = {str(f["name"]): position
+                               for position, f in enumerate(
+                                   [g for g in reply["fields"] if "alloc" in g])}
             numeric = 0
             for index, (member, kind) in enumerate(members):
                 if kind in NUMERIC:
@@ -2167,6 +2350,14 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 if kind in NUMERIC:
                     tail.append(f"      row_slots[{index}] = row_text[{numeric}];\n")
                     numeric += 1
+                elif member in allocated_reply:
+                    # The domain handed over an allocation with the row. It is
+                    # written out and then returned: NULL is the empty value it
+                    # has always meant, and write_reply cannot take a NULL cell.
+                    tail.append(f"      member_owned[{allocated_reply[member]}] = "
+                                f"{slot}.{member};\n")
+                    tail.append(f"      row_slots[{index}] = {slot}.{member} "
+                                f"? {slot}.{member} : \"\";\n")
                 else:
                     tail.append(f"      row_slots[{index}] = {slot}.{member};\n")
             tail.append(f"      rows = row_slots;\n      row_count = {len(members)}u;\n")
@@ -2175,6 +2366,15 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             # shape supplies its own out-parameters, and appending these on top
             # of them is simply two extra arguments to the domain call.
             args += ["value", "sizeof value"]
+            if operation.get("c_returns") == "rc":
+                # The status says the call happened; the second cell says what
+                # it answered. A read whose text is always present cannot carry
+                # its answer in whether the text is present.
+                tail.append('      snprintf(row_text[0], sizeof row_text[0], "%d", rc);\n')
+                tail.append("      row_slots[0] = value;\n")
+                tail.append("      row_slots[1] = row_text[0];\n")
+                tail.append("      rows = row_slots;\n      row_count = 2u;\n")
+                tail.append("      rc = 0;\n")
         # Braced only when a parsed integer needs scoping: an empty block around
         # every other case would be noise, and would move files that have not
         # changed.
@@ -2190,6 +2390,11 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                    "      rc = produced ? 1 : 0;\n" if returns_text
                    else f"      int64_t produced = {operation['c_name']}({', '.join(args)});\n"
                    if returns_id
+                   # A void domain has no rc to take. It reports failure the
+                   # only way it ever did -- by not having happened -- so the
+                   # stage answers OK for a request it accepted and delivered.
+                   else f"      {operation['c_name']}({', '.join(args)});\n"
+                   if operation.get("c_returns") == "void"
                    else f"      rc = {operation['c_name']}({', '.join(args)});\n")
                 + "".join(tail)
                 # Not for a list: it declares member fields like a row does, but
@@ -2223,7 +2428,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         cases.append(head + (f"   {{\n{body}   }}\n"
                              if parse or returns_text or returns_id else body))
     used = {str(f["type"]) for o in operations for f in o["request"]["fields"]}
-    typed = bool(used & {"int", "int64"})
+    typed = bool(used & {"int", "int64", "double"})
     # Storage for a single row's reply, at function scope because write_reply
     # reads it after the switch. One variable per distinct row type the family
     # answers with; a union would save stack but would have to invent member
@@ -2233,6 +2438,12 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         reply = operation["reply"]
         if operation.get("c_returns") == "int64":
             widest = max(widest, 1)
+            most_numeric = max(most_numeric, 1)
+            continue
+        if operation.get("c_returns") == "rc":
+            # The value and the return: two slots, one of them rendered from a
+            # number the reply never declared as a field.
+            widest = max(widest, 2)
             most_numeric = max(most_numeric, 1)
             continue
         if "scalars" in reply:
@@ -2260,6 +2471,35 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                    "      free returns it. */\n"
                    "   char *scalar_owned = NULL;\n") if pooled else ""
     scalar_free = "   free(scalar_owned);\n" if pooled else ""
+    # A row whose members the domain allocated: they are written out and then
+    # returned, after write_reply has copied what it needs.
+    owned = max((sum(1 for f in o["reply"]["fields"] if "alloc" in f)
+                 for o in operations), default=0)
+    member_pool = ("   /* Members the domain allocated with the row. They are released\n"
+                   "      after the reply is written, not before: write_reply reads them. */\n"
+                   f"   char *member_owned[{owned}] = {{0}};\n") if owned else ""
+    member_free = (f"   for (size_t slot = 0; slot < {owned}u; ++slot)\n"
+                   "      free(member_owned[slot]);\n") if owned else ""
+    # Rows whose members the domain allocated. The switch is on op rather than
+    # on a flag set in the case: the stage already knows what it served, and a
+    # second variable saying the same thing is a second thing to get wrong.
+    freeing = []
+    for operation in operations:
+        reply = operation["reply"]
+        if "list" not in reply or not any("alloc" in f for f in reply["fields"]):
+            continue
+        width = len(reply["fields"])
+        freeing.append(
+            f"   case AIMEE_DB1_OP_{str(operation['name']).upper()}:\n"
+            "      if (domain_rows)\n      {\n"
+            f"         {reply['struct']} *held = domain_rows;\n"
+            f"         for (uint32_t at = 0; at < row_count / {width}u; ++at)\n"
+            "         {\n"
+            + "".join(f"            free(held[at].{f['name']});\n"
+                      for f in reply["fields"] if "alloc" in f)
+            + "         }\n      }\n      break;\n")
+    row_member_free = ("   switch (op)\n   {\n" + "".join(freeing)
+                       + "   default:\n      break;\n   }\n") if freeing else ""
     row_locals = ""
     if row_types or widest:
         row_locals = "".join(f"   {struct} row_{struct};\n" for struct in row_types)
@@ -2269,10 +2509,13 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
     return STAGE_SCAFFOLD.format(stem=name, family=name.replace("_", " "),
                                  row_locals=row_locals,
                                  scalar_pool=scalar_pool, scalar_free=scalar_free,
+                                 member_pool=member_pool, member_free=member_free,
+                                 row_member_free=row_member_free,
                                  headers="\n".join(f'#include "{h}"' for h in headers),
                                  cases="".join(cases),
                                  parse_int=PARSE_INT if "int" in used else "",
                                  parse_int64=PARSE_INT64 if "int64" in used else "",
+                                 parse_double=PARSE_DOUBLE if "double" in used else "",
                                  int_includes=INT_INCLUDES if typed else "")
 
 
@@ -2405,7 +2648,7 @@ def validate_dispatch(root: Path, catalog: dict[str, object]) -> None:
 
 
 def run(root: Path, write: bool = False) -> None:
-    catalog = validate_catalog(load_json(root / CATALOG))
+    catalog = validate_catalog(load_json(root / CATALOG), root)
     if write:
         (root / HEADER).write_text(header_bytes(catalog), encoding="utf-8")
     validate_header(root, catalog)

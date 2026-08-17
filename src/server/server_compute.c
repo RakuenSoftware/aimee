@@ -1498,7 +1498,7 @@ void delegate_worker(void *arg)
    char *learning_sys_prompt =
        delegate_agent_uses_mistral_path(target_agent)
            ? NULL
-           : delegate_learning_inject_prompt(role, system_prompt ? system_prompt : "", 3);
+           : db1_delegate_learning_inject_prompt(role, system_prompt ? system_prompt : "", 3);
    if (learning_sys_prompt)
       system_prompt = learning_sys_prompt;
 

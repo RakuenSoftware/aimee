@@ -233,12 +233,14 @@ int db1_cognify_job_status(db1_cognify_job_stats_t *out)
    char slot2[32];
    char slot3[32];
    char slot4[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {slot0, slot1, slot2, slot3, slot4};
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof slot4};
-   memset(out, 0, sizeof *out);
    int wire_status = call_stage(AIMEE_DB1_OP_COGNIFY_STATUS, fields, 0, values, caps, 5, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    out->pending = (int)strtol(slot0, NULL, 10);
    out->running = (int)strtol(slot1, NULL, 10);
    out->done = (int)strtol(slot2, NULL, 10);
@@ -256,14 +258,14 @@ int db1_cognify_job_claim_next(db1_cognify_job_t *out)
    char slot1[32];
    char slot2[32];
    char slot3[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {slot0, slot1, slot2, slot3, out->kind, out->status, out->claimed_by, out->claimed_at, out->last_error};
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof out->kind, sizeof out->status, sizeof out->claimed_by, sizeof out->claimed_at, sizeof out->last_error};
-   memset(out, 0, sizeof *out);
    int wire_status = call_stage(AIMEE_DB1_OP_COGNIFY_CLAIM_NEXT, fields, 0, values, caps, 9, NULL);
-   if (wire_status == (int)AIMEE_DB1_STATUS_MISSING)
-      return 0;
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
+   {
+      return wire_status == (int)AIMEE_DB1_STATUS_MISSING ? 0 : -1;
+   }
    out->id = (int64_t)strtoll(slot0, NULL, 10);
    out->memory_id = (int64_t)strtoll(slot1, NULL, 10);
    out->attempts = (int)strtol(slot2, NULL, 10);
@@ -889,12 +891,14 @@ int db1_agent_log_hud_summary(db1_agent_log_hud_t *out, int recent_secs)
    char slot7[32];
    char slot8[32];
    char slot9[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {slot0, slot1, slot2, slot3, slot4, slot5, slot6, slot7, slot8, slot9};
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof slot4, sizeof slot5, sizeof slot6, sizeof slot7, sizeof slot8, sizeof slot9};
-   memset(out, 0, sizeof *out);
    int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_HUD_SUMMARY, fields, 1, values, caps, 10, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    out->total_calls = (int)strtol(slot0, NULL, 10);
    out->successful_calls = (int)strtol(slot1, NULL, 10);
    out->failed_calls = (int)strtol(slot2, NULL, 10);
@@ -999,12 +1003,14 @@ int db1_agent_log_stats(const char *since_or_null, db1_agent_log_stats_t *out)
    char slot3[32];
    char slot4[32];
    char slot5[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {slot0, slot1, slot2, slot3, slot4, slot5};
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof slot4, sizeof slot5};
-   memset(out, 0, sizeof *out);
    int wire_status = call_stage(AIMEE_DB1_OP_AGENT_LOG_STATS, fields, 1, values, caps, 6, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    out->total = (int)strtol(slot0, NULL, 10);
    out->turns = (int64_t)strtoll(slot1, NULL, 10);
    out->tool_calls = (int64_t)strtoll(slot2, NULL, 10);
@@ -1035,12 +1041,14 @@ int db1_trigger_get(const char *id, db1_trigger_run_t *out)
    if (!id || !id[0] || !out)
       return -1;
    const char *fields[] = {id};
+   memset(out, 0, sizeof *out);
    char *const values[] = {out->id, out->source, out->event, out->task, out->workspace, out->metadata, out->pipeline_id, out->status, out->queued_at, out->started_at, out->finished_at, out->error};
    const size_t caps[] = {sizeof out->id, sizeof out->source, sizeof out->event, sizeof out->task, sizeof out->workspace, sizeof out->metadata, sizeof out->pipeline_id, sizeof out->status, sizeof out->queued_at, sizeof out->started_at, sizeof out->finished_at, sizeof out->error};
-   memset(out, 0, sizeof *out);
    int wire_status = call_stage(AIMEE_DB1_OP_TRIGGER_GET, fields, 1, values, caps, 12, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    return 0;
 }
 
@@ -1105,12 +1113,14 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
    char slot1[32];
    char slot2[32];
    char slot9[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {slot0, slot1, slot2, out->status, out->claimed_by, out->claimed_at, out->files, out->result, out->error, slot9, out->created_at};
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof out->status, sizeof out->claimed_by, sizeof out->claimed_at, sizeof out->files, sizeof out->result, sizeof out->error, sizeof slot9, sizeof out->created_at};
-   memset(out, 0, sizeof *out);
    int wire_status = call_stage(AIMEE_DB1_OP_COORD_TASK_CLAIM_NEXT, fields, 2, values, caps, 11, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    out->id = (int)strtol(slot0, NULL, 10);
    out->job_id = (int)strtol(slot1, NULL, 10);
    out->step_id = (int)strtol(slot2, NULL, 10);
@@ -1217,12 +1227,14 @@ int db1_coord_job_get(int job_id, db1_coord_job_t *out)
    char slot7[32];
    char slot8[32];
    char slot9[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {slot0, slot1, out->status, slot3, out->created_at, out->updated_at, slot6, slot7, slot8, slot9};
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof out->status, sizeof slot3, sizeof out->created_at, sizeof out->updated_at, sizeof slot6, sizeof slot7, sizeof slot8, sizeof slot9};
-   memset(out, 0, sizeof *out);
    int wire_status = call_stage(AIMEE_DB1_OP_COORD_JOB_GET, fields, 1, values, caps, 10, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    out->id = (int)strtol(slot0, NULL, 10);
    out->plan_id = (int)strtol(slot1, NULL, 10);
    out->max_concurrent = (int)strtol(slot3, NULL, 10);
@@ -1484,12 +1496,14 @@ int db1_cron_job_get(const char *job_id, cron_job_t *out)
    char slot19[32];
    char slot20[32];
    char slot21[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {out->id, out->schedule, out->mode, out->script, out->prompt, out->workdir, out->context_from, out->when_context_contains, out->skills[0], out->skills[1], out->skills[2], out->skills[3], out->skills[4], out->skills[5], out->skills[6], out->skills[7], slot16, out->deliver_target, slot18, slot19, slot20, slot21};
    const size_t caps[] = {sizeof out->id, sizeof out->schedule, sizeof out->mode, sizeof out->script, sizeof out->prompt, sizeof out->workdir, sizeof out->context_from, sizeof out->when_context_contains, sizeof out->skills[0], sizeof out->skills[1], sizeof out->skills[2], sizeof out->skills[3], sizeof out->skills[4], sizeof out->skills[5], sizeof out->skills[6], sizeof out->skills[7], sizeof slot16, sizeof out->deliver_target, sizeof slot18, sizeof slot19, sizeof slot20, sizeof slot21};
-   memset(out, 0, sizeof *out);
    int wire_status = call_stage(AIMEE_DB1_OP_CRON_JOB_GET, fields, 1, values, caps, 22, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    out->skill_count = (int)strtol(slot16, NULL, 10);
    out->deliver_only_if_changed = (int)strtol(slot18, NULL, 10);
    out->deliver_first_run_silent = (int)strtol(slot19, NULL, 10);
