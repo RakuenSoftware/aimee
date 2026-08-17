@@ -18,9 +18,9 @@ BUILD_MANIFEST = "c-build.json"
 MODULE_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 BUILD_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
 MODULE_KEYS = {
-    "id", "binary", "main", "sources", "include_roots", "pkg_config",
-    "system_libraries",
+    "id", "binary", "main", "sources", "include_roots", "pkg_config", "system_libraries",
 }
+MODULE_OPTIONAL_KEYS = {"compile_definitions"}
 CORE_EVENT_BUS_SOURCES = [
     "src/core/event_bus/bus_attach.c",
     "src/core/event_bus/bus_client.c",
@@ -103,7 +103,8 @@ def load_builds(bundle: Path) -> list[dict[str, object]]:
     previous = ""
     result: list[dict[str, object]] = []
     for index, module in enumerate(modules):
-        if not isinstance(module, dict) or set(module) != MODULE_KEYS:
+        if (not isinstance(module, dict) or not MODULE_KEYS <= set(module) or
+                not set(module) <= MODULE_KEYS | MODULE_OPTIONAL_KEYS):
             fail(f"module {index}: keys differ from C build v1")
         identifier = module["id"]
         if (not isinstance(identifier, str) or not MODULE_ID.fullmatch(identifier) or
@@ -121,6 +122,11 @@ def load_builds(bundle: Path) -> list[dict[str, object]]:
             fail(f"{identifier}: sources must all be C translation units")
         string_array(module["include_roots"], f"{identifier}.include_roots", paths=True,
                      nonempty=True)
+        definitions = string_array(module.get("compile_definitions", []),
+                                   f"{identifier}.compile_definitions")
+        if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item)
+               for item in definitions):
+            fail(f"{identifier}.compile_definitions contains an unsafe C identifier")
         string_array(module["pkg_config"], f"{identifier}.pkg_config")
         libraries = string_array(module["system_libraries"],
                                  f"{identifier}.system_libraries")
@@ -183,10 +189,11 @@ def compiler_command(module: dict[str, object], root: Path, bundle: Path, output
     assert isinstance(identifier, str)
     sources = module["sources"]
     include_roots = module["include_roots"]
+    definitions = module.get("compile_definitions", [])
     packages = module["pkg_config"]
     libraries = module["system_libraries"]
     assert all(isinstance(value, list) for value in (
-        sources, include_roots, packages, libraries
+        sources, include_roots, definitions, packages, libraries
     ))
     main = real_file(bundle, module["main"], f"{identifier}.main")
     owned_sources = [real_file(root, item, f"{identifier}.sources") for item in sources]
@@ -216,7 +223,8 @@ def compiler_command(module: dict[str, object], root: Path, bundle: Path, output
     return [
         cc, "-std=c11", "-D_GNU_SOURCE=", "-O2", "-Wall", "-Wextra", "-Werror",
         "-Wno-format-truncation", "-ffunction-sections", "-fdata-sections",
-        *(f"-I{path}" for path in include_paths), *cflags, str(main),
+        *(f"-I{path}" for path in include_paths), *(f"-D{item}" for item in definitions),
+        *cflags, str(main),
         *(str(path) for path in owned_sources), *(str(path) for path in core_sources),
         *pkg_libraries, *system_flags, "-Wl,--gc-sections", "-o", str(binary),
     ]

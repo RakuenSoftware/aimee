@@ -227,6 +227,7 @@ class DescriptorTests(unittest.TestCase):
     def test_c_build_contract_is_closed_sorted_and_safe(self) -> None:
         descriptor = self.required()
         descriptor["c_build"] = {
+            "compile_definitions": ["AIMEE_DB1_DISABLED"],
             "include_roots": ["src", "src/modules/memory"],
             "pkg_config": ["libpq"],
             "system_libraries": ["OpenSSL::Crypto", "m"],
@@ -246,6 +247,10 @@ class DescriptorTests(unittest.TestCase):
               "system_libraries": []}, "c-build-path"),
             ({"include_roots": ["src"], "pkg_config": ["libpq;injected"],
               "system_libraries": []}, "c-build-token"),
+            ({"compile_definitions": ["BAD=1"], "include_roots": ["src"],
+              "pkg_config": [], "system_libraries": []}, "c-build-token"),
+            ({"compile_definitions": ["Z", "A"], "include_roots": ["src"],
+              "pkg_config": [], "system_libraries": []}, "c-build-order"),
             ({"include_roots": ["src"], "pkg_config": [],
               "system_libraries": [7]}, "c-build-type"),
         )

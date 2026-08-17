@@ -25,11 +25,12 @@ MAX_ARRAY = 256
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 BASE_KEYS = {"descriptor_version", "id", "dependencies", "runtime_toggle"}
 C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
-# Optional: third-party sources a module compiles but does not own, restricted
-# to src/vendor/. See export_c_repositories for why a vendored library is not
-# treated like a module-owned source.
-C_BUILD_OPTIONAL_KEYS = {"vendor_sources"}
+# Optional build properties include validated preprocessor switches and
+# third-party sources a module compiles but does not own. Vendor sources remain
+# restricted to src/vendor/; see export_c_repositories for the ownership rule.
+C_BUILD_OPTIONAL_KEYS = {"compile_definitions", "vendor_sources"}
 BUILD_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
+C_DEFINE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 OWNERSHIP_FIELDS = (
     "sources", "private_headers", "public_headers", "contracts", "tests", "docs", "go_sources",
     "go_tests",
@@ -180,6 +181,11 @@ def schema() -> dict[str, object]:
                         "items": {"type": "string"},
                         "uniqueItems": True,
                     },
+                    "compile_definitions": {
+                        "type": "array",
+                        "items": {"type": "string", "pattern": C_DEFINE_RE.pattern},
+                        "uniqueItems": True,
+                    },
                     "pkg_config": {
                         "type": "array",
                         "items": {"type": "string", "pattern": BUILD_TOKEN_RE.pattern},
@@ -188,6 +194,11 @@ def schema() -> dict[str, object]:
                     "system_libraries": {
                         "type": "array",
                         "items": {"type": "string", "pattern": BUILD_TOKEN_RE.pattern},
+                        "uniqueItems": True,
+                    },
+                    "vendor_sources": {
+                        "type": "array",
+                        "items": {"type": "string"},
                         "uniqueItems": True,
                     },
                 },
@@ -325,6 +336,20 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
                              pointer)
                 elif not BUILD_TOKEN_RE.fullmatch(entry):
                     fail("c-build-token", f"invalid build token {entry!r}", pointer)
+        definitions = build.get("compile_definitions", [])
+        if not isinstance(definitions, list):
+            fail("c-build-type", "c_build.compile_definitions must be an array",
+                 "/c_build/compile_definitions")
+        previous = ""
+        for index, definition in enumerate(definitions):
+            pointer = f"/c_build/compile_definitions/{index}"
+            if not isinstance(definition, str):
+                fail("c-build-type", "compile definition must be a string", pointer)
+            if definition <= previous:
+                fail("c-build-order", "compile definitions must be sorted and unique", pointer)
+            previous = definition
+            if not C_DEFINE_RE.fullmatch(definition):
+                fail("c-build-token", f"invalid compile definition {definition!r}", pointer)
     return identifier
 
 

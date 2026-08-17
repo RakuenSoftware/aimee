@@ -30,6 +30,10 @@ class CProcessBuildTests(unittest.TestCase):
                 "src/modules/db2/module_adapter.c",
             ],
             "c_build": {
+                "compile_definitions": [
+                    "AIMEE_DB1_DISABLED",
+                    "AIMEE_DISABLE_DB2_SQLITE_SHIM",
+                ],
                 "include_roots": [
                     "src",
                     "src/modules/db2/c",
@@ -66,10 +70,13 @@ class CProcessBuildTests(unittest.TestCase):
         self.assertIn("pkg_check_modules(MODULE_PKG REQUIRED IMPORTED_TARGET libpq)", cmake)
         self.assertIn("PkgConfig::MODULE_PKG", cmake)
         self.assertIn("${CMAKE_CURRENT_SOURCE_DIR}/src/modules/db2/c", cmake)
+        self.assertIn("target_compile_definitions(aimee-module-db2 PRIVATE", cmake)
+        self.assertIn("AIMEE_DB1_DISABLED", cmake)
         self.assertNotIn("runtime/main.c src/modules/db2/module_adapter.c", cmake)
 
     def test_descriptor_order_is_required_for_reproducible_cmake(self) -> None:
-        for field in ("sources", "include_roots", "pkg_config", "system_libraries"):
+        for field in ("sources", "compile_definitions", "include_roots", "pkg_config",
+                      "system_libraries"):
             descriptor = self.descriptor()
             target = descriptor["sources"] if field == "sources" else descriptor["c_build"][field]
             if len(target) == 1:
@@ -97,6 +104,7 @@ class CProcessBuildTests(unittest.TestCase):
             exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor)
 
         for field, value in (
+            ("compile_definitions", "BAD=1"),
             ("include_roots", "../outside"),
             ("pkg_config", "libpq)\nmessage(FATAL_ERROR injected)"),
             ("system_libraries", "m;injected"),

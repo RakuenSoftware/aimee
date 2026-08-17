@@ -32,17 +32,14 @@ REMOTE_ROOT = "https://github.com/RakuenSoftware"
 HOSTED_BY_EXECUTABLE = {"wfe": "/usr/local/bin/aimee-wfe"}
 PRINCIPAL_CLASS = 1
 C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
-# Optional: third-party sources a module compiles but does not own. A module is
-# otherwise self-contained -- it links its descriptor's sources and nothing
-# else, which is why db1_time.c exists to supply now_utc rather than the module
-# linking util.c. That rule is right for a project helper and wrong for a
-# vendored library: cJSON is 77KB of upstream code, and a per-module copy is a
-# thing to patch when upstream issues a CVE. DB2 already holds one such copy;
-# this exists so DB1 does not become the second, and is restricted to
-# src/vendor/ so "not owned" cannot quietly mean "owned by somebody else".
-C_BUILD_OPTIONAL_KEYS = {"vendor_sources"}
+# Optional validated preprocessor switches let a descriptor reproduce its
+# audited standalone mode. Third-party sources a module compiles but does not
+# own are also optional; they remain restricted to src/vendor/ so "not owned"
+# cannot quietly mean "owned by somebody else".
+C_BUILD_OPTIONAL_KEYS = {"compile_definitions", "vendor_sources"}
 VENDOR_ROOT = "src/vendor/"
 BUILD_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
+C_DEFINE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 CMAKE_TARGET_PACKAGES = {
     "OpenSSL::Crypto": "OpenSSL",
     "OpenSSL::SSL": "OpenSSL",
@@ -314,8 +311,8 @@ int main(int argc, char **argv)
 
 
 def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
-        list[str], list[str], list[str], list[str]]:
-    """Return validated C sources, include roots, pkg-config deps, and link items."""
+        list[str], list[str], list[str], list[str], list[str]]:
+    """Return validated C sources, includes, definitions, pkg-config deps, and links."""
     sources = descriptor.get("sources")
     if not isinstance(sources, list) or not sources or not all(isinstance(item, str) for item in sources):
         raise ExportError(f"{module_id}: C process must declare descriptor-owned sources")
@@ -341,6 +338,18 @@ def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
                 f"{module_id}: vendor_sources entry {entry!r} must be a .c file under "
                 f"{VENDOR_ROOT}; anything else is a source some module owns")
 
+    definitions = build.get("compile_definitions", [])
+    if not isinstance(definitions, list) or not all(
+            isinstance(item, str) for item in definitions):
+        raise ExportError(f"{module_id}: c_build.compile_definitions must be a string array")
+    if definitions != sorted(set(definitions)):
+        raise ExportError(
+            f"{module_id}: c_build.compile_definitions must be sorted and unique")
+    for definition in definitions:
+        if not C_DEFINE.fullmatch(definition):
+            raise ExportError(
+                f"{module_id}: unsafe c_build.compile_definitions token {definition!r}")
+
     parsed: dict[str, list[str]] = {}
     for field in sorted(C_BUILD_KEYS):
         entries = build[field]
@@ -364,18 +373,26 @@ def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
     # Vendored sources compile with the module but are not its own: they are
     # appended here rather than merged into `sources`, so ownership keeps
     # meaning what it says everywhere else.
-    return (c_sources + list(vendored), parsed["include_roots"], parsed["pkg_config"],
-            parsed["system_libraries"])
+    return (c_sources + list(vendored), parsed["include_roots"], definitions,
+            parsed["pkg_config"], parsed["system_libraries"])
 
 
 def c_process_cmake(module_id: str, binary: str, version: str,
                     descriptor: dict[str, object]) -> str:
     """Generate the standalone build for a descriptor-owned C process."""
-    sources, include_roots, pkg_config, libraries = c_process_build(module_id, descriptor)
+    sources, include_roots, definitions, pkg_config, libraries = c_process_build(
+        module_id, descriptor)
     source_lines = "\n".join(f"    {source}" for source in sources)
     include_lines = "\n".join(
         f"    ${{CMAKE_CURRENT_SOURCE_DIR}}/{root}" for root in include_roots
     )
+    definition_lines = "\n".join(f"    {definition}" for definition in definitions)
+    definition_block = ""
+    if definition_lines:
+        definition_block = f"""target_compile_definitions({binary} PRIVATE
+{definition_lines}
+)
+"""
     package_names = sorted({
         CMAKE_TARGET_PACKAGES[library]
         for library in libraries
@@ -410,7 +427,7 @@ target_compile_features({binary} PRIVATE c_std_11)
 target_include_directories({binary} PRIVATE
 {include_lines}
 )
-target_link_libraries({binary} PRIVATE
+{definition_block}target_link_libraries({binary} PRIVATE
 {link_lines}
 )
 configure_file(grants/module.grant.in ${{CMAKE_CURRENT_BINARY_DIR}}/{module_id}.grant @ONLY)
@@ -830,7 +847,7 @@ def export_runtime_bundle(output_root: Path) -> int:
         assert isinstance(runtime, str)
         runtimes[module_id] = runtime
         if runtime == "c":
-            sources, include_roots, pkg_config, libraries = c_process_build(
+            sources, include_roots, definitions, pkg_config, libraries = c_process_build(
                 module_id, descriptor
             )
             has_handler = c_process_has_handler(sources)
@@ -846,6 +863,7 @@ def export_runtime_bundle(output_root: Path) -> int:
                 "main": main_path,
                 "sources": sources,
                 "include_roots": include_roots,
+                "compile_definitions": definitions,
                 "pkg_config": pkg_config,
                 "system_libraries": libraries,
             })

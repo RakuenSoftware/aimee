@@ -59,6 +59,10 @@ class RuntimeBundleBuildTests(unittest.TestCase):
                     "src/modules/db2/module_adapter.c",
                 ],
                 "include_roots": ["src/modules/db2/include"],
+                "compile_definitions": [
+                    "AIMEE_DB1_DISABLED",
+                    "AIMEE_DISABLE_DB2_SQLITE_SHIM",
+                ],
                 "pkg_config": ["libpq"],
                 "system_libraries": [
                     "OpenSSL::Crypto",
@@ -119,7 +123,8 @@ class RuntimeBundleBuildTests(unittest.TestCase):
             for source in expected_sources:
                 self.assertEqual(arguments.count(str(source)), 1)
             for flag in ("-I/pkg/include", "-L/pkg/lib", "-lpq", "-lcrypto",
-                         "-pthread", "-lz", "-lm", "-lzstd"):
+                         "-pthread", "-lz", "-lm", "-lzstd", "-DAIMEE_DB1_DISABLED",
+                         "-DAIMEE_DISABLE_DB2_SQLITE_SHIM"):
                 self.assertIn(flag, arguments)
         finally:
             temporary.cleanup()
@@ -128,6 +133,8 @@ class RuntimeBundleBuildTests(unittest.TestCase):
         mutations = (
             (lambda value: value["modules"][0].__setitem__("main", "../main.c"),
              "safe relative path"),
+            (lambda value: value["modules"][0]["compile_definitions"].append("BAD=1"),
+             "unsafe token"),
             (lambda value: (
                 value["modules"][0]["system_libraries"].append("Unknown::Target"),
                 value["modules"][0]["system_libraries"].sort(),
@@ -148,6 +155,18 @@ class RuntimeBundleBuildTests(unittest.TestCase):
                     builder.load_builds(bundle)
             finally:
                 temporary.cleanup()
+
+    def test_v1_manifest_without_compile_definitions_remains_valid(self) -> None:
+        temporary, _root, bundle, _output = self.fixture()
+        try:
+            path = bundle / builder.BUILD_MANIFEST
+            value = json.loads(path.read_text(encoding="utf-8"))
+            del value["modules"][0]["compile_definitions"]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            module = builder.load_builds(bundle)[0]
+            self.assertNotIn("compile_definitions", module)
+        finally:
+            temporary.cleanup()
 
     def test_missing_owned_source_and_symlink_include_fail_closed(self) -> None:
         temporary, root, bundle, output = self.fixture()
