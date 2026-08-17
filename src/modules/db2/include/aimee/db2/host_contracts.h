@@ -117,6 +117,23 @@ extern "C"
     * startup. NULL removes it. */
    void aimee_db2_register_identity_key_provider(aimee_db2_identity_key_fn provider);
 
+   struct kb_mgmt_token_authority_record;
+   struct kb_identity_token_authority_record;
+
+   /* Revalidate authority-only database records through the protected token
+    * owner's canonical binding checks. Exactly 1 means valid; absence, provider
+    * failure, and every other result fail the DB2 decode closed. */
+   typedef int (*aimee_db2_mgmt_token_record_valid_fn)(
+       const struct kb_mgmt_token_authority_record *record);
+   typedef int (*aimee_db2_identity_token_record_valid_fn)(
+       const struct kb_identity_token_authority_record *record);
+
+   /* Install both record validators as one startup contract. NULL removes the
+    * corresponding validator. */
+   void
+   aimee_db2_register_token_record_validators(aimee_db2_mgmt_token_record_valid_fn management,
+                                              aimee_db2_identity_token_record_valid_fn identity);
+
 #ifdef __cplusplus
 }
 #endif

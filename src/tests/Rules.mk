@@ -2597,6 +2597,8 @@ $(TESTPREFIX)/unit-test-kb-mgmt-token-roots-provision: \
 
 $(TESTPREFIX)/unit-test-kb-mgmt-token-authority: \
     $(OBJDIR)/tests/test_kb_mgmt_token_authority.o \
+    $(OBJDIR)/modules/db2/c/management_token_authority.o \
+    $(OBJDIR)/modules/db2/c/db_postgres.o \
     $(OBJDIR)/kb/kb_mgmt_token_authority.o $(OBJDIR)/kb/kb_mgmt_token.o \
     $(OBJDIR)/kb/kb_mgmt_token_public.o \
     $(OBJDIR)/modules/vault/vault_crypto.o
@@ -2604,6 +2606,8 @@ $(TESTPREFIX)/unit-test-kb-mgmt-token-authority: \
 
 $(TESTPREFIX)/unit-test-kb-identity-token-authority: \
     $(OBJDIR)/tests/test_kb_identity_token_authority.o \
+    $(OBJDIR)/modules/db2/c/management_token_authority.o \
+    $(OBJDIR)/modules/db2/c/db_postgres.o \
     $(OBJDIR)/kb/kb_mgmt_token_authority.o $(OBJDIR)/kb/kb_mgmt_token.o \
     $(OBJDIR)/kb/kb_identity_token.o $(OBJDIR)/kb/kb_mgmt_token_public.o \
     $(OBJDIR)/shared/auth_token_verify.o $(OBJDIR)/server/oauth_pkce.o \

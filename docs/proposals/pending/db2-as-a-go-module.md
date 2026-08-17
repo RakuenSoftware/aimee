@@ -6,8 +6,8 @@
   closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
   support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
   deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
-  link remains blocked by 36 sibling contracts. Its closure records 175 external symbols: 139
-  declared system links and those 36 injected contracts; portable API debt is zero. This is
+  link remains blocked by 34 sibling contracts. Its closure records 173 external symbols: 139
+  declared system links and those 34 injected contracts; portable API debt is zero. This is
   explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
@@ -573,6 +573,12 @@ contract rather than linking `kb_identity_key`. The adapter accepts only the ver
 principal fields required by canonicalization. DB2 pins the kind values and independently validates
 the returned owner, issuer-scoped OIDC, normalized certificate, or bounded host-account grammar
 before a transaction begins, so an absent provider or malformed answer cannot set tenant GUCs.
+
+Management and identity token authority rows now cross a paired startup-installed validation
+contract rather than linking the canonical KB validators into DB2. Production and the narrow live
+drivers install both callbacks before opening the service path. DB2 admits a row only when the
+corresponding provider returns exact success; absent providers, ordinary rejection, and unexpected
+positive or negative statuses all fail closed before private-key use.
 
 The closure compiler now matches the production standalone mode by disabling DB1 and the DB2
 SQLite test shim. SQLite compatibility remains tested separately, but its weak DB1 cache hook and

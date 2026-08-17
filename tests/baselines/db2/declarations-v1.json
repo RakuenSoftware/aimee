@@ -1331,6 +1331,21 @@
     },
     {
       "consumers": [
+        "src/tests/identity_mint_live_main.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/management_token_authority.h",
+          "line": 58
+        }
+      ],
+      "signature": "void aimee_db2_register_token_record_validators ( db2_mgmt_token_record_valid_fn management , db2_identity_token_record_valid_fn identity )",
+      "signature_sha256": "0dda787741e0657ecc66e964283cefc27ef4bcec5b71215c1d45d19d6a454717",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_token_record_validators"
+    },
+    {
+      "consumers": [
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/test_kb_vault_rewrap_live.c",
         "src/tests/test_management_status_key_ctx.c",
@@ -13248,7 +13263,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 69
+          "line": 86
         }
       ],
       "signature": "db2_management_token_authority_result_t db2_management_identity_authority_admit ( db2_management_token_authority_ctx_t * ctx , const char correlation_id [ 65 ] , const char jti [ 65 ] , kb_identity_token_authority_record_t * out )",
@@ -13261,7 +13276,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 93
+          "line": 110
         }
       ],
       "signature": "db2_management_token_authority_result_t db2_management_identity_authority_finalize ( db2_management_token_authority_ctx_t * ctx )",
@@ -13274,7 +13289,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 76
+          "line": 93
         }
       ],
       "signature": "db2_management_token_authority_result_t db2_management_identity_authority_readback ( db2_management_token_authority_ctx_t * ctx , const char correlation_id [ 65 ] , const char jti [ 65 ] , kb_identity_token_authority_record_t * out )",
@@ -13287,7 +13302,20 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 83
+          "line": 66
+        }
+      ],
+      "signature": "int db2_management_identity_authority_record_validate ( const kb_identity_token_authority_record_t * record )",
+      "signature_sha256": "e7b75a976076a828d31f290527dc1586ae3a75075e28df64ce22ca03e3942436",
+      "status": "internal-unconsumed",
+      "symbol": "db2_management_identity_authority_record_validate"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/management_token_authority.h",
+          "line": 100
         }
       ],
       "signature": "db2_management_token_authority_result_t db2_management_identity_authority_use_begin ( db2_management_token_authority_ctx_t * ctx , const char correlation_id [ 65 ] , const char jti [ 65 ] , kb_identity_token_authority_record_t * out )",
@@ -13754,7 +13782,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 112
+          "line": 129
         }
       ],
       "signature": "void db2_management_token_authority_abort ( db2_management_token_authority_ctx_t * ctx )",
@@ -13767,7 +13795,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 59
+          "line": 76
         }
       ],
       "signature": "db2_management_token_authority_result_t db2_management_token_authority_admit ( db2_management_token_authority_ctx_t * ctx , const char correlation_id [ 65 ] , const char jti [ 65 ] , kb_mgmt_token_authority_record_t * out )",
@@ -13782,7 +13810,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 54
+          "line": 71
         }
       ],
       "signature": "void db2_management_token_authority_close ( db2_management_token_authority_ctx_t * ctx )",
@@ -13795,7 +13823,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 111
+          "line": 128
         }
       ],
       "signature": "db2_management_token_authority_result_t db2_management_token_authority_finalize ( db2_management_token_authority_ctx_t * ctx )",
@@ -13808,7 +13836,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 115
+          "line": 132
         }
       ],
       "signature": "db2_management_token_authority_result_t db2_management_token_authority_kind ( db2_management_token_authority_ctx_t * ctx , const char correlation_id [ 65 ] , const char jti [ 65 ] , db2_management_token_intent_kind_t * kind )",
@@ -13823,7 +13851,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 52
+          "line": 69
         }
       ],
       "signature": "int db2_management_token_authority_open ( db2_management_token_authority_ctx_t * ctx , const char * conninfo , char * errbuf , size_t errlen )",
@@ -13836,7 +13864,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 97
+          "line": 114
         }
       ],
       "signature": "db2_management_token_authority_result_t db2_management_token_authority_readback ( db2_management_token_authority_ctx_t * ctx , const char correlation_id [ 65 ] , const char jti [ 65 ] , kb_mgmt_token_authority_record_t * out )",
@@ -13849,7 +13877,20 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 104
+          "line": 65
+        }
+      ],
+      "signature": "int db2_management_token_authority_record_validate ( const kb_mgmt_token_authority_record_t * record )",
+      "signature_sha256": "c70bb8d0cefd152f83b2f131c9041863f217d7f38d3ca69ce30f9bcacd74d474",
+      "status": "internal-unconsumed",
+      "symbol": "db2_management_token_authority_record_validate"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/management_token_authority.h",
+          "line": 121
         }
       ],
       "signature": "db2_management_token_authority_result_t db2_management_token_authority_use_begin ( db2_management_token_authority_ctx_t * ctx , const char correlation_id [ 65 ] , const char jti [ 65 ] , kb_mgmt_token_authority_record_t * out )",
@@ -13862,7 +13903,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 119
+          "line": 135
         }
       ],
       "signature": "db2_management_token_authority_result_t db2_management_token_read_claim ( db2_management_token_authority_ctx_t * ctx , const char correlation_id [ 65 ] , const char jti [ 65 ] , const char lease_owner [ 65 ] , kb_mgmt_token_authority_record_t * out )",
@@ -13875,7 +13916,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 124
+          "line": 139
         }
       ],
       "signature": "db2_management_token_authority_result_t db2_management_token_read_finalize ( db2_management_token_authority_ctx_t * ctx , const char correlation_id [ 65 ] , const char jti [ 65 ] , const char lease_owner [ 65 ] , const char * jwt )",
@@ -13888,7 +13929,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/management_token_authority.h",
-          "line": 128
+          "line": 143
         }
       ],
       "signature": "db2_management_token_authority_result_t db2_management_token_read_readback ( db2_management_token_authority_ctx_t * ctx , const char correlation_id [ 65 ] , const char jti [ 65 ] , kb_mgmt_token_authority_output_t * out )",
@@ -23844,15 +23885,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "b07670c56364254bdbeee5b2fb4036d0942502aed66fa9d60098399967e79976",
+  "fingerprint": "db65cfcf98ff17eb1fcdd5d9a96dcd71ec121cbf60a060147a51ffe7167df353",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 895,
-    "declarations": 1359,
+    "declarations": 1362,
     "headers": 136,
-    "internal_unconsumed": 141,
-    "private_test_only": 261,
+    "internal_unconsumed": 143,
+    "private_test_only": 262,
     "reviewed": 62
   }
 }
