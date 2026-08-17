@@ -69,10 +69,10 @@ only lifecycle is active and granted. Later operations must be typed, bounded ca
 Declaration audit:
 
 `declaration-review.json` is the reviewed source for transitions from the legacy C surface. Its
-generated ledger accounts for all 1,364 non-static function declarations in all 136 DB2 headers,
+generated ledger accounts for all 1,368 non-static function declarations in all 136 DB2 headers,
 records identical duplicate declarations by location, and fails on conflicting signatures. The
 ledger also tokenizes every frozen consumer so test-only and production references cannot be
-confused. At this checkpoint 143 declarations are unconsumed implementation details, 264 are used
+confused. At this checkpoint 143 declarations are unconsumed implementation details, 268 are used
 only by private implementation tests, 61 externally referenced `pgvec_*` declarations are
 explicitly private and retained in DB2, lifecycle health is a reviewed retained-DB2 wire operation,
 and 895 production-consumed declarations remain
@@ -401,7 +401,14 @@ validity, availability, equivalence, and a diff count; DB2 independently rejects
 provider errors, nonbinary flags, negative counts, and inconsistent verdicts before updating the
 migration unit. This moves total debt from 173 to 169 and injected-contract debt from 34 to 30.
 
-The remaining 30 non-system rows are sibling-contract migration debt. Session identity, briefing
+The thirty-first reduction moves CSS stylesheet parsing, release, and static class-token extraction
+behind one startup-installed CSS-owner contract. DB2 independently bounds the nested rule and
+declaration counts, validates every fixed field and binary flag, and accepts only bounded, unique,
+terminated static class tokens. Missing providers or malformed output skip the derived graph write
+instead of mutating it. This moves total debt from 169 to 166 and injected-contract debt from 30 to
+27.
+
+The remaining 27 non-system rows are sibling-contract migration debt. Session identity, briefing
 rendering, executable lifecycle, configuration, memory, and other host calls must close through
 their reviewed process contracts before activation; they are not portable-support candidates. Rows
 may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide

@@ -8,6 +8,7 @@
 #include "kb_route_acl.h"
 #include "aimee.h"
 #include "cJSON.h"
+#include "css_analyze.h"
 #include "css_render_oracle.h"
 #include "log.h"
 #include "memory.h"
@@ -66,6 +67,8 @@ _Static_assert((int)AIMEE_DB2_PRINCIPAL_CERT == (int)KB_PRIN_CERT, "DB2 principa
 _Static_assert((int)AIMEE_DB2_PRINCIPAL_OWNER == (int)KB_PRIN_OWNER,
                "DB2 principal OWNER ABI drift");
 _Static_assert((int)AIMEE_DB2_PRINCIPAL_HOST == (int)KB_PRIN_HOST, "DB2 principal HOST ABI drift");
+_Static_assert(AIMEE_DB2_CSS_CLASS_TOKEN_MAX == CSS_CLASS_TOKEN_MAX,
+               "DB2 CSS class-token ABI drift");
 
 static uint64_t monotonic_ns(void)
 {
@@ -454,6 +457,8 @@ void kb_module_stage_adapters_configure(void)
    aimee_db2_register_embed_provider(embed_text);
    aimee_db2_register_identity_key_provider(identity_key);
    aimee_db2_register_css_render_compare_provider(css_render_compare);
+   aimee_db2_register_css_analysis_providers(css_analyze, css_stylesheet_free,
+                                             css_extract_class_tokens);
    kb_curator_grounding_register_provider(grounding_decide);
    kb_route_acl_register_authorization_provider(control_web_authorize);
 }

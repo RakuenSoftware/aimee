@@ -38,8 +38,102 @@
 #define CI_MAX_DEPS        64
 #define CI_MAX_DEFS        256
 #define CI_EXEC_MAX_OUTPUT (64u * 1024u * 1024u)
+#define CI_CSS_MAX_RULES   200000
+#define CI_CSS_MAX_DECLS   8192
+#define CI_CSS_MAX_TOKENS  512
 
 static canonical_index_exec_capture_fn ci_exec_capture;
+static db2_css_analyze_fn ci_css_analyze_provider;
+static db2_css_stylesheet_free_fn ci_css_stylesheet_free_provider;
+static db2_css_extract_class_tokens_fn ci_css_extract_tokens_provider;
+
+_Static_assert(CSS_CLASS_TOKEN_MAX == 128, "CSS class-token ABI drift");
+
+void aimee_db2_register_css_analysis_providers(db2_css_analyze_fn analyze,
+                                               db2_css_stylesheet_free_fn release,
+                                               db2_css_extract_class_tokens_fn extract_class_tokens)
+{
+   ci_css_analyze_provider = analyze;
+   ci_css_stylesheet_free_provider = release;
+   ci_css_extract_tokens_provider = extract_class_tokens;
+}
+
+static int ci_css_stylesheet_valid(const css_stylesheet_t *stylesheet)
+{
+   if (!stylesheet || stylesheet->rule_count < 0 || stylesheet->rule_count > CI_CSS_MAX_RULES ||
+       (stylesheet->truncated != 0 && stylesheet->truncated != 1) ||
+       (stylesheet->rule_count > 0 && !stylesheet->rules))
+      return 0;
+   for (int i = 0; i < stylesheet->rule_count; ++i)
+   {
+      const css_rule_t *rule = &stylesheet->rules[i];
+      if (strnlen(rule->selector, sizeof(rule->selector)) == 0 ||
+          strnlen(rule->selector, sizeof(rule->selector)) == sizeof(rule->selector) ||
+          strnlen(rule->at_context, sizeof(rule->at_context)) == sizeof(rule->at_context) ||
+          rule->spec_a < 0 || rule->spec_b < 0 || rule->spec_c < 0 ||
+          (rule->specificity_uncertain != 0 && rule->specificity_uncertain != 1) ||
+          rule->line < 1 || rule->decl_count < 0 || rule->decl_count > CI_CSS_MAX_DECLS ||
+          (rule->decl_count > 0 && !rule->decls))
+         return 0;
+      for (int d = 0; d < rule->decl_count; ++d)
+      {
+         const css_declaration_t *decl = &rule->decls[d];
+         if (strnlen(decl->property, sizeof(decl->property)) == 0 ||
+             strnlen(decl->property, sizeof(decl->property)) == sizeof(decl->property) ||
+             strnlen(decl->value, sizeof(decl->value)) == sizeof(decl->value) ||
+             (decl->important != 0 && decl->important != 1))
+            return 0;
+      }
+   }
+   return 1;
+}
+
+css_stylesheet_t *canonical_index_css_analyze(const char *text, size_t len)
+{
+   if (!text || !ci_css_analyze_provider || !ci_css_stylesheet_free_provider)
+      return NULL;
+   css_stylesheet_t *stylesheet = ci_css_analyze_provider(text, len);
+   if (stylesheet && !ci_css_stylesheet_valid(stylesheet))
+   {
+      ci_css_stylesheet_free_provider(stylesheet);
+      return NULL;
+   }
+   return stylesheet;
+}
+
+void canonical_index_css_stylesheet_free(css_stylesheet_t *stylesheet)
+{
+   if (stylesheet && ci_css_stylesheet_free_provider)
+      ci_css_stylesheet_free_provider(stylesheet);
+}
+
+int canonical_index_css_extract_class_tokens(const char *text, size_t len,
+                                             char (*out)[CSS_CLASS_TOKEN_MAX], int max)
+{
+   if (!text || !out || max < 1 || max > CI_CSS_MAX_TOKENS || !ci_css_extract_tokens_provider)
+      return -1;
+   memset(out, 0, (size_t)max * CSS_CLASS_TOKEN_MAX);
+   int count = ci_css_extract_tokens_provider(text, len, out, max);
+   if (count < 0 || count > max)
+      goto invalid;
+   for (int i = 0; i < count; ++i)
+   {
+      size_t token_len = strnlen(out[i], CSS_CLASS_TOKEN_MAX);
+      if (token_len == 0 || token_len == CSS_CLASS_TOKEN_MAX)
+         goto invalid;
+      for (size_t j = 0; j < token_len; ++j)
+         if (isspace((unsigned char)out[i][j]) || out[i][j] == '$' || out[i][j] == '{' ||
+             out[i][j] == '}' || out[i][j] == '`')
+            goto invalid;
+      for (int previous = 0; previous < i; ++previous)
+         if (strcmp(out[previous], out[i]) == 0)
+            goto invalid;
+   }
+   return count;
+invalid:
+   memset(out, 0, (size_t)max * CSS_CLASS_TOKEN_MAX);
+   return -1;
+}
 
 void canonical_index_set_exec_capture(canonical_index_exec_capture_fn capture)
 {
@@ -434,11 +528,11 @@ static void ci_css_index_file(int64_t file_id, const char *ext, const char *cont
    size_t len = strlen(content);
    if (strcmp(ext, ".css") == 0)
    {
-      css_stylesheet_t *ss = css_analyze(content, len);
+      css_stylesheet_t *ss = canonical_index_css_analyze(content, len);
       if (ss)
       {
          (void)db2_css_graph_replace(file_id, ss->rules, ss->rule_count);
-         css_stylesheet_free(ss);
+         canonical_index_css_stylesheet_free(ss);
       }
       return;
    }
@@ -449,7 +543,7 @@ static void ci_css_index_file(int64_t file_id, const char *ext, const char *cont
       char(*tokens)[CSS_CLASS_TOKEN_MAX] = malloc((size_t)512 * CSS_CLASS_TOKEN_MAX);
       if (!tokens)
          return;
-      int nt = css_extract_class_tokens(content, len, tokens, 512);
+      int nt = canonical_index_css_extract_class_tokens(content, len, tokens, 512);
       if (nt > 0)
          (void)db2_css_component_resolve(file_id, tokens, nt);
       free(tokens);

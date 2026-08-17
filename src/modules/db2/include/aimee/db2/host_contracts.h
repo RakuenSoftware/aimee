@@ -145,6 +145,22 @@ extern "C"
     * it; DB2 then fails evaluation closed without changing a stored verdict. */
    void aimee_db2_register_css_render_compare_provider(aimee_db2_css_render_compare_fn provider);
 
+   struct css_stylesheet;
+#define AIMEE_DB2_CSS_CLASS_TOKEN_MAX 128
+
+   typedef struct css_stylesheet *(*aimee_db2_css_analyze_fn)(const char *text, size_t len);
+   typedef void (*aimee_db2_css_stylesheet_free_fn)(struct css_stylesheet *stylesheet);
+   typedef int (*aimee_db2_css_extract_class_tokens_fn)(const char *text, size_t len,
+                                                        char (*out)[AIMEE_DB2_CSS_CLASS_TOKEN_MAX],
+                                                        int max);
+
+   /* Install the CSS owner's parser, matching release function, and bounded
+    * static-class extractor as one startup contract. NULL removes a provider;
+    * DB2 then skips that derived write rather than accepting unvalidated data. */
+   void aimee_db2_register_css_analysis_providers(
+       aimee_db2_css_analyze_fn analyze, aimee_db2_css_stylesheet_free_fn release,
+       aimee_db2_css_extract_class_tokens_fn extract_class_tokens);
+
 #ifdef __cplusplus
 }
 #endif
