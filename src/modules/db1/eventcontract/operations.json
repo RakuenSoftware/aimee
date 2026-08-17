@@ -71,6 +71,7 @@
    "retired_sources": [
     "conv_context.c",
     "payload_rewrite_state.c",
+    "user_memory.c",
     "windows.c",
     "wm.c"
    ]
@@ -2363,6 +2364,161 @@
       "name": "turn",
       "type": "int",
       "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 33,
+   "name": "user_memory_list_recall",
+   "c_name": "db1_user_memory_list_recall",
+   "c_params": [
+    "section",
+    "rows",
+    "cap"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "section",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "cap",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_user_memory_row_t",
+    "list": {
+     "out": "rows",
+     "bound": "cap",
+     "max_rows": 32
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "tier",
+      "type": "text"
+     },
+     {
+      "name": "kind",
+      "type": "text"
+     },
+     {
+      "name": "key",
+      "type": "text"
+     },
+     {
+      "name": "content",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 34,
+   "name": "user_memory_any",
+   "c_name": "db1_user_memory_any",
+   "c_params": [],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "present",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 35,
+   "name": "user_memory_upsert",
+   "c_name": "db1_user_memory_upsert",
+   "c_params": [
+    "kind",
+    "tier",
+    "key",
+    "content",
+    "confidence",
+    "source_session"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "kind",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "tier",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "content",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "confidence",
+      "type": "double",
+      "required": true
+     },
+     {
+      "name": "source_session",
+      "type": "text",
+      "required": false
      }
     ]
    },

@@ -2,7 +2,6 @@
 #include "user_memory.h"
 
 #include "db1_internal.h"
-#include "cJSON.h"
 #include <sqlite3.h>
 #include <string.h>
 
@@ -55,46 +54,6 @@ int db1_user_memory_list_recall(db1_user_recall_section_t section, db1_user_memo
    return n;
 }
 
-void db1_user_memory_merge_into_array(cJSON *arr, db1_user_recall_section_t section,
-                                      const char *why)
-{
-   if (!cJSON_IsArray(arr))
-      return;
-   db1_user_memory_row_t rows[32];
-   int n = db1_user_memory_list_recall(section, rows, 32);
-   /* Insert in reverse so the highest-ranked db1 row ends up first. */
-   for (int i = n - 1; i >= 0; i--)
-   {
-      /* db1 wins: drop any org row with the same key. Index is collected inside
-       * the loop and the delete runs AFTER it exits — never during iteration. */
-      int idx = 0, rm = -1;
-      cJSON *it = NULL;
-      cJSON_ArrayForEach(it, arr)
-      {
-         const char *k = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "key"));
-         if (k && strcmp(k, rows[i].key) == 0)
-         {
-            rm = idx;
-            break;
-         }
-         idx++;
-      }
-      if (rm >= 0)
-         cJSON_DeleteItemFromArray(arr, rm);
-
-      cJSON *row = cJSON_CreateObject();
-      if (!row)
-         break;
-      cJSON_AddNumberToObject(row, "memory_id", (double)rows[i].id);
-      cJSON_AddStringToObject(row, "tier", rows[i].tier);
-      cJSON_AddStringToObject(row, "kind", rows[i].kind);
-      cJSON_AddStringToObject(row, "key", rows[i].key);
-      cJSON_AddStringToObject(row, "text", rows[i].content);
-      cJSON_AddStringToObject(row, "why", why ? why : "");
-      cJSON_AddStringToObject(row, "scope", "user");
-      cJSON_InsertItemInArray(arr, 0, row);
-   }
-}
 
 int db1_user_memory_any(void)
 {
