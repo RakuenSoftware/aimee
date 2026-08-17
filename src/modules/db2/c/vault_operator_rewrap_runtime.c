@@ -3,9 +3,6 @@
 #endif
 #include "vault_operator_rewrap_runtime.h"
 
-#include "vault_mutation_budget.h"
-#include "vault_reseal_receipt.h"
-
 #include <libpq-fe.h>
 #include <openssl/crypto.h>
 #include <arpa/inet.h>
@@ -102,8 +99,8 @@ static int64_t deadline(void)
    int64_t n = mono_ms();
    if (n < 0 || n > INT64_MAX - D3B_DB_MS)
       return -1;
-   vault_mutation_budget_t *budget = vault_mutation_budget_current();
-   return budget ? vault_mutation_budget_deadline_ms(budget, D3B_DB_MS) : n + D3B_DB_MS;
+   int64_t end = db2_vault_reseal_deadline_ms(D3B_DB_MS);
+   return end > n && end <= n + D3B_DB_MS ? end : -1;
 }
 
 static int lock_until(pthread_mutex_t *m, int64_t end)
@@ -296,7 +293,7 @@ static int state_parse(PGresult *r, int row, int col, db2_vault_rewrap_state_t *
 }
 static int op_hex(const uint8_t op[16], char out[33])
 {
-   return op ? vault_reseal_operation_id_to_hex(op, out) : -1;
+   return op ? db2_vault_reseal_operation_id_to_hex(op, out) : -1;
 }
 static int failure_valid(const char *s)
 {
@@ -562,10 +559,11 @@ static int snapshot_decode(PGresult *r, db2_vault_rewrap_snapshot_t *o)
 {
    char op[33];
    if (PQntuples(r) != 1 || PQnfields(r) != 14 || col_text(r, 0, 0, op, sizeof(op)) ||
-       vault_reseal_operation_id_from_hex(op, o->operation_id) || state_parse(r, 0, 1, &o->state) ||
-       col_i64(r, 0, 2, &o->seal_epoch) || col_i64(r, 0, 3, &o->fencing_token) ||
-       col_i64(r, 0, 4, &o->old_generation) || col_i64(r, 0, 5, &o->new_generation) ||
-       col_i64(r, 0, 8, &o->secret_count) || col_i64(r, 0, 9, &o->check_count))
+       db2_vault_reseal_operation_id_from_hex(op, o->operation_id) ||
+       state_parse(r, 0, 1, &o->state) || col_i64(r, 0, 2, &o->seal_epoch) ||
+       col_i64(r, 0, 3, &o->fencing_token) || col_i64(r, 0, 4, &o->old_generation) ||
+       col_i64(r, 0, 5, &o->new_generation) || col_i64(r, 0, 8, &o->secret_count) ||
+       col_i64(r, 0, 9, &o->check_count))
       return -1;
    if (o->seal_epoch < 1 || o->fencing_token < 1 || o->old_generation < 0 ||
        o->old_generation == INT64_MAX || o->new_generation != o->old_generation + 1 ||
@@ -578,8 +576,8 @@ static int snapshot_decode(PGresult *r, db2_vault_rewrap_snapshot_t *o)
          return -1;
       vault_tpm2_reseal_receipt_t rr;
       uint8_t digest[32];
-      if (vault_reseal_receipt_decode(o->receipt, sizeof(o->receipt), &rr) ||
-          vault_reseal_receipt_digest(o->receipt, digest) ||
+      if (db2_vault_reseal_receipt_decode(o->receipt, sizeof(o->receipt), &rr) ||
+          db2_vault_reseal_receipt_digest(o->receipt, digest) ||
           CRYPTO_memcmp(digest, o->receipt_digest, 32) ||
           CRYPTO_memcmp(rr.operation_id, o->operation_id, 16) ||
           rr.old_generation != (uint64_t)o->old_generation ||
@@ -750,7 +748,7 @@ static db2_vault_rewrap_result_t record_prepared(db2_vault_rewrap_tx_t *t, const
    (void)og;
    (void)ng;
    uint8_t d[32];
-   if (!receipt || vault_reseal_receipt_digest(receipt, d))
+   if (!receipt || db2_vault_reseal_receipt_digest(receipt, d))
       return fail(t, DB2_VAULT_REWRAP_INVALID);
    Oid ty[] = {17, 17};
    const char *v[] = {(char *)receipt, (char *)d};
@@ -1238,7 +1236,7 @@ static int binding_row(PGresult *r, int row, int base, db2_vault_operator_rewrap
    char op[33], actor[16], req[33];
    if (col_text(r, row, base, op, sizeof(op)) || col_text(r, row, base + 1, actor, sizeof(actor)) ||
        strcmp(actor, "uid:0") || col_text(r, row, base + 2, req, sizeof(req)) ||
-       vault_reseal_operation_id_from_hex(op, out->operation_id) ||
+       db2_vault_reseal_operation_id_from_hex(op, out->operation_id) ||
        hex_bytes(req, 16, out->request_id) || state_parse(r, row, base + 3, &out->state) ||
        col_i64(r, row, base + 4, &out->seal_epoch) ||
        col_i64(r, row, base + 5, &out->fencing_token) ||
@@ -1375,7 +1373,7 @@ int db2_vault_operator_completed(const uint8_t req[16], const uint8_t op[16],
       if (PQntuples(r) != 1 || PQnfields(r) != 13 || col_text(r, 0, 0, rop, sizeof(rop)) ||
           col_text(r, 0, 1, actor, sizeof(actor)) || strcmp(actor, "uid:0") ||
           col_text(r, 0, 2, rreq, sizeof(rreq)) ||
-          vault_reseal_operation_id_from_hex(rop, b->operation_id) ||
+          db2_vault_reseal_operation_id_from_hex(rop, b->operation_id) ||
           hex_bytes(rreq, 16, b->request_id) || col_i64(r, 0, 3, &b->seal_epoch) ||
           col_i64(r, 0, 4, &b->fencing_token) || col_i64(r, 0, 5, &b->old_generation) ||
           col_i64(r, 0, 6, &b->new_generation) ||
@@ -1415,7 +1413,7 @@ int db2_vault_operator_completed_active(const uint8_t op[16], db2_vault_operator
       if (PQntuples(r) != 1 || PQnfields(r) != 13 || col_text(r, 0, 0, rop, sizeof(rop)) ||
           col_text(r, 0, 1, actor, sizeof(actor)) || strcmp(actor, "uid:0") ||
           col_text(r, 0, 2, rreq, sizeof(rreq)) ||
-          vault_reseal_operation_id_from_hex(rop, b->operation_id) ||
+          db2_vault_reseal_operation_id_from_hex(rop, b->operation_id) ||
           hex_bytes(rreq, 16, b->request_id) || col_i64(r, 0, 3, &b->seal_epoch) ||
           col_i64(r, 0, 4, &b->fencing_token) || col_i64(r, 0, 5, &b->old_generation) ||
           col_i64(r, 0, 6, &b->new_generation) ||
@@ -1605,7 +1603,7 @@ int db2_vault_operator_open_event(const uint8_t id[32], db2_vault_operator_open_
          out->completed_open = 1;
          out->operation_present = 1;
          if (PQgetisnull(r, 0, 2) || col_text(r, 0, 2, op, sizeof(op)) ||
-             vault_reseal_operation_id_from_hex(op, out->operation_id) ||
+             db2_vault_reseal_operation_id_from_hex(op, out->operation_id) ||
              col_i64(r, 0, 5, &out->operation_fence))
             rc = DB2_VAULT_REWRAP_INTEGRITY;
       }

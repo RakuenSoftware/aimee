@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "342aa767a9ccbff2f45edc26d26e84a53c6a47c4",
-  "source_fingerprint": "4bd12563a7ad6e5f84e68474ba27dfdc4bff660571329299a62e51e27fe90094",
+  "source_revision": "09e5068c8fe698ff5994bc732b0eb2e0296278f4",
+  "source_fingerprint": "ea317b3559209b0ecf97c6ef8fbcfde8a0ebf326e430d0e9beab035e422bcf7d",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -3036,7 +3036,8 @@
         "src/modules/db2/c/management_status_runtime.c",
         "src/modules/db2/c/management_token_authority.c",
         "src/modules/db2/c/org_model_catalog.c",
-        "src/modules/db2/c/org_telemetry_fmt.c"
+        "src/modules/db2/c/org_telemetry_fmt.c",
+        "src/modules/db2/c/org_vault_rewrap.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3177,58 +3178,6 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "vault_mutation_budget_current",
-      "references": [
-        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_mutation_budget_deadline_ms",
-      "references": [
-        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_reseal_operation_id_from_hex",
-      "references": [
-        "src/modules/db2/c/org_vault_rewrap.c",
-        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_reseal_operation_id_to_hex",
-      "references": [
-        "src/modules/db2/c/org_vault_rewrap.c",
-        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_reseal_receipt_decode",
-      "references": [
-        "src/modules/db2/c/org_vault_rewrap.c",
-        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "vault_reseal_receipt_digest",
-      "references": [
-        "src/modules/db2/c/org_vault_rewrap.c",
-        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "vault_witness_checkpoint_digest",
       "references": [
         "src/modules/db2/c/db2_witness_checkpoint.c"
@@ -3338,15 +3287,15 @@
   "summary": {
     "translation_units": 138,
     "descriptor_support_units": 22,
-    "unresolved_symbols": 157,
+    "unresolved_symbols": 151,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 18,
+      "injected-module-contract": 12,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "6d1006ef0f2636336c95a1ef60cb196e0cf3e90f7e5ee0f3f833cf422bebab6a"
+  "fingerprint": "847015f1637c989558ba9cbe4156e277e2e9b5891fe6c086a095a4b762f5386f"
 }

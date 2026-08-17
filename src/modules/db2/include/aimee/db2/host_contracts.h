@@ -200,6 +200,28 @@ extern "C"
     * fail closed and DB2 cleanses their secret outputs. */
    void aimee_db2_register_vault_crypto_provider(const aimee_db2_vault_crypto_provider_t *provider);
 
+#define AIMEE_DB2_VAULT_RESEAL_RECEIPT_LEN   208
+#define AIMEE_DB2_VAULT_RESEAL_OPERATION_LEN 16
+#define AIMEE_DB2_VAULT_RESEAL_OPERATION_HEX 32
+
+   struct vault_tpm2_reseal_receipt;
+   typedef struct
+   {
+      int64_t (*deadline_ms)(uint32_t per_call_ms);
+      int (*operation_id_to_hex)(const uint8_t operation_id[AIMEE_DB2_VAULT_RESEAL_OPERATION_LEN],
+                                 char out[AIMEE_DB2_VAULT_RESEAL_OPERATION_HEX + 1]);
+      int (*operation_id_from_hex)(const char *hex,
+                                   uint8_t operation_id[AIMEE_DB2_VAULT_RESEAL_OPERATION_LEN]);
+      int (*receipt_decode)(const uint8_t *wire, size_t wire_len,
+                            struct vault_tpm2_reseal_receipt *receipt);
+      int (*receipt_digest)(const uint8_t wire[AIMEE_DB2_VAULT_RESEAL_RECEIPT_LEN],
+                            uint8_t digest[32]);
+   } aimee_db2_vault_reseal_provider_t;
+
+   /* Install the vault owner's mutation-deadline and canonical reseal-codec
+    * operations. The value is copied; NULL removes it and DB2 fails closed. */
+   void aimee_db2_register_vault_reseal_provider(const aimee_db2_vault_reseal_provider_t *provider);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1392,6 +1392,21 @@
     },
     {
       "consumers": [
+        "src/tests/test_org_vault_rewrap.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/org_vault_rewrap.h",
+          "line": 97
+        }
+      ],
+      "signature": "void aimee_db2_register_vault_reseal_provider ( const db2_vault_reseal_provider_t * provider )",
+      "signature_sha256": "96c7ff2d4be69462de24ddc7a3b22d880e5f75e153832c4ef9b0a963f5580deb",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_vault_reseal_provider"
+    },
+    {
+      "consumers": [
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/test_kb_vault_rewrap_live.c",
         "src/tests/test_management_status_key_ctx.c",
@@ -21174,13 +21189,86 @@
       "symbol": "db2_vault_operator_snapshot_equal"
     },
     {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/org_vault_rewrap.h",
+          "line": 98
+        }
+      ],
+      "signature": "int64_t db2_vault_reseal_deadline_ms ( uint32_t per_call_ms )",
+      "signature_sha256": "360ecb119554ed437f4f57c1610af5fcf878cea7fd9a9b61fef9f20c4bf38ab6",
+      "status": "internal-unconsumed",
+      "symbol": "db2_vault_reseal_deadline_ms"
+    },
+    {
       "consumers": [
         "src/tests/test_org_vault_rewrap.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 143
+          "line": 100
+        }
+      ],
+      "signature": "int db2_vault_reseal_operation_id_from_hex ( const char * hex , uint8_t operation_id [ 16 ] )",
+      "signature_sha256": "fc3425b67c72473a6c2310d48652928c9dd89cc80e50bc9d88076abfd511668e",
+      "status": "private-test-only",
+      "symbol": "db2_vault_reseal_operation_id_from_hex"
+    },
+    {
+      "consumers": [
+        "src/tests/test_org_vault_rewrap.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/org_vault_rewrap.h",
+          "line": 99
+        }
+      ],
+      "signature": "int db2_vault_reseal_operation_id_to_hex ( const uint8_t operation_id [ 16 ] , char out [ 33 ] )",
+      "signature_sha256": "8025fd8e2099f605135d67041589dc35d431e1f539913f75535c0979492f6fc1",
+      "status": "private-test-only",
+      "symbol": "db2_vault_reseal_operation_id_to_hex"
+    },
+    {
+      "consumers": [
+        "src/tests/test_org_vault_rewrap.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/org_vault_rewrap.h",
+          "line": 101
+        }
+      ],
+      "signature": "int db2_vault_reseal_receipt_decode ( const uint8_t * wire , size_t wire_len , vault_tpm2_reseal_receipt_t * receipt )",
+      "signature_sha256": "62a352906e0ad6b23ab18282daf5f362f9c19ca7ab6973135e1e56841303b8b8",
+      "status": "private-test-only",
+      "symbol": "db2_vault_reseal_receipt_decode"
+    },
+    {
+      "consumers": [
+        "src/tests/test_org_vault_rewrap.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/org_vault_rewrap.h",
+          "line": 103
+        }
+      ],
+      "signature": "int db2_vault_reseal_receipt_digest ( const uint8_t wire [ VAULT_RESEAL_RECEIPT_V1_LEN ] , uint8_t digest [ 32 ] )",
+      "signature_sha256": "43f4e96f5ff7d22d5a62f8d2304125fe1e1f8679b3e33b6013f90711ff90b613",
+      "status": "private-test-only",
+      "symbol": "db2_vault_reseal_receipt_digest"
+    },
+    {
+      "consumers": [
+        "src/tests/test_org_vault_rewrap.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/org_vault_rewrap.h",
+          "line": 164
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_abort ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence , const char * failure_class )",
@@ -21196,7 +21284,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 97
+          "line": 118
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_begin ( db2_vault_rewrap_tx_t * tx , const char * actor , const char * request_id , const uint8_t operation_id [ 16 ] , int64_t old_generation , int64_t new_generation , int64_t * seal_epoch , int64_t * fence , db2_vault_rewrap_state_t * state )",
@@ -21211,7 +21299,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 87
+          "line": 108
         }
       ],
       "signature": "void db2_vault_rewrap_check_clear ( db2_vault_rewrap_check_t * rows , size_t count )",
@@ -21226,7 +21314,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 224
+          "line": 245
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_classify_sqlstate ( const char * sqlstate )",
@@ -21241,7 +21329,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 138
+          "line": 159
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_complete ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence , const uint8_t receipt_digest [ 32 ] , const uint8_t inventory_digest [ 32 ] , const uint8_t stage_digest [ 32 ] )",
@@ -21256,7 +21344,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 88
+          "line": 109
         }
       ],
       "signature": "void db2_vault_rewrap_cursor_clear ( db2_vault_rewrap_cursor_t * cursor )",
@@ -21269,7 +21357,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 124
+          "line": 145
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_inventory_summary ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence , db2_vault_rewrap_inventory_summary_t * out )",
@@ -21284,7 +21372,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 129
+          "line": 150
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_mark_committing ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence )",
@@ -21299,7 +21387,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 132
+          "line": 153
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_mark_resealed ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence , const uint8_t receipt_digest [ 32 ] )",
@@ -21314,7 +21402,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 136
+          "line": 157
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_promote ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence )",
@@ -21330,7 +21418,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 104
+          "line": 125
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_record_prepared ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence , int64_t old_generation , int64_t new_generation , const uint8_t receipt [ VAULT_RESEAL_RECEIPT_V1_LEN ] )",
@@ -21345,7 +21433,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 146
+          "line": 167
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_recovery_required ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence , const char * failure_class )",
@@ -21360,7 +21448,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 86
+          "line": 107
         }
       ],
       "signature": "void db2_vault_rewrap_secret_clear ( db2_vault_rewrap_secret_t * rows , size_t count )",
@@ -21376,7 +21464,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 90
+          "line": 111
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_snapshot ( const uint8_t operation_id [ 16 ] , db2_vault_rewrap_snapshot_t * out )",
@@ -21392,7 +21480,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 85
+          "line": 106
         }
       ],
       "signature": "void db2_vault_rewrap_snapshot_clear ( db2_vault_rewrap_snapshot_t * snapshot )",
@@ -21407,7 +21495,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 111
+          "line": 132
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_source_check_page ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence , const db2_vault_rewrap_cursor_t * after , int limit , db2_vault_rewrap_check_t * rows , size_t capacity , size_t * count , db2_vault_rewrap_cursor_t * next )",
@@ -21422,7 +21510,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 107
+          "line": 128
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_source_secret_page ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence , int64_t after , int limit , db2_vault_rewrap_secret_t * rows , size_t capacity , size_t * count )",
@@ -21435,7 +21523,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 120
+          "line": 141
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_stage_check ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence , const db2_vault_rewrap_check_t * source , const uint8_t * new_check , size_t new_check_len )",
@@ -21450,7 +21538,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 116
+          "line": 137
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_stage_dek ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence , const db2_vault_rewrap_secret_t * source , const uint8_t new_wrapped_dek [ VAULT_WRAPPED_DEK_LEN ] )",
@@ -21465,7 +21553,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 127
+          "line": 148
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_stage_finish ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence , const db2_vault_rewrap_inventory_summary_t * expected )",
@@ -21482,7 +21570,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 93
+          "line": 114
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_tx_begin ( db2_vault_rewrap_tx_t * * out )",
@@ -21499,7 +21587,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 94
+          "line": 115
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_tx_commit ( db2_vault_rewrap_tx_t * * tx )",
@@ -21516,7 +21604,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 95
+          "line": 116
         }
       ],
       "signature": "void db2_vault_rewrap_tx_rollback ( db2_vault_rewrap_tx_t * * tx )",
@@ -21533,7 +21621,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 159
+          "line": 180
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_verify_check_page ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence , const db2_vault_rewrap_cursor_t * after , int limit , db2_vault_rewrap_check_t * rows , size_t capacity , size_t * count , db2_vault_rewrap_cursor_t * next )",
@@ -21550,7 +21638,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 163
+          "line": 184
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_verify_crypto_ack ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence )",
@@ -21567,7 +21655,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 155
+          "line": 176
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_verify_secret_page ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence , int64_t after , int limit , db2_vault_rewrap_secret_t * rows , size_t capacity , size_t * count )",
@@ -21584,7 +21672,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 151
+          "line": 172
         }
       ],
       "signature": "db2_vault_rewrap_result_t db2_vault_rewrap_verify_summary ( db2_vault_rewrap_tx_t * tx , const uint8_t operation_id [ 16 ] , int64_t fence , db2_vault_rewrap_verify_summary_t * out )",
@@ -21601,7 +21689,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/org_vault_rewrap.h",
-          "line": 89
+          "line": 110
         }
       ],
       "signature": "void db2_vault_rewrap_verify_summary_clear ( db2_vault_rewrap_verify_summary_t * summary )",
@@ -24126,15 +24214,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "241f3eb6ad99d41792616d09fe6c93aee80543f90b39a90913521ff3f0c1e270",
+  "fingerprint": "bcdab3f05e53fe93b4ee1a49195c888bd61a0177c6996b00a52e5384524c3ac5",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 895,
-    "declarations": 1378,
+    "declarations": 1384,
     "headers": 136,
-    "internal_unconsumed": 143,
-    "private_test_only": 278,
+    "internal_unconsumed": 144,
+    "private_test_only": 283,
     "reviewed": 62
   }
 }

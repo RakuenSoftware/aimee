@@ -12,6 +12,98 @@
 
 #define RW_ERR 256
 
+static db2_vault_reseal_provider_t reseal_provider;
+
+void aimee_db2_register_vault_reseal_provider(const db2_vault_reseal_provider_t *provider)
+{
+   if (provider)
+      reseal_provider = *provider;
+   else
+      memset(&reseal_provider, 0, sizeof(reseal_provider));
+}
+
+int64_t db2_vault_reseal_deadline_ms(uint32_t per_call_ms)
+{
+   return per_call_ms && reseal_provider.deadline_ms ? reseal_provider.deadline_ms(per_call_ms)
+                                                     : -1;
+}
+
+int db2_vault_reseal_operation_id_to_hex(const uint8_t operation_id[16], char out[33])
+{
+   if (out)
+      memset(out, 0, 33);
+   if (!operation_id || !out || !reseal_provider.operation_id_to_hex ||
+       reseal_provider.operation_id_to_hex(operation_id, out) != 0 || strnlen(out, 33) != 32)
+      goto invalid;
+   for (size_t i = 0; i < 32; ++i)
+      if (!((out[i] >= '0' && out[i] <= '9') || (out[i] >= 'a' && out[i] <= 'f')))
+         goto invalid;
+   return 0;
+invalid:
+   if (out)
+      OPENSSL_cleanse(out, 33);
+   return -1;
+}
+
+int db2_vault_reseal_operation_id_from_hex(const char *hex, uint8_t operation_id[16])
+{
+   uint8_t expected[16] = {0};
+   if (operation_id)
+      OPENSSL_cleanse(operation_id, 16);
+   if (!hex || !operation_id || strnlen(hex, 33) != 32 || !reseal_provider.operation_id_from_hex)
+      return -1;
+   for (size_t i = 0; i < 32; ++i)
+   {
+      unsigned value;
+      if (hex[i] >= '0' && hex[i] <= '9')
+         value = (unsigned)(hex[i] - '0');
+      else if (hex[i] >= 'a' && hex[i] <= 'f')
+         value = (unsigned)(hex[i] - 'a') + 10U;
+      else
+         return -1;
+      expected[i / 2] |= (uint8_t)(value << ((i & 1U) ? 0 : 4));
+   }
+   if (reseal_provider.operation_id_from_hex(hex, operation_id) != 0 ||
+       CRYPTO_memcmp(operation_id, expected, sizeof(expected)) != 0)
+   {
+      OPENSSL_cleanse(operation_id, 16);
+      OPENSSL_cleanse(expected, sizeof(expected));
+      return -1;
+   }
+   OPENSSL_cleanse(expected, sizeof(expected));
+   return 0;
+}
+
+int db2_vault_reseal_receipt_decode(const uint8_t *wire, size_t wire_len,
+                                    vault_tpm2_reseal_receipt_t *receipt)
+{
+   if (receipt)
+      OPENSSL_cleanse(receipt, sizeof(*receipt));
+   if (!wire || wire_len != VAULT_RESEAL_RECEIPT_V1_LEN || !receipt ||
+       !reseal_provider.receipt_decode || reseal_provider.receipt_decode(wire, wire_len, receipt))
+   {
+      if (receipt)
+         OPENSSL_cleanse(receipt, sizeof(*receipt));
+      return -1;
+   }
+   return 0;
+}
+
+int db2_vault_reseal_receipt_digest(const uint8_t wire[VAULT_RESEAL_RECEIPT_V1_LEN],
+                                    uint8_t digest[32])
+{
+   if (digest)
+      OPENSSL_cleanse(digest, 32);
+   if (!wire || !digest || !reseal_provider.receipt_digest ||
+       reseal_provider.receipt_digest(wire, digest))
+   {
+      if (digest)
+         OPENSSL_cleanse(digest, 32);
+      return -1;
+   }
+   return 0;
+}
+
 static int utf8_valid(const uint8_t *s, size_t n);
 static int cursor_cmp(const uint8_t *a, size_t an, const uint8_t *b, size_t bn);
 
@@ -246,7 +338,7 @@ static int snapshot_decode(aimee_pg_stmt_t *st, db2_vault_rewrap_snapshot_t *o)
 {
    char ophex[33];
    if (text_copy(st, 0, ophex, sizeof(ophex)) != 0 ||
-       vault_reseal_operation_id_from_hex(ophex, o->operation_id) != 0 ||
+       db2_vault_reseal_operation_id_from_hex(ophex, o->operation_id) != 0 ||
        state_parse(aimee_pg_column_text(st, 1), &o->state) != 0)
       return -1;
    if (aimee_pg_column_is_null(st, 2) || aimee_pg_column_is_null(st, 3) ||
@@ -266,10 +358,10 @@ static int snapshot_decode(aimee_pg_stmt_t *st, db2_vault_rewrap_snapshot_t *o)
       uint8_t digest[32], op[16];
       if (blob_exact(st, 6, o->receipt, sizeof(o->receipt)) != 0 ||
           blob_exact(st, 7, o->receipt_digest, 32) != 0 ||
-          vault_reseal_receipt_decode(o->receipt, sizeof(o->receipt), &receipt) != 0 ||
-          vault_reseal_receipt_digest(o->receipt, digest) != 0 ||
+          db2_vault_reseal_receipt_decode(o->receipt, sizeof(o->receipt), &receipt) != 0 ||
+          db2_vault_reseal_receipt_digest(o->receipt, digest) != 0 ||
           CRYPTO_memcmp(digest, o->receipt_digest, 32) != 0 ||
-          vault_reseal_operation_id_from_hex(ophex, op) != 0 ||
+          db2_vault_reseal_operation_id_from_hex(ophex, op) != 0 ||
           CRYPTO_memcmp(op, receipt.operation_id, 16) != 0 ||
           receipt.old_generation != (uint64_t)o->old_generation ||
           receipt.new_generation != (uint64_t)o->new_generation)
@@ -324,7 +416,7 @@ db2_vault_rewrap_result_t db2_vault_rewrap_snapshot(const uint8_t operation_id[1
    if (!operation_id || !out)
       return DB2_VAULT_REWRAP_INVALID;
    char op[33], err[RW_ERR] = "";
-   if (vault_reseal_operation_id_to_hex(operation_id, op) != 0)
+   if (db2_vault_reseal_operation_id_to_hex(operation_id, op) != 0)
       return DB2_VAULT_REWRAP_INVALID;
    if (!db2_pool_active())
       return DB2_VAULT_REWRAP_TRANSIENT;
@@ -439,7 +531,7 @@ static aimee_pg_stmt_t *prepare_op(db2_vault_rewrap_tx_t *tx, const char *sql,
       return NULL;
    }
    char op[33], err[RW_ERR] = "";
-   if (vault_reseal_operation_id_to_hex(operation_id, op) != 0)
+   if (db2_vault_reseal_operation_id_to_hex(operation_id, op) != 0)
       return NULL;
    aimee_pg_prepare_error_t prepare_error = AIMEE_PG_PREPARE_OK;
    aimee_pg_stmt_t *st = aimee_pg_prepare_ex(tx->conn, sql, &prepare_error, err, sizeof(err));
@@ -460,7 +552,7 @@ static aimee_pg_stmt_t *prepare_verify(db2_vault_rewrap_tx_t *tx, const char *sq
       return NULL;
    tx->prepare_error = DB2_VAULT_REWRAP_INVALID;
    char op[33], err[RW_ERR] = "";
-   if (vault_reseal_operation_id_to_hex(operation_id, op) != 0)
+   if (db2_vault_reseal_operation_id_to_hex(operation_id, op) != 0)
       return NULL;
    aimee_pg_prepare_error_t prepare_error = AIMEE_PG_PREPARE_OK;
    aimee_pg_stmt_t *st = aimee_pg_prepare_ex(tx->conn, sql, &prepare_error, err, sizeof(err));
@@ -519,7 +611,7 @@ db2_vault_rewrap_result_t db2_vault_rewrap_begin(db2_vault_rewrap_tx_t *tx, cons
    if (claim_kind(tx, RW_KIND_SINGLE) != DB2_VAULT_REWRAP_OK)
       return DB2_VAULT_REWRAP_INVALID;
    char op[33], err[RW_ERR] = "";
-   if (vault_reseal_operation_id_to_hex(operation_id, op) != 0)
+   if (db2_vault_reseal_operation_id_to_hex(operation_id, op) != 0)
       return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
    aimee_pg_prepare_error_t prepare_error = AIMEE_PG_PREPARE_OK;
    aimee_pg_stmt_t *st =
@@ -537,7 +629,7 @@ db2_vault_rewrap_result_t db2_vault_rewrap_begin(db2_vault_rewrap_tx_t *tx, cons
    db2_vault_rewrap_result_t rc = step(st, &sr);
    uint8_t returned_operation_id[16] = {0};
    if (rc == DB2_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW &&
-       vault_reseal_operation_id_from_hex(aimee_pg_column_text(st, 0), returned_operation_id) ==
+       db2_vault_reseal_operation_id_from_hex(aimee_pg_column_text(st, 0), returned_operation_id) ==
            0 &&
        CRYPTO_memcmp(returned_operation_id, operation_id, 16) == 0 &&
        state_parse(aimee_pg_column_text(st, 1), state) == 0 &&
@@ -574,11 +666,11 @@ db2_vault_rewrap_record_prepared(db2_vault_rewrap_tx_t *tx, const uint8_t opid[1
    memset(&decoded, 0, sizeof(decoded));
    if (!opid || !receipt || old_generation < 0 || old_generation == INT64_MAX ||
        new_generation != old_generation + 1 ||
-       vault_reseal_receipt_decode(receipt, VAULT_RESEAL_RECEIPT_V1_LEN, &decoded) != 0 ||
+       db2_vault_reseal_receipt_decode(receipt, VAULT_RESEAL_RECEIPT_V1_LEN, &decoded) != 0 ||
        CRYPTO_memcmp(decoded.operation_id, opid, 16) != 0 ||
        decoded.old_generation != (uint64_t)old_generation ||
        decoded.new_generation != (uint64_t)new_generation ||
-       vault_reseal_receipt_digest(receipt, digest) != 0)
+       db2_vault_reseal_receipt_digest(receipt, digest) != 0)
    {
       OPENSSL_cleanse(&decoded, sizeof(decoded));
       return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);

@@ -69,10 +69,10 @@ only lifecycle is active and granted. Later operations must be typed, bounded ca
 Declaration audit:
 
 `declaration-review.json` is the reviewed source for transitions from the legacy C surface. Its
-generated ledger accounts for all 1,378 non-static function declarations in all 136 DB2 headers,
+generated ledger accounts for all 1,384 non-static function declarations in all 136 DB2 headers,
 records identical duplicate declarations by location, and fails on conflicting signatures. The
 ledger also tokenizes every frozen consumer so test-only and production references cannot be
-confused. At this checkpoint 143 declarations are unconsumed implementation details, 278 are used
+confused. At this checkpoint 144 declarations are unconsumed implementation details, 283 are used
 only by private implementation tests, 61 externally referenced `pgvec_*` declarations are
 explicitly private and retained in DB2, lifecycle health is a reviewed retained-DB2 wire operation,
 and 895 production-consumed declarations remain
@@ -415,7 +415,13 @@ only exact success, bounds every variable length, validates AAD output length, a
 outputs on absence or failure. This moves total debt from 166 to 157 and injected-contract debt from
 27 to 18.
 
-The remaining 18 non-system rows are sibling-contract migration debt. Session identity, briefing
+The thirty-third reduction replaces DB2's mutation-budget lookup and canonical reseal
+operation-ID/receipt helpers with one startup-installed vault-owner contract. DB2 bounds each
+deadline by its local monotonic per-call window, independently validates lowercase operation IDs
+against decoded bytes, and cleanses failed receipt/digest output. This moves total debt from 157 to
+151 and injected-contract debt from 18 to 12.
+
+The remaining 12 non-system rows are sibling-contract migration debt. Session identity, briefing
 rendering, executable lifecycle, configuration, memory, and other host calls must close through
 their reviewed process contracts before activation; they are not portable-support candidates. Rows
 may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide

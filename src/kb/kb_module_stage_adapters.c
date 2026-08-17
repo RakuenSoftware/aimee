@@ -14,6 +14,8 @@
 #include "memory.h"
 #include "vault_crypto.h"
 #include "vault_kek_check.h"
+#include "vault_mutation_budget.h"
+#include "vault_reseal_receipt.h"
 
 #include <aimee/audit/audit_worm_chain.h>
 #include <aimee/audit/obs_bus.h>
@@ -48,6 +50,26 @@ static const aimee_db2_vault_crypto_provider_t vault_crypto_provider = {
     .secret_decrypt = vault_secret_decrypt,
     .kek_check_wrap = vault_kek_check_wrap,
     .kek_check_verify = vault_kek_check_verify,
+};
+
+static int64_t vault_reseal_deadline_ms(uint32_t per_call_ms)
+{
+   vault_mutation_budget_t *budget = vault_mutation_budget_current();
+   if (budget)
+      return vault_mutation_budget_deadline_ms(budget, per_call_ms);
+   struct timespec now;
+   if (!per_call_ms || clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+      return -1;
+   int64_t current = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+   return current <= INT64_MAX - per_call_ms ? current + per_call_ms : -1;
+}
+
+static const aimee_db2_vault_reseal_provider_t vault_reseal_provider = {
+    .deadline_ms = vault_reseal_deadline_ms,
+    .operation_id_to_hex = vault_reseal_operation_id_to_hex,
+    .operation_id_from_hex = vault_reseal_operation_id_from_hex,
+    .receipt_decode = vault_reseal_receipt_decode,
+    .receipt_digest = vault_reseal_receipt_digest,
 };
 
 static int css_render_compare(const char *before_json, const char *after_json, int *before_valid,
@@ -89,6 +111,12 @@ _Static_assert(AIMEE_DB2_VAULT_NONCE_LEN == VAULT_GCM_NONCE_LEN, "DB2 vault nonc
 _Static_assert(AIMEE_DB2_VAULT_TAG_LEN == VAULT_GCM_TAG_LEN, "DB2 vault tag ABI drift");
 _Static_assert(AIMEE_DB2_VAULT_WRAPPED_DEK_LEN == VAULT_WRAPPED_DEK_LEN,
                "DB2 vault wrapped-DEK ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_RESEAL_RECEIPT_LEN == VAULT_RESEAL_RECEIPT_V1_LEN,
+               "DB2 vault reseal-receipt ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_RESEAL_OPERATION_LEN == VAULT_RESEAL_OPERATION_ID_LEN,
+               "DB2 vault reseal-operation ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_RESEAL_OPERATION_HEX == VAULT_RESEAL_OPERATION_HEX_LEN,
+               "DB2 vault reseal-operation hex ABI drift");
 
 static uint64_t monotonic_ns(void)
 {
@@ -480,6 +508,7 @@ void kb_module_stage_adapters_configure(void)
    aimee_db2_register_css_analysis_providers(css_analyze, css_stylesheet_free,
                                              css_extract_class_tokens);
    aimee_db2_register_vault_crypto_provider(&vault_crypto_provider);
+   aimee_db2_register_vault_reseal_provider(&vault_reseal_provider);
    kb_curator_grounding_register_provider(grounding_decide);
    kb_route_acl_register_authorization_provider(control_web_authorize);
 }
