@@ -82,7 +82,14 @@ ENUM_DECL = re.compile(r"typedef\s+enum\b[^;]*?\}\s*(\w+_t)\s*;", re.S)
 BY_VALUE = re.compile(r"\b([a-z_0-9]+_t) \w+$")
 # An array of fixed-width strings: rows of one text column, spelled as a
 # pointer to an array rather than a pointer to a struct.
-OUT_TEXT_ROWS = re.compile(r"char \s*\(\s*\*\s*\w+\s*\)\s*\[")
+# Both spellings of the same thing: "char (*out)[N]" and "char out[][N]" are
+# the same parameter type, and matching only the first made an ordinary text
+# column look like a shape nobody had classified.
+OUT_TEXT_ROWS = re.compile(r"char \s*(?:\(\s*\*\s*\w+\s*\)|\w+\s*\[\s*\])\s*\[")
+# A variable-length list of strings as INPUT. The counted frame could carry
+# it -- the terms would travel as N fields -- but every operation declares a
+# fixed arity today, so it is a capability rather than a gap.
+REPEATED_TEXT = re.compile(r"const char \s*\*\s*const \s*\*\s*\w+$")
 JSON_IN = re.compile(r"(const )?cJSON \s*\*\s*\w+$")
 OUT_TEXT = re.compile(r"char \s*\*\s*\w+$")
 CAP = re.compile(r"size_t \w+$")
@@ -108,12 +115,14 @@ LARGE = re.compile(r"(json|metadata|content|prompt|body|payload|text|summary|blo
 # column -- int64_t *out -- is the one that does not, only because no family
 # that can be activated yet has one to prove it against.
 NEEDS = {
+    "repeated_text": "repeated",
     "out_column_numeric": "column",
     "alloc_out": "alloc",
     "json_in": "json",
     "other": "unknown",
 }
 CAPABILITY = {
+    "repeated": "repeated -- a variable-length list of strings as an argument",
     "column": "column -- a list of one NUMERIC value per row (text columns cross)",
     "alloc": "alloc -- a callee-allocated out-parameter, T ** or char **",
     "json": "json -- a cJSON tree, which the wire carries but the client must build",
@@ -188,11 +197,37 @@ def remaining_sources(root: Path) -> dict[str, str]:
             for source in family["sources"] if source in linked}
 
 
+# re.S as well as re.M: a definition whose parameter list wraps is still a
+# definition. This is the same wrapped-signature mistake the docstring above
+# says was designed out for DECLARATIONS, reintroduced here for definitions --
+# it hid seven db1_cron_job_* symbols until the unattributed report named them.
+DEFINITION = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_ \*]*?\b([a-z][a-z0-9_]{3,})\s*\([^;]*?\)\s*\{", re.M | re.S)
+
+
+def defining_sources(root: Path) -> dict[str, str]:
+    """Which .c file defines each symbol.
+
+    Attribution used to go by FILENAME: a declaration counted only if its
+    header's stem matched a claimed source name. windows.c declares its API in
+    db1_windows.h and db1_cron_jobs.c in cron_jobs.h, so every operation in both
+    was invisible -- not classified as blocked, not counted at all. A symbol
+    belongs to whichever source defines it, which is a fact rather than a naming
+    convention.
+    """
+    owner: dict[str, str] = {}
+    for source in sorted((root / SOURCE_DIR).glob("*.c")):
+        text = re.sub(r"/\*.*?\*/", "", source.read_text(errors="ignore"), flags=re.S)
+        for symbol in DEFINITION.findall(text):
+            owner.setdefault(symbol, source.stem)
+    return owner
+
+
 def declarations(root: Path, families: dict[str, str]) -> dict[str, dict]:
     found: dict[str, dict] = {}
+    unattributed: list[str] = []
+    owner = defining_sources(root)
     for header in sorted((root / SOURCE_DIR).glob("*.h")):
-        if header.stem not in families:
-            continue
         raw = header.read_text(errors="ignore")
         # The comment immediately before a declaration is its contract, and the
         # contract is where a count or a distinguished refusal is stated.
@@ -204,13 +239,28 @@ def declarations(root: Path, families: dict[str, str]) -> dict[str, dict]:
         text = re.sub(r"/\*.*?\*/", "", raw, flags=re.S)
         for match in DECL.finditer(text):
             returns = match.group("value") or match.group("pointer")
+            source = owner.get(match.group("name"))
+            if source is None:
+                # A declaration whose definition is in no DB1 .c file: an
+                # inline, a macro, or a symbol implemented elsewhere. Recorded
+                # rather than dropped, because "the survey silently skipped it"
+                # is exactly how windows.c stayed invisible.
+                unattributed.append(match.group("name"))
+                continue
+            if source not in families:
+                continue
             found[match.group("name")] = {
-                "family": families[header.stem],
-                "source": header.stem,
+                "family": families[source],
+                "source": source,
                 "returns": " ".join(returns.split()),
                 "params": " ".join(match.group("params").split()),
                 "contract": " ".join(documented.get(match.group("name"), "").split()),
             }
+    if unattributed:
+        print(f"survey: {len(unattributed)} declaration(s) define nothing in "
+              f"{SOURCE_DIR} and were not counted: "
+              f"{', '.join(sorted(unattributed)[:6])}"
+              f"{' ...' if len(unattributed) > 6 else ''}", file=sys.stderr)
     return found
 
 
@@ -247,6 +297,8 @@ def classify(params: str, enums: frozenset[str] = frozenset()) -> list[str]:
             tags.append("out_rows")
         elif JSON_IN.search(current):
             tags.append("json_in")
+        elif REPEATED_TEXT.search(current):
+            tags.append("repeated_text")
         elif ALLOC_OUT.search(current):
             tags.append("alloc_out")
         elif TEXT.search(current):

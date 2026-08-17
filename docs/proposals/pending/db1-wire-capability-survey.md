@@ -231,6 +231,29 @@ sources, and all four together unlock fourteen.
 
 The migration is no longer waiting on the wire. It is waiting on cutovers.
 
+## Attribution by filename, and what it hid
+
+A ninth mistake, and the one that had been there longest: a declaration counted
+only if its header's STEM matched a claimed source name. `windows.c` declares
+its API in `db1_windows.h`, and `db1_cron_jobs.c` in `cron_jobs.h`, so every
+operation in both was invisible — not reported as blocked, not counted at all.
+
+Attribution now goes by which `.c` file DEFINES the symbol, which is a fact
+rather than a naming convention. That moved the surface from 268 operations to
+302 and from 45 sources to 48.
+
+Two shapes surfaced with it. `char out[][N]` is the same parameter type as
+`char (*out)[N]` and was simply unmatched — an ordinary text column that looked
+unclassified. And `const char *const *terms, int term_count` is genuinely new:
+a variable-length list of strings as an ARGUMENT. The counted frame could carry
+it, but every operation declares a fixed arity today, so it is a capability
+(`repeated`, 2 operations) rather than a gap.
+
+The survey now REPORTS declarations it cannot attribute instead of dropping
+them, and that report immediately earned itself: six functions in `cron_jobs.h`
+are declared, defined nowhere, and called by nothing. The header advertises an
+API that does not exist.
+
 ## Two more blind spots, and the one that mattered
 
 A fifth and sixth counting mistake, found while sizing `agent_log`:
