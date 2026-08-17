@@ -209,6 +209,18 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
   useEffect(() => {
     if (!pending) return;
     let alive = true;
+    // Only a 2xx {status:"pending"} keeps us waiting. Everything else stops the
+    // poll and SAYS something.
+    //
+    // This used to branch on d.status alone and ignore the HTTP status entirely.
+    // Server refusals (writeJSONError) have the shape {error:"..."} with no
+    // `status` field, so a 403/500/503 parsed cleanly, matched neither "done"
+    // nor "error", and fell through to "keep polling" — leaving the user on
+    // "waiting…" forever with the real reason ("GitHub sign-in is not
+    // configured", "git sign-in requires a webchat user") sitting unread in the
+    // response body. A sign-in that cannot possibly complete must not look
+    // identical to one that is about to.
+    let consecutiveNetworkErrors = 0;
     const id = setInterval(async () => {
       try {
         const r =
@@ -218,18 +230,34 @@ export default function ConnectHosts({ onDone, onHostsChanged, doneLabel }: Conn
                 method: 'POST',
                 body: JSON.stringify({ provider: pending.provider, host: pending.host }),
               });
-        const d = await r.json();
+        const d = await r.json().catch(() => ({}) as Record<string, unknown>);
         if (!alive) return;
+        if (!r.ok) {
+          setPending(null);
+          setErr(String(d.error || `sign-in failed (${r.status})`));
+          return;
+        }
+        consecutiveNetworkErrors = 0;
         if (d.status === 'done') {
           setPending(null);
           setMsg(`${PROVIDERS[pending.provider].label} connected.`);
           await loadHosts();
         } else if (d.status === 'error') {
           setPending(null);
-          setErr(d.error || 'sign-in failed');
+          setErr(String(d.error || 'sign-in failed'));
+        } else if (d.status !== 'pending') {
+          // An unrecognised body is a contract break, not progress.
+          setPending(null);
+          setErr('unexpected response from the sign-in poll');
         }
       } catch {
-        /* transient; keep polling */
+        // Genuinely transient (server restart, dropped connection): retry, but
+        // do not retry forever in silence.
+        if (!alive) return;
+        if (++consecutiveNetworkErrors >= 12) {
+          setPending(null);
+          setErr('lost contact with the server while waiting for sign-in');
+        }
       }
     }, 5000);
     return () => {
