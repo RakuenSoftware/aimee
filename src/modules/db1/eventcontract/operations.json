@@ -69,6 +69,7 @@
     "wm"
    ],
    "retired_sources": [
+    "conv_context.c",
     "payload_rewrite_state.c",
     "wm.c"
    ]
@@ -89,6 +90,7 @@
     "db1_trigger"
    ],
    "retired_sources": [
+    "agent_log.c",
     "cognify_jobs.c"
    ]
   },
@@ -1104,6 +1106,610 @@
    }
   },
   {
+   "family": "conversation",
+   "id": 9,
+   "name": "conv_record_event",
+   "c_name": "db1_conv_record_event",
+   "c_params": [
+    "session_id",
+    "tool_name",
+    "tool_input",
+    "tool_result",
+    "result_bytes"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "tool_name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "tool_input",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "tool_result",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "result_bytes",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "event_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 10,
+   "name": "conv_set_chain_id",
+   "c_name": "db1_conv_set_chain_id",
+   "c_params": [
+    "event_id_first",
+    "event_id_last",
+    "chain_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "event_id_first",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "event_id_last",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "chain_id",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 11,
+   "name": "conv_insert_chain",
+   "c_name": "db1_conv_insert_chain",
+   "c_params": [
+    "session_id",
+    "event_id_first",
+    "event_id_last",
+    "tools",
+    "stub",
+    "raw_bytes",
+    "stub_bytes"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "event_id_first",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "event_id_last",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "tools",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "stub",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "raw_bytes",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "stub_bytes",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "chain_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 12,
+   "name": "conv_pending_events",
+   "c_name": "db1_conv_pending_events",
+   "c_params": [
+    "session_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "conv_tool_event_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "tool_name",
+      "type": "text"
+     },
+     {
+      "name": "tool_input",
+      "type": "text"
+     },
+     {
+      "name": "tool_result",
+      "type": "text"
+     },
+     {
+      "name": "result_bytes",
+      "type": "int"
+     },
+     {
+      "name": "chain_id",
+      "type": "int64"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 13,
+   "name": "conv_list_chains",
+   "c_name": "db1_conv_list_chains",
+   "c_params": [
+    "session_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "conv_tool_chain_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "event_id_first",
+      "type": "int64"
+     },
+     {
+      "name": "event_id_last",
+      "type": "int64"
+     },
+     {
+      "name": "tools",
+      "type": "text"
+     },
+     {
+      "name": "stub",
+      "type": "text"
+     },
+     {
+      "name": "raw_bytes",
+      "type": "int"
+     },
+     {
+      "name": "stub_bytes",
+      "type": "int"
+     },
+     {
+      "name": "state",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 14,
+   "name": "conv_chain_events",
+   "c_name": "db1_conv_chain_events",
+   "c_params": [
+    "chain_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "chain_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "conv_tool_event_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "tool_name",
+      "type": "text"
+     },
+     {
+      "name": "tool_input",
+      "type": "text"
+     },
+     {
+      "name": "tool_result",
+      "type": "text"
+     },
+     {
+      "name": "result_bytes",
+      "type": "int"
+     },
+     {
+      "name": "chain_id",
+      "type": "int64"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 15,
+   "name": "conv_search_chains",
+   "c_name": "db1_conv_search_chains",
+   "c_params": [
+    "session_id",
+    "query",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "query",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "conv_tool_chain_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "event_id_first",
+      "type": "int64"
+     },
+     {
+      "name": "event_id_last",
+      "type": "int64"
+     },
+     {
+      "name": "tools",
+      "type": "text"
+     },
+     {
+      "name": "stub",
+      "type": "text"
+     },
+     {
+      "name": "raw_bytes",
+      "type": "int"
+     },
+     {
+      "name": "stub_bytes",
+      "type": "int"
+     },
+     {
+      "name": "state",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 16,
+   "name": "conv_state_get",
+   "c_name": "db1_conv_state_get",
+   "c_params": [
+    "session_id",
+    "last_event_id_out",
+    "chain_count_out",
+    "event_count_out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "single",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "last_event_id",
+      "type": "int64"
+     },
+     {
+      "name": "chain_count",
+      "type": "int"
+     },
+     {
+      "name": "event_count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 128
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 17,
+   "name": "conv_state_update",
+   "c_name": "db1_conv_state_update",
+   "c_params": [
+    "session_id",
+    "last_event_id",
+    "chain_count",
+    "event_count"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "last_event_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "chain_count",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "event_count",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
    "family": "agent_work",
    "id": 1,
    "name": "cognify_enqueue",
@@ -1286,6 +1892,1044 @@
    "reply": {
     "fields": [],
     "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 5,
+   "name": "agent_log_insert",
+   "c_name": "db1_agent_log_insert",
+   "c_params": [
+    "row"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "db1_agent_log_insert_row_t",
+    "fields": [
+     {
+      "name": "agent_name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "role",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "latency_ms",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "success",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "turns",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "tool_calls",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "confidence",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "row_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 6,
+   "name": "agent_log_list_recent",
+   "c_name": "db1_agent_log_list_recent",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_log_display_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int"
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int"
+     },
+     {
+      "name": "latency_ms",
+      "type": "int"
+     },
+     {
+      "name": "success",
+      "type": "int"
+     },
+     {
+      "name": "turns",
+      "type": "int"
+     },
+     {
+      "name": "tool_calls",
+      "type": "int"
+     },
+     {
+      "name": "confidence",
+      "type": "int"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "error",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 7,
+   "name": "agent_log_list_by_session",
+   "c_name": "db1_agent_log_list_by_session",
+   "c_params": [
+    "session_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_log_display_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int64"
+     },
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int"
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int"
+     },
+     {
+      "name": "latency_ms",
+      "type": "int"
+     },
+     {
+      "name": "success",
+      "type": "int"
+     },
+     {
+      "name": "turns",
+      "type": "int"
+     },
+     {
+      "name": "tool_calls",
+      "type": "int"
+     },
+     {
+      "name": "confidence",
+      "type": "int"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "error",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 8,
+   "name": "agent_log_search_sessions_by_role",
+   "c_name": "db1_agent_log_search_session_ids_by_role",
+   "c_params": [
+    "pattern",
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "pattern",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 64,
+     "column": {
+      "kind": "text",
+      "width": "DB1_AL_SESSION_LEN"
+     }
+    },
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 9,
+   "name": "agent_log_count_per_role",
+   "c_name": "db1_agent_log_count_per_role",
+   "c_params": [
+    "since_or_null",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_log_role_count_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 10,
+   "name": "agent_log_failures_since",
+   "c_name": "db1_agent_log_failures_since_seconds",
+   "c_params": [
+    "max_rows",
+    "since_secs",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max_rows",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "since_secs",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_log_failure_t",
+    "list": {
+     "out": "out",
+     "bound": "max_rows",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "error",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 11,
+   "name": "agent_log_list_recent_errors",
+   "c_name": "db1_agent_log_list_recent_errors",
+   "c_params": [
+    "since_days",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since_days",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_log_recent_error_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "error",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 12,
+   "name": "agent_log_delegation_patterns",
+   "c_name": "db1_agent_log_list_delegation_patterns",
+   "c_params": [
+    "since_days",
+    "min_total",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since_days",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "min_total",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_log_delegation_pattern_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "wins",
+      "type": "int"
+     },
+     {
+      "name": "fails",
+      "type": "int"
+     },
+     {
+      "name": "total",
+      "type": "int"
+     },
+     {
+      "name": "avg_turns",
+      "type": "int"
+     },
+     {
+      "name": "avg_tools",
+      "type": "int"
+     },
+     {
+      "name": "recent_error",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 13,
+   "name": "agent_log_failure_seeds",
+   "c_name": "db1_agent_log_list_failure_episode_seeds",
+   "c_params": [
+    "since_days",
+    "min_fails",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since_days",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "min_fails",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_log_failure_episode_seed_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "fails",
+      "type": "int"
+     },
+     {
+      "name": "errors",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 14,
+   "name": "agent_log_metrics_by_role",
+   "c_name": "db1_agent_log_metrics_by_role",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_log_metric_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "total",
+      "type": "int"
+     },
+     {
+      "name": "successes",
+      "type": "int"
+     },
+     {
+      "name": "avg_latency_ms",
+      "type": "int"
+     },
+     {
+      "name": "tokens",
+      "type": "int64"
+     },
+     {
+      "name": "cache_write_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "cache_read_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "estimated_cost_usd",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 15,
+   "name": "agent_log_agent_stats",
+   "c_name": "db1_agent_log_agent_stats",
+   "c_params": [
+    "agent_name_or_null",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "agent_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_log_agent_stats_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "total_calls",
+      "type": "int"
+     },
+     {
+      "name": "total_prompt_tokens",
+      "type": "int"
+     },
+     {
+      "name": "total_completion_tokens",
+      "type": "int"
+     },
+     {
+      "name": "avg_latency_ms",
+      "type": "int"
+     },
+     {
+      "name": "success_rate",
+      "type": "double"
+     },
+     {
+      "name": "total_cache_write_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "total_cache_read_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "total_estimated_cost_usd",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 16,
+   "name": "agent_log_hud_summary",
+   "c_name": "db1_agent_log_hud_summary",
+   "c_params": [
+    "out",
+    "recent_secs"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "recent_secs",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_log_hud_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "total_calls",
+      "type": "int"
+     },
+     {
+      "name": "successful_calls",
+      "type": "int"
+     },
+     {
+      "name": "failed_calls",
+      "type": "int"
+     },
+     {
+      "name": "total_prompt_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "total_completion_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "total_turns",
+      "type": "int"
+     },
+     {
+      "name": "total_tool_calls",
+      "type": "int"
+     },
+     {
+      "name": "avg_latency_ms",
+      "type": "double"
+     },
+     {
+      "name": "recent_calls",
+      "type": "int"
+     },
+     {
+      "name": "recent_successes",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 512
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 17,
+   "name": "agent_log_session_outcome",
+   "c_name": "db1_agent_log_session_outcome",
+   "c_params": [
+    "session_id",
+    "successes_out",
+    "total_out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "successes",
+      "type": "int"
+     },
+     {
+      "name": "total",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 18,
+   "name": "agent_log_prometheus",
+   "c_name": "db1_agent_log_prometheus",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_log_prometheus_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "total",
+      "type": "int"
+     },
+     {
+      "name": "successes",
+      "type": "int"
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int"
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int"
+     },
+     {
+      "name": "avg_latency_ms",
+      "type": "int"
+     },
+     {
+      "name": "tool_calls",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 19,
+   "name": "agent_log_stats",
+   "c_name": "db1_agent_log_stats",
+   "c_params": [
+    "since_or_null",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_agent_log_stats_t",
+    "fields": [
+     {
+      "name": "total",
+      "type": "int"
+     },
+     {
+      "name": "turns",
+      "type": "int64"
+     },
+     {
+      "name": "tool_calls",
+      "type": "int64"
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "successes",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 256
    }
   }
  ]

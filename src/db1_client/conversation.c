@@ -16,6 +16,7 @@
  * generator emits, and reflowing generated output would put the file and the
  * catalog permanently one reformat apart. */
 /* clang-format off */
+#include "conv_context.h"
 #include "payload_rewrite_state.h"
 #include "wm.h"
 
@@ -406,6 +407,343 @@ int db1_wm_search_session_ids(const char *query, char (*out)[WM_SESSION_ID_LEN],
    }
    int rows = (int)(filled / 1u);
    return rows;
+}
+
+int64_t db1_conv_record_event(const char *session_id, const char *tool_name, const char *tool_input, const char *tool_result, int result_bytes)
+{
+   if (!session_id || !session_id[0] || !tool_name || !tool_name[0])
+      return -1;
+   char arg4[32];
+   snprintf(arg4, sizeof arg4, "%d", result_bytes);
+   const char *fields[] = {session_id, tool_name, tool_input ? tool_input : "", tool_result ? tool_result : "", arg4};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int status = call_stage(AIMEE_DB1_OP_CONV_RECORD_EVENT, fields, 5, values, caps, 1, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int64_t)strtoll(slot0, NULL, 10);
+}
+
+int db1_conv_set_chain_id(int64_t event_id_first, int64_t event_id_last, int64_t chain_id)
+{
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)event_id_first);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%lld", (long long)event_id_last);
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%lld", (long long)chain_id);
+   const char *fields[] = {arg0, arg1, arg2};
+   return write_result(call_stage(AIMEE_DB1_OP_CONV_SET_CHAIN_ID, fields, 3, NULL, NULL, 0, NULL));
+}
+
+int64_t db1_conv_insert_chain(const char *session_id, int64_t event_id_first, int64_t event_id_last, const char *tools, const char *stub, int raw_bytes, int stub_bytes)
+{
+   if (!session_id || !session_id[0])
+      return -1;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%lld", (long long)event_id_first);
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%lld", (long long)event_id_last);
+   char arg5[32];
+   snprintf(arg5, sizeof arg5, "%d", raw_bytes);
+   char arg6[32];
+   snprintf(arg6, sizeof arg6, "%d", stub_bytes);
+   const char *fields[] = {session_id, arg1, arg2, tools ? tools : "", stub ? stub : "", arg5, arg6};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int status = call_stage(AIMEE_DB1_OP_CONV_INSERT_CHAIN, fields, 7, values, caps, 1, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int64_t)strtoll(slot0, NULL, 10);
+}
+
+int db1_conv_pending_events(const char *session_id, conv_tool_event_t *out, int max)
+{
+   if (!session_id || !session_id[0] || !out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {session_id, arg1};
+   char **values = malloc((size_t)max * 8u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 8u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 3u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 8u + 0u] = scratch[row * 3u + 0u];
+      caps[row * 8u + 0u] = sizeof scratch[row * 3u + 0u];
+      values[row * 8u + 1u] = out[row].session_id;
+      caps[row * 8u + 1u] = sizeof out[row].session_id;
+      values[row * 8u + 2u] = out[row].tool_name;
+      caps[row * 8u + 2u] = sizeof out[row].tool_name;
+      values[row * 8u + 3u] = out[row].tool_input;
+      caps[row * 8u + 3u] = sizeof out[row].tool_input;
+      values[row * 8u + 4u] = out[row].tool_result;
+      caps[row * 8u + 4u] = sizeof out[row].tool_result;
+      values[row * 8u + 5u] = scratch[row * 3u + 1u];
+      caps[row * 8u + 5u] = sizeof scratch[row * 3u + 1u];
+      values[row * 8u + 6u] = scratch[row * 3u + 2u];
+      caps[row * 8u + 6u] = sizeof scratch[row * 3u + 2u];
+      values[row * 8u + 7u] = out[row].created_at;
+      caps[row * 8u + 7u] = sizeof out[row].created_at;
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_CONV_PENDING_EVENTS, fields, 2, values, caps,
+                           (uint32_t)(max * 8), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 8u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 8u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].id = (int64_t)strtoll(scratch[row * 3u + 0u], NULL, 10);
+      out[row].result_bytes = (int)strtol(scratch[row * 3u + 1u], NULL, 10);
+      out[row].chain_id = (int64_t)strtoll(scratch[row * 3u + 2u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_conv_list_chains(const char *session_id, conv_tool_chain_t *out, int max)
+{
+   if (!session_id || !session_id[0] || !out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {session_id, arg1};
+   char **values = malloc((size_t)max * 10u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 10u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 5u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 10u + 0u] = scratch[row * 5u + 0u];
+      caps[row * 10u + 0u] = sizeof scratch[row * 5u + 0u];
+      values[row * 10u + 1u] = out[row].session_id;
+      caps[row * 10u + 1u] = sizeof out[row].session_id;
+      values[row * 10u + 2u] = scratch[row * 5u + 1u];
+      caps[row * 10u + 2u] = sizeof scratch[row * 5u + 1u];
+      values[row * 10u + 3u] = scratch[row * 5u + 2u];
+      caps[row * 10u + 3u] = sizeof scratch[row * 5u + 2u];
+      values[row * 10u + 4u] = out[row].tools;
+      caps[row * 10u + 4u] = sizeof out[row].tools;
+      values[row * 10u + 5u] = out[row].stub;
+      caps[row * 10u + 5u] = sizeof out[row].stub;
+      values[row * 10u + 6u] = scratch[row * 5u + 3u];
+      caps[row * 10u + 6u] = sizeof scratch[row * 5u + 3u];
+      values[row * 10u + 7u] = scratch[row * 5u + 4u];
+      caps[row * 10u + 7u] = sizeof scratch[row * 5u + 4u];
+      values[row * 10u + 8u] = out[row].state;
+      caps[row * 10u + 8u] = sizeof out[row].state;
+      values[row * 10u + 9u] = out[row].created_at;
+      caps[row * 10u + 9u] = sizeof out[row].created_at;
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_CONV_LIST_CHAINS, fields, 2, values, caps,
+                           (uint32_t)(max * 10), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 10u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 10u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].id = (int64_t)strtoll(scratch[row * 5u + 0u], NULL, 10);
+      out[row].event_id_first = (int64_t)strtoll(scratch[row * 5u + 1u], NULL, 10);
+      out[row].event_id_last = (int64_t)strtoll(scratch[row * 5u + 2u], NULL, 10);
+      out[row].raw_bytes = (int)strtol(scratch[row * 5u + 3u], NULL, 10);
+      out[row].stub_bytes = (int)strtol(scratch[row * 5u + 4u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_conv_chain_events(int64_t chain_id, conv_tool_event_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%lld", (long long)chain_id);
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {arg0, arg1};
+   char **values = malloc((size_t)max * 8u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 8u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 3u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 8u + 0u] = scratch[row * 3u + 0u];
+      caps[row * 8u + 0u] = sizeof scratch[row * 3u + 0u];
+      values[row * 8u + 1u] = out[row].session_id;
+      caps[row * 8u + 1u] = sizeof out[row].session_id;
+      values[row * 8u + 2u] = out[row].tool_name;
+      caps[row * 8u + 2u] = sizeof out[row].tool_name;
+      values[row * 8u + 3u] = out[row].tool_input;
+      caps[row * 8u + 3u] = sizeof out[row].tool_input;
+      values[row * 8u + 4u] = out[row].tool_result;
+      caps[row * 8u + 4u] = sizeof out[row].tool_result;
+      values[row * 8u + 5u] = scratch[row * 3u + 1u];
+      caps[row * 8u + 5u] = sizeof scratch[row * 3u + 1u];
+      values[row * 8u + 6u] = scratch[row * 3u + 2u];
+      caps[row * 8u + 6u] = sizeof scratch[row * 3u + 2u];
+      values[row * 8u + 7u] = out[row].created_at;
+      caps[row * 8u + 7u] = sizeof out[row].created_at;
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_CONV_CHAIN_EVENTS, fields, 2, values, caps,
+                           (uint32_t)(max * 8), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 8u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 8u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].id = (int64_t)strtoll(scratch[row * 3u + 0u], NULL, 10);
+      out[row].result_bytes = (int)strtol(scratch[row * 3u + 1u], NULL, 10);
+      out[row].chain_id = (int64_t)strtoll(scratch[row * 3u + 2u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_conv_search_chains(const char *session_id, const char *query, conv_tool_chain_t *out, int max)
+{
+   if (!session_id || !session_id[0] || !query || !query[0] || !out || max <= 0)
+      return -1;
+   if (max > 64)
+      max = 64;
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", max);
+   const char *fields[] = {session_id, query, arg2};
+   char **values = malloc((size_t)max * 10u * sizeof *values);
+   size_t *caps = malloc((size_t)max * 10u * sizeof *caps);
+   char (*scratch)[32] = malloc((size_t)max * 5u * sizeof *scratch);
+   if (!values || !caps || !scratch)
+   {
+      free(values);
+      free(caps);
+      free(scratch);
+      return -1;
+   }
+   memset(out, 0, (size_t)max * sizeof *out);
+   for (int row = 0; row < max; ++row)
+   {
+      values[row * 10u + 0u] = scratch[row * 5u + 0u];
+      caps[row * 10u + 0u] = sizeof scratch[row * 5u + 0u];
+      values[row * 10u + 1u] = out[row].session_id;
+      caps[row * 10u + 1u] = sizeof out[row].session_id;
+      values[row * 10u + 2u] = scratch[row * 5u + 1u];
+      caps[row * 10u + 2u] = sizeof scratch[row * 5u + 1u];
+      values[row * 10u + 3u] = scratch[row * 5u + 2u];
+      caps[row * 10u + 3u] = sizeof scratch[row * 5u + 2u];
+      values[row * 10u + 4u] = out[row].tools;
+      caps[row * 10u + 4u] = sizeof out[row].tools;
+      values[row * 10u + 5u] = out[row].stub;
+      caps[row * 10u + 5u] = sizeof out[row].stub;
+      values[row * 10u + 6u] = scratch[row * 5u + 3u];
+      caps[row * 10u + 6u] = sizeof scratch[row * 5u + 3u];
+      values[row * 10u + 7u] = scratch[row * 5u + 4u];
+      caps[row * 10u + 7u] = sizeof scratch[row * 5u + 4u];
+      values[row * 10u + 8u] = out[row].state;
+      caps[row * 10u + 8u] = sizeof out[row].state;
+      values[row * 10u + 9u] = out[row].created_at;
+      caps[row * 10u + 9u] = sizeof out[row].created_at;
+   }
+   uint32_t filled = 0;
+   int status = call_stage(AIMEE_DB1_OP_CONV_SEARCH_CHAINS, fields, 3, values, caps,
+                           (uint32_t)(max * 10), &filled);
+   free(values);
+   free(caps);
+   if (status != (int)AIMEE_DB1_STATUS_OK || filled % 10u != 0u)
+   {
+      free(scratch);
+      return -1;
+   }
+   int rows = (int)(filled / 10u);
+   for (int row = 0; row < rows; ++row)
+   {
+      out[row].id = (int64_t)strtoll(scratch[row * 5u + 0u], NULL, 10);
+      out[row].event_id_first = (int64_t)strtoll(scratch[row * 5u + 1u], NULL, 10);
+      out[row].event_id_last = (int64_t)strtoll(scratch[row * 5u + 2u], NULL, 10);
+      out[row].raw_bytes = (int)strtol(scratch[row * 5u + 3u], NULL, 10);
+      out[row].stub_bytes = (int)strtol(scratch[row * 5u + 4u], NULL, 10);
+   }
+   free(scratch);
+   return rows;
+}
+
+int db1_conv_state_get(const char *session_id, int64_t *last_event_id_out, int *chain_count_out, int *event_count_out)
+{
+   if (!session_id || !session_id[0] || !last_event_id_out || !chain_count_out || !event_count_out)
+      return -1;
+   const char *fields[] = {session_id};
+   char slot0[32];
+   char slot1[32];
+   char slot2[32];
+   char *const values[] = {slot0, slot1, slot2};
+   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2};
+   int status = call_stage(AIMEE_DB1_OP_CONV_STATE_GET, fields, 1, values, caps, 3, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   *last_event_id_out = (int64_t)strtoll(slot0, NULL, 10);
+   *chain_count_out = (int)strtol(slot1, NULL, 10);
+   *event_count_out = (int)strtol(slot2, NULL, 10);
+   return 0;
+}
+
+int db1_conv_state_update(const char *session_id, int64_t last_event_id, int chain_count, int event_count)
+{
+   if (!session_id || !session_id[0])
+      return -1;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%lld", (long long)last_event_id);
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", chain_count);
+   char arg3[32];
+   snprintf(arg3, sizeof arg3, "%d", event_count);
+   const char *fields[] = {session_id, arg1, arg2, arg3};
+   return write_result(call_stage(AIMEE_DB1_OP_CONV_STATE_UPDATE, fields, 4, NULL, NULL, 0, NULL));
 }
 
 /* clang-format on */

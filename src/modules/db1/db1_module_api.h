@@ -70,6 +70,15 @@
 #define AIMEE_DB1_OP_WM_ASSEMBLE_CONTEXT   6u
 #define AIMEE_DB1_OP_REWRITE_RECORD        7u
 #define AIMEE_DB1_OP_WM_SEARCH_SESSION_IDS 8u
+#define AIMEE_DB1_OP_CONV_RECORD_EVENT     9u
+#define AIMEE_DB1_OP_CONV_SET_CHAIN_ID     10u
+#define AIMEE_DB1_OP_CONV_INSERT_CHAIN     11u
+#define AIMEE_DB1_OP_CONV_PENDING_EVENTS   12u
+#define AIMEE_DB1_OP_CONV_LIST_CHAINS      13u
+#define AIMEE_DB1_OP_CONV_CHAIN_EVENTS     14u
+#define AIMEE_DB1_OP_CONV_SEARCH_CHAINS    15u
+#define AIMEE_DB1_OP_CONV_STATE_GET        16u
+#define AIMEE_DB1_OP_CONV_STATE_UPDATE     17u
 
 /* Family 4: queued agent work: logs, coordination jobs and the cron that
  * drives them. */
@@ -77,10 +86,25 @@
 #define AIMEE_DB1_EVENT_AGENT_WORK 11780u
 #define AIMEE_DB1_STAGE_AGENT_WORK 4u
 
-#define AIMEE_DB1_OP_COGNIFY_ENQUEUE    1u
-#define AIMEE_DB1_OP_COGNIFY_STATUS     2u
-#define AIMEE_DB1_OP_COGNIFY_CLAIM_NEXT 3u
-#define AIMEE_DB1_OP_COGNIFY_MARK       4u
+#define AIMEE_DB1_OP_COGNIFY_ENQUEUE                   1u
+#define AIMEE_DB1_OP_COGNIFY_STATUS                    2u
+#define AIMEE_DB1_OP_COGNIFY_CLAIM_NEXT                3u
+#define AIMEE_DB1_OP_COGNIFY_MARK                      4u
+#define AIMEE_DB1_OP_AGENT_LOG_INSERT                  5u
+#define AIMEE_DB1_OP_AGENT_LOG_LIST_RECENT             6u
+#define AIMEE_DB1_OP_AGENT_LOG_LIST_BY_SESSION         7u
+#define AIMEE_DB1_OP_AGENT_LOG_SEARCH_SESSIONS_BY_ROLE 8u
+#define AIMEE_DB1_OP_AGENT_LOG_COUNT_PER_ROLE          9u
+#define AIMEE_DB1_OP_AGENT_LOG_FAILURES_SINCE          10u
+#define AIMEE_DB1_OP_AGENT_LOG_LIST_RECENT_ERRORS      11u
+#define AIMEE_DB1_OP_AGENT_LOG_DELEGATION_PATTERNS     12u
+#define AIMEE_DB1_OP_AGENT_LOG_FAILURE_SEEDS           13u
+#define AIMEE_DB1_OP_AGENT_LOG_METRICS_BY_ROLE         14u
+#define AIMEE_DB1_OP_AGENT_LOG_AGENT_STATS             15u
+#define AIMEE_DB1_OP_AGENT_LOG_HUD_SUMMARY             16u
+#define AIMEE_DB1_OP_AGENT_LOG_SESSION_OUTCOME         17u
+#define AIMEE_DB1_OP_AGENT_LOG_PROMETHEUS              18u
+#define AIMEE_DB1_OP_AGENT_LOG_STATS                   19u
 
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and
