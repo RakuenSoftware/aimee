@@ -358,7 +358,14 @@ the artifact commit successful while omitting the optional `mdl-v1` feature row,
 scoring-failure behavior. This moves total debt from 181 to 180 and injected-contract debt from 42
 to 41 without copying the MDL implementation or its zstd dependency into DB2.
 
-The remaining 41 non-system rows are sibling-contract migration debt. Session identity, briefing
+The twenty-fifth reduction replaces DB2 typed-fact commit's direct memory-gate call with a
+startup-installed verdict contract. The KB host adapter encodes the bounded memory-module request
+and obtains the authoritative verdict over the event bus; DB2 accepts only its pure verdict range
+and returns `FACT_GATE_DEFER` without writing when the provider is absent, fails, or supplies an
+invalid verdict. This moves total debt from 180 to 179 and injected-contract debt from 41 to 40
+without giving DB2 ownership of memory policy.
+
+The remaining 40 non-system rows are sibling-contract migration debt. Session identity, briefing
 rendering, executable lifecycle, configuration, memory, and other host calls must close through
 their reviewed process contracts before activation; they are not portable-support candidates. Rows
 may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide

@@ -1237,6 +1237,25 @@
     },
     {
       "consumers": [
+        "src/tests/test_fact_ingest.c",
+        "src/tests/test_fact_lifecycle.c",
+        "src/tests/test_fact_recall.c",
+        "src/tests/test_rel_types_store.c",
+        "src/tests/test_typed_facts.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/rel_types_store.h",
+          "line": 31
+        }
+      ],
+      "signature": "void aimee_db2_register_fact_gate_provider ( db2_fact_gate_fn provider )",
+      "signature_sha256": "8f2225aa4902b730d36b0d307d6312d7ad44dc383db012512b86283e2c93ef94",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_fact_gate_provider"
+    },
+    {
+      "consumers": [
         "src/tests/test_artifacts.c"
       ],
       "locations": [
@@ -8000,7 +8019,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 45
+          "line": 60
         }
       ],
       "signature": "fact_gate_verdict_t db2_fact_commit ( const char * source , memory_node_kind_t head_kind , const char * rel_type , const char * target , memory_node_kind_t tail_kind , fact_authority_t authority , int enabled )",
@@ -18512,7 +18531,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 28
+          "line": 43
         }
       ],
       "signature": "int db2_rel_types_active ( const char * rel_type )",
@@ -18532,7 +18551,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 20
+          "line": 35
         }
       ],
       "signature": "int db2_rel_types_ensure_seed ( void )",
@@ -18547,7 +18566,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 24
+          "line": 39
         }
       ],
       "signature": "int db2_rel_types_resolve ( const char * rel_type , long * out_id )",
@@ -18562,7 +18581,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 33
+          "line": 48
         }
       ],
       "signature": "long db2_rel_types_stage_provisional ( const char * rel_type )",
@@ -23735,15 +23754,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "953e4e1bfebd4f7b2a276d968dab7509ade957a801ed71c9334f32e56b5cba89",
+  "fingerprint": "4355164d3f5671d14a4cfaaf2388965d5979ec9e7039c698c9c657be2bd2d5bc",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 895,
-    "declarations": 1352,
+    "declarations": 1353,
     "headers": 136,
     "internal_unconsumed": 141,
-    "private_test_only": 254,
+    "private_test_only": 255,
     "reviewed": 62
   }
 }

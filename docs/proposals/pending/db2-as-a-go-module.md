@@ -6,8 +6,8 @@
   closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
   support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
   deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
-  link remains blocked by 41 sibling contracts. Its closure records 180 external symbols: 139
-  declared system links and those 41 injected contracts; portable API debt is zero. This is
+  link remains blocked by 40 sibling contracts. Its closure records 179 external symbols: 139
+  declared system links and those 40 injected contracts; portable API debt is zero. This is
   explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
@@ -549,6 +549,12 @@ returns only the candidate, residual, and total scalar values DB2 persists; the 
 existing canonical scorer and retains ownership of zstd and ranking internals. Missing or failed
 scoring omits the optional feature row without failing the artifact commit, preserving the previous
 scorer-failure behavior while removing the direct KB link.
+
+Typed-fact commits now accept their ontology verdict through a startup-installed host contract. The
+KB adapter encodes the bounded memory-module request and obtains the authoritative verdict over the
+event bus, while DB2 validates only the bounded pure-verdict range. A missing, failed, or invalid provider returns
+`FACT_GATE_DEFER` and cannot write a semantic edge, preserving the gate's authoritative fail-closed
+behavior without linking the memory implementation into DB2.
 
 The closure compiler now matches the production standalone mode by disabling DB1 and the DB2
 SQLite test shim. SQLite compatibility remains tested separately, but its weak DB1 cache hook and
