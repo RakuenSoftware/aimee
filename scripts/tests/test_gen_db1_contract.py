@@ -345,9 +345,16 @@ class CatalogTests(unittest.TestCase):
         header = contract.header_bytes(catalog)
         families = catalog["families"]
         for name, family in families.items():
-            if not family["active"]:
-                self.assertNotIn(name.upper(), header,
-                                 f"reserved family {name} leaked into the wire header")
+            if family["active"]:
+                continue
+            # The family's own constants, not its bare name. A reserved family
+            # called "delegation" shares a substring with the perfectly legal
+            # AIMEE_DB1_OP_AGENT_LOG_DELEGATION_PATTERNS, and matching the name
+            # made an ordinary operation look like a leak.
+            for constant in (f"AIMEE_DB1_EVENT_{name.upper()}",
+                             f"AIMEE_DB1_STAGE_{name.upper()}"):
+                self.assertNotIn(constant, header,
+                                 f"reserved family {name} leaked {constant} into the wire header")
 
     def test_every_db1_source_is_claimed_exactly_once(self) -> None:
         # The property that makes the catalog a map: an unclaimed domain is one

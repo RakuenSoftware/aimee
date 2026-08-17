@@ -382,6 +382,8 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
             fail("request-field-duplicate", f"{name} repeats a request field")
 
         reply_keys = {"fields", "max_bytes"}
+        if "out" in operation["reply"]:
+            reply_keys = reply_keys | {"out"}
         if "scalars" in operation["reply"]:
             reply_keys = reply_keys | {"scalars"}
         if "struct" in operation["reply"]:
@@ -1052,8 +1054,51 @@ def domain_headers(root: Path, operations: list[dict[str, object]]) -> list[str]
     return sorted(found)
 
 
+def declared_return(root: Path, symbol: str) -> str:
+    """The return type the header actually spells for `symbol`.
+
+    int64_t and long long are the same width and NOT the same type to the
+    compiler: on this platform int64_t is long int, so generating one where the
+    header says the other is a conflicting declaration. The header is the
+    contract; this reads it rather than assuming a spelling.
+    """
+    pattern = re.compile(r"([A-Za-z_][A-Za-z0-9_ ]*?)\s+" + re.escape(symbol) + r"\s*\(")
+    for header in sorted((root / SOURCE_DIR).glob("*.h")):
+        found = pattern.search(re.sub(r"/\*.*?\*/", "", header.read_text(errors="ignore"),
+                                      flags=re.S))
+        if found:
+            return " ".join(found.group(1).split())
+    return "int64_t"
+
+
+def pointer_members(root: Path, struct: str) -> set[str]:
+    """Members of `struct` that are pointers rather than inline arrays.
+
+    Only a pointer can be NULL. A char[N] member always has an address, so
+    "member ? member : \"\"" on one is a comparison the compiler knows is
+    always true -- a -Werror=address failure, and a tell that the question was
+    the wrong one. An array member CAN still be empty, which is why this is
+    separate from whether the field is required.
+    """
+    body = ""
+    for header in sorted((root / SOURCE_DIR).glob("*.h")):
+        found = re.search(r"typedef\s+struct\s*\{(.*?)\}\s*" + re.escape(struct) + r"\s*;",
+                          header.read_text(errors="ignore"), re.S)
+        if found:
+            body = found.group(1)
+            break
+    names: set[str] = set()
+    for member in body.split(";"):
+        member = re.sub(r"/\*.*?\*/", "", member, flags=re.S).strip()
+        matched = re.search(r"\*\s*([A-Za-z_][A-Za-z0-9_]*)$", member)
+        if matched:
+            names.add(matched.group(1))
+    return names
+
+
 def client_bytes(catalog: dict[str, object], family: dict[str, object],
-                 operations: list[dict[str, object]], headers: list[str]) -> str:
+                 operations: list[dict[str, object]], headers: list[str],
+                 root: Path) -> str:
     """Render one family's C client.
 
     Every body is the same three steps -- reject unusable arguments, name the
@@ -1133,6 +1178,13 @@ static int read_result(int status, const char *value_out)
             column = listed.get("column")
             inputs = [p for p in names if p != row_out]
             outputs = [row_out]
+        elif out_struct and "out" in reply:
+            # Some domains put the out parameter FIRST. Assuming it is last put
+            # the arguments in the wrong order with types that happened to
+            # compile as a different function.
+            row_out = str(reply["out"])
+            inputs = [p for p in names if p != row_out]
+            outputs = [row_out]
         else:
             split = 1 if in_struct else len(fields)
             inputs, outputs = names[:split], names[split:]
@@ -1175,6 +1227,11 @@ static int read_result(int status, const char *value_out)
                 declared[row_out] = f"{out_struct} *{row_out}"
             params = [declared[p] for p in names]
             guards += [f"!{row_out}", f"{bound} <= 0"]
+        elif out_struct and "out" in reply:
+            declared_params = dict(zip(inputs, params))
+            declared_params[str(reply["out"])] = f"{out_struct} *{reply['out']}"
+            params = [declared_params[p] for p in names]
+            guards += [f"!{reply['out']}"]
         elif out_struct:
             params += [f"{out_struct} *{outputs[0]}"]
             guards += [f"!{outputs[0]}"]
@@ -1182,7 +1239,8 @@ static int read_result(int status, const char *value_out)
             params += [f"char *{outputs[0]}", f"size_t {outputs[1]}"]
             guards += [f"!{outputs[0]}", f"{outputs[1]} == 0"]
         kind = ("char *" if returns_text
-                else "int64_t " if returns_id else "int ")
+                else f"{declared_return(root, str(operation['c_name']))} " if returns_id
+                else "int ")
         signature = f"{kind}{operation['c_name']}({', '.join(params)})"
         body = [signature, "{"]
         empty = "NULL" if returns_text else "-1"
@@ -1201,11 +1259,18 @@ static int read_result(int status, const char *value_out)
         # separate numeric type on the wire would buy nothing a printf does not.
         carried = []
         sources = ([f"{inputs[0]}->{f}" for f in fields] if in_struct else list(inputs))
+        # Only a pointer member can be NULL; an inline array always has an
+        # address. None means "these are bare arguments", which always can be.
+        member_pointers = pointer_members(root, in_struct) if in_struct else None
         for position, (source, kind, need) in enumerate(zip(sources, types, required)):
             local = f"arg{position}"
-            if kind == "text" and not need and not in_struct:
+            nullable = (member_pointers is None or source.split("->")[-1] in member_pointers)
+            if kind == "text" and not need and nullable:
                 # The domains already read NULL as empty; the wire says so too
-                # rather than refusing a caller that leaves a value out.
+                # rather than refusing a caller that leaves a value out. This
+                # applies to a struct's members as much as to a bare argument:
+                # a row with a nullable "error" is the ordinary case, and
+                # excluding struct members here refused those calls outright.
                 carried.append(f"{source} ? {source} : \"\"")
                 continue
             if kind in NUMERIC:
@@ -1414,7 +1479,7 @@ def validate_clients(root: Path, catalog: dict[str, object], write: bool) -> Non
     for family, operations in client_families(catalog):
         path = root / CLIENT_DIR / f"{family['name']}.c"
         expected = client_bytes(catalog, family, operations,
-                                domain_headers(root, operations))
+                                domain_headers(root, operations), root)
         if write:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(expected, encoding="utf-8")
@@ -1662,7 +1727,7 @@ INT_INCLUDES = """#include <errno.h>
 
 
 def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
-                headers: list[str]) -> str:
+                headers: list[str], root: Path) -> str:
     name = str(family["name"])
     cases = []
     for operation in operations:
@@ -1680,6 +1745,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         if in_struct:
             # Rebuild the row the caller flattened, then hand the domain the
             # struct it has always taken.
+            in_struct_pointers = pointer_members(root, in_struct)
             parse.append(f"      {in_struct} row;\n      memset(&row, 0, sizeof row);\n")
             for position, (member, kind) in enumerate(zip(names, types)):
                 if kind in NUMERIC:
@@ -1689,8 +1755,14 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                                  f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
                                  f"      }}\n")
                 else:
-                    parse.append(f"      snprintf(row.{member}, sizeof row.{member}, \"%s\", "
-                                 f"field[{position}]);\n")
+                    if member in in_struct_pointers:
+                        # A const char * member is assigned, not copied into:
+                        # sizeof would be the pointer's, and it is const. The
+                        # field points into scratch, which outlives the call.
+                        parse.append(f"      row.{member} = field[{position}];\n")
+                    else:
+                        parse.append(f"      snprintf(row.{member}, sizeof row.{member}, "
+                                     f"\"%s\", field[{position}]);\n")
             args.append("&row")
         else:
             for position, kind in enumerate(types):
@@ -1824,7 +1896,16 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             # exactly what it did.
             slot = f"row_{out_struct}"
             parse.append(f"      memset(&{slot}, 0, sizeof {slot});\n")
-            args.append(f"&{slot}")
+            if "out" in reply and "c_params" in operation:
+                # The out parameter is not always last. Ordering the call by
+                # c_params rather than by append order is the same fix the
+                # client needed, and the stage got it wrong the same way.
+                row_out = str(reply["out"])
+                by_name = dict(zip([p for p in operation["c_params"] if p != row_out], args))
+                by_name[row_out] = f"&{slot}"
+                args = [by_name[p] for p in operation["c_params"]]
+            else:
+                args.append(f"&{slot}")
             numeric = 0
             for index, (member, kind) in enumerate(members):
                 if kind in NUMERIC:
@@ -1956,7 +2037,7 @@ def stages_header_bytes(catalog: dict[str, object]) -> str:
 
 def validate_stages(root: Path, catalog: dict[str, object], write: bool) -> None:
     wanted = {(root / SOURCE_DIR / f"{family['name']}_stage.c"):
-              stage_bytes(family, operations, domain_headers(root, operations))
+              stage_bytes(family, operations, domain_headers(root, operations), root)
               for family, operations in client_families(catalog)}
     wanted[root / STAGES_HEADER] = stages_header_bytes(catalog)
     for path, expected in wanted.items():
