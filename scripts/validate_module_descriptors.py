@@ -227,7 +227,11 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
     if identifier not in required | optional:
         fail("module-unknown", f"unknown module ID {identifier!r}", "/id")
     required_keys = BASE_KEYS | ({"enabled_by_default"} if identifier in optional else set())
-    allowed_keys = required_keys | set(OWNERSHIP_FIELDS) | {"ownership_complete", "c_build"}
+    # c_init names a symbol the module's process must call before it serves.
+    # Optional, because most modules hold no process-wide state; declared here
+    # rather than inferred, so "this module needs opening" is reviewable.
+    allowed_keys = (required_keys | set(OWNERSHIP_FIELDS)
+                    | {"ownership_complete", "c_build", "c_init"})
     if not required_keys <= set(value) or not set(value) <= allowed_keys:
         fail(
             "descriptor-keys",

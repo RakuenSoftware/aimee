@@ -6,6 +6,7 @@
  "infrastructure_sources": [
   "db",
   "db1_init",
+  "db1_module_init",
   "db1_time",
   "db1_write",
   "db_schema",

@@ -673,6 +673,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-db1-git-ownership-client \
                $(TESTPREFIX)/unit-test-db1-conversation-client \
                $(TESTPREFIX)/unit-test-db1-agent-work-client \
+               $(TESTPREFIX)/unit-test-db1-module-bus \
                $(TESTPREFIX)/unit-test-db1-roundtable-pipeline \
                $(TESTPREFIX)/unit-test-roundtable-pipeline-eval \
                $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk \
@@ -4998,6 +4999,45 @@ $(TESTPREFIX)/unit-test-db1-git-ownership-client: \
                                        $(OBJDIR)/db1_client/git_ownership.o \
                                        $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+# The composition, not either half: the real module binary, the real bus, and
+# the ordinary generated clients the daemon links. Deliberately links
+# DB1_CLIENT_OBJS and NOT the DB1 domain -- linking the domain would answer
+# every call in-process and prove nothing about the module.
+$(TESTPREFIX)/unit-test-db1-module-bus: \
+                                       $(OBJDIR)/tests/test_db1_module_bus.o \
+                                       $(DB1_CLIENT_OBJS) \
+                                       $(OBS_BUS_LINK_OBJS) \
+                                       $(OBJDIR)/core/event_bus/bus_client.o \
+                                       $(OBJDIR)/core/event_bus/bus_attach.o \
+                                       $(OBJDIR)/core/event_bus/bus_host.o \
+                                       $(OBJDIR)/core/event_bus/bus_route.o \
+                                       $(OBJDIR)/core/event_bus/bus_region.o \
+                                       $(OBJDIR)/core/event_bus/bus_region_host.o \
+                                       $(OBJDIR)/core/event_bus/bus_ring.o \
+                                       $(OBJDIR)/core/event_bus/bus_arena.o \
+                                       $(OBJDIR)/core/event_bus/bus_wire.o \
+                                       $(OBJDIR)/core/event_bus/bus_capture.o \
+                                       $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o \
+                                       $(OBJDIR)/modules/config/config.o \
+                                       $(OBJDIR)/platform_random.o \
+                                       $(OBJDIR)/posix/platform_random.o \
+                                       $(OBJDIR)/aimee_home.o \
+                                       $(OBJDIR)/posix/platform_path.o \
+                                       | $(OBJDIR)/aimee-module-db1
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+.PHONY: unit-test-db1-module-bus
+unit-test-db1-module-bus: $(TESTPREFIX)/unit-test-db1-module-bus $(OBJDIR)/aimee-module-db1
+	$< $(OBJDIR)/aimee-module-db1
+
+# The module binary is produced by the bundle exporter, not this Makefile: the
+# process contract owns which sources a module compiles, and duplicating that
+# list here would let the two drift.
+$(OBJDIR)/aimee-module-db1:
+	@rm -rf $(OBJDIR)/module-bundle
+	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/module-bundle >/dev/null
+	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/module-bundle --output $(abspath $(OBJDIR)) --placement server >/dev/null
 
 $(TESTPREFIX)/unit-test-db1-agent-work-client: \
                                        $(OBJDIR)/tests/test_db1_agent_work_client.o \
