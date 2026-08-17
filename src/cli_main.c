@@ -735,7 +735,17 @@ static int unsupported_client_command(const char *cmd, const char *subcmd, int j
    char msg[768];
    /* Only when the user actually typed a word: an empty cmd defaults `name` to
     * "launch", which is a real dispatch target that client_help[] does not list. */
-   if (cmd && cmd[0] && !client_cmd_known(name))
+   /* "Unknown" requires knowing what IS known. The catalogue comes from the
+    * server now, so with no catalogue the client cannot tell a typo from a real
+    * command it simply could not ask about — and calling a real command unknown
+    * sends the reader to fix their spelling instead of their connection, which
+    * is the mistake this whole function exists to avoid. */
+   if (cmd && cmd[0] && !cli_v1_manifest_commands())
+      snprintf(msg, sizeof(msg),
+               "cannot tell whether '%s' exists: no command catalogue from the server. "
+               "Check the server is reachable, then retry",
+               name);
+   else if (cmd && cmd[0] && !client_cmd_known(name))
       snprintf(msg, sizeof(msg), "unknown command '%s'; run 'aimee help --all' to list commands",
                name);
    else if (!client_cmd_available(name))
