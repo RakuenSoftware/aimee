@@ -44,6 +44,12 @@ def production_repo() -> tempfile.TemporaryDirectory[str]:
         build = descriptor.get("c_build")
         if isinstance(build, dict):
             include_roots.update(build.get("include_roots", []))
+            for header in build.get("generated_headers", []):
+                for entry in header.get("entries", []):
+                    relative = entry["source"]
+                    generated_input = repo / relative
+                    generated_input.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(REPO_ROOT / relative, generated_input)
     # The validator requires every c_build include root to be a real directory.
     # Only roots that happen to hold a descriptor-owned file appear from the
     # copies above, so materialize the rest: a module may legitimately include
@@ -228,6 +234,13 @@ class DescriptorTests(unittest.TestCase):
         descriptor = self.required()
         descriptor["c_build"] = {
             "compile_definitions": ["AIMEE_DB1_DISABLED"],
+            "generated_headers": [{
+                "entries": [{
+                    "source": "src/modules/memory/schema.sql",
+                    "symbol": "AIMEE_MEMORY_SCHEMA_SQL",
+                }],
+                "output": "schema_data.h",
+            }],
             "include_roots": ["src", "src/modules/memory"],
             "pkg_config": ["libpq"],
             "system_libraries": ["OpenSSL::Crypto", "m"],
@@ -251,6 +264,21 @@ class DescriptorTests(unittest.TestCase):
               "pkg_config": [], "system_libraries": []}, "c-build-token"),
             ({"compile_definitions": ["Z", "A"], "include_roots": ["src"],
               "pkg_config": [], "system_libraries": []}, "c-build-order"),
+            ({"generated_headers": "bad", "include_roots": ["src"],
+              "pkg_config": [], "system_libraries": []}, "c-build-type"),
+            ({"generated_headers": [{"output": "../bad.h", "entries": [
+                {"source": "src/schema.sql", "symbol": "SCHEMA_SQL"},
+            ]}], "include_roots": ["src"], "pkg_config": [],
+              "system_libraries": []}, "c-build-generated-output"),
+            ({"generated_headers": [{"output": "schema.h", "entries": [
+                {"source": "../schema.sql", "symbol": "SCHEMA_SQL"},
+            ]}], "include_roots": ["src"], "pkg_config": [],
+              "system_libraries": []}, "c-build-path"),
+            ({"generated_headers": [{"output": "schema.h", "entries": [
+                {"source": "src/a.sql", "symbol": "Z_SQL"},
+                {"source": "src/z.sql", "symbol": "A_SQL"},
+            ]}], "include_roots": ["src"], "pkg_config": [],
+              "system_libraries": []}, "c-build-order"),
             ({"include_roots": ["src"], "pkg_config": [],
               "system_libraries": [7]}, "c-build-type"),
         )

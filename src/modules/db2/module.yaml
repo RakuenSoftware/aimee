@@ -388,6 +388,21 @@
       "AIMEE_DB1_DISABLED",
       "AIMEE_DISABLE_DB2_SQLITE_SHIM"
     ],
+    "generated_headers": [
+      {
+        "entries": [
+          {
+            "source": "src/modules/db2/c/schema.sql",
+            "symbol": "AIMEE_DB2_SCHEMA_SQL"
+          },
+          {
+            "source": "src/modules/db2/c/schema_sqlite.sql",
+            "symbol": "AIMEE_DB2_SCHEMA_SQLITE_SQL"
+          }
+        ],
+        "output": "schema_data.h"
+      }
+    ],
     "include_roots": [
       "src",
       "src/headers",

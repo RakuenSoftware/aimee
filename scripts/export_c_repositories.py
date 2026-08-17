@@ -36,7 +36,7 @@ C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
 # audited standalone mode. Third-party sources a module compiles but does not
 # own are also optional; they remain restricted to src/vendor/ so "not owned"
 # cannot quietly mean "owned by somebody else".
-C_BUILD_OPTIONAL_KEYS = {"compile_definitions", "vendor_sources"}
+C_BUILD_OPTIONAL_KEYS = {"compile_definitions", "generated_headers", "vendor_sources"}
 VENDOR_ROOT = "src/vendor/"
 BUILD_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
 C_DEFINE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -224,6 +224,12 @@ def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[st
         if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
             raise ExportError(f"{module_id}: descriptor field {key} must be a string array")
         result.extend(values)
+    build = descriptor.get("c_build")
+    if isinstance(build, dict):
+        for header in c_generated_headers(module_id, build):
+            entries = header["entries"]
+            assert isinstance(entries, list)
+            result.extend(str(entry["source"]) for entry in entries)
     if len(result) != len(set(result)):
         raise ExportError(f"{module_id}: duplicate owned file")
     return result
@@ -310,9 +316,56 @@ int main(int argc, char **argv)
 """
 
 
+def c_generated_headers(module_id: str, build: dict[str, object]) -> list[dict[str, object]]:
+    """Return validated deterministic text-header declarations."""
+    generated = build.get("generated_headers", [])
+    if not isinstance(generated, list):
+        raise ExportError(f"{module_id}: c_build.generated_headers must be an array")
+    result: list[dict[str, object]] = []
+    previous_output = ""
+    for index, header in enumerate(generated):
+        if not isinstance(header, dict) or set(header) != {"entries", "output"}:
+            raise ExportError(f"{module_id}: generated header {index} has invalid keys")
+        output = header["output"]
+        pure_output = PurePosixPath(output) if isinstance(output, str) else None
+        if (not isinstance(output, str) or "\\" in output or output <= previous_output or
+                pure_output is None or pure_output.name != output or pure_output.suffix != ".h"):
+            raise ExportError(
+                f"{module_id}: generated header outputs must be sorted unique .h basenames")
+        previous_output = output
+        entries = header["entries"]
+        if not isinstance(entries, list) or not entries:
+            raise ExportError(f"{module_id}: {output} entries must be a nonempty array")
+        parsed: list[dict[str, str]] = []
+        previous_entry: tuple[str, str] | None = None
+        seen_symbols: set[str] = set()
+        for entry in entries:
+            if not isinstance(entry, dict) or set(entry) != {"source", "symbol"}:
+                raise ExportError(f"{module_id}: {output} entry has invalid keys")
+            source, symbol = entry["source"], entry["symbol"]
+            pure_source = PurePosixPath(source) if isinstance(source, str) else None
+            if (not isinstance(source, str) or not source or "\\" in source or
+                    pure_source is None or pure_source.is_absolute() or
+                    "." in pure_source.parts or ".." in pure_source.parts or
+                    pure_source.as_posix() != source):
+                raise ExportError(f"{module_id}: unsafe generated input {source!r}")
+            if not isinstance(symbol, str) or not C_DEFINE.fullmatch(symbol):
+                raise ExportError(f"{module_id}: unsafe generated symbol {symbol!r}")
+            key = (symbol, source)
+            if previous_entry is not None and key <= previous_entry:
+                raise ExportError(f"{module_id}: {output} entries must be sorted and unique")
+            if symbol in seen_symbols:
+                raise ExportError(f"{module_id}: {output} symbols must be unique")
+            previous_entry = key
+            seen_symbols.add(symbol)
+            parsed.append({"source": source, "symbol": symbol})
+        result.append({"output": output, "entries": parsed})
+    return result
+
+
 def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
-        list[str], list[str], list[str], list[str], list[str]]:
-    """Return validated C sources, includes, definitions, pkg-config deps, and links."""
+        list[str], list[str], list[str], list[dict[str, object]], list[str], list[str]]:
+    """Return validated C sources, includes, definitions, codegen, pkg-config, and links."""
     sources = descriptor.get("sources")
     if not isinstance(sources, list) or not sources or not all(isinstance(item, str) for item in sources):
         raise ExportError(f"{module_id}: C process must declare descriptor-owned sources")
@@ -374,15 +427,56 @@ def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
     # appended here rather than merged into `sources`, so ownership keeps
     # meaning what it says everywhere else.
     return (c_sources + list(vendored), parsed["include_roots"], definitions,
+            c_generated_headers(module_id, build),
             parsed["pkg_config"], parsed["system_libraries"])
 
 
 def c_process_cmake(module_id: str, binary: str, version: str,
                     descriptor: dict[str, object]) -> str:
     """Generate the standalone build for a descriptor-owned C process."""
-    sources, include_roots, definitions, pkg_config, libraries = c_process_build(
+    sources, include_roots, definitions, generated, pkg_config, libraries = c_process_build(
         module_id, descriptor)
     source_lines = "\n".join(f"    {source}" for source in sources)
+    generated_setup = ""
+    generated_source_lines = ""
+    generated_include_line = ""
+    if generated:
+        commands: list[str] = [
+            "find_package(Python3 REQUIRED COMPONENTS Interpreter)",
+            'set(MODULE_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")',
+        ]
+        outputs: list[str] = []
+        for header in generated:
+            output = str(header["output"])
+            entries = header["entries"]
+            assert isinstance(entries, list)
+            output_expr = f'${{MODULE_GENERATED_DIR}}/{output}'
+            outputs.append(output_expr)
+            entry_lines = "\n".join(
+                f'            --entry {entry["symbol"]} '
+                f'"${{CMAKE_CURRENT_SOURCE_DIR}}/{entry["source"]}"'
+                for entry in entries
+            )
+            dependency_lines = "\n".join(
+                f'        "${{CMAKE_CURRENT_SOURCE_DIR}}/{entry["source"]}"'
+                for entry in entries
+            )
+            commands.append(f"""add_custom_command(
+    OUTPUT "{output_expr}"
+    COMMAND ${{CMAKE_COMMAND}} -E make_directory "${{MODULE_GENERATED_DIR}}"
+    COMMAND ${{Python3_EXECUTABLE}}
+            "${{CMAKE_CURRENT_SOURCE_DIR}}/scripts/generate_c_embedded_header.py"
+            --output "{output_expr}"
+{entry_lines}
+    DEPENDS
+        "${{CMAKE_CURRENT_SOURCE_DIR}}/scripts/generate_c_embedded_header.py"
+{dependency_lines}
+    VERBATIM
+)
+""")
+        generated_setup = "\n".join(commands) + "\n"
+        generated_source_lines = "\n".join(f'    "{output}"' for output in outputs) + "\n"
+        generated_include_line = "    ${MODULE_GENERATED_DIR}\n"
     include_lines = "\n".join(
         f"    ${{CMAKE_CURRENT_SOURCE_DIR}}/{root}" for root in include_roots
     )
@@ -416,15 +510,17 @@ project(aimee_module_{module_id.replace('-', '_')} VERSION {version} LANGUAGES C
 
 include(GNUInstallDirs)
 find_package(aimee-core {version} EXACT CONFIG REQUIRED)
-{discovery_text}if(NOT TARGET aimee::aimee-core-event-bus-client)
+{discovery_text}{generated_setup}if(NOT TARGET aimee::aimee-core-event-bus-client)
     message(FATAL_ERROR "{binary} requires the Linux event-bus client")
 endif()
 add_executable({binary}
     runtime/main.c
+{generated_source_lines}\
 {source_lines}
 )
 target_compile_features({binary} PRIVATE c_std_11)
 target_include_directories({binary} PRIVATE
+{generated_include_line}\
 {include_lines}
 )
 {definition_block}target_link_libraries({binary} PRIVATE
@@ -607,6 +703,10 @@ serve={serve}
 """,
         )
         if runtime == "c":
+            build = descriptor.get("c_build")
+            assert isinstance(build, dict)
+            if c_generated_headers(module_id, build):
+                copy_file("scripts/generate_c_embedded_header.py", repository)
             write_text(
                 repository / "runtime/main.c",
                 module_main(module_id, principal_ref, stages, has_handler, init_symbol),
@@ -847,7 +947,7 @@ def export_runtime_bundle(output_root: Path) -> int:
         assert isinstance(runtime, str)
         runtimes[module_id] = runtime
         if runtime == "c":
-            sources, include_roots, definitions, pkg_config, libraries = c_process_build(
+            sources, include_roots, definitions, generated, pkg_config, libraries = c_process_build(
                 module_id, descriptor
             )
             has_handler = c_process_has_handler(sources)
@@ -857,7 +957,7 @@ def export_runtime_bundle(output_root: Path) -> int:
                 output_root / main_path,
                 module_main(module_id, principal_ref, stages, has_handler, init_symbol),
             )
-            c_builds.append({
+            build_row: dict[str, object] = {
                 "id": module_id,
                 "binary": binary,
                 "main": main_path,
@@ -866,7 +966,10 @@ def export_runtime_bundle(output_root: Path) -> int:
                 "compile_definitions": definitions,
                 "pkg_config": pkg_config,
                 "system_libraries": libraries,
-            })
+            }
+            if generated:
+                build_row["generated_headers"] = generated
+            c_builds.append(build_row)
         else:
             go_sources = descriptor.get("go_sources", [])
             if not isinstance(go_sources, list) or not go_sources:

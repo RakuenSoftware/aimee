@@ -10,7 +10,9 @@
   packaging, injected-contract, portable API, private-implementation, and dead-code debt are zero.
   The disabled-by-default runtime bundle now compiles all 138 DB2 owner translation units into a
   real `aimee-module-db2`, opens only from `AIMEE_DB2_URL`, and serves health through strong backend
-  symbols; missing or failed initialization refuses attachment without logging the DSN. This is
+  symbols; missing or failed initialization refuses attachment without logging the DSN. Its
+  descriptor also owns deterministic SQL-to-header generation, so a clean runtime-bundle build no
+  longer depends on a prior monolithic build writing `src/schema_data.h`. This is
   explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.

@@ -6,6 +6,8 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -58,6 +60,105 @@ class CProcessBuildTests(unittest.TestCase):
         descriptor["contracts"] = "src/modules/db2/eventcontract/operations.json"
         with self.assertRaisesRegex(exporter.ExportError, "contracts must be a string array"):
             exporter.module_owned_files("db2", descriptor)
+
+    def test_generated_header_inputs_are_owned_and_cmake_generates_out_of_tree(self) -> None:
+        descriptor = self.descriptor()
+        descriptor["c_build"]["generated_headers"] = [{
+            "entries": [
+                {"source": "src/modules/db2/c/schema.sql",
+                 "symbol": "AIMEE_DB2_SCHEMA_SQL"},
+                {"source": "src/modules/db2/c/schema_sqlite.sql",
+                 "symbol": "AIMEE_DB2_SCHEMA_SQLITE_SQL"},
+            ],
+            "output": "schema_data.h",
+        }]
+        owned = exporter.module_owned_files("db2", descriptor)
+        self.assertIn("src/modules/db2/c/schema.sql", owned)
+        self.assertIn("src/modules/db2/c/schema_sqlite.sql", owned)
+        cmake = exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor)
+        self.assertIn("find_package(Python3 REQUIRED COMPONENTS Interpreter)", cmake)
+        self.assertIn("scripts/generate_c_embedded_header.py", cmake)
+        self.assertIn("${MODULE_GENERATED_DIR}/schema_data.h", cmake)
+        self.assertIn("--entry AIMEE_DB2_SCHEMA_SQL", cmake)
+        self.assertIn("${CMAKE_CURRENT_SOURCE_DIR}/src/modules/db2/c/schema.sql", cmake)
+        self.assertIn("${MODULE_GENERATED_DIR}", cmake)
+
+    @unittest.skipUnless(shutil.which("cmake"), "cmake is not installed")
+    def test_generated_header_cmake_builds_from_a_clean_source_tree(self) -> None:
+        descriptor = self.descriptor()
+        descriptor["sources"] = ["src/modules/db2/store.c"]
+        descriptor["c_build"] = {
+            "generated_headers": [{
+                "entries": [{
+                    "source": "src/modules/db2/schema.sql",
+                    "symbol": "AIMEE_DB2_SCHEMA_SQL",
+                }],
+                "output": "schema_data.h",
+            }],
+            "include_roots": ["src/modules/db2"],
+            "pkg_config": [],
+            "system_libraries": [],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            module = root / "module"
+            prefix = root / "prefix/lib/cmake/aimee-core"
+            (module / "runtime").mkdir(parents=True)
+            (module / "scripts").mkdir()
+            (module / "grants").mkdir()
+            (module / "src/modules/db2").mkdir(parents=True)
+            prefix.mkdir(parents=True)
+            (module / "runtime/main.c").write_text(
+                "int embedded_value(void); int main(void) { return embedded_value(); }\n",
+                encoding="utf-8",
+            )
+            (module / "grants/module.grant.in").write_text(
+                "version=1\n", encoding="utf-8"
+            )
+            (module / "src/modules/db2/store.c").write_text(
+                '#include "schema_data.h"\n'
+                "int embedded_value(void) { return AIMEE_DB2_SCHEMA_SQL[0] == 's' ? 0 : 1; }\n",
+                encoding="utf-8",
+            )
+            (module / "src/modules/db2/schema.sql").write_text(
+                "select 1;\n", encoding="utf-8"
+            )
+            shutil.copy2(
+                REPO_ROOT / "scripts/generate_c_embedded_header.py",
+                module / "scripts/generate_c_embedded_header.py",
+            )
+            (module / "CMakeLists.txt").write_text(
+                exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor),
+                encoding="utf-8",
+            )
+            (prefix / "aimee-coreConfig.cmake").write_text(
+                "add_library(aimee-core-event-bus-client INTERFACE IMPORTED)\n"
+                "add_library(aimee::aimee-core-event-bus-client ALIAS "
+                "aimee-core-event-bus-client)\n",
+                encoding="utf-8",
+            )
+            (prefix / "aimee-coreConfigVersion.cmake").write_text(
+                'set(PACKAGE_VERSION "1.2.3")\n'
+                "set(PACKAGE_VERSION_COMPATIBLE TRUE)\n"
+                "set(PACKAGE_VERSION_EXACT TRUE)\n",
+                encoding="utf-8",
+            )
+            build = root / "build"
+            configured = subprocess.run(
+                ["cmake", "-S", str(module), "-B", str(build),
+                 f"-DCMAKE_PREFIX_PATH={root / 'prefix'}"],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+            )
+            self.assertEqual(configured.returncode, 0, configured.stderr)
+            compiled = subprocess.run(
+                ["cmake", "--build", str(build), "--parallel", "2"],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+            )
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            self.assertTrue((build / "generated/schema_data.h").is_file())
+            self.assertFalse((module / "schema_data.h").exists())
+            ran = subprocess.run([str(build / "aimee-module-db2")], check=False)
+            self.assertEqual(ran.returncode, 0)
 
     def test_cmake_compiles_every_owned_source_once(self) -> None:
         cmake = exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", self.descriptor())
@@ -120,6 +221,24 @@ class CProcessBuildTests(unittest.TestCase):
         descriptor["c_build"]["system_libraries"].sort()
         with self.assertRaisesRegex(exporter.ExportError, "unsupported imported CMake target"):
             exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor)
+
+        for generated, message in (
+            ([{"output": "../schema.h", "entries": [
+                {"source": "src/schema.sql", "symbol": "SCHEMA_SQL"},
+            ]}], "outputs"),
+            ([{"output": "schema.h", "entries": [
+                {"source": "../schema.sql", "symbol": "SCHEMA_SQL"},
+            ]}], "unsafe generated input"),
+            ([{"output": "schema.h", "entries": [
+                {"source": "src/schema.sql", "symbol": "BAD=1"},
+            ]}], "unsafe generated symbol"),
+        ):
+            descriptor = self.descriptor()
+            descriptor["c_build"]["generated_headers"] = generated
+            with self.subTest(message=message), self.assertRaisesRegex(
+                exporter.ExportError, message
+            ):
+                exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor)
 
     def test_repeated_imported_targets_discover_each_package_once(self) -> None:
         descriptor = self.descriptor()

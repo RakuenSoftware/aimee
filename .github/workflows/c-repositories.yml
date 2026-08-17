@@ -15,6 +15,7 @@ on:
       - "docs/modules/**"
       - "scripts/export_c_repositories.py"
       - "scripts/build_c_module_runtime_bundle.py"
+      - "scripts/generate_c_embedded_header.py"
       - "scripts/check_c_repository_lock.py"
       - "scripts/validate_module_process_contracts.py"
       - "scripts/check_go_module_runtime_bundle.py"
@@ -35,6 +36,7 @@ on:
       - "docs/modules/**"
       - "scripts/export_c_repositories.py"
       - "scripts/build_c_module_runtime_bundle.py"
+      - "scripts/generate_c_embedded_header.py"
       - "scripts/check_c_repository_lock.py"
       - "scripts/validate_module_process_contracts.py"
       - "scripts/check_go_module_runtime_bundle.py"
@@ -55,6 +57,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 -I -S scripts/validate_module_process_contracts.py
       - run: python3 -I scripts/tests/test_export_c_process_build.py -v
+      - run: python3 -I scripts/tests/test_generate_c_embedded_header.py -v
       - run: python3 -I scripts/tests/test_build_c_module_runtime_bundle.py -v
       - run: python3 -I scripts/check_go_module_runtime_bundle.py
       - run: cd server-go && CGO_ENABLED=0 go test ./bus ./modules/... ./cmd/aimee-module

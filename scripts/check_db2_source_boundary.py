@@ -104,6 +104,11 @@ ADMITTED_OUTBOUND_DEPENDENCIES = {
         "src/modules/css/css_analyze.h",
     ): (1, "module-private-api"),
     (
+        "src/modules/db2/c/db_schema.c",
+        "schema_data.h",
+        "src/schema_data.h",
+    ): (1, "generated-schema-input"),
+    (
         "src/modules/db2/c/db2_vault_witness_provider.h",
         "modules/vault/vault_witness_checkpoint.h",
         "src/modules/vault/vault_witness_checkpoint.h",

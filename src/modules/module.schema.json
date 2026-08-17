@@ -15,6 +15,42 @@
           "type": "array",
           "uniqueItems": true
         },
+        "generated_headers": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "entries": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "source": {
+                      "type": "string"
+                    },
+                    "symbol": {
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "symbol"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "output": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "entries",
+              "output"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "include_roots": {
           "items": {
             "type": "string"

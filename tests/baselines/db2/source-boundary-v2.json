@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "source_revision": "9c431e01de78a8725efc0b093e2544a4fc855a14",
+  "source_revision": "0d122a77119b36e51d7c03ec4d614609751d849d",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 138,
@@ -6603,16 +6603,16 @@
     },
     {
       "source": "src/modules/db2/c/db_schema.c",
-      "header": "../schema_data.h",
-      "resolved": "src/schema_data.h",
-      "classification": "generated-schema-input",
+      "header": "aimee.h",
+      "resolved": "src/headers/aimee.h",
+      "classification": "host-api",
       "count": 1
     },
     {
       "source": "src/modules/db2/c/db_schema.c",
-      "header": "aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
+      "header": "schema_data.h",
+      "resolved": "src/schema_data.h",
+      "classification": "generated-schema-input",
       "count": 1
     },
     {
@@ -7260,5 +7260,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "ad9eba03a9a2f086d0a51347d7733ab751655f91c6dd78490338c7cf99dd7192"
+  "fingerprint": "038a6b01b3567b22ad305cd5a0d368f2831bde65e74df824192b3577f150e902"
 }

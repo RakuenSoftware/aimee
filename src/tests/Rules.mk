@@ -5097,8 +5097,9 @@ $(OBJDIR)/aimee-module-db1:
 
 # DB2 is granted but not started by default in the KB image. This target proves
 # that its complete descriptor-owned source set still produces the executable
-# the grant names; schema_data.h is the ordinary tree-owned generated input.
-$(OBJDIR)/aimee-module-db2: schema_data.h
+# the grant names. The descriptor generates schema_data.h in the bundle build
+# directory, so this proof does not depend on a prior monolithic build.
+$(OBJDIR)/aimee-module-db2:
 	@rm -rf $(OBJDIR)/db2-module-bundle
 	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/db2-module-bundle >/dev/null
 	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/db2-module-bundle --output $(abspath $(OBJDIR)) --placement kb >/dev/null

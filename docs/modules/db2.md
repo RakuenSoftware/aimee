@@ -464,6 +464,10 @@ Build tooling exports and compiles `aimee-module-db2` from all 138 descriptor-ow
 units plus its reviewed support closure. The generated main opens the real backend before attaching;
 the health handler then reports the real schema, extension, and KB-table evidence. Test injection
 continues to cover every response and failure shape without providing a production fallback.
+The descriptor declares both canonical DB2 SQL inputs for deterministic text embedding. Runtime
+bundles generate `schema_data.h` in a temporary build directory, and standalone exports emit the
+equivalent CMake rule and copy those exact inputs; neither path requires or modifies a source-tree
+generated header.
 
 ## Tests and failure behavior
 
@@ -472,8 +476,10 @@ flags, reserved bytes, wrong stage, undersized output, cancellation, missing cal
 failure, typed-client transport/protocol failures, and successful encode-handler-decode. A dedicated
 integration test crosses the real authenticated event bus from the generated client through the
 module runtime into the C handler and verifies non-zero evidence. Runtime-bundle tests compile the
-descriptor-owned C
-process. Catalog tests mutate every closed field, process/descriptor binding, resource limit, and
+descriptor-owned C process from a clean tree with no `src/schema_data.h`. Generator tests pin
+UTF-8/C escaping, reproducibility, output location, path containment, ordering, duplicate symbols,
+and symlink rejection; an exported miniature CMake project exercises the same rule where CMake is
+available. Catalog tests mutate every closed field, process/descriptor binding, resource limit, and
 generated artifact. Boundary tests prohibit any direct import from `src/modules/db2/c` into private
 `src/kb`. Declaration-ledger tests cover C linkage blocks, multiline and callback declarations,
 comments/literals/directives, identical and conflicting duplicates, malformed nesting, resource
