@@ -94,7 +94,8 @@ DB1_MIGRATED_OBJS = $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/modules/db1/payload_rew
                     $(OBJDIR)/modules/db1/cognify_jobs.o \
                     $(OBJDIR)/modules/db1/conv_context.o \
                     $(OBJDIR)/modules/db1/agent_log.o \
-                    $(OBJDIR)/modules/db1/windows.o
+                    $(OBJDIR)/modules/db1/windows.o \
+                    $(OBJDIR)/modules/db1/db1_trigger.o
 
 TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o $(OBJDIR)/modules/workspace/workspace_turn.o $(DB1_OBJS) $(DB1_MIGRATED_OBJS) \
                             $(OBJDIR)/modules/config/agent_config.o $(OBJDIR)/modules/vault/agent_credentials.o $(OBJDIR)/modules/config/agent_registry.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
@@ -5110,6 +5111,8 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/conv_context.o \
                                        $(OBJDIR)/modules/db1/agent_log.o \
                                        $(OBJDIR)/modules/db1/windows.o \
+                                       $(OBJDIR)/modules/db1/db1_trigger.o \
+                                       $(OBJDIR)/cJSON.o \
                                        $(OBJDIR)/core/event_bus/module_runtime.o \
                                        $(OBJDIR)/core/event_bus/module_protocol.o \
                                        $(OBJDIR)/core/event_bus/bus_attach.o \
