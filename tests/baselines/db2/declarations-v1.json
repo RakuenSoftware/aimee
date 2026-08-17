@@ -1237,6 +1237,21 @@
     },
     {
       "consumers": [
+        "src/tests/test_fact_ingest.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/fact_ingest.h",
+          "line": 39
+        }
+      ],
+      "signature": "void aimee_db2_register_fact_extract_provider ( db2_fact_extract_fn provider )",
+      "signature_sha256": "13d592fd1c7dc0e9416cd39e7911f080042abd2aa9c46537b64280161e84dd91",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_fact_extract_provider"
+    },
+    {
+      "consumers": [
         "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_fact_recall.c",
@@ -1253,6 +1268,21 @@
       "signature_sha256": "8f2225aa4902b730d36b0d307d6312d7ad44dc383db012512b86283e2c93ef94",
       "status": "private-test-only",
       "symbol": "aimee_db2_register_fact_gate_provider"
+    },
+    {
+      "consumers": [
+        "src/tests/test_fact_ingest.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/fact_ingest.h",
+          "line": 40
+        }
+      ],
+      "signature": "void aimee_db2_register_fact_scan_provider ( db2_fact_scan_fn provider )",
+      "signature_sha256": "778769db9a9b8ed08848a401aaac428b3a2886f97b72b9d2ab1671285aba7401",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_fact_scan_provider"
     },
     {
       "consumers": [
@@ -8066,7 +8096,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 31
+          "line": 54
         }
       ],
       "signature": "int db2_fact_ingest_text ( const char * text , fact_authority_t authority , int enabled )",
@@ -8123,7 +8153,6 @@
     },
     {
       "consumers": [
-        "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_fact_recall.c"
       ],
@@ -20474,12 +20503,13 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_memory.c"
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
+        "src/tests/test_fact_ingest.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 39
+          "line": 62
         }
       ],
       "signature": "int db2_typed_fact_ingress ( const char * query , char * facts_out , size_t facts_cap )",
@@ -23754,15 +23784,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "4355164d3f5671d14a4cfaaf2388965d5979ec9e7039c698c9c657be2bd2d5bc",
+  "fingerprint": "348e667bd71112ab01faee4d53276342d0397593ec4290bc3c07bd3819218fed",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 895,
-    "declarations": 1353,
+    "declarations": 1355,
     "headers": 136,
     "internal_unconsumed": 141,
-    "private_test_only": 255,
+    "private_test_only": 257,
     "reviewed": 62
   }
 }

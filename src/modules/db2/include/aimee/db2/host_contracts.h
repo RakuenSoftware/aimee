@@ -49,6 +49,35 @@ extern "C"
     * an authoritative verdict. */
    void aimee_db2_register_fact_gate_provider(aimee_db2_fact_gate_fn provider);
 
+#define AIMEE_DB2_FACT_SUBJECT_MAX  128
+#define AIMEE_DB2_FACT_REL_TYPE_MAX 64
+#define AIMEE_DB2_FACT_OBJECT_MAX   128
+#define AIMEE_DB2_FACT_ATTR_MAX     128
+
+   typedef struct
+   {
+      char subject[AIMEE_DB2_FACT_SUBJECT_MAX];
+      char rel_type[AIMEE_DB2_FACT_REL_TYPE_MAX];
+      char object[AIMEE_DB2_FACT_OBJECT_MAX];
+      int subject_kind;
+      int object_kind;
+   } aimee_db2_fact_candidate_t;
+
+   /* Extract bounded typed-fact candidates through the host memory module. The
+    * provider returns 0 and a count in [0,max], or -1 when it cannot answer. */
+   typedef int (*aimee_db2_fact_extract_fn)(const char *text, aimee_db2_fact_candidate_t *out,
+                                            int max, int *count);
+
+   /* Scan one turn for a retraction cue and optional attribute. Both flags must
+    * be 0 or 1, and attr is non-empty exactly when has_attr is 1. */
+   typedef int (*aimee_db2_fact_scan_fn)(const char *text, int *is_retraction, int *has_attr,
+                                         char attr[AIMEE_DB2_FACT_ATTR_MAX]);
+
+   /* Install the memory module's extraction and retraction-scan adapters. NULL
+    * removes a provider; extraction then fails and scanning cannot delete. */
+   void aimee_db2_register_fact_extract_provider(aimee_db2_fact_extract_fn provider);
+   void aimee_db2_register_fact_scan_provider(aimee_db2_fact_scan_fn provider);
+
 #ifdef __cplusplus
 }
 #endif
