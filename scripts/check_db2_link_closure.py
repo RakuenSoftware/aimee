@@ -415,6 +415,28 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "only C runtime functions and contains no git, DB, bus, provider, pgvector, "
                 "DB3, allocation, configuration, or logging dependency.",
 }, {
+    "path": "src/modules/db2/support/code_match_primitives.c",
+    "source_sha256": "a6190eb5fc93657cf7a6e9142d99977c322c8e9765811a628c8eb70970231876",
+    "header": "src/modules/db2/support/db2_code_match.h",
+    "header_sha256": "e1a2da6d369a3519405f980f703ec4325a07ced6426408d167d084b741e23d3a",
+    "defines": ["code_match_line"],
+    "resolves": ["code_match_line"],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_code_match.h", "string.h"],
+    "allowed_header_includes": [],
+    "allowed_undefined": ["strncmp", "strstr"],
+    "base_references": {
+        "code_match_line": ["src/modules/db2/c/code_index.c"],
+    },
+    "provenance": "The string-only line-enrichment definition is promoted from "
+                  "src/code_match.c; the sole DB2 call is pinned to code_index.c.",
+    "evidence": "The descriptor owns marker extraction, empty-token rejection, first-verbatim-"
+                "match selection, and one-based line counting. Normal and sanitizer parity cover "
+                "NULL, malformed and repeated markers, every non-NUL byte, 256 lines, and token "
+                "lengths through 2048. Only strncmp and strstr are imported; there is no FTS, "
+                "DB, bus, provider, pgvector, DB3, allocation, configuration, I/O, or logging "
+                "edge.",
+}, {
     "path": "src/modules/db2/support/dstr_primitives.c",
     "source_sha256": "ae448e0ae6e0464922042536b77ab396ea230d5ba16ec977e003ecd614cf22ab",
     "header": "src/modules/db2/support/db2_dstr.h",

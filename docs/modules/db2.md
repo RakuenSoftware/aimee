@@ -110,9 +110,9 @@ the process boundary while their storage calls migrate to generated DB2 clients.
 calls as injected DB2 callbacks would recreate the monolith inside the module. The
 probe compiles each unit plus exact descriptor-owned support, combines only those objects with a
 relocatable link, supplies no archive, shared library, helper stub, or weak definition, and records
-the 192 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
+the 191 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
 disposition and rationale. The current ledger contains 139 explicit system-link dependencies, zero
-remaining vendored/generated inputs, 53 sibling or KB contracts to inject, and zero support APIs to
+remaining vendored/generated inputs, 52 sibling or KB contracts to inject, and zero support APIs to
 promote. The standalone-link exit condition requires zero entries in the latter three groups; a
 classified ledger alone is not enough.
 
@@ -295,7 +295,13 @@ behavior for every non-NUL byte, short output capacities, and lengths across the
 boundary. This moves total debt from 193 to 192 and injected-contract debt from 54 to 53 while
 leaving principal construction and authentication policy outside DB2.
 
-The remaining 53 non-system rows are sibling-contract migration debt. Session identity, briefing
+The seventeenth reduction owns the string-only code-search line-enrichment helper. Normal and
+ASan/UBSan parity cover NULL, malformed and repeated markers, empty and absent tokens, every
+non-NUL byte, 256-line content, and token lengths through 2048 while preserving first-verbatim-match
+and one-based line semantics. This moves total debt from 192 to 191 and injected-contract debt from
+53 to 52 with only `strncmp` and `strstr` imports.
+
+The remaining 52 non-system rows are sibling-contract migration debt. Session identity, briefing
 rendering, executable lifecycle, configuration, memory, and other host calls must close through
 their reviewed process contracts before activation; they are not portable-support candidates. Rows
 may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide

@@ -762,6 +762,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-db2-cert-serial-support \
                 $(TESTPREFIX)/unit-test-db2-cjson-support \
                 $(TESTPREFIX)/unit-test-db2-cochange-support \
+                $(TESTPREFIX)/unit-test-db2-code-match-support \
                 $(TESTPREFIX)/unit-test-db2-dstr-support \
                 $(TESTPREFIX)/unit-test-db2-extractor-support \
                 $(TESTPREFIX)/unit-test-db2-log-support \
@@ -849,6 +850,7 @@ UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-cert-serial-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-cjson-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-cochange-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-code-match-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-extractor-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-log-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
@@ -6998,6 +7000,58 @@ unit-test-db2-cochange-support: $(TESTPREFIX)/unit-test-db2-cochange-support
 
 unit-test-db2-cochange-support-sanitize: \
                      $(TESTPREFIX)/unit-test-db2-cochange-support-sanitize
+	$<
+
+DB2_CODE_MATCH_SUPPORT_RENAMES = -DAIMEE_DB2_CODE_MATCH_PREFIX
+DB2_CODE_MATCH_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_code_match_support_impl.o: \
+                     modules/db2/support/code_match_primitives.c \
+                     modules/db2/support/db2_code_match.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_MATCH_SUPPORT_RENAMES) \
+	      $(DB2_CODE_MATCH_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_code_match_monolith.o: code_match.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_MATCH_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-code-match-support: \
+                     $(OBJDIR)/tests/test_db2_code_match_support.o \
+                     $(OBJDIR)/tests/db2_code_match_support_impl.o \
+                     $(OBJDIR)/tests/db2_code_match_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_CODE_MATCH_SANITIZE_DIR = $(OBJDIR)/tests/db2-code-match-support-sanitize
+
+$(DB2_CODE_MATCH_SANITIZE_DIR)/test.o: tests/test_db2_code_match_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CODE_MATCH_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/code_match_primitives.c \
+                     modules/db2/support/db2_code_match.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_MATCH_SUPPORT_RENAMES) \
+	      $(DB2_CODE_MATCH_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CODE_MATCH_SANITIZE_DIR)/monolith.o: code_match.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_MATCH_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-code-match-support-sanitize: \
+                     $(DB2_CODE_MATCH_SANITIZE_DIR)/test.o \
+                     $(DB2_CODE_MATCH_SANITIZE_DIR)/support.o \
+                     $(DB2_CODE_MATCH_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-code-match-support unit-test-db2-code-match-support-sanitize
+unit-test-db2-code-match-support: $(TESTPREFIX)/unit-test-db2-code-match-support
+	$<
+
+unit-test-db2-code-match-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-code-match-support-sanitize
 	$<
 
 DB2_DSTR_SUPPORT_RENAMES = \
