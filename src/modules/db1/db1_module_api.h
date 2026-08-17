@@ -120,6 +120,10 @@
 #define AIMEE_DB1_OP_AGENT_LOG_SESSION_OUTCOME         17u
 #define AIMEE_DB1_OP_AGENT_LOG_PROMETHEUS              18u
 #define AIMEE_DB1_OP_AGENT_LOG_STATS                   19u
+#define AIMEE_DB1_OP_TRIGGER_INSERT                    20u
+#define AIMEE_DB1_OP_TRIGGER_STATUS_SET                21u
+#define AIMEE_DB1_OP_TRIGGER_GET                       22u
+#define AIMEE_DB1_OP_TRIGGER_LIST_JSON                 23u
 
 /* Wire bounds, carried from the catalog. VALUE_MAX is the widest
    reply a stage may build; FIELDS_MAX is the widest request arity, and

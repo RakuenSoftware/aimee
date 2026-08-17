@@ -25,6 +25,10 @@ MAX_ARRAY = 256
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 BASE_KEYS = {"descriptor_version", "id", "dependencies", "runtime_toggle"}
 C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
+# Optional: third-party sources a module compiles but does not own, restricted
+# to src/vendor/. See export_c_repositories for why a vendored library is not
+# treated like a module-owned source.
+C_BUILD_OPTIONAL_KEYS = {"vendor_sources"}
 BUILD_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
 OWNERSHIP_FIELDS = (
     "sources", "private_headers", "public_headers", "contracts", "tests", "docs", "go_sources",
@@ -293,8 +297,11 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
              "/ownership_complete")
     if "c_build" in value:
         build = value["c_build"]
-        if not isinstance(build, dict) or set(build) != C_BUILD_KEYS:
-            fail("c-build-shape", f"c_build keys must equal {sorted(C_BUILD_KEYS)}", "/c_build")
+        if not isinstance(build, dict) or not C_BUILD_KEYS <= set(build) or \
+                not set(build) <= C_BUILD_KEYS | C_BUILD_OPTIONAL_KEYS:
+            fail("c-build-shape",
+                 f"c_build keys must include {sorted(C_BUILD_KEYS)} and may add "
+                 f"{sorted(C_BUILD_OPTIONAL_KEYS)}", "/c_build")
         for field in sorted(C_BUILD_KEYS):
             entries = build[field]
             if not isinstance(entries, list):

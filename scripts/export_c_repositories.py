@@ -32,6 +32,16 @@ REMOTE_ROOT = "https://github.com/RakuenSoftware"
 HOSTED_BY_EXECUTABLE = {"wfe": "/usr/local/bin/aimee-wfe"}
 PRINCIPAL_CLASS = 1
 C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
+# Optional: third-party sources a module compiles but does not own. A module is
+# otherwise self-contained -- it links its descriptor's sources and nothing
+# else, which is why db1_time.c exists to supply now_utc rather than the module
+# linking util.c. That rule is right for a project helper and wrong for a
+# vendored library: cJSON is 77KB of upstream code, and a per-module copy is a
+# thing to patch when upstream issues a CVE. DB2 already holds one such copy;
+# this exists so DB1 does not become the second, and is restricted to
+# src/vendor/ so "not owned" cannot quietly mean "owned by somebody else".
+C_BUILD_OPTIONAL_KEYS = {"vendor_sources"}
+VENDOR_ROOT = "src/vendor/"
 BUILD_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
 CMAKE_TARGET_PACKAGES = {
     "OpenSSL::Crypto": "OpenSSL",
@@ -315,8 +325,21 @@ def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
     if c_sources != sorted(set(c_sources)):
         raise ExportError(f"{module_id}: C process sources must be sorted and unique")
     build = descriptor.get("c_build")
-    if not isinstance(build, dict) or set(build) != C_BUILD_KEYS:
+    if not isinstance(build, dict) or not C_BUILD_KEYS <= set(build) or \
+            not set(build) <= C_BUILD_KEYS | C_BUILD_OPTIONAL_KEYS:
         raise ExportError(f"{module_id}: C process must declare exact c_build fields")
+    vendored = build.get("vendor_sources", [])
+    if not isinstance(vendored, list) or not all(isinstance(item, str) for item in vendored):
+        raise ExportError(f"{module_id}: c_build.vendor_sources must be a string array")
+    if vendored != sorted(set(vendored)):
+        raise ExportError(f"{module_id}: c_build.vendor_sources must be sorted and unique")
+    for entry in vendored:
+        pure = PurePosixPath(entry)
+        if (not entry.startswith(VENDOR_ROOT) or pure.is_absolute() or ".." in pure.parts or
+                pure.suffix != ".c" or pure.as_posix() != entry):
+            raise ExportError(
+                f"{module_id}: vendor_sources entry {entry!r} must be a .c file under "
+                f"{VENDOR_ROOT}; anything else is a source some module owns")
 
     parsed: dict[str, list[str]] = {}
     for field in sorted(C_BUILD_KEYS):
@@ -338,7 +361,11 @@ def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
             elif field == "system_libraries" and "::" in entry and entry not in CMAKE_TARGET_PACKAGES:
                 raise ExportError(f"{module_id}: unsupported imported CMake target {entry!r}")
         parsed[field] = entries
-    return c_sources, parsed["include_roots"], parsed["pkg_config"], parsed["system_libraries"]
+    # Vendored sources compile with the module but are not its own: they are
+    # appended here rather than merged into `sources`, so ownership keeps
+    # meaning what it says everywhere else.
+    return (c_sources + list(vendored), parsed["include_roots"], parsed["pkg_config"],
+            parsed["system_libraries"])
 
 
 def c_process_cmake(module_id: str, binary: str, version: str,

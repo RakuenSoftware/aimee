@@ -15,6 +15,7 @@
 #include "db1_module_api.h"
 #include "agent_log.h"
 #include "cognify_jobs.h"
+#include "db1_trigger.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -164,7 +165,8 @@ aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, ui
    db1_cognify_job_t row_db1_cognify_job_t;
    db1_agent_log_hud_t row_db1_agent_log_hud_t;
    db1_agent_log_stats_t row_db1_agent_log_stats_t;
-   const char *row_slots[10];
+   db1_trigger_run_t row_db1_trigger_run_t;
+   const char *row_slots[12];
    char row_text[10][32];
    /* A domain that returns a string hands over the allocation with it. The
       reply is written straight out of it rather than copied into value: the
@@ -1308,6 +1310,96 @@ aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, ui
       row_slots[5] = row_text[5];
       rows = row_slots;
       row_count = 6u;
+      reads = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_TRIGGER_INSERT:
+      if (count != 6u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[3][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[5][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_trigger_insert(field[0], field[1], field[2], field[3], field[4], field[5]);
+      break;
+   case AIMEE_DB1_OP_TRIGGER_STATUS_SET:
+      if (count != 4u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_trigger_status_set(field[0], field[1], field[2], field[3]);
+      break;
+   case AIMEE_DB1_OP_TRIGGER_GET:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      memset(&row_db1_trigger_run_t, 0, sizeof row_db1_trigger_run_t);
+      rc = db1_trigger_get(field[0], &row_db1_trigger_run_t);
+      row_slots[0] = row_db1_trigger_run_t.id;
+      row_slots[1] = row_db1_trigger_run_t.source;
+      row_slots[2] = row_db1_trigger_run_t.event;
+      row_slots[3] = row_db1_trigger_run_t.task;
+      row_slots[4] = row_db1_trigger_run_t.workspace;
+      row_slots[5] = row_db1_trigger_run_t.metadata;
+      row_slots[6] = row_db1_trigger_run_t.pipeline_id;
+      row_slots[7] = row_db1_trigger_run_t.status;
+      row_slots[8] = row_db1_trigger_run_t.queued_at;
+      row_slots[9] = row_db1_trigger_run_t.started_at;
+      row_slots[10] = row_db1_trigger_run_t.finished_at;
+      row_slots[11] = row_db1_trigger_run_t.error;
+      rows = row_slots;
+      row_count = 12u;
+      reads = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_TRIGGER_LIST_JSON:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      char *produced = db1_trigger_list_json(field[0]);
+      rc = produced ? 1 : 0;
+      text_owned = produced;
       reads = 1;
       break;
    }
