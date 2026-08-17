@@ -480,6 +480,13 @@ static void test_minhash_shadow_signatures_persist(void)
 
 static void test_async_embedding_queue_and_drain(void)
 {
+   char oversized_identity[128];
+   memset(oversized_identity, 'x', sizeof(oversized_identity));
+   assert(db2_kb_service_async_queue_drain(NULL, NULL, 0, NULL, NULL, NULL, NULL) == -1);
+   assert(db2_kb_service_async_queue_drain("", NULL, 0, NULL, NULL, NULL, NULL) == -1);
+   assert(db2_kb_service_async_queue_drain(oversized_identity, NULL, 0, NULL, NULL, NULL, NULL) ==
+          -1);
+
    char tmpdir[256];
    snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_async_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
@@ -511,13 +518,24 @@ static void test_async_embedding_queue_and_drain(void)
    assert(aimee_pg_column_int(vc_st, 0) == 0);
    aimee_pg_finalize(vc_st);
 
-   assert(db2_kb_service_async_queue_drain(MEMORY_EMBED_TEST_FIXTURE, 5,
+   assert(db2_kb_service_async_queue_drain("test-async-drain", MEMORY_EMBED_TEST_FIXTURE, 5,
                                            pgvec_kb_vector_collection_name(),
                                            test_kb_vector_upsert_document, NULL, &qstats) == 0);
    assert(qstats.pending == 0);
    assert(qstats.running == 0);
    assert(qstats.failed == 0);
    assert(qstats.done > 0);
+
+   char claim_err[128] = "";
+   aimee_pg_stmt_t *claim_st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT COUNT(*) FROM kb_async_jobs WHERE claimed_by = 'test-async-drain'"
+                        " AND status = 'done'",
+                        claim_err, sizeof(claim_err));
+   assert(claim_st != NULL);
+   assert(aimee_pg_step(claim_st, claim_err, sizeof(claim_err)) == AIMEE_PG_ROW);
+   assert(aimee_pg_column_int(claim_st, 0) > 0);
+   aimee_pg_finalize(claim_st);
 
    vc_st = aimee_pg_prepare(db2_conn(), vector_count_sql, vc_err, sizeof(vc_err));
    assert(vc_st != NULL);

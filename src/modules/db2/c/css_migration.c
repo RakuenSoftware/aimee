@@ -1,7 +1,7 @@
 /* db2/css_migration.c: CSS migration pipeline driver. See css_migration.h. */
 #include "css_migration.h"
 
-#include "config.h" /* typed_facts_enabled gate */
+#include "../support/db2_runtime_config.h"
 #include "db2.h"
 #include "db2_internal.h"
 #include "db_postgres.h"

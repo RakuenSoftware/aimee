@@ -138,7 +138,8 @@ static int mem_eval_drain_async_queues(mem_eval_async_drain_totals_t *totals)
 
    struct timespec ts0, ts1;
    clock_gettime(CLOCK_MONOTONIC, &ts0);
-   if (db2_kb_service_async_queue_drain(embed_cmd, 0, pgvec_kb_vector_collection_name(),
+   if (db2_kb_service_async_queue_drain("benchmark", embed_cmd, 0,
+                                        pgvec_kb_vector_collection_name(),
                                         mem_eval_vector_upsert_document, NULL, &queue_stats) != 0)
       return -1;
    if (cognify_enabled && memory_cognify_drain(0, &cog_stats) != 0)

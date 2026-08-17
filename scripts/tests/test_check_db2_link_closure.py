@@ -300,6 +300,26 @@ class LinkClosureTest(unittest.TestCase):
         self._refresh_summary(current)
         checker.compare_contracts(self.root, previous, current)
 
+    def test_support_import_requires_owned_or_system_provenance(self) -> None:
+        unit = self._support_row()
+        unit["allowed_undefined"] = ["project_helper"]
+        with self.assertRaisesRegex(
+            checker.ClosureError, "support-undefined-provenance"
+        ):
+            checker._validate_support_import_provenance([unit], {"outside"})
+
+    def test_support_import_accepts_another_support_definition(self) -> None:
+        unit = self._support_row()
+        unit["allowed_undefined"] = ["project_helper"]
+        checker._validate_support_import_provenance(
+            [unit], {"outside", "project_helper"}
+        )
+
+    def test_support_import_accepts_explicit_system_link(self) -> None:
+        unit = self._support_row()
+        unit["allowed_undefined"] = ["memset"]
+        checker._validate_support_import_provenance([unit], {"outside"})
+
     def test_previous_contract_rejects_added_system_import_from_legacy_unit(self) -> None:
         previous, current = self._support_comparison()
         current["unresolved"].append({  # type: ignore[union-attr]
@@ -708,21 +728,75 @@ class LinkClosureTest(unittest.TestCase):
         with mock.patch.object(checker, "SUPPORT_UNITS", self.production_support):
             checker.check(REPO, run_probe=True)
 
-    def test_real_repository_reduces_owned_input_and_random_debt(self) -> None:
+    def test_real_repository_reduces_owned_input_and_bounded_contract_debt(self) -> None:
         contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
-        self.assertEqual(contract["summary"]["unresolved_symbols"], 311)
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 182)
         self.assertEqual(
             contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 0
         )
-        self.assertEqual(contract["summary"]["dispositions"]["system-link"], 145)
+        self.assertEqual(contract["summary"]["dispositions"]["system-link"], 139)
         self.assertEqual(
-            contract["summary"]["dispositions"]["portable-core-promotion"], 16
+            contract["summary"]["dispositions"]["portable-core-promotion"], 0
+        )
+        self.assertEqual(
+            contract["summary"]["dispositions"]["injected-module-contract"], 43
         )
         self.assertFalse(any(
             row["symbol"].startswith("cJSON_") for row in contract["unresolved"]
         ))
         self.assertFalse(any(
             row["symbol"] in {"platform_random_bytes", "platform_random_hex"}
+            for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] in {
+                "rel_types_seed_at", "rel_types_seed_count", "rel_types_seed_lookup",
+            }
+            for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] == "aimee_log" for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] == "session_id" for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] in {"cochange_is_hex_sha", "cochange_pairs_for_commit"}
+            for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] in {
+                "kb_models_endpoint_valid", "kb_models_name_clean", "kb_models_wire_valid",
+            }
+            for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] == "kb_cert_serial_normalize" for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] == "code_match_line" for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] == "memory_ontology_node_kind_to_text"
+            for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] == "memory_pii_should_inject"
+            for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] in {
+                "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
+                "memory_pii_turn_requests_sensitive",
+            }
+            for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] in {"code_import_identity", "code_import_resolves_path"}
+            for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] in {"code_audit_dead_exports", "code_audit_find_cycles"}
             for row in contract["unresolved"]
         ))
         cjson = next(
@@ -739,6 +813,128 @@ class LinkClosureTest(unittest.TestCase):
             random_support["defines"], ["platform_random_bytes", "platform_random_hex"]
         )
         self.assertEqual(random_support["resolves"], random_support["defines"])
+        seed_support = next(
+            unit for unit in contract["descriptor_support_units"]
+            if unit["path"] == "src/modules/db2/support/rel_seed_primitives.c"
+        )
+        self.assertEqual(seed_support["defines"], [
+            "rel_types_seed_at", "rel_types_seed_count", "rel_types_seed_lookup",
+        ])
+        self.assertEqual(seed_support["resolves"], seed_support["defines"])
+        code_match_support = next(
+            unit for unit in contract["descriptor_support_units"]
+            if unit["path"] == "src/modules/db2/support/code_match_primitives.c"
+        )
+        self.assertEqual(code_match_support["defines"], ["code_match_line"])
+        self.assertEqual(code_match_support["resolves"], ["code_match_line"])
+        self.assertEqual(code_match_support["allowed_undefined"], ["strncmp", "strstr"])
+        self.assertEqual(
+            code_match_support["source_sha256"],
+            hashlib.sha256((REPO / code_match_support["path"]).read_bytes()).hexdigest(),
+        )
+        self.assertIn(
+            code_match_support["path"],
+            json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
+        )
+        code_import_support = next(
+            unit for unit in contract["descriptor_support_units"]
+            if unit["path"] == "src/modules/db2/support/code_import_primitives.c"
+        )
+        self.assertEqual(code_import_support["defines"], [
+            "code_import_identity", "code_import_resolves_path", "code_path_import_identity",
+        ])
+        self.assertEqual(code_import_support["resolves"], [
+            "code_import_identity", "code_import_resolves_path",
+        ])
+        self.assertEqual(code_import_support["allowed_undefined"], [
+            "snprintf", "strcmp", "strlen", "strncmp", "strrchr",
+        ])
+        self.assertEqual(
+            code_import_support["source_sha256"],
+            hashlib.sha256((REPO / code_import_support["path"]).read_bytes()).hexdigest(),
+        )
+        self.assertIn(
+            code_import_support["path"],
+            json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
+        )
+        code_audit_support = next(
+            unit for unit in contract["descriptor_support_units"]
+            if unit["path"] == "src/modules/db2/support/code_audit_graph_primitives.c"
+        )
+        self.assertEqual(code_audit_support["defines"], [
+            "code_audit_dead_exports", "code_audit_find_cycles",
+        ])
+        self.assertEqual(code_audit_support["resolves"], code_audit_support["defines"])
+        self.assertEqual(code_audit_support["allowed_undefined"], [
+            "calloc", "free", "malloc", "memcpy", "realloc", "snprintf", "strcmp", "strlen",
+            "strncmp",
+        ])
+        self.assertEqual(
+            code_audit_support["source_sha256"],
+            hashlib.sha256((REPO / code_audit_support["path"]).read_bytes()).hexdigest(),
+        )
+        self.assertIn(
+            code_audit_support["path"],
+            json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
+        )
+        node_kind_support = next(
+            unit for unit in contract["descriptor_support_units"]
+            if unit["path"] == "src/modules/db2/support/node_kind_text_primitives.c"
+        )
+        self.assertEqual(
+            node_kind_support["defines"], ["memory_ontology_node_kind_to_text"]
+        )
+        self.assertEqual(node_kind_support["resolves"], node_kind_support["defines"])
+        self.assertEqual(node_kind_support["allowed_undefined"], [])
+        self.assertEqual(
+            node_kind_support["source_sha256"],
+            hashlib.sha256((REPO / node_kind_support["path"]).read_bytes()).hexdigest(),
+        )
+        self.assertIn(
+            node_kind_support["path"],
+            json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
+        )
+        pii_gate_support = next(
+            unit for unit in contract["descriptor_support_units"]
+            if unit["path"] == "src/modules/db2/support/pii_inject_gate_primitives.c"
+        )
+        self.assertEqual(
+            pii_gate_support["defines"], ["memory_pii_should_inject"]
+        )
+        self.assertEqual(pii_gate_support["resolves"], pii_gate_support["defines"])
+        self.assertEqual(pii_gate_support["allowed_undefined"], [])
+        self.assertEqual(
+            pii_gate_support["source_sha256"],
+            hashlib.sha256((REPO / pii_gate_support["path"]).read_bytes()).hexdigest(),
+        )
+        self.assertIn(
+            pii_gate_support["path"],
+            json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
+        )
+        pii_classifier_support = next(
+            unit for unit in contract["descriptor_support_units"]
+            if unit["path"] == "src/modules/db2/support/pii_classifier_primitives.c"
+        )
+        self.assertEqual(pii_classifier_support["defines"], [
+            "memory_pii_register_sensitivity_batch", "memory_pii_register_turn_classifier",
+            "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
+            "memory_pii_turn_requests_sensitive",
+        ])
+        self.assertEqual(pii_classifier_support["resolves"], [
+            "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
+            "memory_pii_turn_requests_sensitive",
+        ])
+        self.assertEqual(pii_classifier_support["allowed_undefined"], [
+            "__ctype_tolower_loc", "rel_type_normalize", "rel_types_seed_lookup", "strlen",
+        ])
+        self.assertEqual(
+            pii_classifier_support["source_sha256"],
+            hashlib.sha256((REPO / pii_classifier_support["path"]).read_bytes()).hexdigest(),
+        )
+        self.assertIn(
+            pii_classifier_support["path"],
+            json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
+        )
 
 
 if __name__ == "__main__":

@@ -65,7 +65,37 @@
       "ctest": false,
       "make": true,
       "module": "db2",
+      "test": "src/tests/test_db2_cert_serial_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
       "test": "src/tests/test_db2_cjson_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_cochange_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_code_audit_graph_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_code_import_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_code_match_support.c"
     },
     {
       "ctest": false,
@@ -77,13 +107,49 @@
       "ctest": false,
       "make": true,
       "module": "db2",
+      "test": "src/tests/test_db2_extractor_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_log_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
       "test": "src/tests/test_db2_management_read_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_model_validation_support.c"
     },
     {
       "ctest": true,
       "make": true,
       "module": "db2",
       "test": "src/tests/test_db2_module_contract.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_node_kind_text_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_pii_classifier_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_pii_inject_gate_support.c"
     },
     {
       "ctest": false,
@@ -101,7 +167,19 @@
       "ctest": false,
       "make": true,
       "module": "db2",
+      "test": "src/tests/test_db2_rel_seed_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
       "test": "src/tests/test_db2_rel_type_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_runtime_config_support.c"
     },
     {
       "ctest": false,

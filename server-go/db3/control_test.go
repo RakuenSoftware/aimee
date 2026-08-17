@@ -36,9 +36,9 @@ func TestControlFramesReplayGeneratedBaseline(t *testing.T) {
 				return EncodeApplyChunk(ApplyChunk{OperationID: 1001, Total: uint32(len(applyWire)), Data: applyWire})
 			}, func(v []byte) (any, error) { return DecodeApplyChunk(v) }},
 		{"applied", baseline.AppliedHex,
-			Applied{OperationID: 1001, Generation: 7, Watermark: 7, Result: AppliedOK},
+			Applied{OperationID: 1001, Generation: 7, Watermark: 1001, Result: AppliedOK},
 			func() ([]byte, error) {
-				return EncodeApplied(Applied{OperationID: 1001, Generation: 7, Watermark: 7, Result: AppliedOK})
+				return EncodeApplied(Applied{OperationID: 1001, Generation: 7, Watermark: 1001, Result: AppliedOK})
 			}, func(v []byte) (any, error) { return DecodeApplied(v) }},
 		{"search-failure", baseline.SearchFailureHex,
 			SearchFailure{RequestID: 77, Code: SearchFailureUnavailable},
@@ -140,7 +140,7 @@ func TestControlSemanticValidation(t *testing.T) {
 			t.Errorf("route[%d] error = %v", i, err)
 		}
 	}
-	if _, err := EncodeApplied(Applied{OperationID: 1, Generation: 7, Watermark: 6}); !errors.Is(err, ErrMalformed) {
+	if _, err := EncodeApplied(Applied{OperationID: 7, Generation: 1, Watermark: 6}); !errors.Is(err, ErrMalformed) {
 		t.Fatalf("regressing watermark error = %v", err)
 	}
 	if _, err := EncodeRouteReply(RouteReply{RequestID: 1, SelectedPrincipal: 2}); !errors.Is(err, ErrMalformed) {

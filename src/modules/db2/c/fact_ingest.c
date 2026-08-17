@@ -1,14 +1,14 @@
 /* fact_ingest.c: pattern-first typed-fact ingest pipeline (§6 -> §1) + the
  * per-turn ingress orchestration (§4/§6/§7). P5. See fact_ingest.h. */
 #include "fact_ingest.h"
-#include "fact_lifecycle.h"                         /* db2_fact_retract */
-#include "fact_recall.h"                            /* db2_fact_recall_in_query */
-#include "rel_types_store.h"                        /* db2_fact_commit */
-#include "../headers/aimee.h"                       /* config_t */
-#include "config.h"                                 /* config_load */
+#include "fact_lifecycle.h"   /* db2_fact_retract */
+#include "fact_recall.h"      /* db2_fact_recall_in_query */
+#include "rel_types_store.h"  /* db2_fact_commit */
+#include "../headers/aimee.h" /* config_t */
+#include "../support/db2_runtime_config.h"
 #include "modules/memory/memory_extract_patterns.h" /* memory_extract_patterns, retraction */
 #include "modules/memory/memory_pii_gate.h"         /* memory_pii_turn_requests_sensitive */
-#include "../headers/log.h"                         /* LOG_WARN */
+#include "../support/db2_log.h"                     /* LOG_WARN */
 
 #define FI_MAX_TRIPLES 16
 

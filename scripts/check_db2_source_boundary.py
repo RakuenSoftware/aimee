@@ -51,6 +51,40 @@ DEPENDENCY_CLASSES = {
     "unresolved-project-include",
     "vendored-system-api",
 }
+HOST_ADAPTER_REHOMES = {
+    "src/modules/db2/c/kb_service_backend_agent.c":
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
+    "src/modules/db2/c/kb_service_backend_export.c":
+        "src/kb/db2_adapters/kb_service_backend_export.c",
+    "src/modules/db2/c/kb_service_backend_export.h":
+        "src/kb/db2_adapters/kb_service_backend_export.h",
+    "src/modules/db2/c/kb_service_backend_memory.c":
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
+}
+ADMITTED_SUPPORT_TEST_INCLUDES = {
+    (
+        "src/tests/test_db2_extractor_support.c",
+        "../modules/db2/support/db2_extractors.h",
+    ),
+    (
+        "src/tests/test_db2_log_support.c",
+        "../modules/db2/support/db2_log.h",
+    ),
+    (
+        "src/tests/test_db2_rel_seed_support.c",
+        "../modules/db2/support/db2_rel_seed.h",
+    ),
+    (
+        "src/tests/test_db2_runtime_config_support.c",
+        "../modules/db2/support/db2_runtime_config.h",
+    ),
+}
+ADMITTED_HOST_ADAPTER_INCLUDES = {
+    (
+        "src/kb/db2_adapters/kb_service_backend_runtime.c",
+        "modules/db2/c/kb_service_backend.h",
+    ),
+}
 
 
 class BoundaryError(ValueError):
@@ -483,9 +517,22 @@ def enforce_shrink_only(previous: object, current: object) -> None:
         fail("baseline-shape", "previous/current manifests must be objects")
     previous_rows = _baseline_rows(previous.get("consumers"))
     current_rows = _baseline_rows(current.get("consumers"))
+    previous_sources = previous.get("source_files")
+    previous_source_paths = {
+        str(path)
+        for paths in previous_sources.values()
+        if isinstance(paths, list)
+        for path in paths
+    } if isinstance(previous_sources, dict) else set()
+    rehome_origins = {new: old for old, new in HOST_ADAPTER_REHOMES.items()}
     for key, (count, classification) in current_rows.items():
         prior = previous_rows.get(key)
         if prior is None:
+            if key in ADMITTED_SUPPORT_TEST_INCLUDES or key in ADMITTED_HOST_ADAPTER_INCLUDES:
+                continue
+            old_source = rehome_origins.get(key[0])
+            if old_source in previous_source_paths:
+                continue
             fail("baseline-growth", f"new allowlist entry {key[1]!r} in {key[0]}")
         if count > prior[0]:
             fail(
@@ -550,6 +597,43 @@ def enforce_shrink_only(previous: object, current: object) -> None:
                 None,
             )
             if localized is not None and count <= localized[0]:
+                continue
+            # The DB2 process consumes one immutable, descriptor-owned runtime
+            # config snapshot instead of importing the host config module.
+            config_localized = next(
+                (
+                    value
+                    for (old_source, old_header, old_resolved), value
+                    in previous_dependencies.items()
+                    if old_source == source
+                    and old_header == "config.h"
+                    and old_resolved == "src/modules/config/config.h"
+                    and header == "../support/db2_runtime_config.h"
+                    and resolved == "src/modules/db2/support/db2_runtime_config.h"
+                    and value[1] == classification == "module-private-api"
+                ),
+                None,
+            )
+            if config_localized is not None and count <= config_localized[0]:
+                continue
+            # DB2 process logging is a startup-installed module-private sink;
+            # replacing the host logger include is directional debt removal.
+            log_localized = next(
+                (
+                    value
+                    for (old_source, old_header, old_resolved), value
+                    in previous_dependencies.items()
+                    if old_source == source
+                    and PurePosixPath(old_header).name == "log.h"
+                    and old_resolved == "src/headers/log.h"
+                    and header == "../support/db2_log.h"
+                    and resolved == "src/modules/db2/support/db2_log.h"
+                    and value[1] == "host-api"
+                    and classification == "module-private-api"
+                ),
+                None,
+            )
+            if log_localized is not None and count <= log_localized[0]:
                 continue
             fail(
                 "baseline-growth",

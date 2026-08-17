@@ -3,7 +3,7 @@ package db3
 import "encoding/binary"
 
 const (
-	MaxEncodedApply  = applyHeader + (MaxCollectionBytes - 1) + 4*MaxDimension
+	MaxEncodedApply  = applyV2Header + (MaxCollectionBytes - 1) + 4*MaxDimension + MaxLabelsBytes
 	ApplyChunkHeader = applyChunkHeader
 )
 
@@ -123,7 +123,7 @@ type Applied struct {
 
 func (a Applied) Validate() error {
 	if a.OperationID == 0 || a.Generation == 0 || a.Result > AppliedInternal ||
-		(a.Result == AppliedOK && a.Watermark < a.Generation) {
+		(a.Result == AppliedOK && a.Watermark < a.OperationID) {
 		return ErrMalformed
 	}
 	return nil

@@ -228,6 +228,39 @@ static void test_wire_codecs(void)
    apply.dimension = 0;
    assert(aimee_db3_apply_validate(&apply) == 0);
 
+   apply.kind = AIMEE_DB3_APPLY_UPSERT;
+   apply.dimension = 3;
+   apply.label_count = 3;
+   strcpy(apply.labels[0].key, "project");
+   strcpy(apply.labels[0].value, "project with space");
+   strcpy(apply.labels[1].key, "record_type");
+   strcpy(apply.labels[1].value, "memory");
+   strcpy(apply.labels[2].key, "workspace");
+   strcpy(apply.labels[2].value, "workspace-a");
+   assert(aimee_db3_apply_encode(&apply, wire, sizeof(wire), &length) == 0);
+   assert(wire[4] == AIMEE_DB3_APPLY_V2_VERSION && wire[5] == 0);
+   assert(aimee_db3_apply_decode(wire, length, &decoded_apply) == 0);
+   assert(decoded_apply.label_count == 3);
+   assert(strcmp(decoded_apply.labels[0].value, "project with space") == 0);
+   assert(strcmp(decoded_apply.labels[2].key, "workspace") == 0);
+   memcpy(mutated, wire, length);
+   mutated[36] = 0;
+   mutated[37] = 0;
+   assert(aimee_db3_apply_decode(mutated, length, &decoded_apply) != 0);
+   memcpy(mutated, wire, length);
+   mutated[38]++;
+   assert(aimee_db3_apply_decode(mutated, length, &decoded_apply) != 0);
+   strcpy(apply.labels[1].key, "project");
+   assert(aimee_db3_apply_validate(&apply) != 0);
+   strcpy(apply.labels[1].key, "record_type");
+   apply.labels[1].value[0] = '\n';
+   apply.labels[1].value[1] = '\0';
+   assert(aimee_db3_apply_validate(&apply) != 0);
+   strcpy(apply.labels[1].value, "memory");
+   apply.kind = AIMEE_DB3_APPLY_DELETE;
+   apply.dimension = 0;
+   assert(aimee_db3_apply_validate(&apply) != 0);
+
    /* Generated tests/baselines/modules/db3-wire-v1.json replays these exact
     * bytes in Go. Pin them here as the C side of the cross-language fixture. */
    const uint8_t expected_request[] = {
@@ -246,6 +279,16 @@ static void test_wire_codecs(void)
        0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x29, 0x00, 0x00, 0x00,
        0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x03, 0x00, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79,
        0xcd, 0xcc, 0xcc, 0x3d, 0xcd, 0xcc, 0x4c, 0x3e, 0x9a, 0x99, 0x99, 0x3e};
+   const uint8_t expected_apply_v2[] = {
+       0x44, 0x42, 0x33, 0x41, 0x02, 0x00, 0x01, 0x00, 0xea, 0x03, 0x00, 0x00, 0x00, 0x00,
+       0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2a, 0x00, 0x00, 0x00,
+       0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x03, 0x00, 0x03, 0x00, 0x41, 0x00, 0x6d, 0x65,
+       0x6d, 0x6f, 0x72, 0x79, 0x9a, 0x99, 0x99, 0x3e, 0xcd, 0xcc, 0x4c, 0x3e, 0xcd, 0xcc,
+       0xcc, 0x3d, 0x07, 0x00, 0x09, 0x00, 0x70, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x70,
+       0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x2d, 0x61, 0x0b, 0x00, 0x06, 0x00, 0x72, 0x65,
+       0x63, 0x6f, 0x72, 0x64, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x6d, 0x65, 0x6d, 0x6f, 0x72,
+       0x79, 0x09, 0x00, 0x0b, 0x00, 0x77, 0x6f, 0x72, 0x6b, 0x73, 0x70, 0x61, 0x63, 0x65,
+       0x77, 0x6f, 0x72, 0x6b, 0x73, 0x70, 0x61, 0x63, 0x65, 0x2d, 0x61};
    aimee_db3_search_request_t fixture_request = {.request_id = 77,
                                                  .required_generation = 7,
                                                  .workspace = "workspace-a",
@@ -269,6 +312,21 @@ static void test_wire_codecs(void)
                                       .vector = {0.1f, 0.2f, 0.3f}};
    assert(aimee_db3_apply_encode(&fixture_apply, wire, sizeof(wire), &length) == 0);
    assert(length == sizeof(expected_apply) && memcmp(wire, expected_apply, length) == 0);
+   aimee_db3_apply_t fixture_apply_v2 = {.operation_id = 1002,
+                                         .generation = 7,
+                                         .point_id = 42,
+                                         .kind = AIMEE_DB3_APPLY_UPSERT,
+                                         .collection = "memory",
+                                         .dimension = 3,
+                                         .vector = {0.3f, 0.2f, 0.1f},
+                                         .label_count = 3,
+                                         .labels = {
+                                             {.key = "project", .value = "project-a"},
+                                             {.key = "record_type", .value = "memory"},
+                                             {.key = "workspace", .value = "workspace-a"},
+                                         }};
+   assert(aimee_db3_apply_encode(&fixture_apply_v2, wire, sizeof(wire), &length) == 0);
+   assert(length == sizeof(expected_apply_v2) && memcmp(wire, expected_apply_v2, length) == 0);
 }
 
 int main(void)

@@ -13,7 +13,7 @@
 #include "modules/db2/c/kb_maintenance.h"
 #include "modules/db2/c/kb_payload.h"
 #include "modules/db2/c/kb_service_backend.h"
-#include "modules/db2/c/kb_service_backend_export.h"
+#include "kb/db2_adapters/kb_service_backend_export.h"
 #include "modules/db2/c/kb_runtime_state.h"
 #include "modules/db2/c/lifecycle.h"
 #include "modules/db2/c/vector_index_ops.h"

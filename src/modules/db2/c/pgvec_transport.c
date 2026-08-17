@@ -6,7 +6,7 @@
 #include "db_postgres.h"
 #include "lifecycle.h" /* db2_embedding_dim */
 #include "cJSON.h"
-#include "log.h"
+#include "../support/db2_log.h"
 
 #include <pthread.h>
 #include <stdatomic.h>

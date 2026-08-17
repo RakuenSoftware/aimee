@@ -508,8 +508,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_runtime_state.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend_ingest.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend_agent.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend_memory.c
     ${AIMEE_SRC_DIR}/modules/db2/c/memory_briefing.c
     ${AIMEE_SRC_DIR}/modules/db2/c/memory_conflicts.c
     ${AIMEE_SRC_DIR}/modules/db2/c/memory_export.c
@@ -558,7 +556,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/report_enrichments.c
     ${AIMEE_SRC_DIR}/modules/db2/c/bandit.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_maintenance.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend_export.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_docs.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_releases.c
     ${AIMEE_SRC_DIR}/modules/db2/c/pgvec_transport.c
@@ -567,6 +564,13 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/vector_status.c
     ${AIMEE_SRC_DIR}/modules/db2/c/pgvec_verify.c
     ${AIMEE_SRC_DIR}/modules/db2/c/pgvec_kb_service.c
+)
+
+set(DB2_HOST_ADAPTER_SRCS
+    ${AIMEE_SRC_DIR}/kb/db2_adapters/kb_service_backend_agent.c
+    ${AIMEE_SRC_DIR}/kb/db2_adapters/kb_service_backend_export.c
+    ${AIMEE_SRC_DIR}/kb/db2_adapters/kb_service_backend_memory.c
+    ${AIMEE_SRC_DIR}/kb/db2_adapters/kb_service_backend_runtime.c
 )
 
 set(CORE_SRCS
@@ -1276,6 +1280,7 @@ add_library(aimee-core STATIC
     ${CORE_SRCS}
     ${DB1_SRCS}
     ${DB2_SRCS}
+    ${DB2_HOST_ADAPTER_SRCS}
 )
 target_include_directories(aimee-core PUBLIC
     ${AIMEE_PROJECT_INCLUDE_DIRS}

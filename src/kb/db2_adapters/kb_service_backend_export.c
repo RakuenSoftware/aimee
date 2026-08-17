@@ -1,4 +1,5 @@
-/* db2/kb_service_backend_export.c: filtered memory export/import for kb.export / kb.import RPCs. */
+/* kb/db2_adapters/kb_service_backend_export.c: caller-side filtered memory
+ * export/import composition for kb.export / kb.import RPCs. */
 
 #include "kb_service_backend_export.h"
 #include "../headers/aimee.h" /* memory_t for memory_query.h */

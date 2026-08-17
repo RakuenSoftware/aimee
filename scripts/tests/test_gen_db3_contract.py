@@ -63,7 +63,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn(b"AIMEE_DB3_CAPABILITIES_MAGIC", header)
         self.assertIn(b"const capabilitiesMagic", go_contract)
         for field in (
-            "capabilities_hex", "apply_chunk_hex", "applied_hex", "search_failure_hex",
+            "capabilities_hex", "apply_v2_hex", "apply_chunk_hex", "applied_hex", "search_failure_hex",
             "route_request_hex", "route_reply_hex",
         ):
             self.assertTrue(parsed[field], field)

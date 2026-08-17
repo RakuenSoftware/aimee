@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -152,7 +153,7 @@ func TestDB3BusRouterSearchRouteAndAuthenticatedEvidence(t *testing.T) {
 	}
 
 	appliedWire, _ := protocol.EncodeApplied(protocol.Applied{
-		OperationID: 1001, Generation: 7, Watermark: 7, Result: protocol.AppliedOK,
+		OperationID: 1001, Generation: 7, Watermark: 1001, Result: protocol.AppliedOK,
 	})
 	client.events <- bus.Event{Frame: bus.Frame{HdrFlags: bus.FNotification,
 		EventKind: protocol.EventApplied, PrincipalRef: 1001, SrcHandle: 41}, Payload: appliedWire}
@@ -162,7 +163,7 @@ func TestDB3BusRouterSearchRouteAndAuthenticatedEvidence(t *testing.T) {
 		return observed.OperationID == 1001
 	})
 	observedMu.Lock()
-	if observedPrincipal != 1001 || observed.Watermark != 7 {
+	if observedPrincipal != 1001 || observed.Watermark != 1001 {
 		t.Fatalf("applied observation = principal %d, %+v", observedPrincipal, observed)
 	}
 	observedMu.Unlock()
@@ -308,5 +309,48 @@ func TestDB3BusRouterConstructionFailsClosed(t *testing.T) {
 		allowAll, nil)
 	if !errors.Is(err, ErrDB3RouterConfig) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestDB3BusRouterPersistsApplyProviderBeforeRouting(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := newDB3FakeBus(128)
+	var observed atomic.Int32
+	router, _, err := newDB3BusRouterWithObservers(ctx, client,
+		func(_ context.Context, request protocol.SearchRequest) (protocol.SearchReply, error) {
+			return db3Reply(request, 1), nil
+		}, allowAll, DB3BusObservers{
+			Capabilities: func(_ context.Context, principal, handle uint32, sequence uint64,
+				capabilities protocol.Capabilities) error {
+				if principal != 1001 || handle != 41 || sequence != 1 ||
+					capabilities.Generation != 7 {
+					t.Fatalf("capability evidence = %d/%d/%d %+v",
+						principal, handle, sequence, capabilities)
+				}
+				observed.Add(1)
+				return errors.New("database unavailable")
+			},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enqueueCapabilities(t, client, 1001, 41, 1, db3Capabilities(7, true))
+	waitDB3(t, func() bool { return observed.Load() == 1 })
+	if got := router.Route(protocol.RouteRequest{RequestID: 1, Action: protocol.RouteQuery}); got.SelectedPrincipal != 0 {
+		t.Fatalf("unpersisted provider became route = %+v", got)
+	}
+
+	// Search-only providers do not create apply-delivery obligations.
+	searchOnly := db3Capabilities(7, true)
+	searchOnly.Operations = protocol.OperationSearch
+	searchOnly.MaxBatch = 0
+	enqueueCapabilities(t, client, 2002, 42, 1, searchOnly)
+	waitDB3(t, func() bool {
+		return router.Route(protocol.RouteRequest{RequestID: 2, Action: protocol.RouteQuery}).
+			SelectedPrincipal == 2002
+	})
+	if observed.Load() != 1 {
+		t.Fatalf("search-only provider was persisted: %d", observed.Load())
 	}
 }

@@ -90,16 +90,52 @@ memory-candidate operation. Its internal pgvector, external provider, and author
 checks are injected, so the route can be exhaustively tested before the private DB2 source closure is
 linked. This is not a production cutover: the module remains disabled and no provider grant ships.
 
+DB2's schema also contains the pre-activation DB3 durability owner. AFTER ROW triggers on the
+reviewed pgvector mutation relations create canonical apply-v2 operations and per-principal
+delivery obligations in the same PostgreSQL transaction as the authoritative vector write. A new
+apply-capable provider receives durable catalog-driven cursors under the same advisory transaction
+lock, then a Go worker backfills in bounded transactions while live writes also target that
+principal; it cannot advertise ready search evidence until that backfill is acknowledged. With no
+active or backfilling external provider, no outbox history is retained because a later snapshot is
+authoritative. The Go dispatcher uses bounded `SKIP LOCKED` leases and
+broadcasts over the event bus, while only authenticated per-principal applied acknowledgements
+complete delivery. These paths remain unselected until the standalone C DB2 activation gate.
+
 Link-closure audit:
 
-`link-closure-v1.json` accounts for all 141 C translation units in the private DB2 boundary. The
+`link-closure-v1.json` accounts for all 138 storage-owner C translation units in the private DB2
+boundary. Three JSON/RPC composition units were rehomed unchanged to `src/kb/db2_adapters`: they call
+high-level memory, dashboard, learning, and agent policy and therefore remain on the caller side of
+the process boundary while their storage calls migrate to generated DB2 clients. Treating those
+calls as injected DB2 callbacks would recreate the monolith inside the module. The
 probe compiles each unit plus exact descriptor-owned support, combines only those objects with a
 relocatable link, supplies no archive, shared library, helper stub, or weak definition, and records
-the 311 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
-disposition and rationale. The current ledger contains 145 explicit system-link dependencies, zero
-remaining vendored/generated inputs, 150 sibling or KB contracts to inject, and 16 support APIs to
+the 190 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
+disposition and rationale. The current ledger contains 139 explicit system-link dependencies, zero
+remaining vendored/generated inputs, 51 sibling or KB contracts to inject, and zero support APIs to
 promote. The standalone-link exit condition requires zero entries in the latter three groups; a
 classified ledger alone is not enough.
+
+The descriptor also replaces eighteen live host-config getters with one versioned immutable
+startup snapshot. Retained DB2 sources include only the private snapshot header; the legacy
+monolith continues resolving the same getter symbols from the config module until cutover, while
+the standalone process resolves them locally after one validated install. Wrong ABI, NULL, and
+unterminated command snapshots fail atomically, and normal plus hardened tests cover every field,
+fail-closed defaults, requested embedder override, and retained state after rejected installs.
+
+Process discovery and daemon spawning were extracted from the retained SQL backend into a
+caller-side runtime adapter. Queue rows, transactional claims, and completion state remain in DB2;
+the supervisor alone resolves and spawns the host executable. The legacy function and object
+names remain linked during cutover, while the standalone DB2 closure no longer imports either
+platform lifecycle API. This adapter is explicit S2 caller-side debt: its storage calls must become
+generated DB2 client operations before S4, but process discovery and spawn policy never move back
+inside DB2 or become injected module callbacks.
+
+The closure probe now uses the same `AIMEE_DB1_DISABLED` and
+`AIMEE_DISABLE_DB2_SQLITE_SHIM` mode as the standalone KB/DB2 build. The legacy SQLite evaluation
+shim remains available to its existing tests, but its DB1 statement-cache hook and SQLite-only
+system ABI no longer count as production module dependencies. The one newly active POSIX process
+reference and its exact call site are pinned as part of this one-way probe-mode migration.
 
 The first closure reduction promotes seven deterministic sketch primitives from `src/sketch.c` into
 the descriptor-owned `support/sketch_primitives.c`. Their DB2 calls are confined to `c/sketch.c` and
@@ -142,8 +178,8 @@ and parsing imports. The existing Linux `timegm` and Windows `_mkgmtime` branche
 Parity covers both stored timestamp spellings, date-only values, epoch and calendar normalization,
 invalid basic ranges and separators, trailing input, NULL/empty input, three host timezones, exact
 formatter grammar, parser round-trip, and a five-second wall-clock window under normal and hardened
-builds. The two formatter callers that also log do not create a support import: logging remains an
-independent injected process-policy decision.
+builds. The two formatter callers that also log share the bounded process logger described below;
+the time support unit itself retains no logging import.
 
 The sixth reduction promotes `rel_type_normalize` and `rel_type_is_functional` without importing the
 relationship enum, seed-table, or memory-ontology surface. The private header exposes only string,
@@ -189,13 +225,130 @@ nonrepeating output, eight-thread concurrency, fork safety, and ASan/UBSan/FORTI
 This slice moves total debt from 313 to 311 and portable promotion debt from 18 to 16 without
 changing database, pgvector, provider, event-bus, or activation ownership.
 
-The remaining portable rows are named migration debt, not an assertion that copying is always the
-right answer. DB2 owns the decision and must close it before activation: relationship seed iteration
-triggers a shared ontology-type boundary; canonical-index extraction and shell helpers trigger a
-typed indexing capability review; logging, session identity, and briefing rendering trigger an
-injected process/config/memory contract review; executable discovery and daemon spawning trigger a
-runtime lifecycle capability review. Those rows may be reclassified only with a reviewed contract
-and replay evidence, so later slices do not repeatedly guess between support copying and injection.
+The tenth reduction packages `rel_types_seed_count`, `rel_types_seed_at`, and
+`rel_types_seed_lookup` as one generated ontology unit. The existing compiled-table generator now
+walks the authoritative `SEED_ONTOLOGY` once and can emit DB2's complete rows alongside the Go
+memory table and its fixture; it does not parse or duplicate the C initializer. A descriptor-private
+ABI mirror keeps monolithic relationship and memory headers outside the bundle while preserving all
+kind arrays, inverse and correction policy, category, sensitivity, hierarchy, and status fields.
+Admission pins the generated source and header hashes, three exports, four original references,
+three includes, and only the adjacent normalization support API plus `strcmp` imports. Compile-time
+checks bind every size, enum width, constant, and field offset to the authoritative row. Runtime and
+hardened parity walk every row and unused kind slot, prove iteration bounds and pointer identity,
+and compare canonical, normalized, missing, empty, NULL, and overlong lookups. This slice moves total
+debt from 311 to 308 and portable promotion debt from 16 to 13 without importing the memory module
+or changing database, pgvector, provider, DB3, event-bus, or activation ownership.
+
+The eleventh reduction replaces the monolithic host logger import with a descriptor-owned process
+sink. Seventeen DB2 units retain the existing `aimee_log` ABI while a startup-only installer binds
+level, module, and a capped formatted message to the module runtime. The remaining six legacy
+logger includes are localized to the same private header even though they currently emit no symbol.
+Normal and hardened tests cover an absent sink, formatting, truncation, invalid levels and pointers,
+and uninstall. The implementation imports only `vsnprintf` and has no KB logger state, allocation,
+database, bus, pgvector, provider, or DB3 edge. This slice moves total debt from 207 to 206 and
+portable promotion debt from 9 to 8.
+
+The async-queue drain now receives a nonempty, NUL-terminated worker identity bounded to 127 bytes.
+The KB caller supplies its session attribution and DB2 persists that exact value with the atomic
+claim; DB2 no longer imports the host `session_id()` accessor. Invalid identities fail before any
+configuration or database access, and database-backed plus HTTP-adapter tests cover rejection and
+round-trip attribution. This moves total debt from 206 to 205 and portable promotion debt from 8 to
+7 while leaving durable claim/state ownership inside DB2.
+
+The twelfth reduction removes generic shell execution from canonical indexing. The DB2 owner now
+constructs fixed argv vectors for its exact `git` and `find` operations, while the KB host installs
+the bounded `safe_exec_capture` capability once at service initialization, before HTTP routing or
+ingest workers start. A missing installer logs an explicit rejection and
+fails `canonical_index_scan_project` before database mutation; caller-pushed
+`canonical_index_scan_files` remains process-free. The production index test covers absence and a
+git root containing a space, including incremental co-change replay. This moves total debt from 205
+to 203 and portable promotion debt from 7 to 5, removes one host-header dependency, and eliminates
+both `run_cmd` and `shell_escape` without adding shell parsing to the module.
+
+The thirteenth reduction closes the portable ledger with one generated fallback-parser cluster. Its
+private ABI mirrors only definitions and call references; the generator derives the parser bodies
+from the three authoritative extractor sources, embeds the shared C system-header policy, removes
+the separately owned import-identity span, and supplies the normal build's unavailable tree-sitter
+fallback. Normal and ASan/UBSan parity replay imports and system flags, exports, routes, definitions
+and spans, and calls for all sixteen supported language families plus an unknown extension. This
+moves total debt from 203 to 198 and portable promotion debt from 5 to 0 without adding DB, bus,
+provider, pgvector, process, filesystem, network, logging, or configuration imports.
+
+The fourteenth reduction realizes the two pure co-change calls as one bounded injected contract.
+Its private pair ABI preserves object-id validation, deduplication, the bulk-commit gate, lexical
+ordering, and output truncation. Normal and ASan/UBSan parity cover empty, duplicate, unordered,
+boundary-length, hostile object-id, gated, and capped inputs against the authoritative monolith.
+This moves total debt from 198 to 196 and injected-contract debt from 59 to 57 without adding git,
+DB, bus, provider, pgvector, DB3, allocation, configuration, or logging dependencies.
+
+The fifteenth reduction owns the three model-catalog validators at DB2's pre-database storage choke
+point instead of importing their HTTP-layer implementation. Its contract freezes the exact wire
+whitelist, printable-name bounds, HTTP(S) prefix grammar, and empty-endpoint default. Normal and
+ASan/UBSan parity cover NULL, every non-NUL byte, lengths through 512, inclusive/exclusive bounds,
+accepted and rejected schemes, and negative maxima. This moves total debt from 196 to 193 and
+injected-contract debt from 57 to 54 while importing only `strcmp`, `strlen`, and `strncmp`.
+
+The sixteenth reduction isolates the certificate-serial canonicalizer used by DB2 enrollment from
+the broader identity owner. Normal and ASan/UBSan parity freeze prefix and separator removal,
+process-locale lowercasing, leading-zero collapse, bounded output, and fail-with-empty-output
+behavior for every non-NUL byte, short output capacities, and lengths across the internal 512-byte
+boundary. This moves total debt from 193 to 192 and injected-contract debt from 54 to 53 while
+leaving principal construction and authentication policy outside DB2.
+
+The seventeenth reduction owns the string-only code-search line-enrichment helper. Normal and
+ASan/UBSan parity cover NULL, malformed and repeated markers, empty and absent tokens, every
+non-NUL byte, 256-line content, and token lengths through 2048 while preserving first-verbatim-match
+and one-based line semantics. This moves total debt from 192 to 191 and injected-contract debt from
+53 to 52 with only `strncmp` and `strstr` imports.
+
+The eighteenth reduction adds a descriptor-owned node-kind text contract for the memory node-kind
+serializer used by the relationship seed writer. Normal and ASan/UBSan parity freeze all seventeen
+named persisted values, the `NODE_OTHER` sentinel, and every other signed 16-bit value plus integer
+boundaries to `other`. This moves total debt from 191 to 190 and injected-contract debt from 52 to
+51 without imports, shared ontology headers, allocation, I/O, DB, bus, provider, pgvector, DB3,
+configuration, or logging dependencies.
+
+The nineteenth reduction isolates `memory_pii_should_inject`, the final allocation-free decision in
+DB2 recall after relation sensitivity has been obtained. Its descriptor-private numeric ABI freezes
+the three sensitivity tiers and the `0.4` confidence floor without importing the memory classifier,
+ontology tables, or registration state. Normal and ASan/UBSan parity cover every signed 16-bit
+sensitivity, integer boundaries, values immediately around the floor, finite extremes, infinities,
+NaN, and full-width false/true request values. Unknown tiers, credentials, low confidence, and NaN
+remain fail-closed. This moves total debt from 190 to 189 and injected-contract debt from 51 to 50
+without imports, allocation, I/O, DB, bus, provider, pgvector, DB3, configuration, or logging edges.
+
+The twentieth reduction packages the import-identity pair used by DB2 code indexing together with
+its required path-identity helper. The descriptor-private `size_t` ABI and 4096-byte workspace
+preserve Python relative-import resolution, `__init__` equivalence, slash normalization, bounded
+truncation, and empty-input behavior without importing the rest of the extractor monolith. Normal
+and ASan/UBSan parity cover NULL, every non-NUL byte, POSIX and Windows separators, relative-dot
+levels, all short output capacities, the internal path boundary, and importer/import/target
+resolution matrices. This moves total debt from 189 to 187 and injected-contract debt from 50 to
+48; its five C string/format imports were already declared system dependencies.
+
+The twenty-first reduction packages the complete pure code-audit graph owner: dead-export selection
+and bounded cycle discovery. Its descriptor-private edge ABI preserves borrowed export pointers,
+import/reference tail matching, the 4096-node cap, deterministic traversal and rendering, duplicate
+suppression, result limits, and cleanup without importing DB fetch or JSON assembly. Normal and
+ASan/UBSan parity cover NULL and negative bounds, prefix variants, duplicates, DAGs, self/two/three-
+node and overlapping cycles, null endpoints, disconnected graphs, limits, and a generated 64-node
+graph. This moves total debt from 187 to 185 and injected-contract debt from 48 to 46; its allocation,
+string, and formatting imports were already declared system dependencies.
+
+The twenty-second reduction packages the remaining memory PII classifier owner while keeping the
+already-isolated final injection decision separate. It includes turn cue scanning, direct and batched
+relation sensitivity, plus both provider-registration seams; registered provider failures remain
+authoritative and fail closed instead of silently falling back. The relation classifier composes only
+with DB2's admitted seed and normalization support. Normal and ASan/UBSan parity cover every seed
+relation, every non-NUL byte, sensitive-name and case/length boundaries, local and provider paths,
+provider failures after partial writes, invalid batches, and output canaries. This moves total debt
+from 185 to 182 and injected-contract debt from 46 to 43 without adding a system dependency.
+
+The remaining 43 non-system rows are sibling-contract migration debt. Session identity, briefing
+rendering, executable lifecycle, configuration, memory, and other host calls must close through
+their reviewed process contracts before activation; they are not portable-support candidates. Rows
+may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide
+host coupling inside support copies.
 
 The gate rejects legacy source additions or omissions, support path escape, symlinks, content drift,
 new unresolved symbols, non-system reference growth, missing evidence, and any attempt to make the

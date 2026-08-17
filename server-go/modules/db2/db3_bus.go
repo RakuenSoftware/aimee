@@ -49,26 +49,34 @@ type db3AppliedEvent struct {
 }
 
 type DB3AppliedObserver func(principal uint32, applied protocol.Applied)
+type DB3CapabilitiesObserver func(context.Context, uint32, uint32, uint64,
+	protocol.Capabilities) error
+
+type DB3BusObservers struct {
+	Capabilities DB3CapabilitiesObserver
+	Applied      DB3AppliedObserver
+}
 
 // DB3BusRouter owns the DB2-side DB3 attachment. One poller multiplexes
 // provider notifications, route-control requests, and concurrent search
 // replies so no goroutine races another consumer on the shared inbound ring.
 type DB3BusRouter struct {
-	client    db3WireClient
-	router    *DB3Router
-	applied   DB3AppliedObserver
-	appliedCh chan db3AppliedEvent
-	next      atomic.Uint64
-	sendMu    sync.Mutex
-	mu        sync.Mutex
-	pending   map[uint64]db3BusPending
-	replies   map[uint64]db3BusAssembly
-	routes    map[uint64]db3BusAssembly
-	closed    chan struct{}
-	closeOnce sync.Once
-	errMu     sync.Mutex
-	err       error
-	pollDelay time.Duration
+	client       db3WireClient
+	router       *DB3Router
+	capabilities DB3CapabilitiesObserver
+	applied      DB3AppliedObserver
+	appliedCh    chan db3AppliedEvent
+	next         atomic.Uint64
+	sendMu       sync.Mutex
+	mu           sync.Mutex
+	pending      map[uint64]db3BusPending
+	replies      map[uint64]db3BusAssembly
+	routes       map[uint64]db3BusAssembly
+	closed       chan struct{}
+	closeOnce    sync.Once
+	errMu        sync.Mutex
+	err          error
+	pollDelay    time.Duration
 }
 
 func NewDB3BusRouter(ctx context.Context, client *bus.Client, internal DB3InternalSearcher,
@@ -79,17 +87,34 @@ func NewDB3BusRouter(ctx context.Context, client *bus.Client, internal DB3Intern
 	return newDB3BusRouter(ctx, client, internal, authorize, applied)
 }
 
+func NewDB3BusRouterWithObservers(ctx context.Context, client *bus.Client,
+	internal DB3InternalSearcher, authorize DB3CandidateAuthorizer,
+	observers DB3BusObservers) (*DB3Router, *DB3BusRouter, error) {
+	if client == nil {
+		return nil, nil, ErrDB3RouterConfig
+	}
+	return newDB3BusRouterWithObservers(ctx, client, internal, authorize, observers)
+}
+
 func newDB3BusRouter(ctx context.Context, client db3WireClient, internal DB3InternalSearcher,
 	authorize DB3CandidateAuthorizer, applied DB3AppliedObserver) (*DB3Router, *DB3BusRouter, error) {
+	return newDB3BusRouterWithObservers(ctx, client, internal, authorize,
+		DB3BusObservers{Applied: applied})
+}
+
+func newDB3BusRouterWithObservers(ctx context.Context, client db3WireClient,
+	internal DB3InternalSearcher, authorize DB3CandidateAuthorizer,
+	observers DB3BusObservers) (*DB3Router, *DB3BusRouter, error) {
 	if ctx == nil || client == nil || client.InlineBudget() == 0 {
 		return nil, nil, ErrDB3RouterConfig
 	}
 	endpoint := &DB3BusRouter{
-		client: client, applied: applied, pending: make(map[uint64]db3BusPending),
+		client: client, capabilities: observers.Capabilities, applied: observers.Applied,
+		pending: make(map[uint64]db3BusPending),
 		replies: make(map[uint64]db3BusAssembly), routes: make(map[uint64]db3BusAssembly),
 		closed: make(chan struct{}), pollDelay: db3BusPollInterval,
 	}
-	if applied != nil {
+	if observers.Applied != nil {
 		endpoint.appliedCh = make(chan db3AppliedEvent, db3BusMaxPending)
 		go endpoint.observeApplied(ctx)
 	}
@@ -185,8 +210,15 @@ func (b *DB3BusRouter) handleEvent(ctx context.Context, event bus.Event) {
 		}
 		capabilities, err := protocol.DecodeCapabilities(event.Payload)
 		if err == nil {
-			_ = b.router.ObserveCapabilities(event.Frame.PrincipalRef, event.Frame.SrcHandle,
-				event.Frame.Seq, capabilities)
+			principal, handle := event.Frame.PrincipalRef, event.Frame.SrcHandle
+			if b.capabilities != nil &&
+				capabilities.Operations&protocol.OperationApply != 0 {
+				if err := b.capabilities(ctx, principal, handle, event.Frame.Seq,
+					capabilities); err != nil {
+					return
+				}
+			}
+			_ = b.router.ObserveCapabilities(principal, handle, event.Frame.Seq, capabilities)
 		}
 	case protocol.EventApplied:
 		if event.Frame.HdrFlags&bus.FNotification == 0 {
