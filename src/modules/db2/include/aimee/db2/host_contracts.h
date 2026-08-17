@@ -30,6 +30,25 @@ extern "C"
     * removes it; artifact commits continue without optional MDL features. */
    void aimee_db2_register_mdl_score_provider(aimee_db2_mdl_score_fn provider);
 
+   enum
+   {
+      AIMEE_DB2_FACT_GATE_ACCEPT = 0,
+      AIMEE_DB2_FACT_GATE_REJECT_KIND = 1,
+      AIMEE_DB2_FACT_GATE_NOVEL = 2,
+      AIMEE_DB2_FACT_GATE_BADARG = 3,
+   };
+
+   /* Validate one typed-fact relation through the host's memory gate. The
+    * provider returns 0 and writes one AIMEE_DB2_FACT_GATE_* verdict, or -1
+    * when no authoritative verdict is available. */
+   typedef int (*aimee_db2_fact_gate_fn)(int head_kind, const char *rel_type, int tail_kind,
+                                         int *verdict);
+
+   /* Install the host's canonical memory fact gate during process startup. NULL
+    * removes it; DB2 then defers typed-fact commits rather than writing without
+    * an authoritative verdict. */
+   void aimee_db2_register_fact_gate_provider(aimee_db2_fact_gate_fn provider);
+
 #ifdef __cplusplus
 }
 #endif

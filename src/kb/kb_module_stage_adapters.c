@@ -13,6 +13,7 @@
 #include <aimee/db2/client.h>
 #include <aimee/db2/host_contracts.h>
 #include <aimee/kb-synthesis/module_api.h>
+#include <aimee/memory/module_api.h>
 #include <aimee/postgres/module_api.h>
 
 #include <stdatomic.h>
@@ -104,6 +105,42 @@ static int score_mdl(const char *candidate, const char *evidence, double *l_cand
    return 0;
 }
 
+static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict)
+{
+   uint8_t request[AIMEE_MEMORY_GATE_REQUEST_LEN], response[AIMEE_MEMORY_GATE_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   aimee_memory_fact_verdict_t result;
+   if (!verdict)
+      return -1;
+   if (aimee_memory_gate_request_encode((uint32_t)head_kind, rel_type, (uint32_t)tail_kind, request,
+                                        sizeof(request)) != 0)
+   {
+      *verdict = AIMEE_DB2_FACT_GATE_BADARG;
+      return 0;
+   }
+   if (call_module(AIMEE_MEMORY_EVENT_WRITE, AIMEE_MEMORY_STAGE_WRITE, request, sizeof(request),
+                   response, sizeof(response), &response_len) != 0 ||
+       aimee_memory_gate_response_decode(response, response_len, &result) != 0)
+      return -1;
+   switch (result)
+   {
+   case AIMEE_MEMORY_FACT_ACCEPT:
+      *verdict = AIMEE_DB2_FACT_GATE_ACCEPT;
+      return 0;
+   case AIMEE_MEMORY_FACT_REJECT_KIND:
+      *verdict = AIMEE_DB2_FACT_GATE_REJECT_KIND;
+      return 0;
+   case AIMEE_MEMORY_FACT_NOVEL:
+      *verdict = AIMEE_DB2_FACT_GATE_NOVEL;
+      return 0;
+   case AIMEE_MEMORY_FACT_BADARG:
+      *verdict = AIMEE_DB2_FACT_GATE_BADARG;
+      return 0;
+   default:
+      return -1;
+   }
+}
+
 int kb_module_postgres_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_tables_ok)
 {
    uint8_t request[AIMEE_POSTGRES_REQUEST_LEN];
@@ -141,6 +178,7 @@ void kb_module_stage_adapters_configure(void)
 {
    aimee_db2_register_audit_hash_provider(audit_worm_row_hash);
    aimee_db2_register_mdl_score_provider(score_mdl);
+   aimee_db2_register_fact_gate_provider(check_fact_gate);
    kb_curator_grounding_register_provider(grounding_decide);
    kb_route_acl_register_authorization_provider(control_web_authorize);
 }

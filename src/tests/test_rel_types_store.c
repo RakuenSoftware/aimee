@@ -16,11 +16,53 @@ static int semantic_count(const char *entity)
    return db2_entity_edges_semantic_by_entity(entity, e, 64);
 }
 
+static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict)
+{
+   if (!verdict)
+      return -1;
+   *verdict = (int)memory_fact_gate_check((memory_node_kind_t)head_kind, rel_type,
+                                          (memory_node_kind_t)tail_kind, NULL);
+   return 0;
+}
+
+static int invalid_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict)
+{
+   (void)head_kind;
+   (void)rel_type;
+   (void)tail_kind;
+   *verdict = FACT_GATE_DEFER;
+   return 0;
+}
+
+static int failing_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict)
+{
+   (void)head_kind;
+   (void)rel_type;
+   (void)tail_kind;
+   (void)verdict;
+   return -1;
+}
+
 int main(void)
 {
    db2_test_shim_open();
    assert(db2_rel_types_ensure_seed() == 0);
    assert(db2_rel_types_ensure_seed() == 0); /* idempotent */
+
+   /* No provider, provider failure, and out-of-range verdicts all defer without
+    * writing. The host-installed memory gate is authoritative. */
+   assert(db2_fact_commit("unconfigured", NODE_PERSON, "works_for", "acme", NODE_ORG,
+                          FACT_AUTHORITY_MODEL, 1) == FACT_GATE_DEFER);
+   assert(semantic_count("unconfigured") == 0);
+   aimee_db2_register_fact_gate_provider(failing_fact_gate);
+   assert(db2_fact_commit("failed", NODE_PERSON, "works_for", "acme", NODE_ORG,
+                          FACT_AUTHORITY_MODEL, 1) == FACT_GATE_DEFER);
+   assert(semantic_count("failed") == 0);
+   aimee_db2_register_fact_gate_provider(invalid_fact_gate);
+   assert(db2_fact_commit("invalid", NODE_PERSON, "works_for", "acme", NODE_ORG,
+                          FACT_AUTHORITY_MODEL, 1) == FACT_GATE_DEFER);
+   assert(semantic_count("invalid") == 0);
+   aimee_db2_register_fact_gate_provider(check_fact_gate);
 
    /* Resolve: seeded names (normalized), absent names. */
    long id = 0;

@@ -33,9 +33,19 @@ static int counting_batch(const char *const *rel_types, int count, rel_sensitivi
    return 0;
 }
 
+static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict)
+{
+   if (!verdict)
+      return -1;
+   *verdict = (int)memory_fact_gate_check((memory_node_kind_t)head_kind, rel_type,
+                                          (memory_node_kind_t)tail_kind, NULL);
+   return 0;
+}
+
 int main(void)
 {
    db2_test_shim_open();
+   aimee_db2_register_fact_gate_provider(check_fact_gate);
    assert(db2_rel_types_ensure_seed() == 0);
 
    /* user facts via the gate (USER authority -> Class A, conf 1.0, above floor):

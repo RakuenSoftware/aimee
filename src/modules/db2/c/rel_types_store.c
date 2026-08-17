@@ -18,6 +18,13 @@
  * edge source/target columns (db2_entity_aliases_for writes into char[128]). */
 #define FACT_ENDPOINT_MAX 128
 
+static db2_fact_gate_fn g_fact_gate_provider;
+
+void aimee_db2_register_fact_gate_provider(db2_fact_gate_fn provider)
+{
+   g_fact_gate_provider = provider;
+}
+
 /* Serialize a kinds list to comma-separated canonical kind text (for the table;
  * validation itself uses the in-code seed). */
 static void kinds_to_text(const memory_node_kind_t *kinds, int n, char *out, size_t cap)
@@ -194,8 +201,27 @@ fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_
                                     memory_node_kind_t tail_kind, fact_authority_t authority,
                                     int enabled)
 {
-   const rel_type_def_t *def = NULL;
-   fact_gate_verdict_t v = memory_fact_gate_check(head_kind, rel_type, tail_kind, &def);
+   int verdict = -1;
+   if (!g_fact_gate_provider ||
+       g_fact_gate_provider((int)head_kind, rel_type, (int)tail_kind, &verdict) != 0 ||
+       verdict < DB2_FACT_GATE_ACCEPT || verdict > DB2_FACT_GATE_BADARG)
+      verdict = -1;
+   fact_gate_verdict_t v = FACT_GATE_DEFER;
+   switch (verdict)
+   {
+   case DB2_FACT_GATE_ACCEPT:
+      v = FACT_GATE_ACCEPT;
+      break;
+   case DB2_FACT_GATE_REJECT_KIND:
+      v = FACT_GATE_REJECT_KIND;
+      break;
+   case DB2_FACT_GATE_NOVEL:
+      v = FACT_GATE_NOVEL;
+      break;
+   case DB2_FACT_GATE_BADARG:
+      v = FACT_GATE_BADARG;
+      break;
+   }
    if (!enabled)
       return v; /* observe-only when the feature flag is off */
    if (!source || !source[0] || !target || !target[0])
