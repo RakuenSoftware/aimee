@@ -71,6 +71,7 @@
    "retired_sources": [
     "conv_context.c",
     "payload_rewrite_state.c",
+    "windows.c",
     "wm.c"
    ]
   },
@@ -1699,6 +1700,666 @@
      },
      {
       "name": "event_count",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 18,
+   "name": "window_scan_state",
+   "c_name": "db1_windows_session_scan_state",
+   "c_params": [
+    "session_id",
+    "count_out",
+    "max_seq_out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "count",
+      "type": "int"
+     },
+     {
+      "name": "max_seq",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 19,
+   "name": "window_session_id",
+   "c_name": "db1_window_session_id",
+   "c_params": [
+    "window_id",
+    "out",
+    "out_sz"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 20,
+   "name": "window_create_raw",
+   "c_name": "db1_window_create_raw",
+   "c_params": [
+    "session_id",
+    "seq",
+    "summary",
+    "created_at"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "seq",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "summary",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "created_at",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 21,
+   "name": "window_add_term",
+   "c_name": "db1_window_add_term",
+   "c_params": [
+    "window_id",
+    "term"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "term",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 22,
+   "name": "window_add_file",
+   "c_name": "db1_window_add_file",
+   "c_params": [
+    "window_id",
+    "file_path"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "file_path",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 23,
+   "name": "window_ids_by_tier",
+   "c_name": "db1_windows_list_ids_by_tier_before_days",
+   "c_params": [
+    "tier",
+    "older_than_days",
+    "out_ids",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "tier",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "older_than_days",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out_ids",
+     "bound": "max",
+     "max_rows": 64,
+     "column": {
+      "kind": "int64"
+     }
+    },
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 24,
+   "name": "window_candidates_by_terms",
+   "c_name": "db1_windows_find_candidates_by_terms",
+   "c_params": [
+    "terms",
+    "term_count",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ],
+    "repeated": {
+     "values": "terms",
+     "count": "term_count",
+     "max_values": 32
+    }
+   },
+   "reply": {
+    "struct": "db1_window_search_candidate_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "seq",
+      "type": "int"
+     },
+     {
+      "name": "summary",
+      "type": "text"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "match_count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 25,
+   "name": "window_list_files",
+   "c_name": "db1_window_list_files",
+   "c_params": [
+    "window_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64,
+     "column": {
+      "kind": "text",
+      "width": "MAX_PATH_LEN"
+     }
+    },
+    "fields": [
+     {
+      "name": "file_path",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 26,
+   "name": "window_index_summary",
+   "c_name": "db1_window_index_summary",
+   "c_params": [
+    "window_id",
+    "summary"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "summary",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 27,
+   "name": "window_lexical_hits",
+   "c_name": "db1_windows_find_lexical_hits",
+   "c_params": [
+    "terms",
+    "term_count",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ],
+    "repeated": {
+     "values": "terms",
+     "count": "term_count",
+     "max_values": 32
+    }
+   },
+   "reply": {
+    "struct": "db1_window_lexical_hit_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64"
+     },
+     {
+      "name": "rank",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 28,
+   "name": "window_set_tier",
+   "c_name": "db1_window_set_tier",
+   "c_params": [
+    "window_id",
+    "tier"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "tier",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 29,
+   "name": "window_prune_terms",
+   "c_name": "db1_window_prune_terms_keep_top",
+   "c_params": [
+    "window_id",
+    "keep"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "keep",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 30,
+   "name": "window_delete_all_files",
+   "c_name": "db1_window_delete_all_files",
+   "c_params": [
+    "window_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 31,
+   "name": "window_prune_files",
+   "c_name": "db1_window_prune_files_keep_top",
+   "c_params": [
+    "window_id",
+    "keep"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "window_id",
+      "type": "int64",
+      "required": true
+     },
+     {
+      "name": "keep",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "conversation",
+   "id": 32,
+   "name": "windows_delete_after_turn",
+   "c_name": "db1_windows_delete_after_turn",
+   "c_params": [
+    "session_id",
+    "turn"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "session",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "key",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "turn",
       "type": "int",
       "required": true
      }

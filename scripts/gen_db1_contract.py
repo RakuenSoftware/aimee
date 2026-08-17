@@ -254,6 +254,8 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
             reply_shape = operation["reply"]
             request_shape = operation["request"]
             inbound = 1 if "struct" in request_shape else len(request_shape["fields"])
+            if "repeated" in request_shape:
+                inbound += 2  # the values array and its count
             if operation.get("c_returns") in ("text", "int64"):
                 # The value comes back as the return, so there is no out
                 # parameter to name -- the caller frees what it is handed, or
@@ -323,6 +325,8 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
             fail("results-order", f"{name} results must follow the declared result order")
 
         request_keys = {"fields", "struct"} if "struct" in operation["request"] else {"fields"}
+        if "repeated" in operation["request"]:
+            request_keys = request_keys | {"repeated"}
         request = keys(operation["request"], request_keys, f"{name}.request")
         if "struct" in request and not re.fullmatch(r"[a-z][a-z0-9_]*_t", str(request["struct"])):
             fail("request-struct", f"{name} request struct must be a _t type name")
@@ -352,6 +356,24 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
                      f"{name} field {declared['name']!r} type must be one of {list(FIELD_TYPES)}")
             fields.append(str(declared["name"]))
         operation["_field_types"] = [str(f["type"]) for f in raw_fields]
+        if "repeated" in request:
+            # A variable-length list of strings, carried at the END of the
+            # frame. The operation's fixed fields come first, so the stage can
+            # hand the domain a slice of its own decoded array rather than
+            # copying: field[] is already const char *[], and &field[base] is
+            # exactly the const char *const * the domain takes.
+            rep = keys(request["repeated"], {"values", "count", "max_values"},
+                       f"{name}.request.repeated")
+            if "struct" in request:
+                fail("request-repeated", f"{name} cannot repeat and take a struct")
+            if "c_params" not in operation:
+                fail("request-repeated", f"{name} repeats but names no C parameters")
+            for role in ("values", "count"):
+                if str(rep[role]) not in operation["c_params"]:
+                    fail("request-repeated",
+                         f"{name} repeated {role} {rep[role]!r} is not a C parameter")
+            integer(rep["max_values"], f"{name}.request.repeated.max_values", 1, 64)
+
         # A scoped operation must take its scoping key FIRST, because that key is
         # the boundary: DB1 rows belong to a conversation, session or repository,
         # and reading without one crosses it.
@@ -412,16 +434,10 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
                               f"{name}.reply.list.column")
                 if "struct" in reply:
                     fail("reply-column", f"{name} is a column, so it declares no row struct")
-                # Text only, deliberately. The numeric column -- int64_t *out --
-                # exists in the survey but in no family that can be activated
-                # yet, so generating for it would ship a path nothing exercises.
-                # The generator already handles it; lifting this check and
-                # declaring the operation is the whole change when a family
-                # arrives that has one.
-                if str(column["kind"]) != "text":
-                    fail("reply-column",
-                         f"{name} column kind must be text: a numeric column has no operation "
-                         f"to prove it yet")
+                # Numeric columns are enabled now that windows has one to
+                # prove: db1_windows_list_ids_by_tier_before_days answers with
+                # int64_t *out_ids. Text and numeric take the same path; only
+                # the row's declared C type differs.
                 if (str(column["kind"]) == "text") != ("width" in column):
                     fail("reply-column",
                          f"{name} column of text needs a width, and a numeric one has none")
@@ -452,7 +468,11 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
                 fail("reply-list", f"{name} list out and bound must differ")
             # The remaining parameters map onto the request fields in order, so
             # the bound's position tells us which field must be the integer.
-            inputs = [p for p in params if p != listed["out"]]
+            excluded_names = {str(listed["out"])}
+            if "repeated" in request:
+                excluded_names |= {str(request["repeated"]["values"]),
+                                   str(request["repeated"]["count"])}
+            inputs = [p for p in params if p not in excluded_names]
             if len(inputs) != len(raw_fields):
                 fail("reply-list",
                      f"{name} has {len(inputs)} input parameters but {len(raw_fields)} "
@@ -802,7 +822,10 @@ def header_bytes(catalog: dict[str, object]) -> str:
             if "text" in kinds and operation.get("c_returns") != "text":
                 field_max = max(field_max, int(reply["max_bytes"]))
             if operation["wire_format"] == "db1-fields-v2":
-                fields_max = max(fields_max, len(request["fields"]))
+                widest_request = len(request["fields"])
+                if "repeated" in request:
+                    widest_request += int(request["repeated"]["max_values"])
+                fields_max = max(fields_max, widest_request)
 
     limits: list[tuple[str, str]] = []
     if state_max:
@@ -1159,6 +1182,7 @@ static int read_result(int status, const char *value_out)
         in_struct = str(request["struct"]) if "struct" in request else ""
         out_struct = str(reply["struct"]) if "struct" in reply else ""
         listed = reply.get("list")
+        repeated = request.get("repeated")
         scalars = reply.get("scalars")
         scalar_members = ([(str(f["name"]), str(f["type"])) for f in reply["fields"]]
                           if scalars else [])
@@ -1176,7 +1200,10 @@ static int read_result(int status, const char *value_out)
             row_out = str(listed["out"])
             bound = str(listed["bound"])
             column = listed.get("column")
-            inputs = [p for p in names if p != row_out]
+            excluded = {row_out}
+            if repeated:
+                excluded |= {str(repeated["values"]), str(repeated["count"])}
+            inputs = [p for p in names if p not in excluded]
             outputs = [row_out]
         elif out_struct and "out" in reply:
             # Some domains put the out parameter FIRST. Assuming it is last put
@@ -1205,7 +1232,19 @@ static int read_result(int status, const char *value_out)
             # guarded -- and only where the operation says it must be there.
             guards = [f"!{p} || !{p}[0]" for p, t, need in zip(inputs, types, required)
                       if t == "text" and need]
-        if returns_text or returns_id:
+        if repeated:
+            # The array and its count are declared where c_params puts them.
+            declared_rep = dict(zip(inputs, params))
+            declared_rep[str(repeated["values"])] = f"const char *const *{repeated['values']}"
+            declared_rep[str(repeated["count"])] = f"int {repeated['count']}"
+            if listed:
+                declared_rep[row_out] = f"{out_struct} *{row_out}"
+            params = [declared_rep[p] for p in names]
+            guards += [f"!{repeated['values']}", f"{repeated['count']} <= 0",
+                       f"{repeated['count']} > {repeated['max_values']}"]
+            if listed:
+                guards += [f"!{row_out}", f"{bound} <= 0"]
+        elif returns_text or returns_id:
             pass  # the value is the return; there is no out parameter
         elif scalars:
             # One pointer per value, in the order the reply declares them.
@@ -1280,13 +1319,26 @@ static int read_result(int status, const char *value_out)
                 carried.append(local)
             else:
                 carried.append(source)
-        if carried:
+        if repeated:
+            # Fixed fields first, then the values. The stage recovers the count
+            # by subtracting its own known arity from the frame's, so nothing
+            # extra is sent to say how many there are.
+            base = len(carried)
+            total = base + int(repeated["max_values"])
+            body.append(f"   const char *fields[{total}];")
+            for index, value in enumerate(carried):
+                body.append(f"   fields[{index}] = {value};")
+            body.append(f"   for (int at = 0; at < {repeated['count']}; ++at)")
+            body.append(f"      fields[{base} + at] = {repeated['values']}[at] "
+                        f"? {repeated['values']}[at] : \"\";")
+        elif carried:
             body.append(f"   const char *fields[] = {{{', '.join(carried)}}};")
         else:
             # A zero-length array is not valid C; the frame carries no fields.
             body.append("   const char *const *fields = NULL;")
         op_symbol = f"AIMEE_DB1_OP_{str(operation['name']).upper()}"
-        arity = len(fields)
+        arity = (f"(uint32_t)({len(fields)} + {repeated['count']})" if repeated
+                 else str(len(fields)))
         if returns_id:
             # The id IS the answer, so it crosses as a value and comes back as
             # the return. Flattening it to 0/-1 would tell the caller the row
@@ -1780,6 +1832,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                     args.append(f"field[{position}]")
 
         listed = reply.get("list")
+        repeated = request.get("repeated")
         scalars = reply.get("scalars")
         returns_id = operation.get("c_returns") == "int64"
         returns_text = operation.get("c_returns") == "text"
@@ -1817,7 +1870,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             row_out = str(listed["out"])
             bound = str(listed["bound"])
             column = listed.get("column")
-            inputs = [p for p in operation["c_params"] if p != row_out]
+            excluded_params = {row_out}
+            if repeated:
+                excluded_params |= {str(repeated["values"]), str(repeated["count"])}
+            inputs = [p for p in operation["c_params"] if p not in excluded_params]
             at = inputs.index(bound)
             held = args[at]
             # The bound is the allocation, so it is checked against the ceiling
@@ -1837,6 +1893,12 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                          f"      domain_rows = found;\n")
             ordered = dict(zip(inputs, args))
             ordered[row_out] = "found"
+            if repeated:
+                # field[] is already const char *[], contiguous and decoded, so
+                # the domain takes a pointer into it rather than a copy. It
+                # lives until scratch is freed, which is after the call.
+                ordered[str(repeated["values"])] = f"&field[{len(request['fields'])}]"
+                ordered[str(repeated["count"])] = f"(int)(count - {len(request['fields'])}u)"
             args = [ordered[p] for p in operation["c_params"]]
             assigns = "".join(
                 f"            cells[row * {width}u + {i}u] = "
@@ -1931,8 +1993,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         # Braced only when a parsed integer needs scoping: an empty block around
         # every other case would be noise, and would move files that have not
         # changed.
-        body = (f"      if (count != {arity}u)\n"
-                f"      {{\n"
+        check = (f"      if (count < {arity}u || count > {arity}u + {repeated['max_values']}u)\n"
+                 if repeated else f"      if (count != {arity}u)\n")
+        body = (check
+                + f"      {{\n"
                 f"         free(scratch);\n"
                 f"         return AIMEE_MODULE_STATUS_INVALID_REQUEST;\n"
                 f"      }}\n"
