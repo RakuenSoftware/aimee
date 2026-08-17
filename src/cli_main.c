@@ -4,6 +4,7 @@
 #include "cli_remote.h"
 #include "cli_kb_smoke.h"
 #include "cli_client.h"
+#include "cli_command_defs.h" /* aimee_cmd_tier_t: shared with the served catalogue */
 #include "cli_agent_keys.h"
 #include "cli_session_start.h"
 #include "cmd_self_update.h"
@@ -123,12 +124,13 @@ static void print_server_unavailable(void)
    fprintf(stderr, "  server log : %s\n", log_path);
 }
 
-typedef enum
-{
-   CLIENT_TIER_CORE = 0,
-   CLIENT_TIER_ADVANCED = 1,
-   CLIENT_TIER_ADMIN = 2,
-} client_cmd_tier_t;
+/* The tier enum lives with the catalogue (headers/cli_command_defs.h) so the same
+ * rows compile here as a last-resort fallback and on the server as the served
+ * answer. Aliased to the historical spelling to keep the call sites below. */
+typedef aimee_cmd_tier_t client_cmd_tier_t;
+#define CLIENT_TIER_CORE     AIMEE_CMD_TIER_CORE
+#define CLIENT_TIER_ADVANCED AIMEE_CMD_TIER_ADVANCED
+#define CLIENT_TIER_ADMIN    AIMEE_CMD_TIER_ADMIN
 
 typedef struct
 {
@@ -158,6 +160,22 @@ static const client_help_t client_bootstrap_help[] = {
     {"version", "Print the client version", CLIENT_TIER_CORE, 0, NULL},
     {"help", "Show commands, or details for one command", CLIENT_TIER_CORE, 0, NULL},
     {NULL, NULL, CLIENT_TIER_CORE, 0, NULL},
+};
+
+/* The catalogue as it stood when this client was BUILT.
+ *
+ * Consulted last: after the bootstrap list and after whatever the server sent
+ * (live, or the cached copy of a live answer). It exists for one reason -- `aimee
+ * <cmd> --help` has to answer on a machine that has never reached a server, which
+ * build-integrity asserts and which a fresh install cannot satisfy from a cache.
+ *
+ * This is NOT a second source of truth. It is generated from the same file the
+ * server serves (server/cli_command_defs_data.h), the server's answer always
+ * wins, and being out of date here costs a stale description -- never an
+ * unreachable command, because ROUTING never consults it. */
+static const client_help_t client_builtin_help[] = {
+#include "server/cli_command_defs_data.h"
+    {NULL, NULL, AIMEE_CMD_TIER_CORE, 0, NULL},
 };
 
 /* Render one row, whatever it came from. */
@@ -225,7 +243,20 @@ static void print_client_commands(FILE *out, client_cmd_tier_t tier)
 
    const cJSON *cmds = cli_v1_manifest_commands();
    if (!cmds)
-      return; /* cli_v1_manifest() already said why */
+   {
+      /* No server and no cache: show what this build knows, so `aimee` still
+       * lists commands instead of printing three and a diagnostic. */
+      for (int i = 0; client_builtin_help[i].name; i++)
+      {
+         if (client_cmd_tier(&client_builtin_help[i]) != tier ||
+             client_builtin_help[i].hidden_default)
+            continue;
+         if (!client_cmd_available(client_builtin_help[i].name))
+            continue;
+         print_help_row(out, client_builtin_help[i].name, client_builtin_help[i].help);
+      }
+      return;
+   }
    const cJSON *row = NULL;
    cJSON_ArrayForEach(row, cmds)
    {
@@ -314,13 +345,17 @@ static int client_help_command(int argc, char **argv)
       return 0;
    }
 
-   /* Distinguish "no such command" from "could not ask". Reporting the first
-    * when the truth is the second is how a transport problem gets read as a
-    * typo -- the failure this whole change exists to stop. */
-   if (!cmds)
-      fprintf(stderr, "Cannot list commands: no catalogue from the server.\n");
-   else
-      fprintf(stderr, "Unknown command: %s\n", target);
+   for (int i = 0; client_builtin_help[i].name; i++)
+   {
+      if (strcmp(target, client_builtin_help[i].name) != 0)
+         continue;
+      fprintf(stderr, "aimee %s: %s\n", client_builtin_help[i].name, client_builtin_help[i].help);
+      if (client_builtin_help[i].subcommands)
+         fprintf(stderr, "\nSubcommands:\n%s", client_builtin_help[i].subcommands);
+      return 0;
+   }
+
+   fprintf(stderr, "Unknown command: %s\n", target);
    return 1;
 }
 

@@ -4,6 +4,7 @@
  * =================================================================== */
 
 #include "cli_v1_routes_internal.h"
+#include <stdint.h> /* uint64_t: the manifest cache key must be 64-bit on LLP64 too */
 #include "platform_path.h"
 #include "platform_random.h"
 #include "cli_client.h"
@@ -525,6 +526,112 @@ int cli_v1_remote_endpoint_is_network(void)
 static cJSON *g_cli_manifest;
 static int g_cli_manifest_fetched;
 
+/* Last-known catalogue on disk, so `aimee <cmd> --help` still answers when the
+ * server is unreachable.
+ *
+ * This is deliberately NOT a general staleness cache -- the whole point of
+ * serving the manifest is that the client stops holding a stale copy of what the
+ * server can do. It exists because help must work offline: build-integrity
+ * asserts "server-routed provider help is client-side", and moving the
+ * catalogue to the server broke `provider --help` and `identity snapshot --help`
+ * for anyone whose server is down. A command that cannot run without a server
+ * can still be EXPLAINED without one.
+ *
+ * A live fetch always wins and always overwrites this; the cache is read only
+ * after a fetch has failed, and the reader is told the answer is cached. Keyed
+ * by endpoint so pointing the client at a different server never shows the
+ * previous server's commands. */
+static void manifest_cache_path(char *out, size_t cap, const char *endpoint)
+{
+   const char *home = aimee_home();
+   if (!home || !home[0])
+   {
+      out[0] = '\0';
+      return;
+   }
+   /* FNV-1a over the endpoint: short, stable, and no crypto dependency in the
+    * thin client for what is only a filename. */
+   /* uint64_t, not unsigned long: that is 32 bits on Windows (LLP64), where the
+    * 64-bit FNV offset basis truncates and -Werror=overflow rejects it. */
+   uint64_t h = 1469598103934665603ULL;
+   for (const char *q = endpoint ? endpoint : ""; *q; q++)
+   {
+      h ^= (unsigned char)*q;
+      h *= 1099511628211ULL;
+   }
+   if ((size_t)snprintf(out, cap, "%s/cli-manifest-%016llx.json", home, (unsigned long long)h) >=
+       cap)
+      out[0] = '\0';
+}
+
+static void manifest_cache_store(const char *endpoint, const cJSON *doc)
+{
+   char path[1024];
+   manifest_cache_path(path, sizeof(path), endpoint);
+   if (!path[0] || !doc)
+      return;
+   char *text = cJSON_PrintUnformatted(doc);
+   if (!text)
+      return;
+   /* Best effort: a catalogue we could not cache costs offline help, never
+    * correctness, so a failure here is silent rather than a warning on every
+    * successful command. */
+   FILE *f = fopen(path, "w");
+   if (f)
+   {
+      fputs(text, f);
+      fclose(f);
+      (void)chmod(path, 0600);
+   }
+   free(text);
+}
+
+static cJSON *manifest_cache_load(const char *endpoint)
+{
+   char path[1024];
+   manifest_cache_path(path, sizeof(path), endpoint);
+   if (!path[0])
+      return NULL;
+   FILE *f = fopen(path, "r");
+   if (!f)
+      return NULL;
+   char *buf = NULL;
+   size_t len = 0, cap = 0;
+   for (;;)
+   {
+      if (len + 4096 + 1 > cap)
+      {
+         size_t grown = cap ? cap * 2 : 8192;
+         char *nb = realloc(buf, grown);
+         if (!nb)
+         {
+            free(buf);
+            fclose(f);
+            return NULL;
+         }
+         buf = nb;
+         cap = grown;
+      }
+      size_t got = fread(buf + len, 1, 4096, f);
+      len += got;
+      if (got < 4096)
+         break;
+      if (len > (1u << 20)) /* a catalogue this large is not one we wrote */
+      {
+         free(buf);
+         fclose(f);
+         return NULL;
+      }
+   }
+   fclose(f);
+   if (!buf)
+      return NULL;
+   buf[len] = '\0';
+   cJSON *doc = cJSON_Parse(buf);
+   free(buf);
+   return doc;
+}
+
 /* The manifest document, or NULL when it could not be fetched. Fetched at most
  * once: every routed command calls through here, so an unconditional diagnostic
  * would print several times for a single failure. */
@@ -541,12 +648,26 @@ static const cJSON *cli_v1_manifest(void)
    int status = 0;
    cJSON *doc = cli_http_request(remote, "GET", "/v1/cli/manifest", NULL, bearer,
                                  CLIENT_DEFAULT_TIMEOUT_MS, &status);
-   free(remote);
    free(bearer);
 
    if (!doc || status < 200 || status >= 300)
    {
       cJSON_Delete(doc);
+      /* Fall back to the last catalogue this endpoint gave us, so `--help` still
+       * answers with the server down. Routing off a cached map is fine: a route
+       * that no longer exists fails at the server with its own message, which is
+       * strictly better than refusing to explain a command because the machine
+       * that documents it is unreachable. */
+      cJSON *cached = manifest_cache_load(remote);
+      if (cached)
+      {
+         free(remote);
+         fprintf(stderr, "aimee: using the last known command list; the server did not "
+                         "answer, so it may be out of date.\n");
+         g_cli_manifest = cached;
+         return g_cli_manifest;
+      }
+      free(remote);
       /* Say which of the two it is. status == 0 means the transport never got an
        * answer (server down, wrong endpoint); a 4xx means it answered and has no
        * such route, i.e. it predates the manifest. Reporting "your server is old"
@@ -572,8 +693,11 @@ static const cJSON *cli_v1_manifest(void)
               "Upgrade the client.\n",
               cJSON_IsNumber(ver) ? (int)ver->valuedouble : 0);
       cJSON_Delete(doc);
+      free(remote);
       return NULL;
    }
+   manifest_cache_store(remote, doc);
+   free(remote);
    g_cli_manifest = doc;
    return g_cli_manifest;
 }
