@@ -19,7 +19,9 @@
 #include "evidence_vectors.h"
 #include "feature_rows.h"
 #include "modules/db2/c/db2_test_shim.h"
+#include <aimee/db2/host_contracts.h>
 #include "cJSON.h"
+#include "kb_mdl.h"
 #include "modules/learning/learning_evidence.h"
 
 /* Stub the memory-store typed verb so learning_promote's memory dispatch is
@@ -71,6 +73,18 @@ static void open_db(void)
 static void close_db(void)
 {
    db2_test_shim_close();
+}
+
+static int score_mdl(const char *candidate, const char *evidence, double *l_candidate,
+                     double *l_residual, double *total)
+{
+   kb_mdl_score_t score = {0};
+   if (!l_candidate || !l_residual || !total || kb_mdl_score(candidate, evidence, &score) != 0)
+      return -1;
+   *l_candidate = score.l_candidate;
+   *l_residual = score.l_residual;
+   *total = score.total;
+   return 0;
 }
 
 /* ---- 1. artifact_write ---- */
@@ -133,6 +147,9 @@ static void test_synthesis_commit_emits_mdl_features(void)
    assert(db2_artifact_set_state(id, "committed") == 0);
 
    char features[512];
+   assert(db2_feature_row_read(id, "artifact", "mdl-v1", features, sizeof(features)) == -1);
+   aimee_db2_register_mdl_score_provider(score_mdl);
+   assert(db2_artifact_set_state(id, "committed") == 0);
    assert(db2_feature_row_read(id, "artifact", "mdl-v1", features, sizeof(features)) == 0);
    assert(strstr(features, "\"mdl.l_candidate\":") != NULL);
    assert(strstr(features, "\"mdl.l_residual\":") != NULL);
