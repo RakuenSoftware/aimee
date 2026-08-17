@@ -163,6 +163,9 @@
     "pkg_config": [
       "sqlite3"
     ],
+    "vendor_sources": [
+      "src/vendor/cJSON.c"
+    ],
     "system_libraries": [
       "m"
     ]

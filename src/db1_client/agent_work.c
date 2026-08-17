@@ -22,6 +22,7 @@
 /* clang-format off */
 #include "agent_log.h"
 #include "cognify_jobs.h"
+#include "db1_trigger.h"
 
 #include "db1_module_api.h"
 
@@ -1009,6 +1010,54 @@ int db1_agent_log_stats(const char *since_or_null, db1_agent_log_stats_t *out)
    out->completion_tokens = (int64_t)strtoll(slot4, NULL, 10);
    out->successes = (int)strtol(slot5, NULL, 10);
    return 0;
+}
+
+int db1_trigger_insert(const char *id, const char *source, const char *event, const char *task, const char *workspace, const char *metadata)
+{
+   if (!id || !id[0] || !source || !source[0] || !task || !task[0] || !metadata || !metadata[0])
+      return -1;
+   const char *fields[] = {id, source, event ? event : "", task, workspace ? workspace : "", metadata};
+   return write_result(call_stage(AIMEE_DB1_OP_TRIGGER_INSERT, fields, 6, NULL, NULL, 0, NULL));
+}
+
+int db1_trigger_status_set(const char *id, const char *status, const char *pipeline_id, const char *error)
+{
+   if (!id || !id[0] || !status || !status[0])
+      return -1;
+   const char *fields[] = {id, status, pipeline_id ? pipeline_id : "", error ? error : ""};
+   return write_result(call_stage(AIMEE_DB1_OP_TRIGGER_STATUS_SET, fields, 4, NULL, NULL, 0, NULL));
+}
+
+int db1_trigger_get(const char *id, db1_trigger_run_t *out)
+{
+   if (!id || !id[0] || !out)
+      return -1;
+   const char *fields[] = {id};
+   char *const values[] = {out->id, out->source, out->event, out->task, out->workspace, out->metadata, out->pipeline_id, out->status, out->queued_at, out->started_at, out->finished_at, out->error};
+   const size_t caps[] = {sizeof out->id, sizeof out->source, sizeof out->event, sizeof out->task, sizeof out->workspace, sizeof out->metadata, sizeof out->pipeline_id, sizeof out->status, sizeof out->queued_at, sizeof out->started_at, sizeof out->finished_at, sizeof out->error};
+   memset(out, 0, sizeof *out);
+   int status = call_stage(AIMEE_DB1_OP_TRIGGER_GET, fields, 1, values, caps, 12, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return 0;
+}
+
+char *db1_trigger_list_json(const char *status_filter)
+{
+   const char *fields[] = {status_filter ? status_filter : ""};
+   char *value = malloc(524288u);
+   if (!value)
+      return NULL;
+   char *const values[] = {value};
+   const size_t caps[] = {524288u};
+   int status = call_stage(AIMEE_DB1_OP_TRIGGER_LIST_JSON, fields, 1, values, caps, 1, NULL);
+   if (status != (int)AIMEE_DB1_STATUS_OK || !value[0])
+   {
+      free(value);
+      return NULL;
+   }
+   char *shrunk = realloc(value, strlen(value) + 1u);
+   return shrunk ? shrunk : value;
 }
 
 /* clang-format on */
