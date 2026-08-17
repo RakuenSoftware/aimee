@@ -28,11 +28,100 @@ static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind, i
    return 0;
 }
 
+_Static_assert(sizeof(((db2_fact_candidate_t *)0)->subject) ==
+                   sizeof(((pattern_triple_t *)0)->subject),
+               "test extractor subject capacity must match DB2");
+_Static_assert(sizeof(((db2_fact_candidate_t *)0)->rel_type) ==
+                   sizeof(((pattern_triple_t *)0)->rel_type),
+               "test extractor relation capacity must match DB2");
+_Static_assert(sizeof(((db2_fact_candidate_t *)0)->object) ==
+                   sizeof(((pattern_triple_t *)0)->object),
+               "test extractor object capacity must match DB2");
+
+static int extract_facts(const char *text, db2_fact_candidate_t *out, int max, int *count)
+{
+   if (!text || !out || max <= 0 || max > 32 || !count)
+      return -1;
+   pattern_triple_t triples[32] = {0};
+   int found = memory_extract_patterns(text, triples, max);
+   if (found < 0)
+      return -1;
+   for (int i = 0; i < found; ++i)
+   {
+      memcpy(out[i].subject, triples[i].subject, sizeof(out[i].subject));
+      memcpy(out[i].rel_type, triples[i].rel_type, sizeof(out[i].rel_type));
+      memcpy(out[i].object, triples[i].object, sizeof(out[i].object));
+      out[i].subject_kind = (int)triples[i].subject_kind;
+      out[i].object_kind = (int)triples[i].object_kind;
+   }
+   *count = found;
+   return 0;
+}
+
+static int failing_extract(const char *text, db2_fact_candidate_t *out, int max, int *count)
+{
+   (void)text;
+   (void)out;
+   (void)max;
+   (void)count;
+   return -1;
+}
+
+static int invalid_extract_count(const char *text, db2_fact_candidate_t *out, int max, int *count)
+{
+   (void)text;
+   (void)out;
+   *count = max + 1;
+   return 0;
+}
+
+static int scan_fact_turn(const char *text, int *is_retraction, int *has_attr,
+                          char attr[DB2_FACT_ATTR_MAX])
+{
+   memory_pattern_turn_t scan;
+   if (memory_pattern_scan_turn(text, &scan) != 0)
+      return -1;
+   *is_retraction = scan.is_retraction;
+   *has_attr = scan.has_attr;
+   memcpy(attr, scan.attr, DB2_FACT_ATTR_MAX);
+   return 0;
+}
+
+static int failing_scan(const char *text, int *is_retraction, int *has_attr,
+                        char attr[DB2_FACT_ATTR_MAX])
+{
+   (void)text;
+   (void)is_retraction;
+   (void)has_attr;
+   (void)attr;
+   return -1;
+}
+
+static int invalid_scan(const char *text, int *is_retraction, int *has_attr,
+                        char attr[DB2_FACT_ATTR_MAX])
+{
+   (void)text;
+   *is_retraction = 1;
+   *has_attr = 1;
+   attr[0] = '\0';
+   return 0;
+}
+
 int main(void)
 {
    db2_test_shim_open();
    aimee_db2_register_fact_gate_provider(check_fact_gate);
    assert(db2_rel_types_ensure_seed() == 0);
+
+   /* Extraction is authoritative: absence, failure, or an invalid count cannot
+    * be mistaken for a turn with zero facts. */
+   assert(db2_fact_ingest_text("my city is Berlin", FACT_AUTHORITY_USER, 1) == -1);
+   aimee_db2_register_fact_extract_provider(failing_extract);
+   assert(db2_fact_ingest_text("my city is Berlin", FACT_AUTHORITY_USER, 1) == -1);
+   aimee_db2_register_fact_extract_provider(invalid_extract_count);
+   assert(db2_fact_ingest_text("my city is Berlin", FACT_AUTHORITY_USER, 1) == -1);
+   assert(semantic_count("user") == 0);
+   aimee_db2_register_fact_extract_provider(extract_facts);
 
    /* Disabled: the gate is observe-only — nothing is written. */
    assert(db2_fact_ingest_text("my email is theo@example.com", FACT_AUTHORITY_USER, 0) == 0);
@@ -57,14 +146,19 @@ int main(void)
    /* No template in the text -> nothing committed. */
    assert(db2_fact_ingest_text("the server crashed last night", FACT_AUTHORITY_USER, 1) == 0);
 
-   /* §4 retraction flow (the handler's glue): a retraction turn extracts the named
-    * attribute and retracts it. After ingesting email+city, "forget my email"
-    * supersedes only the email fact. */
+   /* §4 retraction flow: no scanner, a failed scanner, or an inconsistent answer
+    * cannot delete. The host-installed scanner then retracts only the named fact. */
    assert(db2_fact_current_count("user") == 2); /* email + city currently believed */
-   char attr[128];
-   assert(memory_pattern_is_retraction("please forget my email"));
-   assert(memory_pattern_possessive_attr("please forget my email", attr, sizeof(attr)) == 1);
-   assert(db2_fact_retract("user", attr, NULL, FACT_AUTHORITY_USER) == 1);
+   assert(db2_typed_fact_ingress("please forget my email", NULL, 0) == 0);
+   assert(db2_fact_current_count("user") == 2);
+   aimee_db2_register_fact_scan_provider(failing_scan);
+   assert(db2_typed_fact_ingress("please forget my email", NULL, 0) == 0);
+   assert(db2_fact_current_count("user") == 2);
+   aimee_db2_register_fact_scan_provider(invalid_scan);
+   assert(db2_typed_fact_ingress("please forget my email", NULL, 0) == 0);
+   assert(db2_fact_current_count("user") == 2);
+   aimee_db2_register_fact_scan_provider(scan_fact_turn);
+   assert(db2_typed_fact_ingress("please forget my email", NULL, 0) == 0);
    assert(db2_fact_current_count("user") == 1); /* only city remains current */
 
    /* Bad args. */

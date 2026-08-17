@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "aa4d5b14011f86db7e34651fab63e01fdebb18ca",
-  "source_fingerprint": "da37bb8b83d0e438c198231c84e535f0c5d44c938d18311a71d3e9fed08e08c9",
+  "source_revision": "cdf10a8c1b200387f2b87921972e07c0210df90f",
+  "source_fingerprint": "d20994fd2d15d6e84c8665ff0f9e599268cff94cb8a6e0a8a93245f8cf7ef237",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -2439,22 +2439,6 @@
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
-      "symbol": "memory_extract_patterns",
-      "references": [
-        "src/modules/db2/c/fact_ingest.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_pattern_scan_turn",
-      "references": [
-        "src/modules/db2/c/fact_ingest.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "mktime",
       "references": [
         "src/modules/db2/c/entity_edges.c"
@@ -3510,15 +3494,15 @@
   "summary": {
     "translation_units": 138,
     "descriptor_support_units": 22,
-    "unresolved_symbols": 179,
+    "unresolved_symbols": 177,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 40,
+      "injected-module-contract": 38,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "3985c4acc8ca0a1306317255bf234360c71dc98097678f130b6e14fbbf58e47c"
+  "fingerprint": "e7d3d850e9c5b5dce234576c1d2a13838b07a3da1e5250b706b2d01aab9a760a"
 }

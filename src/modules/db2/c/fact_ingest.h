@@ -15,6 +15,30 @@ extern "C"
 {
 #endif
 
+#define DB2_FACT_SUBJECT_MAX  128
+#define DB2_FACT_REL_TYPE_MAX 64
+#define DB2_FACT_OBJECT_MAX   128
+#define DB2_FACT_ATTR_MAX     128
+
+   typedef struct
+   {
+      char subject[DB2_FACT_SUBJECT_MAX];
+      char rel_type[DB2_FACT_REL_TYPE_MAX];
+      char object[DB2_FACT_OBJECT_MAX];
+      int subject_kind;
+      int object_kind;
+   } db2_fact_candidate_t;
+
+   typedef int (*db2_fact_extract_fn)(const char *text, db2_fact_candidate_t *out, int max,
+                                      int *count);
+   typedef int (*db2_fact_scan_fn)(const char *text, int *is_retraction, int *has_attr,
+                                   char attr[DB2_FACT_ATTR_MAX]);
+
+   /* Internal declarations of the host contracts exported publicly through
+    * <aimee/db2/host_contracts.h>. NULL removes the corresponding provider. */
+   void aimee_db2_register_fact_extract_provider(db2_fact_extract_fn provider);
+   void aimee_db2_register_fact_scan_provider(db2_fact_scan_fn provider);
+
    /* Run pattern-first ingest on one turn's `text`: extract candidate triples
     * (§6) and route each through the typed gate db2_fact_commit with `authority`
     * (§5 class keying). `enabled` is the master gate (config.typed_facts_enabled):
@@ -25,9 +49,8 @@ extern "C"
     * count, not a "new rows inserted" count. 0 when disabled / nothing matched, -1
     * on bad args.
     *
-    * Retraction is NOT handled here: callers should first check
-    * memory_pattern_is_retraction() and route a correction through
-    * db2_fact_retract() instead of ingesting the turn as new assertions. */
+    * Retraction is NOT handled here; the full ingress path obtains the memory
+    * module's scan verdict before routing a correction through db2_fact_retract. */
    int db2_fact_ingest_text(const char *text, fact_authority_t authority, int enabled);
 
    /* The full per-turn typed-fact ingress orchestration (the KB context_block

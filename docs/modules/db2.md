@@ -365,7 +365,15 @@ and returns `FACT_GATE_DEFER` without writing when the provider is absent, fails
 invalid verdict. This moves total debt from 180 to 179 and injected-contract debt from 41 to 40
 without giving DB2 ownership of memory policy.
 
-The remaining 40 non-system rows are sibling-contract migration debt. Session identity, briefing
+The twenty-sixth reduction moves typed-fact pattern extraction and retraction scanning behind two
+startup-installed memory-module contracts. The KB host adapters encode both bounded requests over
+the event bus and validate decoded field sizes and flags; DB2 additionally rejects invalid counts,
+unterminated fields, unknown node kinds, and inconsistent scan answers. Missing or failed
+extraction is an error rather than a false zero-fact answer, while missing or failed scanning never
+deletes a fact. This moves total debt from 179 to 177, injected-contract debt from 40 to 38, and
+outbound source-boundary includes from 168 to 167.
+
+The remaining 38 non-system rows are sibling-contract migration debt. Session identity, briefing
 rendering, executable lifecycle, configuration, memory, and other host calls must close through
 their reviewed process contracts before activation; they are not portable-support candidates. Rows
 may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide
