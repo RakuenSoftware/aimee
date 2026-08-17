@@ -95,6 +95,7 @@
     "agent_log.c",
     "cognify_jobs.c",
     "coord_jobs.c",
+    "db1_cron_jobs.c",
     "db1_trigger.c"
    ]
   },
@@ -4956,6 +4957,629 @@
      }
     ],
     "max_bytes": 32768
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 43,
+   "name": "cron_job_upsert",
+   "c_name": "db1_cron_job_upsert",
+   "c_params": [
+    "job"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "cron_job_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "schedule",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "mode",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "script",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "prompt",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "workdir",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "context_from",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "when_context_contains",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "skills",
+      "type": "text",
+      "required": false,
+      "repeat": 8
+     },
+     {
+      "name": "skill_count",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "deliver_target",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "deliver_only_if_changed",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "deliver_first_run_silent",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "pre_wake_gate",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "enabled",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 44,
+   "name": "cron_job_get",
+   "c_name": "db1_cron_job_get",
+   "c_params": [
+    "job_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "cron_job_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "text"
+     },
+     {
+      "name": "schedule",
+      "type": "text"
+     },
+     {
+      "name": "mode",
+      "type": "text"
+     },
+     {
+      "name": "script",
+      "type": "text"
+     },
+     {
+      "name": "prompt",
+      "type": "text"
+     },
+     {
+      "name": "workdir",
+      "type": "text"
+     },
+     {
+      "name": "context_from",
+      "type": "text"
+     },
+     {
+      "name": "when_context_contains",
+      "type": "text"
+     },
+     {
+      "name": "skills",
+      "type": "text",
+      "repeat": 8
+     },
+     {
+      "name": "skill_count",
+      "type": "int"
+     },
+     {
+      "name": "deliver_target",
+      "type": "text"
+     },
+     {
+      "name": "deliver_only_if_changed",
+      "type": "int"
+     },
+     {
+      "name": "deliver_first_run_silent",
+      "type": "int"
+     },
+     {
+      "name": "pre_wake_gate",
+      "type": "int"
+     },
+     {
+      "name": "enabled",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 16384
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 45,
+   "name": "cron_job_load",
+   "c_name": "db1_cron_jobs_load",
+   "c_params": [
+    "out",
+    "max",
+    "enabled_only"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "enabled_only",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "cron_job_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 32
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "text"
+     },
+     {
+      "name": "schedule",
+      "type": "text"
+     },
+     {
+      "name": "mode",
+      "type": "text"
+     },
+     {
+      "name": "script",
+      "type": "text"
+     },
+     {
+      "name": "prompt",
+      "type": "text"
+     },
+     {
+      "name": "workdir",
+      "type": "text"
+     },
+     {
+      "name": "context_from",
+      "type": "text"
+     },
+     {
+      "name": "when_context_contains",
+      "type": "text"
+     },
+     {
+      "name": "skills",
+      "type": "text",
+      "repeat": 8
+     },
+     {
+      "name": "skill_count",
+      "type": "int"
+     },
+     {
+      "name": "deliver_target",
+      "type": "text"
+     },
+     {
+      "name": "deliver_only_if_changed",
+      "type": "int"
+     },
+     {
+      "name": "deliver_first_run_silent",
+      "type": "int"
+     },
+     {
+      "name": "pre_wake_gate",
+      "type": "int"
+     },
+     {
+      "name": "enabled",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 46,
+   "name": "cron_job_set_enabled",
+   "c_name": "db1_cron_job_set_enabled",
+   "c_params": [
+    "job_id",
+    "enabled"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "enabled",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 47,
+   "name": "cron_job_set_enabled_all",
+   "c_name": "db1_cron_jobs_set_enabled_all",
+   "c_params": [
+    "enabled"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "enabled",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 48,
+   "name": "cron_job_delete",
+   "c_name": "db1_cron_job_delete",
+   "c_params": [
+    "job_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 49,
+   "name": "cron_job_record_run",
+   "c_name": "db1_cron_job_record_run",
+   "c_params": [
+    "job_id",
+    "status",
+    "silent",
+    "delivered",
+    "output",
+    "error",
+    "output_hash"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "silent",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "delivered",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "output",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "output_hash",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "run_id",
+      "type": "int64"
+     }
+    ],
+    "max_bytes": 64
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 50,
+   "name": "cron_job_list_json",
+   "c_name": "db1_cron_jobs_list_json",
+   "c_params": [],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "jobs",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 51,
+   "name": "cron_job_history_json",
+   "c_name": "db1_cron_job_history_json",
+   "c_params": [
+    "job_id",
+    "limit"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "limit",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "history",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 52,
+   "name": "cron_job_latest_output",
+   "c_name": "db1_cron_job_latest_output",
+   "c_params": [
+    "job_id"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "output",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 262144
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 53,
+   "name": "cron_job_last_output_hash",
+   "c_name": "db1_cron_job_last_output_hash",
+   "c_params": [
+    "job_id"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "job_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "output_hash",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 128
    }
   }
  ]

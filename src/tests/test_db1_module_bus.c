@@ -36,6 +36,7 @@
 #include "agent_log.h"
 #include "conv_context.h"
 #include "coord_jobs.h"
+#include "db1_cron_jobs.h"
 #include "db1_windows.h"
 #include "db1_module_api.h"
 #include "git_ownership.h"
@@ -354,6 +355,56 @@ static void test_coordination_claims_and_dispatches(void)
    printf("  PASS: coordination claims and dispatches\n");
 }
 
+static void test_a_cron_job_carries_its_array_member(void)
+{
+   cron_job_t job;
+   memset(&job, 0, sizeof job);
+   snprintf(job.id, sizeof job.id, "%s", "nightly");
+   snprintf(job.schedule, sizeof job.schedule, "%s", "0 3 * * *");
+   snprintf(job.mode, sizeof job.mode, "%s", "llm");
+   snprintf(job.prompt, sizeof job.prompt, "%s", "summarise the day");
+   /* All eight slots, each distinct. The domain stores them as a CSV of the
+      non-empty ones and reparses into consecutive slots, so a gap is its own
+      business -- what the wire has to prove is that eight separate values
+      cross as eight, in order, rather than one running into the next. */
+   for (int i = 0; i < CRON_JOB_MAX_SKILLS; i++)
+      snprintf(job.skills[i], sizeof job.skills[i], "skill-%d", i);
+   job.skill_count = CRON_JOB_MAX_SKILLS;
+   job.enabled = 1;
+   must(db1_cron_job_upsert(&job) == 0, "upsert a cron job with an array member");
+
+   cron_job_t back;
+   memset(&back, 0, sizeof back);
+   must(db1_cron_job_get("nightly", &back) == 0, "read the cron job back");
+   must(strcmp(back.schedule, "0 3 * * *") == 0, "the schedule survived");
+   for (int i = 0; i < CRON_JOB_MAX_SKILLS; i++)
+   {
+      char expected[32];
+      snprintf(expected, sizeof expected, "skill-%d", i);
+      must(strcmp(back.skills[i], expected) == 0, "each slot holds its own value");
+   }
+   must(back.skill_count == CRON_JOB_MAX_SKILLS, "the count came with them");
+
+   cron_job_t all[4];
+   memset(all, 0, sizeof all);
+   int loaded = db1_cron_jobs_load(all, 4, 1);
+   must(loaded == 1, "load the enabled jobs");
+   must(strcmp(all[0].skills[7], "skill-7") == 0,
+        "a listed row carries its array too, out to the last slot");
+
+   int64_t run = db1_cron_job_record_run("nightly", "ok", 0, 1, "output", "", "hash-1");
+   must(run > 0, "record a run and learn its id");
+   char *hash = db1_cron_job_last_output_hash("nightly");
+   must(hash && strcmp(hash, "hash-1") == 0, "the returned string is the hash just written");
+   free(hash);
+
+   must(db1_cron_job_set_enabled("nightly", 0) == 0, "disable it");
+   must(db1_cron_jobs_load(all, 4, 1) == 0, "and it is no longer enabled");
+   must(db1_cron_job_delete("nightly") == 0, "delete it");
+
+   printf("  PASS: a cron job carries its array member\n");
+}
+
 int main(int argc, char **argv)
 {
    /* The suite runs its binaries with no arguments, so default to where the
@@ -392,6 +443,7 @@ int main(int argc, char **argv)
    test_agent_log_carries_every_shape();
    test_repeated_terms_and_a_numeric_column();
    test_coordination_claims_and_dispatches();
+   test_a_cron_job_carries_its_array_member();
 
    stop_module();
    obs_bus_stop();

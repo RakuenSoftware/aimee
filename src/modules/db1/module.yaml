@@ -89,7 +89,6 @@
     "src/modules/db1/conv_context.h",
     "src/modules/db1/coord_jobs.h",
     "src/modules/db1/cost_fold.h",
-    "src/modules/db1/cron_jobs.h",
     "src/modules/db1/db.h",
     "src/modules/db1/db1.h",
     "src/modules/db1/db1_cron_jobs.h",

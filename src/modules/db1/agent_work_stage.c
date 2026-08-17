@@ -16,6 +16,7 @@
 #include "agent_log.h"
 #include "cognify_jobs.h"
 #include "coord_jobs.h"
+#include "db1_cron_jobs.h"
 #include "db1_trigger.h"
 
 #include <errno.h>
@@ -169,7 +170,8 @@ aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, ui
    db1_trigger_run_t row_db1_trigger_run_t;
    db1_coord_task_t row_db1_coord_task_t;
    db1_coord_job_t row_db1_coord_job_t;
-   const char *row_slots[12];
+   cron_job_t row_cron_job_t;
+   const char *row_slots[22];
    char row_text[10][32];
    /* A domain that returns a string hands over the allocation with it. The
       reply is written straight out of it rather than copied into value: the
@@ -2117,6 +2119,395 @@ aimee_module_status_t aimee_db1_stage_agent_work(const uint8_t *request_body, ui
       row_slots[4] = scalar4;
       rows = row_slots;
       row_count = 5u;
+      break;
+   }
+   case AIMEE_DB1_OP_CRON_JOB_UPSERT:
+   {
+      if (count != 22u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      cron_job_t row;
+      memset(&row, 0, sizeof row);
+      snprintf(row.id, sizeof row.id, "%s", field[0]);
+      snprintf(row.schedule, sizeof row.schedule, "%s", field[1]);
+      snprintf(row.mode, sizeof row.mode, "%s", field[2]);
+      snprintf(row.script, sizeof row.script, "%s", field[3]);
+      snprintf(row.prompt, sizeof row.prompt, "%s", field[4]);
+      snprintf(row.workdir, sizeof row.workdir, "%s", field[5]);
+      snprintf(row.context_from, sizeof row.context_from, "%s", field[6]);
+      snprintf(row.when_context_contains, sizeof row.when_context_contains, "%s", field[7]);
+      snprintf(row.skills[0], sizeof row.skills[0], "%s", field[8]);
+      snprintf(row.skills[1], sizeof row.skills[1], "%s", field[9]);
+      snprintf(row.skills[2], sizeof row.skills[2], "%s", field[10]);
+      snprintf(row.skills[3], sizeof row.skills[3], "%s", field[11]);
+      snprintf(row.skills[4], sizeof row.skills[4], "%s", field[12]);
+      snprintf(row.skills[5], sizeof row.skills[5], "%s", field[13]);
+      snprintf(row.skills[6], sizeof row.skills[6], "%s", field[14]);
+      snprintf(row.skills[7], sizeof row.skills[7], "%s", field[15]);
+      if (parse_int(field[16], &row.skill_count) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      snprintf(row.deliver_target, sizeof row.deliver_target, "%s", field[17]);
+      if (parse_int(field[18], &row.deliver_only_if_changed) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parse_int(field[19], &row.deliver_first_run_silent) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parse_int(field[20], &row.pre_wake_gate) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parse_int(field[21], &row.enabled) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_cron_job_upsert(&row);
+      break;
+   }
+   case AIMEE_DB1_OP_CRON_JOB_GET:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      memset(&row_cron_job_t, 0, sizeof row_cron_job_t);
+      rc = db1_cron_job_get(field[0], &row_cron_job_t);
+      snprintf(row_text[0], sizeof row_text[0], "%d", row_cron_job_t.skill_count);
+      snprintf(row_text[1], sizeof row_text[1], "%d", row_cron_job_t.deliver_only_if_changed);
+      snprintf(row_text[2], sizeof row_text[2], "%d", row_cron_job_t.deliver_first_run_silent);
+      snprintf(row_text[3], sizeof row_text[3], "%d", row_cron_job_t.pre_wake_gate);
+      snprintf(row_text[4], sizeof row_text[4], "%d", row_cron_job_t.enabled);
+      row_slots[0] = row_cron_job_t.id;
+      row_slots[1] = row_cron_job_t.schedule;
+      row_slots[2] = row_cron_job_t.mode;
+      row_slots[3] = row_cron_job_t.script;
+      row_slots[4] = row_cron_job_t.prompt;
+      row_slots[5] = row_cron_job_t.workdir;
+      row_slots[6] = row_cron_job_t.context_from;
+      row_slots[7] = row_cron_job_t.when_context_contains;
+      row_slots[8] = row_cron_job_t.skills[0];
+      row_slots[9] = row_cron_job_t.skills[1];
+      row_slots[10] = row_cron_job_t.skills[2];
+      row_slots[11] = row_cron_job_t.skills[3];
+      row_slots[12] = row_cron_job_t.skills[4];
+      row_slots[13] = row_cron_job_t.skills[5];
+      row_slots[14] = row_cron_job_t.skills[6];
+      row_slots[15] = row_cron_job_t.skills[7];
+      row_slots[16] = row_text[0];
+      row_slots[17] = row_cron_job_t.deliver_target;
+      row_slots[18] = row_text[1];
+      row_slots[19] = row_text[2];
+      row_slots[20] = row_text[3];
+      row_slots[21] = row_text[4];
+      rows = row_slots;
+      row_count = 22u;
+      reads = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_CRON_JOB_LOAD:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed0;
+      if (parse_int(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (parsed0 <= 0 || parsed0 > 32)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      cron_job_t *found = calloc((size_t)parsed0, sizeof *found);
+      if (!found)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      domain_rows = found;
+      rc = db1_cron_jobs_load(found, parsed0, parsed1);
+      if (rc > 0)
+      {
+         uint32_t produced = ((uint32_t)rc < (uint32_t)parsed0)
+                                 ? (uint32_t)rc : (uint32_t)parsed0;
+         const char **cells = malloc((size_t)produced * 22u * sizeof *cells);
+         char (*numbers)[32] = malloc((size_t)produced * 5u * sizeof *numbers);
+         if (!cells || !numbers)
+         {
+            free(cells);
+            free(numbers);
+            free(scratch);
+            free(domain_rows);
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+         cells_owned = cells;
+         numeric_owned = numbers;
+         for (uint32_t row = 0; row < produced; ++row)
+         {
+            snprintf(numbers[row * 5u + 0u], 32,
+                     "%d", found[row].skill_count);
+            snprintf(numbers[row * 5u + 1u], 32,
+                     "%d", found[row].deliver_only_if_changed);
+            snprintf(numbers[row * 5u + 2u], 32,
+                     "%d", found[row].deliver_first_run_silent);
+            snprintf(numbers[row * 5u + 3u], 32,
+                     "%d", found[row].pre_wake_gate);
+            snprintf(numbers[row * 5u + 4u], 32,
+                     "%d", found[row].enabled);
+            cells[row * 22u + 0u] = found[row].id;
+            cells[row * 22u + 1u] = found[row].schedule;
+            cells[row * 22u + 2u] = found[row].mode;
+            cells[row * 22u + 3u] = found[row].script;
+            cells[row * 22u + 4u] = found[row].prompt;
+            cells[row * 22u + 5u] = found[row].workdir;
+            cells[row * 22u + 6u] = found[row].context_from;
+            cells[row * 22u + 7u] = found[row].when_context_contains;
+            cells[row * 22u + 8u] = found[row].skills[0];
+            cells[row * 22u + 9u] = found[row].skills[1];
+            cells[row * 22u + 10u] = found[row].skills[2];
+            cells[row * 22u + 11u] = found[row].skills[3];
+            cells[row * 22u + 12u] = found[row].skills[4];
+            cells[row * 22u + 13u] = found[row].skills[5];
+            cells[row * 22u + 14u] = found[row].skills[6];
+            cells[row * 22u + 15u] = found[row].skills[7];
+            cells[row * 22u + 16u] = numbers[row * 5u + 0u];
+            cells[row * 22u + 17u] = found[row].deliver_target;
+            cells[row * 22u + 18u] = numbers[row * 5u + 1u];
+            cells[row * 22u + 19u] = numbers[row * 5u + 2u];
+            cells[row * 22u + 20u] = numbers[row * 5u + 3u];
+            cells[row * 22u + 21u] = numbers[row * 5u + 4u];
+         }
+         rows = cells;
+         row_count = produced * 22u;
+      }
+      listed = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_CRON_JOB_SET_ENABLED:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_cron_job_set_enabled(field[0], parsed1);
+      break;
+   }
+   case AIMEE_DB1_OP_CRON_JOB_SET_ENABLED_ALL:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed0;
+      if (parse_int(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_cron_jobs_set_enabled_all(parsed0);
+      break;
+   }
+   case AIMEE_DB1_OP_CRON_JOB_DELETE:
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      rc = db1_cron_job_delete(field[0]);
+      break;
+   case AIMEE_DB1_OP_CRON_JOB_RECORD_RUN:
+   {
+      if (count != 7u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[2][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[3][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed2;
+      if (parse_int(field[2], &parsed2) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed3;
+      if (parse_int(field[3], &parsed3) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int64_t produced = db1_cron_job_record_run(field[0], field[1], parsed2, parsed3, field[4], field[5], field[6]);
+      rc = (produced >= 0) ? 0 : -1;
+      snprintf(row_text[0], sizeof row_text[0], "%lld", (long long)produced);
+      row_slots[0] = row_text[0];
+      rows = row_slots;
+      row_count = 1u;
+      break;
+   }
+   case AIMEE_DB1_OP_CRON_JOB_LIST_JSON:
+   {
+      if (count != 0u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      char *produced = db1_cron_jobs_list_json();
+      rc = produced ? 1 : 0;
+      text_owned = produced;
+      reads = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_CRON_JOB_HISTORY_JSON:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[1][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed1;
+      if (parse_int(field[1], &parsed1) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      char *produced = db1_cron_job_history_json(field[0], parsed1);
+      rc = produced ? 1 : 0;
+      text_owned = produced;
+      reads = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_CRON_JOB_LATEST_OUTPUT:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      char *produced = db1_cron_job_latest_output(field[0]);
+      rc = produced ? 1 : 0;
+      text_owned = produced;
+      reads = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_CRON_JOB_LAST_OUTPUT_HASH:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      char *produced = db1_cron_job_last_output_hash(field[0]);
+      rc = produced ? 1 : 0;
+      text_owned = produced;
+      reads = 1;
       break;
    }
    default:

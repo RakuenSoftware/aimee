@@ -942,6 +942,75 @@ class CatalogTests(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def array_catalog(self, root: Path) -> str:
+        """A family whose row carries `char member[N][W]`."""
+        catalog = self.catalog(root)
+        reserved = self.reserved(catalog)
+        reserved["active"] = True
+        self.route(root, reserved)
+        row = [{"name": "id", "type": "text"},
+               {"name": "tags", "type": "text", "repeat": 4},
+               {"name": "tag_count", "type": "int"}]
+        catalog["operations"].append({
+            "family": reserved["name"], "id": 1, "name": "probe_tagged_get",
+            "c_name": "db1_probe_tagged_get", "c_params": ["probe_id", "out"],
+            "wire_format": "db1-fields-v2", "scope": "global", "transaction": "none",
+            "idempotency": "safe", "results": ["ok", "invalid", "failed"],
+            "request": {"fields": [{"name": "probe_id", "type": "text", "required": True}]},
+            "reply": {"struct": "db1_probe_tagged_t", "out": "out",
+                      "fields": row, "max_bytes": 1024}})
+        self.write(root, catalog)
+        path = root / contract.PROCESS_CONTRACTS
+        document = json.loads(path.read_text(encoding="utf-8"))
+        for component in document["components"]:
+            if component["id"] == "db1":
+                component["stages"].append({
+                    "id": reserved["id"],
+                    "name": "db1-" + reserved["name"].replace("_", "-"),
+                    "event_kind": reserved["event_kind"]})
+        path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        return reserved["name"]
+
+    def test_an_array_member_crosses_as_its_elements(self) -> None:
+        # A struct member does not have variable arity: the array is always N
+        # wide and an unused slot is an empty string, not an absent field. The
+        # element spelling is what makes this the whole capability -- C already
+        # writes `out->tags[2]`, so every emitter carries it unchanged.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            family = self.array_catalog(root)
+            contract.run(root, write=True)
+            client = (root / contract.CLIENT_DIR / f"{family}.c").read_text()
+            stage = (root / contract.SOURCE_DIR / f"{family}_stage.c").read_text()
+            for index in range(4):
+                self.assertIn(f"out->tags[{index}]", client)
+            # Six cells: id, four tags, the count. A count of five would mean
+            # the array crossed as one value and the row would be misread.
+            self.assertIn("caps, 6, NULL)", client)
+            self.assertIn("row_slots[5] = row_text[0];", stage)
+        finally:
+            tmp.cleanup()
+
+    def test_only_a_struct_member_may_repeat(self) -> None:
+        # A repeating ARGUMENT is the repeated shape, which carries its own
+        # count at the end of the frame. Letting a bare argument say `repeat`
+        # would silently make its arity fixed.
+        tmp = sandbox()
+        try:
+            root = Path(tmp.name)
+            self.array_catalog(root)
+            catalog = json.loads((root / contract.CATALOG).read_text(encoding="utf-8"))
+            for operation in catalog["operations"]:
+                if operation["name"] == "probe_tagged_get":
+                    operation["request"]["fields"].append(
+                        {"name": "terms", "type": "text", "required": True, "repeat": 3})
+            self.write(root, catalog)
+            with self.assertRaises(contract.ContractError):
+                contract.run(root, write=False)
+        finally:
+            tmp.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

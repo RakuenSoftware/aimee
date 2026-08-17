@@ -128,6 +128,32 @@ def load_json(path: Path) -> object:
         fail("parse", f"cannot parse {path}: {exc}")
 
 
+# A field name, or one element of an expanded array member.
+ELEMENT = re.compile(r"[a-z][a-z0-9_]*(\[[0-9]+\])?")
+
+
+def expand_repeats(fields: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Turn a `char member[N][W]` declaration into the N values it holds.
+
+    The alternative is variable arity, and a struct member does not have any:
+    the array is always N wide, and the slots the domain left empty are empty
+    strings rather than absent. Naming the expansion `member[i]` means every
+    emitter that writes `row.{name}` or `sizeof out->{name}` keeps working --
+    C spells an element exactly that way -- so this is the whole capability.
+    """
+    grown = []
+    for field in fields:
+        repeat = field.get("repeat")
+        if repeat is None:
+            grown.append(field)
+            continue
+        for index in range(int(repeat)):
+            element = {k: v for k, v in field.items() if k != "repeat"}
+            element["name"] = f"{field['name']}[{index}]"
+            grown.append(element)
+    return grown
+
+
 def keys(value: object, expected: set[str], label: str) -> dict[str, object]:
     if not isinstance(value, dict) or set(value) != expected:
         fail("keys", f"{label} keys differ from version 1: {sorted(expected)}")
@@ -354,8 +380,24 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
                  f"{name} takes no arguments, so it cannot be scoped: say global")
         fields = []
         for position, entry_field in enumerate(raw_fields):
-            declared = keys(entry_field, {"name", "type", "required"},
+            repeated_member = isinstance(entry_field, dict) and "repeat" in entry_field
+            declared = keys(entry_field,
+                            {"name", "type", "required", "repeat"} if repeated_member
+                            else {"name", "type", "required"},
                             f"{name}.request.fields[{position}]")
+            if repeated_member:
+                # Only a struct has members wide enough to need this. A bare
+                # argument that repeats is the `repeated` shape, which carries
+                # its own count and belongs at the end of the frame.
+                if "struct" not in request:
+                    fail("field-repeat",
+                         f"{name} field {declared['name']!r} repeats, which only a struct "
+                         f"member does; a repeating argument is the repeated shape")
+                if str(declared["type"]) != "text":
+                    fail("field-repeat",
+                         f"{name} field {declared['name']!r} repeats, so it carries text: "
+                         f"a repeated number has no caller yet and no test")
+                integer(declared["repeat"], f"{name}.request.fields[{position}].repeat", 2, 64)
             if type(declared["required"]) is not bool:
                 fail("field-required",
                      f"{name} field {declared['name']!r} required must be boolean")
@@ -367,6 +409,9 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
                 fail("field-type",
                      f"{name} field {declared['name']!r} type must be one of {list(FIELD_TYPES)}")
             fields.append(str(declared["name"]))
+        raw_fields = expand_repeats(raw_fields)
+        request["fields"] = raw_fields
+        fields = [str(f["name"]) for f in raw_fields]
         operation["_field_types"] = [str(f["type"]) for f in raw_fields]
         if "repeated" in request:
             # A variable-length list of strings, carried at the END of the
@@ -410,7 +455,9 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
         elif operation["scope"] != "none" and fields[0] != "key":
             fail("request-key", f"{name} is scoped, so it must take its key first")
         for field in fields:
-            if not isinstance(field, str) or not NAME.fullmatch(field):
+            # An expanded array member is spelled the way C spells an element,
+            # which is the point: every emitter writes it straight through.
+            if not isinstance(field, str) or not ELEMENT.fullmatch(field):
                 fail("request-field-name", f"{name} declares invalid request field {field!r}")
         if len(set(fields)) != len(fields):
             fail("request-field-duplicate", f"{name} repeats a request field")
@@ -504,15 +551,29 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]]) -> 
             # sent, so it says how wide that buffer is. Nothing else in a reply
             # needs one: a struct member is as wide as the struct says, and a
             # column already declares its own.
+            repeated_member = isinstance(declared, dict) and "repeat" in declared
             allowed_field = ({"name", "type", "width"}
                              if scalar_reply and isinstance(declared, dict) and "width" in declared
+                             else {"name", "type", "repeat"} if repeated_member
                              else {"name", "type"})
+            if repeated_member:
+                if "struct" not in reply:
+                    fail("field-repeat",
+                         f"{name} reply field {declared['name']!r} repeats, which only a "
+                         f"struct member does")
+                if str(declared["type"]) != "text":
+                    fail("field-repeat",
+                         f"{name} reply field {declared['name']!r} repeats, so it carries text")
+                integer(declared["repeat"], f"{name}.reply.fields[{position}].repeat", 2, 64)
             shape = keys(declared, allowed_field, f"{name}.reply.fields[{position}]")
             if shape["type"] not in PAYLOADS or shape["type"] == "none":
                 fail("reply-payload",
                      f"{name} reply field type must be one of {[p for p in PAYLOADS if p != 'none']}")
             if not NAME.fullmatch(str(shape["name"])):
                 fail("reply-field-name", f"{name} invalid reply field {shape['name']!r}")
+        reply_fields = expand_repeats(reply_fields)
+        reply["fields"] = reply_fields
+        operation["reply"]["fields"] = reply_fields
         if "scalars" in operation["reply"]:
             listed_fields = operation["reply"]["fields"]
             if operation["reply"]["scalars"] is not True:
@@ -1425,9 +1486,9 @@ static int read_result(int status, const char *value_out)
             body.append(f"   char slot0[{NUMERIC_TEXT}];")
             body.append("   char *const values[] = {slot0};")
             body.append("   const size_t caps[] = {sizeof slot0};")
-            body.append(f"   int status = call_stage({op_symbol}, fields, {arity}, values, caps, "
+            body.append(f"   int wire_status = call_stage({op_symbol}, fields, {arity}, values, caps, "
                         "1, NULL);")
-            body.append("   if (status != (int)AIMEE_DB1_STATUS_OK)")
+            body.append("   if (wire_status != (int)AIMEE_DB1_STATUS_OK)")
             body.append("      return -1;")
             body.append(f"   return {numeric_parse('int64', 'slot0')};")
         elif scalars:
@@ -1452,9 +1513,9 @@ static int read_result(int status, const char *value_out)
                     position += 1
             body.append(f"   char *const values[] = {{{', '.join(slots)}}};")
             body.append(f"   const size_t caps[] = {{{', '.join(caps)}}};")
-            body.append(f"   int status = call_stage({op_symbol}, fields, {arity}, values, caps, "
+            body.append(f"   int wire_status = call_stage({op_symbol}, fields, {arity}, values, caps, "
                         f"{len(scalar_members)}, NULL);")
-            body.append("   if (status != (int)AIMEE_DB1_STATUS_OK)")
+            body.append("   if (wire_status != (int)AIMEE_DB1_STATUS_OK)")
             body.append("      return -1;")
             for out_name, kind, slot_name in converts:
                 body.append(f"   *{out_name} = {numeric_parse(kind, slot_name)};")
@@ -1470,12 +1531,12 @@ static int read_result(int status, const char *value_out)
             body.append("      return NULL;")
             body.append("   char *const values[] = {value};")
             body.append(f"   const size_t caps[] = {{{cap}u}};")
-            body.append(f"   int status = call_stage({op_symbol}, fields, {arity}, values, caps, "
+            body.append(f"   int wire_status = call_stage({op_symbol}, fields, {arity}, values, caps, "
                         "1, NULL);")
             # An empty value is the miss the domain signalled with NULL, and the
             # two must stay the same answer: a caller that treats "" as content
             # would render an empty context rather than skipping it.
-            body.append("   if (status != (int)AIMEE_DB1_STATUS_OK || !value[0])")
+            body.append("   if (wire_status != (int)AIMEE_DB1_STATUS_OK || !value[0])")
             body.append("   {")
             body.append("      free(value);")
             body.append("      return NULL;")
@@ -1561,22 +1622,22 @@ static int read_result(int status, const char *value_out)
             body.append(f"   char *const values[] = {{{slots}}};")
             body.append(f"   const size_t caps[] = {{{caps}}};")
             body.append(f"   memset({target}, 0, sizeof *{target});")
-            body.append(f"   int status = call_stage({op_symbol}, fields, {arity}, values, caps, "
+            body.append(f"   int wire_status = call_stage({op_symbol}, fields, {arity}, values, caps, "
                         f"{len(members)}, NULL);")
             if operation.get("c_returns") == "found":
                 # This domain DOES distinguish, so the client hands back the
                 # same three answers rather than folding nothing-there into
                 # failure: a caller polling a queue would otherwise treat an
                 # empty queue as a broken one and back off from it.
-                body.append("   if (status == (int)AIMEE_DB1_STATUS_MISSING)")
+                body.append("   if (wire_status == (int)AIMEE_DB1_STATUS_MISSING)")
                 body.append("      return 0;")
-                body.append("   if (status != (int)AIMEE_DB1_STATUS_OK)")
+                body.append("   if (wire_status != (int)AIMEE_DB1_STATUS_OK)")
                 body.append("      return -1;")
             else:
                 # The domain answers 0 or -1 here: a miss and a failure are the
                 # same answer to its callers, and the wire does not invent a
                 # distinction the contract never had.
-                body.append("   if (status != (int)AIMEE_DB1_STATUS_OK)")
+                body.append("   if (wire_status != (int)AIMEE_DB1_STATUS_OK)")
                 body.append("      return -1;")
             for index, (member, kind) in enumerate(members):
                 if kind == "int":
@@ -1593,17 +1654,17 @@ static int read_result(int status, const char *value_out)
         elif reads:
             body.append(f"   char *const values[] = {{{outputs[0]}}};")
             body.append(f"   const size_t caps[] = {{{outputs[1]}}};")
-            body.append(f"   int status = call_stage({op_symbol}, fields, {arity}, values, caps, 1, NULL);")
-            body.append(f"   return read_result(status, {outputs[0]});")
+            body.append(f"   int wire_status = call_stage({op_symbol}, fields, {arity}, values, caps, 1, NULL);")
+            body.append(f"   return read_result(wire_status, {outputs[0]});")
         elif operation.get("c_returns") == "found":
             # A question whose whole answer is yes/no: nothing comes back but
             # the status, and the three answers stay three. Folding "no" into
             # "failed" would turn an empty result into an outage.
-            body.append(f"   int status = call_stage({op_symbol}, fields, {arity}, "
+            body.append(f"   int wire_status = call_stage({op_symbol}, fields, {arity}, "
                         f"NULL, NULL, 0, NULL);")
-            body.append("   if (status == (int)AIMEE_DB1_STATUS_MISSING)")
+            body.append("   if (wire_status == (int)AIMEE_DB1_STATUS_MISSING)")
             body.append("      return 0;")
-            body.append("   return status == (int)AIMEE_DB1_STATUS_OK ? 1 : -1;")
+            body.append("   return wire_status == (int)AIMEE_DB1_STATUS_OK ? 1 : -1;")
         else:
             body.append(f"   return write_result(call_stage({op_symbol}, fields, {arity}, "
                         f"NULL, NULL, 0, NULL));")
