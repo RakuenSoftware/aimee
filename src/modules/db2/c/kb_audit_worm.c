@@ -13,6 +13,35 @@
 #include "db_postgres.h"
 #include "kb_audit_worm.h"
 
+static db2_audit_hash_fn g_audit_hash_provider;
+
+void aimee_db2_register_audit_hash_provider(db2_audit_hash_fn provider)
+{
+   g_audit_hash_provider = provider;
+}
+
+static int kb_worm_row_hash(long long seq, const char *actor_role, const char *actor_principal,
+                            const char *action, const char *subject, const char *verdict,
+                            const char *key_id, const char *detail, const char *prev_hash,
+                            char out_hex[65])
+{
+   if (!out_hex)
+      return -1;
+   memset(out_hex, 0, 65);
+   if (!g_audit_hash_provider)
+      return -1;
+   g_audit_hash_provider(seq, actor_role, actor_principal, action, subject, verdict, key_id, detail,
+                         prev_hash, out_hex);
+   out_hex[64] = '\0';
+   for (size_t i = 0; i < 64; i++)
+      if (!((out_hex[i] >= '0' && out_hex[i] <= '9') || (out_hex[i] >= 'a' && out_hex[i] <= 'f')))
+      {
+         out_hex[0] = '\0';
+         return -1;
+      }
+   return 0;
+}
+
 /* Capture gate (S6). Resolved once from config.audit_worm_enabled (default-off)
  * and cached, so the hot kb-audit seam costs one branch after the first call;
  * db2_kb_audit_worm_set_enabled() lets the app or a test override. */
@@ -83,8 +112,9 @@ int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *a
    char ts[32];
    kb_worm_ts(ts);
    char row_hash[65];
-   audit_worm_row_hash(seq, actor_role, actor_principal, action, subject, verdict, "", detail, prev,
-                       row_hash);
+   if (kb_worm_row_hash(seq, actor_role, actor_principal, action, subject, verdict, "", detail,
+                        prev, row_hash) != 0)
+      return -1;
 
    aimee_pg_stmt_t *ins = aimee_pg_prepare(
        conn,
@@ -184,9 +214,15 @@ int db2_kb_audit_verify_chain(char *err, size_t errlen)
          break;
       }
       char rh[65];
-      audit_worm_row_hash(seq, role ? role : "", principal ? principal : "", action ? action : "",
-                          subject ? subject : "", verdict ? verdict : "", key_id ? key_id : "",
-                          detail ? detail : "", prev, rh);
+      if (kb_worm_row_hash(seq, role ? role : "", principal ? principal : "", action ? action : "",
+                           subject ? subject : "", verdict ? verdict : "", key_id ? key_id : "",
+                           detail ? detail : "", prev, rh) != 0)
+      {
+         if (err)
+            snprintf(err, errlen, "row hash provider unavailable or invalid at seq %lld", seq);
+         rc = -1;
+         break;
+      }
       if (!stored_row || strcmp(rh, stored_row) != 0)
       {
          if (err)

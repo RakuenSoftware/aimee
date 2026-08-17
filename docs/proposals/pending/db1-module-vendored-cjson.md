@@ -1,7 +1,7 @@
 # Proposal: how a module process gets cJSON
 
-- **State:** PENDING — a decision is needed before nine DB1 sources can migrate;
-  no code in this PR beyond the write-up.
+- **State:** DECIDED — the second option is implemented. A descriptor may name
+  vendored sources under `src/vendor/` that it compiles but does not own.
 
 Nine of DB1's remaining sources use cJSON, and none of them can be served until
 the DB1 module process can link it. This is not a wire question — the frame
@@ -73,10 +73,12 @@ This costs a change to `export_c_repositories.py`, the bundle builder and
 `check_module_source_ownership.py`. It is the smaller diff long-term: one copy
 of cJSON, and every module after this one gets the same door.
 
-## Recommendation
+## Decision (implemented)
 
-The second, and DB2's copy folded into it afterwards rather than left as a
-second precedent. The first is faster today and I did not take it, because a
+The second, implemented as `c_build.vendor_sources`. DB1 compiles
+`src/vendor/cJSON.c` — the same copy the daemon uses — and owns none of it.
+DB2's copy should fold into this rather than remain a second precedent; that is
+left as follow-up because moving DB2's build is a change to DB2, not to this. The first is faster today and I did not take it, because a
 third copy of a vendored library is the kind of decision that is cheap to make
 once and expensive to unmake, and because "DB2 did it" is a weak argument for
 repeating something whose cost only shows up during an incident.

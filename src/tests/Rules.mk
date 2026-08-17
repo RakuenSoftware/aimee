@@ -94,7 +94,8 @@ DB1_MIGRATED_OBJS = $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/modules/db1/payload_rew
                     $(OBJDIR)/modules/db1/cognify_jobs.o \
                     $(OBJDIR)/modules/db1/conv_context.o \
                     $(OBJDIR)/modules/db1/agent_log.o \
-                    $(OBJDIR)/modules/db1/windows.o
+                    $(OBJDIR)/modules/db1/windows.o \
+                    $(OBJDIR)/modules/db1/db1_trigger.o
 
 TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o $(OBJDIR)/modules/workspace/workspace_turn.o $(DB1_OBJS) $(DB1_MIGRATED_OBJS) \
                             $(OBJDIR)/modules/config/agent_config.o $(OBJDIR)/modules/vault/agent_credentials.o $(OBJDIR)/modules/config/agent_registry.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
@@ -4632,6 +4633,10 @@ $(TESTPREFIX)/unit-test-kb-audit-worm: $(OBJDIR)/tests/test_kb_audit_worm.o \
                                $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(OBJDIR)/tests/test_kb_audit_worm.o \
+$(OBJDIR)/tests/test_kb_audit_worm_pg.o \
+$(OBJDIR)/tests/test_code_project_lifecycle.o: C_FLAGS += -Imodules/db2/include
+
 $(TESTPREFIX)/unit-test-decision-log: $(OBJDIR)/tests/test_decision_log.o \
                                $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -5101,6 +5106,8 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/conv_context.o \
                                        $(OBJDIR)/modules/db1/agent_log.o \
                                        $(OBJDIR)/modules/db1/windows.o \
+                                       $(OBJDIR)/modules/db1/db1_trigger.o \
+                                       $(OBJDIR)/cJSON.o \
                                        $(OBJDIR)/core/event_bus/module_runtime.o \
                                        $(OBJDIR)/core/event_bus/module_protocol.o \
                                        $(OBJDIR)/core/event_bus/bus_attach.o \
@@ -8080,6 +8087,8 @@ $(TESTPREFIX)/unit-test-ranker-fit: $(OBJDIR)/tests/test_ranker_fit.o \
 $(TESTPREFIX)/unit-test-retrieval-outcome-bridge: $(OBJDIR)/tests/test_retrieval_outcome_bridge.o \
                      $(OBJDIR)/server/retrieval_outcome_bridge.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(OBJDIR)/tests/test_artifacts.o: C_FLAGS += -Imodules/db2/include
 
 # Pure render/extract helpers behind the kb_search tool — cJSON + dstr only.
 $(TESTPREFIX)/unit-test-td-search-render: $(OBJDIR)/tests/test_td_search_render.o \

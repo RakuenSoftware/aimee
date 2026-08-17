@@ -92,7 +92,8 @@
    ],
    "retired_sources": [
     "agent_log.c",
-    "cognify_jobs.c"
+    "cognify_jobs.c",
+    "db1_trigger.c"
    ]
   },
   {
@@ -3591,6 +3592,236 @@
      }
     ],
     "max_bytes": 256
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 20,
+   "name": "trigger_insert",
+   "c_name": "db1_trigger_insert",
+   "c_params": [
+    "id",
+    "source",
+    "event",
+    "task",
+    "workspace",
+    "metadata"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "source",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "event",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "task",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "workspace",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "metadata",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 21,
+   "name": "trigger_status_set",
+   "c_name": "db1_trigger_status_set",
+   "c_params": [
+    "id",
+    "status",
+    "pipeline_id",
+    "error"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "single",
+   "idempotency": "idempotent",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "pipeline_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 22,
+   "name": "trigger_get",
+   "c_name": "db1_trigger_get",
+   "c_params": [
+    "id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "none",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_trigger_run_t",
+    "fields": [
+     {
+      "name": "id",
+      "type": "text"
+     },
+     {
+      "name": "source",
+      "type": "text"
+     },
+     {
+      "name": "event",
+      "type": "text"
+     },
+     {
+      "name": "task",
+      "type": "text"
+     },
+     {
+      "name": "workspace",
+      "type": "text"
+     },
+     {
+      "name": "metadata",
+      "type": "text"
+     },
+     {
+      "name": "pipeline_id",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "queued_at",
+      "type": "text"
+     },
+     {
+      "name": "started_at",
+      "type": "text"
+     },
+     {
+      "name": "finished_at",
+      "type": "text"
+     },
+     {
+      "name": "error",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 8192
+   }
+  },
+  {
+   "family": "agent_work",
+   "id": 23,
+   "name": "trigger_list_json",
+   "c_name": "db1_trigger_list_json",
+   "c_params": [
+    "status_filter"
+   ],
+   "c_returns": "text",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "missing",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "status_filter",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "runs",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
    }
   }
  ]
