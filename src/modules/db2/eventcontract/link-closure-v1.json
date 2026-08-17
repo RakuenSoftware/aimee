@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "93512ce7c5e552d4afb4b29258fd12d2fe3538b7",
-  "source_fingerprint": "07ea3191a6478c3390225ae8c51d988226d1efe285ae5a566932bf1e4ba342f8",
+  "source_revision": "3aeaec6f03e98ed32d7545dc8ab5c81ea72409e1",
+  "source_fingerprint": "455568630a1562eefa791dc0505bd18ab04f4a4aac4c15f7c29b7471d4749234",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -155,6 +155,39 @@
     "src/modules/db2/c/write_tier_grant.c"
   ],
   "descriptor_support_units": [
+    {
+      "path": "src/modules/db2/support/cert_serial_primitives.c",
+      "source_sha256": "9104b934e60e7f5d72ced9f4dee60feb8fa2d26ea48d51dafea05ecdbb8ff057",
+      "header": "src/modules/db2/support/db2_cert_serial.h",
+      "header_sha256": "8075795205e0e4dd9fd05d81ac7a06ad27159d149fc55dc7403c9a6be98add91",
+      "defines": [
+        "kb_cert_serial_normalize"
+      ],
+      "resolves": [
+        "kb_cert_serial_normalize"
+      ],
+      "resolution_disposition": "injected-module-contract",
+      "allowed_includes": [
+        "db2_cert_serial.h",
+        "ctype.h",
+        "string.h"
+      ],
+      "allowed_header_includes": [
+        "stddef.h"
+      ],
+      "allowed_undefined": [
+        "__ctype_tolower_loc",
+        "memcpy",
+        "strlen"
+      ],
+      "base_references": {
+        "kb_cert_serial_normalize": [
+          "src/modules/db2/c/enrollments.c"
+        ]
+      },
+      "provenance": "The certificate-serial canonicalizer is promoted from src/kb/kb_identity.c; the sole DB2 call is pinned to enrollments.c.",
+      "evidence": "The descriptor owns prefix and separator removal, process-locale lowercase, leading-zero collapse, bounded output, and fail-with-empty-output behavior. Normal and sanitizer parity cover NULL, every non-NUL byte, all short output capacities, and input lengths across the internal 512-byte boundary. Only ctype, memcpy, and strlen are imported; there is no identity object, DB, bus, provider, pgvector, DB3, allocation, configuration, I/O, or logging edge."
+    },
     {
       "path": "src/modules/db2/support/cjson.c",
       "source_sha256": "c17f53aaa58dddb899f452b02dc313b98af9111c81d87797c72607c1f6d6b4d4",
@@ -1717,6 +1750,7 @@
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/notes.c",
         "src/modules/db2/c/prospective_memories.c",
+        "src/modules/db2/support/cert_serial_primitives.c",
         "src/modules/db2/support/cjson.c",
         "src/modules/db2/support/rel_type_primitives.c"
       ],
@@ -2141,14 +2175,6 @@
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
-    },
-    {
-      "symbol": "kb_cert_serial_normalize",
-      "references": [
-        "src/modules/db2/c/enrollments.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
       "symbol": "kb_identity_key",
@@ -2920,6 +2946,7 @@
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_operator_status_runtime.c",
         "src/modules/db2/c/vault_pg.c",
+        "src/modules/db2/support/cert_serial_primitives.c",
         "src/modules/db2/support/cjson.c",
         "src/modules/db2/support/extractor_primitives.c",
         "src/modules/db2/support/model_validation_primitives.c"
@@ -3360,16 +3387,16 @@
   ],
   "summary": {
     "translation_units": 138,
-    "descriptor_support_units": 15,
-    "unresolved_symbols": 193,
+    "descriptor_support_units": 16,
+    "unresolved_symbols": 192,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 54,
+      "injected-module-contract": 53,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 139
     }
   },
-  "fingerprint": "52f7fa3e59b986cd1aca3597798bf41df2004f45d065a0bb5b41c319c0dc0252"
+  "fingerprint": "4ab5ca7edefb2dd13470e3fedb1e94c6ccfe0dd161e0cc0371824763b8417016"
 }

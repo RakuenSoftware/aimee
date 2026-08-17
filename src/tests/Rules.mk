@@ -759,6 +759,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
 TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-bus-db2-module \
+                $(TESTPREFIX)/unit-test-db2-cert-serial-support \
                 $(TESTPREFIX)/unit-test-db2-cjson-support \
                 $(TESTPREFIX)/unit-test-db2-cochange-support \
                 $(TESTPREFIX)/unit-test-db2-dstr-support \
@@ -845,6 +846,7 @@ UNIT_TEST_SHARD_INDEX ?= 0
 UNIT_TEST_SKIP_P1 ?= 0
 ifeq ($(UNIT_TEST_SHARD_INDEX),0)
 UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-cert-serial-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-cjson-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-cochange-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-extractor-support-sanitize \
@@ -6892,6 +6894,58 @@ unit-test-db2-random-support: $(TESTPREFIX)/unit-test-db2-random-support
 	$<
 
 unit-test-db2-random-support-sanitize: $(TESTPREFIX)/unit-test-db2-random-support-sanitize
+	$<
+
+DB2_CERT_SERIAL_SUPPORT_RENAMES = -DAIMEE_DB2_CERT_SERIAL_PREFIX
+DB2_CERT_SERIAL_SECTION_FLAGS = -ffunction-sections -fdata-sections
+
+$(OBJDIR)/tests/db2_cert_serial_support_impl.o: \
+                     modules/db2/support/cert_serial_primitives.c \
+                     modules/db2/support/db2_cert_serial.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CERT_SERIAL_SUPPORT_RENAMES) \
+	      $(DB2_CERT_SERIAL_SECTION_FLAGS) -c -o $@ $<
+
+$(OBJDIR)/tests/db2_cert_serial_monolith.o: kb/kb_identity.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CERT_SERIAL_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-cert-serial-support: \
+                     $(OBJDIR)/tests/test_db2_cert_serial_support.o \
+                     $(OBJDIR)/tests/db2_cert_serial_support_impl.o \
+                     $(OBJDIR)/tests/db2_cert_serial_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_CERT_SERIAL_SANITIZE_DIR = $(OBJDIR)/tests/db2-cert-serial-support-sanitize
+
+$(DB2_CERT_SERIAL_SANITIZE_DIR)/test.o: tests/test_db2_cert_serial_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CERT_SERIAL_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/cert_serial_primitives.c \
+                     modules/db2/support/db2_cert_serial.h
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CERT_SERIAL_SUPPORT_RENAMES) \
+	      $(DB2_CERT_SERIAL_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_CERT_SERIAL_SANITIZE_DIR)/monolith.o: kb/kb_identity.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_CERT_SERIAL_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-cert-serial-support-sanitize: \
+                     $(DB2_CERT_SERIAL_SANITIZE_DIR)/test.o \
+                     $(DB2_CERT_SERIAL_SANITIZE_DIR)/support.o \
+                     $(DB2_CERT_SERIAL_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-cert-serial-support unit-test-db2-cert-serial-support-sanitize
+unit-test-db2-cert-serial-support: $(TESTPREFIX)/unit-test-db2-cert-serial-support
+	$<
+
+unit-test-db2-cert-serial-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-cert-serial-support-sanitize
 	$<
 
 DB2_COCHANGE_SUPPORT_RENAMES = -DAIMEE_DB2_COCHANGE_PREFIX

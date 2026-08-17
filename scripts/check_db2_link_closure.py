@@ -346,6 +346,28 @@ for _references in CJSON_BASE_REFERENCES.values():
         path for path in _references if path not in HOST_ADAPTER_REHOMES
     ]
 SUPPORT_UNITS: list[dict[str, object]] = [{
+    "path": "src/modules/db2/support/cert_serial_primitives.c",
+    "source_sha256": "9104b934e60e7f5d72ced9f4dee60feb8fa2d26ea48d51dafea05ecdbb8ff057",
+    "header": "src/modules/db2/support/db2_cert_serial.h",
+    "header_sha256": "8075795205e0e4dd9fd05d81ac7a06ad27159d149fc55dc7403c9a6be98add91",
+    "defines": ["kb_cert_serial_normalize"],
+    "resolves": ["kb_cert_serial_normalize"],
+    "resolution_disposition": "injected-module-contract",
+    "allowed_includes": ["db2_cert_serial.h", "ctype.h", "string.h"],
+    "allowed_header_includes": ["stddef.h"],
+    "allowed_undefined": ["__ctype_tolower_loc", "memcpy", "strlen"],
+    "base_references": {
+        "kb_cert_serial_normalize": ["src/modules/db2/c/enrollments.c"],
+    },
+    "provenance": "The certificate-serial canonicalizer is promoted from "
+                  "src/kb/kb_identity.c; the sole DB2 call is pinned to enrollments.c.",
+    "evidence": "The descriptor owns prefix and separator removal, process-locale lowercase, "
+                "leading-zero collapse, bounded output, and fail-with-empty-output behavior. "
+                "Normal and sanitizer parity cover NULL, every non-NUL byte, all short output "
+                "capacities, and input lengths across the internal 512-byte boundary. Only "
+                "ctype, memcpy, and strlen are imported; there is no identity object, DB, bus, "
+                "provider, pgvector, DB3, allocation, configuration, I/O, or logging edge.",
+}, {
     "path": "src/modules/db2/support/cjson.c",
     "source_sha256": "c17f53aaa58dddb899f452b02dc313b98af9111c81d87797c72607c1f6d6b4d4",
     "header": "src/modules/db2/support/cJSON.h",

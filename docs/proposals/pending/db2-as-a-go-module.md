@@ -6,8 +6,8 @@
   closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
   support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
   deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
-  link remains blocked by 54 sibling contracts. Its closure records 193 external symbols: 139
-  declared system links and those 54 injected contracts; portable API debt is zero. This is
+  link remains blocked by 53 sibling contracts. Its closure records 192 external symbols: 139
+  declared system links and those 53 injected contracts; portable API debt is zero. This is
   explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
@@ -497,6 +497,12 @@ printable-name bounds, HTTP(S) prefix grammar, and empty-endpoint default. Exhau
 length-boundary parity plus hardened execution protect the legacy behavior while removing DB2's
 dependency on the HTTP-layer implementation. The private implementation imports only `strcmp`,
 `strlen`, and `strncmp`.
+
+The certificate-serial contract similarly isolates the sole identity-layer helper used by DB2
+enrollment. It freezes prefix and separator removal, process-locale lowercasing, leading-zero
+collapse, bounded output, and fail-with-empty-output behavior. Byte-complete and internal-buffer
+boundary parity preserve the existing canonical enrollment key without moving principals or
+authentication policy into DB2.
 
 The three former `kb_service_backend_{memory,agent,export}.c` units are not support candidates or DB2
 implementation. They compose KB JSON/RPC responses while invoking high-level memory, dashboard,
