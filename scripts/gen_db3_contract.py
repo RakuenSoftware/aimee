@@ -182,13 +182,18 @@ def validate_catalog(value: object) -> dict[str, object]:
             fail("event-semantics", f"events[{index}] must equal {expected}")
     limits = _keys(
         catalog["limits"],
-        {"scope_bytes", "record_type_bytes", "collection_bytes", "dimension", "top_k"},
+        {"scope_bytes", "record_type_bytes", "collection_bytes", "label_count",
+         "label_key_bytes", "label_value_bytes", "labels_bytes", "dimension", "top_k"},
         "limits",
     )
     if limits != {
         "scope_bytes": 64,
         "record_type_bytes": 32,
         "collection_bytes": 32,
+        "label_count": 16,
+        "label_key_bytes": 32,
+        "label_value_bytes": 256,
+        "labels_bytes": 4096,
         "dimension": 4096,
         "top_k": 256,
     }:
@@ -196,7 +201,7 @@ def validate_catalog(value: object) -> dict[str, object]:
     wire = _keys(
         catalog["wire"],
         {
-            "capabilities", "search_request", "search_reply", "apply", "apply_chunk",
+            "capabilities", "search_request", "search_reply", "apply", "apply_v2", "apply_chunk",
             "applied", "search_failure", "route_request", "route_reply",
         },
         "wire",
@@ -208,6 +213,11 @@ def validate_catalog(value: object) -> dict[str, object]:
         "wire.search_reply",
     )
     apply = _keys(wire["apply"], {"magic", "header_bytes"}, "wire.apply")
+    apply_v2 = _keys(
+        wire["apply_v2"],
+        {"magic", "wire_version", "header_bytes", "label_header_bytes"},
+        "wire.apply_v2",
+    )
     apply_chunk = _keys(
         wire["apply_chunk"], {"magic", "header_bytes"}, "wire.apply_chunk",
     )
@@ -229,6 +239,11 @@ def validate_catalog(value: object) -> dict[str, object]:
         fail("search-reply-wire", "search reply wire differs from DB3 v1")
     if apply != {"magic": 0x41334244, "header_bytes": 36}:
         fail("apply-wire", "apply wire differs from DB3 v1")
+    if apply_v2 != {
+        "magic": 0x41334244, "wire_version": 2, "header_bytes": 40,
+        "label_header_bytes": 4,
+    }:
+        fail("apply-v2-wire", "apply v2 wire differs from the canonical label extension")
     if apply_chunk != {"magic": 0x4b334244, "header_bytes": 32}:
         fail("apply-chunk-wire", "apply chunk wire differs from DB3 v1")
     if applied != {"magic": 0x44334244, "header_bytes": 40}:
@@ -332,12 +347,17 @@ def header_bytes(catalog: dict[str, object], registry: dict[str, object],
 #define AIMEE_DB3_MAX_SCOPE       {limits['scope_bytes']}u
 #define AIMEE_DB3_MAX_RECORD_TYPE {limits['record_type_bytes']}u
 #define AIMEE_DB3_MAX_COLLECTION  {limits['collection_bytes']}u
+#define AIMEE_DB3_MAX_LABELS       {limits['label_count']}u
+#define AIMEE_DB3_MAX_LABEL_KEY    {limits['label_key_bytes']}u
+#define AIMEE_DB3_MAX_LABEL_VALUE  {limits['label_value_bytes']}u
+#define AIMEE_DB3_MAX_LABEL_BYTES  {limits['labels_bytes']}u
 #define AIMEE_DB3_MAX_DIM         {limits['dimension']}u
 #define AIMEE_DB3_MAX_TOP_K       {limits['top_k']}u
 
 #define AIMEE_DB3_SEARCH_REQUEST_MAGIC  0x{wire['search_request']['magic']:08x}u
 #define AIMEE_DB3_SEARCH_REPLY_MAGIC    0x{wire['search_reply']['magic']:08x}u
 #define AIMEE_DB3_APPLY_MAGIC           0x{wire['apply']['magic']:08x}u
+#define AIMEE_DB3_APPLY_V2_VERSION      {wire['apply_v2']['wire_version']}u
 #define AIMEE_DB3_CAPABILITIES_MAGIC    0x{wire['capabilities']['magic']:08x}u
 #define AIMEE_DB3_APPLY_CHUNK_MAGIC     0x{wire['apply_chunk']['magic']:08x}u
 #define AIMEE_DB3_APPLIED_MAGIC         0x{wire['applied']['magic']:08x}u
@@ -348,6 +368,8 @@ def header_bytes(catalog: dict[str, object], registry: dict[str, object],
 #define AIMEE_DB3_SEARCH_REPLY_HEADER   {wire['search_reply']['header_bytes']}u
 #define AIMEE_DB3_CANDIDATE_BYTES       {wire['search_reply']['candidate_bytes']}u
 #define AIMEE_DB3_APPLY_HEADER          {wire['apply']['header_bytes']}u
+#define AIMEE_DB3_APPLY_V2_HEADER       {wire['apply_v2']['header_bytes']}u
+#define AIMEE_DB3_LABEL_HEADER          {wire['apply_v2']['label_header_bytes']}u
 #define AIMEE_DB3_CAPABILITIES_HEADER   {wire['capabilities']['header_bytes']}u
 #define AIMEE_DB3_APPLY_CHUNK_HEADER    {wire['apply_chunk']['header_bytes']}u
 #define AIMEE_DB3_APPLIED_HEADER        {wire['applied']['header_bytes']}u
@@ -393,6 +415,10 @@ const WireVersion uint16 = {catalog['wire_version']}
 const MaxScopeBytes = {limits['scope_bytes']}
 const MaxRecordTypeBytes = {limits['record_type_bytes']}
 const MaxCollectionBytes = {limits['collection_bytes']}
+const MaxLabelCount = {limits['label_count']}
+const MaxLabelKeyBytes = {limits['label_key_bytes']}
+const MaxLabelValueBytes = {limits['label_value_bytes']}
+const MaxLabelsBytes = {limits['labels_bytes']}
 const MaxDimension = {limits['dimension']}
 const MaxTopK = {limits['top_k']}
 
@@ -409,6 +435,9 @@ const searchRequestHeader = {wire['search_request']['header_bytes']}
 const searchReplyHeader = {wire['search_reply']['header_bytes']}
 const candidateBytes = {wire['search_reply']['candidate_bytes']}
 const applyHeader = {wire['apply']['header_bytes']}
+const applyV2Version uint16 = {wire['apply_v2']['wire_version']}
+const applyV2Header = {wire['apply_v2']['header_bytes']}
+const labelHeader = {wire['apply_v2']['label_header_bytes']}
 const capabilitiesHeader = {wire['capabilities']['header_bytes']}
 const applyChunkHeader = {wire['apply_chunk']['header_bytes']}
 const appliedHeader = {wire['applied']['header_bytes']}
@@ -447,6 +476,11 @@ type SearchReply struct {{
 \tCandidates []Candidate
 }}
 
+type ExactLabel struct {{
+\tKey string
+\tValue string
+}}
+
 type Apply struct {{
 \tOperationID uint64
 \tGeneration uint64
@@ -454,6 +488,7 @@ type Apply struct {{
 \tKind ApplyKind
 \tCollection string
 \tVector []float32
+\tLabels []ExactLabel
 }}
 
 func validText(value string, capacity int, empty bool) bool {{
@@ -469,6 +504,42 @@ func finite32(values []float32) bool {{
 \t\tif math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {{ return false }}
 \t}}
 \treturn true
+}}
+
+func validLabelKey(value string) bool {{
+\tif !validText(value, MaxLabelKeyBytes, false) || value[0] < 'a' || value[0] > 'z' {{
+\t\treturn false
+\t}}
+\tfor i := 1; i < len(value); i++ {{
+\t\tchar := value[i]
+\t\tif (char < 'a' || char > 'z') && (char < '0' || char > '9') &&
+\t\t\tchar != '_' && char != '.' && char != '-' {{
+\t\t\treturn false
+\t\t}}
+\t}}
+\treturn true
+}}
+
+func validLabelValue(value string) bool {{
+\tif len(value) >= MaxLabelValueBytes {{ return false }}
+\tfor i := 0; i < len(value); i++ {{
+\t\tif value[i] < 0x20 || value[i] > 0x7e {{ return false }}
+\t}}
+\treturn true
+}}
+
+func labelsSize(labels []ExactLabel) (int, bool) {{
+\tif len(labels) > MaxLabelCount {{ return 0, false }}
+\ttotal := 0
+\tprevious := ""
+\tfor _, label := range labels {{
+\t\tif !validLabelKey(label.Key) || !validLabelValue(label.Value) ||
+\t\t\t(previous != "" && label.Key <= previous) {{ return 0, false }}
+\t\ttotal += labelHeader + len(label.Key) + len(label.Value)
+\t\tif total > MaxLabelsBytes {{ return 0, false }}
+\t\tprevious = label.Key
+\t}}
+\treturn total, true
 }}
 
 func (request SearchRequest) Validate() error {{
@@ -509,13 +580,14 @@ func ValidateSearchReply(request SearchRequest, reply SearchReply) error {{
 func (apply Apply) Validate() error {{
 \tif apply.OperationID == 0 || apply.Generation == 0 || apply.PointID <= 0 ||
 \t\t!validText(apply.Collection, MaxCollectionBytes, false) {{ return ErrMalformed }}
+\tif _, ok := labelsSize(apply.Labels); !ok {{ return ErrMalformed }}
 \tswitch apply.Kind {{
 \tcase ApplyUpsert:
 \t\tif len(apply.Vector) == 0 || len(apply.Vector) > MaxDimension || !finite32(apply.Vector) {{
 \t\t\treturn ErrMalformed
 \t\t}}
 \tcase ApplyDelete, ApplyTombstone:
-\t\tif len(apply.Vector) != 0 {{ return ErrMalformed }}
+\t\tif len(apply.Vector) != 0 || len(apply.Labels) != 0 {{ return ErrMalformed }}
 \tdefault:
 \t\treturn ErrMalformed
 \t}}
@@ -607,34 +679,75 @@ func DecodeSearchReply(input []byte) (SearchReply, error) {{
 
 func EncodeApply(apply Apply) ([]byte, error) {{
 \tif apply.Validate() != nil {{ return nil, ErrMalformed }}
-\tout := make([]byte, applyHeader+len(apply.Collection)+4*len(apply.Vector))
+\tlabelsBytes, _ := labelsSize(apply.Labels)
+\theader := applyHeader
+\tversion := WireVersion
+\tif len(apply.Labels) != 0 {{ header = applyV2Header; version = applyV2Version }}
+\tout := make([]byte, header+len(apply.Collection)+4*len(apply.Vector)+labelsBytes)
 \tbinary.LittleEndian.PutUint32(out[0:4], applyMagic)
-\tbinary.LittleEndian.PutUint16(out[4:6], WireVersion)
+\tbinary.LittleEndian.PutUint16(out[4:6], version)
 \tout[6] = byte(apply.Kind)
 \tbinary.LittleEndian.PutUint64(out[8:16], apply.OperationID)
 \tbinary.LittleEndian.PutUint64(out[16:24], apply.Generation)
 \tbinary.LittleEndian.PutUint64(out[24:32], uint64(apply.PointID))
 \tbinary.LittleEndian.PutUint16(out[32:34], uint16(len(apply.Collection)))
 \tbinary.LittleEndian.PutUint16(out[34:36], uint16(len(apply.Vector)))
-\toffset := applyHeader
+\tif version == applyV2Version {{
+\t\tbinary.LittleEndian.PutUint16(out[36:38], uint16(len(apply.Labels)))
+\t\tbinary.LittleEndian.PutUint16(out[38:40], uint16(labelsBytes))
+\t}}
+\toffset := header
 \toffset += copy(out[offset:], apply.Collection)
 \tfor _, value := range apply.Vector {{ binary.LittleEndian.PutUint32(out[offset:offset+4], math.Float32bits(value)); offset += 4 }}
+\tfor _, label := range apply.Labels {{
+\t\tbinary.LittleEndian.PutUint16(out[offset:offset+2], uint16(len(label.Key)))
+\t\tbinary.LittleEndian.PutUint16(out[offset+2:offset+4], uint16(len(label.Value)))
+\t\toffset += labelHeader
+\t\toffset += copy(out[offset:], label.Key)
+\t\toffset += copy(out[offset:], label.Value)
+\t}}
 \treturn out, nil
 }}
 
 func DecodeApply(input []byte) (Apply, error) {{
 \tif len(input) < applyHeader || binary.LittleEndian.Uint32(input[0:4]) != applyMagic ||
-\t\tbinary.LittleEndian.Uint16(input[4:6]) != WireVersion || input[7] != 0 {{ return Apply{{}}, ErrMalformed }}
+\t\tinput[7] != 0 {{ return Apply{{}}, ErrMalformed }}
+\tversion := binary.LittleEndian.Uint16(input[4:6])
+\theader, labelCount, labelsBytes := applyHeader, 0, 0
+\tif version == applyV2Version {{
+\t\tif len(input) < applyV2Header {{ return Apply{{}}, ErrMalformed }}
+\t\theader = applyV2Header
+\t\tlabelCount = int(binary.LittleEndian.Uint16(input[36:38]))
+\t\tlabelsBytes = int(binary.LittleEndian.Uint16(input[38:40]))
+\t\tif labelCount == 0 || labelCount > MaxLabelCount || labelsBytes > MaxLabelsBytes {{ return Apply{{}}, ErrMalformed }}
+\t}} else if version != WireVersion {{ return Apply{{}}, ErrMalformed }}
 \tcollection, dim := int(binary.LittleEndian.Uint16(input[32:34])), int(binary.LittleEndian.Uint16(input[34:36]))
-\tif collection == 0 || collection >= MaxCollectionBytes || dim > MaxDimension || len(input) != applyHeader+collection+4*dim {{ return Apply{{}}, ErrMalformed }}
+\tif collection == 0 || collection >= MaxCollectionBytes || dim > MaxDimension ||
+\t\tlen(input) != header+collection+4*dim+labelsBytes {{ return Apply{{}}, ErrMalformed }}
 \tpoint := binary.LittleEndian.Uint64(input[24:32])
 \tif point == 0 || point > math.MaxInt64 {{ return Apply{{}}, ErrMalformed }}
 \tapply := Apply{{OperationID: binary.LittleEndian.Uint64(input[8:16]), Generation: binary.LittleEndian.Uint64(input[16:24]), PointID: int64(point), Kind: ApplyKind(input[6])}}
-\toffset := applyHeader
+\toffset := header
 \tapply.Collection = string(input[offset:offset+collection]); offset += collection
 \tif dim > 0 {{
 \t\tapply.Vector = make([]float32, dim)
 \t\tfor i := range apply.Vector {{ apply.Vector[i] = math.Float32frombits(binary.LittleEndian.Uint32(input[offset:offset+4])); offset += 4 }}
+\t}}
+\tif labelCount != 0 {{
+\t\tend := offset + labelsBytes
+\t\tapply.Labels = make([]ExactLabel, labelCount)
+\t\tfor i := range apply.Labels {{
+\t\t\tif offset+labelHeader > end {{ return Apply{{}}, ErrMalformed }}
+\t\t\tkeyBytes := int(binary.LittleEndian.Uint16(input[offset:offset+2]))
+\t\t\tvalueBytes := int(binary.LittleEndian.Uint16(input[offset+2:offset+4]))
+\t\t\toffset += labelHeader
+\t\t\tif keyBytes == 0 || offset+keyBytes+valueBytes > end {{ return Apply{{}}, ErrMalformed }}
+\t\t\tapply.Labels[i] = ExactLabel{{Key: string(input[offset:offset+keyBytes])}}
+\t\t\toffset += keyBytes
+\t\t\tapply.Labels[i].Value = string(input[offset:offset+valueBytes])
+\t\t\toffset += valueBytes
+\t\t}}
+\t\tif offset != end {{ return Apply{{}}, ErrMalformed }}
 \t}}
 \tif apply.Validate() != nil {{ return Apply{{}}, ErrMalformed }}
 \treturn apply, nil
@@ -677,10 +790,20 @@ def baseline_bytes(catalog: dict[str, object], registry: dict[str, object],
              _u64(41) + struct.pack("<d", .95) + _u64(42) + struct.pack("<d", .75))
     apply = (_u32(0x41334244) + _u16(1) + bytes((1, 0)) + _u64(1001) + _u64(7) + _u64(41) +
              _u16(6) + _u16(3) + b"memory" + struct.pack("<fff", .1, .2, .3))
+    labels = (
+        _u16(7) + _u16(9) + b"project" + b"project-a" +
+        _u16(11) + _u16(6) + b"record_type" + b"memory" +
+        _u16(9) + _u16(11) + b"workspace" + b"workspace-a"
+    )
+    apply_v2 = (
+        _u32(0x41334244) + _u16(2) + bytes((1, 0)) + _u64(1002) + _u64(7) + _u64(42) +
+        _u16(6) + _u16(3) + _u16(3) + _u16(len(labels)) +
+        b"memory" + struct.pack("<fff", .3, .2, .1) + labels
+    )
     apply_chunk = (_u32(0x4b334244) + _u16(1) + _u16(32) + _u64(1001) +
                    _u32(len(apply)) + _u32(0) + _u32(len(apply)) + _u32(0) + apply)
     applied = (_u32(0x44334244) + _u16(1) + _u16(40) + _u64(1001) + _u64(7) +
-               _u64(7) + _u32(0) + _u32(0))
+               _u64(1001) + _u32(0) + _u32(0))
     search_failure = (_u32(0x45334244) + _u16(1) + _u16(24) + _u64(77) +
                       _u32(2) + _u32(0))
     route_request = (_u32(0x54334244) + _u16(1) + _u16(40) + _u64(91) +
@@ -696,6 +819,7 @@ def baseline_bytes(catalog: dict[str, object], registry: dict[str, object],
         "search_request_hex": request.hex(),
         "search_reply_hex": reply.hex(),
         "apply_hex": apply.hex(),
+        "apply_v2_hex": apply_v2.hex(),
         "apply_chunk_hex": apply_chunk.hex(),
         "applied_hex": applied.hex(),
         "search_failure_hex": search_failure.hex(),

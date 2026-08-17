@@ -764,7 +764,9 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-db2-management-read-support \
                 $(TESTPREFIX)/unit-test-db2-random-support \
                 $(TESTPREFIX)/unit-test-db2-rel-enum-text-support \
+                $(TESTPREFIX)/unit-test-db2-rel-seed-support \
                 $(TESTPREFIX)/unit-test-db2-rel-type-support \
+                $(TESTPREFIX)/unit-test-db2-runtime-config-support \
                 $(TESTPREFIX)/unit-test-db2-sketch-support \
                 $(TESTPREFIX)/unit-test-db2-text-support \
                 $(TESTPREFIX)/unit-test-db2-time-support \
@@ -843,7 +845,9 @@ UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-random-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-rel-seed-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-type-support-sanitize \
+                        $(TESTPREFIX)/unit-test-db2-runtime-config-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-text-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-time-support-sanitize
@@ -7119,6 +7123,41 @@ unit-test-db2-rel-enum-text-support-sanitize: \
       $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize
 	$<
 
+$(OBJDIR)/tests/db2_runtime_config_support_impl.o: \
+                     modules/db2/support/runtime_config_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-runtime-config-support: \
+                     $(OBJDIR)/tests/test_db2_runtime_config_support.o \
+                     $(OBJDIR)/tests/db2_runtime_config_support_impl.o
+	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_RUNTIME_CONFIG_SANITIZE_DIR = $(OBJDIR)/tests/db2-runtime-config-support-sanitize
+
+$(DB2_RUNTIME_CONFIG_SANITIZE_DIR)/test.o: tests/test_db2_runtime_config_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_RUNTIME_CONFIG_SANITIZE_DIR)/support.o: \
+                     modules/db2/support/runtime_config_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-runtime-config-support-sanitize: \
+                     $(DB2_RUNTIME_CONFIG_SANITIZE_DIR)/test.o \
+                     $(DB2_RUNTIME_CONFIG_SANITIZE_DIR)/support.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -o $@ $^
+
+.PHONY: unit-test-db2-runtime-config-support \
+        unit-test-db2-runtime-config-support-sanitize
+unit-test-db2-runtime-config-support: $(TESTPREFIX)/unit-test-db2-runtime-config-support
+	$<
+
+unit-test-db2-runtime-config-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-db2-runtime-config-support-sanitize
+	$<
+
 DB2_REL_TYPE_SUPPORT_RENAMES = \
    -Drel_type_is_functional=db2_support_rel_type_is_functional \
    -Drel_type_normalize=db2_support_rel_type_normalize
@@ -7166,6 +7205,49 @@ unit-test-db2-rel-type-support: $(TESTPREFIX)/unit-test-db2-rel-type-support
 	$<
 
 unit-test-db2-rel-type-support-sanitize: $(TESTPREFIX)/unit-test-db2-rel-type-support-sanitize
+	$<
+
+DB2_REL_SEED_SUPPORT_RENAMES = \
+   -Drel_type_normalize=db2_support_rel_type_normalize \
+   -Drel_types_seed_at=db2_support_rel_types_seed_at \
+   -Drel_types_seed_count=db2_support_rel_types_seed_count \
+   -Drel_types_seed_lookup=db2_support_rel_types_seed_lookup
+
+$(OBJDIR)/tests/db2_rel_seed_support_impl.o: modules/db2/support/rel_seed_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_REL_SEED_SUPPORT_RENAMES) \
+	      $(DB2_REL_TYPE_SECTION_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-rel-seed-support: \
+                     $(OBJDIR)/tests/test_db2_rel_seed_support.o \
+                     $(OBJDIR)/tests/db2_rel_seed_support_impl.o \
+                     $(OBJDIR)/tests/db2_rel_type_support_impl.o \
+                     $(OBJDIR)/tests/db2_rel_type_monolith.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+DB2_REL_SEED_SANITIZE_DIR = $(OBJDIR)/tests/db2-rel-seed-support-sanitize
+
+$(DB2_REL_SEED_SANITIZE_DIR)/test.o: tests/test_db2_rel_seed_support.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(DB2_REL_SEED_SANITIZE_DIR)/support.o: modules/db2/support/rel_seed_primitives.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TEST_C_FLAGS) $(DB2_REL_SEED_SUPPORT_RENAMES) $(DB2_REL_TYPE_SECTION_FLAGS) \
+	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-db2-rel-seed-support-sanitize: \
+                     $(DB2_REL_SEED_SANITIZE_DIR)/test.o \
+                     $(DB2_REL_SEED_SANITIZE_DIR)/support.o \
+                     $(DB2_REL_TYPE_SANITIZE_DIR)/support.o \
+                     $(DB2_REL_TYPE_SANITIZE_DIR)/monolith.o
+	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+
+.PHONY: unit-test-db2-rel-seed-support unit-test-db2-rel-seed-support-sanitize
+unit-test-db2-rel-seed-support: $(TESTPREFIX)/unit-test-db2-rel-seed-support
+	$<
+
+unit-test-db2-rel-seed-support-sanitize: $(TESTPREFIX)/unit-test-db2-rel-seed-support-sanitize
 	$<
 
 DB2_SKETCH_SUPPORT_RENAMES = \

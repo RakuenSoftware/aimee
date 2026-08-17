@@ -90,16 +90,52 @@ memory-candidate operation. Its internal pgvector, external provider, and author
 checks are injected, so the route can be exhaustively tested before the private DB2 source closure is
 linked. This is not a production cutover: the module remains disabled and no provider grant ships.
 
+DB2's schema also contains the pre-activation DB3 durability owner. AFTER ROW triggers on the
+reviewed pgvector mutation relations create canonical apply-v2 operations and per-principal
+delivery obligations in the same PostgreSQL transaction as the authoritative vector write. A new
+apply-capable provider receives durable catalog-driven cursors under the same advisory transaction
+lock, then a Go worker backfills in bounded transactions while live writes also target that
+principal; it cannot advertise ready search evidence until that backfill is acknowledged. With no
+active or backfilling external provider, no outbox history is retained because a later snapshot is
+authoritative. The Go dispatcher uses bounded `SKIP LOCKED` leases and
+broadcasts over the event bus, while only authenticated per-principal applied acknowledgements
+complete delivery. These paths remain unselected until the standalone C DB2 activation gate.
+
 Link-closure audit:
 
-`link-closure-v1.json` accounts for all 141 C translation units in the private DB2 boundary. The
+`link-closure-v1.json` accounts for all 138 storage-owner C translation units in the private DB2
+boundary. Three JSON/RPC composition units were rehomed unchanged to `src/kb/db2_adapters`: they call
+high-level memory, dashboard, learning, and agent policy and therefore remain on the caller side of
+the process boundary while their storage calls migrate to generated DB2 clients. Treating those
+calls as injected DB2 callbacks would recreate the monolith inside the module. The
 probe compiles each unit plus exact descriptor-owned support, combines only those objects with a
 relocatable link, supplies no archive, shared library, helper stub, or weak definition, and records
-the 311 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
-disposition and rationale. The current ledger contains 145 explicit system-link dependencies, zero
-remaining vendored/generated inputs, 150 sibling or KB contracts to inject, and 16 support APIs to
+the 207 genuinely external symbols plus every referencing unit. Each symbol has a reviewed
+disposition and rationale. The current ledger contains 139 explicit system-link dependencies, zero
+remaining vendored/generated inputs, 59 sibling or KB contracts to inject, and 9 support APIs to
 promote. The standalone-link exit condition requires zero entries in the latter three groups; a
 classified ledger alone is not enough.
+
+The descriptor also replaces eighteen live host-config getters with one versioned immutable
+startup snapshot. Retained DB2 sources include only the private snapshot header; the legacy
+monolith continues resolving the same getter symbols from the config module until cutover, while
+the standalone process resolves them locally after one validated install. Wrong ABI, NULL, and
+unterminated command snapshots fail atomically, and normal plus hardened tests cover every field,
+fail-closed defaults, requested embedder override, and retained state after rejected installs.
+
+Process discovery and daemon spawning were extracted from the retained SQL backend into a
+caller-side runtime adapter. Queue rows, transactional claims, and completion state remain in DB2;
+the supervisor alone resolves and spawns the host executable. The legacy function and object
+names remain linked during cutover, while the standalone DB2 closure no longer imports either
+platform lifecycle API. This adapter is explicit S2 caller-side debt: its storage calls must become
+generated DB2 client operations before S4, but process discovery and spawn policy never move back
+inside DB2 or become injected module callbacks.
+
+The closure probe now uses the same `AIMEE_DB1_DISABLED` and
+`AIMEE_DISABLE_DB2_SQLITE_SHIM` mode as the standalone KB/DB2 build. The legacy SQLite evaluation
+shim remains available to its existing tests, but its DB1 statement-cache hook and SQLite-only
+system ABI no longer count as production module dependencies. The one newly active POSIX process
+reference and its exact call site are pinned as part of this one-way probe-mode migration.
 
 The first closure reduction promotes seven deterministic sketch primitives from `src/sketch.c` into
 the descriptor-owned `support/sketch_primitives.c`. Their DB2 calls are confined to `c/sketch.c` and
@@ -189,13 +225,27 @@ nonrepeating output, eight-thread concurrency, fork safety, and ASan/UBSan/FORTI
 This slice moves total debt from 313 to 311 and portable promotion debt from 18 to 16 without
 changing database, pgvector, provider, event-bus, or activation ownership.
 
+The tenth reduction packages `rel_types_seed_count`, `rel_types_seed_at`, and
+`rel_types_seed_lookup` as one generated ontology unit. The existing compiled-table generator now
+walks the authoritative `SEED_ONTOLOGY` once and can emit DB2's complete rows alongside the Go
+memory table and its fixture; it does not parse or duplicate the C initializer. A descriptor-private
+ABI mirror keeps monolithic relationship and memory headers outside the bundle while preserving all
+kind arrays, inverse and correction policy, category, sensitivity, hierarchy, and status fields.
+Admission pins the generated source and header hashes, three exports, four original references,
+three includes, and only the adjacent normalization support API plus `strcmp` imports. Compile-time
+checks bind every size, enum width, constant, and field offset to the authoritative row. Runtime and
+hardened parity walk every row and unused kind slot, prove iteration bounds and pointer identity,
+and compare canonical, normalized, missing, empty, NULL, and overlong lookups. This slice moves total
+debt from 311 to 308 and portable promotion debt from 16 to 13 without importing the memory module
+or changing database, pgvector, provider, DB3, event-bus, or activation ownership.
+
 The remaining portable rows are named migration debt, not an assertion that copying is always the
-right answer. DB2 owns the decision and must close it before activation: relationship seed iteration
-triggers a shared ontology-type boundary; canonical-index extraction and shell helpers trigger a
-typed indexing capability review; logging, session identity, and briefing rendering trigger an
-injected process/config/memory contract review; executable discovery and daemon spawning trigger a
-runtime lifecycle capability review. Those rows may be reclassified only with a reviewed contract
-and replay evidence, so later slices do not repeatedly guess between support copying and injection.
+right answer. DB2 owns the decision and must close it before activation: canonical-index extraction
+and shell helpers trigger a typed indexing capability review; logging, session identity, and
+briefing rendering trigger an injected process/config/memory contract review; executable discovery
+and daemon spawning trigger a runtime lifecycle capability review. Those rows may be reclassified
+only with a reviewed contract and replay evidence, so later slices do not repeatedly guess between
+support copying and injection.
 
 The gate rejects legacy source additions or omissions, support path escape, symlinks, content drift,
 new unresolved symbols, non-system reference growth, missing evidence, and any attempt to make the

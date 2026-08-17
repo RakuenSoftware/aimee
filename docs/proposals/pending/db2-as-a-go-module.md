@@ -1,14 +1,18 @@
 # Proposal: put DB2 behind a module boundary, then port it to Go
 
-- **State:** PENDING — the C source boundary and separately buildable C process shell are registered;
-  the descriptor owns the generated health contract, typed C client, and declaration-review source;
-  all 1,351 external C declarations are mechanically inventoried, lifecycle health is reviewed as a
-  retained-DB2 wire operation, and provider-specific pgvector declarations are explicitly
-  retained/private. The typed client/handler path passes through the real event bus, but production
-  remains on direct calls until the standalone C backend is complete.
+- **State:** PENDING — residual scope only. S1 is complete, S2 is in progress, and S4/S6 remain open.
+- **Completed slices:** The C source boundary, separately buildable process shell, generated health
+  contract/client, declaration and
+  closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
+  support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
+  deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
+  closure currently records 207 external symbols: 139 declared system links, 59 sibling contracts
+  to inject, and 9 portable APIs to close. This is explicitly not the S4 atomic ownership cutover or
+  the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
+  external provider grant ships until the complete C backend passes replay and S4 activates it.
 - **Date:** 2026-08-15.
 - **Charter roles:** Constrain-Verify / Gate-Promote.
-- **Thesis:** DB2 was created as a portable source boundary and now resides intact at
+- **Thesis:** DB2 was created as a portable source boundary and its storage owner now resides at
   `src/modules/db2/c`. Preserve its behavior by putting that C implementation behind a KB-local
   module process first. Once
   `aimee-kb` has no direct DB2 linkage, replace that module's internals with pure Go without
@@ -223,14 +227,19 @@ be multiple authorized observers of the write side of that contract:
 
 - `db3.capabilities`: metric, maximum dimension/batch/top-K, supported filter nodes, and provider
   generation;
-- `db3.apply`: idempotent committed upsert/delete/tombstone batches with operation and generation IDs;
+- `db3.apply`: idempotent committed upsert/delete/tombstone batches with operation and corpus
+  generation IDs; compatible apply-v2 upserts add canonically sorted exact labels while v1 remains
+  decodable;
 - `db3.applied`: per-observer acknowledgement, durable watermark, lag, and typed failure;
 - `db3.search`: request/reply carrying query ID, collection, vector, metric, typed filter, top-K,
   bounded relative timeout, required provider generation, then bounded point IDs, distances, and
   ranks; and
 - `db3.route`: observable selected-provider, default-pgvector, or explicit-fallback decisions.
 
-The proposed version 1 assigns kinds `11777` through `11781` in that order. Notifications use a
+The frozen protocol assigns event kinds `0x80030001` through `0x80030005` in that order. Its
+non-apply frames and compatible apply-v1 encoding are version one; apply-v2 reuses the apply event
+kind and adds bounded exact labels required for filter-correct external projections. Notifications
+use a
 bounded chunk envelope when a valid apply batch exceeds one negotiated inline bus slot. Correlated
 search uses the bus request/reply stream directly and therefore inherits its fragmentation,
 cancellation, and deadline semantics. Notification reassembly is keyed by the host-stamped provider
@@ -309,13 +318,26 @@ The migration lands in independently testable slices, but activation remains ato
 7. **S7 — C retirement.** Deploy only the Go provider, remove the C tree and C-only shims after the
    compatibility window, and prove no C DB2 object, stale grant, or fallback executable ships.
 
-This implementation is intentionally split across those ordered PRs. The current S2 owner PR adds
-the exact C link-closure audit and does not claim the C cutover, Go port, or complete DB3 runtime.
+This implementation is intentionally split across those ordered PRs. The current S2 owner series adds
+the exact C link-closure audit and pre-activation DB3 durability substrate; it does not claim the C
+cutover, Go port, or a deployed external DB3 provider.
 Subsequent autonomous S2 PRs own elimination of each audited dependency cluster. S3 and S4 own the
 replayable C process and atomic ownership switch; S5 owns the deployable provider-neutral DB3
 descriptor, grants, pgvector adapter, and external-provider conformance; S6 owns the aimee-kb Go
 implementation and parity switch. Pulling any of those later owners into this audit PR would violate
 the required C-first ordering and activate an unproven partial closure.
+
+That sequence is now concrete rather than aspirational. PRs #2698 through #2713 established the
+decision, boundary, process shell, catalogs, DB3 reference route, and closure ratchet; #2714 through
+#2759 admitted the reviewed portable support/input clusters; #2744, #2751, and #2762 established the
+provider-neutral DB3 protocol, multiple-observer Go router, and automatic deployed-provider read
+selection while keeping transaction-coupled reads on DB2/pgvector. The next durability slice adds
+transactional pgvector triggers, a per-principal PostgreSQL delivery ledger, locked provider
+snapshot admission, apply-v2 labels, and a replayable Go event-bus dispatcher without activating a
+provider grant. Each remaining S2 dependency
+cluster continues to land as its own reviewed PR because the activation invariant forbids claiming
+or deploying a partially linked C owner. The complete migration request remains open until the
+series reaches the S4/S6 activation and parity gates; no precursor diff claims that completion.
 
 Material changes to operation ownership, fallback semantics, observer selection, or the activation
 boundary return to roundtable review. Mechanical catalog additions follow the frozen rules above.
@@ -451,11 +473,34 @@ values and both enum sizes to the authoritative int-sized calling convention. Ex
 16-bit and remaining int-boundary parity protects each explicit value and both default classes under
 normal and hardened builds. The unit has no imports and does not change DB2 or DB3 vector ownership.
 
-The next support candidates stay explicitly deferred by ownership shape: relation seed iteration,
-lookup, and remaining ontology helpers move the semantic seed table or its struct ABI; language
-extractors bring a broad parser/helper closure; platform random/process functions carry OS, entropy,
-and daemon policy. Each requires its own coherent admission and parity slice rather than being folded
-into this unit.
+Later admitted units now own the pinned cJSON input, portable randomness, and the generated full-field
+relationship seed. The remaining support candidates stay explicitly deferred by ownership shape:
+language extractors bring a broad parser/helper closure; process discovery/spawn carries runtime
+lifecycle policy; and logging, session, and briefing helpers belong behind injected host contracts.
+Each requires its own coherent admission and parity slice rather than being folded into an unrelated
+unit.
+
+The three former `kb_service_backend_{memory,agent,export}.c` units are not support candidates or DB2
+implementation. They compose KB JSON/RPC responses while invoking high-level memory, dashboard,
+learning, and agent policy. They are now caller adapters under `src/kb/db2_adapters`, with the same
+symbols and legacy linkage during the compatibility window. Their storage calls move to generated
+DB2 clients; their policy calls never become a broad callback surface inside the DB2 process.
+The closure gate permits only these named, existence-checked rehomes and rejects any unreviewed
+translation-unit disappearance.
+
+DB2's eighteen configuration reads now resolve through a single versioned immutable startup
+snapshot rather than an eighteen-function callback table or live dependency on the host config
+module. The C process installs that bounded value before dispatch; the later Go provider consumes
+the same fields from its process configuration. Requested embedder overrides retain precedence,
+invalid snapshots fail atomically, and all existing call symbols remain stable during C parity.
+
+Host executable discovery and daemon spawning now live in a KB runtime adapter rather than the
+retained DB2 SQL backend. DB2 continues to own durable async-queue claims and state transitions;
+the caller-side supervisor owns process lifecycle and will invoke the generated queue operations.
+
+The closure compiler now matches the production standalone mode by disabling DB1 and the DB2
+SQLite test shim. SQLite compatibility remains tested separately, but its weak DB1 cache hook and
+SQLite-only runtime imports are not dependencies of the deployable C or Go DB2 owner.
 
 These reductions remain phase-one precursors, not substitutes for the program exit criteria below:
 standalone C closure reaches zero non-system packaging/injection/promotion debt; the C process is

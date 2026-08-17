@@ -1,26 +1,26 @@
-/* db2/kb_service_backend_memory.c: memory-domain RPC backends for
+/* kb/db2_adapters/kb_service_backend_memory.c: caller-side memory RPC adapters for
  * aimee-kb (find_facts, list, get, insert, briefing, context_block,
- * entity_profile, entity_edges).  Split from kb_service_backend.c so
- * the two stay under the per-file line cap. */
+ * entity_profile, entity_edges). This policy/JSON composition layer remains
+ * with aimee-kb while its storage calls migrate to the generated DB2 client. */
 
 #include "kb_service_backend.h"
 
 #include "aimee.h"
-#include "memory_lint.h"
+#include "modules/db2/c/memory_lint.h"
 #include "config.h"
-#include "fact_ingest.h" /* db2_typed_fact_ingress (typed-fact §4/§6/§7 ingress) */
-#include "fact_recall.h" /* db2_fact_recall_in_query (read-only §7 recall) */
+#include "modules/db2/c/fact_ingest.h"      /* db2_typed_fact_ingress */
+#include "modules/db2/c/fact_recall.h"      /* db2_fact_recall_in_query */
 #include "modules/memory/memory_pii_gate.h" /* memory_pii_turn_requests_sensitive */
-#include "kb_payload.h"                     /* db2_kb_async_enqueue (background memory_facts job) */
-#include "decision_log.h"
+#include "modules/db2/c/kb_payload.h"       /* db2_kb_async_enqueue */
+#include "modules/db2/c/decision_log.h"
 #include "memory.h"
-#include "memory_export.h"
-#include "memory_lifecycle.h" /* db2_memory_valid_at (memory get --as-of) */
-#include "memory_payload.h"
-#include "memory_query.h"
-#include "memory_scope_query.h"
+#include "modules/db2/c/memory_export.h"
+#include "modules/db2/c/memory_lifecycle.h" /* db2_memory_valid_at */
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/memory_scope_query.h"
 #include "session_briefing.h"
-#include "tasks.h"
+#include "modules/db2/c/tasks.h"
 
 #include <stdlib.h>
 #include <string.h>

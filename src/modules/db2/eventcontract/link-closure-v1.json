@@ -1,15 +1,15 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "5e25927805cbc87738afcfda28dfabcf5c62ca55",
-  "source_fingerprint": "ee40264fc69213f12eb5c9d8167b9b5e9918492750e8979ba7a45107c2b61f4d",
+  "source_revision": "e4f83d22ddc012b6bfd16935a9fa90cbac4f8147",
+  "source_fingerprint": "d88ad887c296cce19034688ad9439b282b8e73945029facc718be8ce52b12822",
   "probe": {
     "compile_driver": "src/Makefile",
-    "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
+    "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
     "link_mode": "relocatable-no-libraries",
     "helper_objects": [],
     "libraries": [],
-    "support_compile_flags": "-std=c11 -Os -Wall -Wextra -Werror -fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
+    "support_compile_flags": "-std=c11 -Os -Wall -Wextra -Werror -fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
     "support_include_roots": [
       "src/modules/db2/support"
     ]
@@ -79,10 +79,7 @@
     "src/modules/db2/c/kb_releases.c",
     "src/modules/db2/c/kb_runtime_state.c",
     "src/modules/db2/c/kb_service_backend.c",
-    "src/modules/db2/c/kb_service_backend_agent.c",
-    "src/modules/db2/c/kb_service_backend_export.c",
     "src/modules/db2/c/kb_service_backend_ingest.c",
-    "src/modules/db2/c/kb_service_backend_memory.c",
     "src/modules/db2/c/kb_vectors.c",
     "src/modules/db2/c/kind_lifecycle.c",
     "src/modules/db2/c/learning.c",
@@ -306,13 +303,9 @@
           "src/modules/db2/c/code_audit.c",
           "src/modules/db2/c/collab_rules.c",
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/kb_service_backend.c",
-          "src/modules/db2/c/kb_service_backend_agent.c",
-          "src/modules/db2/c/kb_service_backend_memory.c"
+          "src/modules/db2/c/kb_service_backend.c"
         ],
         "cJSON_AddBoolToObject": [
-          "src/modules/db2/c/kb_service_backend_agent.c",
-          "src/modules/db2/c/kb_service_backend_memory.c",
           "src/modules/db2/c/vector_status.c"
         ],
         "cJSON_AddItemToArray": [
@@ -320,18 +313,12 @@
           "src/modules/db2/c/collab_rules.c",
           "src/modules/db2/c/demotion.c",
           "src/modules/db2/c/kb_service_backend.c",
-          "src/modules/db2/c/kb_service_backend_agent.c",
-          "src/modules/db2/c/kb_service_backend_export.c",
           "src/modules/db2/c/kb_service_backend_ingest.c",
-          "src/modules/db2/c/kb_service_backend_memory.c",
           "src/modules/db2/c/memory_payload.c"
         ],
         "cJSON_AddItemToObject": [
           "src/modules/db2/c/demotion.c",
           "src/modules/db2/c/kb_service_backend.c",
-          "src/modules/db2/c/kb_service_backend_agent.c",
-          "src/modules/db2/c/kb_service_backend_export.c",
-          "src/modules/db2/c/kb_service_backend_memory.c",
           "src/modules/db2/c/memory_payload.c"
         ],
         "cJSON_AddNumberToObject": [
@@ -342,17 +329,12 @@
           "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/kb_payload.c",
           "src/modules/db2/c/kb_service_backend.c",
-          "src/modules/db2/c/kb_service_backend_agent.c",
-          "src/modules/db2/c/kb_service_backend_export.c",
-          "src/modules/db2/c/kb_service_backend_memory.c",
           "src/modules/db2/c/memory_export.c",
           "src/modules/db2/c/memory_payload.c",
           "src/modules/db2/c/rules.c",
           "src/modules/db2/c/vector_status.c"
         ],
-        "cJSON_AddObjectToObject": [
-          "src/modules/db2/c/kb_service_backend_memory.c"
-        ],
+        "cJSON_AddObjectToObject": [],
         "cJSON_AddStringToObject": [
           "src/modules/db2/c/artifacts.c",
           "src/modules/db2/c/code_audit.c",
@@ -362,10 +344,7 @@
           "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/kb_payload.c",
           "src/modules/db2/c/kb_service_backend.c",
-          "src/modules/db2/c/kb_service_backend_agent.c",
-          "src/modules/db2/c/kb_service_backend_export.c",
           "src/modules/db2/c/kb_service_backend_ingest.c",
-          "src/modules/db2/c/kb_service_backend_memory.c",
           "src/modules/db2/c/memory_export.c",
           "src/modules/db2/c/memory_payload.c",
           "src/modules/db2/c/rules.c",
@@ -375,14 +354,11 @@
           "src/modules/db2/c/code_audit.c",
           "src/modules/db2/c/collab_rules.c",
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/kb_service_backend_agent.c",
-          "src/modules/db2/c/kb_service_backend_export.c",
           "src/modules/db2/c/kb_service_backend_ingest.c",
           "src/modules/db2/c/memory_payload.c"
         ],
         "cJSON_CreateNumber": [
-          "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/kb_service_backend_memory.c"
+          "src/modules/db2/c/demotion.c"
         ],
         "cJSON_CreateObject": [
           "src/modules/db2/c/artifacts.c",
@@ -393,10 +369,7 @@
           "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/kb_payload.c",
           "src/modules/db2/c/kb_service_backend.c",
-          "src/modules/db2/c/kb_service_backend_agent.c",
-          "src/modules/db2/c/kb_service_backend_export.c",
           "src/modules/db2/c/kb_service_backend_ingest.c",
-          "src/modules/db2/c/kb_service_backend_memory.c",
           "src/modules/db2/c/memory_export.c",
           "src/modules/db2/c/memory_payload.c",
           "src/modules/db2/c/rules.c",
@@ -404,7 +377,6 @@
         ],
         "cJSON_CreateString": [
           "src/modules/db2/c/code_audit.c",
-          "src/modules/db2/c/kb_service_backend_memory.c",
           "src/modules/db2/c/memory_payload.c"
         ],
         "cJSON_Delete": [
@@ -417,9 +389,6 @@
           "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/kb_payload.c",
           "src/modules/db2/c/kb_service_backend.c",
-          "src/modules/db2/c/kb_service_backend_agent.c",
-          "src/modules/db2/c/kb_service_backend_export.c",
-          "src/modules/db2/c/kb_service_backend_memory.c",
           "src/modules/db2/c/memory_export.c",
           "src/modules/db2/c/memory_payload.c",
           "src/modules/db2/c/org_model_catalog.c",
@@ -445,54 +414,37 @@
           "src/modules/db2/c/code_audit.c",
           "src/modules/db2/c/demotion.c",
           "src/modules/db2/c/fidelity.c",
-          "src/modules/db2/c/kb_service_backend_agent.c",
-          "src/modules/db2/c/kb_service_backend_export.c",
           "src/modules/db2/c/pgvec_transport.c"
         ],
         "cJSON_IsArray": [
           "src/modules/db2/c/artifacts.c",
           "src/modules/db2/c/calibration.c",
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/kb_service_backend_agent.c",
-          "src/modules/db2/c/kb_service_backend_export.c",
-          "src/modules/db2/c/kb_service_backend_memory.c",
           "src/modules/db2/c/org_model_catalog.c"
         ],
-        "cJSON_IsBool": [
-          "src/modules/db2/c/kb_service_backend_agent.c"
-        ],
+        "cJSON_IsBool": [],
         "cJSON_IsNumber": [
           "src/modules/db2/c/artifacts.c",
           "src/modules/db2/c/calibration.c",
           "src/modules/db2/c/code_audit.c",
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/fidelity.c",
-          "src/modules/db2/c/kb_service_backend_agent.c",
-          "src/modules/db2/c/kb_service_backend_export.c"
+          "src/modules/db2/c/fidelity.c"
         ],
-        "cJSON_IsObject": [
-          "src/modules/db2/c/kb_service_backend_agent.c"
-        ],
+        "cJSON_IsObject": [],
         "cJSON_IsString": [
           "src/modules/db2/c/artifacts.c",
           "src/modules/db2/c/demotion.c",
           "src/modules/db2/c/fidelity.c",
-          "src/modules/db2/c/kb_service_backend_agent.c",
-          "src/modules/db2/c/kb_service_backend_export.c",
-          "src/modules/db2/c/kb_service_backend_memory.c",
           "src/modules/db2/c/org_model_catalog.c",
           "src/modules/db2/c/pgvec_transport.c"
         ],
-        "cJSON_IsTrue": [
-          "src/modules/db2/c/kb_service_backend_agent.c"
-        ],
+        "cJSON_IsTrue": [],
         "cJSON_Parse": [
           "src/modules/db2/c/artifacts.c",
           "src/modules/db2/c/calibration.c",
           "src/modules/db2/c/code_audit.c",
           "src/modules/db2/c/demotion.c",
           "src/modules/db2/c/fidelity.c",
-          "src/modules/db2/c/kb_service_backend_agent.c",
           "src/modules/db2/c/pgvec_transport.c"
         ],
         "cJSON_ParseWithOpts": [
@@ -505,8 +457,6 @@
           "src/modules/db2/c/demotion.c",
           "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/kb_payload.c",
-          "src/modules/db2/c/kb_service_backend_agent.c",
-          "src/modules/db2/c/kb_service_backend_memory.c",
           "src/modules/db2/c/memory_export.c",
           "src/modules/db2/c/memory_payload.c",
           "src/modules/db2/c/rules.c"
@@ -653,6 +603,46 @@
       "evidence": "Two deterministic three-value switches with descriptor-owned numeric ABI and no imports, shared ontology header, allocation, I/O, DB, event-bus, provider, platform, pgvector, DB3, or logging dependency; enum ABI and parity tested."
     },
     {
+      "path": "src/modules/db2/support/rel_seed_primitives.c",
+      "source_sha256": "2794ca2836bcd26f6849165750abb8c6689f65b6073e7df602dafff7d892241c",
+      "header": "src/modules/db2/support/db2_rel_seed.h",
+      "header_sha256": "a9fdcb84c1dca6d8fa295fe0586be5e2ac43eb1ba17e53bb2197d47175307423",
+      "defines": [
+        "rel_types_seed_at",
+        "rel_types_seed_count",
+        "rel_types_seed_lookup"
+      ],
+      "resolves": [
+        "rel_types_seed_at",
+        "rel_types_seed_count",
+        "rel_types_seed_lookup"
+      ],
+      "allowed_includes": [
+        "db2_rel_seed.h",
+        "db2_rel_type_helpers.h",
+        "string.h"
+      ],
+      "allowed_header_includes": [],
+      "allowed_undefined": [
+        "rel_type_normalize",
+        "strcmp"
+      ],
+      "base_references": {
+        "rel_types_seed_at": [
+          "src/modules/db2/c/rel_types_store.c"
+        ],
+        "rel_types_seed_count": [
+          "src/modules/db2/c/rel_types_store.c"
+        ],
+        "rel_types_seed_lookup": [
+          "src/modules/db2/c/entity_edges.c",
+          "src/modules/db2/c/fact_lifecycle.c"
+        ]
+      },
+      "provenance": "Full relationship seed rows generated by walking the compiled canonical SEED_ONTOLOGY in src/rel_types.c; all four DB2 references are pinned.",
+      "evidence": "The descriptor owns the generated database-free table and a private ABI mirror; size, offsets, enum widths, every field, iteration bounds, pointer identity, normalization, misses, and sanitizer behavior are compared with the monolith. Only the adjacent normalization support API and strcmp are imported."
+    },
+    {
       "path": "src/modules/db2/support/rel_type_primitives.c",
       "source_sha256": "a3a9e88f2a90c0de5d09f952c60ff90843f4f332a9c2a411e2dc1e081f31cce1",
       "header": "src/modules/db2/support/db2_rel_type_helpers.h",
@@ -690,6 +680,124 @@
       },
       "provenance": "Definitions promoted from the DB-free core in src/rel_types.c; all DB2 calls audited in entity_edges.c, fact_lifecycle.c, ontology_evolution.c, and rel_types_store.c.",
       "evidence": "Relation normalization preserves the legacy process-locale ctype behavior and functional classification; only ctype and strcmp are imported. No ontology enum/header, DB, event-bus, provider, platform, pgvector, DB3, allocation, I/O, or logging dependency."
+    },
+    {
+      "path": "src/modules/db2/support/runtime_config_primitives.c",
+      "source_sha256": "392a2271241a13046b61bc49a99f3e4efe22edbe8becf2290f13dcb3052400ed",
+      "header": "src/modules/db2/support/db2_runtime_config.h",
+      "header_sha256": "e8dd532f6729eb7ae42929168c1faa7abf423ea49da9632ae1a7977f0c48d2cc",
+      "defines": [
+        "config_audit_worm_enabled",
+        "config_cache_disabled",
+        "config_code_cochange_git_enabled",
+        "config_css_style_graph_enabled",
+        "config_embedder_command_current",
+        "config_kb_curator_cross_repo_caller_collision_c",
+        "config_kb_curator_cross_repo_distinctiveness_v",
+        "config_kb_curator_cross_repo_graph_enabled",
+        "config_kb_curator_cross_repo_k",
+        "config_kb_curator_cross_repo_len_min",
+        "config_kb_curator_cross_repo_m",
+        "config_kb_curator_cross_repo_max_candidates",
+        "config_kb_curator_cross_repo_p_pct",
+        "config_kb_curator_cross_repo_review_queue_max",
+        "config_kb_pdf_vector_enabled",
+        "config_kb_purge_fence_ttl_s",
+        "config_present",
+        "config_typed_facts_enabled",
+        "db2_runtime_config_install"
+      ],
+      "resolves": [
+        "config_audit_worm_enabled",
+        "config_cache_disabled",
+        "config_code_cochange_git_enabled",
+        "config_css_style_graph_enabled",
+        "config_embedder_command_current",
+        "config_kb_curator_cross_repo_caller_collision_c",
+        "config_kb_curator_cross_repo_distinctiveness_v",
+        "config_kb_curator_cross_repo_graph_enabled",
+        "config_kb_curator_cross_repo_k",
+        "config_kb_curator_cross_repo_len_min",
+        "config_kb_curator_cross_repo_m",
+        "config_kb_curator_cross_repo_max_candidates",
+        "config_kb_curator_cross_repo_p_pct",
+        "config_kb_curator_cross_repo_review_queue_max",
+        "config_kb_pdf_vector_enabled",
+        "config_kb_purge_fence_ttl_s",
+        "config_present",
+        "config_typed_facts_enabled"
+      ],
+      "resolution_disposition": "injected-module-contract",
+      "allowed_includes": [
+        "db2_runtime_config.h",
+        "string.h"
+      ],
+      "allowed_header_includes": [],
+      "allowed_undefined": [
+        "memchr"
+      ],
+      "base_references": {
+        "config_audit_worm_enabled": [
+          "src/modules/db2/c/kb_audit_worm.c"
+        ],
+        "config_cache_disabled": [
+          "src/modules/db2/c/rules.c"
+        ],
+        "config_code_cochange_git_enabled": [
+          "src/modules/db2/c/canonical_index.c"
+        ],
+        "config_css_style_graph_enabled": [
+          "src/modules/db2/c/canonical_index.c",
+          "src/modules/db2/c/css_migration.c",
+          "src/modules/db2/c/css_render.c"
+        ],
+        "config_embedder_command_current": [
+          "src/modules/db2/c/kb_payload.c",
+          "src/modules/db2/c/kb_service_backend.c"
+        ],
+        "config_kb_curator_cross_repo_caller_collision_c": [
+          "src/modules/db2/c/cross_repo_deps.c"
+        ],
+        "config_kb_curator_cross_repo_distinctiveness_v": [
+          "src/modules/db2/c/cross_repo_deps.c"
+        ],
+        "config_kb_curator_cross_repo_graph_enabled": [
+          "src/modules/db2/c/cross_repo_deps.c"
+        ],
+        "config_kb_curator_cross_repo_k": [
+          "src/modules/db2/c/cross_repo_deps.c"
+        ],
+        "config_kb_curator_cross_repo_len_min": [
+          "src/modules/db2/c/cross_repo_deps.c"
+        ],
+        "config_kb_curator_cross_repo_m": [
+          "src/modules/db2/c/cross_repo_deps.c"
+        ],
+        "config_kb_curator_cross_repo_max_candidates": [
+          "src/modules/db2/c/cross_repo_deps.c"
+        ],
+        "config_kb_curator_cross_repo_p_pct": [
+          "src/modules/db2/c/cross_repo_deps.c"
+        ],
+        "config_kb_curator_cross_repo_review_queue_max": [
+          "src/modules/db2/c/cross_repo_deps.c"
+        ],
+        "config_kb_pdf_vector_enabled": [
+          "src/modules/db2/c/kb_payload.c"
+        ],
+        "config_kb_purge_fence_ttl_s": [
+          "src/modules/db2/c/kb_runtime_state.c"
+        ],
+        "config_present": [
+          "src/modules/db2/c/canonical_index.c"
+        ],
+        "config_typed_facts_enabled": [
+          "src/modules/db2/c/css_migration.c",
+          "src/modules/db2/c/fact_ingest.c"
+        ]
+      },
+      "provenance": "The complete DB2 config read set is captured once as a versioned immutable startup snapshot; every legacy call site is pinned to the matching field.",
+      "evidence": "Nineteen exact exports replace eighteen live host getters with one bounded install operation. Invalid ABI, NULL, and unterminated snapshots fail atomically; the implementation imports only memchr and contains no file, DB, bus, vector, provider, allocation, or reload dependency."
     },
     {
       "path": "src/modules/db2/support/sketch_primitives.c",
@@ -1329,20 +1437,11 @@
         "src/modules/db2/c/db2_pool.c",
         "src/modules/db2/c/db2_reembed.c",
         "src/modules/db2/c/db2_tenant.c",
-        "src/modules/db2/c/db2_test_shim.c",
         "src/modules/db2/c/db_schema.c",
         "src/modules/db2/c/memory_scope_query.c",
         "src/modules/db2/c/memory_vectors.c",
         "src/modules/db2/c/tool_registry.c",
         "src/modules/db2/support/cjson.c"
-      ],
-      "disposition": "system-link",
-      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
-    },
-    {
-      "symbol": "__assert_fail",
-      "references": [
-        "src/modules/db2/c/db2_test_shim.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -1481,70 +1580,6 @@
       "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
     },
     {
-      "symbol": "anti_pattern_escalate",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "anti_pattern_extract_from_failures",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "anti_pattern_extract_from_feedback",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "api_dashboard_directives",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "api_dashboard_recall",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "api_dashboard_reminders",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "api_logs",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "api_memory_stats",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "atoi",
       "references": [
         "src/modules/db2/c/db_postgres.c",
@@ -1581,8 +1616,6 @@
         "src/modules/db2/c/db_postgres.c",
         "src/modules/db2/c/demotion.c",
         "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
         "src/modules/db2/c/org_vault_rewrap.c",
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_operator_status_runtime.c",
@@ -1661,155 +1694,6 @@
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
-      "symbol": "config_audit_worm_enabled",
-      "references": [
-        "src/modules/db2/c/kb_audit_worm.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_cache_disabled",
-      "references": [
-        "src/modules/db2/c/rules.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_code_cochange_git_enabled",
-      "references": [
-        "src/modules/db2/c/canonical_index.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_css_style_graph_enabled",
-      "references": [
-        "src/modules/db2/c/canonical_index.c",
-        "src/modules/db2/c/css_migration.c",
-        "src/modules/db2/c/css_render.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_embedder_command_current",
-      "references": [
-        "src/modules/db2/c/kb_payload.c",
-        "src/modules/db2/c/kb_service_backend.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_kb_curator_cross_repo_caller_collision_c",
-      "references": [
-        "src/modules/db2/c/cross_repo_deps.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_kb_curator_cross_repo_distinctiveness_v",
-      "references": [
-        "src/modules/db2/c/cross_repo_deps.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_kb_curator_cross_repo_graph_enabled",
-      "references": [
-        "src/modules/db2/c/cross_repo_deps.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_kb_curator_cross_repo_k",
-      "references": [
-        "src/modules/db2/c/cross_repo_deps.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_kb_curator_cross_repo_len_min",
-      "references": [
-        "src/modules/db2/c/cross_repo_deps.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_kb_curator_cross_repo_m",
-      "references": [
-        "src/modules/db2/c/cross_repo_deps.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_kb_curator_cross_repo_max_candidates",
-      "references": [
-        "src/modules/db2/c/cross_repo_deps.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_kb_curator_cross_repo_p_pct",
-      "references": [
-        "src/modules/db2/c/cross_repo_deps.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_kb_curator_cross_repo_review_queue_max",
-      "references": [
-        "src/modules/db2/c/cross_repo_deps.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_kb_pdf_vector_enabled",
-      "references": [
-        "src/modules/db2/c/kb_payload.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_kb_purge_fence_ttl_s",
-      "references": [
-        "src/modules/db2/c/kb_runtime_state.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_present",
-      "references": [
-        "src/modules/db2/c/canonical_index.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "config_typed_facts_enabled",
-      "references": [
-        "src/modules/db2/c/css_migration.c",
-        "src/modules/db2/c/fact_ingest.c",
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "css_analyze",
       "references": [
         "src/modules/db2/c/canonical_index.c"
@@ -1861,15 +1745,6 @@
       "symbol": "css_stylesheet_free",
       "references": [
         "src/modules/db2/c/canonical_index.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "db1_stmt_cache_clear_for_sqlite",
-      "references": [
-        "src/modules/db2/c/db2_init.c",
-        "src/modules/db2/c/db2_test_shim.c"
       ],
       "disposition": "injected-module-contract",
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
@@ -1939,7 +1814,6 @@
       "references": [
         "src/modules/db2/c/canonical_index.c",
         "src/modules/db2/c/entity_edges.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
         "src/modules/db2/c/memory_export.c",
         "src/modules/db2/c/rules.c",
         "src/modules/db2/support/random_primitives.c"
@@ -1968,7 +1842,6 @@
       "references": [
         "src/modules/db2/c/canonical_index.c",
         "src/modules/db2/c/entity_edges.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
         "src/modules/db2/c/memory_export.c",
         "src/modules/db2/c/rules.c",
         "src/modules/db2/support/random_primitives.c"
@@ -1983,7 +1856,6 @@
         "src/modules/db2/c/db2_init.c",
         "src/modules/db2/c/db2_pool.c",
         "src/modules/db2/c/entity_edges.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
         "src/modules/db2/c/memory_export.c",
         "src/modules/db2/c/rules.c"
       ],
@@ -2032,8 +1904,6 @@
         "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
         "src/modules/db2/c/memory_export.c",
         "src/modules/db2/c/memory_query.c",
         "src/modules/db2/c/org_vault_rewrap.c",
@@ -2068,6 +1938,7 @@
       "symbol": "getenv",
       "references": [
         "src/modules/db2/c/db2_hardening.c",
+        "src/modules/db2/c/db2_init.c",
         "src/modules/db2/c/db_postgres.c",
         "src/modules/db2/c/pgvec_transport.c"
       ],
@@ -2075,9 +1946,9 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "gmtime",
+      "symbol": "getpid",
       "references": [
-        "src/modules/db2/c/kb_service_backend_export.c"
+        "src/modules/db2/c/db2_init.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2175,38 +2046,6 @@
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
-      "symbol": "learning_dispatch_result_to_json",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "learning_evidence_write_event",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "learning_implicit_record_correction",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "learning_router_record_signal",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "log10",
       "references": [
         "src/modules/db2/c/curiosity.c"
@@ -2224,7 +2063,6 @@
         "src/modules/db2/c/db_postgres.c",
         "src/modules/db2/c/db_schema.c",
         "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
         "src/modules/db2/c/memory_export.c",
         "src/modules/db2/c/pgvec_transport.c",
         "src/modules/db2/c/rules.c",
@@ -2239,7 +2077,8 @@
       "references": [
         "src/modules/db2/c/canonical_index.c",
         "src/modules/db2/c/management_jwks_runtime.c",
-        "src/modules/db2/c/vault_operator_rewrap_runtime.c"
+        "src/modules/db2/c/vault_operator_rewrap_runtime.c",
+        "src/modules/db2/support/runtime_config_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2270,130 +2109,10 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "memory_alerts",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_answer_evidence_decision_str",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_answer_evidence_reason_str",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_ask_query",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_ask_query_scoped",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_assemble_context",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_briefing",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_check_drift",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_collect_scopes",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_compact_windows",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_delete",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_diagnose_scoped",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_effectiveness_stats",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "memory_embed_text",
       "references": [
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/kb_service_backend.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_episode_card_generate",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_explain_match",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
       ],
       "disposition": "injected-module-contract",
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
@@ -2410,174 +2129,6 @@
       "symbol": "memory_fact_gate_check",
       "references": [
         "src/modules/db2/c/rel_types_store.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_fact_history",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_find_facts",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_find_facts_scoped",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_find_facts_visible",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_find_facts_visible_ex",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_fold_session",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_get",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_get_context_block",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_get_entity_edges",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_get_entity_profile",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_get_episode",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_get_provenance",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_insert_ex",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_learn_style",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_link_create",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_link_delete",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_link_query",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_list",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_list_conflicts",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_maintenance_run",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_maintenance_summary_to_json",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
       ],
       "disposition": "injected-module-contract",
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
@@ -2625,200 +2176,7 @@
     {
       "symbol": "memory_pii_turn_requests_sensitive",
       "references": [
-        "src/modules/db2/c/fact_ingest.c",
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_primary_scope",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_prospective_complete",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_prospective_create",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_prospective_list",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_prospective_mark_triggered",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_prospective_match",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_prospective_sweep_expired",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_query_edges",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_query_health",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_recall",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_reject",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_scan_conversations",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_agent.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_scope_level_name",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_scope_visibility_rank",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_search",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_search_graph",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_search_graph_as_of",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_stats",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_supersede",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_tag_scope",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_tag_workspace",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_touch",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_update_content",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_upsert_workflow",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
+        "src/modules/db2/c/fact_ingest.c"
       ],
       "disposition": "injected-module-contract",
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
@@ -2840,22 +2198,6 @@
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
-    },
-    {
-      "symbol": "platform_get_exe_path",
-      "references": [
-        "src/modules/db2/c/kb_service_backend.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "platform_spawn_daemon",
-      "references": [
-        "src/modules/db2/c/kb_service_backend.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
     },
     {
       "symbol": "poll",
@@ -3038,50 +2380,9 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "rel_types_seed_at",
-      "references": [
-        "src/modules/db2/c/rel_types_store.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "rel_types_seed_count",
-      "references": [
-        "src/modules/db2/c/rel_types_store.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "rel_types_seed_lookup",
-      "references": [
-        "src/modules/db2/c/entity_edges.c",
-        "src/modules/db2/c/fact_lifecycle.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
       "symbol": "run_cmd",
       "references": [
         "src/modules/db2/c/canonical_index.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "session_briefing_render_commitments",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
-      "symbol": "session_briefing_render_directives",
-      "references": [
-        "src/modules/db2/c/kb_service_backend_memory.c"
       ],
       "disposition": "portable-core-promotion",
       "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
@@ -3167,10 +2468,7 @@
         "src/modules/db2/c/kb_releases.c",
         "src/modules/db2/c/kb_runtime_state.c",
         "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
         "src/modules/db2/c/kb_service_backend_ingest.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
         "src/modules/db2/c/learning.c",
         "src/modules/db2/c/learning_synth_ops.c",
         "src/modules/db2/c/lessons.c",
@@ -3237,50 +2535,6 @@
       "symbol": "sprintf",
       "references": [
         "src/modules/db2/support/cjson.c"
-      ],
-      "disposition": "system-link",
-      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
-    },
-    {
-      "symbol": "sqlite3_close",
-      "references": [
-        "src/modules/db2/c/db2_init.c",
-        "src/modules/db2/c/db2_test_shim.c"
-      ],
-      "disposition": "system-link",
-      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
-    },
-    {
-      "symbol": "sqlite3_errmsg",
-      "references": [
-        "src/modules/db2/c/db_schema.c"
-      ],
-      "disposition": "system-link",
-      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
-    },
-    {
-      "symbol": "sqlite3_exec",
-      "references": [
-        "src/modules/db2/c/db2_init.c",
-        "src/modules/db2/c/db2_test_shim.c",
-        "src/modules/db2/c/db_schema.c"
-      ],
-      "disposition": "system-link",
-      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
-    },
-    {
-      "symbol": "sqlite3_free",
-      "references": [
-        "src/modules/db2/c/db_schema.c"
-      ],
-      "disposition": "system-link",
-      "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
-    },
-    {
-      "symbol": "sqlite3_open",
-      "references": [
-        "src/modules/db2/c/db2_init.c",
-        "src/modules/db2/c/db2_test_shim.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3380,10 +2634,7 @@
         "src/modules/db2/c/kb_releases.c",
         "src/modules/db2/c/kb_runtime_state.c",
         "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/kb_service_backend_agent.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
         "src/modules/db2/c/kb_service_backend_ingest.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
         "src/modules/db2/c/lessons.c",
         "src/modules/db2/c/management_action_journal.c",
         "src/modules/db2/c/management_client_instance.c",
@@ -3416,6 +2667,7 @@
         "src/modules/db2/c/vault_pg.c",
         "src/modules/db2/c/write_tier_grant.c",
         "src/modules/db2/support/cjson.c",
+        "src/modules/db2/support/rel_seed_primitives.c",
         "src/modules/db2/support/rel_type_primitives.c"
       ],
       "disposition": "system-link",
@@ -3438,7 +2690,6 @@
         "src/modules/db2/c/kb_audit_worm.c",
         "src/modules/db2/c/kb_maintenance.c",
         "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
         "src/modules/db2/c/memory_lint.c",
         "src/modules/db2/c/memory_query.c",
         "src/modules/db2/c/pgvec_transport.c",
@@ -3491,7 +2742,6 @@
         "src/modules/db2/c/entity_profiles.c",
         "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/kb_audit_worm.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
         "src/modules/db2/c/memory_conflicts.c",
         "src/modules/db2/c/memory_health.c",
         "src/modules/db2/c/memory_relations.c",
@@ -3527,7 +2777,6 @@
         "src/modules/db2/c/fact_recall.c",
         "src/modules/db2/c/kb_audit_worm.c",
         "src/modules/db2/c/kb_payload.c",
-        "src/modules/db2/c/kb_service_backend_memory.c",
         "src/modules/db2/c/management_action_journal.c",
         "src/modules/db2/c/management_client_instance.c",
         "src/modules/db2/c/management_identity_journal.c",
@@ -3716,7 +2965,6 @@
         "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/kb_audit_worm.c",
         "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/kb_service_backend_export.c",
         "src/modules/db2/c/memory_conflicts.c",
         "src/modules/db2/c/memory_health.c",
         "src/modules/db2/c/memory_relations.c",
@@ -3983,17 +3231,17 @@
     }
   ],
   "summary": {
-    "translation_units": 141,
-    "descriptor_support_units": 9,
-    "unresolved_symbols": 311,
+    "translation_units": 138,
+    "descriptor_support_units": 11,
+    "unresolved_symbols": 207,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 150,
-      "portable-core-promotion": 16,
+      "injected-module-contract": 59,
+      "portable-core-promotion": 9,
       "private-implementation": 0,
       "remove/dead": 0,
-      "system-link": 145
+      "system-link": 139
     }
   },
-  "fingerprint": "5fe2711ed32efaaa638abb4e9cefbd29ed1212998397ccc52cf38d32964bb2db"
+  "fingerprint": "cb21f9ef17af7a80631a4dcb33cbe6cd49dde03183b58c0aa8a0ea0469a26ad5"
 }

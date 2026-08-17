@@ -2,7 +2,7 @@
  * See css_render.h. */
 #include "css_render.h"
 
-#include "config.h" /* css_style_graph_enabled gate */
+#include "../support/db2_runtime_config.h"
 #include "css_render_oracle.h"
 #include "db2.h"
 #include "db2_internal.h"

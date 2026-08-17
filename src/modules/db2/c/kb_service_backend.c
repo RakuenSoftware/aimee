@@ -3,7 +3,7 @@
 #include "kb_service_backend.h"
 
 #include "aimee.h"
-#include "config.h"
+#include "../support/db2_runtime_config.h"
 #include "curiosity.h"
 #include "epistemic_directives.h"
 #include "notes.h"
@@ -15,7 +15,6 @@
 #include "code_index_ops.h"
 #include "db_postgres.h"
 #include "memory_scenes.h"
-#include "platform_process.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -281,16 +280,6 @@ int db2_kb_service_async_job_get(int64_t job_id, db2_kb_service_async_job_t *out
    db2_copy_text(out->updated_at, sizeof(out->updated_at), aimee_pg_column_text(stmt, 10));
    aimee_pg_finalize(stmt);
    return 1;
-}
-
-int db2_kb_service_async_queue_spawn_worker(void)
-{
-   char exe[MAX_PATH_LEN];
-   if (platform_get_exe_path(exe, sizeof(exe)) != 0)
-      return -1;
-
-   const char *argv[] = {exe, "memory", "drain", NULL};
-   return platform_spawn_daemon(argv) > 0 ? 0 : -1;
 }
 
 static int db2_kb_service_async_queue_claim_next(int64_t *job_id, int64_t *document_id, char *kind,

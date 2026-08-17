@@ -26,7 +26,8 @@ ALLOWED_AGENT_NAMED_SOURCES = {
     "kb_service_agent.c",
     "modules/db2/c/agent_hints.c",
     "modules/db2/c/agent_outcomes.c",
-    "modules/db2/c/kb_service_backend_agent.c",
+    "kb/db2_adapters/kb_service_backend_agent.c",
+    "kb/db2_adapters/kb_service_backend_runtime.c",
     "modules/db2/c/server_registry.c",
 }
 
@@ -137,7 +138,10 @@ def is_forbidden_source(src: str) -> bool:
 def check_makefile(makefile: Path) -> list[str]:
     violations: list[str] = []
 
-    source_vars = ("KB_SRCS", "KB_DATA_SRCS", "KB_CORE_SRCS", "DB2_SRCS", "DB2_PG_SRCS")
+    source_vars = (
+        "KB_SRCS", "KB_DATA_SRCS", "KB_CORE_SRCS", "DB2_SRCS", "DB2_PG_SRCS",
+        "DB2_HOST_ADAPTER_SRCS",
+    )
     for var in source_vars:
         for src in words(make_var(makefile, var)):
             if is_forbidden_source(src):

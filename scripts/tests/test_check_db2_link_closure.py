@@ -300,6 +300,26 @@ class LinkClosureTest(unittest.TestCase):
         self._refresh_summary(current)
         checker.compare_contracts(self.root, previous, current)
 
+    def test_support_import_requires_owned_or_system_provenance(self) -> None:
+        unit = self._support_row()
+        unit["allowed_undefined"] = ["project_helper"]
+        with self.assertRaisesRegex(
+            checker.ClosureError, "support-undefined-provenance"
+        ):
+            checker._validate_support_import_provenance([unit], {"outside"})
+
+    def test_support_import_accepts_another_support_definition(self) -> None:
+        unit = self._support_row()
+        unit["allowed_undefined"] = ["project_helper"]
+        checker._validate_support_import_provenance(
+            [unit], {"outside", "project_helper"}
+        )
+
+    def test_support_import_accepts_explicit_system_link(self) -> None:
+        unit = self._support_row()
+        unit["allowed_undefined"] = ["memset"]
+        checker._validate_support_import_provenance([unit], {"outside"})
+
     def test_previous_contract_rejects_added_system_import_from_legacy_unit(self) -> None:
         previous, current = self._support_comparison()
         current["unresolved"].append({  # type: ignore[union-attr]
@@ -708,21 +728,30 @@ class LinkClosureTest(unittest.TestCase):
         with mock.patch.object(checker, "SUPPORT_UNITS", self.production_support):
             checker.check(REPO, run_probe=True)
 
-    def test_real_repository_reduces_owned_input_and_random_debt(self) -> None:
+    def test_real_repository_reduces_owned_input_random_and_seed_debt(self) -> None:
         contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
-        self.assertEqual(contract["summary"]["unresolved_symbols"], 311)
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 207)
         self.assertEqual(
             contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 0
         )
-        self.assertEqual(contract["summary"]["dispositions"]["system-link"], 145)
+        self.assertEqual(contract["summary"]["dispositions"]["system-link"], 139)
         self.assertEqual(
-            contract["summary"]["dispositions"]["portable-core-promotion"], 16
+            contract["summary"]["dispositions"]["portable-core-promotion"], 9
+        )
+        self.assertEqual(
+            contract["summary"]["dispositions"]["injected-module-contract"], 59
         )
         self.assertFalse(any(
             row["symbol"].startswith("cJSON_") for row in contract["unresolved"]
         ))
         self.assertFalse(any(
             row["symbol"] in {"platform_random_bytes", "platform_random_hex"}
+            for row in contract["unresolved"]
+        ))
+        self.assertFalse(any(
+            row["symbol"] in {
+                "rel_types_seed_at", "rel_types_seed_count", "rel_types_seed_lookup",
+            }
             for row in contract["unresolved"]
         ))
         cjson = next(
@@ -739,6 +768,14 @@ class LinkClosureTest(unittest.TestCase):
             random_support["defines"], ["platform_random_bytes", "platform_random_hex"]
         )
         self.assertEqual(random_support["resolves"], random_support["defines"])
+        seed_support = next(
+            unit for unit in contract["descriptor_support_units"]
+            if unit["path"] == "src/modules/db2/support/rel_seed_primitives.c"
+        )
+        self.assertEqual(seed_support["defines"], [
+            "rel_types_seed_at", "rel_types_seed_count", "rel_types_seed_lookup",
+        ])
+        self.assertEqual(seed_support["resolves"], seed_support["defines"])
 
 
 if __name__ == "__main__":

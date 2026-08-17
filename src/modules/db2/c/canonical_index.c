@@ -13,7 +13,7 @@
 #include "canonical_index.h"
 #include "code_index.h"
 #include "cross_repo_resolver.h" /* H0b: xrepo_lang_name / xrepo_path_is_vendored */
-#include "config.h"
+#include "../support/db2_runtime_config.h"
 #include "css_graph.h" /* CSS migration assistant: style graph + component join (WP-C/D) */
 #include "db2.h"
 #include "db2_internal.h"

@@ -18,6 +18,7 @@ type wireBaseline struct {
 	SearchRequestHex string `json:"search_request_hex"`
 	SearchReplyHex   string `json:"search_reply_hex"`
 	ApplyHex         string `json:"apply_hex"`
+	ApplyV2Hex       string `json:"apply_v2_hex"`
 	CapabilitiesHex  string `json:"capabilities_hex"`
 	ApplyChunkHex    string `json:"apply_chunk_hex"`
 	AppliedHex       string `json:"applied_hex"`
@@ -70,6 +71,15 @@ func fixtureReply() SearchReply {
 func fixtureApply() Apply {
 	return Apply{OperationID: 1001, Generation: 7, PointID: 41, Kind: ApplyUpsert,
 		Collection: "memory", Vector: []float32{0.1, 0.2, 0.3}}
+}
+
+func fixtureLabeledApply() Apply {
+	return Apply{OperationID: 1002, Generation: 7, PointID: 42, Kind: ApplyUpsert,
+		Collection: "memory", Vector: []float32{0.3, 0.2, 0.1}, Labels: []ExactLabel{
+			{Key: "project", Value: "project-a"},
+			{Key: "record_type", Value: "memory"},
+			{Key: "workspace", Value: "workspace-a"},
+		}}
 }
 
 func TestGeneratedIdentityAndProviderSemantics(t *testing.T) {
@@ -134,6 +144,95 @@ func TestApplyCGoReplay(t *testing.T) {
 	decoded, err := DecodeApply(want)
 	if err != nil || !reflect.DeepEqual(decoded, fixtureApply()) {
 		t.Fatalf("decode = (%+v,%v)", decoded, err)
+	}
+}
+
+func TestApplyV2LabelsRoundTripAndV1Compatibility(t *testing.T) {
+	labeled := fixtureLabeledApply()
+	wire, err := EncodeApply(labeled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint16(wire[4:6]); got != applyV2Version {
+		t.Fatalf("labeled version = %d, want %d", got, applyV2Version)
+	}
+	if want := fixtureBytes(t, loadBaseline(t).ApplyV2Hex); !reflect.DeepEqual(wire, want) {
+		t.Fatalf("apply v2 = %x, want %x", wire, want)
+	}
+	if got := binary.LittleEndian.Uint16(wire[36:38]); int(got) != len(labeled.Labels) {
+		t.Fatalf("label count = %d", got)
+	}
+	decoded, err := DecodeApply(wire)
+	if err != nil || !reflect.DeepEqual(decoded, labeled) {
+		t.Fatalf("decode = (%+v, %v), want %+v", decoded, err, labeled)
+	}
+
+	legacy, err := EncodeApply(fixtureApply())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint16(legacy[4:6]); got != WireVersion {
+		t.Fatalf("legacy version = %d, want %d", got, WireVersion)
+	}
+	decoded, err = DecodeApply(legacy)
+	if err != nil || !reflect.DeepEqual(decoded, fixtureApply()) {
+		t.Fatalf("legacy decode = (%+v, %v)", decoded, err)
+	}
+}
+
+func TestApplyV2RejectsNonCanonicalLabelsAndMalformedFrames(t *testing.T) {
+	invalid := map[string][]ExactLabel{
+		"duplicate": {{Key: "project", Value: "a"}, {Key: "project", Value: "b"}},
+		"unsorted":  {{Key: "workspace", Value: "a"}, {Key: "project", Value: "b"}},
+		"bad-key":   {{Key: "Project", Value: "a"}},
+		"control":   {{Key: "project", Value: "not\nprintable"}},
+		"too-many": func() []ExactLabel {
+			labels := make([]ExactLabel, MaxLabelCount+1)
+			for i := range labels {
+				labels[i] = ExactLabel{Key: "a" + string(rune('a'+i)), Value: "x"}
+			}
+			return labels
+		}(),
+	}
+	for name, labels := range invalid {
+		t.Run(name, func(t *testing.T) {
+			apply := fixtureLabeledApply()
+			apply.Labels = labels
+			if _, err := EncodeApply(apply); !errors.Is(err, ErrMalformed) {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+	deleteWithLabels := fixtureLabeledApply()
+	deleteWithLabels.Kind = ApplyDelete
+	deleteWithLabels.Vector = nil
+	if _, err := EncodeApply(deleteWithLabels); !errors.Is(err, ErrMalformed) {
+		t.Fatalf("delete labels error = %v", err)
+	}
+
+	valid, err := EncodeApply(fixtureLabeledApply())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutations := map[string]func([]byte) []byte{
+		"zero-label-count": func(v []byte) []byte { clear(v[36:38]); return v },
+		"bad-label-bytes":  func(v []byte) []byte { v[38]++; return v },
+		"bad-order": func(v []byte) []byte {
+			// The first label starts after the fixed header, collection, and vector.
+			offset := applyV2Header + len("memory") + 3*4
+			keyLen := int(binary.LittleEndian.Uint16(v[offset : offset+2]))
+			valueLen := int(binary.LittleEndian.Uint16(v[offset+2 : offset+4]))
+			second := offset + labelHeader + keyLen + valueLen
+			v[second+labelHeader] = 'a'
+			return v
+		},
+		"truncated": func(v []byte) []byte { return v[:len(v)-1] },
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			_, err := DecodeApply(mutate(append([]byte(nil), valid...)))
+			requireMalformed(t, err)
+		})
 	}
 }
 

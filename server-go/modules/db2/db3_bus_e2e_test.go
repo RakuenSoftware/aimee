@@ -154,7 +154,7 @@ func TestDB3GoProvidersOperateOverAuthenticatedCBus(t *testing.T) {
 				state.effects++
 			}
 			state.mu.Unlock()
-			return protocol.ProviderApplyOutcome{Result: protocol.AppliedOK, Watermark: apply.Generation}
+			return protocol.ProviderApplyOutcome{Result: protocol.AppliedOK, Watermark: apply.OperationID}
 		}
 	}
 	stateA, stateB := &applyState{}, &applyState{}

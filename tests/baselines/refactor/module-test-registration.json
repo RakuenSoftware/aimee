@@ -101,7 +101,19 @@
       "ctest": false,
       "make": true,
       "module": "db2",
+      "test": "src/tests/test_db2_rel_seed_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
       "test": "src/tests/test_db2_rel_type_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_runtime_config_support.c"
     },
     {
       "ctest": false,

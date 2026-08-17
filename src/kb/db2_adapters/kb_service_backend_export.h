@@ -1,4 +1,5 @@
-/* db2/kb_service_backend_export.h: filtered memory export/import for kb.export / kb.import RPCs. */
+/* kb/db2_adapters/kb_service_backend_export.h: caller-side filtered memory
+ * export/import adapter for kb.export / kb.import RPCs. */
 #ifndef DEC_DB2_KB_SERVICE_BACKEND_EXPORT_H
 #define DEC_DB2_KB_SERVICE_BACKEND_EXPORT_H 1
 

@@ -3,6 +3,7 @@ package db3
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -75,7 +76,10 @@ func providerTestRequest() SearchRequest {
 
 func providerTestApply() Apply {
 	return Apply{OperationID: 1001, Generation: 7, PointID: 41, Kind: ApplyUpsert,
-		Collection: "memory", Vector: []float32{.1, .2, .3}}
+		Collection: "memory", Vector: []float32{.1, .2, .3}, Labels: []ExactLabel{
+			{Key: "project", Value: "project-a"},
+			{Key: "record_type", Value: "memory"},
+		}}
 }
 
 func TestProviderConfigFailsClosed(t *testing.T) {
@@ -227,10 +231,13 @@ func TestProviderServesFragmentedSearchAndChunkedApply(t *testing.T) {
 				Candidates: []Candidate{{PointID: 41, Score: .9}, {PointID: 42, Score: .8}}}, 0
 		},
 		Apply: func(_ context.Context, apply Apply) ProviderApplyOutcome {
+			if !reflect.DeepEqual(apply.Labels, providerTestApply().Labels) {
+				t.Errorf("apply labels = %+v", apply.Labels)
+			}
 			applyMu.Lock()
 			applyCalls++
 			applyMu.Unlock()
-			return ProviderApplyOutcome{Result: AppliedOK, Watermark: apply.Generation}
+			return ProviderApplyOutcome{Result: AppliedOK, Watermark: apply.OperationID}
 		},
 	}
 	done := make(chan error, 1)
@@ -292,7 +299,7 @@ func TestProviderServesFragmentedSearchAndChunkedApply(t *testing.T) {
 			t.Fatal("timed out waiting for applied acknowledgement")
 		}
 	}
-	if applied.OperationID != 1001 || applied.Watermark != 7 {
+	if applied.OperationID != 1001 || applied.Watermark != 1001 {
 		t.Fatalf("applied = %+v", applied)
 	}
 	applyMu.Lock()

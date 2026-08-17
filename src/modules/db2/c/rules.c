@@ -1,6 +1,6 @@
 /* db2/rules.c: agent rules — Postgres via libpq. */
 
-#include "config.h"
+#include "../support/db2_runtime_config.h"
 #include "rules.h"
 #include "db2_internal.h"
 #include "db_postgres.h"

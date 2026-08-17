@@ -7,7 +7,7 @@
 #include "cross_repo_deps.h"
 
 #include "aimee.h"
-#include "config.h"
+#include "../support/db2_runtime_config.h"
 #include "cross_repo_review.h"
 #include "cross_repo_stats.h"
 #include "db2.h"
