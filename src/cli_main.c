@@ -139,11 +139,43 @@ typedef struct
    const char *subcommands;
 } client_help_t;
 
-static const client_help_t client_help[] = {
-/* Table entries live in cli_help_data.h to keep this file under the source
- * line-count limit (same pattern as agent_help_data.h). */
-#include "cli_help_data.h"
+/* The commands that must work with NO server, and only those.
+ *
+ * The catalogue itself now comes from the server (GET /v1/cli/manifest ->
+ * `commands`); it used to be compiled in here, which made the client the source
+ * of truth for what the server can do and meant a rebuild to learn a new
+ * command. What cannot come from the server is the handful of commands you need
+ * BEFORE you can reach one -- pointing the client at a server, and asking what
+ * it is. Every entry here is a thing that can rot, so the list stays this short
+ * on purpose. */
+static const client_help_t client_bootstrap_help[] = {
+    {"remote", "Point the thin client at a remote aimee-server", CLIENT_TIER_CORE, 0,
+     "  set <url> [token]  Persist a remote server target\n"
+     "  enroll            Rotate the bearer and enroll this client certificate\n"
+     "  trust             Pin the configured server certificate again\n"
+     "  show              Show the configured target\n"
+     "  clear             Forget the configured target\n"},
+    {"version", "Print the client version", CLIENT_TIER_CORE, 0, NULL},
+    {"help", "Show commands, or details for one command", CLIENT_TIER_CORE, 0, NULL},
+    {NULL, NULL, CLIENT_TIER_CORE, 0, NULL},
 };
+
+/* Render one row, whatever it came from. */
+static void print_help_row(FILE *out, const char *name, const char *summary)
+{
+   fprintf(out, "  %-16s %s\n", name, summary ? summary : "");
+}
+
+/* Tier a served row belongs to; unknown spellings fall to CORE so a command is
+ * shown rather than silently dropped from every listing. */
+static client_cmd_tier_t tier_from_name(const char *t)
+{
+   if (t && strcmp(t, "advanced") == 0)
+      return CLIENT_TIER_ADVANCED;
+   if (t && strcmp(t, "admin") == 0)
+      return CLIENT_TIER_ADMIN;
+   return CLIENT_TIER_CORE;
+}
 
 /* Commands the Windows thin client does not carry: they reach the server over the
  * Unix-domain /v1 socket, which it does not build (see the _WIN32 guard in the
@@ -179,13 +211,36 @@ static client_cmd_tier_t client_cmd_tier(const client_help_t *entry)
 
 static void print_client_commands(FILE *out, client_cmd_tier_t tier)
 {
-   for (int i = 0; client_help[i].name; i++)
+   /* Bootstrap commands first: they are the ones that work when the listing
+    * below cannot be fetched, so they must never depend on it. */
+   for (int i = 0; client_bootstrap_help[i].name; i++)
    {
-      if (client_cmd_tier(&client_help[i]) != tier || client_help[i].hidden_default)
+      if (client_cmd_tier(&client_bootstrap_help[i]) != tier ||
+          client_bootstrap_help[i].hidden_default)
          continue;
-      if (!client_cmd_available(client_help[i].name))
+      if (!client_cmd_available(client_bootstrap_help[i].name))
          continue;
-      fprintf(out, "  %-16s %s\n", client_help[i].name, client_help[i].help);
+      print_help_row(out, client_bootstrap_help[i].name, client_bootstrap_help[i].help);
+   }
+
+   const cJSON *cmds = cli_v1_manifest_commands();
+   if (!cmds)
+      return; /* cli_v1_manifest() already said why */
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, cmds)
+   {
+      const cJSON *name = cJSON_GetObjectItemCaseSensitive(row, "name");
+      if (!cJSON_IsString(name))
+         continue;
+      if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(row, "hidden_default")))
+         continue;
+      const cJSON *t = cJSON_GetObjectItemCaseSensitive(row, "tier");
+      if (tier_from_name(cJSON_IsString(t) ? t->valuestring : NULL) != tier)
+         continue;
+      if (!client_cmd_available(name->valuestring))
+         continue;
+      const cJSON *sum = cJSON_GetObjectItemCaseSensitive(row, "summary");
+      print_help_row(out, name->valuestring, cJSON_IsString(sum) ? sum->valuestring : "");
    }
 }
 
@@ -232,17 +287,40 @@ static int client_help_command(int argc, char **argv)
 
    const char *target = argv[0];
 
-   for (int i = 0; client_help[i].name; i++)
+   for (int i = 0; client_bootstrap_help[i].name; i++)
    {
-      if (strcmp(target, client_help[i].name) != 0)
+      if (strcmp(target, client_bootstrap_help[i].name) != 0)
          continue;
-      fprintf(stderr, "aimee %s: %s\n", client_help[i].name, client_help[i].help);
-      if (client_help[i].subcommands)
-         fprintf(stderr, "\nSubcommands:\n%s", client_help[i].subcommands);
+      fprintf(stderr, "aimee %s: %s\n", client_bootstrap_help[i].name,
+              client_bootstrap_help[i].help);
+      if (client_bootstrap_help[i].subcommands)
+         fprintf(stderr, "\nSubcommands:\n%s", client_bootstrap_help[i].subcommands);
       return 0;
    }
 
-   fprintf(stderr, "Unknown command: %s\n", target);
+   const cJSON *cmds = cli_v1_manifest_commands();
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, cmds)
+   {
+      const cJSON *name = cJSON_GetObjectItemCaseSensitive(row, "name");
+      if (!cJSON_IsString(name) || strcmp(target, name->valuestring) != 0)
+         continue;
+      const cJSON *sum = cJSON_GetObjectItemCaseSensitive(row, "summary");
+      fprintf(stderr, "aimee %s: %s\n", name->valuestring,
+              cJSON_IsString(sum) ? sum->valuestring : "");
+      const cJSON *subs = cJSON_GetObjectItemCaseSensitive(row, "subcommands");
+      if (cJSON_IsString(subs) && subs->valuestring[0])
+         fprintf(stderr, "\nSubcommands:\n%s", subs->valuestring);
+      return 0;
+   }
+
+   /* Distinguish "no such command" from "could not ask". Reporting the first
+    * when the truth is the second is how a transport problem gets read as a
+    * typo -- the failure this whole change exists to stop. */
+   if (!cmds)
+      fprintf(stderr, "Cannot list commands: no catalogue from the server.\n");
+   else
+      fprintf(stderr, "Unknown command: %s\n", target);
    return 1;
 }
 
@@ -518,9 +596,18 @@ static int client_command_has_subcommands(const char *cmd)
 {
    if (!cmd)
       return 0;
-   for (int i = 0; client_help[i].name; i++)
-      if (strcmp(cmd, client_help[i].name) == 0)
-         return client_help[i].subcommands != NULL;
+   for (int i = 0; client_bootstrap_help[i].name; i++)
+      if (strcmp(cmd, client_bootstrap_help[i].name) == 0)
+         return client_bootstrap_help[i].subcommands != NULL;
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, cli_v1_manifest_commands())
+   {
+      const cJSON *name = cJSON_GetObjectItemCaseSensitive(row, "name");
+      if (!cJSON_IsString(name) || strcmp(cmd, name->valuestring) != 0)
+         continue;
+      const cJSON *subs = cJSON_GetObjectItemCaseSensitive(row, "subcommands");
+      return cJSON_IsString(subs) && subs->valuestring[0] ? 1 : 0;
+   }
    return 0;
 }
 
@@ -605,14 +692,26 @@ static void ensemble_usage(void)
            "  See docs/ENSEMBLE.md. `aimee delegate aggregate|roundtable` remain as aliases.\n");
 }
 
-/* Is `name` a command this client advertises at all? client_help[] is the same
- * table `aimee help --all` prints from, so this answers "would the user have seen
- * this listed" rather than "is it routable". */
+/* Is `name` a command this client advertises at all? Same source `aimee help
+ * --all` prints from, so this answers "would the user have seen this listed"
+ * rather than "is it routable".
+ *
+ * That source is now the server's catalogue plus the bootstrap list. With no
+ * catalogue this reports only the bootstrap commands as known -- correct, since
+ * the client genuinely cannot say what else exists, and the caller's message
+ * distinguishes that from a typo. */
 static int client_cmd_known(const char *name)
 {
-   for (int i = 0; i < (int)(sizeof(client_help) / sizeof(client_help[0])); i++)
-      if (client_help[i].name && strcmp(name, client_help[i].name) == 0)
+   for (int i = 0; client_bootstrap_help[i].name; i++)
+      if (strcmp(name, client_bootstrap_help[i].name) == 0)
          return 1;
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, cli_v1_manifest_commands())
+   {
+      const cJSON *n = cJSON_GetObjectItemCaseSensitive(row, "name");
+      if (cJSON_IsString(n) && strcmp(name, n->valuestring) == 0)
+         return 1;
+   }
    return 0;
 }
 

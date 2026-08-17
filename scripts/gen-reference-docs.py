@@ -3,7 +3,8 @@
 
 Two committed outputs (regenerate with `make -C src docs-gen`):
   docs/gen/cli-commands.md  : every `aimee` CLI command + subcommands, from the
-                               client help table (src/cli_help_data.h).
+                               command catalogue the server serves
+                               (src/server/cli_command_defs_data.h).
   docs/gen/configuration.md : every config key: the `aimee config get/set`
                                scalar allowlist (src/modules/config/config_fields.c) plus the
                                config-file (JSON) sections parsed by src/config*.c.
@@ -20,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
 GEN = ROOT / "docs" / "gen"
 
-# ─── CLI commands (src/cli_help_data.h) ──────────────────────────────────────
+# ─── CLI commands (src/server/cli_command_defs_data.h) ───────────────────────
 # Each entry: {"name", "description", CLIENT_TIER_X, hidden_flag, subcmd_or_NULL}
 # where subcmd is a (possibly multi-line, concatenated) C string of lines like
 #   "  sub   description\n"
@@ -36,7 +37,7 @@ def _c_strings(blob):
 
 
 def parse_cli_commands():
-    text = (SRC / "cli_help_data.h").read_text(encoding="utf-8")
+    text = (SRC / "server" / "cli_command_defs_data.h").read_text(encoding="utf-8")
     # Each entry begins with {"<name>", and ends at the matching `},` at the
     # entry's top level. Split on the entry-start sentinel instead of brace
     # counting (the subcmd strings contain no braces).
@@ -46,7 +47,7 @@ def parse_cli_commands():
     # split into entries on `},\n` boundaries that precede a new `{"`
     raw = re.split(r'\},\s*(?=\{")', body)
     for chunk in raw:
-        m = re.match(r'\s*\{\s*"([^"]+)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*,\s*CLIENT_TIER_(\w+)\s*,\s*(\d+)\s*,\s*(.*)$',
+        m = re.match(r'\s*\{\s*"([^"]+)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*,\s*AIMEE_CMD_TIER_(\w+)\s*,\s*(\d+)\s*,\s*(.*)$',
                      chunk, re.S)
         if not m:
             continue
@@ -60,7 +61,7 @@ def parse_cli_commands():
 def render_cli(entries):
     out = ["# CLI Command Reference",
            "",
-           "> Auto-generated from `src/cli_help_data.h` by `scripts/gen-reference-docs.py`.",
+           "> Auto-generated from `src/server/cli_command_defs_data.h` by `scripts/gen-reference-docs.py`.",
            "> Do not edit by hand; run `make -C src docs-gen` to regenerate.",
            "",
            "`aimee` is a thin client: each command either runs a small local "

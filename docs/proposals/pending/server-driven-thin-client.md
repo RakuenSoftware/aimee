@@ -141,14 +141,27 @@ wire contract is the only thing that can force an upgrade, so it is the only thi
 
 ## Phasing
 
-1. **`POST /v1/cli` + argv forwarding**, with the existing route map retained as a fallback.
-   Nothing is deleted yet; both paths work; the new one is proven against real commands.
-2. **Server-side help/completion.** Delete `client_help[]` and `check-cli-help-coverage.py`.
-3. **Delete the route map, marshallers and command table**, along with
-   `gen-cli-v1-routes.py` and `check-cli-v1-routes.py`. This is the step that actually pays.
-4. **Version negotiation** and the explicit bootstrap-command allowlist.
+1. **DONE — the route map is served, not compiled in.** `GET /v1/cli/manifest` emits
+   `{op, verb, path, async?}` off the live `g_v1_routes`; the client's 245-row generated table
+   and its drift guard are gone. Proof the copy had drifted: the served map carries
+   `workspace.mirror-sync`, which the generated table was missing, so a route the server had all
+   along became reachable.
+2. **DONE — the command catalogue is served.** The 67-row help table moved from
+   `src/cli_help_data.h` to `src/server/cli_command_defs_data.h` and rides the same manifest.
+   The client keeps a deliberately tiny bootstrap list (`remote`, `version`, `help`) — the
+   commands you need *before* you can reach a server — and renders the rest. `aimee help` on an
+   existing client lists a newer server's commands.
+3. **NEXT — modules own their rows.** The catalogue is still one hand-written table, just on the
+   correct side of the wire. `command_registry.h` says each module registers its own; modules are
+   separate processes, so the natural home is the module descriptor (`module.json`), which today
+   has no `commands` field. Adding one, and assembling the registry from the descriptors, is what
+   makes "registration is the only way in" true rather than aspirational.
+4. **THEN — the marshallers**, the last body of server knowledge in the client. The registry
+   already carries a `schema` per command, which is the shape an argument marshaller needs.
+5. **Version negotiation** beyond the current `manifest_version` refusal, and writing the
+   bootstrap allowlist down as a contract rather than a convention.
 
-Each phase is independently shippable and each removes more than it adds after phase 1.
+Each phase is independently shippable and each removes more than it adds.
 
 ## Non-goals
 

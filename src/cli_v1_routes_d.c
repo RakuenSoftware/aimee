@@ -578,6 +578,18 @@ static const cJSON *cli_v1_manifest(void)
    return g_cli_manifest;
 }
 
+/* The command catalogue the server sent, or NULL when there is none (no server
+ * configured, unreachable, or a server too old to send one). Callers render it;
+ * they do not keep a copy. Borrowed — lives in the cached manifest. */
+const cJSON *cli_v1_manifest_commands(void)
+{
+   const cJSON *doc = cli_v1_manifest();
+   if (!doc)
+      return NULL;
+   const cJSON *cmds = cJSON_GetObjectItemCaseSensitive(doc, "commands");
+   return cJSON_IsArray(cmds) ? cmds : NULL;
+}
+
 /* Test seam: install a manifest directly instead of fetching one. Unit tests
  * have no server to ask, and the mapping they used to assert (method -> path) is
  * the SERVER's property now — covered by server-api-conformance-check and by the

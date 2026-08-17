@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
+#include "cli_command_defs.h" /* the command catalogue served in the CLI manifest */
 #include "server_http.h"
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
@@ -1214,6 +1215,15 @@ int rh_cli_manifest(const route_req_t *rq, char *resp, int cap)
    cJSON_AddNumberToObject(root, "manifest_version", 1);
    cJSON_AddStringToObject(root, "server_version", AIMEE_VERSION);
    cJSON_AddItemToObject(root, "routes", routes);
+   /* The catalogue a human is shown. `routes` says how to ADDRESS a method;
+    * this says what exists and what it is for. Both answer "what can I do?",
+    * so both ride one document and one round trip. Absent rather than empty if
+    * it cannot be built: a client that gets no catalogue falls back to its
+    * bootstrap list and says so, which beats rendering an empty command list as
+    * though the server had none. */
+   cJSON *commands = cli_command_defs_to_json();
+   if (commands)
+      cJSON_AddItemToObject(root, "commands", commands);
 
    char *s = cJSON_PrintUnformatted(root);
    int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;

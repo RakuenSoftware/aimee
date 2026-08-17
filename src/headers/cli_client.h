@@ -254,6 +254,13 @@ char *cli_v1_client_bearer(void);
  * cli_v1_send. */
 void cli_v1_warn_no_endpoint(const char *method);
 
+/* The command catalogue the server sent: an array of
+ * {name, summary, tier, hidden_default?, subcommands?}, or NULL when no server
+ * answered. The client RENDERS this; it does not keep its own catalogue, so a
+ * command added server-side is discoverable without rebuilding the client.
+ * Borrowed — owned by the cached manifest. */
+const struct cJSON *cli_v1_manifest_commands(void);
+
 /* TEST ONLY. Install a command manifest instead of fetching one from the server,
  * so a unit test can exercise route lookup without a server. Takes ownership of
  * `doc`. Never called outside tests; real invocations always fetch. */
