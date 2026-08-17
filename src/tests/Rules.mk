@@ -674,6 +674,20 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-db1-conversation-client \
                $(TESTPREFIX)/unit-test-db1-agent-work-client \
                $(TESTPREFIX)/unit-test-db1-module-bus \
+               $(TESTPREFIX)/unit-test-bus-memory-recall \
+               $(TESTPREFIX)/unit-test-bus-memory-upsert \
+               $(TESTPREFIX)/unit-test-bus-audit-replay \
+               $(TESTPREFIX)/unit-test-bus-audit-replay-tool \
+               $(TESTPREFIX)/unit-test-bus-audit-retention \
+               $(TESTPREFIX)/unit-test-bus-config-autonomy \
+               $(TESTPREFIX)/unit-test-bus-guardrail-durability \
+               $(TESTPREFIX)/unit-test-bus-shutdown-race \
+               $(TESTPREFIX)/unit-test-git-verify-state-bus \
+               $(TESTPREFIX)/unit-test-bus-audit-durability \
+               $(TESTPREFIX)/unit-test-bus-memory-audit \
+               $(TESTPREFIX)/unit-test-bus-sandbox-audit \
+               $(TESTPREFIX)/unit-test-bus-tool-completion \
+               $(TESTPREFIX)/unit-test-bus-vault-audit \
                $(TESTPREFIX)/unit-test-db1-roundtable-pipeline \
                $(TESTPREFIX)/unit-test-roundtable-pipeline-eval \
                $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk \
@@ -3457,6 +3471,7 @@ $(OBJDIR)/aimee-module: $(wildcard ../server-go/modules/git/*.go) $(wildcard ../
 	@mkdir -p $(@D)
 	cd ../server-go && CGO_ENABLED=0 $(GO) build -o "$(CURDIR)/$@" ./cmd/aimee-module
 
+$(TESTPREFIX)/unit-test-git-verify-state-bus: | $(OBJDIR)/aimee-module
 $(TESTPREFIX)/unit-test-git-verify-state-bus: $(OBJDIR)/tests/test_git_verify_state_bus.o \
                                            $(OBJDIR)/modules/git/git_verify_state.o \
                                            $(OBJDIR)/modules/git/git_verify.o \
