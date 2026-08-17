@@ -69,10 +69,10 @@ only lifecycle is active and granted. Later operations must be typed, bounded ca
 Declaration audit:
 
 `declaration-review.json` is the reviewed source for transitions from the legacy C surface. Its
-generated ledger accounts for all 1,368 non-static function declarations in all 136 DB2 headers,
+generated ledger accounts for all 1,378 non-static function declarations in all 136 DB2 headers,
 records identical duplicate declarations by location, and fails on conflicting signatures. The
 ledger also tokenizes every frozen consumer so test-only and production references cannot be
-confused. At this checkpoint 143 declarations are unconsumed implementation details, 268 are used
+confused. At this checkpoint 143 declarations are unconsumed implementation details, 278 are used
 only by private implementation tests, 61 externally referenced `pgvec_*` declarations are
 explicitly private and retained in DB2, lifecycle health is a reviewed retained-DB2 wire operation,
 and 895 production-consumed declarations remain
@@ -408,7 +408,14 @@ terminated static class tokens. Missing providers or malformed output skip the d
 instead of mutating it. This moves total debt from 169 to 166 and injected-contract debt from 30 to
 27.
 
-The remaining 27 non-system rows are sibling-contract migration debt. Session identity, briefing
+The thirty-second reduction moves DB2's nine credential-record cryptographic calls behind one
+startup-installed vault-owner vtable. The boundary covers canonical v1/v2 AAD, random generation,
+DEK wrap/unwrap, authenticated secret encryption/decryption, and KEK-check wrap/verify. DB2 accepts
+only exact success, bounds every variable length, validates AAD output length, and cleanses secret
+outputs on absence or failure. This moves total debt from 166 to 157 and injected-contract debt from
+27 to 18.
+
+The remaining 18 non-system rows are sibling-contract migration debt. Session identity, briefing
 rendering, executable lifecycle, configuration, memory, and other host calls must close through
 their reviewed process contracts before activation; they are not portable-support candidates. Rows
 may be reclassified only with a reviewed contract and replay evidence, so later slices do not hide

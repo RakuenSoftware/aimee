@@ -12,6 +12,8 @@
 #include "css_render_oracle.h"
 #include "log.h"
 #include "memory.h"
+#include "vault_crypto.h"
+#include "vault_kek_check.h"
 
 #include <aimee/audit/audit_worm_chain.h>
 #include <aimee/audit/obs_bus.h>
@@ -35,6 +37,18 @@
 #define KB_MODULE_EMBED_DEADLINE_NS (25ULL * 1000000000ULL)
 
 static atomic_uint_fast64_t next_trace = 1;
+
+static const aimee_db2_vault_crypto_provider_t vault_crypto_provider = {
+    .aad_build_v2 = vault_aad_build_v2,
+    .aad_build_v1_safe = vault_aad_build_v1_safe,
+    .random = vault_crypto_random,
+    .dek_wrap = vault_dek_wrap,
+    .dek_unwrap = vault_dek_unwrap,
+    .secret_encrypt = vault_secret_encrypt,
+    .secret_decrypt = vault_secret_decrypt,
+    .kek_check_wrap = vault_kek_check_wrap,
+    .kek_check_verify = vault_kek_check_verify,
+};
 
 static int css_render_compare(const char *before_json, const char *after_json, int *before_valid,
                               int *after_valid, int *available, int *equivalent, int *diff_count)
@@ -69,6 +83,12 @@ _Static_assert((int)AIMEE_DB2_PRINCIPAL_OWNER == (int)KB_PRIN_OWNER,
 _Static_assert((int)AIMEE_DB2_PRINCIPAL_HOST == (int)KB_PRIN_HOST, "DB2 principal HOST ABI drift");
 _Static_assert(AIMEE_DB2_CSS_CLASS_TOKEN_MAX == CSS_CLASS_TOKEN_MAX,
                "DB2 CSS class-token ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_KEK_LEN == VAULT_KEK_LEN, "DB2 vault KEK ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_DEK_LEN == VAULT_DEK_LEN, "DB2 vault DEK ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_NONCE_LEN == VAULT_GCM_NONCE_LEN, "DB2 vault nonce ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_TAG_LEN == VAULT_GCM_TAG_LEN, "DB2 vault tag ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_WRAPPED_DEK_LEN == VAULT_WRAPPED_DEK_LEN,
+               "DB2 vault wrapped-DEK ABI drift");
 
 static uint64_t monotonic_ns(void)
 {
@@ -459,6 +479,7 @@ void kb_module_stage_adapters_configure(void)
    aimee_db2_register_css_render_compare_provider(css_render_compare);
    aimee_db2_register_css_analysis_providers(css_analyze, css_stylesheet_free,
                                              css_extract_class_tokens);
+   aimee_db2_register_vault_crypto_provider(&vault_crypto_provider);
    kb_curator_grounding_register_provider(grounding_decide);
    kb_route_acl_register_authorization_provider(control_web_authorize);
 }

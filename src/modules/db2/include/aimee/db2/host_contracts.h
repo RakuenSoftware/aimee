@@ -3,6 +3,7 @@
 #define AIMEE_DB2_HOST_CONTRACTS_H 1
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -160,6 +161,44 @@ extern "C"
    void aimee_db2_register_css_analysis_providers(
        aimee_db2_css_analyze_fn analyze, aimee_db2_css_stylesheet_free_fn release,
        aimee_db2_css_extract_class_tokens_fn extract_class_tokens);
+
+#define AIMEE_DB2_VAULT_KEK_LEN         32
+#define AIMEE_DB2_VAULT_DEK_LEN         32
+#define AIMEE_DB2_VAULT_NONCE_LEN       12
+#define AIMEE_DB2_VAULT_TAG_LEN         16
+#define AIMEE_DB2_VAULT_WRAPPED_DEK_LEN 40
+
+   typedef struct
+   {
+      int (*aad_build_v2)(const char *principal, const char *agent, const char *cred,
+                          int64_t version, uint8_t *out, size_t cap, size_t *out_len);
+      int (*aad_build_v1_safe)(const char *principal, const char *agent, const char *cred,
+                               int64_t version, uint8_t *out, size_t cap, size_t *out_len);
+      int (*random)(uint8_t *out, size_t len);
+      int (*dek_wrap)(const uint8_t kek[AIMEE_DB2_VAULT_KEK_LEN],
+                      const uint8_t dek[AIMEE_DB2_VAULT_DEK_LEN],
+                      uint8_t wrapped[AIMEE_DB2_VAULT_WRAPPED_DEK_LEN]);
+      int (*dek_unwrap)(const uint8_t kek[AIMEE_DB2_VAULT_KEK_LEN],
+                        const uint8_t wrapped[AIMEE_DB2_VAULT_WRAPPED_DEK_LEN],
+                        uint8_t dek[AIMEE_DB2_VAULT_DEK_LEN]);
+      int (*secret_encrypt)(const uint8_t dek[AIMEE_DB2_VAULT_DEK_LEN], const uint8_t *aad,
+                            size_t aad_len, const uint8_t *plaintext, size_t plaintext_len,
+                            uint8_t nonce[AIMEE_DB2_VAULT_NONCE_LEN], uint8_t *ciphertext,
+                            uint8_t tag[AIMEE_DB2_VAULT_TAG_LEN]);
+      int (*secret_decrypt)(const uint8_t dek[AIMEE_DB2_VAULT_DEK_LEN], const uint8_t *aad,
+                            size_t aad_len, const uint8_t nonce[AIMEE_DB2_VAULT_NONCE_LEN],
+                            const uint8_t *ciphertext, size_t ciphertext_len,
+                            const uint8_t tag[AIMEE_DB2_VAULT_TAG_LEN], uint8_t *plaintext);
+      int (*kek_check_wrap)(const uint8_t kek[AIMEE_DB2_VAULT_KEK_LEN],
+                            uint8_t wrapped[AIMEE_DB2_VAULT_WRAPPED_DEK_LEN]);
+      int (*kek_check_verify)(const uint8_t kek[AIMEE_DB2_VAULT_KEK_LEN],
+                              const uint8_t wrapped[AIMEE_DB2_VAULT_WRAPPED_DEK_LEN]);
+   } aimee_db2_vault_crypto_provider_t;
+
+   /* Install the vault owner's complete envelope-crypto vtable at startup. The
+    * value is copied. NULL removes it; absent operations and nonzero results
+    * fail closed and DB2 cleanses their secret outputs. */
+   void aimee_db2_register_vault_crypto_provider(const aimee_db2_vault_crypto_provider_t *provider);
 
 #ifdef __cplusplus
 }

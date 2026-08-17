@@ -1376,6 +1376,22 @@
     },
     {
       "consumers": [
+        "src/tests/test_kb_p2b_egress_live.c",
+        "src/tests/test_vault_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/vault_pg.h",
+          "line": 49
+        }
+      ],
+      "signature": "void aimee_db2_register_vault_crypto_provider ( const db2_vault_crypto_provider_t * provider )",
+      "signature_sha256": "49ffbc2614e7377a56b847ad015d93a11eb8754eb15ce8c445fa3dc775fd6e83",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_vault_crypto_provider"
+    },
+    {
+      "consumers": [
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/test_kb_vault_rewrap_live.c",
         "src/tests/test_management_status_key_ctx.c",
@@ -20727,6 +20743,36 @@
     },
     {
       "consumers": [
+        "src/tests/test_vault_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/vault_pg.h",
+          "line": 59
+        }
+      ],
+      "signature": "int db2_vault_aad_build_v1_safe ( const char * principal , const char * agent , const char * cred , int64_t version , uint8_t * out , size_t cap , size_t * out_len )",
+      "signature_sha256": "f3a7c55c31fd903d6631d0750029aacfaa4c393d2ff31fd9afeb6f10e2bc1aa8",
+      "status": "private-test-only",
+      "symbol": "db2_vault_aad_build_v1_safe"
+    },
+    {
+      "consumers": [
+        "src/tests/test_vault_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/vault_pg.h",
+          "line": 57
+        }
+      ],
+      "signature": "int db2_vault_aad_build_v2 ( const char * principal , const char * agent , const char * cred , int64_t version , uint8_t * out , size_t cap , size_t * out_len )",
+      "signature_sha256": "95d1989e9a8245a0d3f9600e00ca624e3a5599965a7ebead6b993dcdc11c3cac",
+      "status": "private-test-only",
+      "symbol": "db2_vault_aad_build_v2"
+    },
+    {
+      "consumers": [
         "src/kb/kb_main.c",
         "src/tests/test_kb_p2b_egress_live.c",
         "src/tests/test_kb_vault_key_use_live.c"
@@ -20758,6 +20804,81 @@
       "signature_sha256": "28e24701717ad0945c03443d15f4e761d821892a941a526cfe19c14947a73476",
       "status": "audit-pending",
       "symbol": "db2_vault_control_startup_end"
+    },
+    {
+      "consumers": [
+        "src/tests/test_vault_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/vault_pg.h",
+          "line": 56
+        }
+      ],
+      "signature": "int db2_vault_crypto_random ( uint8_t * out , size_t len )",
+      "signature_sha256": "1a3775855e7c320a07374a937733bd5d915dfb91b0fafb35931aea5d8f317b69",
+      "status": "private-test-only",
+      "symbol": "db2_vault_crypto_random"
+    },
+    {
+      "consumers": [
+        "src/tests/test_vault_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/vault_pg.h",
+          "line": 63
+        }
+      ],
+      "signature": "int db2_vault_dek_unwrap ( const uint8_t kek [ VAULT_KEK_LEN ] , const uint8_t wrapped [ VAULT_WRAPPED_DEK_LEN ] , uint8_t dek [ VAULT_DEK_LEN ] )",
+      "signature_sha256": "d305ec7d9f93700f24dbcf0d687a15f82555815d7b7c5638191c3a94fbd7f1f2",
+      "status": "private-test-only",
+      "symbol": "db2_vault_dek_unwrap"
+    },
+    {
+      "consumers": [
+        "src/tests/test_vault_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/vault_pg.h",
+          "line": 61
+        }
+      ],
+      "signature": "int db2_vault_dek_wrap ( const uint8_t kek [ VAULT_KEK_LEN ] , const uint8_t dek [ VAULT_DEK_LEN ] , uint8_t wrapped [ VAULT_WRAPPED_DEK_LEN ] )",
+      "signature_sha256": "5424b21ebedc20be4dcb7197ce07f71c1178887518cbecb99f3a09cda0de49b1",
+      "status": "private-test-only",
+      "symbol": "db2_vault_dek_wrap"
+    },
+    {
+      "consumers": [
+        "src/tests/test_vault_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/vault_pg.h",
+          "line": 75
+        }
+      ],
+      "signature": "int db2_vault_kek_check_verify ( const uint8_t kek [ VAULT_KEK_LEN ] , const uint8_t wrapped [ VAULT_WRAPPED_DEK_LEN ] )",
+      "signature_sha256": "85112ada280e1e41c691b341c065d6df1aff7c95e0f1e04c1f1ffa22bc6ec664",
+      "status": "private-test-only",
+      "symbol": "db2_vault_kek_check_verify"
+    },
+    {
+      "consumers": [
+        "src/tests/test_vault_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/vault_pg.h",
+          "line": 73
+        }
+      ],
+      "signature": "int db2_vault_kek_check_wrap ( const uint8_t kek [ VAULT_KEK_LEN ] , uint8_t wrapped [ VAULT_WRAPPED_DEK_LEN ] )",
+      "signature_sha256": "67994f35171706c424c1c00165ef7faf051363182488c600066c96a0b4b27ba2",
+      "status": "private-test-only",
+      "symbol": "db2_vault_kek_check_wrap"
     },
     {
       "consumers": [
@@ -21703,6 +21824,36 @@
       "signature_sha256": "8133895530eca08549708773f8fe44152a503caa3b516ec1a6c5df0b98609921",
       "status": "audit-pending",
       "symbol": "db2_vault_rotation_transition_claimed"
+    },
+    {
+      "consumers": [
+        "src/tests/test_vault_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/vault_pg.h",
+          "line": 69
+        }
+      ],
+      "signature": "int db2_vault_secret_decrypt ( const uint8_t dek [ VAULT_DEK_LEN ] , const uint8_t * aad , size_t aad_len , const uint8_t nonce [ VAULT_GCM_NONCE_LEN ] , const uint8_t * ciphertext , size_t ciphertext_len , const uint8_t tag [ VAULT_GCM_TAG_LEN ] , uint8_t * plaintext )",
+      "signature_sha256": "36d10cd5d148622b8b7becf4d91f83613ea6f410ecfd81fc9583fd94f11e6131",
+      "status": "private-test-only",
+      "symbol": "db2_vault_secret_decrypt"
+    },
+    {
+      "consumers": [
+        "src/tests/test_vault_pg.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/vault_pg.h",
+          "line": 65
+        }
+      ],
+      "signature": "int db2_vault_secret_encrypt ( const uint8_t dek [ VAULT_DEK_LEN ] , const uint8_t * aad , size_t aad_len , const uint8_t * plaintext , size_t plaintext_len , uint8_t nonce [ VAULT_GCM_NONCE_LEN ] , uint8_t * ciphertext , uint8_t tag [ VAULT_GCM_TAG_LEN ] )",
+      "signature_sha256": "84033687dc3bb9183dce66285a5a45d38f72c0efbcb6b8eee9ee455838b5ac18",
+      "status": "private-test-only",
+      "symbol": "db2_vault_secret_encrypt"
     },
     {
       "consumers": [
@@ -23975,15 +24126,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d1ff2a7d76052fd2fd916ef643d366f52f9dae349a152259efc7ce5f67ca1990",
+  "fingerprint": "241f3eb6ad99d41792616d09fe6c93aee80543f90b39a90913521ff3f0c1e270",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 895,
-    "declarations": 1368,
+    "declarations": 1378,
     "headers": 136,
     "internal_unconsumed": 143,
-    "private_test_only": 268,
+    "private_test_only": 278,
     "reviewed": 62
   }
 }
