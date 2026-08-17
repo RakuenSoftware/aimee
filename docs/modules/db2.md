@@ -257,7 +257,8 @@ round-trip attribution. This moves total debt from 206 to 205 and portable promo
 
 The twelfth reduction removes generic shell execution from canonical indexing. The DB2 owner now
 constructs fixed argv vectors for its exact `git` and `find` operations, while the KB host installs
-the bounded `safe_exec_capture` capability once before ingest workers start. A missing installer
+the bounded `safe_exec_capture` capability once at service initialization, before HTTP routing or
+ingest workers start. A missing installer logs an explicit rejection and
 fails `canonical_index_scan_project` before database mutation; caller-pushed
 `canonical_index_scan_files` remains process-free. The production index test covers absence and a
 git root containing a space, including incremental co-change replay. This moves total debt from 205

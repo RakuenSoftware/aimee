@@ -2316,7 +2316,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 77
+          "line": 81
         }
       ],
       "signature": "int canonical_index_blast_radius ( const char * project , const char * file_path , blast_radius_t * out )",
@@ -2332,7 +2332,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 95
+          "line": 99
         }
       ],
       "signature": "int canonical_index_code_search ( const char * query , const char * project , code_search_hit_t * out , int max , int enrich )",
@@ -2349,7 +2349,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 97
+          "line": 101
         }
       ],
       "signature": "int canonical_index_code_search_excluding_project ( const char * query , const char * excluded_project , code_search_hit_t * out , int max , int enrich )",
@@ -2400,7 +2400,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 65
+          "line": 69
         }
       ],
       "signature": "int canonical_index_find ( const char * identifier , term_hit_t * out , int max )",
@@ -2416,7 +2416,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 85
+          "line": 89
         }
       ],
       "signature": "int canonical_index_find_callers ( const char * project , const char * symbol , caller_hit_t * out , int max )",
@@ -2432,7 +2432,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 87
+          "line": 91
         }
       ],
       "signature": "int canonical_index_find_callers_excluding_project ( const char * excluded_project , const char * symbol , caller_hit_t * out , int max )",
@@ -2449,7 +2449,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 73
+          "line": 77
         }
       ],
       "signature": "int canonical_index_find_excluding_project ( const char * excluded_project , const char * identifier , term_hit_t * out , int max )",
@@ -2466,7 +2466,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 69
+          "line": 73
         }
       ],
       "signature": "int canonical_index_find_project ( const char * project , const char * identifier , term_hit_t * out , int max )",
@@ -2483,7 +2483,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 62
+          "line": 66
         }
       ],
       "signature": "int canonical_index_list_projects ( project_info_t * out , int max )",
@@ -2499,7 +2499,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 110
+          "line": 114
         }
       ],
       "signature": "int canonical_index_project_lang_breakdown ( const char * project , char * buf , size_t bufsz )",
@@ -2515,7 +2515,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 105
+          "line": 109
         }
       ],
       "signature": "int canonical_index_project_stats ( const char * project , int * files_out , int * defs_out )",
@@ -2532,7 +2532,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 57
+          "line": 61
         }
       ],
       "signature": "int canonical_index_scan_files ( const char * name , const char * root_label , const canonical_index_file_input_t * files , int file_count , int force , int * inspected_out )",
@@ -2550,7 +2550,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 44
+          "line": 48
         }
       ],
       "signature": "int canonical_index_scan_project ( const char * name , const char * root , int force , int * inspected_out )",
@@ -2560,13 +2560,13 @@
     },
     {
       "consumers": [
-        "src/kb/kb_ingest_workers.c",
+        "src/kb/kb_service_workers.c",
         "src/tests/test_index.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 33
+          "line": 37
         }
       ],
       "signature": "void canonical_index_set_exec_capture ( canonical_index_exec_capture_fn capture )",
@@ -2584,7 +2584,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 81
+          "line": 85
         }
       ],
       "signature": "int canonical_index_structure ( const char * project , const char * file_path , definition_t * out , int max )",
@@ -23703,7 +23703,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "587de3b8afa2b24c5238605d8c56f240364afa6b6c74f8c67620c7b675af1fd6",
+  "fingerprint": "e5efc0a9563f491b531554b46417fa5ddb3500936dd0da292ed76f892646e01f",
   "module": "db2",
   "schema_version": 1,
   "summary": {

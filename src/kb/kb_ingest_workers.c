@@ -38,7 +38,6 @@
 #include "code_collect.h" /* git_resolve_default_sha, code_index_source_is_worktree */
 #include "kb_doc_hash.h"
 #include "memory.h"
-#include "util.h"
 
 #include <dirent.h>
 #include <pthread.h>
@@ -540,10 +539,6 @@ void kb_ingest_workers_start(kb_service_ctx_t *ctx)
 {
    if (!ctx)
       return;
-
-   /* DB2 owns indexing policy and argv construction; the KB host owns the
-    * process capability. Install before any HTTP or worker scan can run. */
-   canonical_index_set_exec_capture(safe_exec_capture);
 
    pthread_mutex_init(&ctx->ingest_mu, NULL);
    pthread_cond_init(&ctx->ingest_cond, NULL);

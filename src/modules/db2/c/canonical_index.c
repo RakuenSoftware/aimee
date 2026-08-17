@@ -1220,7 +1220,10 @@ int canonical_index_scan_project(const char *name, const char *root, int force, 
    if (inspected_out)
       *inspected_out = 0;
    if (!ci_exec_capture)
+   {
+      LOG_ERROR(CI_LOG_TAG, "local scan rejected: host exec capture is not installed");
       return -1;
+   }
 
    void *conn = ci_conn();
    if (!conn)

@@ -318,7 +318,9 @@ static char *create_cochange_repo(void)
 {
    char *dir = malloc(PATH_MAX);
    assert(dir != NULL);
-   snprintf(dir, PATH_MAX, "%s/aimee cochange-XXXXXX", platform_tmpdir());
+   /* Spaces and shell metacharacters remain one literal argv element. A shell-
+    * joined implementation would execute/substitute `false` and miss this root. */
+   snprintf(dir, PATH_MAX, "%s/aimee $(false) cochange-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(dir) != NULL);
    char cmd[4096];
    snprintf(cmd, sizeof(cmd),

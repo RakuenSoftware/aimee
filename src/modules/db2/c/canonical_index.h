@@ -24,10 +24,14 @@ extern "C"
 #endif
 
    /* Host-owned process capability used only by scan_project's local filesystem
-    * and git discovery. DB2 constructs a fixed argv for each operation; the host
-    * supplies execution so the module never imports a shell or generic command
-    * runner. Install once, before scans or ingest workers start. Passing NULL
-    * disables local discovery (scan_files remains available). */
+    * and git discovery. DB2 constructs a fixed, NULL-terminated argv for each
+    * operation. The callback must execute argv[0] directly without a shell, put
+    * at most max_out captured stdout/stderr bytes in one malloc-owned *out_buf,
+    * and return the child exit code (negative for host failure). Environment
+    * isolation is host policy: the current KB safe_exec_capture implementation
+    * inherits the service environment but never places it in argv. Install once
+    * at KB service initialization, before HTTP routing or ingest workers start.
+    * Passing NULL disables local discovery (scan_files remains available). */
    typedef int (*canonical_index_exec_capture_fn)(const char *const argv[], char **out_buf,
                                                   size_t max_out);
    void canonical_index_set_exec_capture(canonical_index_exec_capture_fn capture);

@@ -6,8 +6,9 @@
   closure ledgers, reviewed host-adapter rehomes, immutable runtime-config and relationship-seed
   support, the provider-neutral DB3 protocol, authenticated multi-observer bus path, automatic
   deployed-provider default, and the catalog-driven durable projection/outbox seam. The standalone
-  closure currently records 198 external symbols: 139 declared system links, 59 sibling contracts
-  to inject, and zero portable APIs left to close. This is explicitly not the S4 ownership cutover or
+  link remains blocked by 59 sibling contracts. Its closure records 198 external symbols: 139
+  declared system links and those 59 injected contracts; portable API debt is zero. This is
+  explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
 - **Date:** 2026-08-15.
@@ -505,7 +506,8 @@ without reaching back into the host's process-global session configuration.
 
 Canonical-index local discovery now follows the same ownership rule. DB2 constructs fixed argv
 vectors for its exact `git` and `find` operations and accepts one startup-installed capture
-capability; the KB host installs its bounded fork/exec implementation before workers start. No
+capability; the KB host installs its bounded fork/exec implementation at service initialization,
+before HTTP routing or workers start. No
 repository path, revision marker, or DB2 string is shell-interpolated, missing installation fails a
 local scan before database mutation, and the caller-pushed `scan_files` path needs no process
 capability. This removes the generic `run_cmd` and `shell_escape` imports rather than copying a shell
