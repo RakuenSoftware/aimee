@@ -467,7 +467,12 @@ continues to cover every response and failure shape without providing a producti
 The descriptor declares both canonical DB2 SQL inputs for deterministic text embedding. Runtime
 bundles generate `schema_data.h` in a temporary build directory, and standalone exports emit the
 equivalent CMake rule and copy those exact inputs; neither path requires or modifies a source-tree
-generated header.
+generated header. The same descriptor declares the 54 non-owned compatibility headers required by
+the retained C implementation. Export validation requires sorted, normalized, real `.h` inputs,
+copies them without claiming DB2 ownership, includes them in the repository source digest, and
+rejects module-local entries that belong in `private_headers` or `public_headers`. A clean isolated
+export now compiles and links the same 138 translation units without reaching back into the
+monorepo.
 
 ## Tests and failure behavior
 
@@ -479,8 +484,10 @@ module runtime into the C handler and verifies non-zero evidence. Runtime-bundle
 descriptor-owned C process from a clean tree with no `src/schema_data.h`. Generator tests pin
 UTF-8/C escaping, reproducibility, output location, path containment, ordering, duplicate symbols,
 and symlink rejection; an exported miniature CMake project exercises the same rule where CMake is
-available. Catalog tests mutate every closed field, process/descriptor binding, resource limit, and
-generated artifact. Boundary tests prohibit any direct import from `src/modules/db2/c` into private
+available. Export tests pin compatibility-header path safety, ownership separation,
+materialization, manifest admission, and missing-file failure. Catalog tests mutate every closed
+field, process/descriptor binding, resource limit, and generated artifact. Boundary tests prohibit
+any direct import from `src/modules/db2/c` into private
 `src/kb`. Declaration-ledger tests cover C linkage blocks, multiline and callback declarations,
 comments/literals/directives, identical and conflicting duplicates, malformed nesting, resource
 limits, signature-bound review transitions, pgvector retention, output symlinks, reproducibility,

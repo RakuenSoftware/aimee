@@ -211,6 +211,28 @@ class RuntimeBundleBuildTests(unittest.TestCase):
         finally:
             temporary.cleanup()
 
+    def test_declared_header_dependency_must_be_a_real_header(self) -> None:
+        temporary, root, bundle, output = self.fixture()
+        try:
+            path = bundle / builder.BUILD_MANIFEST
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["modules"][0]["header_dependencies"] = ["src/headers/aimee.h"]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            module = builder.load_builds(bundle)[0]
+            with self.assertRaisesRegex(builder.BuildError, "missing or escapes"):
+                builder.compiler_command(
+                    module, root, bundle, output, "cc", "pkg-config"
+                )
+            dependency = root / "src/headers/aimee.h"
+            dependency.parent.mkdir(parents=True)
+            dependency.write_text("#pragma once\n", encoding="utf-8")
+            command = builder.compiler_command(
+                module, root, bundle, output, "cc", "pkg-config"
+            )
+            self.assertNotIn(str(dependency), command)
+        finally:
+            temporary.cleanup()
+
     def test_missing_owned_source_and_symlink_include_fail_closed(self) -> None:
         temporary, root, bundle, output = self.fixture()
         try:

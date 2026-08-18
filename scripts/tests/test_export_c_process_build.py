@@ -83,6 +83,37 @@ class CProcessBuildTests(unittest.TestCase):
         self.assertIn("${CMAKE_CURRENT_SOURCE_DIR}/src/modules/db2/c/schema.sql", cmake)
         self.assertIn("${MODULE_GENERATED_DIR}", cmake)
 
+    def test_header_dependencies_are_materialized_but_not_compiled(self) -> None:
+        descriptor = self.descriptor()
+        descriptor["c_build"]["header_dependencies"] = [
+            "src/headers/aimee.h",
+            "src/modules/config/config.h",
+        ]
+        files = exporter.module_repository_files("db2", descriptor)
+        self.assertIn("src/headers/aimee.h", files)
+        self.assertIn("src/modules/config/config.h", files)
+        self.assertNotIn(
+            "src/headers/aimee.h", exporter.module_owned_files("db2", descriptor)
+        )
+        cmake = exporter.c_process_cmake(
+            "db2", "aimee-module-db2", "1.2.3", descriptor
+        )
+        self.assertNotIn("src/headers/aimee.h", cmake)
+
+        for dependencies, message in (
+            (["../outside.h"], "unsafe header dependency"),
+            (["src/modules/db2/c/db2.h"], "must be owned"),
+            (["src/headers/z.h", "src/headers/a.h"], "sorted and unique"),
+        ):
+            mutated = self.descriptor()
+            mutated["c_build"]["header_dependencies"] = dependencies
+            with self.subTest(message=message), self.assertRaisesRegex(
+                exporter.ExportError, message
+            ):
+                exporter.c_process_cmake(
+                    "db2", "aimee-module-db2", "1.2.3", mutated
+                )
+
     @unittest.skipUnless(shutil.which("cmake"), "cmake is not installed")
     def test_generated_header_cmake_builds_from_a_clean_source_tree(self) -> None:
         descriptor = self.descriptor()

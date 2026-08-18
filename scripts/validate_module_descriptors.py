@@ -28,7 +28,9 @@ C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
 # Optional build properties include validated preprocessor switches and
 # third-party sources a module compiles but does not own. Vendor sources remain
 # restricted to src/vendor/; see export_c_repositories for the ownership rule.
-C_BUILD_OPTIONAL_KEYS = {"compile_definitions", "generated_headers", "vendor_sources"}
+C_BUILD_OPTIONAL_KEYS = {
+    "compile_definitions", "generated_headers", "header_dependencies", "vendor_sources",
+}
 BUILD_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
 C_DEFINE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 OWNERSHIP_FIELDS = (
@@ -212,6 +214,11 @@ def schema() -> dict[str, object]:
                             },
                         },
                     },
+                    "header_dependencies": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "uniqueItems": True,
+                    },
                     "pkg_config": {
                         "type": "array",
                         "items": {"type": "string", "pattern": BUILD_TOKEN_RE.pattern},
@@ -376,6 +383,27 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
             previous = definition
             if not C_DEFINE_RE.fullmatch(definition):
                 fail("c-build-token", f"invalid compile definition {definition!r}", pointer)
+        header_dependencies = build.get("header_dependencies", [])
+        if not isinstance(header_dependencies, list):
+            fail("c-build-type", "c_build.header_dependencies must be an array",
+                 "/c_build/header_dependencies")
+        previous = ""
+        module_prefix = f"src/modules/{identifier}/"
+        for index, dependency in enumerate(header_dependencies):
+            pointer = f"/c_build/header_dependencies/{index}"
+            if not isinstance(dependency, str):
+                fail("c-build-type", "header dependency must be a string", pointer)
+            if dependency <= previous:
+                fail("c-build-order", "header dependencies must be sorted and unique", pointer)
+            previous = dependency
+            pure = PurePosixPath(dependency)
+            if (not dependency.startswith("src/") or "\\" in dependency or
+                    pure.is_absolute() or "." in pure.parts or ".." in pure.parts or
+                    pure.as_posix() != dependency or pure.suffix != ".h"):
+                fail("c-build-path", f"invalid header dependency {dependency!r}", pointer)
+            if dependency.startswith(module_prefix):
+                fail("c-build-header-owned",
+                     "module-local headers must use private_headers or public_headers", pointer)
         generated = build.get("generated_headers", [])
         if not isinstance(generated, list):
             fail("c-build-type", "c_build.generated_headers must be an array",
@@ -667,6 +695,16 @@ def validate_ownership(
                          pointer)
                 if resolved != lexical or not resolved.is_file():
                     fail("c-build-file", f"generated input is not a real file: {raw}", pointer)
+        for index, raw in enumerate(build.get("header_dependencies", [])):
+            pointer = f"/c_build/header_dependencies/{index}"
+            pure = PurePosixPath(raw)
+            lexical = repo.resolve().joinpath(*pure.parts)
+            resolved = _resolve_owned(lexical, pointer)
+            if not _contained(resolved, repo.resolve()):
+                fail("c-build-path-escape", f"header dependency escapes repository: {raw}",
+                     pointer)
+            if resolved != lexical or not resolved.is_file():
+                fail("c-build-file", f"header dependency is not a real file: {raw}", pointer)
     for field in OWNERSHIP_FIELDS:
         raw_entries = value.get(field, [])
         if not isinstance(raw_entries, list):

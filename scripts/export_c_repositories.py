@@ -36,7 +36,9 @@ C_BUILD_KEYS = {"include_roots", "pkg_config", "system_libraries"}
 # audited standalone mode. Third-party sources a module compiles but does not
 # own are also optional; they remain restricted to src/vendor/ so "not owned"
 # cannot quietly mean "owned by somebody else".
-C_BUILD_OPTIONAL_KEYS = {"compile_definitions", "generated_headers", "vendor_sources"}
+C_BUILD_OPTIONAL_KEYS = {
+    "compile_definitions", "generated_headers", "header_dependencies", "vendor_sources",
+}
 VENDOR_ROOT = "src/vendor/"
 BUILD_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
 C_DEFINE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -217,6 +219,7 @@ jobs:
 
 
 def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[str]:
+    """Return descriptor-owned source-tree inputs for the module repository."""
     result = [f"src/modules/{module_id}/module.yaml"]
     for key in ("sources", "private_headers", "public_headers", "contracts", "tests", "docs",
                 "go_sources", "go_tests"):
@@ -232,6 +235,17 @@ def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[st
             result.extend(str(entry["source"]) for entry in entries)
     if len(result) != len(set(result)):
         raise ExportError(f"{module_id}: duplicate owned file")
+    return result
+
+
+def module_repository_files(module_id: str, descriptor: dict[str, object]) -> list[str]:
+    """Return owned files plus explicit non-owned standalone build inputs."""
+    owned = module_owned_files(module_id, descriptor)
+    build = descriptor.get("c_build")
+    dependencies = c_header_dependencies(module_id, build) if isinstance(build, dict) else []
+    result = [*owned, *dependencies]
+    if len(result) != len(set(result)):
+        raise ExportError(f"{module_id}: duplicate repository file")
     return result
 
 
@@ -314,6 +328,28 @@ int main(int argc, char **argv)
    return aimee_module_process_run(&config);
 }}
 """
+
+
+def c_header_dependencies(module_id: str, build: dict[str, object]) -> list[str]:
+    """Return validated non-owned headers copied into an isolated C export."""
+    dependencies = build.get("header_dependencies", [])
+    if not isinstance(dependencies, list) or not all(
+            isinstance(item, str) for item in dependencies):
+        raise ExportError(f"{module_id}: c_build.header_dependencies must be a string array")
+    if dependencies != sorted(set(dependencies)):
+        raise ExportError(
+            f"{module_id}: c_build.header_dependencies must be sorted and unique")
+    module_prefix = f"src/modules/{module_id}/"
+    for dependency in dependencies:
+        pure = PurePosixPath(dependency)
+        if (not dependency.startswith("src/") or "\\" in dependency or pure.is_absolute() or
+                "." in pure.parts or ".." in pure.parts or
+                pure.as_posix() != dependency or pure.suffix != ".h"):
+            raise ExportError(f"{module_id}: unsafe header dependency {dependency!r}")
+        if dependency.startswith(module_prefix):
+            raise ExportError(
+                f"{module_id}: module-local header dependency {dependency!r} must be owned")
+    return list(dependencies)
 
 
 def c_generated_headers(module_id: str, build: dict[str, object]) -> list[dict[str, object]]:
@@ -402,6 +438,8 @@ def c_process_build(module_id: str, descriptor: dict[str, object]) -> tuple[
         if not C_DEFINE.fullmatch(definition):
             raise ExportError(
                 f"{module_id}: unsafe c_build.compile_definitions token {definition!r}")
+
+    c_header_dependencies(module_id, build)
 
     parsed: dict[str, list[str]] = {}
     for field in sorted(C_BUILD_KEYS):
@@ -672,13 +710,14 @@ def export_module(
     if descriptor.get("id") != module_id:
         raise ExportError(f"{descriptor_path}: descriptor id mismatch")
     owned = module_owned_files(module_id, descriptor)
+    repository_files = module_repository_files(module_id, descriptor)
     declared_sources = descriptor.get("sources", [])
     assert isinstance(declared_sources, list)
     has_handler = c_process_has_handler(declared_sources)
     init_symbol = c_process_init_symbol(module_id, descriptor)
     repository = output_root / f"aimee-module-{module_id}"
     repository.mkdir()
-    for relative in owned:
+    for relative in repository_files:
         copy_file(relative, repository)
     shutil.copy2(ROOT / "LICENSE", repository / "LICENSE")
     binary = f"aimee-module-{module_id}"
@@ -877,9 +916,11 @@ This is the independent `{module_id}` source-ownership repository.
 
 The descriptor-owned production sources, headers, tests, and documentation are
 preserved at their canonical paths so their migration history remains auditable.
+Any non-owned compatibility headers required by the standalone C build are
+declared separately, copied at canonical paths, and bound into the source digest.
 """,
     )
-    source_paths = [ROOT / item for item in owned]
+    source_paths = [ROOT / item for item in repository_files]
     manifest = {
         "schema_version": 1,
         "module": module_id,
@@ -892,6 +933,7 @@ preserved at their canonical paths so their migration history remains auditable.
         "stages": contract.get("stages", []),
         "source_sha256": digest_files(source_paths),
         "owned_files": owned,
+        "repository_files": repository_files,
     }
     write_text(repository / "SOURCE_MANIFEST.json", json.dumps(manifest, indent=2) + "\n")
     remote = f"{REMOTE_ROOT}/aimee-module-{module_id}.git"
@@ -932,7 +974,7 @@ def export_runtime_bundle(output_root: Path) -> int:
         if contract["execution"] != "process":
             continue
         descriptor = load_json(ROOT / f"src/modules/{module_id}/module.yaml")
-        module_owned_files(module_id, descriptor)
+        module_repository_files(module_id, descriptor)
         enabled = module_id in required or descriptor.get("enabled_by_default") is True
         principal_ref = contract["principal_ref"]
         stages = contract["stages"]
@@ -967,6 +1009,9 @@ def export_runtime_bundle(output_root: Path) -> int:
                 "pkg_config": pkg_config,
                 "system_libraries": libraries,
             }
+            header_dependencies = c_header_dependencies(module_id, descriptor["c_build"])
+            if header_dependencies:
+                build_row["header_dependencies"] = header_dependencies
             if generated:
                 build_row["generated_headers"] = generated
             c_builds.append(build_row)
@@ -1064,8 +1109,10 @@ def refresh_lock_from_repositories(repository_root: Path) -> int:
             entry["source_sha256"] = digest_files(core_files())
         else:
             descriptor = load_json(ROOT / f"src/modules/{repository_id}/module.yaml")
-            owned = module_owned_files(repository_id, descriptor)
-            entry["source_sha256"] = digest_files([ROOT / relative for relative in owned])
+            repository_files = module_repository_files(repository_id, descriptor)
+            entry["source_sha256"] = digest_files(
+                [ROOT / relative for relative in repository_files]
+            )
     LOCK.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
     return len(entries)
 

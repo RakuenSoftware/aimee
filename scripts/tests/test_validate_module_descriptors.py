@@ -44,6 +44,10 @@ def production_repo() -> tempfile.TemporaryDirectory[str]:
         build = descriptor.get("c_build")
         if isinstance(build, dict):
             include_roots.update(build.get("include_roots", []))
+            for relative in build.get("header_dependencies", []):
+                dependency = repo / relative
+                dependency.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(REPO_ROOT / relative, dependency)
             for header in build.get("generated_headers", []):
                 for entry in header.get("entries", []):
                     relative = entry["source"]
@@ -241,6 +245,7 @@ class DescriptorTests(unittest.TestCase):
                 }],
                 "output": "schema_data.h",
             }],
+            "header_dependencies": ["src/headers/aimee.h"],
             "include_roots": ["src", "src/modules/memory"],
             "pkg_config": ["libpq"],
             "system_libraries": ["OpenSSL::Crypto", "m"],
@@ -266,6 +271,13 @@ class DescriptorTests(unittest.TestCase):
               "pkg_config": [], "system_libraries": []}, "c-build-order"),
             ({"generated_headers": "bad", "include_roots": ["src"],
               "pkg_config": [], "system_libraries": []}, "c-build-type"),
+            ({"header_dependencies": "bad", "include_roots": ["src"],
+              "pkg_config": [], "system_libraries": []}, "c-build-type"),
+            ({"header_dependencies": ["../outside.h"], "include_roots": ["src"],
+              "pkg_config": [], "system_libraries": []}, "c-build-path"),
+            ({"header_dependencies": ["src/modules/memory/private.h"],
+              "include_roots": ["src"], "pkg_config": [], "system_libraries": []},
+             "c-build-header-owned"),
             ({"generated_headers": [{"output": "../bad.h", "entries": [
                 {"source": "src/schema.sql", "symbol": "SCHEMA_SQL"},
             ]}], "include_roots": ["src"], "pkg_config": [],

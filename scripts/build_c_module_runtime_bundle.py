@@ -25,7 +25,7 @@ BUILD_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
 MODULE_KEYS = {
     "id", "binary", "main", "sources", "include_roots", "pkg_config", "system_libraries",
 }
-MODULE_OPTIONAL_KEYS = {"compile_definitions", "generated_headers"}
+MODULE_OPTIONAL_KEYS = {"compile_definitions", "generated_headers", "header_dependencies"}
 CORE_EVENT_BUS_SOURCES = [
     "src/core/event_bus/bus_attach.c",
     "src/core/event_bus/bus_client.c",
@@ -176,6 +176,12 @@ def load_builds(bundle: Path) -> list[dict[str, object]]:
                for item in definitions):
             fail(f"{identifier}.compile_definitions contains an unsafe C identifier")
         generated_headers(module.get("generated_headers"), f"{identifier}.generated_headers")
+        dependencies = string_array(
+            module.get("header_dependencies", []),
+            f"{identifier}.header_dependencies", paths=True,
+        )
+        if any(PurePosixPath(dependency).suffix != ".h" for dependency in dependencies):
+            fail(f"{identifier}: header_dependencies must all be header files")
         string_array(module["pkg_config"], f"{identifier}.pkg_config")
         libraries = string_array(module["system_libraries"],
                                  f"{identifier}.system_libraries")
@@ -273,6 +279,8 @@ def compiler_command(module: dict[str, object], root: Path, bundle: Path, output
     ))
     main = real_file(bundle, module["main"], f"{identifier}.main")
     owned_sources = [real_file(root, item, f"{identifier}.sources") for item in sources]
+    for dependency in module.get("header_dependencies", []):
+        real_file(root, dependency, f"{identifier}.header_dependencies")
     core_sources = [real_file(root, item, "event-bus source")
                     for item in CORE_EVENT_BUS_SOURCES]
     include_paths = [real_directory(root, "src/core/event_bus/include", "event-bus include")]
