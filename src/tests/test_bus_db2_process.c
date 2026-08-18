@@ -237,6 +237,28 @@ int main(int argc, char **argv)
                                              NULL) == AIMEE_MODULE_CALL_OK);
    assert(domain_result == AIMEE_DB2_RESULT_OK && serving_id[0] == '\0');
 
+   /* Exercise the destructive operator action through the packaged process without
+    * mutating the shared replay database. A different target forces complete plan
+    * discovery; dry-run must leave both the effective width and maintenance marker
+    * unchanged. */
+   aimee_db2_dimension_reset_t reset = {0};
+   domain_result = 9;
+   assert(aimee_db2_dimension_reset_call(call_client, &client, 9018, 0, 385, 0, 1, &domain_result,
+                                         &reset, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && reset.recorded_dimension == 384 &&
+          reset.target_dimension == 385 && reset.tables_discovered > 0 &&
+          reset.tables_discovered <= AIMEE_DB2_DIMENSION_RESET_TABLES_MAX &&
+          reset.tables_dropped == 0 && reset.curator_requeued == 0 && reset.evidence_requeued == 0);
+   dimension = 9;
+   assert(aimee_db2_embedding_dimension_call(call_client, &client, 9019, 0, &domain_result,
+                                             &dimension, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && dimension == 384);
+   reembed = (aimee_db2_reembed_status_t){0};
+   assert(aimee_db2_reembed_status_call(call_client, &client, 9020, 0, &domain_result, &reembed,
+                                        NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_NOT_FOUND && reembed.target_dimension == 0 &&
+          reembed.started_epoch == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
