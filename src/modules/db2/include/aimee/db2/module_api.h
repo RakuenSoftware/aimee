@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "1bbb26a27542420f16c8d43274509b7faf4aec1a6699c65cbe9e3eaea7252fea"
+#define AIMEE_DB2_CONTRACT_SHA256 "b6d7c2e727f963840943f0e5e5e2b1e19d34bd144e6a8299270f0d0bb7bba76e"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -242,6 +242,16 @@
 #define AIMEE_DB2_HEALTH_RETENTION_SNAPSHOT_DAYS          90
 #define AIMEE_DB2_HEALTH_RETENTION_CONTRADICTION_DAYS     90
 #define AIMEE_DB2_HEALTH_RETENTION_MAX                    2147483647u
+#define AIMEE_DB2_EVENT_HEALTH_COUNTERS                   AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_HEALTH_COUNTERS                   AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_HEALTH_COUNTERS               16u
+#define AIMEE_DB2_HEALTH_COUNTERS_REQUEST_LEN             24u
+#define AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN            60u
+#define AIMEE_DB2_HEALTH_COUNTERS_ERROR_LEN               24u
+#define AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_USE_COUNT       3
+#define AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_CONFIDENCE      0.9
+#define AIMEE_DB2_HEALTH_COUNTERS_FIELDS                  9u
+#define AIMEE_DB2_HEALTH_COUNTERS_MAX                     2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -1568,6 +1578,98 @@ static inline int aimee_db2_health_retention_reply_decode(const uint8_t *input, 
       return -1;
    *snapshots_deleted = snapshots;
    *contradictions_deleted = contradictions;
+   return 0;
+}
+
+typedef struct
+{
+   uint32_t cycles;
+   uint32_t total_contradictions;
+   uint32_t total_promotions;
+   uint32_t total_demotions;
+   uint32_t total_expirations;
+   uint32_t new_memories;
+   uint32_t l1_eligible;
+   uint32_t l2_total;
+   uint32_t l2_stale_30_days;
+} aimee_db2_health_counters_t;
+
+static inline int aimee_db2_health_counters_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_HEALTH_COUNTERS, 0u, 0u, output,
+                                          capacity);
+}
+
+static inline int aimee_db2_health_counters_request_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_HEALTH_COUNTERS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_HEALTH_COUNTERS &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_health_counters_reply_encode(const aimee_db2_health_counters_t *counters,
+                                                         uint8_t *output, size_t capacity,
+                                                         uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!counters || !output || !output_len)
+      return -1;
+   const uint32_t values[AIMEE_DB2_HEALTH_COUNTERS_FIELDS] = {
+       counters->cycles,           counters->total_contradictions, counters->total_promotions,
+       counters->total_demotions,  counters->total_expirations,    counters->new_memories,
+       counters->l1_eligible,      counters->l2_total,             counters->l2_stale_30_days,
+   };
+   for (uint32_t index = 0u; index < AIMEE_DB2_HEALTH_COUNTERS_FIELDS; index++)
+      if (values[index] > AIMEE_DB2_HEALTH_COUNTERS_MAX)
+         return -1;
+   uint32_t payload_len = 4u * AIMEE_DB2_HEALTH_COUNTERS_FIELDS;
+   if (capacity < AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_HEALTH_COUNTERS, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   for (uint32_t index = 0u; index < AIMEE_DB2_HEALTH_COUNTERS_FIELDS; index++)
+      aimee_db2_put_u32(payload + index * 4u, values[index]);
+   *output_len = AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_health_counters_reply_decode(const uint8_t *input, size_t input_len,
+                                                         aimee_db2_health_counters_t *counters)
+{
+   if (counters)
+      memset(counters, 0, sizeof(*counters));
+   if (!counters)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_HEALTH_COUNTERS ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       header.payload_len != 4u * AIMEE_DB2_HEALTH_COUNTERS_FIELDS)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t values[AIMEE_DB2_HEALTH_COUNTERS_FIELDS];
+   for (uint32_t index = 0u; index < AIMEE_DB2_HEALTH_COUNTERS_FIELDS; index++)
+   {
+      values[index] = aimee_db2_get_u32(payload + index * 4u);
+      if (values[index] > AIMEE_DB2_HEALTH_COUNTERS_MAX)
+         return -1;
+   }
+   counters->cycles = values[0];
+   counters->total_contradictions = values[1];
+   counters->total_promotions = values[2];
+   counters->total_demotions = values[3];
+   counters->total_expirations = values[4];
+   counters->new_memories = values[5];
+   counters->l1_eligible = values[6];
+   counters->l2_total = values[7];
+   counters->l2_stale_30_days = values[8];
    return 0;
 }
 

@@ -270,6 +270,11 @@ int main(int argc, char **argv)
                                           NULL) == AIMEE_MODULE_CALL_OK);
    assert(snapshots_deleted == 0 && contradictions_deleted == 0);
 
+   aimee_db2_health_counters_t counters = {.cycles = 99};
+   assert(aimee_db2_health_counters_call(call_client, &client, 9037, 0, &counters, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(counters.cycles == 0 && counters.l2_stale_30_days == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

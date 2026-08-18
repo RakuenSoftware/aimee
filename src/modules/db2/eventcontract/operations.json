@@ -714,6 +714,40 @@
           {"name": "contradictions_deleted", "type": "u32", "minimum": 0, "maximum": 2147483647}
         ]
       }
+    },
+    {
+      "family": "memory",
+      "id": 16,
+      "name": "health_counters",
+      "wire_format": "db2-envelope-health-counters-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The rolling health-window counters aggregate canonical relational DB2 snapshot and corpus rows; the host derives its rates from them and owns no part of the aggregation.",
+      "c_symbols": ["db2_memory_health_query_counters"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"promote_use_count": 3,
+                   "promote_confidence_binary64_bits": 4606281698874543309}
+      },
+      "reply": {
+        "encoded_size_ok": 60,
+        "encoded_size_error": 24,
+        "fields": [
+          {"name": "cycles", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "total_contradictions", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "total_promotions", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "total_demotions", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "total_expirations", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "new_memories", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "l1_eligible", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "l2_total", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "l2_stale_30_days", "type": "u32", "minimum": 0, "maximum": 2147483647}
+        ]
+      }
     }
   ]
 }

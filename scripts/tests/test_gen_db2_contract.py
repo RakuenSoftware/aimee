@@ -442,6 +442,28 @@ class ContractTests(unittest.TestCase):
              "short", "long"],
         )
 
+    def test_health_counters_vectors_cover_the_whole_aggregate(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][25]
+        self.assertEqual(operation["name"], "health_counters")
+        self.assertEqual(operation["request"]["promote_use_count"], 3)
+        self.assertEqual(operation["request"]["promote_confidence_bits"], 0x3feccccccccccccd)
+        self.assertEqual(
+            [row["mutation"] for row in operation["request"]["negative"]],
+            ["bad_flags", "payload_length", "short", "long"],
+        )
+        self.assertEqual(
+            operation["reply"]["positive"][0]["counters"],
+            {"cycles": 7, "total_contradictions": 13, "total_promotions": 5,
+             "total_demotions": 2, "total_expirations": 4, "new_memories": 21,
+             "l1_eligible": 9, "l2_total": 30, "l2_stale_30_days": 6},
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_payload",
+             "first_counter_too_large", "last_counter_too_large", "short", "long"],
+        )
+
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
         operation = baseline["operations"][2]
@@ -942,6 +964,28 @@ class ContractTests(unittest.TestCase):
              "health-retention-reply"),
             (lambda value: value["operations"][24]["c_symbols"].pop(),
              "operation-c-symbols"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_health_counters_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][25].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][25].__setitem__("results", ["ok", "not_found"]),
+             "operation-results"),
+            (lambda value: value["operations"][25]["request"]["policy"].__setitem__(
+                "promote_use_count", 5), "health-counters-request"),
+            (lambda value: value["operations"][25]["request"]["policy"].__setitem__(
+                "promote_confidence_binary64_bits", 0), "health-counters-request"),
+            # Wire order is part of the contract, not just the field set.
+            (lambda value: value["operations"][25]["reply"]["fields"].reverse(),
+             "health-counters-reply"),
+            (lambda value: value["operations"][25]["reply"]["fields"].pop(),
+             "health-counters-reply"),
+            (lambda value: value["operations"][25]["reply"]["fields"][8].__setitem__(
+                "maximum", 0xffffffff), "health-counters-reply"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):

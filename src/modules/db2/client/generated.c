@@ -475,6 +475,32 @@ aimee_db2_health_retention_call(aimee_db2_call_fn call, void *call_context, uint
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_health_counters_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                               uint64_t deadline_ns, aimee_db2_health_counters_t *counters,
+                               aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (counters)
+      memset(counters, 0, sizeof(*counters));
+   if (!call || !counters)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_HEALTH_COUNTERS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_health_counters_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_HEALTH_COUNTERS, AIMEE_DB2_STAGE_HEALTH_COUNTERS,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_health_counters_reply_decode(response, response_len, counters) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,

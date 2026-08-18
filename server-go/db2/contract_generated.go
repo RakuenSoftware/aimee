@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "1bbb26a27542420f16c8d43274509b7faf4aec1a6699c65cbe9e3eaea7252fea"
+const ContractSHA256 = "b6d7c2e727f963840943f0e5e5e2b1e19d34bd144e6a8299270f0d0bb7bba76e"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -164,6 +164,13 @@ const OperationHealthRetention uint32 = 15
 const HealthRetentionSnapshotDays uint32 = 90
 const HealthRetentionContradictionDays uint32 = 90
 const HealthRetentionMax uint32 = 2147483647
+const EventHealthCounters = EventMemory
+const StageHealthCounters = FamilyMemory
+const OperationHealthCounters uint32 = 16
+const HealthCountersPromoteUseCount uint32 = 3
+const HealthCountersPromoteConfidenceBits uint64 = 4606281698874543309
+const HealthCountersFields = 9
+const HealthCountersMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1001,6 +1008,89 @@ type EffectivenessStats struct {
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}
+
+// HealthCounters is the rolling health-window aggregate the host derives its rates from.
+type HealthCounters struct {
+	Cycles              uint32
+	TotalContradictions uint32
+	TotalPromotions     uint32
+	TotalDemotions      uint32
+	TotalExpirations    uint32
+	NewMemories         uint32
+	L1Eligible          uint32
+	L2Total             uint32
+	L2Stale30Days       uint32
+}
+
+func (c HealthCounters) values() [HealthCountersFields]uint32 {
+	return [HealthCountersFields]uint32{
+		c.Cycles, c.TotalContradictions, c.TotalPromotions, c.TotalDemotions,
+		c.TotalExpirations, c.NewMemories, c.L1Eligible, c.L2Total, c.L2Stale30Days,
+	}
+}
+
+// EncodeHealthCountersRequest emits the empty request for the fixed promotion policy.
+func EncodeHealthCountersRequest() []byte {
+	header, err := EncodeRequestHeader(OperationHealthCounters, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeHealthCountersRequest validates the exact empty operation envelope.
+func DecodeHealthCountersRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationHealthCounters || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeHealthCountersReply emits every bounded counter in the contract's order.
+func EncodeHealthCountersReply(counters HealthCounters) ([]byte, error) {
+	values := counters.values()
+	for _, value := range values {
+		if value > HealthCountersMax {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	payloadLen := 4 * HealthCountersFields
+	header, err := EncodeReplyHeader(OperationHealthCounters, ResultOK, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	for index, value := range values {
+		binary.LittleEndian.PutUint32(payload[index*4:], value)
+	}
+	return reply, nil
+}
+
+// DecodeHealthCountersReply validates the operation and every bounded counter.
+func DecodeHealthCountersReply(reply []byte) (HealthCounters, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationHealthCounters || header.Result != ResultOK ||
+		header.PayloadLen != uint32(4*HealthCountersFields) ||
+		len(reply) != int(EnvelopeHeaderLen)+4*HealthCountersFields {
+		return HealthCounters{}, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	var values [HealthCountersFields]uint32
+	for index := range values {
+		values[index] = binary.LittleEndian.Uint32(payload[index*4:])
+		if values[index] > HealthCountersMax {
+			return HealthCounters{}, ErrMalformedEnvelope
+		}
+	}
+	return HealthCounters{
+		Cycles: values[0], TotalContradictions: values[1], TotalPromotions: values[2],
+		TotalDemotions: values[3], TotalExpirations: values[4], NewMemories: values[5],
+		L1Eligible: values[6], L2Total: values[7], L2Stale30Days: values[8],
+	}, nil
 }
 
 // EncodeHealthRetentionRequest emits the empty request for the complete fixed policy.

@@ -8,6 +8,42 @@
 #include "c/memory_payload.h"
 #include "c/memory_query.h"
 
+static int production_health_counters(int promote_use_count, double promote_confidence,
+                                      aimee_db2_health_counters_t *counters)
+{
+   if (!counters)
+      return -1;
+   db2_memory_health_query_counters_t raw = {0};
+   if (db2_memory_health_query_counters(promote_use_count, promote_confidence, &raw) != 0)
+      return -1;
+   const int values[] = {
+       raw.cycles,
+       raw.total_contradictions,
+       raw.total_promotions,
+       raw.total_demotions,
+       raw.total_expirations,
+       raw.new_memories,
+       raw.l1_eligible,
+       raw.l2_total,
+       raw.l2_stale_30_days,
+   };
+   for (size_t index = 0; index < sizeof(values) / sizeof(values[0]); index++)
+      if (values[index] < 0 || values[index] > (int)AIMEE_DB2_HEALTH_COUNTERS_MAX)
+         return -1;
+   *counters = (aimee_db2_health_counters_t){
+       .cycles = (uint32_t)raw.cycles,
+       .total_contradictions = (uint32_t)raw.total_contradictions,
+       .total_promotions = (uint32_t)raw.total_promotions,
+       .total_demotions = (uint32_t)raw.total_demotions,
+       .total_expirations = (uint32_t)raw.total_expirations,
+       .new_memories = (uint32_t)raw.new_memories,
+       .l1_eligible = (uint32_t)raw.l1_eligible,
+       .l2_total = (uint32_t)raw.l2_total,
+       .l2_stale_30_days = (uint32_t)raw.l2_stale_30_days,
+   };
+   return 0;
+}
+
 static int production_pool_status(aimee_db2_pool_status_t *status)
 {
    int size = 0, in_use = 0, waiters = 0;
@@ -134,6 +170,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .health_record = db2_memory_health_record,
        .prune_health = db2_memory_health_prune_old,
        .prune_contradictions = db2_memory_health_prune_old_contradictions,
+       .health_counters = production_health_counters,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -464,6 +501,23 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_health_retention_reply_encode((uint32_t)snapshots, (uint32_t)contradictions,
                                                      response_body, response_capacity,
                                                      response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_health_counters_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->health_counters)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         aimee_db2_health_counters_t counters = {0};
+         if (backend->health_counters(AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_USE_COUNT,
+                                      AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_CONFIDENCE, &counters) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_health_counters_reply_encode(&counters, response_body, response_capacity,
+                                                    response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

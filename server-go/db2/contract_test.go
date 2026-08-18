@@ -53,6 +53,8 @@ type wireBaseline struct {
 			ConflictWindowDays         uint32 `json:"conflict_window_days"`
 			SnapshotRetentionDays      uint32 `json:"snapshot_retention_days"`
 			ContradictionRetentionDays uint32 `json:"contradiction_retention_days"`
+			PromoteUseCount            uint32 `json:"promote_use_count"`
+			PromoteConfidenceBits      uint64 `json:"promote_confidence_bits"`
 			Negative                   []struct {
 				Mutation string `json:"mutation"`
 				Hex      string `json:"hex"`
@@ -60,42 +62,43 @@ type wireBaseline struct {
 		} `json:"request"`
 		Reply struct {
 			Positive []struct {
-				Flags                 uint32   `json:"flags"`
-				Result                uint32   `json:"result"`
-				Dimension             uint32   `json:"dimension"`
-				Count                 uint64   `json:"count"`
-				DeletedCount          uint32   `json:"deleted_count"`
-				DemotedCount          uint32   `json:"demoted_count"`
-				AvgEffectivenessBits  uint64   `json:"avg_effectiveness_bits"`
-				LowEffectivenessCount uint32   `json:"low_effectiveness_count"`
-				HighImpactCount       uint32   `json:"high_impact_count"`
-				MemoryIDs             []uint64 `json:"memory_ids"`
-				SnapshotsDeleted      uint32   `json:"snapshots_deleted"`
-				ContradictionsDeleted uint32   `json:"contradictions_deleted"`
-				Exists                uint32   `json:"exists"`
-				Found                 uint32   `json:"found"`
-				ID                    uint64   `json:"id"`
-				Size                  uint32   `json:"size"`
-				InUse                 uint32   `json:"in_use"`
-				Waiters               uint32   `json:"waiters"`
-				LeaseGrants           uint64   `json:"lease_grants"`
-				LeaseTimeouts         uint64   `json:"lease_timeouts"`
-				Stuck                 uint64   `json:"stuck"`
-				Poisoned              uint64   `json:"poisoned"`
-				RefusedCount          uint64   `json:"refused_count"`
-				LastOffered           uint32   `json:"last_offered"`
-				Available             uint32   `json:"available"`
-				Active                uint32   `json:"active_connections"`
-				Maximum               uint32   `json:"max_connections"`
-				IsReplica             uint32   `json:"is_replica"`
-				ReplicaLag            uint64   `json:"replica_lag_bytes"`
-				TargetDim             uint32   `json:"target_dimension"`
-				StartedEpoch          uint64   `json:"started_epoch"`
-				WasInProgress         uint32   `json:"was_in_progress"`
-				RecordedDim           uint32   `json:"recorded_dimension"`
-				RunningDim            uint32   `json:"running_dimension"`
-				ServingID             string   `json:"serving_id"`
-				Hex                   string   `json:"hex"`
+				Flags                 uint32            `json:"flags"`
+				Result                uint32            `json:"result"`
+				Dimension             uint32            `json:"dimension"`
+				Count                 uint64            `json:"count"`
+				DeletedCount          uint32            `json:"deleted_count"`
+				DemotedCount          uint32            `json:"demoted_count"`
+				AvgEffectivenessBits  uint64            `json:"avg_effectiveness_bits"`
+				LowEffectivenessCount uint32            `json:"low_effectiveness_count"`
+				HighImpactCount       uint32            `json:"high_impact_count"`
+				MemoryIDs             []uint64          `json:"memory_ids"`
+				SnapshotsDeleted      uint32            `json:"snapshots_deleted"`
+				ContradictionsDeleted uint32            `json:"contradictions_deleted"`
+				Counters              map[string]uint32 `json:"counters"`
+				Exists                uint32            `json:"exists"`
+				Found                 uint32            `json:"found"`
+				ID                    uint64            `json:"id"`
+				Size                  uint32            `json:"size"`
+				InUse                 uint32            `json:"in_use"`
+				Waiters               uint32            `json:"waiters"`
+				LeaseGrants           uint64            `json:"lease_grants"`
+				LeaseTimeouts         uint64            `json:"lease_timeouts"`
+				Stuck                 uint64            `json:"stuck"`
+				Poisoned              uint64            `json:"poisoned"`
+				RefusedCount          uint64            `json:"refused_count"`
+				LastOffered           uint32            `json:"last_offered"`
+				Available             uint32            `json:"available"`
+				Active                uint32            `json:"active_connections"`
+				Maximum               uint32            `json:"max_connections"`
+				IsReplica             uint32            `json:"is_replica"`
+				ReplicaLag            uint64            `json:"replica_lag_bytes"`
+				TargetDim             uint32            `json:"target_dimension"`
+				StartedEpoch          uint64            `json:"started_epoch"`
+				WasInProgress         uint32            `json:"was_in_progress"`
+				RecordedDim           uint32            `json:"recorded_dimension"`
+				RunningDim            uint32            `json:"running_dimension"`
+				ServingID             string            `json:"serving_id"`
+				Hex                   string            `json:"hex"`
 			} `json:"positive"`
 			Negative []struct {
 				Mutation string `json:"mutation"`
@@ -190,7 +193,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 25 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 26 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -214,7 +217,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[21].Name != "effectiveness_stats" ||
 		baseline.Operations[22].Name != "l2_memory_ids" ||
 		baseline.Operations[23].Name != "health_record" ||
-		baseline.Operations[24].Name != "health_retention" {
+		baseline.Operations[24].Name != "health_retention" ||
+		baseline.Operations[25].Name != "health_counters" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -783,6 +787,69 @@ func TestHealthRetentionMatchesEverySharedCVector(t *testing.T) {
 	}
 	if _, err := EncodeHealthRetentionReply(0, HealthRetentionMax+1); !errors.Is(err, ErrMalformedEnvelope) {
 		t.Fatalf("contradiction count past its bound encoded: %v", err)
+	}
+}
+
+func TestHealthCountersMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[25]
+	if operation.Request.PromoteUseCount != HealthCountersPromoteUseCount ||
+		operation.Request.PromoteConfidenceBits != HealthCountersPromoteConfidenceBits ||
+		math.Float64bits(0.9) != HealthCountersPromoteConfidenceBits {
+		t.Fatalf("promotion policy = (%d, %x), generated = (%d, %x)",
+			operation.Request.PromoteUseCount, operation.Request.PromoteConfidenceBits,
+			HealthCountersPromoteUseCount, HealthCountersPromoteConfidenceBits)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeHealthCountersRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeHealthCountersRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeHealthCountersRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		want := HealthCounters{
+			Cycles:              vector.Counters["cycles"],
+			TotalContradictions: vector.Counters["total_contradictions"],
+			TotalPromotions:     vector.Counters["total_promotions"],
+			TotalDemotions:      vector.Counters["total_demotions"],
+			TotalExpirations:    vector.Counters["total_expirations"],
+			NewMemories:         vector.Counters["new_memories"],
+			L1Eligible:          vector.Counters["l1_eligible"],
+			L2Total:             vector.Counters["l2_total"],
+			L2Stale30Days:       vector.Counters["l2_stale_30_days"],
+		}
+		got, err := EncodeHealthCountersReply(want)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		counters, err := DecodeHealthCountersReply(got)
+		if err != nil || counters != want {
+			t.Fatalf("decode = (%+v, %v)", counters, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		counters, err := DecodeHealthCountersReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || counters != (HealthCounters{}) {
+			t.Fatalf("negative reply %s = (%+v, %v)", vector.Mutation, counters, err)
+		}
+	}
+	// Each counter is bounded independently, wherever it sits on the wire.
+	for index := range HealthCountersFields {
+		var counters HealthCounters
+		values := [HealthCountersFields]*uint32{
+			&counters.Cycles, &counters.TotalContradictions, &counters.TotalPromotions,
+			&counters.TotalDemotions, &counters.TotalExpirations, &counters.NewMemories,
+			&counters.L1Eligible, &counters.L2Total, &counters.L2Stale30Days,
+		}
+		*values[index] = HealthCountersMax + 1
+		if _, err := EncodeHealthCountersReply(counters); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("counter %d past its bound encoded: %v", index, err)
+		}
 	}
 }
 

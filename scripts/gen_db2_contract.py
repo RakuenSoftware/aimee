@@ -37,6 +37,13 @@ ENVELOPE_REQUEST_MAGIC = 0x51523244  # "D2RQ", little-endian
 ENVELOPE_REPLY_MAGIC = 0x52523244  # "D2RR", little-endian
 ENVELOPE_HEADER_LEN = 24
 NAME = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+# The rolling health-window aggregate, in the order the reviewed struct declares
+# it. Wire order is part of the contract, so it lives here rather than being
+# re-listed at each use.
+HEALTH_COUNTERS = (
+    "cycles", "total_contradictions", "total_promotions", "total_demotions",
+    "total_expirations", "new_memories", "l1_eligible", "l2_total", "l2_stale_30_days",
+)
 
 
 class ContractError(ValueError):
@@ -947,9 +954,41 @@ def validate_catalog(value: object) -> dict[str, object]:
                                for name_ in ("snapshots_deleted", "contradictions_deleted")]):
                 fail("health-retention-reply",
                      "reply must contain the two bounded deletion counts")
+        elif key == ("memory", 16) and name == "health_counters" and \
+                operation["wire_format"] == "db2-envelope-health-counters-v1":
+            if operation["c_symbols"] != ["db2_memory_health_query_counters"]:
+                fail("operation-c-symbols",
+                     "health_counters C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "health_counters results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "health_counters.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"promote_use_count": 3,
+                                          "promote_confidence_binary64_bits":
+                                              0x3feccccccccccccd}):
+                fail("health-counters-request",
+                     "request must carry no payload and use the fixed canonical promotion policy")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "health_counters.reply")
+            reply_fields = reply["fields"]
+            if not isinstance(reply_fields, list) or len(reply_fields) != len(HEALTH_COUNTERS):
+                fail("health-counters-reply",
+                     "reply must contain the complete rolling-window aggregate")
+            counters = [_keys(field, {"name", "type", "minimum", "maximum"},
+                              f"health_counters.reply.fields[{index}]")
+                        for index, field in enumerate(reply_fields)]
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 * len(HEALTH_COUNTERS) or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    counters != [{"name": counter, "type": "u32", "minimum": 0,
+                                  "maximum": 0x7fffffff} for counter in HEALTH_COUNTERS]):
+                fail("health-counters-reply",
+                     "reply must contain every bounded counter in the reviewed order")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 25 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 26 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -957,9 +996,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "session_l2_count", "key_exists", "find_id_by_key_kind",
             "key_exists_in_tier_pair", "effectiveness_update", "retention_enforce",
             "effectiveness_demote", "effectiveness_stats", "l2_memory_ids",
-            "health_record", "health_retention"]:
+            "health_record", "health_retention", "health_counters"]:
         fail("unsupported-operation",
-             "the partial generator requires the twenty-five supported operations exactly once")
+             "the partial generator requires the twenty-six supported operations exactly once")
     return catalog
 
 
@@ -1108,6 +1147,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     l2_memory_ids = catalog["operations"][22]
     health_record = catalog["operations"][23]
     health_retention = catalog["operations"][24]
+    health_counters = catalog["operations"][25]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1372,6 +1412,14 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     health_retention_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(health_retention["id"]), 0,
         _put_u32(11) + _put_u32(3),
+    )
+    health_counters_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(health_counters["id"]), 0, b"",
+    )
+    health_counters_values = (7, 13, 5, 2, 4, 21, 9, 30, 6)
+    health_counters_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(health_counters["id"]), 0,
+        b"".join(_put_u32(value) for value in health_counters_values),
     )
 
     value = {
@@ -2536,6 +2584,48 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (health_retention_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": health_counters["family"],
+            "id": health_counters["id"],
+            "name": health_counters["name"],
+            "request": {
+                "positive": health_counters_request.hex(),
+                "promote_use_count":
+                    health_counters["request"]["policy"]["promote_use_count"],
+                "promote_confidence_bits":
+                    health_counters["request"]["policy"]["promote_confidence_binary64_bits"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(health_counters_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(health_counters_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": health_counters_request[:-1].hex()},
+                    {"mutation": "long", "hex": (health_counters_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0,
+                     "counters": dict(zip(HEALTH_COUNTERS, health_counters_values)),
+                     "hex": health_counters_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(health_counters_ok, 8, 15).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(health_counters_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(health_counters["id"]), 0, b"").hex()},
+                    # Every counter is bounded, including the last one on the wire.
+                    {"mutation": "first_counter_too_large", "hex":
+                     mutate_u32(health_counters_ok, ENVELOPE_HEADER_LEN, 0x80000000).hex()},
+                    {"mutation": "last_counter_too_large", "hex":
+                     (health_counters_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": health_counters_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (health_counters_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -2573,6 +2663,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     l2_memory_ids = catalog["operations"][22]
     health_record = catalog["operations"][23]
     health_retention = catalog["operations"][24]
+    health_counters = catalog["operations"][25]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -2913,6 +3004,23 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{health_retention['request']['policy']['contradiction_retention_days']}"),
         ("AIMEE_DB2_HEALTH_RETENTION_MAX",
          f"{health_retention['reply']['fields'][0]['maximum']}u"),
+        ("AIMEE_DB2_EVENT_HEALTH_COUNTERS", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_HEALTH_COUNTERS", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_HEALTH_COUNTERS", f"{health_counters['id']}u"),
+        ("AIMEE_DB2_HEALTH_COUNTERS_REQUEST_LEN",
+         f"{health_counters['request']['encoded_size']}u"),
+        ("AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN",
+         f"{health_counters['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_HEALTH_COUNTERS_ERROR_LEN",
+         f"{health_counters['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_USE_COUNT",
+         f"{health_counters['request']['policy']['promote_use_count']}"),
+        ("AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_CONFIDENCE",
+         _binary64_literal(
+             health_counters["request"]["policy"]["promote_confidence_binary64_bits"])),
+        ("AIMEE_DB2_HEALTH_COUNTERS_FIELDS", f"{len(HEALTH_COUNTERS)}u"),
+        ("AIMEE_DB2_HEALTH_COUNTERS_MAX",
+         f"{health_counters['reply']['fields'][0]['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -4268,6 +4376,98 @@ static inline int aimee_db2_health_retention_reply_decode(const uint8_t *input, 
    return 0;
 }}
 
+typedef struct
+{{
+   uint32_t cycles;
+   uint32_t total_contradictions;
+   uint32_t total_promotions;
+   uint32_t total_demotions;
+   uint32_t total_expirations;
+   uint32_t new_memories;
+   uint32_t l1_eligible;
+   uint32_t l2_total;
+   uint32_t l2_stale_30_days;
+}} aimee_db2_health_counters_t;
+
+static inline int aimee_db2_health_counters_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_HEALTH_COUNTERS, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_health_counters_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_HEALTH_COUNTERS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_HEALTH_COUNTERS &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_health_counters_reply_encode(const aimee_db2_health_counters_t *counters,
+                                                         uint8_t *output, size_t capacity,
+                                                         uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!counters || !output || !output_len)
+      return -1;
+   const uint32_t values[AIMEE_DB2_HEALTH_COUNTERS_FIELDS] = {{
+       counters->cycles,           counters->total_contradictions, counters->total_promotions,
+       counters->total_demotions,  counters->total_expirations,    counters->new_memories,
+       counters->l1_eligible,      counters->l2_total,             counters->l2_stale_30_days,
+   }};
+   for (uint32_t index = 0u; index < AIMEE_DB2_HEALTH_COUNTERS_FIELDS; index++)
+      if (values[index] > AIMEE_DB2_HEALTH_COUNTERS_MAX)
+         return -1;
+   uint32_t payload_len = 4u * AIMEE_DB2_HEALTH_COUNTERS_FIELDS;
+   if (capacity < AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_HEALTH_COUNTERS, AIMEE_DB2_RESULT_OK,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   for (uint32_t index = 0u; index < AIMEE_DB2_HEALTH_COUNTERS_FIELDS; index++)
+      aimee_db2_put_u32(payload + index * 4u, values[index]);
+   *output_len = AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_health_counters_reply_decode(const uint8_t *input, size_t input_len,
+                                                         aimee_db2_health_counters_t *counters)
+{{
+   if (counters)
+      memset(counters, 0, sizeof(*counters));
+   if (!counters)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_HEALTH_COUNTERS ||
+       header.result != AIMEE_DB2_RESULT_OK ||
+       header.payload_len != 4u * AIMEE_DB2_HEALTH_COUNTERS_FIELDS)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t values[AIMEE_DB2_HEALTH_COUNTERS_FIELDS];
+   for (uint32_t index = 0u; index < AIMEE_DB2_HEALTH_COUNTERS_FIELDS; index++)
+   {{
+      values[index] = aimee_db2_get_u32(payload + index * 4u);
+      if (values[index] > AIMEE_DB2_HEALTH_COUNTERS_MAX)
+         return -1;
+   }}
+   counters->cycles = values[0];
+   counters->total_contradictions = values[1];
+   counters->total_promotions = values[2];
+   counters->total_demotions = values[3];
+   counters->total_expirations = values[4];
+   counters->new_memories = values[5];
+   counters->l1_eligible = values[6];
+   counters->l2_total = values[7];
+   counters->l2_stale_30_days = values[8];
+   return 0;
+}}
+
 static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)
 {{
    return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, 0u, 0u, output,
@@ -5194,6 +5394,11 @@ extern "C"
        uint32_t *snapshots_deleted, uint32_t *contradictions_deleted,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_health_counters_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       aimee_db2_health_counters_t *counters, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -5721,6 +5926,32 @@ aimee_db2_health_retention_call(aimee_db2_call_fn call, void *call_context, uint
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t
+aimee_db2_health_counters_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                               uint64_t deadline_ns, aimee_db2_health_counters_t *counters,
+                               aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (counters)
+      memset(counters, 0, sizeof(*counters));
+   if (!call || !counters)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_HEALTH_COUNTERS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_health_counters_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_HEALTH_COUNTERS, AIMEE_DB2_STAGE_HEALTH_COUNTERS,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_health_counters_reply_decode(response, response_len, counters) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -5985,6 +6216,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     l2_memory_ids = catalog["operations"][22]
     health_record = catalog["operations"][23]
     health_retention = catalog["operations"][24]
+    health_counters = catalog["operations"][25]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -6150,6 +6382,13 @@ const OperationHealthRetention uint32 = {health_retention['id']}
 const HealthRetentionSnapshotDays uint32 = {health_retention['request']['policy']['snapshot_retention_days']}
 const HealthRetentionContradictionDays uint32 = {health_retention['request']['policy']['contradiction_retention_days']}
 const HealthRetentionMax uint32 = {health_retention['reply']['fields'][0]['maximum']}
+const EventHealthCounters = EventMemory
+const StageHealthCounters = FamilyMemory
+const OperationHealthCounters uint32 = {health_counters['id']}
+const HealthCountersPromoteUseCount uint32 = {health_counters['request']['policy']['promote_use_count']}
+const HealthCountersPromoteConfidenceBits uint64 = {health_counters['request']['policy']['promote_confidence_binary64_bits']}
+const HealthCountersFields = {len(HEALTH_COUNTERS)}
+const HealthCountersMax uint32 = {health_counters['reply']['fields'][0]['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -6985,6 +7224,89 @@ type EffectivenessStats struct {{
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}}
+
+// HealthCounters is the rolling health-window aggregate the host derives its rates from.
+type HealthCounters struct {{
+	Cycles              uint32
+	TotalContradictions uint32
+	TotalPromotions     uint32
+	TotalDemotions      uint32
+	TotalExpirations    uint32
+	NewMemories         uint32
+	L1Eligible          uint32
+	L2Total             uint32
+	L2Stale30Days       uint32
+}}
+
+func (c HealthCounters) values() [HealthCountersFields]uint32 {{
+	return [HealthCountersFields]uint32{{
+		c.Cycles, c.TotalContradictions, c.TotalPromotions, c.TotalDemotions,
+		c.TotalExpirations, c.NewMemories, c.L1Eligible, c.L2Total, c.L2Stale30Days,
+	}}
+}}
+
+// EncodeHealthCountersRequest emits the empty request for the fixed promotion policy.
+func EncodeHealthCountersRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationHealthCounters, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeHealthCountersRequest validates the exact empty operation envelope.
+func DecodeHealthCountersRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationHealthCounters || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeHealthCountersReply emits every bounded counter in the contract's order.
+func EncodeHealthCountersReply(counters HealthCounters) ([]byte, error) {{
+	values := counters.values()
+	for _, value := range values {{
+		if value > HealthCountersMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	payloadLen := 4 * HealthCountersFields
+	header, err := EncodeReplyHeader(OperationHealthCounters, ResultOK, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	for index, value := range values {{
+		binary.LittleEndian.PutUint32(payload[index*4:], value)
+	}}
+	return reply, nil
+}}
+
+// DecodeHealthCountersReply validates the operation and every bounded counter.
+func DecodeHealthCountersReply(reply []byte) (HealthCounters, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationHealthCounters || header.Result != ResultOK ||
+		header.PayloadLen != uint32(4*HealthCountersFields) ||
+		len(reply) != int(EnvelopeHeaderLen)+4*HealthCountersFields {{
+		return HealthCounters{{}}, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	var values [HealthCountersFields]uint32
+	for index := range values {{
+		values[index] = binary.LittleEndian.Uint32(payload[index*4:])
+		if values[index] > HealthCountersMax {{
+			return HealthCounters{{}}, ErrMalformedEnvelope
+		}}
+	}}
+	return HealthCounters{{
+		Cycles: values[0], TotalContradictions: values[1], TotalPromotions: values[2],
+		TotalDemotions: values[3], TotalExpirations: values[4], NewMemories: values[5],
+		L1Eligible: values[6], L2Total: values[7], L2Stale30Days: values[8],
+	}}, nil
 }}
 
 // EncodeHealthRetentionRequest emits the empty request for the complete fixed policy.

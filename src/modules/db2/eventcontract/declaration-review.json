@@ -1500,6 +1500,14 @@
       "reason": "The typed memory.health_retention operation runs contradiction pruning together with health-snapshot pruning under one fixed policy, so this half is never invoked on its own."
     },
     {
+      "symbol": "db2_memory_health_query_counters",
+      "signature_sha256": "07a19db46b4eb5496de2db2d8be823485644c416fefdb08a0acb8229e115f1e6",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.health_counters operation returns the complete rolling-window aggregate under the fixed host promotion policy; DB2 owns every count and the host derives only ratios from them."
+    },
+    {
       "symbol": "db2_memory_health_record",
       "signature_sha256": "1721479092870132f590c9472bd062ad44b298ca88a30abd0f100b5564daf726",
       "disposition": "wire-operation",

@@ -51,6 +51,8 @@ typedef struct
                          int demotions, int expirations);
    int (*prune_health)(int days);
    int (*prune_contradictions)(int days);
+   int (*health_counters)(int promote_use_count, double promote_confidence,
+                          aimee_db2_health_counters_t *counters);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -105,6 +107,7 @@ static int health_record_contradictions;
 static int health_record_promotions;
 static int prune_health_calls;
 static int prune_contradictions_calls;
+static int health_counters_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -446,6 +449,37 @@ static int prune_contradictions(int days)
    return prune_contradictions_impl(days);
 }
 
+/* The counter struct is DB2-private, so the production symbol takes void * here
+ * the way db2_dim_change_reset does; these tests drive their own backend. */
+int db2_memory_health_query_counters(int promote_use_count, double promote_confidence, void *out)
+{
+   (void)promote_use_count;
+   (void)promote_confidence;
+   (void)out;
+   return -1;
+}
+
+static int health_counters(int promote_use_count, double promote_confidence,
+                           aimee_db2_health_counters_t *counters)
+{
+   health_counters_calls++;
+   if (promote_use_count != (int)AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_USE_COUNT ||
+       promote_confidence != AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_CONFIDENCE)
+      return -1;
+   *counters = (aimee_db2_health_counters_t){
+       .cycles = 7,
+       .total_contradictions = 13,
+       .total_promotions = 5,
+       .total_demotions = 2,
+       .total_expirations = 4,
+       .new_memories = 21,
+       .l1_eligible = 9,
+       .l2_total = 30,
+       .l2_stale_30_days = 6,
+   };
+   return 0;
+}
+
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
                     long *stuck, long *poisoned)
 {
@@ -719,6 +753,7 @@ int main(void)
        .health_record = health_record,
        .prune_health = prune_health,
        .prune_contradictions = prune_contradictions,
+       .health_counters = health_counters,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -850,6 +885,12 @@ int main(void)
                                           NULL) == AIMEE_MODULE_CALL_OK);
    assert(snapshots_deleted == 11 && contradictions_deleted == 3 && prune_health_calls == 1 &&
           prune_contradictions_calls == 1);
+
+   aimee_db2_health_counters_t counters = {0};
+   assert(aimee_db2_health_counters_call(call_client, &client, 7035, 0, &counters, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(counters.cycles == 7 && counters.total_contradictions == 13 &&
+          counters.l2_stale_30_days == 6 && health_counters_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

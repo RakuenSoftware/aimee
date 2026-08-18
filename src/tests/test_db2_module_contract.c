@@ -68,6 +68,11 @@ static int prune_health_value;
 static int prune_health_days;
 static int prune_contradictions_value;
 static int prune_contradictions_days;
+static int health_counters_result;
+static int health_counters_calls;
+static int health_counters_use_count;
+static double health_counters_confidence;
+static uint32_t health_counters_cycles;
 static int pool_status_result;
 static long long refused_count_value;
 static int last_offered_value;
@@ -110,6 +115,7 @@ static int transport_expect_effectiveness_stats;
 static int transport_expect_l2_memory_ids;
 static int transport_expect_health_record;
 static int transport_expect_health_retention;
+static int transport_expect_health_counters;
 static int transport_expect_pool;
 static int transport_expect_refusals;
 static int transport_expect_postgres;
@@ -484,6 +490,38 @@ static int prune_contradictions(int days)
    return prune_contradictions_impl(days);
 }
 
+/* The counter struct is DB2-private, so the production symbol takes void * here
+ * the way db2_dim_change_reset does; these tests drive their own backend. */
+int db2_memory_health_query_counters(int promote_use_count, double promote_confidence, void *out)
+{
+   (void)promote_use_count;
+   (void)promote_confidence;
+   (void)out;
+   return -1;
+}
+
+static int health_counters(int promote_use_count, double promote_confidence,
+                           aimee_db2_health_counters_t *counters)
+{
+   health_counters_calls++;
+   health_counters_use_count = promote_use_count;
+   health_counters_confidence = promote_confidence;
+   if (health_counters_result != 0)
+      return health_counters_result;
+   *counters = (aimee_db2_health_counters_t){
+       .cycles = health_counters_cycles,
+       .total_contradictions = 13,
+       .total_promotions = 5,
+       .total_demotions = 2,
+       .total_expirations = 4,
+       .new_memories = 21,
+       .l1_eligible = 9,
+       .l2_total = 30,
+       .l2_stale_30_days = 6,
+   };
+   return 0;
+}
+
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
                     long *stuck, long *poisoned)
 {
@@ -672,6 +710,11 @@ static void reset(void)
    prune_health_days = 0;
    prune_contradictions_value = 3;
    prune_contradictions_days = 0;
+   health_counters_result = 0;
+   health_counters_calls = 0;
+   health_counters_use_count = 0;
+   health_counters_confidence = 0.0;
+   health_counters_cycles = 7;
    pool_status_result = 0;
    refused_count_value = 7;
    last_offered_value = 768;
@@ -709,6 +752,7 @@ static void reset(void)
    transport_expect_l2_memory_ids = 0;
    transport_expect_health_record = 0;
    transport_expect_health_retention = 0;
+   transport_expect_health_counters = 0;
    transport_expect_pool = 0;
    transport_expect_refusals = 0;
    transport_expect_postgres = 0;
@@ -729,7 +773,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
 {
    assert(context == (void *)0x1234);
    uint32_t expected_event =
-       transport_expect_health_retention          ? AIMEE_DB2_EVENT_HEALTH_RETENTION
+       transport_expect_health_counters           ? AIMEE_DB2_EVENT_HEALTH_COUNTERS
+       : transport_expect_health_retention        ? AIMEE_DB2_EVENT_HEALTH_RETENTION
        : transport_expect_health_record           ? AIMEE_DB2_EVENT_HEALTH_RECORD
        : transport_expect_l2_memory_ids           ? AIMEE_DB2_EVENT_L2_MEMORY_IDS
        : transport_expect_effectiveness_stats     ? AIMEE_DB2_EVENT_EFFECTIVENESS_STATS
@@ -755,7 +800,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
        : transport_expect_dimension               ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
                                                   : AIMEE_DB2_EVENT_HEALTH;
    uint32_t expected_stage =
-       transport_expect_health_retention          ? AIMEE_DB2_STAGE_HEALTH_RETENTION
+       transport_expect_health_counters           ? AIMEE_DB2_STAGE_HEALTH_COUNTERS
+       : transport_expect_health_retention        ? AIMEE_DB2_STAGE_HEALTH_RETENTION
        : transport_expect_health_record           ? AIMEE_DB2_STAGE_HEALTH_RECORD
        : transport_expect_l2_memory_ids           ? AIMEE_DB2_STAGE_L2_MEMORY_IDS
        : transport_expect_effectiveness_stats     ? AIMEE_DB2_STAGE_EFFECTIVENESS_STATS
@@ -784,7 +830,9 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
    assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_health_retention)
+   if (transport_expect_health_counters)
+      assert(aimee_db2_health_counters_request_decode(request_body, request_len) == 0);
+   else if (transport_expect_health_retention)
       assert(aimee_db2_health_retention_request_decode(request_body, request_len) == 0);
    else if (transport_expect_health_record)
    {
@@ -1594,6 +1642,55 @@ static void test_health_retention_wire(void)
    assert(aimee_db2_health_retention_reply_decode(reply, reply_len, &snapshots, &contradictions) ==
           -1);
    assert(snapshots == 0 && contradictions == 0);
+}
+
+static void test_health_counters_wire(void)
+{
+   uint64_t confidence_bits = 0;
+   double confidence = AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_CONFIDENCE;
+   memcpy(&confidence_bits, &confidence, sizeof(confidence_bits));
+   assert(confidence_bits == 0x3feccccccccccccdULL);
+   assert(AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_USE_COUNT == 3);
+
+   uint8_t request[AIMEE_DB2_HEALTH_COUNTERS_REQUEST_LEN] = {0};
+   assert(aimee_db2_health_counters_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_health_counters_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12u, 1u);
+   assert(aimee_db2_health_counters_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99;
+   const aimee_db2_health_counters_t counters = {
+       .cycles = 7,
+       .total_contradictions = 13,
+       .total_promotions = 5,
+       .total_demotions = 2,
+       .total_expirations = 4,
+       .new_memories = 21,
+       .l1_eligible = 9,
+       .l2_total = 30,
+       .l2_stale_30_days = 6,
+   };
+   aimee_db2_health_counters_t decoded = {0};
+   assert(aimee_db2_health_counters_reply_encode(&counters, reply, sizeof(reply), &reply_len) == 0);
+   assert(reply_len == AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN);
+   assert(aimee_db2_health_counters_reply_decode(reply, reply_len, &decoded) == 0);
+   assert(memcmp(&decoded, &counters, sizeof(decoded)) == 0);
+
+   /* Every counter is bounded, including the last field on the wire. */
+   aimee_db2_health_counters_t overflow = counters;
+   overflow.cycles = AIMEE_DB2_HEALTH_COUNTERS_MAX + 1u;
+   assert(aimee_db2_health_counters_reply_encode(&overflow, reply, sizeof(reply), &reply_len) ==
+          -1);
+   overflow = counters;
+   overflow.l2_stale_30_days = AIMEE_DB2_HEALTH_COUNTERS_MAX + 1u;
+   assert(aimee_db2_health_counters_reply_encode(&overflow, reply, sizeof(reply), &reply_len) ==
+          -1);
+   assert(reply_len == 0);
+   assert(aimee_db2_health_counters_reply_encode(&counters, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + AIMEE_DB2_ENVELOPE_HEADER_LEN + 32u, 0x80000000u);
+   assert(aimee_db2_health_counters_reply_decode(reply, reply_len, &decoded) == -1);
+   assert(decoded.cycles == 0 && decoded.l2_stale_30_days == 0);
 }
 
 static void test_pool_status_wire(void)
@@ -2522,6 +2619,43 @@ static void test_health_retention_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_health_counters_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.health_counters = health_counters};
+   uint8_t request[AIMEE_DB2_HEALTH_COUNTERS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_HEALTH_COUNTERS_RESPONSE_LEN];
+   uint32_t response_len = 99;
+   aimee_db2_health_counters_t decoded = {0};
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_HEALTH_COUNTERS};
+   assert(aimee_db2_health_counters_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(health_counters_calls == 1 &&
+          health_counters_use_count == (int)AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_USE_COUNT &&
+          health_counters_confidence == AIMEE_DB2_HEALTH_COUNTERS_PROMOTE_CONFIDENCE);
+   assert(aimee_db2_health_counters_reply_decode(response, response_len, &decoded) == 0);
+   assert(decoded.cycles == 7 && decoded.total_contradictions == 13 && decoded.l2_total == 30 &&
+          decoded.l2_stale_30_days == 6);
+
+   health_counters_result = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   health_counters_result = 0;
+
+   /* A counter past the declared bound never reaches the wire. */
+   health_counters_cycles = AIMEE_DB2_HEALTH_COUNTERS_MAX + 1u;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   health_counters_cycles = 7;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_pool_status_handler(void)
 {
    reset();
@@ -3112,6 +3246,33 @@ static void test_health_retention_typed_client(void)
    assert(snapshots == 11 && contradictions == 3 && transport_calls == 1);
 }
 
+static void test_health_counters_typed_client(void)
+{
+   reset();
+   transport_expect_health_counters = 1;
+   const aimee_db2_health_counters_t counters = {
+       .cycles = 7,
+       .total_contradictions = 13,
+       .total_promotions = 5,
+       .total_demotions = 2,
+       .total_expirations = 4,
+       .new_memories = 21,
+       .l1_eligible = 9,
+       .l2_total = 30,
+       .l2_stale_30_days = 6,
+   };
+   aimee_db2_health_counters_t received = {.cycles = 99};
+   assert(aimee_db2_health_counters_call(NULL, NULL, 77, 88, &received, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(received.cycles == 0);
+   assert(aimee_db2_health_counters_reply_encode(&counters, transport_response,
+                                                 sizeof(transport_response),
+                                                 &transport_response_len) == 0);
+   assert(aimee_db2_health_counters_call(transport, (void *)0x1234, 77, 88, &received, NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+   assert(memcmp(&received, &counters, sizeof(received)) == 0 && transport_calls == 1);
+}
+
 static void test_pool_status_typed_client(void)
 {
    reset();
@@ -3298,6 +3459,7 @@ int main(void)
    test_l2_memory_ids_wire();
    test_health_record_wire();
    test_health_retention_wire();
+   test_health_counters_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -3323,6 +3485,7 @@ int main(void)
    test_l2_memory_ids_handler();
    test_health_record_handler();
    test_health_retention_handler();
+   test_health_counters_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
@@ -3348,6 +3511,7 @@ int main(void)
    test_l2_memory_ids_typed_client();
    test_health_record_typed_client();
    test_health_retention_typed_client();
+   test_health_counters_typed_client();
    test_pool_status_typed_client();
    test_embedding_refusals_typed_client();
    test_postgres_status_typed_client();

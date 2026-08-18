@@ -16538,9 +16538,15 @@
           "line": 63
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.health_counters operation returns the complete rolling-window aggregate under the fixed host promotion policy; DB2 owns every count and the host derives only ratios from them."
+      },
       "signature": "int db2_memory_health_query_counters ( int promote_use_count , double promote_confidence , db2_memory_health_query_counters_t * out )",
       "signature_sha256": "07a19db46b4eb5496de2db2d8be823485644c416fefdb08a0acb8229e115f1e6",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_health_query_counters"
     },
     {
@@ -25710,15 +25716,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "a5ae1517fb44c44d120d37cdedc2d432b574a2be2738e9b60a8df6605dac4b67",
+  "fingerprint": "458cb9582e29b2b3c26c1c3d839a44ed835883ce7578f595401b42f22d64e2d5",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 677,
+    "audit_pending": 676,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 281
+    "reviewed": 282
   }
 }
