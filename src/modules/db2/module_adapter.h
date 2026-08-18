@@ -2,12 +2,14 @@
 #define AIMEE_DB2_MODULE_ADAPTER_H 1
 
 #include <aimee/core/event_bus/module_runtime.h>
+#include <aimee/db2/module_api.h>
 
 typedef struct
 {
    int (*health_probe)(int *schema_ok, int *have_pg_trgm);
    int (*kb_health_probe)(int *kb_tables_ok);
    int (*embedding_dimension)(void);
+   int (*pool_status)(aimee_db2_pool_status_t *status);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

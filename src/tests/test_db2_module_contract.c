@@ -17,11 +17,13 @@ static int health_calls;
 static int kb_health_calls;
 static int embedding_dimension_value;
 static int embedding_dimension_calls;
+static int pool_status_result;
 static aimee_module_call_result_t transport_result;
-static uint8_t transport_response[AIMEE_DB2_EMBEDDING_DIMENSION_RESPONSE_LEN];
+static uint8_t transport_response[AIMEE_DB2_POOL_STATUS_RESPONSE_LEN];
 static uint32_t transport_response_len;
 static int transport_calls;
 static int transport_expect_dimension;
+static int transport_expect_pool;
 
 int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
 {
@@ -70,6 +72,31 @@ static int embedding_dimension(void)
    return embedding_dimension_value;
 }
 
+void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
+                    long *stuck, long *poisoned)
+{
+   if (size)
+      *size = 16;
+   if (in_use)
+      *in_use = 2;
+   if (waiters)
+      *waiters = 1;
+   if (lease_grants)
+      *lease_grants = 10;
+   if (lease_timeouts)
+      *lease_timeouts = 3;
+   if (stuck)
+      *stuck = 4;
+   if (poisoned)
+      *poisoned = 5;
+}
+
+static int pool_status(aimee_db2_pool_status_t *status)
+{
+   *status = (aimee_db2_pool_status_t){16, 2, 1, 10, 3, 4, 5};
+   return pool_status_result;
+}
+
 static void reset(void)
 {
    cancelled = 0;
@@ -81,10 +108,12 @@ static void reset(void)
    kb_health_calls = 0;
    embedding_dimension_value = 384;
    embedding_dimension_calls = 0;
+   pool_status_result = 0;
    transport_result = AIMEE_MODULE_CALL_OK;
    transport_response_len = AIMEE_DB2_RESPONSE_LEN;
    transport_calls = 0;
    transport_expect_dimension = 0;
+   transport_expect_pool = 0;
    assert(aimee_db2_health_response_encode(AIMEE_DB2_FLAG_SCHEMA | AIMEE_DB2_FLAG_KB_TABLES,
                                            transport_response, sizeof(transport_response)) == 0);
 }
@@ -96,13 +125,19 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
           aimee_module_cancelled_fn cancelled_fn, void *cancel_context)
 {
    assert(context == (void *)0x1234);
-   assert(event_kind == (transport_expect_dimension ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
-                                                    : AIMEE_DB2_EVENT_HEALTH));
-   assert(stage_id == (transport_expect_dimension ? AIMEE_DB2_STAGE_EMBEDDING_DIMENSION
-                                                  : AIMEE_DB2_STAGE_HEALTH));
+   uint32_t expected_event = transport_expect_pool        ? AIMEE_DB2_EVENT_POOL_STATUS
+                             : transport_expect_dimension ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
+                                                          : AIMEE_DB2_EVENT_HEALTH;
+   uint32_t expected_stage = transport_expect_pool        ? AIMEE_DB2_STAGE_POOL_STATUS
+                             : transport_expect_dimension ? AIMEE_DB2_STAGE_EMBEDDING_DIMENSION
+                                                          : AIMEE_DB2_STAGE_HEALTH;
+   assert(event_kind == expected_event);
+   assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_dimension)
+   if (transport_expect_pool)
+      assert(aimee_db2_pool_status_request_decode(request_body, request_len) == 0);
+   else if (transport_expect_dimension)
       assert(aimee_db2_embedding_dimension_request_decode(request_body, request_len) == 0);
    else
       assert(aimee_db2_health_request_decode(request_body, request_len) == 0);
@@ -315,6 +350,55 @@ static void test_embedding_dimension_wire(void)
    assert(aimee_db2_embedding_dimension_reply_decode(reply, reply_len, NULL, &dimension) == -1);
 }
 
+static void test_pool_status_wire(void)
+{
+   uint8_t request[AIMEE_DB2_POOL_STATUS_REQUEST_LEN] = {0};
+   assert(aimee_db2_pool_status_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_pool_status_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_pool_status_request_decode(request, sizeof(request)) == -1);
+
+   const aimee_db2_pool_status_t expected = {16, 2, 1, 10, 3, 4, 5};
+   uint8_t reply[AIMEE_DB2_POOL_STATUS_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, result = 99;
+   aimee_db2_pool_status_t decoded = {0};
+   assert(aimee_db2_pool_status_reply_encode(AIMEE_DB2_RESULT_OK, &expected, reply, sizeof(reply),
+                                             &reply_len) == 0);
+   assert(reply_len == sizeof(reply));
+   assert(aimee_db2_pool_status_reply_decode(reply, reply_len, &result, &decoded) == 0);
+   assert(result == AIMEE_DB2_RESULT_OK && decoded.size == 16 && decoded.in_use == 2 &&
+          decoded.waiters == 1 && decoded.lease_grants == 10 && decoded.lease_timeouts == 3 &&
+          decoded.stuck == 4 && decoded.poisoned == 5);
+
+   assert(aimee_db2_pool_status_reply_encode(AIMEE_DB2_RESULT_INVALID_STATE, NULL, reply,
+                                             sizeof(reply), &reply_len) == 0);
+   assert(reply_len == AIMEE_DB2_POOL_STATUS_ERROR_LEN);
+   assert(aimee_db2_pool_status_reply_decode(reply, reply_len, &result, &decoded) == 0);
+   assert(result == AIMEE_DB2_RESULT_INVALID_STATE && decoded.size == 0);
+
+   aimee_db2_pool_status_t bad = expected;
+   bad.size = 0;
+   assert(aimee_db2_pool_status_reply_encode(AIMEE_DB2_RESULT_OK, &bad, reply, sizeof(reply),
+                                             &reply_len) == -1);
+   bad = expected;
+   bad.in_use = bad.size + 1;
+   assert(aimee_db2_pool_status_reply_encode(AIMEE_DB2_RESULT_OK, &bad, reply, sizeof(reply),
+                                             &reply_len) == -1);
+   assert(aimee_db2_pool_status_reply_encode(AIMEE_DB2_RESULT_NOT_FOUND, NULL, reply, sizeof(reply),
+                                             &reply_len) == -1);
+   assert(aimee_db2_pool_status_reply_encode(AIMEE_DB2_RESULT_INVALID_STATE, &expected, reply,
+                                             sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_pool_status_reply_encode(AIMEE_DB2_RESULT_OK, &expected, reply,
+                                             sizeof(reply) - 1, &reply_len) == -1);
+
+   assert(aimee_db2_pool_status_reply_encode(AIMEE_DB2_RESULT_OK, &expected, reply, sizeof(reply),
+                                             &reply_len) == 0);
+   aimee_db2_put_u32(reply + AIMEE_DB2_ENVELOPE_HEADER_LEN, 0);
+   assert(aimee_db2_pool_status_reply_decode(reply, reply_len, &result, &decoded) == -1);
+   assert(result == 0 && decoded.size == 0);
+   assert(aimee_db2_pool_status_reply_decode(NULL, reply_len, &result, &decoded) == -1);
+}
+
 static aimee_module_status_t invoke(const aimee_db2_module_backend_t *backend,
                                     aimee_module_invocation_t *invocation, uint8_t *request,
                                     uint32_t request_len, uint8_t *response,
@@ -438,6 +522,36 @@ static void test_embedding_dimension_handler(void)
    assert(response_len == 0 && embedding_dimension_calls == prior_calls + 1);
 }
 
+static void test_pool_status_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {
+       .pool_status = pool_status,
+   };
+   uint8_t request[AIMEE_DB2_POOL_STATUS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_POOL_STATUS_RESPONSE_LEN];
+   uint32_t response_len = 99, result = 99;
+   aimee_db2_pool_status_t status = {0};
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_POOL_STATUS};
+   assert(aimee_db2_pool_status_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_pool_status_reply_decode(response, response_len, &result, &status) == 0);
+   assert(result == AIMEE_DB2_RESULT_OK && status.size == 16 && status.in_use == 2);
+
+   pool_status_result = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_pool_status_reply_decode(response, response_len, &result, &status) == 0);
+   assert(result == AIMEE_DB2_RESULT_INVALID_STATE && status.size == 0);
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_typed_client(void)
 {
    reset();
@@ -504,15 +618,44 @@ static void test_embedding_dimension_typed_client(void)
    assert(domain_result == 0 && dimension == 0);
 }
 
+static void test_pool_status_typed_client(void)
+{
+   reset();
+   transport_expect_pool = 1;
+   const aimee_db2_pool_status_t expected = {16, 2, 1, 10, 3, 4, 5};
+   uint32_t domain_result = 9;
+   aimee_db2_pool_status_t status = {.size = 9};
+   assert(aimee_db2_pool_status_call(NULL, NULL, 77, 88, &domain_result, &status, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(domain_result == 0 && status.size == 0);
+
+   assert(aimee_db2_pool_status_reply_encode(AIMEE_DB2_RESULT_OK, &expected, transport_response,
+                                             sizeof(transport_response),
+                                             &transport_response_len) == 0);
+   assert(aimee_db2_pool_status_call(transport, (void *)0x1234, 77, 88, &domain_result, &status,
+                                     NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && status.size == 16 && status.poisoned == 5);
+
+   transport_result = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+   domain_result = 9;
+   status.size = 9;
+   assert(aimee_db2_pool_status_call(transport, (void *)0x1234, 77, 88, &domain_result, &status,
+                                     NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
+   assert(domain_result == 0 && status.size == 0);
+}
+
 int main(void)
 {
    test_wire_contract();
    test_body_envelope();
    test_embedding_dimension_wire();
+   test_pool_status_wire();
    test_handler_success_and_failures();
    test_embedding_dimension_handler();
+   test_pool_status_handler();
    test_typed_client();
    test_embedding_dimension_typed_client();
+   test_pool_status_typed_client();
    puts("test_db2_module_contract: ok");
    return 0;
 }

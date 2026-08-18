@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "73d206ef0821aafe269b24273a90b6a5a338d1ecd1f61a24e6201aca66d80e6c"
+const ContractSHA256 = "3bef57d69acbfa915d540c9cc4f216b690ed82fa9afc91e8408f850f630bf04c"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -44,6 +44,10 @@ const StageEmbeddingDimension = FamilyLifecycle
 const OperationEmbeddingDimension uint32 = 2
 const EmbeddingDimensionMin uint32 = 1
 const EmbeddingDimensionMax uint32 = 4000
+const EventPoolStatus = EventLifecycle
+const StagePoolStatus = FamilyLifecycle
+const OperationPoolStatus uint32 = 3
+const PoolSizeMax uint32 = 256
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -204,6 +208,90 @@ func DecodeEmbeddingDimensionReply(reply []byte) (uint32, uint32, error) {
 		return 0, 0, ErrMalformedEnvelope
 	}
 	return header.Result, dimension, nil
+}
+
+// PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.
+type PoolStatus struct {
+	Size          uint32
+	InUse         uint32
+	Waiters       uint32
+	LeaseGrants   uint64
+	LeaseTimeouts uint64
+	Stuck         uint64
+	Poisoned      uint64
+}
+
+func EncodePoolStatusRequest() []byte {
+	header, err := EncodeRequestHeader(OperationPoolStatus, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+func DecodePoolStatusRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPoolStatus || header.Flags != 0 ||
+		header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+func EncodePoolStatusReply(result uint32, status PoolStatus) ([]byte, error) {
+	var payloadLen uint32
+	if result == ResultOK {
+		if status.Size == 0 || status.Size > PoolSizeMax || status.InUse > status.Size {
+			return nil, ErrMalformedEnvelope
+		}
+		payloadLen = 44
+	} else if result != ResultInvalidState || status != (PoolStatus{}) {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationPoolStatus, result, payloadLen)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	if payloadLen == 0 {
+		return header, nil
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload[0:4], status.Size)
+	binary.LittleEndian.PutUint32(payload[4:8], status.InUse)
+	binary.LittleEndian.PutUint32(payload[8:12], status.Waiters)
+	binary.LittleEndian.PutUint64(payload[12:20], status.LeaseGrants)
+	binary.LittleEndian.PutUint64(payload[20:28], status.LeaseTimeouts)
+	binary.LittleEndian.PutUint64(payload[28:36], status.Stuck)
+	binary.LittleEndian.PutUint64(payload[36:44], status.Poisoned)
+	return reply, nil
+}
+
+func DecodePoolStatusReply(reply []byte) (uint32, PoolStatus, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPoolStatus {
+		return 0, PoolStatus{}, ErrMalformedEnvelope
+	}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {
+		return header.Result, PoolStatus{}, nil
+	}
+	if header.Result != ResultOK || header.PayloadLen != 44 {
+		return 0, PoolStatus{}, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	status := PoolStatus{
+		Size:          binary.LittleEndian.Uint32(payload[0:4]),
+		InUse:         binary.LittleEndian.Uint32(payload[4:8]),
+		Waiters:       binary.LittleEndian.Uint32(payload[8:12]),
+		LeaseGrants:   binary.LittleEndian.Uint64(payload[12:20]),
+		LeaseTimeouts: binary.LittleEndian.Uint64(payload[20:28]),
+		Stuck:         binary.LittleEndian.Uint64(payload[28:36]),
+		Poisoned:      binary.LittleEndian.Uint64(payload[36:44]),
+	}
+	if status.Size == 0 || status.Size > PoolSizeMax || status.InUse > status.Size {
+		return 0, PoolStatus{}, ErrMalformedEnvelope
+	}
+	return header.Result, status, nil
 }
 
 // HealthEvidence is DB2-owned PostgreSQL readiness evidence. It intentionally

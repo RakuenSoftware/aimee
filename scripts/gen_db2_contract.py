@@ -248,12 +248,35 @@ def validate_catalog(value: object) -> dict[str, object]:
                     field != {"name": "dimension", "type": "u32", "minimum": 1,
                               "maximum": 4000}):
                 fail("embedding-dimension-reply", "reply must contain one bounded u32 on success")
+        elif key == ("lifecycle", 3) and name == "pool_status" and \
+                operation["wire_format"] == "db2-envelope-pool-status-v1":
+            if operation["results"] != ["ok", "invalid_state"]:
+                fail("operation-results", "pool_status results must equal ['ok', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "pool_status.request")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "pool_status.reply")
+            expected_fields = [
+                {"name": "size", "type": "u32", "minimum": 1, "maximum": 256},
+                {"name": "in_use", "type": "u32", "minimum": 0, "maximum": 256},
+                {"name": "waiters", "type": "u32", "minimum": 0, "maximum": 0xffffffff},
+                {"name": "lease_grants", "type": "u64", "minimum": 0},
+                {"name": "lease_timeouts", "type": "u64", "minimum": 0},
+                {"name": "stuck", "type": "u64", "minimum": 0},
+                {"name": "poisoned", "type": "u64", "minimum": 0},
+            ]
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("pool-status-request", "request must be an empty version-1 envelope")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 44 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != expected_fields):
+                fail("pool-status-reply", "reply must contain the canonical bounded pool snapshot")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 2 or [item["name"] for item in raw_operations] != [
-            "health", "embedding_dimension"]:
+    if len(raw_operations) != 3 or [item["name"] for item in raw_operations] != [
+            "health", "embedding_dimension", "pool_status"]:
         fail("unsupported-operation",
-             "the partial generator requires health and embedding_dimension exactly once")
+             "the partial generator requires the three supported lifecycle operations exactly once")
     return catalog
 
 
@@ -322,6 +345,10 @@ def _put_u16(value: int) -> bytes:
     return value.to_bytes(2, "little")
 
 
+def _put_u64(value: int) -> bytes:
+    return value.to_bytes(8, "little")
+
+
 def _envelope(
         catalog: dict[str, object], magic: int, operation: int, code: int, payload: bytes) -> bytes:
     return (
@@ -334,6 +361,7 @@ def _envelope(
 def baseline_bytes(catalog: dict[str, object]) -> bytes:
     health = catalog["operations"][0]
     embedding_dimension = catalog["operations"][1]
+    pool_status = catalog["operations"][2]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -367,6 +395,17 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     dimension_invalid = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(embedding_dimension["id"]), 5, b"",
+    )
+    pool_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(pool_status["id"]), 0, b"",
+    )
+    pool_payload = (_put_u32(16) + _put_u32(2) + _put_u32(1) + _put_u64(10) +
+                    _put_u64(3) + _put_u64(4) + _put_u64(5))
+    pool_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(pool_status["id"]), 0, pool_payload,
+    )
+    pool_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(pool_status["id"]), 5, b"",
     )
 
     value = {
@@ -486,6 +525,47 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (dimension_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": pool_status["family"],
+            "id": pool_status["id"],
+            "name": pool_status["name"],
+            "request": {
+                "positive": pool_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex": mutate_u32(pool_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(pool_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": pool_request[:-1].hex()},
+                    {"mutation": "long", "hex": (pool_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "size": 16, "in_use": 2, "waiters": 1,
+                     "lease_grants": 10, "lease_timeouts": 3, "stuck": 4, "poisoned": 5,
+                     "hex": pool_ok.hex()},
+                    {"result": 5, "size": 0, "in_use": 0, "waiters": 0,
+                     "lease_grants": 0, "lease_timeouts": 0, "stuck": 0, "poisoned": 0,
+                     "hex": pool_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex": mutate_u32(pool_ok, 8, 2).hex()},
+                    {"mutation": "unsupported_result", "hex": mutate_u32(pool_ok, 12, 1).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(pool_status["id"]), 0, b"").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     mutate_u32(pool_ok, 12, 5).hex()},
+                    {"mutation": "zero_size", "hex":
+                     mutate_u32(pool_ok, ENVELOPE_HEADER_LEN, 0).hex()},
+                    {"mutation": "size_too_large", "hex":
+                     mutate_u32(pool_ok, ENVELOPE_HEADER_LEN, 257).hex()},
+                    {"mutation": "in_use_too_large", "hex":
+                     mutate_u32(pool_ok, ENVELOPE_HEADER_LEN + 4, 17).hex()},
+                    {"mutation": "short", "hex": pool_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (pool_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -500,6 +580,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     families = catalog["families"]
     health = catalog["operations"][0]
     embedding_dimension = catalog["operations"][1]
+    pool_status = catalog["operations"][2]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -539,6 +620,13 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{embedding_dimension['reply']['field']['minimum']}u"),
         ("AIMEE_DB2_EMBEDDING_DIMENSION_MAX",
          f"{embedding_dimension['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_POOL_STATUS", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_POOL_STATUS", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_POOL_STATUS", f"{pool_status['id']}u"),
+        ("AIMEE_DB2_POOL_STATUS_REQUEST_LEN", f"{pool_status['request']['encoded_size']}u"),
+        ("AIMEE_DB2_POOL_STATUS_RESPONSE_LEN", f"{pool_status['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_POOL_STATUS_ERROR_LEN", f"{pool_status['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_POOL_SIZE_MAX", "256u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -588,6 +676,17 @@ typedef struct
    uint32_t payload_len;
 }} aimee_db2_reply_header_t;
 
+typedef struct
+{{
+   uint32_t size;
+   uint32_t in_use;
+   uint32_t waiters;
+   uint64_t lease_grants;
+   uint64_t lease_timeouts;
+   uint64_t stuck;
+   uint64_t poisoned;
+}} aimee_db2_pool_status_t;
+
 static inline void aimee_db2_put_u16(uint8_t *output, uint16_t value)
 {{
    output[0] = (uint8_t)value;
@@ -611,6 +710,20 @@ static inline uint32_t aimee_db2_get_u32(const uint8_t *input)
 static inline uint16_t aimee_db2_get_u16(const uint8_t *input)
 {{
    return (uint16_t)((uint16_t)input[0] | (uint16_t)((uint16_t)input[1] << 8u));
+}}
+
+static inline void aimee_db2_put_u64(uint8_t *output, uint64_t value)
+{{
+   for (unsigned index = 0; index < 8; ++index)
+      output[index] = (uint8_t)(value >> (index * 8u));
+}}
+
+static inline uint64_t aimee_db2_get_u64(const uint8_t *input)
+{{
+   uint64_t value = 0;
+   for (unsigned index = 0; index < 8; ++index)
+      value |= (uint64_t)input[index] << (index * 8u);
+   return value;
 }}
 
 static inline int aimee_db2_request_header_encode(uint32_t operation, uint32_t flags,
@@ -765,6 +878,100 @@ static inline int aimee_db2_embedding_dimension_reply_decode(const uint8_t *inpu
    return 0;
 }}
 
+static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, 0u, 0u, output,
+                                           capacity);
+}}
+
+static inline int aimee_db2_pool_status_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_POOL_STATUS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_POOL_STATUS && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_pool_status_reply_encode(uint32_t result,
+                                                     const aimee_db2_pool_status_t *status,
+                                                     uint8_t *output, size_t capacity,
+                                                     uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {{
+      if (!status || status->size == 0u || status->size > AIMEE_DB2_POOL_SIZE_MAX ||
+          status->in_use > status->size || capacity < AIMEE_DB2_POOL_STATUS_RESPONSE_LEN)
+         return -1;
+      payload_len = 44u;
+   }}
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || status ||
+            capacity < AIMEE_DB2_POOL_STATUS_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, result, payload_len, output,
+                                     capacity) != 0)
+      return -1;
+   if (status)
+   {{
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, status->size);
+      aimee_db2_put_u32(payload + 4, status->in_use);
+      aimee_db2_put_u32(payload + 8, status->waiters);
+      aimee_db2_put_u64(payload + 12, status->lease_grants);
+      aimee_db2_put_u64(payload + 20, status->lease_timeouts);
+      aimee_db2_put_u64(payload + 28, status->stuck);
+      aimee_db2_put_u64(payload + 36, status->poisoned);
+   }}
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_pool_status_reply_decode(const uint8_t *input, size_t input_len,
+                                                     uint32_t *result,
+                                                     aimee_db2_pool_status_t *status)
+{{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_pool_status_t){{0}};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_POOL_STATUS)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 44u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_pool_status_t decoded = {{
+       .size = aimee_db2_get_u32(payload),
+       .in_use = aimee_db2_get_u32(payload + 4),
+       .waiters = aimee_db2_get_u32(payload + 8),
+       .lease_grants = aimee_db2_get_u64(payload + 12),
+       .lease_timeouts = aimee_db2_get_u64(payload + 20),
+       .stuck = aimee_db2_get_u64(payload + 28),
+       .poisoned = aimee_db2_get_u64(payload + 36),
+   }};
+   if (decoded.size == 0u || decoded.size > AIMEE_DB2_POOL_SIZE_MAX ||
+       decoded.in_use > decoded.size)
+      return -1;
+   *result = header.result;
+   *status = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_health_request_encode(uint8_t *output, size_t capacity)
 {{
    if (!output || capacity < AIMEE_DB2_REQUEST_LEN)
@@ -834,6 +1041,7 @@ def client_header_bytes() -> bytes:
 #include <stdint.h>
 
 #include <aimee/core/event_bus/module_client.h>
+#include <aimee/db2/module_api.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -854,6 +1062,11 @@ extern "C"
    aimee_module_call_result_t aimee_db2_embedding_dimension_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, uint32_t *dimension,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_pool_status_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, aimee_db2_pool_status_t *status,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 #ifdef __cplusplus
@@ -931,6 +1144,36 @@ aimee_db2_embedding_dimension_call(aimee_db2_call_fn call, void *call_context, u
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
+                                                      uint64_t trace_id, uint64_t deadline_ns,
+                                                      uint32_t *domain_result,
+                                                      aimee_db2_pool_status_t *status,
+                                                      aimee_module_cancelled_fn cancelled,
+                                                      void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (status)
+      *status = (aimee_db2_pool_status_t){0};
+   if (!call || !domain_result || !status)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_POOL_STATUS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_POOL_STATUS_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (aimee_db2_pool_status_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_POOL_STATUS, AIMEE_DB2_STAGE_POOL_STATUS, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_pool_status_reply_decode(response, response_len, domain_result, status) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
 '''
     return text.encode("utf-8")
 
@@ -944,6 +1187,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     families = catalog["families"]
     health = catalog["operations"][0]
     embedding_dimension = catalog["operations"][1]
+    pool_status = catalog["operations"][2]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -989,6 +1233,10 @@ const StageEmbeddingDimension = FamilyLifecycle
 const OperationEmbeddingDimension uint32 = {embedding_dimension['id']}
 const EmbeddingDimensionMin uint32 = {embedding_dimension['reply']['field']['minimum']}
 const EmbeddingDimensionMax uint32 = {embedding_dimension['reply']['field']['maximum']}
+const EventPoolStatus = EventLifecycle
+const StagePoolStatus = FamilyLifecycle
+const OperationPoolStatus uint32 = {pool_status['id']}
+const PoolSizeMax uint32 = 256
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -1147,6 +1395,90 @@ func DecodeEmbeddingDimensionReply(reply []byte) (uint32, uint32, error) {{
 		return 0, 0, ErrMalformedEnvelope
 	}}
 	return header.Result, dimension, nil
+}}
+
+// PoolStatus is a bounded snapshot of the DB2 PostgreSQL connection pool.
+type PoolStatus struct {{
+	Size          uint32
+	InUse         uint32
+	Waiters       uint32
+	LeaseGrants   uint64
+	LeaseTimeouts uint64
+	Stuck         uint64
+	Poisoned      uint64
+}}
+
+func EncodePoolStatusRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationPoolStatus, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+func DecodePoolStatusRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPoolStatus || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+func EncodePoolStatusReply(result uint32, status PoolStatus) ([]byte, error) {{
+	var payloadLen uint32
+	if result == ResultOK {{
+		if status.Size == 0 || status.Size > PoolSizeMax || status.InUse > status.Size {{
+			return nil, ErrMalformedEnvelope
+		}}
+		payloadLen = 44
+	}} else if result != ResultInvalidState || status != (PoolStatus{{}}) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationPoolStatus, result, payloadLen)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	if payloadLen == 0 {{
+		return header, nil
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload[0:4], status.Size)
+	binary.LittleEndian.PutUint32(payload[4:8], status.InUse)
+	binary.LittleEndian.PutUint32(payload[8:12], status.Waiters)
+	binary.LittleEndian.PutUint64(payload[12:20], status.LeaseGrants)
+	binary.LittleEndian.PutUint64(payload[20:28], status.LeaseTimeouts)
+	binary.LittleEndian.PutUint64(payload[28:36], status.Stuck)
+	binary.LittleEndian.PutUint64(payload[36:44], status.Poisoned)
+	return reply, nil
+}}
+
+func DecodePoolStatusReply(reply []byte) (uint32, PoolStatus, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPoolStatus {{
+		return 0, PoolStatus{{}}, ErrMalformedEnvelope
+	}}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {{
+		return header.Result, PoolStatus{{}}, nil
+	}}
+	if header.Result != ResultOK || header.PayloadLen != 44 {{
+		return 0, PoolStatus{{}}, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	status := PoolStatus{{
+		Size:          binary.LittleEndian.Uint32(payload[0:4]),
+		InUse:         binary.LittleEndian.Uint32(payload[4:8]),
+		Waiters:       binary.LittleEndian.Uint32(payload[8:12]),
+		LeaseGrants:   binary.LittleEndian.Uint64(payload[12:20]),
+		LeaseTimeouts: binary.LittleEndian.Uint64(payload[20:28]),
+		Stuck:         binary.LittleEndian.Uint64(payload[28:36]),
+		Poisoned:      binary.LittleEndian.Uint64(payload[36:44]),
+	}}
+	if status.Size == 0 || status.Size > PoolSizeMax || status.InUse > status.Size {{
+		return 0, PoolStatus{{}}, ErrMalformedEnvelope
+	}}
+	return header.Result, status, nil
 }}
 
 // HealthEvidence is DB2-owned PostgreSQL readiness evidence. It intentionally

@@ -63,8 +63,9 @@ func loadHealthBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode %s: %v", path, err)
 	}
-	if len(baseline.Operations) != 2 || baseline.Operations[0].Name != "health" ||
-		baseline.Operations[1].Name != "embedding_dimension" {
+	if len(baseline.Operations) != 3 || baseline.Operations[0].Name != "health" ||
+		baseline.Operations[1].Name != "embedding_dimension" ||
+		baseline.Operations[2].Name != "pool_status" {
 		t.Fatalf("unexpected operation baseline: %+v", baseline.Operations)
 	}
 	return baseline

@@ -18,7 +18,8 @@
   translation units compile and link from the isolated export. The first live S3 replay group now
   starts that packaged executable against fresh PostgreSQL, crosses an executable-bound event bus,
   compares canonical health bytes, verifies the recorded dimension and schema effects, and serves
-  that effective dimension through the first post-bootstrap envelope operation. This is
+  that effective dimension plus a bounded PostgreSQL pool snapshot through post-bootstrap envelope
+  operations. This is
   explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
@@ -649,9 +650,10 @@ tables, and the stable `unit-tests` aggregate now requires this job. This proves
 operation and schema bootstrap through the real process boundary. The same harness proves an
 expired deadline, deterministic cancellation after request publication, stale-terminal-reply
 draining, post-cancellation process health, and the first envelope-backed lifecycle operation:
-`embedding_dimension` returns the effective 1–4000 pgvector schema width or `invalid_state`. It does
-not claim the remaining catalog handlers,
-tenant, concurrency, ambiguity, or durability replay groups.
+`embedding_dimension` returns the effective 1–4000 pgvector schema width or `invalid_state`.
+The following `pool_status` operation returns the initialized 16-slot pool plus bounded occupancy,
+waiter, lease, stuck, and poison counters from one DB2-owned snapshot. These operations do not claim
+the remaining catalog handlers, tenant, concurrency, ambiguity, or durability replay groups.
 
 These reductions remain phase-one precursors, not substitutes for the program exit criteria below:
 standalone C closure reaches zero non-system packaging/injection/promotion debt; the C process is

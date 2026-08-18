@@ -131,6 +131,38 @@
           "maximum": 4000
         }
       }
+    },
+    {
+      "family": "lifecycle",
+      "id": 3,
+      "name": "pool_status",
+      "wire_format": "db2-envelope-pool-status-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid_state"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Connection-pool occupancy and failure counters describe the DB2 PostgreSQL owner.",
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 68,
+        "encoded_size_error": 24,
+        "fields": [
+          {"name": "size", "type": "u32", "minimum": 1, "maximum": 256},
+          {"name": "in_use", "type": "u32", "minimum": 0, "maximum": 256},
+          {"name": "waiters", "type": "u32", "minimum": 0, "maximum": 4294967295},
+          {"name": "lease_grants", "type": "u64", "minimum": 0},
+          {"name": "lease_timeouts", "type": "u64", "minimum": 0},
+          {"name": "stuck", "type": "u64", "minimum": 0},
+          {"name": "poisoned", "type": "u64", "minimum": 0}
+        ]
+      }
     }
   ]
 }

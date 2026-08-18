@@ -29,6 +29,7 @@ typedef struct
    int (*health_probe)(int *schema_ok, int *have_pg_trgm);
    int (*kb_health_probe)(int *kb_tables_ok);
    int (*embedding_dimension)(void);
+   int (*pool_status)(aimee_db2_pool_status_t *status);
 } aimee_db2_module_backend_t;
 
 extern aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
@@ -99,6 +100,24 @@ static int embedding_dimension(void)
 {
    embedding_dimension_calls++;
    return 384;
+}
+
+void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
+                    long *stuck, long *poisoned)
+{
+   (void)size;
+   (void)in_use;
+   (void)waiters;
+   (void)lease_grants;
+   (void)lease_timeouts;
+   (void)stuck;
+   (void)poisoned;
+}
+
+static int pool_status(aimee_db2_pool_status_t *status)
+{
+   *status = (aimee_db2_pool_status_t){16, 2, 1, 10, 3, 4, 5};
+   return 0;
 }
 
 static void *run_process(void *argument)
@@ -232,6 +251,7 @@ int main(void)
        .health_probe = health_probe,
        .kb_health_probe = kb_health_probe,
        .embedding_dimension = embedding_dimension,
+       .pool_status = pool_status,
    };
    process_thread_t process = {
        .config = {.socket_path = socket_path,
@@ -271,6 +291,14 @@ int main(void)
                                              &dimension, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(domain_result == AIMEE_DB2_RESULT_OK && dimension == 384);
    assert(embedding_dimension_calls == 1);
+
+   aimee_db2_pool_status_t pool = {0};
+   domain_result = 9;
+   assert(aimee_db2_pool_status_call(call_client, &client, 7011, 0, &domain_result, &pool, NULL,
+                                     NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && pool.size == 16 && pool.in_use == 2 &&
+          pool.waiters == 1 && pool.lease_grants == 10 && pool.lease_timeouts == 3 &&
+          pool.stuck == 4 && pool.poisoned == 5);
 
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 7002, 1, &schema_ok, &have_pg_trgm,

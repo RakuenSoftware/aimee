@@ -23,8 +23,13 @@ request flags or a closed reply result, exact payload length, and zero reserved 
 positive and negative vectors pin that additive envelope without changing a health byte. The first
 envelope-backed operation, `lifecycle.embedding_dimension`, returns the effective PostgreSQL/
 pgvector schema width as a bounded `u32`, or the closed `invalid_state` result when no valid width is
-available. The exported process binds both operations to strong production DB2 accessors; explicit
+available. The exported process binds all three operations to strong production DB2 accessors; explicit
 injected backends are confined to tests.
+
+The next lifecycle operation, `pool_status`, returns a single mutex-protected snapshot of the
+PostgreSQL pool: bounded size/occupancy, waiters, lease grants/timeouts, stuck leases, and poisoned
+connections. Signed or relationally impossible backend values become `invalid_state` rather than
+wrapping onto the wire.
 
 ## Dependencies and consumers
 
@@ -66,7 +71,7 @@ gone, and the declaration ledger proves that `db2_health_probe` has no productio
 ## Surfaces
 
 The current surface is the lifecycle event on the KB-local Unix-domain module bus. It serves the
-frozen health operation and the envelope-backed embedding-dimension operation. There
+frozen health operation plus the envelope-backed embedding-dimension and pool-status operations. There
 is no HTTP listener, network service, generic query operation, raw SQL payload, or provider-secret
 field. The catalog reserves the eight family identities and event kinds `11521` through `11528`, but
 only lifecycle is active and granted. Later operations must be typed, bounded catalog entries.
@@ -490,14 +495,17 @@ the generated reference codec, repeats the request through the typed client, ver
 embedding dimension and representative schema tables for a separate database-effect assertion.
 The replay also rejects an expired deadline, deterministically cancels a request only after it has
 entered the bus, proves a later live health call drains any stale terminal reply, and reads the
-effective dimension through the generated envelope client from the real initialized process. The required
+effective dimension through the generated envelope client from the real initialized process. It also
+requires that process to return its configured 16-slot pool and a bounded occupancy snapshot through
+the generated client. The required
 CI job runs this target and is part of the stable `unit-tests` aggregate. These are the first live
 S3 replay groups; the remaining operation families and fault fixtures still gate S3 completion and
 activation.
 
 ## Tests and failure behavior
 
-Focused C tests cover every response flag combination, both embedding-dimension result shapes and
+Focused C tests cover every response flag combination, both embedding-dimension result shapes,
+pool counter widths and occupancy relations, and
 dimension bounds, malformed magic/version/length, unknown
 flags, reserved bytes, wrong stage, undersized output, cancellation, missing callbacks, backend
 failure, typed-client transport/protocol failures, and successful encode-handler-decode. A dedicated

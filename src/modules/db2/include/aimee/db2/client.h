@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include <aimee/core/event_bus/module_client.h>
+#include <aimee/db2/module_api.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -25,6 +26,11 @@ extern "C"
    aimee_module_call_result_t aimee_db2_embedding_dimension_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, uint32_t *dimension,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_pool_status_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, aimee_db2_pool_status_t *status,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 #ifdef __cplusplus

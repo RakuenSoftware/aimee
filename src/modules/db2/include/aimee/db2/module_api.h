@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "73d206ef0821aafe269b24273a90b6a5a338d1ecd1f61a24e6201aca66d80e6c"
+#define AIMEE_DB2_CONTRACT_SHA256 "3bef57d69acbfa915d540c9cc4f216b690ed82fa9afc91e8408f850f630bf04c"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -48,6 +48,13 @@
 #define AIMEE_DB2_EMBEDDING_DIMENSION_ERROR_LEN    24u
 #define AIMEE_DB2_EMBEDDING_DIMENSION_MIN          1u
 #define AIMEE_DB2_EMBEDDING_DIMENSION_MAX          4000u
+#define AIMEE_DB2_EVENT_POOL_STATUS                AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_POOL_STATUS                AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_POOL_STATUS            3u
+#define AIMEE_DB2_POOL_STATUS_REQUEST_LEN          24u
+#define AIMEE_DB2_POOL_STATUS_RESPONSE_LEN         68u
+#define AIMEE_DB2_POOL_STATUS_ERROR_LEN            24u
+#define AIMEE_DB2_POOL_SIZE_MAX                    256u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -72,6 +79,17 @@ typedef struct
    uint32_t payload_len;
 } aimee_db2_reply_header_t;
 
+typedef struct
+{
+   uint32_t size;
+   uint32_t in_use;
+   uint32_t waiters;
+   uint64_t lease_grants;
+   uint64_t lease_timeouts;
+   uint64_t stuck;
+   uint64_t poisoned;
+} aimee_db2_pool_status_t;
+
 static inline void aimee_db2_put_u16(uint8_t *output, uint16_t value)
 {
    output[0] = (uint8_t)value;
@@ -95,6 +113,20 @@ static inline uint32_t aimee_db2_get_u32(const uint8_t *input)
 static inline uint16_t aimee_db2_get_u16(const uint8_t *input)
 {
    return (uint16_t)((uint16_t)input[0] | (uint16_t)((uint16_t)input[1] << 8u));
+}
+
+static inline void aimee_db2_put_u64(uint8_t *output, uint64_t value)
+{
+   for (unsigned index = 0; index < 8; ++index)
+      output[index] = (uint8_t)(value >> (index * 8u));
+}
+
+static inline uint64_t aimee_db2_get_u64(const uint8_t *input)
+{
+   uint64_t value = 0;
+   for (unsigned index = 0; index < 8; ++index)
+      value |= (uint64_t)input[index] << (index * 8u);
+   return value;
 }
 
 static inline int aimee_db2_request_header_encode(uint32_t operation, uint32_t flags,
@@ -246,6 +278,100 @@ static inline int aimee_db2_embedding_dimension_reply_decode(const uint8_t *inpu
       return -1;
    *result = header.result;
    *dimension = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, 0u, 0u, output,
+                                           capacity);
+}
+
+static inline int aimee_db2_pool_status_request_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_POOL_STATUS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_POOL_STATUS && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_pool_status_reply_encode(uint32_t result,
+                                                     const aimee_db2_pool_status_t *status,
+                                                     uint8_t *output, size_t capacity,
+                                                     uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {
+      if (!status || status->size == 0u || status->size > AIMEE_DB2_POOL_SIZE_MAX ||
+          status->in_use > status->size || capacity < AIMEE_DB2_POOL_STATUS_RESPONSE_LEN)
+         return -1;
+      payload_len = 44u;
+   }
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || status ||
+            capacity < AIMEE_DB2_POOL_STATUS_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, result, payload_len, output,
+                                     capacity) != 0)
+      return -1;
+   if (status)
+   {
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, status->size);
+      aimee_db2_put_u32(payload + 4, status->in_use);
+      aimee_db2_put_u32(payload + 8, status->waiters);
+      aimee_db2_put_u64(payload + 12, status->lease_grants);
+      aimee_db2_put_u64(payload + 20, status->lease_timeouts);
+      aimee_db2_put_u64(payload + 28, status->stuck);
+      aimee_db2_put_u64(payload + 36, status->poisoned);
+   }
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_pool_status_reply_decode(const uint8_t *input, size_t input_len,
+                                                     uint32_t *result,
+                                                     aimee_db2_pool_status_t *status)
+{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_pool_status_t){0};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_POOL_STATUS)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {
+      *result = header.result;
+      return 0;
+   }
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 44u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_pool_status_t decoded = {
+       .size = aimee_db2_get_u32(payload),
+       .in_use = aimee_db2_get_u32(payload + 4),
+       .waiters = aimee_db2_get_u32(payload + 8),
+       .lease_grants = aimee_db2_get_u64(payload + 12),
+       .lease_timeouts = aimee_db2_get_u64(payload + 20),
+       .stuck = aimee_db2_get_u64(payload + 28),
+       .poisoned = aimee_db2_get_u64(payload + 36),
+   };
+   if (decoded.size == 0u || decoded.size > AIMEE_DB2_POOL_SIZE_MAX ||
+       decoded.in_use > decoded.size)
+      return -1;
+   *result = header.result;
+   *status = decoded;
    return 0;
 }
 

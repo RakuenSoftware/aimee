@@ -42,10 +42,17 @@ type wireBaseline struct {
 		} `json:"request"`
 		Reply struct {
 			Positive []struct {
-				Flags     uint32 `json:"flags"`
-				Result    uint32 `json:"result"`
-				Dimension uint32 `json:"dimension"`
-				Hex       string `json:"hex"`
+				Flags         uint32 `json:"flags"`
+				Result        uint32 `json:"result"`
+				Dimension     uint32 `json:"dimension"`
+				Size          uint32 `json:"size"`
+				InUse         uint32 `json:"in_use"`
+				Waiters       uint32 `json:"waiters"`
+				LeaseGrants   uint64 `json:"lease_grants"`
+				LeaseTimeouts uint64 `json:"lease_timeouts"`
+				Stuck         uint64 `json:"stuck"`
+				Poisoned      uint64 `json:"poisoned"`
+				Hex           string `json:"hex"`
 			} `json:"positive"`
 			Negative []struct {
 				Mutation string `json:"mutation"`
@@ -140,11 +147,57 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 2 || baseline.Operations[0].Name != "health" ||
-		baseline.Operations[1].Name != "embedding_dimension" {
+	if len(baseline.Operations) != 3 || baseline.Operations[0].Name != "health" ||
+		baseline.Operations[1].Name != "embedding_dimension" ||
+		baseline.Operations[2].Name != "pool_status" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
+}
+
+func TestPoolStatusMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[2]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodePoolStatusRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodePoolStatusRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		t.Run("request_"+vector.Mutation, func(t *testing.T) {
+			if err := DecodePoolStatusRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+				t.Fatalf("negative request error = %v", err)
+			}
+		})
+	}
+	for _, vector := range operation.Reply.Positive {
+		vector := vector
+		t.Run("reply_"+vector.Hex, func(t *testing.T) {
+			status := PoolStatus{vector.Size, vector.InUse, vector.Waiters, vector.LeaseGrants,
+				vector.LeaseTimeouts, vector.Stuck, vector.Poisoned}
+			got, err := EncodePoolStatusReply(vector.Result, status)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			want := decodeHex(t, vector.Hex)
+			if string(got) != string(want) {
+				t.Fatalf("reply = %x, want %x", got, want)
+			}
+			result, decoded, err := DecodePoolStatusReply(want)
+			if err != nil || result != vector.Result || decoded != status {
+				t.Fatalf("decode = (%d, %+v, %v)", result, decoded, err)
+			}
+		})
+	}
+	for _, vector := range operation.Reply.Negative {
+		t.Run("reply_"+vector.Mutation, func(t *testing.T) {
+			result, status, err := DecodePoolStatusReply(decodeHex(t, vector.Hex))
+			if !errors.Is(err, ErrMalformedEnvelope) || result != 0 || status != (PoolStatus{}) {
+				t.Fatalf("negative reply = (%d, %+v, %v)", result, status, err)
+			}
+		})
+	}
 }
 
 func TestEmbeddingDimensionMatchesEverySharedCVector(t *testing.T) {
