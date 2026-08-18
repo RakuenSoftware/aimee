@@ -44,6 +44,14 @@
       "reason": "The typed lifecycle.health operation exposes canonical KB-table readiness together with the schema probe; that evidence remains DB2 authority."
     },
     {
+      "symbol": "db2_pg_stat_summary",
+      "signature_sha256": "cbef9ff5eee86a096a36a66c4153f2aa76a45f7a4bcf026994ee3f6f53ac42f8",
+      "disposition": "wire-operation",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "The typed lifecycle.postgres_status operation replaces the doctor command's direct PostgreSQL diagnostics call with bounded availability and metric fields."
+    },
+    {
       "symbol": "db2_pool_stats",
       "signature_sha256": "4efb451841b4da87a1e5b2536e284dbb5146f7a5d2187016a9756507a8bae047",
       "disposition": "wire-operation",

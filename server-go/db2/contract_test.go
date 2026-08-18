@@ -54,6 +54,11 @@ type wireBaseline struct {
 				Poisoned      uint64 `json:"poisoned"`
 				RefusedCount  uint64 `json:"refused_count"`
 				LastOffered   uint32 `json:"last_offered"`
+				Available     uint32 `json:"available"`
+				Active        uint32 `json:"active_connections"`
+				Maximum       uint32 `json:"max_connections"`
+				IsReplica     uint32 `json:"is_replica"`
+				ReplicaLag    uint64 `json:"replica_lag_bytes"`
 				Hex           string `json:"hex"`
 			} `json:"positive"`
 			Negative []struct {
@@ -149,13 +154,44 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 4 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 5 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
-		baseline.Operations[3].Name != "embedding_refusals" {
+		baseline.Operations[3].Name != "embedding_refusals" ||
+		baseline.Operations[4].Name != "postgres_status" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
+}
+
+func TestPostgresStatusMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[4]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodePostgresStatusRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodePostgresStatusRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		status := PostgresStatus{vector.Available, vector.Active, vector.Maximum, vector.IsReplica, vector.ReplicaLag}
+		got, err := EncodePostgresStatusReply(vector.Result, status)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		result, decoded, err := DecodePostgresStatusReply(got)
+		if err != nil || result != vector.Result || decoded != status {
+			t.Fatalf("decode = (%d, %+v, %v)", result, decoded, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		result, status, err := DecodePostgresStatusReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || result != 0 || status != (PostgresStatus{}) {
+			t.Fatalf("negative reply %s = (%d, %+v, %v)", vector.Mutation, result, status, err)
+		}
+	}
 }
 
 func TestEmbeddingRefusalsMatchesEverySharedCVector(t *testing.T) {

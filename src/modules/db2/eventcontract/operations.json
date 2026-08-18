@@ -188,6 +188,31 @@
           {"name": "last_offered", "type": "u32", "minimum": 0, "maximum": 2147483647}
         ]
       }
+    },
+    {
+      "family": "lifecycle",
+      "id": 5,
+      "name": "postgres_status",
+      "wire_format": "db2-envelope-postgres-status-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok", "invalid_state"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Connection pressure, PostgreSQL recovery role, and WAL replay lag remain DB2 operational evidence.",
+      "c_symbols": ["db2_pg_stat_summary"],
+      "request": {"encoded_size": 24, "payload": "none"},
+      "reply": {
+        "encoded_size_ok": 48,
+        "encoded_size_error": 24,
+        "fields": [
+          {"name": "available", "type": "u32", "minimum": 0, "maximum": 15},
+          {"name": "active_connections", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "max_connections", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "is_replica", "type": "u32", "minimum": 0, "maximum": 1},
+          {"name": "replica_lag_bytes", "type": "u64", "minimum": 0}
+        ]
+      }
     }
   ]
 }

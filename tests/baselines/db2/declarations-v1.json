@@ -18289,9 +18289,15 @@
           "line": 232
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "lifecycle",
+        "reason": "The typed lifecycle.postgres_status operation replaces the doctor command's direct PostgreSQL diagnostics call with bounded availability and metric fields."
+      },
       "signature": "int db2_pg_stat_summary ( int * active_conns , int * max_conns , int * is_replica , int64_t * replica_lag_bytes )",
       "signature_sha256": "cbef9ff5eee86a096a36a66c4153f2aa76a45f7a4bcf026994ee3f6f53ac42f8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_pg_stat_summary"
     },
     {
@@ -24426,15 +24432,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "b73399f510ec830e29b848d5aa90c6f3990673f48871e54d49ef2b1092157d6d",
+  "fingerprint": "d4af9e3d6871a787c1d649b36aca9ae355c308d485c84e020e740abfc04f36c4",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 891,
+    "audit_pending": 890,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 67
+    "reviewed": 68
   }
 }

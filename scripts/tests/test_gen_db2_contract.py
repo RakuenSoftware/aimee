@@ -70,6 +70,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn(b"aimee_db2_embedding_dimension_call", client_header)
         self.assertIn(b"aimee_db2_pool_status_call", client_header)
         self.assertIn(b"aimee_db2_embedding_refusals_call", client_header)
+        self.assertIn(b"aimee_db2_postgres_status_call", client_header)
         self.assertIn(b"AIMEE_MODULE_CALL_PROTOCOL", client_source)
         self.assertIn(fingerprint.encode(), go_contract)
         self.assertIn(b"func DecodeHealthResponse", go_contract)
@@ -78,6 +79,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn(b"func DecodeEmbeddingDimensionReply", go_contract)
         self.assertIn(b"func DecodePoolStatusReply", go_contract)
         self.assertIn(b"func DecodeEmbeddingRefusalsReply", go_contract)
+        self.assertIn(b"func DecodePostgresStatusReply", go_contract)
         self.assertIn(b"ErrMalformedHealth", go_contract)
         self.assertIn(b"ResultOK", go_contract)
         self.assertIn(b"HealthFlagPGTrgm", go_contract)
@@ -181,6 +183,30 @@ class ContractTests(unittest.TestCase):
              "offered_too_large", "short", "long"],
         )
 
+    def test_postgres_status_vectors_cover_availability_failures(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][4]
+        self.assertEqual(operation["name"], "postgres_status")
+        self.assertEqual(
+            [(row["result"], row["available"], row["active_connections"],
+              row["max_connections"], row["is_replica"], row["replica_lag_bytes"])
+             for row in operation["reply"]["positive"]],
+            [(0, 15, 12, 100, 1, 1048576), (0, 3, 12, 100, 0, 0),
+             (5, 0, 0, 0, 0, 0)],
+        )
+        self.assertIn(
+            "lag_on_primary",
+            [row["mutation"] for row in operation["reply"]["negative"]],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_payload",
+             "error_with_payload", "unknown_availability", "active_without_availability",
+             "max_without_availability", "role_without_availability",
+             "lag_without_availability", "lag_on_primary", "invalid_replica_role", "short",
+             "long"],
+        )
+
     def test_root_and_version_mutations(self) -> None:
         cases = (
             (lambda value: value.__setitem__("extra", 1), "keys"),
@@ -250,7 +276,7 @@ class ContractTests(unittest.TestCase):
         self.assert_rule(
             lambda value: value["operations"].append({
                 **copy.deepcopy(value["operations"][0]),
-                "id": 5,
+                "id": 6,
                 "name": "health_second",
                 "c_symbols": ["db2_health_second"],
             }),
@@ -318,6 +344,19 @@ class ContractTests(unittest.TestCase):
              "operation-results"),
             (lambda value: value["operations"][3]["reply"].__setitem__("encoded_size_ok", 35),
              "embedding-refusals-reply"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_postgres_status_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][4].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][4].__setitem__("results", ["ok"]),
+             "operation-results"),
+            (lambda value: value["operations"][4]["reply"].__setitem__("encoded_size_ok", 47),
+             "postgres-status-reply"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):

@@ -31,6 +31,7 @@ typedef struct
    int (*embedding_dimension)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
+   int (*postgres_status)(aimee_db2_postgres_status_t *status);
 } aimee_db2_module_backend_t;
 
 extern aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
@@ -134,6 +135,25 @@ int db2_embedding_dim_last_offered(void)
 static int embedding_refusals(aimee_db2_embedding_refusals_t *status)
 {
    *status = (aimee_db2_embedding_refusals_t){7, 768};
+   return 0;
+}
+
+int db2_pg_stat_summary(int *active, int *maximum, int *replica, int64_t *lag)
+{
+   if (active)
+      *active = 12;
+   if (maximum)
+      *maximum = 100;
+   if (replica)
+      *replica = 1;
+   if (lag)
+      *lag = 1048576;
+   return 0;
+}
+
+static int postgres_status(aimee_db2_postgres_status_t *status)
+{
+   *status = (aimee_db2_postgres_status_t){15, 12, 100, 1, 1048576};
    return 0;
 }
 
@@ -270,6 +290,7 @@ int main(void)
        .embedding_dimension = embedding_dimension,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
+       .postgres_status = postgres_status,
    };
    process_thread_t process = {
        .config = {.socket_path = socket_path,
@@ -324,6 +345,14 @@ int main(void)
                                             &refusals, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(domain_result == AIMEE_DB2_RESULT_OK && refusals.refused_count == 7 &&
           refusals.last_offered == 768);
+
+   aimee_db2_postgres_status_t postgres = {0};
+   domain_result = 9;
+   assert(aimee_db2_postgres_status_call(call_client, &client, 7013, 0, &domain_result, &postgres,
+                                         NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && postgres.available == 15 &&
+          postgres.active_connections == 12 && postgres.max_connections == 100 &&
+          postgres.is_replica == 1 && postgres.replica_lag_bytes == 1048576);
 
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 7002, 1, &schema_ok, &have_pg_trgm,

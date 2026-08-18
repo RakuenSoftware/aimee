@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "1090cceb947a6e7822d79434b57d2d0f881dcda71a3ea173411f64a3227653b5"
+#define AIMEE_DB2_CONTRACT_SHA256 "fcab868fd9dbcf0b7b946eac072cc7a9d38fce44db1ed0851ebfe240afd0d2bd"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -62,6 +62,18 @@
 #define AIMEE_DB2_EMBEDDING_REFUSALS_RESPONSE_LEN  36u
 #define AIMEE_DB2_EMBEDDING_REFUSALS_ERROR_LEN     24u
 #define AIMEE_DB2_EMBEDDING_OFFERED_MAX            2147483647u
+#define AIMEE_DB2_EVENT_POSTGRES_STATUS            AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_POSTGRES_STATUS            AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_POSTGRES_STATUS        5u
+#define AIMEE_DB2_POSTGRES_STATUS_REQUEST_LEN      24u
+#define AIMEE_DB2_POSTGRES_STATUS_RESPONSE_LEN     48u
+#define AIMEE_DB2_POSTGRES_STATUS_ERROR_LEN        24u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_ACTIVE        0x1u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_MAX           0x2u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_ROLE          0x4u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_LAG           0x8u
+#define AIMEE_DB2_POSTGRES_AVAILABLE_ALL           0xfu
+#define AIMEE_DB2_POSTGRES_COUNT_MAX               2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -102,6 +114,15 @@ typedef struct
    uint64_t refused_count;
    uint32_t last_offered;
 } aimee_db2_embedding_refusals_t;
+
+typedef struct
+{
+   uint32_t available;
+   uint32_t active_connections;
+   uint32_t max_connections;
+   uint32_t is_replica;
+   uint64_t replica_lag_bytes;
+} aimee_db2_postgres_status_t;
 
 static inline void aimee_db2_put_u16(uint8_t *output, uint16_t value)
 {
@@ -465,6 +486,119 @@ static inline int aimee_db2_embedding_refusals_reply_decode(
    };
    if (decoded.last_offered > AIMEE_DB2_EMBEDDING_OFFERED_MAX ||
        ((decoded.refused_count == 0u) != (decoded.last_offered == 0u)))
+      return -1;
+   *result = header.result;
+   *status = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_postgres_status_valid(const aimee_db2_postgres_status_t *status)
+{
+   if (!status || (status->available & ~AIMEE_DB2_POSTGRES_AVAILABLE_ALL) != 0u ||
+       status->active_connections > AIMEE_DB2_POSTGRES_COUNT_MAX ||
+       status->max_connections > AIMEE_DB2_POSTGRES_COUNT_MAX)
+      return 0;
+   if ((status->available & AIMEE_DB2_POSTGRES_AVAILABLE_ACTIVE) == 0u &&
+       status->active_connections != 0u)
+      return 0;
+   if ((status->available & AIMEE_DB2_POSTGRES_AVAILABLE_MAX) == 0u &&
+       status->max_connections != 0u)
+      return 0;
+   if ((status->available & AIMEE_DB2_POSTGRES_AVAILABLE_ROLE) == 0u)
+   {
+      if (status->is_replica != 0u)
+         return 0;
+   }
+   else if (status->is_replica > 1u)
+      return 0;
+   if ((status->available & AIMEE_DB2_POSTGRES_AVAILABLE_LAG) == 0u)
+      return status->replica_lag_bytes == 0u;
+   return (status->available & AIMEE_DB2_POSTGRES_AVAILABLE_ROLE) != 0u &&
+          status->is_replica == 1u;
+}
+
+static inline int aimee_db2_postgres_status_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POSTGRES_STATUS, 0u, 0u, output,
+                                           capacity);
+}
+
+static inline int aimee_db2_postgres_status_request_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_POSTGRES_STATUS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_POSTGRES_STATUS && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_postgres_status_reply_encode(
+    uint32_t result, const aimee_db2_postgres_status_t *status, uint8_t *output, size_t capacity,
+    uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {
+      if (!aimee_db2_postgres_status_valid(status) ||
+          capacity < AIMEE_DB2_POSTGRES_STATUS_RESPONSE_LEN)
+         return -1;
+      payload_len = 24u;
+   }
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || status ||
+            capacity < AIMEE_DB2_POSTGRES_STATUS_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_POSTGRES_STATUS, result, payload_len,
+                                     output, capacity) != 0)
+      return -1;
+   if (status)
+   {
+      uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+      aimee_db2_put_u32(payload, status->available);
+      aimee_db2_put_u32(payload + 4, status->active_connections);
+      aimee_db2_put_u32(payload + 8, status->max_connections);
+      aimee_db2_put_u32(payload + 12, status->is_replica);
+      aimee_db2_put_u64(payload + 16, status->replica_lag_bytes);
+   }
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_postgres_status_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result,
+    aimee_db2_postgres_status_t *status)
+{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_postgres_status_t){0};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_POSTGRES_STATUS)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {
+      *result = header.result;
+      return 0;
+   }
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 24u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_postgres_status_t decoded = {
+       .available = aimee_db2_get_u32(payload),
+       .active_connections = aimee_db2_get_u32(payload + 4),
+       .max_connections = aimee_db2_get_u32(payload + 8),
+       .is_replica = aimee_db2_get_u32(payload + 12),
+       .replica_lag_bytes = aimee_db2_get_u64(payload + 16),
+   };
+   if (!aimee_db2_postgres_status_valid(&decoded))
       return -1;
    *result = header.result;
    *status = decoded;

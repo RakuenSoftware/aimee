@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "1090cceb947a6e7822d79434b57d2d0f881dcda71a3ea173411f64a3227653b5"
+const ContractSHA256 = "fcab868fd9dbcf0b7b946eac072cc7a9d38fce44db1ed0851ebfe240afd0d2bd"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -52,6 +52,15 @@ const EventEmbeddingRefusals = EventLifecycle
 const StageEmbeddingRefusals = FamilyLifecycle
 const OperationEmbeddingRefusals uint32 = 4
 const EmbeddingOfferedMax uint32 = 2147483647
+const EventPostgresStatus = EventLifecycle
+const StagePostgresStatus = FamilyLifecycle
+const OperationPostgresStatus uint32 = 5
+const PostgresAvailableActive uint32 = 1 << 0
+const PostgresAvailableMax uint32 = 1 << 1
+const PostgresAvailableRole uint32 = 1 << 2
+const PostgresAvailableLag uint32 = 1 << 3
+const PostgresAvailableAll uint32 = 0xf
+const PostgresCountMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -362,6 +371,107 @@ func DecodeEmbeddingRefusalsReply(reply []byte) (uint32, EmbeddingRefusals, erro
 	if status.LastOffered > EmbeddingOfferedMax ||
 		(status.RefusedCount == 0) != (status.LastOffered == 0) {
 		return 0, EmbeddingRefusals{}, ErrMalformedEnvelope
+	}
+	return header.Result, status, nil
+}
+
+type PostgresStatus struct {
+	Available         uint32
+	ActiveConnections uint32
+	MaxConnections    uint32
+	IsReplica         uint32
+	ReplicaLagBytes   uint64
+}
+
+func validPostgresStatus(status PostgresStatus) bool {
+	if status.Available & ^PostgresAvailableAll != 0 || status.ActiveConnections > PostgresCountMax ||
+		status.MaxConnections > PostgresCountMax {
+		return false
+	}
+	if status.Available&PostgresAvailableActive == 0 && status.ActiveConnections != 0 {
+		return false
+	}
+	if status.Available&PostgresAvailableMax == 0 && status.MaxConnections != 0 {
+		return false
+	}
+	if status.Available&PostgresAvailableRole == 0 {
+		if status.IsReplica != 0 {
+			return false
+		}
+	} else if status.IsReplica > 1 {
+		return false
+	}
+	if status.Available&PostgresAvailableLag == 0 {
+		return status.ReplicaLagBytes == 0
+	}
+	return status.Available&PostgresAvailableRole != 0 && status.IsReplica == 1
+}
+
+func EncodePostgresStatusRequest() []byte {
+	header, err := EncodeRequestHeader(OperationPostgresStatus, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+func DecodePostgresStatusRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPostgresStatus || header.Flags != 0 ||
+		header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+func EncodePostgresStatusReply(result uint32, status PostgresStatus) ([]byte, error) {
+	var payloadLen uint32
+	if result == ResultOK {
+		if !validPostgresStatus(status) {
+			return nil, ErrMalformedEnvelope
+		}
+		payloadLen = 24
+	} else if result != ResultInvalidState || status != (PostgresStatus{}) {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationPostgresStatus, result, payloadLen)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	if payloadLen == 0 {
+		return header, nil
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload[0:4], status.Available)
+	binary.LittleEndian.PutUint32(payload[4:8], status.ActiveConnections)
+	binary.LittleEndian.PutUint32(payload[8:12], status.MaxConnections)
+	binary.LittleEndian.PutUint32(payload[12:16], status.IsReplica)
+	binary.LittleEndian.PutUint64(payload[16:24], status.ReplicaLagBytes)
+	return reply, nil
+}
+
+func DecodePostgresStatusReply(reply []byte) (uint32, PostgresStatus, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPostgresStatus {
+		return 0, PostgresStatus{}, ErrMalformedEnvelope
+	}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {
+		return header.Result, PostgresStatus{}, nil
+	}
+	if header.Result != ResultOK || header.PayloadLen != 24 {
+		return 0, PostgresStatus{}, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	status := PostgresStatus{
+		Available:         binary.LittleEndian.Uint32(payload[0:4]),
+		ActiveConnections: binary.LittleEndian.Uint32(payload[4:8]),
+		MaxConnections:    binary.LittleEndian.Uint32(payload[8:12]),
+		IsReplica:         binary.LittleEndian.Uint32(payload[12:16]),
+		ReplicaLagBytes:   binary.LittleEndian.Uint64(payload[16:24]),
+	}
+	if !validPostgresStatus(status) {
+		return 0, PostgresStatus{}, ErrMalformedEnvelope
 	}
 	return header.Result, status, nil
 }
