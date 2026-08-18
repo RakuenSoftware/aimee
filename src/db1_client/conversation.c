@@ -232,12 +232,14 @@ int db1_payload_rewrite_state_get(const char *session_id, payload_rewrite_state_
    char slot6[32];
    char slot7[32];
    char slot8[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {out->session_id, slot1, slot2, out->last_prefix_hash, slot4, out->last_rewrite_at, slot6, slot7, slot8, out->rewrite_reason, out->updated_at};
    const size_t caps[] = {sizeof out->session_id, sizeof slot1, sizeof slot2, sizeof out->last_prefix_hash, sizeof slot4, sizeof out->last_rewrite_at, sizeof slot6, sizeof slot7, sizeof slot8, sizeof out->rewrite_reason, sizeof out->updated_at};
-   memset(out, 0, sizeof *out);
    int wire_status = call_stage(AIMEE_DB1_OP_REWRITE_STATE_GET, fields, 1, values, caps, 11, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    out->payload_epoch = (int64_t)strtoll(slot1, NULL, 10);
    out->compaction_epoch = (int64_t)strtoll(slot2, NULL, 10);
    out->last_payload_tokens = (int)strtol(slot4, NULL, 10);
@@ -283,12 +285,14 @@ int db1_wm_get(const char *session_id, const char *key, wm_entry_t *out)
       return -1;
    const char *fields[] = {session_id, key};
    char slot0[32];
+   memset(out, 0, sizeof *out);
    char *const values[] = {slot0, out->session_id, out->key, out->value, out->category, out->created_at, out->updated_at, out->expires_at};
    const size_t caps[] = {sizeof slot0, sizeof out->session_id, sizeof out->key, sizeof out->value, sizeof out->category, sizeof out->created_at, sizeof out->updated_at, sizeof out->expires_at};
-   memset(out, 0, sizeof *out);
    int wire_status = call_stage(AIMEE_DB1_OP_WM_GET, fields, 2, values, caps, 8, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
       return -1;
+   }
    out->id = (int64_t)strtoll(slot0, NULL, 10);
    return 0;
 }

@@ -96,8 +96,8 @@ void delegate_record_exit_learning(const char *sid, const char *role, const agen
       cJSON_AddStringToObject(evidence, "model", event_agent ? event_agent->model : "");
       evidence_json = cJSON_PrintUnformatted(evidence);
    }
-   delegate_learning_record(sid, role, dlc.failure_mode, dlc.lesson,
-                            evidence_json ? evidence_json : dlc.evidence, dlc.confidence);
+   db1_delegate_learning_record(sid, role, dl_failure_mode_to_string(dlc.failure_mode), dlc.lesson,
+                                evidence_json ? evidence_json : dlc.evidence, dlc.confidence);
    free(evidence_json);
    cJSON_Delete(evidence);
 

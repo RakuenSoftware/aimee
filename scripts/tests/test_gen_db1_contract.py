@@ -282,7 +282,8 @@ class CatalogTests(unittest.TestCase):
         contract.run(REPO_ROOT)
 
     def test_generation_is_deterministic(self) -> None:
-        catalog = contract.validate_catalog(contract.load_json(REPO_ROOT / contract.CATALOG))
+        catalog = contract.validate_catalog(contract.load_json(REPO_ROOT / contract.CATALOG),
+                                            REPO_ROOT)
         self.assertEqual(contract.header_bytes(catalog), contract.header_bytes(catalog))
 
     def test_writing_the_header_is_idempotent(self) -> None:
@@ -341,7 +342,8 @@ class CatalogTests(unittest.TestCase):
             tmp.cleanup()
 
     def test_a_reserved_family_emits_nothing(self) -> None:
-        catalog = contract.validate_catalog(contract.load_json(REPO_ROOT / contract.CATALOG))
+        catalog = contract.validate_catalog(contract.load_json(REPO_ROOT / contract.CATALOG),
+                                            REPO_ROOT)
         header = contract.header_bytes(catalog)
         families = catalog["families"]
         for name, family in families.items():
@@ -1010,6 +1012,48 @@ class CatalogTests(unittest.TestCase):
                 contract.run(root, write=False)
         finally:
             tmp.cleanup()
+
+    def test_a_void_domain_gets_a_void_client(self) -> None:
+        # A heartbeat answers nothing. Inventing a status for it would be a
+        # value no caller checks and no domain produced -- and the stage cannot
+        # assign one either, because there is nothing to assign from.
+        client = (REPO_ROOT / contract.CLIENT_DIR / "delegation.c").read_text()
+        stage = (REPO_ROOT / contract.SOURCE_DIR / "delegation_stage.c").read_text()
+        body = client[client.index("void db1_agent_job_heartbeat(int job_id)"):]
+        body = body[:body.index("\n}")]
+        self.assertIn("(void)call_stage(", body)
+        self.assertNotIn("return write_result", body)
+        case = stage[stage.index("AGENT_JOB_HEARTBEAT:"):]
+        case = case[:case.index("break;")]
+        self.assertIn("      db1_agent_job_heartbeat(parsed0);", case)
+        self.assertNotIn("rc = db1_agent_job_heartbeat", case)
+
+    def test_an_allocated_member_is_allocated_and_released_on_both_sides(self) -> None:
+        # The caller frees the row with the call it always used, so the client
+        # has to be the one that allocated it. A failure part-way through must
+        # not leave the caller holding memory it was never told about.
+        client = (REPO_ROOT / contract.CLIENT_DIR / "delegation.c").read_text()
+        stage = (REPO_ROOT / contract.SOURCE_DIR / "delegation_stage.c").read_text()
+        body = client[client.index("int db1_agent_job_get(int job_id,"):]
+        body = body[:body.index("\n}")]
+        self.assertIn("out->prompt = malloc(", body)
+        self.assertIn("free(out->prompt);", body)
+        self.assertIn("realloc(out->prompt", body)
+        # The stage releases what the DOMAIN allocated, after write_reply has
+        # read it -- which is why the release is in the tail, not the case.
+        self.assertIn("free(member_owned[slot]);", stage)
+        self.assertIn("? row_db1_agent_job_t.prompt : \"\";", stage)
+
+    def test_a_read_carries_its_own_return_when_it_says_so(self) -> None:
+        # classify_stale always fills the buffer and separately answers whether
+        # that state counts as stale. Deriving the answer from "did any text
+        # arrive" says yes every time.
+        client = (REPO_ROOT / contract.CLIENT_DIR / "delegation.c").read_text()
+        body = client[client.index("int db1_agent_job_classify_stale("):]
+        body = body[:body.index("\n}")]
+        self.assertIn("caps, 2, NULL)", body)
+        self.assertIn("strtol(slot_rc, NULL, 10)", body)
+        self.assertNotIn("read_result(", body)
 
 
 if __name__ == "__main__":
