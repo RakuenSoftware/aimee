@@ -796,6 +796,22 @@
       "reason": "A single-row scope-tag SQL probe is private DB2 query planning; complete memory search and retrieval operations enforce scope before returning bounded rows."
     },
     {
+      "symbol": "db2_memory_session_l0_list",
+      "signature_sha256": "b8dbcc2d55245e60afc0709039bfa0ee50f80c82e9ed488b02e6305f44f024f8",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Listing a session's L0 rows is a private step of the future memory.session_fold operation; exposing the list separately would race the L1 checkpoint insert and subsequent provenance-aware purge."
+    },
+    {
+      "symbol": "db2_memory_session_l0_purge",
+      "signature_sha256": "4e517dde22542cf42658f3ae08648c3a9297d256e7a5ffcf988d73060ca7d831",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "Purging a session's L0 memories and provenance is a private mutation inside the future memory.session_fold transaction; it cannot be an independent wire operation without risking loss between checkpoint creation and deletion."
+    },
+    {
       "symbol": "db2_memory_set_valid_from",
       "signature_sha256": "c4e1e242a8f75d2d21c7d46f6210348f825cd8ca4f673abd91396d865e6aa444",
       "disposition": "private-db2",

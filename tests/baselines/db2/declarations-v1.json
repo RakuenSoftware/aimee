@@ -17591,9 +17591,15 @@
           "line": 183
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Listing a session's L0 rows is a private step of the future memory.session_fold operation; exposing the list separately would race the L1 checkpoint insert and subsequent provenance-aware purge."
+      },
       "signature": "int db2_memory_session_l0_list ( const char * session_id , db2_memory_session_l0_row_t * out , int max )",
       "signature_sha256": "b8dbcc2d55245e60afc0709039bfa0ee50f80c82e9ed488b02e6305f44f024f8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_session_l0_list"
     },
     {
@@ -17606,9 +17612,15 @@
           "line": 560
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "Purging a session's L0 memories and provenance is a private mutation inside the future memory.session_fold transaction; it cannot be an independent wire operation without risking loss between checkpoint creation and deletion."
+      },
       "signature": "void db2_memory_session_l0_purge ( const char * session_id )",
       "signature_sha256": "4e517dde22542cf42658f3ae08648c3a9297d256e7a5ffcf988d73060ca7d831",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_session_l0_purge"
     },
     {
@@ -25098,15 +25110,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "c8101461577a24b25c94c159d32a19b4843bdf419c094b63f834ff82659bb62f",
+  "fingerprint": "29af88feea5c193a2280984e11676842d2b382e409c76f05069465d4eb1e515e",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 779,
+    "audit_pending": 777,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 179
+    "reviewed": 181
   }
 }
