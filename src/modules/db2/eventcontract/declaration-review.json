@@ -188,6 +188,86 @@
       "reason": "The typed lifecycle.health operation exposes canonical KB-table readiness together with the schema probe; that evidence remains DB2 authority."
     },
     {
+      "symbol": "db2_kb_service_agent_hint_consume_json",
+      "signature_sha256": "495f0aaa0e5a6f7d73f3c27767bdf4e030862cad32e4c208e186064343ab9674",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "This cJSON compatibility facade is caller presentation code; the learning operation consumes bounded role and prompt fields and returns a typed hint record."
+    },
+    {
+      "symbol": "db2_kb_service_agent_outcome_record_json",
+      "signature_sha256": "eec9bed7ed8f5e690708cef2f7e6eb77fc57ba30794ce5926410bd6609e5674d",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON outcome wrapper is retired at the process boundary; a typed learning mutation validates bounded outcome evidence and returns structured status."
+    },
+    {
+      "symbol": "db2_kb_service_anti_pattern_bump_json",
+      "signature_sha256": "63bff083c4042184d07f7e4aea2c63436c1175b52347fc338f017a0d178758ce",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON mutation adapter cannot cross the stable bus; a typed anti-pattern operation owns the update and returns bounded counters."
+    },
+    {
+      "symbol": "db2_kb_service_anti_pattern_check_json",
+      "signature_sha256": "952be8ae3aca11c6696e6302e91fc1957f590a8549a53523ce8230d2dcefc210",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON check result is caller-specific serialization; DB2 evaluates bounded path and command inputs and returns typed anti-pattern matches."
+    },
+    {
+      "symbol": "db2_kb_service_anti_pattern_delete_json",
+      "signature_sha256": "44e6bd888a9e8a1bdab4a29b848c120606492fea4e91314efb885ffb1b5eb572",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The legacy cJSON delete facade is not a wire shape; the typed learning mutation owns deletion and exposes only its closed result."
+    },
+    {
+      "symbol": "db2_kb_service_anti_pattern_escalate_json",
+      "signature_sha256": "e0abc48fb7f50c91363ea18c9aeb5af9adc28c4373dadbc7b83df024cf0e90f1",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON escalation report stays with the caller; DB2 applies the bounded threshold atomically and returns typed aggregate evidence."
+    },
+    {
+      "symbol": "db2_kb_service_anti_pattern_extract_from_failures_json",
+      "signature_sha256": "d2b6aeefc0f79c3a4dc5d8ea66ce6f96c5c6f390919bcf510813808a89dcddb8",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON maintenance response is not a transport contract; one typed learning operation owns failure extraction and returns bounded counts."
+    },
+    {
+      "symbol": "db2_kb_service_anti_pattern_extract_from_feedback_json",
+      "signature_sha256": "fcbfac0cf16e32c1fa5154bda3ede046d27dc871a16f8ebde3a9ce8fee83212b",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON maintenance response remains local presentation; one typed learning operation owns feedback extraction and returns bounded counts."
+    },
+    {
+      "symbol": "db2_kb_service_anti_pattern_insert_json",
+      "signature_sha256": "e571c9d7b6d62f8c1380232f59312c0eaf67d3abcf2bdc4c95be22d96ec0d55f",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON insert facade is caller presentation code; a typed operation bounds every learning field and returns an explicit identifier and result."
+    },
+    {
+      "symbol": "db2_kb_service_anti_pattern_list_json",
+      "signature_sha256": "f3b5378e18120047ed21ca678daf10340d4accb4a8a0a294cd265bde8e7a3a98",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON list builder cannot be the stable wire shape; DB2 returns a bounded typed anti-pattern record set for caller serialization."
+    },
+    {
       "symbol": "db2_kb_service_learning_get_json",
       "signature_sha256": "9dd27e1e2c8bababa5057a656f302898147c6479f34aeb98d7bda861877292c2",
       "disposition": "private-db2",
