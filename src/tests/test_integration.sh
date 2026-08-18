@@ -634,7 +634,33 @@ RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":4,"method":"resources/read","p
 check_output "mcp resources/read config" '"mimeType":"application/json"' echo "$RESP"
 check_output "mcp resources/read config text" '\"protocolVersion\":\"2024-11-05\"' echo "$RESP"
 
-RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git_status","arguments":{}}}') || true
+# Retry ONCE when the bridge reports the server unreachable.
+#
+# A tools/call is a POST, and cli_mcp_serve.c deliberately never retries those:
+# "a lost response must not duplicate a mutation whose first attempt may have
+# completed." That is right, and it makes this check single-shot -- one slow
+# response on a loaded runner fails it. It has failed twice now for two
+# different reasons, which makes it the flakiest check here.
+#
+# So retry the CHECK, not the request. Safe precisely because git_status is a
+# read: a second attempt cannot duplicate anything, which is the whole reason
+# the product refuses to retry the general case. Anything other than "server
+# unavailable" is a real answer and is asserted on as-is, so a genuine
+# regression still fails on the first attempt.
+mcp_git_status() {
+    local out
+    out=$(mcp_initialized_req '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git_status","arguments":{}}}' 2>/dev/null) || true
+    case "$out" in
+        *"unavailable after retries"*)
+            echo "  (mcp git_status: bridge reported the server unreachable; retrying once)" >&2
+            sleep 2
+            out=$(mcp_initialized_req '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"git_status","arguments":{}}}' 2>/dev/null) || true
+            ;;
+    esac
+    printf '%s' "$out"
+}
+
+RESP=$(mcp_git_status) || true
 check_output "mcp git_status tool call" '"content"' echo "$RESP"
 check_output "mcp git_status result text" 'branch:' echo "$RESP"
 
