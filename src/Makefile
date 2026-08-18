@@ -1186,7 +1186,10 @@ else
 	echo "check-linking: ok"
 endif
 
-integration-tests: $(BINARY) $(SERVER)
+# The harness starts the DB1 module the way a container's supervisor does, so
+# the module is a prerequisite: without it every migrated operation answers
+# "capability absent" and the failure reads as a broken store.
+integration-tests: $(BINARY) $(SERVER) $(OBJDIR)/aimee-module-db1
 	./tests/test_integration.sh
 	python3 ../scripts/test-thin-client-remote-exclusive.py $(BINARY)
 	python3 ../scripts/test-served-argspec-e2e.py $(BINARY)

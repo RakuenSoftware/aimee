@@ -36,6 +36,88 @@ HTTP_SOCK="$AIMEE_HOME/aimee-http.sock"
 # while the server it started is running perfectly well two lines away.
 export AIMEE_API_ENDPOINT="unix:$HTTP_SOCK"
 
+# ---------------------------------------------------------------
+# The DB1 module.
+#
+# Most of DB1 is served by a separate process now, and the daemon has no
+# in-process fallback: with nothing attached, every migrated call answers
+# "capability absent" and the operation fails. In a container the module
+# supervisor starts it from server.modules; this harness has no supervisor, so
+# it does what the supervisor does -- install the module beside the socket,
+# write the grant the daemon's policy loader reads, and attach it once the
+# daemon is up.
+#
+# Without this the harness exercises a daemon that cannot reach its own store,
+# and reports it as "failed to create session" rather than as a missing module.
+#
+# The grant is written only when the module is actually there. A grant naming an
+# executable that does not resolve is not one the daemon ignores: it refuses to
+# start the module bus, and the server exits before it listens. The make target
+# builds the module, so the ordinary path has one; a hand-run without it
+# degrades to the old behaviour rather than to a server that will not come up.
+# ---------------------------------------------------------------
+DB1_MODULE_BUILT="$REPO_ROOT/src/build/obj/aimee-module-db1"
+DB1_MODULE="$AIMEE_HOME/aimee-module-db1"
+MODULE_POLICY_DIR="$AIMEE_HOME/modules.d/server"
+MODULE_BUS_SOCK="$AIMEE_HOME/server-module-bus.sock"
+DB1_MODULE_PID=""
+
+install_db1_module() {
+    [ -x "$DB1_MODULE_BUILT" ] || return 0
+    # Copied beside the socket rather than granted where it was built: a grant
+    # pins a resolved path, and a build tree is not where a deployed module
+    # lives.
+    cp "$DB1_MODULE_BUILT" "$DB1_MODULE" || return 0
+    chmod 0755 "$DB1_MODULE"
+    mkdir -p "$MODULE_POLICY_DIR"
+    # Read the serve list from the grant the exporter generates when it is
+    # there, so this cannot drift from what the module serves. It is a build
+    # artifact and not always present, and under `set -e` a failed command
+    # substitution ends the run, so the read is guarded rather than trusted.
+    local generated="$REPO_ROOT/src/build/obj/module-bundle/grants/server/db1.grant"
+    local serve=""
+    if [ -r "$generated" ]; then
+        serve=$(sed -n 's/^serve=//p' "$generated" || true)
+    fi
+    [ -n "$serve" ] || serve="11777,11778,11779,11780,11781,11782,11783,11784"
+    cat >"$MODULE_POLICY_DIR/db1.grant" <<GRANT
+version=1
+principal_class=1
+principal_ref=30
+uid=self
+executable=$DB1_MODULE
+publish=
+subscribe=
+request=
+serve=$serve
+GRANT
+}
+
+start_db1_module() {
+    [ -x "$DB1_MODULE" ] || return 0
+    stop_db1_module
+    AIMEE_DB1_PATH="$AIMEE_HOME/aimee.db" "$DB1_MODULE" "$MODULE_BUS_SOCK" >/dev/null 2>&1 &
+    DB1_MODULE_PID=$!
+    # Wait for the module to answer rather than guessing, for the reason
+    # start_server does: a fixed sleep is either a stall or a flake.
+    local i
+    for i in $(seq 1 100); do
+        [ -S "$MODULE_BUS_SOCK" ] && break
+        kill -0 "$DB1_MODULE_PID" 2>/dev/null || break
+        sleep 0.1
+    done
+}
+
+stop_db1_module() {
+    if [ -n "$DB1_MODULE_PID" ]; then
+        kill "$DB1_MODULE_PID" 2>/dev/null || true
+        wait "$DB1_MODULE_PID" 2>/dev/null || true
+        DB1_MODULE_PID=""
+    fi
+}
+
+install_db1_module
+
 PASS=0
 FAIL=0
 SKIP=0
@@ -260,7 +342,9 @@ start_server() {
     SERVER_PID=$!
     local i
     for i in $(seq 1 300); do
-        [ -S "$HTTP_SOCK" ] && return 0
+        # The daemon owns the module bus socket, so the module attaches only
+        # once the daemon is listening -- which is what this loop waits for.
+        [ -S "$HTTP_SOCK" ] && { start_db1_module; return 0; }
         # A dead process will never bind; fail fast rather than waiting out the
         # full window for a server that has already exited.
         kill -0 "$SERVER_PID" 2>/dev/null || break
@@ -284,6 +368,7 @@ ABORT_CMD=""
 trap 'ABORT_LINE=$LINENO; ABORT_CMD=$BASH_COMMAND' ERR
 
 cleanup() {
+    stop_db1_module
     local rc=$?
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
         echo ""
