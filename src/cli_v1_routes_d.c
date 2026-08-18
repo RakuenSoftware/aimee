@@ -60,6 +60,8 @@ static const struct
     {"git.verify", pt_print_git_verify},
     /* Every git command returns MCP content blocks, the same shape verify does. */
     {"git.cli", pt_print_git_verify},
+    {"tool.call", pt_print_git_verify},
+    {"index.ast_grep", pt_print_git_verify},
     {"get_help", pt_print_get_help},
     {"server.health", pt_print_server_health},
     {"session.list", pt_print_session_list},
@@ -724,6 +726,33 @@ const cJSON *cli_v1_manifest_dispatch(void)
       return NULL;
    const cJSON *rows = cJSON_GetObjectItemCaseSensitive(doc, "dispatch");
    return cJSON_IsArray(rows) ? rows : NULL;
+}
+
+/* Does the server say this method's request body is empty?
+ *
+ * Only "args":"none" counts. An unknown or richer shape returns 0 so the
+ * client's own marshaller decides, rather than this silently sending an empty
+ * body for a command that needed arguments. */
+int cli_v1_manifest_method_takes_no_args(const char *method)
+{
+   if (!method || !method[0])
+      return 0;
+   const cJSON *doc = cli_v1_manifest();
+   if (!doc)
+      return 0;
+   const cJSON *rows = cJSON_GetObjectItemCaseSensitive(doc, "marshal");
+   if (!cJSON_IsArray(rows))
+      return 0;
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, rows)
+   {
+      const cJSON *m = cJSON_GetObjectItemCaseSensitive(row, "method");
+      if (!cJSON_IsString(m) || strcmp(m->valuestring, method) != 0)
+         continue;
+      const cJSON *a = cJSON_GetObjectItemCaseSensitive(row, "args");
+      return cJSON_IsString(a) && strcmp(a->valuestring, "none") == 0;
+   }
+   return 0;
 }
 
 /* Test seam: install a manifest directly instead of fetching one. Unit tests

@@ -269,6 +269,31 @@ static void test_served_dispatch(void)
    printf("  served_dispatch: ok\n");
 }
 
+/* ---- served argument shapes ---- */
+static void test_served_marshal(void)
+{
+   /* Only an explicit "args":"none" may make the client send an empty body. A
+    * looser reading would send {} for a command that needed arguments, which
+    * fails at the server with a worse message than the client's own refusal. */
+   cJSON *doc = cJSON_Parse("{\"manifest_version\":1,\"routes\":[],\"marshal\":["
+                            "{\"method\":\"brandnew.thing\",\"args\":\"none\"},"
+                            "{\"method\":\"needs.args\",\"args\":\"positional\"},"
+                            "{\"method\":\"no.shape\"}]}");
+   assert(doc);
+   cli_v1_manifest_set_for_test(doc);
+
+   assert(cli_v1_manifest_method_takes_no_args("brandnew.thing") == 1);
+   /* A shape this client does not understand leaves the decision to its own
+    * marshaller rather than guessing an empty body. */
+   assert(cli_v1_manifest_method_takes_no_args("needs.args") == 0);
+   assert(cli_v1_manifest_method_takes_no_args("no.shape") == 0);
+   assert(cli_v1_manifest_method_takes_no_args("never.mentioned") == 0);
+   assert(cli_v1_manifest_method_takes_no_args(NULL) == 0);
+   assert(cli_v1_manifest_method_takes_no_args("") == 0);
+
+   printf("  served_marshal: ok\n");
+}
+
 int main(void)
 {
    printf("cli_http_transport:\n");
@@ -276,6 +301,7 @@ int main(void)
    test_build_request();
    test_v1_route_map();
    test_served_dispatch();
+   test_served_marshal();
    test_http_round_trip();
    test_http_stream();
    printf("All cli_http_transport tests passed.\n");

@@ -407,6 +407,187 @@ cJSON *marshal_index_scan(int argc, char **argv)
    return req;
 }
 
+static void add_tool_arg(cJSON *args, const char *name, const char *value)
+{
+   if (!name || !name[0] || !value)
+      return;
+   if (strcmp(value, "true") == 0)
+      cJSON_AddBoolToObject(args, name, 1);
+   else if (strcmp(value, "false") == 0)
+      cJSON_AddBoolToObject(args, name, 0);
+   else
+   {
+      char *end = NULL;
+      long n = strtol(value, &end, 10);
+      if (value[0] && end && *end == '\0')
+         cJSON_AddNumberToObject(args, name, n);
+      else
+         cJSON_AddStringToObject(args, name, value);
+   }
+}
+
+/* Build the one normal RPC request used by both the universal CLI projection
+ * and ergonomic aliases. Accepted argument forms are --key value,
+ * --key=value, and key=value. A complete JSON object can be supplied as
+ * --arguments '{...}'. */
+static cJSON *marshal_tool_call_named(const char *tool, int argc, char **argv, const char *bare_key)
+{
+   if (!tool || !tool[0])
+      return NULL;
+
+   cJSON *args = cJSON_CreateObject();
+   if (!args)
+      return NULL;
+   for (int i = 0; i < argc; i++)
+   {
+      const char *raw = argv[i];
+      if (!raw)
+         continue;
+      if ((strcmp(raw, "--arguments") == 0 || strcmp(raw, "--json-args") == 0) && i + 1 < argc)
+      {
+         cJSON *parsed = cJSON_Parse(argv[++i]);
+         if (!cJSON_IsObject(parsed))
+         {
+            cJSON_Delete(parsed);
+            cJSON_Delete(args);
+            fprintf(stderr, "aimee tool call: --arguments must be a JSON object\n");
+            marshal_request_note_reported();
+            return NULL;
+         }
+         cJSON_Delete(args);
+         args = parsed;
+         continue;
+      }
+
+      while (raw[0] == '-' && raw[1] == '-')
+         raw += 2;
+      const char *eq = strchr(raw, '=');
+      /* A structural-search pattern is the one positional argument and may
+       * itself contain '=' (for example `$X = call()`). Do not mistake that
+       * expression for generic key=value syntax. The ast-grep alias has only
+       * these three named keys; every other first non-option token is its
+       * pattern, byte for byte. */
+      if (bare_key && argv[i][0] != '-' && !cJSON_GetObjectItemCaseSensitive(args, bare_key) &&
+          eq && strncmp(raw, "lang=", 5) != 0 && strncmp(raw, "path=", 5) != 0 &&
+          strncmp(raw, "pattern=", 8) != 0)
+      {
+         cJSON_AddStringToObject(args, bare_key, argv[i]);
+         continue;
+      }
+      if (eq)
+      {
+         char key[128];
+         size_t n = (size_t)(eq - raw);
+         if (n == 0 || n >= sizeof(key))
+         {
+            cJSON_Delete(args);
+            return NULL;
+         }
+         memcpy(key, raw, n);
+         key[n] = '\0';
+         add_tool_arg(args, key, eq + 1);
+         continue;
+      }
+      if (argv[i][0] == '-' && i + 1 < argc && strncmp(argv[i + 1], "--", 2) != 0)
+      {
+         add_tool_arg(args, raw, argv[++i]);
+         continue;
+      }
+      if (argv[i][0] == '-')
+      {
+         cJSON_AddBoolToObject(args, raw, 1);
+         continue;
+      }
+      if (bare_key && !cJSON_GetObjectItemCaseSensitive(args, bare_key))
+      {
+         cJSON_AddStringToObject(args, bare_key, argv[i]);
+         continue;
+      }
+      fprintf(stderr, "aimee tool call: unexpected argument '%s' (use key=value)\n", argv[i]);
+      cJSON_Delete(args);
+      marshal_request_note_reported();
+      return NULL;
+   }
+
+   cJSON *req = marshal_no_args("mcp.call");
+   if (!req)
+   {
+      cJSON_Delete(args);
+      return NULL;
+   }
+   cJSON_AddStringToObject(req, "tool", tool);
+   cJSON_AddItemToObject(req, "arguments", args);
+   const char *sid = getenv("AIMEE_SESSION_ID");
+   if (!sid || !sid[0])
+      sid = getenv("CLAUDE_SESSION_ID");
+   if (sid && sid[0])
+      cJSON_AddStringToObject(req, "session_id", sid);
+   char cwd[4096];
+   if (getcwd(cwd, sizeof(cwd)))
+      cJSON_AddStringToObject(req, "cwd", cwd);
+   return req;
+}
+
+cJSON *marshal_tool_call(int argc, char **argv)
+{
+   if (argc < 1 || !argv[0] || !argv[0][0])
+   {
+      fprintf(stderr, "usage: aimee tool call <tool> [--key value|key=value ...]\n");
+      marshal_request_note_reported();
+      return NULL;
+   }
+   return marshal_tool_call_named(argv[0], argc - 1, argv + 1, NULL);
+}
+
+cJSON *marshal_index_ast_grep(int argc, char **argv)
+{
+   cJSON *req = marshal_tool_call_named("ast_grep_search", argc, argv, "pattern");
+   if (!req)
+      return NULL;
+   cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+   cJSON *pattern = cJSON_GetObjectItemCaseSensitive(args, "pattern");
+   cJSON *lang = cJSON_GetObjectItemCaseSensitive(args, "lang");
+   if (!cJSON_IsString(pattern) || !pattern->valuestring[0] || !cJSON_IsString(lang) ||
+       !lang->valuestring[0])
+   {
+      fprintf(stderr,
+              "usage: aimee index ast-grep --lang <language> [--path <path>] '<pattern>'\n");
+      fprintf(stderr, "  missing or invalid:%s%s\n",
+              (!cJSON_IsString(lang) || !lang->valuestring[0]) ? " --lang" : "",
+              (!cJSON_IsString(pattern) || !pattern->valuestring[0]) ? " pattern" : "");
+      cJSON_Delete(req);
+      marshal_request_note_reported();
+      return NULL;
+   }
+   /* ast-grep resolves path in the server process. For a thin client, both an
+    * omitted path AND a caller-relative path would otherwise resolve against
+    * the server checkout. Bind relative paths to the caller cwd before the
+    * request crosses the CLI/API boundary. */
+   cJSON *path = cJSON_GetObjectItemCaseSensitive(args, "path");
+   cJSON *cwd = cJSON_GetObjectItemCaseSensitive(req, "cwd");
+   if (!path)
+   {
+      if (cJSON_IsString(cwd) && cwd->valuestring[0])
+         cJSON_AddStringToObject(args, "path", cwd->valuestring);
+   }
+   else if (cJSON_IsString(path) && path->valuestring[0] &&
+            !aimee_path_is_absolute(path->valuestring) && cJSON_IsString(cwd) &&
+            cwd->valuestring[0])
+   {
+      size_t n = strlen(cwd->valuestring) + strlen(path->valuestring) + 2;
+      char *absolute = malloc(n);
+      if (!absolute)
+      {
+         cJSON_Delete(req);
+         return NULL;
+      }
+      snprintf(absolute, n, "%s/%s", cwd->valuestring, path->valuestring);
+      cJSON_ReplaceItemInObjectCaseSensitive(args, "path", cJSON_CreateString(absolute));
+      free(absolute);
+   }
+   return req;
+}
+
 cJSON *marshal_index_find(int argc, char **argv)
 {
    static const char *bools[] = {"json", NULL};
