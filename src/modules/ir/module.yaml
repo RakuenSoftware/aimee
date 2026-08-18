@@ -10,7 +10,8 @@
   },
   "sources": [
     "src/modules/ir/aimee_ir.c",
-    "src/modules/ir/aimee_ir_metrics.c"
+    "src/modules/ir/aimee_ir_metrics.c",
+    "src/modules/ir/aimee_ir_session.c"
   ],
   "public_headers": [
     "src/modules/ir/include/aimee/ir/aimee_ir.h",
