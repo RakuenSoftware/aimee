@@ -370,6 +370,20 @@ int main(int argc, char **argv)
    assert(aimee_db2_has_workspace_tag_call(call_client, &client, 9052, 0, 0u, &tagged, NULL,
                                            NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
 
+   /* Memory 42 does not exist, so the delete removes nothing and reports zero.
+    * Replayed because deleting an absent row is genuinely neutral: the second
+    * call must give the same answer, which is what `safe` claims here. */
+   uint32_t removed = 99;
+   assert(aimee_db2_delete_row_call(call_client, &client, 9053, 0, 42u, &removed, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(removed == 0);
+   removed = 99;
+   assert(aimee_db2_delete_row_call(call_client, &client, 9054, 0, 42u, &removed, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(removed == 0);
+   assert(aimee_db2_delete_row_call(call_client, &client, 9055, 0, 0u, &removed, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

@@ -1022,6 +1022,29 @@
         "encoded_size_error": 24,
         "field": {"name": "tagged", "type": "u32", "minimum": 0, "maximum": 1}
       }
+    },
+    {
+      "family": "memory",
+      "id": 27,
+      "name": "delete_row",
+      "wire_format": "db2-envelope-u64-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Deleting a canonical relational memory row is DB2 authority; portable ANN providers hold derived vectors rather than the row itself.",
+      "c_symbols": ["db2_memory_delete_row"],
+      "request": {
+        "encoded_size": 32,
+        "field": {"name": "memory_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "deleted_rows", "type": "u32", "minimum": 0, "maximum": 1}
+      }
     }
   ]
 }

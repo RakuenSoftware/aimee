@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "dfee7146af425c3ec78575c9917b448c4bb981a71e942d21b14215446acac55e"
+const ContractSHA256 = "d3ddea4b22735b8eb89a5af9eee2fc0730e439ea8fba09bd41756784c2fabe02"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -238,6 +238,11 @@ const StageHasWorkspaceTag = FamilyMemory
 const OperationHasWorkspaceTag uint32 = 26
 const HasWorkspaceTagMemoryIDMax uint64 = 9223372036854775807
 const HasWorkspaceTagMax uint32 = 1
+const EventDeleteRow = EventMemory
+const StageDeleteRow = FamilyMemory
+const OperationDeleteRow uint32 = 27
+const DeleteRowMemoryIDMax uint64 = 9223372036854775807
+const DeleteRowMax uint32 = 1
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -748,6 +753,62 @@ func DecodeHasWorkspaceTagReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return tagged, nil
+}
+
+// EncodeDeleteRowRequest emits the memory the caller wants removed.
+func EncodeDeleteRowRequest(memoryID uint64) ([]byte, error) {
+	if memoryID == 0 || memoryID > DeleteRowMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationDeleteRow, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], memoryID)
+	return request, nil
+}
+
+// DecodeDeleteRowRequest validates the envelope and the bounded memory.
+func DecodeDeleteRowRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDeleteRow || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if memoryID == 0 || memoryID > DeleteRowMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+// EncodeDeleteRowReply emits whether the named row existed.
+func EncodeDeleteRowReply(deletedRows uint32) ([]byte, error) {
+	if deletedRows > DeleteRowMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationDeleteRow, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], deletedRows)
+	return reply, nil
+}
+
+// DecodeDeleteRowReply validates the operation and the single-row bound.
+func DecodeDeleteRowReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDeleteRow || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	deletedRows := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if deletedRows > DeleteRowMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return deletedRows, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

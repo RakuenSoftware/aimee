@@ -34,6 +34,9 @@ static int demote_id_calls;
 static int64_t demote_id_last;
 static int workspace_tag_value;
 static int workspace_tag_calls;
+static int delete_row_value;
+static int delete_row_calls;
+static int64_t delete_row_last;
 static int64_t workspace_tag_last;
 static int64_t total_count_value;
 static int total_count_calls;
@@ -311,6 +314,19 @@ static int has_workspace_tag(int64_t memory_id)
    workspace_tag_calls++;
    workspace_tag_last = memory_id;
    return workspace_tag_value;
+}
+
+int db2_memory_delete_row(int64_t memory_id)
+{
+   (void)memory_id;
+   return 0;
+}
+
+static int delete_row(int64_t memory_id)
+{
+   delete_row_calls++;
+   delete_row_last = memory_id;
+   return delete_row_value;
 }
 
 int64_t db2_memory_count(void)
@@ -966,6 +982,9 @@ static void reset(void)
    workspace_tag_value = 1;
    workspace_tag_calls = 0;
    workspace_tag_last = 0;
+   delete_row_value = 1;
+   delete_row_calls = 0;
+   delete_row_last = 0;
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
    session_l2_count_value = 3;
@@ -2255,6 +2274,36 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_delete_row_wire(void)
+{
+   uint8_t request[AIMEE_DB2_DELETE_ROW_REQUEST_LEN] = {0};
+   uint64_t memory_id = 99;
+   assert(aimee_db2_delete_row_request_encode(42u, request, sizeof(request)) == 0);
+   assert(aimee_db2_delete_row_request_decode(request, sizeof(request), &memory_id) == 0 &&
+          memory_id == 42);
+   assert(aimee_db2_delete_row_request_encode(0u, request, sizeof(request)) == -1);
+   assert(aimee_db2_delete_row_request_encode(AIMEE_DB2_DELETE_ROW_MEMORY_ID_MAX + 1ull, request,
+                                              sizeof(request)) == -1);
+   assert(aimee_db2_delete_row_request_encode(42u, request, sizeof(request) - 1) == -1);
+   assert(aimee_db2_delete_row_request_encode(42u, request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_delete_row_request_decode(request, sizeof(request), &memory_id) == -1 &&
+          memory_id == 0);
+
+   uint8_t reply[AIMEE_DB2_DELETE_ROW_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, removed = 99;
+   assert(aimee_db2_delete_row_reply_encode(1, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_delete_row_reply_decode(reply, reply_len, &removed) == 0 && removed == 1);
+   assert(aimee_db2_delete_row_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_delete_row_reply_decode(reply, reply_len, &removed) == 0 && removed == 0);
+   /* A primary-key delete can remove at most one row. */
+   assert(aimee_db2_delete_row_reply_encode(2, reply, sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_delete_row_reply_encode(1, reply, sizeof(reply) - 1, &reply_len) == -1);
+   assert(aimee_db2_delete_row_reply_encode(1, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_delete_row_reply_decode(reply, reply_len, &removed) == -1 && removed == 0);
 }
 
 static void test_has_workspace_tag_wire(void)
@@ -3665,6 +3714,44 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_delete_row_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.delete_row = delete_row};
+   uint8_t request[AIMEE_DB2_DELETE_ROW_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DELETE_ROW_RESPONSE_LEN];
+   uint32_t response_len = 99, removed = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_DELETE_ROW};
+   assert(aimee_db2_delete_row_request_encode(42u, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(delete_row_calls == 1 && delete_row_last == 42);
+   assert(aimee_db2_delete_row_reply_decode(response, response_len, &removed) == 0 && removed == 1);
+
+   /* Deleting a memory that is not there is a success reporting zero. The
+    * backend cannot distinguish that from a connection failure, which it also
+    * reports as zero -- the same limitation the sweep operations carry, kept
+    * rather than changed under a bus migration. */
+   delete_row_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_delete_row_reply_decode(response, response_len, &removed) == 0 && removed == 0);
+
+   delete_row_value = 2;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   delete_row_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   delete_row_value = 1;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_has_workspace_tag_handler(void)
 {
    reset();
@@ -4732,6 +4819,7 @@ int main(void)
    test_lifecycle_sweep_expired_wire();
    test_demote_id_wire();
    test_has_workspace_tag_wire();
+   test_delete_row_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -4768,6 +4856,7 @@ int main(void)
    test_lifecycle_sweep_expired_handler();
    test_demote_id_handler();
    test_has_workspace_tag_handler();
+   test_delete_row_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

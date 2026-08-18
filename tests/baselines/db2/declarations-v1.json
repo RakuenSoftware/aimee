@@ -15814,9 +15814,15 @@
           "line": 706
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.delete_row operation replaces the canonical row delete and reports whether the named memory existed; the row is DB2 authority and any derived vector removal is a separate provider concern."
+      },
       "signature": "int db2_memory_delete_row ( int64_t memory_id )",
       "signature_sha256": "b9e88857118459c3be0d1328af8c32642bb24af70246b95a1fd09f2dba9336fb",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_delete_row"
     },
     {
@@ -25812,15 +25818,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "2281a35a52dbb67615b52df2809785fc7f79af94ef596629e8c6f8214c0d2322",
+  "fingerprint": "b752ff9613fdf8948bcba7c6c5c329c7b35fe6552f4ed3d50135bfc3a67514ac",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 660,
+    "audit_pending": 659,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 298
+    "reviewed": 299
   }
 }

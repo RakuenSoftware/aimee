@@ -85,6 +85,7 @@ type wireBaseline struct {
 				DeletedCount          uint32            `json:"deleted_count"`
 				ArchivedCount         uint32            `json:"archived_count"`
 				Tagged                uint32            `json:"tagged"`
+				DeletedRows           uint32            `json:"deleted_rows"`
 				DemotedCount          uint32            `json:"demoted_count"`
 				AvgEffectivenessBits  uint64            `json:"avg_effectiveness_bits"`
 				LowEffectivenessCount uint32            `json:"low_effectiveness_count"`
@@ -220,7 +221,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 36 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 37 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -255,7 +256,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[32].Name != "prune_orphaned_l0" ||
 		baseline.Operations[33].Name != "lifecycle_sweep_expired" ||
 		baseline.Operations[34].Name != "demote_id" ||
-		baseline.Operations[35].Name != "has_workspace_tag" {
+		baseline.Operations[35].Name != "has_workspace_tag" ||
+		baseline.Operations[36].Name != "delete_row" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -452,6 +454,47 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
 		}
+	}
+}
+
+func TestDeleteRowMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[36]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	got, err := EncodeDeleteRowRequest(operation.Request.MemoryID)
+	if err != nil || string(got) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", got, err, wantRequest)
+	}
+	memoryID, err := DecodeDeleteRowRequest(wantRequest)
+	if err != nil || memoryID != operation.Request.MemoryID {
+		t.Fatalf("positive request = (%d, %v)", memoryID, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, err := DecodeDeleteRowRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeDeleteRowReply(vector.DeletedRows)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		removed, err := DecodeDeleteRowReply(got)
+		if err != nil || removed != vector.DeletedRows {
+			t.Fatalf("decode = (%d, %v)", removed, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		removed, err := DecodeDeleteRowReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || removed != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, removed, err)
+		}
+	}
+	// A primary-key delete removes at most one row on this side too.
+	if _, err := EncodeDeleteRowReply(DeleteRowMax + 1); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("count past the single-row bound encoded: %v", err)
+	}
+	if _, err := EncodeDeleteRowRequest(0); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("zero memory encoded: %v", err)
 	}
 }
 

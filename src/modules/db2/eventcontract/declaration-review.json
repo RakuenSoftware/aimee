@@ -1420,6 +1420,14 @@
       "reason": "Counting version suffixes is private read-modify-write state for the future composite memory.supersede operation; exposing the count separately would race concurrent supersedes and split one logical DB2 mutation."
     },
     {
+      "symbol": "db2_memory_delete_row",
+      "signature_sha256": "b9e88857118459c3be0d1328af8c32642bb24af70246b95a1fd09f2dba9336fb",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.delete_row operation replaces the canonical row delete and reports whether the named memory existed; the row is DB2 authority and any derived vector removal is a separate provider concern."
+    },
+    {
       "symbol": "db2_memory_export_row_free",
       "signature_sha256": "ba729127864e108afffe9baf8c825923f9f857206dabcdac43769c09d121f0e1",
       "disposition": "private-db2",

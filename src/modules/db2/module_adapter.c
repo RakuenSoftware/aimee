@@ -273,6 +273,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .lifecycle_sweep_expired = db2_memory_lifecycle_sweep_expired,
        .demote_id = db2_memory_promotion_demote_id,
        .has_workspace_tag = db2_memory_has_any_workspace_tag,
+       .delete_row = db2_memory_delete_row,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -881,6 +882,25 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_INTERNAL;
          if (aimee_db2_has_workspace_tag_reply_encode((uint32_t)tagged, response_body,
                                                       response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t delete_memory_id = 0u;
+      if (aimee_db2_delete_row_request_decode(request_body, request_len, &delete_memory_id) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_DELETE_ROW_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->delete_row)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* Equality on the primary key: the row existed or it did not, so a
+          * wider count means the statement no longer matches the operation. */
+         int deleted = backend->delete_row((int64_t)delete_memory_id);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (deleted < 0 || (uint32_t)deleted > AIMEE_DB2_DELETE_ROW_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_delete_row_reply_encode((uint32_t)deleted, response_body, response_capacity,
+                                               response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
