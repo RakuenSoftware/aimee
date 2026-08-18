@@ -201,6 +201,11 @@ int main(int argc, char **argv)
                                            NULL) == AIMEE_MODULE_CALL_OK);
    assert(orphaned_l0_total == 0);
 
+   uint64_t memory_total = 99;
+   assert(aimee_db2_total_count_call(call_client, &client, 9024, 0, &memory_total, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(memory_total == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

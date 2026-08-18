@@ -15089,9 +15089,15 @@
           "line": 40
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.total_count operation replaces the read-only global corpus count while preserving the legacy 64-bit result width; canonical relational memory rows remain DB2 authority."
+      },
       "signature": "int64_t db2_memory_count ( void )",
       "signature_sha256": "9ba16dc645d42d96744285c4ebf5a81ba93d16af8c77d60c1f03d9109d358b19",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_count"
     },
     {
@@ -25050,15 +25056,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "45a9bc3f47fc55a8fd50712ce3b305cd41bb178ac02093e18141220ffcc44b72",
+  "fingerprint": "fb2f09e6f554f3a71ca881c20c5c77694086996a70a918e3fb90aec4b0915cc0",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 787,
+    "audit_pending": 786,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 171
+    "reviewed": 172
   }
 }

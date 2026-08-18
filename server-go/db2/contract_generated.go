@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "eb77dc82f7541438dd94c003d52864d2d28092b1c1c7b0d1018931677c7b9bd2"
+const ContractSHA256 = "8a6211747147bc72ab9e736466be73b8aaf57120274ffcdb3960aa47c9498da2"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -92,6 +92,10 @@ const EventOrphanedL0Count = EventMemory
 const StageOrphanedL0Count = FamilyMemory
 const OperationOrphanedL0Count uint32 = 3
 const OrphanedL0CountMax uint32 = 2147483647
+const EventTotalCount = EventMemory
+const StageTotalCount = FamilyMemory
+const OperationTotalCount uint32 = 4
+const TotalCountMax uint64 = 9223372036854775807
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -390,6 +394,53 @@ func DecodeOrphanedL0CountReply(reply []byte) (uint32, error) {
 	}
 	count := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
 	if count > OrphanedL0CountMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return count, nil
+}
+
+// EncodeTotalCountRequest emits the empty request envelope for the global memory count.
+func EncodeTotalCountRequest() []byte {
+	header, err := EncodeRequestHeader(OperationTotalCount, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeTotalCountRequest validates the exact memory-family operation envelope.
+func DecodeTotalCountRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTotalCount ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeTotalCountReply emits one bounded u64 success payload.
+func EncodeTotalCountReply(count uint64) ([]byte, error) {
+	if count > TotalCountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationTotalCount, ResultOK, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}
+
+// DecodeTotalCountReply validates the operation and bounded count.
+func DecodeTotalCountReply(reply []byte) (uint64, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationTotalCount || header.Result != ResultOK ||
+		header.PayloadLen != 8 {
+		return 0, ErrMalformedEnvelope
+	}
+	count := binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen:])
+	if count > TotalCountMax {
 		return 0, ErrMalformedEnvelope
 	}
 	return count, nil

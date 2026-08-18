@@ -45,7 +45,7 @@ type wireBaseline struct {
 				Flags         uint32 `json:"flags"`
 				Result        uint32 `json:"result"`
 				Dimension     uint32 `json:"dimension"`
-				Count         uint32 `json:"count"`
+				Count         uint64 `json:"count"`
 				Size          uint32 `json:"size"`
 				InUse         uint32 `json:"in_use"`
 				Waiters       uint32 `json:"waiters"`
@@ -161,7 +161,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 13 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 14 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -173,7 +173,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[9].Name != "dimension_reset" ||
 		baseline.Operations[10].Name != "level3_count" ||
 		baseline.Operations[11].Name != "level2_count" ||
-		baseline.Operations[12].Name != "orphaned_l0_count" {
+		baseline.Operations[12].Name != "orphaned_l0_count" ||
+		baseline.Operations[13].Name != "total_count" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -194,12 +195,12 @@ func TestLevel3CountMatchesEverySharedCVector(t *testing.T) {
 		}
 	}
 	for _, vector := range operation.Reply.Positive {
-		got, err := EncodeLevel3CountReply(vector.Count)
+		got, err := EncodeLevel3CountReply(uint32(vector.Count))
 		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
 			t.Fatalf("positive reply = (%x, %v)", got, err)
 		}
 		count, err := DecodeLevel3CountReply(got)
-		if err != nil || count != vector.Count {
+		if err != nil || uint64(count) != vector.Count {
 			t.Fatalf("decode = (%d, %v)", count, err)
 		}
 	}
@@ -226,12 +227,12 @@ func TestLevel2CountMatchesEverySharedCVector(t *testing.T) {
 		}
 	}
 	for _, vector := range operation.Reply.Positive {
-		got, err := EncodeLevel2CountReply(vector.Count)
+		got, err := EncodeLevel2CountReply(uint32(vector.Count))
 		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
 			t.Fatalf("positive reply = (%x, %v)", got, err)
 		}
 		count, err := DecodeLevel2CountReply(got)
-		if err != nil || count != vector.Count {
+		if err != nil || uint64(count) != vector.Count {
 			t.Fatalf("decode = (%d, %v)", count, err)
 		}
 	}
@@ -258,17 +259,49 @@ func TestOrphanedL0CountMatchesEverySharedCVector(t *testing.T) {
 		}
 	}
 	for _, vector := range operation.Reply.Positive {
-		got, err := EncodeOrphanedL0CountReply(vector.Count)
+		got, err := EncodeOrphanedL0CountReply(uint32(vector.Count))
 		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
 			t.Fatalf("positive reply = (%x, %v)", got, err)
 		}
 		count, err := DecodeOrphanedL0CountReply(got)
-		if err != nil || count != vector.Count {
+		if err != nil || uint64(count) != vector.Count {
 			t.Fatalf("decode = (%d, %v)", count, err)
 		}
 	}
 	for _, vector := range operation.Reply.Negative {
 		count, err := DecodeOrphanedL0CountReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || count != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, count, err)
+		}
+	}
+}
+
+func TestTotalCountMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[13]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeTotalCountRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeTotalCountRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeTotalCountRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeTotalCountReply(vector.Count)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		count, err := DecodeTotalCountReply(got)
+		if err != nil || count != vector.Count {
+			t.Fatalf("decode = (%d, %v)", count, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		count, err := DecodeTotalCountReply(decodeHex(t, vector.Hex))
 		if !errors.Is(err, ErrMalformedEnvelope) || count != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, count, err)
 		}

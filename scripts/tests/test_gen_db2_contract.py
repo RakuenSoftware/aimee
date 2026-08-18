@@ -192,6 +192,20 @@ class ContractTests(unittest.TestCase):
             [(0, 5)],
         )
 
+    def test_total_count_vectors_cover_closed_result_and_bound(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][13]
+        self.assertEqual(operation["name"], "total_count")
+        self.assertEqual(
+            [(row["result"], row["count"]) for row in operation["reply"]["positive"]],
+            [(0, 1234567890123)],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_payload",
+             "count_too_large", "short", "long"],
+        )
+
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
         operation = baseline["operations"][2]
@@ -380,7 +394,7 @@ class ContractTests(unittest.TestCase):
             "operation-duplicate",
         )
         self.assert_rule(
-            lambda value: value["operations"].insert(-3, {
+            lambda value: value["operations"].insert(-4, {
                 **copy.deepcopy(value["operations"][0]),
                 "id": 11,
                 "name": "health_second",
@@ -463,6 +477,21 @@ class ContractTests(unittest.TestCase):
              "operation-results"),
             (lambda value: value["operations"][12]["reply"]["field"].__setitem__(
                 "maximum", 0xffffffff), "orphaned-l0-count-reply"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_total_count_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][13].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][13].__setitem__("results", ["ok", "invalid_state"]),
+             "operation-results"),
+            (lambda value: value["operations"][13]["request"].__setitem__("payload", "u64"),
+             "total-count-request"),
+            (lambda value: value["operations"][13]["reply"]["field"].__setitem__(
+                "maximum", 0xffffffffffffffff), "total-count-reply"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):
