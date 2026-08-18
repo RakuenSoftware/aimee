@@ -15135,9 +15135,15 @@
           "line": 569
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.level2_count operation replaces the bounded global working-memory count; canonical relational memory rows remain DB2 authority."
+      },
       "signature": "int db2_memory_count_l2 ( void )",
       "signature_sha256": "225725868415d80e5299f9f46705008e0f1369ccc57fd8435bec4a26a4267a04",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_count_l2"
     },
     {
@@ -25038,15 +25044,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "7d98c18ed026b298d116427e08e077f3135a3384da2266ae1784c9f7ddd0f450",
+  "fingerprint": "02e5103aebb3154319a362af84355fe3a163fcfc589ed7ce81d9b26df5637f61",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 789,
+    "audit_pending": 788,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 169
+    "reviewed": 170
   }
 }

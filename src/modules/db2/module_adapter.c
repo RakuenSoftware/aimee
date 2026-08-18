@@ -114,6 +114,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .kb_health_probe = db2_kb_health_probe,
        .embedding_dimension = db2_embedding_dim,
        .level3_count = db2_memory_count_l3,
+       .level2_count = db2_memory_count_l2,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -146,21 +147,39 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
 
    if (invocation->stage_id == AIMEE_DB2_STAGE_LEVEL3_COUNT)
    {
-      if (aimee_db2_level3_count_request_decode(request_body, request_len) != 0)
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      if (response_capacity < AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN)
-         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-      if (!backend || !backend->level3_count)
-         return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-      int raw_count = backend->level3_count();
-      if (aimee_module_invocation_cancelled(invocation))
-         return AIMEE_MODULE_STATUS_CANCELLED;
-      if (raw_count < 0 || (uint32_t)raw_count > AIMEE_DB2_LEVEL3_COUNT_MAX)
-         return AIMEE_MODULE_STATUS_INTERNAL;
-      if (aimee_db2_level3_count_reply_encode((uint32_t)raw_count, response_body, response_capacity,
-                                              response_len) != 0)
-         return AIMEE_MODULE_STATUS_INTERNAL;
-      return AIMEE_MODULE_STATUS_OK;
+      if (aimee_db2_level3_count_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_LEVEL3_COUNT_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->level3_count)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         int raw_count = backend->level3_count();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (raw_count < 0 || (uint32_t)raw_count > AIMEE_DB2_LEVEL3_COUNT_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_level3_count_reply_encode((uint32_t)raw_count, response_body,
+                                                 response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_level2_count_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_LEVEL2_COUNT_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->level2_count)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         int raw_count = backend->level2_count();
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (raw_count < 0 || (uint32_t)raw_count > AIMEE_DB2_LEVEL2_COUNT_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_level2_count_reply_encode((uint32_t)raw_count, response_body,
+                                                 response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      return AIMEE_MODULE_STATUS_INVALID_REQUEST;
    }
 
    if (aimee_db2_health_request_decode(request_body, request_len) == 0)

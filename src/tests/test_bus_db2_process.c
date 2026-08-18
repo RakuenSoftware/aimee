@@ -191,6 +191,11 @@ int main(int argc, char **argv)
           AIMEE_MODULE_CALL_OK);
    assert(level3_total == 0);
 
+   uint32_t level2_total = 99;
+   assert(aimee_db2_level2_count_call(call_client, &client, 9022, 0, &level2_total, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(level2_total == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,
