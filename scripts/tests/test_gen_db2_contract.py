@@ -183,6 +183,15 @@ class ContractTests(unittest.TestCase):
              "count_too_large", "short", "long"],
         )
 
+    def test_orphaned_l0_count_vectors_cover_closed_result_and_bound(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][12]
+        self.assertEqual(operation["name"], "orphaned_l0_count")
+        self.assertEqual(
+            [(row["result"], row["count"]) for row in operation["reply"]["positive"]],
+            [(0, 5)],
+        )
+
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
         operation = baseline["operations"][2]
@@ -371,7 +380,7 @@ class ContractTests(unittest.TestCase):
             "operation-duplicate",
         )
         self.assert_rule(
-            lambda value: value["operations"].insert(-2, {
+            lambda value: value["operations"].insert(-3, {
                 **copy.deepcopy(value["operations"][0]),
                 "id": 11,
                 "name": "health_second",
@@ -441,6 +450,19 @@ class ContractTests(unittest.TestCase):
              "level2-count-request"),
             (lambda value: value["operations"][11]["reply"]["field"].__setitem__(
                 "maximum", 0xffffffff), "level2-count-reply"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_orphaned_l0_count_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][12].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][12].__setitem__("results", ["ok", "invalid_state"]),
+             "operation-results"),
+            (lambda value: value["operations"][12]["reply"]["field"].__setitem__(
+                "maximum", 0xffffffff), "orphaned-l0-count-reply"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):

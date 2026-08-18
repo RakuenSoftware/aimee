@@ -15193,9 +15193,15 @@
           "line": 577
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.orphaned_l0_count operation replaces the bounded integrity diagnostic for unlinked short-term memories; canonical relational links remain DB2 authority."
+      },
       "signature": "int db2_memory_count_orphaned_l0 ( void )",
       "signature_sha256": "49261718065617b747cab45edbba255562e38e6e3213d9f9fea139c969c8dbe8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_count_orphaned_l0"
     },
     {
@@ -25044,15 +25050,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "02e5103aebb3154319a362af84355fe3a163fcfc589ed7ce81d9b26df5637f61",
+  "fingerprint": "45a9bc3f47fc55a8fd50712ce3b305cd41bb178ac02093e18141220ffcc44b72",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 788,
+    "audit_pending": 787,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 170
+    "reviewed": 171
   }
 }

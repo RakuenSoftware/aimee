@@ -23,6 +23,8 @@ static int level3_count_value;
 static int level3_count_calls;
 static int level2_count_value;
 static int level2_count_calls;
+static int orphaned_l0_count_value;
+static int orphaned_l0_count_calls;
 static int pool_status_result;
 static long long refused_count_value;
 static int last_offered_value;
@@ -50,6 +52,7 @@ static int transport_calls;
 static int transport_expect_dimension;
 static int transport_expect_level3_count;
 static int transport_expect_level2_count;
+static int transport_expect_orphaned_l0_count;
 static int transport_expect_pool;
 static int transport_expect_refusals;
 static int transport_expect_postgres;
@@ -139,6 +142,18 @@ static int level2_count(void)
 {
    level2_count_calls++;
    return level2_count_value;
+}
+
+int db2_memory_count_orphaned_l0(void)
+{
+   orphaned_l0_count_calls++;
+   return orphaned_l0_count_value;
+}
+
+static int orphaned_l0_count(void)
+{
+   orphaned_l0_count_calls++;
+   return orphaned_l0_count_value;
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -284,6 +299,8 @@ static void reset(void)
    level3_count_calls = 0;
    level2_count_value = 17;
    level2_count_calls = 0;
+   orphaned_l0_count_value = 5;
+   orphaned_l0_count_calls = 0;
    pool_status_result = 0;
    refused_count_value = 7;
    last_offered_value = 768;
@@ -308,6 +325,7 @@ static void reset(void)
    transport_expect_dimension = 0;
    transport_expect_level3_count = 0;
    transport_expect_level2_count = 0;
+   transport_expect_orphaned_l0_count = 0;
    transport_expect_pool = 0;
    transport_expect_refusals = 0;
    transport_expect_postgres = 0;
@@ -327,7 +345,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
           aimee_module_cancelled_fn cancelled_fn, void *cancel_context)
 {
    assert(context == (void *)0x1234);
-   uint32_t expected_event = transport_expect_level2_count      ? AIMEE_DB2_EVENT_LEVEL2_COUNT
+   uint32_t expected_event = transport_expect_orphaned_l0_count ? AIMEE_DB2_EVENT_ORPHANED_L0_COUNT
+                             : transport_expect_level2_count    ? AIMEE_DB2_EVENT_LEVEL2_COUNT
                              : transport_expect_level3_count    ? AIMEE_DB2_EVENT_LEVEL3_COUNT
                              : transport_expect_dimension_reset ? AIMEE_DB2_EVENT_DIMENSION_RESET
                              : transport_expect_serving_id ? AIMEE_DB2_EVENT_EMBEDDER_SERVING_ID
@@ -340,7 +359,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
                              : transport_expect_pool          ? AIMEE_DB2_EVENT_POOL_STATUS
                              : transport_expect_dimension     ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
                                                               : AIMEE_DB2_EVENT_HEALTH;
-   uint32_t expected_stage = transport_expect_level2_count      ? AIMEE_DB2_STAGE_LEVEL2_COUNT
+   uint32_t expected_stage = transport_expect_orphaned_l0_count ? AIMEE_DB2_STAGE_ORPHANED_L0_COUNT
+                             : transport_expect_level2_count    ? AIMEE_DB2_STAGE_LEVEL2_COUNT
                              : transport_expect_level3_count    ? AIMEE_DB2_STAGE_LEVEL3_COUNT
                              : transport_expect_dimension_reset ? AIMEE_DB2_STAGE_DIMENSION_RESET
                              : transport_expect_serving_id ? AIMEE_DB2_STAGE_EMBEDDER_SERVING_ID
@@ -357,7 +377,9 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
    assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_level2_count)
+   if (transport_expect_orphaned_l0_count)
+      assert(aimee_db2_orphaned_l0_count_request_decode(request_body, request_len) == 0);
+   else if (transport_expect_level2_count)
       assert(aimee_db2_level2_count_request_decode(request_body, request_len) == 0);
    else if (transport_expect_level3_count)
       assert(aimee_db2_level3_count_request_decode(request_body, request_len) == 0);
@@ -648,6 +670,26 @@ static void test_level2_count_wire(void)
    assert(aimee_db2_level2_count_reply_encode(17, reply, sizeof(reply), &reply_len) == 0);
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_level2_count_reply_decode(reply, reply_len, &count) == -1 && count == 0);
+}
+
+static void test_orphaned_l0_count_wire(void)
+{
+   uint8_t request[AIMEE_DB2_ORPHANED_L0_COUNT_REQUEST_LEN] = {0};
+   assert(aimee_db2_orphaned_l0_count_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_orphaned_l0_count_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_orphaned_l0_count_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_ORPHANED_L0_COUNT_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, count = 99;
+   assert(aimee_db2_orphaned_l0_count_reply_encode(5, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_orphaned_l0_count_reply_decode(reply, reply_len, &count) == 0 && count == 5);
+   assert(aimee_db2_orphaned_l0_count_reply_encode(AIMEE_DB2_ORPHANED_L0_COUNT_MAX + 1u, reply,
+                                                   sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_orphaned_l0_count_reply_encode(5, reply, sizeof(reply) - 1, &reply_len) == -1);
+   assert(aimee_db2_orphaned_l0_count_reply_encode(5, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_orphaned_l0_count_reply_decode(reply, reply_len, &count) == -1 && count == 0);
 }
 
 static void test_pool_status_wire(void)
@@ -1156,6 +1198,28 @@ static void test_level2_count_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_orphaned_l0_count_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.orphaned_l0_count = orphaned_l0_count};
+   uint8_t request[AIMEE_DB2_ORPHANED_L0_COUNT_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_ORPHANED_L0_COUNT_RESPONSE_LEN];
+   uint32_t response_len = 99, count = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_ORPHANED_L0_COUNT};
+   assert(aimee_db2_orphaned_l0_count_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(orphaned_l0_count_calls == 1);
+   assert(aimee_db2_orphaned_l0_count_reply_decode(response, response_len, &count) == 0 &&
+          count == 5);
+   orphaned_l0_count_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+}
+
 static void test_pool_status_handler(void)
 {
    reset();
@@ -1516,6 +1580,21 @@ static void test_level2_count_typed_client(void)
    assert(count == 0);
 }
 
+static void test_orphaned_l0_count_typed_client(void)
+{
+   reset();
+   transport_expect_orphaned_l0_count = 1;
+   uint32_t count = 99;
+   assert(aimee_db2_orphaned_l0_count_call(NULL, NULL, 77, 88, &count, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(count == 0);
+   assert(aimee_db2_orphaned_l0_count_reply_encode(
+              5, transport_response, sizeof(transport_response), &transport_response_len) == 0);
+   assert(aimee_db2_orphaned_l0_count_call(transport, (void *)0x1234, 77, 88, &count, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(count == 5 && transport_calls == 1);
+}
+
 static void test_pool_status_typed_client(void)
 {
    reset();
@@ -1689,6 +1768,7 @@ int main(void)
    test_embedding_dimension_wire();
    test_level3_count_wire();
    test_level2_count_wire();
+   test_orphaned_l0_count_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -1701,6 +1781,7 @@ int main(void)
    test_embedding_dimension_handler();
    test_level3_count_handler();
    test_level2_count_handler();
+   test_orphaned_l0_count_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
@@ -1713,6 +1794,7 @@ int main(void)
    test_embedding_dimension_typed_client();
    test_level3_count_typed_client();
    test_level2_count_typed_client();
+   test_orphaned_l0_count_typed_client();
    test_pool_status_typed_client();
    test_embedding_refusals_typed_client();
    test_postgres_status_typed_client();

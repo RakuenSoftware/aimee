@@ -32,6 +32,7 @@ typedef struct
    int (*embedding_dimension)(void);
    int (*level3_count)(void);
    int (*level2_count)(void);
+   int (*orphaned_l0_count)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -68,6 +69,7 @@ static int initialized_calls;
 static int embedding_dimension_calls;
 static int level3_count_calls;
 static int level2_count_calls;
+static int orphaned_l0_count_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -149,6 +151,18 @@ static int level2_count(void)
 {
    level2_count_calls++;
    return 17;
+}
+
+int db2_memory_count_orphaned_l0(void)
+{
+   orphaned_l0_count_calls++;
+   return 5;
+}
+
+static int orphaned_l0_count(void)
+{
+   orphaned_l0_count_calls++;
+   return 5;
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -407,6 +421,7 @@ int main(void)
        .embedding_dimension = embedding_dimension,
        .level3_count = level3_count,
        .level2_count = level2_count,
+       .orphaned_l0_count = orphaned_l0_count,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -464,6 +479,11 @@ int main(void)
    assert(aimee_db2_level2_count_call(call_client, &client, 7021, 0, &level2_total, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(level2_total == 17 && level2_count_calls == 1);
+
+   uint32_t orphaned_l0_total = 99;
+   assert(aimee_db2_orphaned_l0_count_call(call_client, &client, 7022, 0, &orphaned_l0_total, NULL,
+                                           NULL) == AIMEE_MODULE_CALL_OK);
+   assert(orphaned_l0_total == 5 && orphaned_l0_count_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

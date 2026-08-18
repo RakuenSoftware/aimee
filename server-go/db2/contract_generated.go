@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "5c3511708622e091d3c3edd3c3bc73ae67d65c909ff08dcbff1bf91fe80d9228"
+const ContractSHA256 = "eb77dc82f7541438dd94c003d52864d2d28092b1c1c7b0d1018931677c7b9bd2"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -88,6 +88,10 @@ const EventLevel2Count = EventMemory
 const StageLevel2Count = FamilyMemory
 const OperationLevel2Count uint32 = 2
 const Level2CountMax uint32 = 2147483647
+const EventOrphanedL0Count = EventMemory
+const StageOrphanedL0Count = FamilyMemory
+const OperationOrphanedL0Count uint32 = 3
+const OrphanedL0CountMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -339,6 +343,53 @@ func DecodeLevel2CountReply(reply []byte) (uint32, error) {
 	}
 	count := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
 	if count > Level2CountMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return count, nil
+}
+
+// EncodeOrphanedL0CountRequest emits the empty request envelope for the orphaned L0 count.
+func EncodeOrphanedL0CountRequest() []byte {
+	header, err := EncodeRequestHeader(OperationOrphanedL0Count, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeOrphanedL0CountRequest validates the exact memory-family operation envelope.
+func DecodeOrphanedL0CountRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationOrphanedL0Count ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeOrphanedL0CountReply emits one bounded u32 success payload.
+func EncodeOrphanedL0CountReply(count uint32) ([]byte, error) {
+	if count > OrphanedL0CountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationOrphanedL0Count, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}
+
+// DecodeOrphanedL0CountReply validates the operation and bounded count.
+func DecodeOrphanedL0CountReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationOrphanedL0Count || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	count := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if count > OrphanedL0CountMax {
 		return 0, ErrMalformedEnvelope
 	}
 	return count, nil

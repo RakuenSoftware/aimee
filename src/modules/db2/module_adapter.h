@@ -12,6 +12,7 @@ typedef struct
    int (*embedding_dimension)(void);
    int (*level3_count)(void);
    int (*level2_count)(void);
+   int (*orphaned_l0_count)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

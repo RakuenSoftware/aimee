@@ -391,6 +391,25 @@
           "maximum": 2147483647
         }
       }
+    },
+    {
+      "family": "memory",
+      "id": 3,
+      "name": "orphaned_l0_count",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The orphaned L0 count is canonical relational integrity evidence owned by DB2, not portable ANN state.",
+      "c_symbols": ["db2_memory_count_orphaned_l0"],
+      "request": {"encoded_size": 24, "payload": "none"},
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+      }
     }
   ]
 }
