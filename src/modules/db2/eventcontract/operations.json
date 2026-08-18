@@ -835,6 +835,36 @@
         ],
         "consistency": "demoted_count=0 requires cascaded_count=0"
       }
+    },
+    {
+      "family": "memory",
+      "id": 20,
+      "name": "promote_stable",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Promoting settled relational memory rows into the slow-changing project tier is DB2 lifecycle authority and does not belong to portable ANN providers.",
+      "c_symbols": ["db2_memory_promotion_promote_stable_l2_to_l3"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {
+          "source_tier": "L2",
+          "target_tier": "L3",
+          "kinds": ["fact", "preference"],
+          "minimum_confidence_binary64_bits": 4606732058837280358,
+          "minimum_use_count": 5,
+          "stable_days": 30
+        }
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "promoted_count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+      }
     }
   ]
 }

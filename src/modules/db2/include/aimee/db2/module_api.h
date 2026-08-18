@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "955fb6b818a63076ec2f47a0c3625d9a1899f42accb4a22e4bef3da6b1844f7c"
+#define AIMEE_DB2_CONTRACT_SHA256 "d30da8bc27f6684fb7e63b507fe7cc3c8aebbc72c9f36f47bb5ba2245ad2a8f2"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -279,6 +279,18 @@
 #define AIMEE_DB2_DEMOTE_TIER                             "L2"
 #define AIMEE_DB2_DEMOTE_KINDS_MAX                        16u
 #define AIMEE_DB2_DEMOTE_MAX                              2147483647u
+#define AIMEE_DB2_EVENT_PROMOTE_STABLE                    AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_PROMOTE_STABLE                    AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_PROMOTE_STABLE                20u
+#define AIMEE_DB2_PROMOTE_STABLE_REQUEST_LEN              24u
+#define AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN             28u
+#define AIMEE_DB2_PROMOTE_STABLE_ERROR_LEN                24u
+#define AIMEE_DB2_PROMOTE_STABLE_SOURCE_TIER              "L2"
+#define AIMEE_DB2_PROMOTE_STABLE_TARGET_TIER              "L3"
+#define AIMEE_DB2_PROMOTE_STABLE_CONFIDENCE               0.95
+#define AIMEE_DB2_PROMOTE_STABLE_USE_COUNT                5u
+#define AIMEE_DB2_PROMOTE_STABLE_DAYS                     30u
+#define AIMEE_DB2_PROMOTE_STABLE_MAX                      2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -1921,6 +1933,58 @@ static inline int aimee_db2_demote_reply_decode(const uint8_t *input, size_t inp
       return -1;
    *demoted_count = demoted;
    *cascaded_count = cascaded;
+   return 0;
+}
+
+static inline int aimee_db2_promote_stable_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_PROMOTE_STABLE, 0u, 0u, output,
+                                          capacity);
+}
+
+static inline int aimee_db2_promote_stable_request_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_PROMOTE_STABLE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_PROMOTE_STABLE && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_promote_stable_reply_encode(uint32_t promoted_count, uint8_t *output,
+                                                        size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || promoted_count > AIMEE_DB2_PROMOTE_STABLE_MAX ||
+       capacity < AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_PROMOTE_STABLE, AIMEE_DB2_RESULT_OK, 4u,
+                                     output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, promoted_count);
+   *output_len = AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_promote_stable_reply_decode(const uint8_t *input, size_t input_len,
+                                                        uint32_t *promoted_count)
+{
+   if (promoted_count)
+      *promoted_count = 0u;
+   if (!promoted_count)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_PROMOTE_STABLE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_PROMOTE_STABLE_MAX)
+      return -1;
+   *promoted_count = decoded;
    return 0;
 }
 

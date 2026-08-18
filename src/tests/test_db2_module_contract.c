@@ -90,6 +90,9 @@ static int demote_cascade_value;
 static int demote_cascade_calls;
 static char demote_kind_stamp[32];
 static char demote_cascade_stamp[32];
+static int promote_stable_value;
+static int promote_stable_calls;
+static char promote_stable_stamp[32];
 static int pool_status_result;
 static long long refused_count_value;
 static int last_offered_value;
@@ -136,6 +139,7 @@ static int transport_expect_health_counters;
 static int transport_expect_stats_counts;
 static int transport_expect_expire;
 static int transport_expect_demote;
+static int transport_expect_promote_stable;
 static int transport_expect_pool;
 static int transport_expect_refusals;
 static int transport_expect_postgres;
@@ -657,6 +661,19 @@ static int demote_cascade(const char *ts)
    return demote_cascade_value;
 }
 
+int db2_memory_promotion_promote_stable_l2_to_l3(const char *ts)
+{
+   (void)ts;
+   return 0;
+}
+
+static int promote_stable(const char *ts)
+{
+   promote_stable_calls++;
+   snprintf(promote_stable_stamp, sizeof(promote_stable_stamp), "%s", ts);
+   return promote_stable_value;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -903,6 +920,9 @@ static void reset(void)
    demote_cascade_calls = 0;
    demote_kind_stamp[0] = '\0';
    demote_cascade_stamp[0] = '\0';
+   promote_stable_value = 4;
+   promote_stable_calls = 0;
+   promote_stable_stamp[0] = '\0';
    pool_status_result = 0;
    refused_count_value = 7;
    last_offered_value = 768;
@@ -944,6 +964,7 @@ static void reset(void)
    transport_expect_stats_counts = 0;
    transport_expect_expire = 0;
    transport_expect_demote = 0;
+   transport_expect_promote_stable = 0;
    transport_expect_pool = 0;
    transport_expect_refusals = 0;
    transport_expect_postgres = 0;
@@ -964,7 +985,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
 {
    assert(context == (void *)0x1234);
    uint32_t expected_event =
-       transport_expect_demote                    ? AIMEE_DB2_EVENT_DEMOTE
+       transport_expect_promote_stable            ? AIMEE_DB2_EVENT_PROMOTE_STABLE
+       : transport_expect_demote                  ? AIMEE_DB2_EVENT_DEMOTE
        : transport_expect_expire                  ? AIMEE_DB2_EVENT_EXPIRE
        : transport_expect_stats_counts            ? AIMEE_DB2_EVENT_STATS_COUNTS
        : transport_expect_health_counters         ? AIMEE_DB2_EVENT_HEALTH_COUNTERS
@@ -994,7 +1016,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
        : transport_expect_dimension               ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
                                                   : AIMEE_DB2_EVENT_HEALTH;
    uint32_t expected_stage =
-       transport_expect_demote                    ? AIMEE_DB2_STAGE_DEMOTE
+       transport_expect_promote_stable            ? AIMEE_DB2_STAGE_PROMOTE_STABLE
+       : transport_expect_demote                  ? AIMEE_DB2_STAGE_DEMOTE
        : transport_expect_expire                  ? AIMEE_DB2_STAGE_EXPIRE
        : transport_expect_stats_counts            ? AIMEE_DB2_STAGE_STATS_COUNTS
        : transport_expect_health_counters         ? AIMEE_DB2_STAGE_HEALTH_COUNTERS
@@ -1027,7 +1050,9 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
    assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_demote)
+   if (transport_expect_promote_stable)
+      assert(aimee_db2_promote_stable_request_decode(request_body, request_len) == 0);
+   else if (transport_expect_demote)
       assert(aimee_db2_demote_request_decode(request_body, request_len) == 0);
    else if (transport_expect_expire)
       assert(aimee_db2_expire_request_decode(request_body, request_len) == 0);
@@ -2000,6 +2025,32 @@ static void test_demote_wire(void)
                                         &reply_len) == -1);
    assert(aimee_db2_demote_reply_encode(6u, AIMEE_DB2_DEMOTE_MAX + 1u, reply, sizeof(reply),
                                         &reply_len) == -1);
+   assert(reply_len == 0);
+}
+
+static void test_promote_stable_wire(void)
+{
+   /* The stability policy is fixed, so the wire pins the confidence floor. */
+   uint64_t confidence_bits = 0;
+   double confidence = AIMEE_DB2_PROMOTE_STABLE_CONFIDENCE;
+   memcpy(&confidence_bits, &confidence, sizeof(confidence_bits));
+   assert(confidence_bits == 0x3fee666666666666ULL);
+   assert(AIMEE_DB2_PROMOTE_STABLE_USE_COUNT == 5 && AIMEE_DB2_PROMOTE_STABLE_DAYS == 30);
+   assert(strcmp(AIMEE_DB2_PROMOTE_STABLE_SOURCE_TIER, "L2") == 0);
+   assert(strcmp(AIMEE_DB2_PROMOTE_STABLE_TARGET_TIER, "L3") == 0);
+
+   uint8_t request[AIMEE_DB2_PROMOTE_STABLE_REQUEST_LEN] = {0};
+   assert(aimee_db2_promote_stable_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_promote_stable_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12u, 1u);
+   assert(aimee_db2_promote_stable_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, promoted = 99;
+   assert(aimee_db2_promote_stable_reply_encode(4u, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_promote_stable_reply_decode(reply, reply_len, &promoted) == 0 && promoted == 4);
+   assert(aimee_db2_promote_stable_reply_encode(AIMEE_DB2_PROMOTE_STABLE_MAX + 1u, reply,
+                                                sizeof(reply), &reply_len) == -1);
    assert(reply_len == 0);
 }
 
@@ -3146,6 +3197,38 @@ static void test_demote_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_promote_stable_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.now_utc = contract_now_utc,
+                                               .promote_stable = promote_stable};
+   uint8_t request[AIMEE_DB2_PROMOTE_STABLE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN];
+   uint32_t response_len = 99, promoted = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_PROMOTE_STABLE};
+   assert(aimee_db2_promote_stable_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(promote_stable_calls == 1 && promote_stable_stamp[0]);
+   assert(aimee_db2_promote_stable_reply_decode(response, response_len, &promoted) == 0 &&
+          promoted == 4);
+
+   promote_stable_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   promote_stable_value = 4;
+
+   /* Both the stamp and the promotion are required. */
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   const aimee_db2_module_backend_t no_clock = {.promote_stable = promote_stable};
+   assert(invoke(&no_clock, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_pool_status_handler(void)
 {
    reset();
@@ -3815,6 +3898,21 @@ static void test_demote_typed_client(void)
    assert(demoted == 6 && cascaded == 2 && transport_calls == 1);
 }
 
+static void test_promote_stable_typed_client(void)
+{
+   reset();
+   transport_expect_promote_stable = 1;
+   uint32_t promoted = 99;
+   assert(aimee_db2_promote_stable_call(NULL, NULL, 77, 88, &promoted, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(promoted == 0);
+   assert(aimee_db2_promote_stable_reply_encode(4u, transport_response, sizeof(transport_response),
+                                                &transport_response_len) == 0);
+   assert(aimee_db2_promote_stable_call(transport, (void *)0x1234, 77, 88, &promoted, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(promoted == 4 && transport_calls == 1);
+}
+
 static void test_pool_status_typed_client(void)
 {
    reset();
@@ -4005,6 +4103,7 @@ int main(void)
    test_stats_counts_wire();
    test_expire_wire();
    test_demote_wire();
+   test_promote_stable_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -4034,6 +4133,7 @@ int main(void)
    test_stats_counts_handler();
    test_expire_handler();
    test_demote_handler();
+   test_promote_stable_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
@@ -4063,6 +4163,7 @@ int main(void)
    test_stats_counts_typed_client();
    test_expire_typed_client();
    test_demote_typed_client();
+   test_promote_stable_typed_client();
    test_pool_status_typed_client();
    test_embedding_refusals_typed_client();
    test_postgres_status_typed_client();

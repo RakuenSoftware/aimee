@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "955fb6b818a63076ec2f47a0c3625d9a1899f42accb4a22e4bef3da6b1844f7c"
+const ContractSHA256 = "d30da8bc27f6684fb7e63b507fe7cc3c8aebbc72c9f36f47bb5ba2245ad2a8f2"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -189,6 +189,15 @@ const OperationDemote uint32 = 19
 const DemoteTier = "L2"
 const DemoteKindsMax uint32 = 16
 const DemoteMax uint32 = 2147483647
+const EventPromoteStable = EventMemory
+const StagePromoteStable = FamilyMemory
+const OperationPromoteStable uint32 = 20
+const PromoteStableSourceTier = "L2"
+const PromoteStableTargetTier = "L3"
+const PromoteStableConfidenceBits uint64 = 4606732058837280358
+const PromoteStableUseCount uint32 = 5
+const PromoteStableDays uint32 = 30
+const PromoteStableMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1026,6 +1035,53 @@ type EffectivenessStats struct {
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}
+
+// EncodePromoteStableRequest emits the empty request for the fixed stability policy.
+func EncodePromoteStableRequest() []byte {
+	header, err := EncodeRequestHeader(OperationPromoteStable, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodePromoteStableRequest validates the exact empty operation envelope.
+func DecodePromoteStableRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPromoteStable || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodePromoteStableReply emits the bounded number of promoted rows.
+func EncodePromoteStableReply(promotedCount uint32) ([]byte, error) {
+	if promotedCount > PromoteStableMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationPromoteStable, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], promotedCount)
+	return reply, nil
+}
+
+// DecodePromoteStableReply validates the operation and bounded promotion count.
+func DecodePromoteStableReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPromoteStable || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {
+		return 0, ErrMalformedEnvelope
+	}
+	promotedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if promotedCount > PromoteStableMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return promotedCount, nil
 }
 
 // EncodeDemoteRequest emits the empty request for the fixed demotion policy.

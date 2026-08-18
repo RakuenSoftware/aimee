@@ -220,7 +220,8 @@ def validate_catalog(value: object) -> dict[str, object]:
         expected_transaction = ("single-statement" if name in ("reembed_clear",
                                                                 "effectiveness_update",
                                                                 "effectiveness_demote",
-                                                                "health_record") else
+                                                                "health_record",
+                                                                "promote_stable") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
@@ -1095,9 +1096,41 @@ def validate_catalog(value: object) -> dict[str, object]:
                                for name_ in ("demoted_count", "cascaded_count")]):
                 fail("demote-reply",
                      "reply must contain both bounded counts and the cascade invariant")
+        elif key == ("memory", 20) and name == "promote_stable" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_promotion_promote_stable_l2_to_l3"]:
+                fail("operation-c-symbols",
+                     "promote_stable C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "promote_stable results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "promote_stable.request")
+            policy = _keys(request["policy"],
+                           {"source_tier", "target_tier", "kinds",
+                            "minimum_confidence_binary64_bits", "minimum_use_count",
+                            "stable_days"},
+                           "promote_stable.request.policy")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    policy != {"source_tier": "L2", "target_tier": "L3",
+                               "kinds": ["fact", "preference"],
+                               "minimum_confidence_binary64_bits": 0x3fee666666666666,
+                               "minimum_use_count": 5, "stable_days": 30}):
+                fail("promote-stable-request",
+                     "request must carry no payload and use the complete fixed stability policy")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "promote_stable.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                "promote_stable.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "promoted_count", "type": "u32", "minimum": 0,
+                                    "maximum": 0x7fffffff}):
+                fail("promote-stable-reply", "reply must contain one bounded promotion count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 29 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 30 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1106,9 +1139,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "key_exists_in_tier_pair", "effectiveness_update", "retention_enforce",
             "effectiveness_demote", "effectiveness_stats", "l2_memory_ids",
             "health_record", "health_retention", "health_counters", "stats_counts",
-            "expire", "demote"]:
+            "expire", "demote", "promote_stable"]:
         fail("unsupported-operation",
-             "the partial generator requires the twenty-nine supported operations exactly once")
+             "the partial generator requires the thirty supported operations exactly once")
     return catalog
 
 
@@ -1261,6 +1294,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     stats_counts = catalog["operations"][26]
     expire = catalog["operations"][27]
     demote = catalog["operations"][28]
+    promote_stable = catalog["operations"][29]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1561,6 +1595,12 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     demote_idle = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(demote["id"]), 0, _put_u32(0) + _put_u32(0),
+    )
+    promote_stable_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(promote_stable["id"]), 0, b"",
+    )
+    promote_stable_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(promote_stable["id"]), 0, _put_u32(4),
     )
 
     value = {
@@ -2892,6 +2932,46 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (demote_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": promote_stable["family"],
+            "id": promote_stable["id"],
+            "name": promote_stable["name"],
+            "request": {
+                "positive": promote_stable_request.hex(),
+                "source_tier": promote_stable["request"]["policy"]["source_tier"],
+                "target_tier": promote_stable["request"]["policy"]["target_tier"],
+                "kinds": list(promote_stable["request"]["policy"]["kinds"]),
+                "confidence_bits":
+                    promote_stable["request"]["policy"]["minimum_confidence_binary64_bits"],
+                "use_count": promote_stable["request"]["policy"]["minimum_use_count"],
+                "stable_days": promote_stable["request"]["policy"]["stable_days"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(promote_stable_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(promote_stable_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": promote_stable_request[:-1].hex()},
+                    {"mutation": "long", "hex": (promote_stable_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "promoted_count": 4, "hex": promote_stable_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(promote_stable_ok, 8, 19).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(promote_stable_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(promote_stable["id"]), 0, b"").hex()},
+                    {"mutation": "promoted_count_too_large", "hex":
+                     (promote_stable_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": promote_stable_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (promote_stable_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -2933,6 +3013,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     stats_counts = catalog["operations"][26]
     expire = catalog["operations"][27]
     demote = catalog["operations"][28]
+    promote_stable = catalog["operations"][29]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -3321,6 +3402,28 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         ("AIMEE_DB2_DEMOTE_TIER", f"\"{demote['request']['policy']['demote_tier']}\""),
         ("AIMEE_DB2_DEMOTE_KINDS_MAX", f"{demote['request']['policy']['maximum_kinds']}u"),
         ("AIMEE_DB2_DEMOTE_MAX", f"{demote['reply']['fields'][0]['maximum']}u"),
+        ("AIMEE_DB2_EVENT_PROMOTE_STABLE", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_PROMOTE_STABLE", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_PROMOTE_STABLE", f"{promote_stable['id']}u"),
+        ("AIMEE_DB2_PROMOTE_STABLE_REQUEST_LEN",
+         f"{promote_stable['request']['encoded_size']}u"),
+        ("AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN",
+         f"{promote_stable['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_PROMOTE_STABLE_ERROR_LEN",
+         f"{promote_stable['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_PROMOTE_STABLE_SOURCE_TIER",
+         f"\"{promote_stable['request']['policy']['source_tier']}\""),
+        ("AIMEE_DB2_PROMOTE_STABLE_TARGET_TIER",
+         f"\"{promote_stable['request']['policy']['target_tier']}\""),
+        ("AIMEE_DB2_PROMOTE_STABLE_CONFIDENCE",
+         _binary64_literal(
+             promote_stable["request"]["policy"]["minimum_confidence_binary64_bits"])),
+        ("AIMEE_DB2_PROMOTE_STABLE_USE_COUNT",
+         f"{promote_stable['request']['policy']['minimum_use_count']}u"),
+        ("AIMEE_DB2_PROMOTE_STABLE_DAYS",
+         f"{promote_stable['request']['policy']['stable_days']}u"),
+        ("AIMEE_DB2_PROMOTE_STABLE_MAX",
+         f"{promote_stable['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -4992,6 +5095,58 @@ static inline int aimee_db2_demote_reply_decode(const uint8_t *input, size_t inp
    return 0;
 }}
 
+static inline int aimee_db2_promote_stable_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_PROMOTE_STABLE, 0u, 0u, output,
+                                          capacity);
+}}
+
+static inline int aimee_db2_promote_stable_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_PROMOTE_STABLE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_PROMOTE_STABLE && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_promote_stable_reply_encode(uint32_t promoted_count, uint8_t *output,
+                                                        size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || promoted_count > AIMEE_DB2_PROMOTE_STABLE_MAX ||
+       capacity < AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_PROMOTE_STABLE, AIMEE_DB2_RESULT_OK, 4u,
+                                     output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, promoted_count);
+   *output_len = AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_promote_stable_reply_decode(const uint8_t *input, size_t input_len,
+                                                        uint32_t *promoted_count)
+{{
+   if (promoted_count)
+      *promoted_count = 0u;
+   if (!promoted_count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_PROMOTE_STABLE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_PROMOTE_STABLE_MAX)
+      return -1;
+   *promoted_count = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)
 {{
    return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, 0u, 0u, output,
@@ -5937,6 +6092,10 @@ extern "C"
        uint32_t *demoted_count, uint32_t *cascaded_count, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_promote_stable_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *promoted_count, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -6575,6 +6734,33 @@ aimee_module_call_result_t aimee_db2_demote_call(aimee_db2_call_fn call, void *c
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_promote_stable_call(aimee_db2_call_fn call, void *call_context,
+                                                         uint64_t trace_id, uint64_t deadline_ns,
+                                                         uint32_t *promoted_count,
+                                                         aimee_module_cancelled_fn cancelled,
+                                                         void *cancel_context)
+{
+   if (promoted_count)
+      *promoted_count = 0u;
+   if (!call || !promoted_count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_PROMOTE_STABLE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_promote_stable_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_PROMOTE_STABLE, AIMEE_DB2_STAGE_PROMOTE_STABLE, trace_id,
+            deadline_ns, request, sizeof(request), response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_promote_stable_reply_decode(response, response_len, promoted_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -6843,6 +7029,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     stats_counts = catalog["operations"][26]
     expire = catalog["operations"][27]
     demote = catalog["operations"][28]
+    promote_stable = catalog["operations"][29]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -7033,6 +7220,15 @@ const OperationDemote uint32 = {demote['id']}
 const DemoteTier = "{demote['request']['policy']['demote_tier']}"
 const DemoteKindsMax uint32 = {demote['request']['policy']['maximum_kinds']}
 const DemoteMax uint32 = {demote['reply']['fields'][0]['maximum']}
+const EventPromoteStable = EventMemory
+const StagePromoteStable = FamilyMemory
+const OperationPromoteStable uint32 = {promote_stable['id']}
+const PromoteStableSourceTier = "{promote_stable['request']['policy']['source_tier']}"
+const PromoteStableTargetTier = "{promote_stable['request']['policy']['target_tier']}"
+const PromoteStableConfidenceBits uint64 = {promote_stable['request']['policy']['minimum_confidence_binary64_bits']}
+const PromoteStableUseCount uint32 = {promote_stable['request']['policy']['minimum_use_count']}
+const PromoteStableDays uint32 = {promote_stable['request']['policy']['stable_days']}
+const PromoteStableMax uint32 = {promote_stable['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -7868,6 +8064,53 @@ type EffectivenessStats struct {{
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}}
+
+// EncodePromoteStableRequest emits the empty request for the fixed stability policy.
+func EncodePromoteStableRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationPromoteStable, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodePromoteStableRequest validates the exact empty operation envelope.
+func DecodePromoteStableRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationPromoteStable || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodePromoteStableReply emits the bounded number of promoted rows.
+func EncodePromoteStableReply(promotedCount uint32) ([]byte, error) {{
+	if promotedCount > PromoteStableMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationPromoteStable, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], promotedCount)
+	return reply, nil
+}}
+
+// DecodePromoteStableReply validates the operation and bounded promotion count.
+func DecodePromoteStableReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationPromoteStable || header.Result != ResultOK ||
+		header.PayloadLen != 4 || len(reply) != int(EnvelopeHeaderLen)+4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	promotedCount := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if promotedCount > PromoteStableMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return promotedCount, nil
 }}
 
 // EncodeDemoteRequest emits the empty request for the fixed demotion policy.

@@ -265,6 +265,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .kind_demote_policy = production_kind_demote_policy,
        .demote_kind = db2_memory_promotion_demote_kind,
        .demote_cascade = db2_memory_promotion_demote_cascade,
+       .promote_stable = db2_memory_promotion_promote_stable_l2_to_l3,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -734,6 +735,26 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
             return AIMEE_MODULE_STATUS_CANCELLED;
          if (aimee_db2_demote_reply_encode((uint32_t)demoted, (uint32_t)cascaded, response_body,
                                            response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_promote_stable_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_PROMOTE_STABLE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->now_utc || !backend->promote_stable)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         char stamp[32] = "";
+         backend->now_utc(stamp, sizeof(stamp));
+         if (!stamp[0])
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         int promoted = backend->promote_stable(stamp);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (promoted < 0 || promoted > (int)AIMEE_DB2_PROMOTE_STABLE_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_promote_stable_reply_encode((uint32_t)promoted, response_body,
+                                                   response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }

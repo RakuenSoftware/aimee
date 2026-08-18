@@ -17661,9 +17661,15 @@
           "line": 73
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy \u2014 tier, kinds, confidence floor, use count, and settling window \u2014 so callers cannot promote rows into the slow-changing tier on terms of their own."
+      },
       "signature": "int db2_memory_promotion_promote_stable_l2_to_l3 ( const char * ts )",
       "signature_sha256": "7774ad32c2c5d27c72f22ce7ebdcf2608add0a25daddc4b23f5bdec5d52f5e4f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_promote_stable_l2_to_l3"
     },
     {
@@ -25770,15 +25776,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "7a51a8b27ca369d469f74455b67dcd4598696ab3caeab761402015d468d337aa",
+  "fingerprint": "c7d5b9d8be3082affb3a04d7352b5330bd9cd1739649ac309cc1ca3229a3cef7",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 667,
+    "audit_pending": 666,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 291
+    "reviewed": 292
   }
 }

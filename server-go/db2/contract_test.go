@@ -35,29 +35,35 @@ type wireBaseline struct {
 	Operations []struct {
 		Name    string `json:"name"`
 		Request struct {
-			Positive                   string `json:"positive"`
-			SourceSession              string `json:"source_session"`
-			Key                        string `json:"key"`
-			Kind                       string `json:"kind"`
-			TierA                      string `json:"tier_a"`
-			TierB                      string `json:"tier_b"`
-			MemoryID                   uint64 `json:"memory_id"`
-			HasValue                   uint32 `json:"has_value"`
-			ValueBits                  uint64 `json:"value_bits"`
-			ThresholdBits              uint64 `json:"threshold_bits"`
-			LowThresholdBits           uint64 `json:"low_threshold_bits"`
-			MaximumIDs                 uint32 `json:"maximum_ids"`
-			StaleL1Tier                string `json:"stale_l1_tier"`
-			MaximumKinds               uint32 `json:"maximum_kinds"`
-			DemoteTier                 string `json:"demote_tier"`
-			Promotions                 uint32 `json:"promotions"`
-			Demotions                  uint32 `json:"demotions"`
-			Expirations                uint32 `json:"expirations"`
-			ConflictWindowDays         uint32 `json:"conflict_window_days"`
-			SnapshotRetentionDays      uint32 `json:"snapshot_retention_days"`
-			ContradictionRetentionDays uint32 `json:"contradiction_retention_days"`
-			PromoteUseCount            uint32 `json:"promote_use_count"`
-			PromoteConfidenceBits      uint64 `json:"promote_confidence_bits"`
+			Positive                   string   `json:"positive"`
+			SourceSession              string   `json:"source_session"`
+			Key                        string   `json:"key"`
+			Kind                       string   `json:"kind"`
+			TierA                      string   `json:"tier_a"`
+			TierB                      string   `json:"tier_b"`
+			MemoryID                   uint64   `json:"memory_id"`
+			HasValue                   uint32   `json:"has_value"`
+			ValueBits                  uint64   `json:"value_bits"`
+			ThresholdBits              uint64   `json:"threshold_bits"`
+			LowThresholdBits           uint64   `json:"low_threshold_bits"`
+			MaximumIDs                 uint32   `json:"maximum_ids"`
+			StaleL1Tier                string   `json:"stale_l1_tier"`
+			MaximumKinds               uint32   `json:"maximum_kinds"`
+			DemoteTier                 string   `json:"demote_tier"`
+			SourceTier                 string   `json:"source_tier"`
+			TargetTier                 string   `json:"target_tier"`
+			Kinds                      []string `json:"kinds"`
+			ConfidenceBits             uint64   `json:"confidence_bits"`
+			UseCount                   uint32   `json:"use_count"`
+			StableDays                 uint32   `json:"stable_days"`
+			Promotions                 uint32   `json:"promotions"`
+			Demotions                  uint32   `json:"demotions"`
+			Expirations                uint32   `json:"expirations"`
+			ConflictWindowDays         uint32   `json:"conflict_window_days"`
+			SnapshotRetentionDays      uint32   `json:"snapshot_retention_days"`
+			ContradictionRetentionDays uint32   `json:"contradiction_retention_days"`
+			PromoteUseCount            uint32   `json:"promote_use_count"`
+			PromoteConfidenceBits      uint64   `json:"promote_confidence_bits"`
 			Negative                   []struct {
 				Mutation string `json:"mutation"`
 				Hex      string `json:"hex"`
@@ -85,6 +91,7 @@ type wireBaseline struct {
 				Level0Deleted         uint32            `json:"level0_deleted"`
 				StaleLevel1Deleted    uint32            `json:"stale_level1_deleted"`
 				CascadedCount         uint32            `json:"cascaded_count"`
+				PromotedCount         uint32            `json:"promoted_count"`
 				Exists                uint32            `json:"exists"`
 				Found                 uint32            `json:"found"`
 				ID                    uint64            `json:"id"`
@@ -203,7 +210,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 29 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 30 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -231,7 +238,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[25].Name != "health_counters" ||
 		baseline.Operations[26].Name != "stats_counts" ||
 		baseline.Operations[27].Name != "expire" ||
-		baseline.Operations[28].Name != "demote" {
+		baseline.Operations[28].Name != "demote" ||
+		baseline.Operations[29].Name != "promote_stable" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -1007,6 +1015,54 @@ func TestDemoteMatchesEverySharedCVector(t *testing.T) {
 	}
 	if _, err := EncodeDemoteReply(1, DemoteMax+1); !errors.Is(err, ErrMalformedEnvelope) {
 		t.Fatalf("cascaded count past its bound encoded: %v", err)
+	}
+}
+
+func TestPromoteStableMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[29]
+	request := operation.Request
+	if request.SourceTier != PromoteStableSourceTier || request.TargetTier != PromoteStableTargetTier ||
+		request.ConfidenceBits != PromoteStableConfidenceBits ||
+		request.UseCount != PromoteStableUseCount || request.StableDays != PromoteStableDays ||
+		math.Float64bits(0.95) != PromoteStableConfidenceBits {
+		t.Fatalf("stability policy = (%q, %q, %x, %d, %d), generated = (%q, %q, %x, %d, %d)",
+			request.SourceTier, request.TargetTier, request.ConfidenceBits, request.UseCount,
+			request.StableDays, PromoteStableSourceTier, PromoteStableTargetTier,
+			PromoteStableConfidenceBits, PromoteStableUseCount, PromoteStableDays)
+	}
+	if len(request.Kinds) != 2 || request.Kinds[0] != "fact" || request.Kinds[1] != "preference" {
+		t.Fatalf("promotable kinds = %v", request.Kinds)
+	}
+	wantRequest := decodeHex(t, request.Positive)
+	if got := EncodePromoteStableRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodePromoteStableRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	for _, vector := range request.Negative {
+		if err := DecodePromoteStableRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodePromoteStableReply(vector.PromotedCount)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		promoted, err := DecodePromoteStableReply(got)
+		if err != nil || promoted != vector.PromotedCount {
+			t.Fatalf("decode = (%d, %v)", promoted, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		promoted, err := DecodePromoteStableReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || promoted != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, promoted, err)
+		}
+	}
+	if _, err := EncodePromoteStableReply(PromoteStableMax + 1); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("promoted count past its bound encoded: %v", err)
 	}
 }
 

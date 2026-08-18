@@ -290,6 +290,11 @@ int main(int argc, char **argv)
                                 NULL) == AIMEE_MODULE_CALL_OK);
    assert(tier_demoted == 0 && tier_cascaded == 0);
 
+   uint32_t tier_promoted = 99;
+   assert(aimee_db2_promote_stable_call(call_client, &client, 9041, 0, &tier_promoted, NULL,
+                                        NULL) == AIMEE_MODULE_CALL_OK);
+   assert(tier_promoted == 0);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,
