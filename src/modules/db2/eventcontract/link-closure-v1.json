@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "bdc2d9d3d78f32569123123bb5744c63ddb2d724",
-  "source_fingerprint": "544b4b376c3afedfff31ed9f9cdea139d936439cfa28c2cb1b435a1cc3274e86",
+  "source_revision": "ab3cf828b3acc5b1eb3ab6b06bdd903b8d373906",
+  "source_fingerprint": "2649e60804a954bb8b0af2f5b36573aeb8e3be424acb5924dbbeda418057065d",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -2734,11 +2734,8 @@
         "src/modules/db2/c/cross_repo_deps.c",
         "src/modules/db2/c/cross_repo_resolver.c",
         "src/modules/db2/c/css_insights.c",
-        "src/modules/db2/c/db2_tenant.c",
         "src/modules/db2/c/db_postgres.c",
         "src/modules/db2/c/kb_runtime_state.c",
-        "src/modules/db2/c/management_action_journal.c",
-        "src/modules/db2/c/management_identity_journal.c",
         "src/modules/db2/c/org_model_catalog.c",
         "src/modules/db2/c/vault_operator_status_runtime.c",
         "src/modules/db2/support/extractor_primitives.c"
@@ -2771,7 +2768,6 @@
         "src/modules/db2/c/db2_init.c",
         "src/modules/db2/c/db2_pool.c",
         "src/modules/db2/c/db2_reembed.c",
-        "src/modules/db2/c/db2_tenant.c",
         "src/modules/db2/c/db2_witness_checkpoint.c",
         "src/modules/db2/c/db_postgres.c",
         "src/modules/db2/c/db_schema.c",
@@ -2996,11 +2992,8 @@
         "src/modules/db2/c/code_audit.c",
         "src/modules/db2/c/cross_repo_deps.c",
         "src/modules/db2/c/cross_repo_resolver.c",
-        "src/modules/db2/c/db2_tenant.c",
         "src/modules/db2/c/db_postgres.c",
         "src/modules/db2/c/db_schema.c",
-        "src/modules/db2/c/management_action_journal.c",
-        "src/modules/db2/c/management_identity_journal.c",
         "src/modules/db2/c/org_model_catalog.c",
         "src/modules/db2/c/org_vault_rewrap.c",
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
@@ -3026,9 +3019,6 @@
     {
       "symbol": "strnlen",
       "references": [
-        "src/modules/db2/c/canonical_index.c",
-        "src/modules/db2/c/db2_tenant.c",
-        "src/modules/db2/c/management_action_journal.c",
         "src/modules/db2/c/management_client_instance.c",
         "src/modules/db2/c/management_identity_journal.c",
         "src/modules/db2/c/management_jwks_runtime.c",
@@ -3036,8 +3026,7 @@
         "src/modules/db2/c/management_status_runtime.c",
         "src/modules/db2/c/management_token_authority.c",
         "src/modules/db2/c/org_model_catalog.c",
-        "src/modules/db2/c/org_telemetry_fmt.c",
-        "src/modules/db2/c/org_vault_rewrap.c"
+        "src/modules/db2/c/org_telemetry_fmt.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3201,5 +3190,5 @@
       "system-link": 139
     }
   },
-  "fingerprint": "b20d562c4aeaf6ecfdb6b6cd6e099ed72ca6e29b0fe6634851dcd159e2443f0e"
+  "fingerprint": "2a045006fb68c8508f2ba2a7ce9e8beab29f173ecb62ae6b02ccc3bc027f2755"
 }

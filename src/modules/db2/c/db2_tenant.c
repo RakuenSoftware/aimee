@@ -4,6 +4,7 @@
 #include "db2_internal.h"
 #include "db_postgres.h"
 #include "db2.h" /* db2_lease_begin/_end */
+#include "db2_bounded_text.h"
 #include "management_intent_fields.h"
 #include "../support/db2_log.h"
 
@@ -35,8 +36,9 @@ int db2_tenant_identity_key(const kb_principal_t *principal, char *out, size_t c
       out[0] = '\0';
    if (!principal || !out || cap < 2 || cap > DB2_INTENT_ACTOR_MAX ||
        principal->authenticated != 1 ||
-       strnlen(principal->issuer, sizeof(principal->issuer)) == sizeof(principal->issuer) ||
-       strnlen(principal->subject, sizeof(principal->subject)) == sizeof(principal->subject) ||
+       db2_bounded_len(principal->issuer, sizeof(principal->issuer)) == sizeof(principal->issuer) ||
+       db2_bounded_len(principal->subject, sizeof(principal->subject)) ==
+           sizeof(principal->subject) ||
        !g_identity_key_provider)
       return -1;
 
@@ -55,7 +57,7 @@ int db2_tenant_identity_key(const kb_principal_t *principal, char *out, size_t c
                                principal->authenticated, out, cap) != 0)
       goto invalid;
 
-   size_t n = strnlen(out, cap);
+   size_t n = db2_bounded_len(out, cap);
    if (!n || n == cap)
       goto invalid;
    char canonical[DB2_INTENT_ACTOR_MAX + 1] = {0};

@@ -16,6 +16,7 @@
 #include "../support/db2_runtime_config.h"
 #include "css_graph.h" /* CSS migration assistant: style graph + component join (WP-C/D) */
 #include "db2.h"
+#include "db2_bounded_text.h"
 #include "db2_internal.h"
 #include "entity_edges.h"     /* co_edited backfill: edge upsert / co_targets read */
 #include "index.h"            /* cochange_pairs_for_commit / cochange_is_hex_sha */
@@ -67,9 +68,9 @@ static int ci_css_stylesheet_valid(const css_stylesheet_t *stylesheet)
    for (int i = 0; i < stylesheet->rule_count; ++i)
    {
       const css_rule_t *rule = &stylesheet->rules[i];
-      if (strnlen(rule->selector, sizeof(rule->selector)) == 0 ||
-          strnlen(rule->selector, sizeof(rule->selector)) == sizeof(rule->selector) ||
-          strnlen(rule->at_context, sizeof(rule->at_context)) == sizeof(rule->at_context) ||
+      if (db2_bounded_len(rule->selector, sizeof(rule->selector)) == 0 ||
+          db2_bounded_len(rule->selector, sizeof(rule->selector)) == sizeof(rule->selector) ||
+          db2_bounded_len(rule->at_context, sizeof(rule->at_context)) == sizeof(rule->at_context) ||
           rule->spec_a < 0 || rule->spec_b < 0 || rule->spec_c < 0 ||
           (rule->specificity_uncertain != 0 && rule->specificity_uncertain != 1) ||
           rule->line < 1 || rule->decl_count < 0 || rule->decl_count > CI_CSS_MAX_DECLS ||
@@ -78,9 +79,9 @@ static int ci_css_stylesheet_valid(const css_stylesheet_t *stylesheet)
       for (int d = 0; d < rule->decl_count; ++d)
       {
          const css_declaration_t *decl = &rule->decls[d];
-         if (strnlen(decl->property, sizeof(decl->property)) == 0 ||
-             strnlen(decl->property, sizeof(decl->property)) == sizeof(decl->property) ||
-             strnlen(decl->value, sizeof(decl->value)) == sizeof(decl->value) ||
+         if (db2_bounded_len(decl->property, sizeof(decl->property)) == 0 ||
+             db2_bounded_len(decl->property, sizeof(decl->property)) == sizeof(decl->property) ||
+             db2_bounded_len(decl->value, sizeof(decl->value)) == sizeof(decl->value) ||
              (decl->important != 0 && decl->important != 1))
             return 0;
       }
@@ -118,7 +119,7 @@ int canonical_index_css_extract_class_tokens(const char *text, size_t len,
       goto invalid;
    for (int i = 0; i < count; ++i)
    {
-      size_t token_len = strnlen(out[i], CSS_CLASS_TOKEN_MAX);
+      size_t token_len = db2_bounded_len(out[i], CSS_CLASS_TOKEN_MAX);
       if (token_len == 0 || token_len == CSS_CLASS_TOKEN_MAX)
          goto invalid;
       for (size_t j = 0; j < token_len; ++j)

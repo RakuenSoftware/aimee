@@ -25788,13 +25788,13 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "5256b02c44a95cb50c4343a47f5daaf2120874ae2cb31758d6b0a38b0b4c5e73",
+  "fingerprint": "3266102e61926a846a1dd3da3ea7858d59d4f31f5a1ddf17192fe345f6cb62d9",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 664,
     "declarations": 1397,
-    "headers": 137,
+    "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
     "reviewed": 294

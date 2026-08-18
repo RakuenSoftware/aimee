@@ -1,10 +1,10 @@
 {
   "schema_version": 2,
-  "source_revision": "9d44b1b81f0be0edc94136db7d69f035fdf1343c",
+  "source_revision": "ab3cf828b3acc5b1eb3ab6b06bdd903b8d373906",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 138,
-    "headers": 137,
+    "headers": 138,
     "sql_files": 6,
     "consumer_files": 305,
     "production_consumers": 151,
@@ -186,6 +186,7 @@
       "src/modules/db2/c/curator_terms.h",
       "src/modules/db2/c/curiosity.h",
       "src/modules/db2/c/db2.h",
+      "src/modules/db2/c/db2_bounded_text.h",
       "src/modules/db2/c/db2_hardening.h",
       "src/modules/db2/c/db2_internal.h",
       "src/modules/db2/c/db2_learning.h",
@@ -7260,5 +7261,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "cbf80d08cc7f25fa3f971696a367ed746e56ffdec0c4cf6f768d6bf9efb508a6"
+  "fingerprint": "9f2530cbaf454536776b4d2ba2e67abe1f393083d0336779a26b6f5355ec2c00"
 }

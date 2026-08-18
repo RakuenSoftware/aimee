@@ -18,6 +18,7 @@
 #ifndef AIMEE_DB2_MANAGEMENT_INTENT_FIELDS_H
 #define AIMEE_DB2_MANAGEMENT_INTENT_FIELDS_H
 
+#include "db2_bounded_text.h"
 #include "db_postgres.h"
 #include "platform_random.h"
 
@@ -40,7 +41,7 @@ static inline int db2_intent_fixed_text(const char *s, size_t cap, size_t max, i
 {
    if (!s || cap < 2 || max >= cap)
       return 0;
-   size_t n = strnlen(s, cap);
+   size_t n = db2_bounded_len(s, cap);
    if (n == 0 || n > max || n == cap)
       return 0;
    for (size_t i = 0; i < n; ++i)
@@ -61,7 +62,7 @@ static inline int db2_intent_input_text(const char *s, size_t max, int token)
 {
    if (!s)
       return 0;
-   size_t n = strnlen(s, max + 1);
+   size_t n = db2_bounded_len(s, max + 1);
    if (n == 0 || n > max)
       return 0;
    for (size_t i = 0; i < n; ++i)
@@ -87,7 +88,7 @@ static inline int db2_intent_fixed_hex(const char *s, size_t cap, size_t n)
 
 static inline int db2_intent_input_hex(const char *s, size_t n)
 {
-   if (!s || strnlen(s, n + 1) != n)
+   if (!s || db2_bounded_len(s, n + 1) != n)
       return 0;
    for (size_t i = 0; i < n; ++i)
       if (!((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f')))
@@ -148,7 +149,9 @@ static inline int db2_intent_encoded_component(const char *s, size_t n)
  * subject CHECK in db2/schema.sql. */
 static inline int db2_intent_bare_username(const char *s)
 {
-   size_t n = strlen(s);
+   /* 33 is one past the limit, so an over-long name reports 33 and is
+    * rejected without an unbounded scan. */
+   size_t n = db2_bounded_len(s, 33);
    if (n == 0 || n > 32)
       return 0;
    unsigned char first = (unsigned char)s[0];
@@ -175,26 +178,26 @@ static inline int db2_intent_canonical_actor(const char *s, size_t cap)
 {
    if (!db2_intent_fixed_text(s, cap, DB2_INTENT_ACTOR_MAX, 0))
       return 0;
-   if (!strcmp(s, "owner"))
+   if (db2_bounded_equals(s, "owner"))
       return 1;
    /* No ':' means it can only be the bare form; the prefixed forms are checked
     * below. Note `owner` was matched above, which is why a host account named
     * `owner` is indistinguishable from the bearer principal and is reserved —
     * see the note on kb_write_tier_grant. */
-   if (!strchr(s, ':'))
+   if (!db2_bounded_find(s, ':'))
       return db2_intent_bare_username(s);
-   int cert = !strncmp(s, "cert:", 5);
-   size_t prefix = cert ? 5 : (!strncmp(s, "oidc:", 5) ? 5 : 0);
+   int cert = db2_bounded_prefix(s, "cert:");
+   size_t prefix = cert ? 5 : (db2_bounded_prefix(s, "oidc:") ? 5 : 0);
    if (!prefix)
       return 0;
-   const char *middle = strchr(s + prefix, ':');
-   if (!middle || strchr(middle + 1, ':') ||
+   const char *middle = db2_bounded_find(s + prefix, ':');
+   if (!middle || db2_bounded_find(middle + 1, ':') ||
        !db2_intent_encoded_component(s + prefix, (size_t)(middle - (s + prefix))) ||
-       !db2_intent_encoded_component(middle + 1, strlen(middle + 1)))
+       !db2_intent_encoded_component(middle + 1, db2_bounded_len(middle + 1, cap)))
       return 0;
    if (cert)
    {
-      size_t serial_len = strlen(middle + 1);
+      size_t serial_len = db2_bounded_len(middle + 1, cap);
       if (serial_len == 0 || serial_len > DB2_INTENT_SERIAL_MAX)
          return 0;
       for (const char *p = middle + 1; *p; ++p)
@@ -211,9 +214,11 @@ static inline int db2_intent_canonical_actor(const char *s, size_t cap)
 static inline int db2_intent_col_bool(aimee_pg_stmt_t *st, int col, int *out)
 {
    const char *s = aimee_pg_column_text(st, col);
-   if (s && (!strcmp(s, "t") || !strcmp(s, "true") || !strcmp(s, "1")))
+   if (s &&
+       (db2_bounded_equals(s, "t") || db2_bounded_equals(s, "true") || db2_bounded_equals(s, "1")))
       *out = 1;
-   else if (s && (!strcmp(s, "f") || !strcmp(s, "false") || !strcmp(s, "0")))
+   else if (s && (db2_bounded_equals(s, "f") || db2_bounded_equals(s, "false") ||
+                  db2_bounded_equals(s, "0")))
       *out = 0;
    else
       return -1;
@@ -249,7 +254,7 @@ static inline int db2_intent_copy_col(aimee_pg_stmt_t *st, int col, char *out, s
    const char *s = aimee_pg_column_text(st, col);
    if (aimee_pg_column_is_null(st, col) || !s)
       return -1;
-   size_t n = strnlen(s, cap);
+   size_t n = db2_bounded_len(s, cap);
    if (n == cap || n == 0 || n > max)
       return -1;
    memset(out, 0, cap);
@@ -262,7 +267,7 @@ static inline int db2_intent_copy_hex_col(aimee_pg_stmt_t *st, int col, char *ou
    if (aimee_pg_column_is_null(st, col))
       return -1;
    const char *s = aimee_pg_column_text(st, col);
-   if (!s || strnlen(s, n + 1) != n)
+   if (!s || db2_bounded_len(s, n + 1) != n)
       return -1;
    memset(out, 0, n + 1);
    memcpy(out, s, n);

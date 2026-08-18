@@ -1,5 +1,6 @@
 #include "org_vault_rewrap.h"
 
+#include "db2_bounded_text.h"
 #include "db2_internal.h"
 #include "db2_pool.h"
 #include "db_postgres.h"
@@ -33,7 +34,8 @@ int db2_vault_reseal_operation_id_to_hex(const uint8_t operation_id[16], char ou
    if (out)
       memset(out, 0, 33);
    if (!operation_id || !out || !reseal_provider.operation_id_to_hex ||
-       reseal_provider.operation_id_to_hex(operation_id, out) != 0 || strnlen(out, 33) != 32)
+       reseal_provider.operation_id_to_hex(operation_id, out) != 0 ||
+       db2_bounded_len(out, 33) != 32)
       goto invalid;
    for (size_t i = 0; i < 32; ++i)
       if (!((out[i] >= '0' && out[i] <= '9') || (out[i] >= 'a' && out[i] <= 'f')))
@@ -50,7 +52,8 @@ int db2_vault_reseal_operation_id_from_hex(const char *hex, uint8_t operation_id
    uint8_t expected[16] = {0};
    if (operation_id)
       OPENSSL_cleanse(operation_id, 16);
-   if (!hex || !operation_id || strnlen(hex, 33) != 32 || !reseal_provider.operation_id_from_hex)
+   if (!hex || !operation_id || db2_bounded_len(hex, 33) != 32 ||
+       !reseal_provider.operation_id_from_hex)
       return -1;
    for (size_t i = 0; i < 32; ++i)
    {
