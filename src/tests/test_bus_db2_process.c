@@ -384,6 +384,15 @@ int main(int argc, char **argv)
    assert(aimee_db2_delete_row_call(call_client, &client, 9055, 0, 0u, &removed, NULL, NULL) ==
           AIMEE_MODULE_CALL_INVALID_ARGUMENT);
 
+   /* Memory 42 does not exist, so the bump matches no row and the backend
+    * reports failure, which crosses the packaged boundary as INTERNAL rather
+    * than a quiet acknowledgement. Called once: the operation is declared
+    * unsafe because a real row's use count would move on every call. */
+   assert(aimee_db2_touch_call(call_client, &client, 9056, 0, 42u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INTERNAL);
+   assert(aimee_db2_touch_call(call_client, &client, 9057, 0, 0u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

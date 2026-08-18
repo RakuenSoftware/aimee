@@ -1772,6 +1772,14 @@
       "reason": "The typed memory.stats_counts operation returns the complete tier, kind, and conflict breakdown of the canonical relational corpus; the host layers its own PageRank timings on top and DB2 owns none of those."
     },
     {
+      "symbol": "db2_memory_touch",
+      "signature_sha256": "20d10f1335b7b4dc04a34fde264a3ef5d5c17bf9cf00662a46bb7701925b4890",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.touch operation replaces the retrieval-accounting bump; the increment and the stamp are fixed policy behind the handler so a caller can record that a memory was used but cannot choose by how much or when."
+    },
+    {
       "symbol": "db2_memory_workspace_matches",
       "signature_sha256": "20497944db190512bcd0cfe009a9d24fb48a73d301cb1d4ad2c9bee4dbb21732",
       "disposition": "private-db2",

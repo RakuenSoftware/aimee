@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "d3ddea4b22735b8eb89a5af9eee2fc0730e439ea8fba09bd41756784c2fabe02"
+#define AIMEE_DB2_CONTRACT_SHA256 "f9ae4a4f7f8f12494976c0a22e5803fb173f1bd0af0eee264dbdc00d79ed1d17"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -358,6 +358,13 @@
 #define AIMEE_DB2_DELETE_ROW_ERROR_LEN                    24u
 #define AIMEE_DB2_DELETE_ROW_MEMORY_ID_MAX                9223372036854775807ull
 #define AIMEE_DB2_DELETE_ROW_MAX                          1u
+#define AIMEE_DB2_EVENT_TOUCH                             AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_TOUCH                             AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_TOUCH                         28u
+#define AIMEE_DB2_TOUCH_REQUEST_LEN                       32u
+#define AIMEE_DB2_TOUCH_RESPONSE_LEN                      24u
+#define AIMEE_DB2_TOUCH_ERROR_LEN                         24u
+#define AIMEE_DB2_TOUCH_MEMORY_ID_MAX                     9223372036854775807ull
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -2272,6 +2279,56 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
       return -1;
    *deleted_count = decoded;
    return 0;
+}
+
+static inline int aimee_db2_touch_request_encode(uint64_t memory_id, uint8_t *output,
+                                                size_t capacity)
+{
+   if (!output || memory_id == 0u || memory_id > AIMEE_DB2_TOUCH_MEMORY_ID_MAX ||
+       capacity < AIMEE_DB2_TOUCH_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_TOUCH, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, memory_id);
+   return 0;
+}
+
+static inline int aimee_db2_touch_request_decode(const uint8_t *input, size_t input_len,
+                                                 uint64_t *memory_id)
+{
+   if (memory_id)
+      *memory_id = 0u;
+   if (!memory_id)
+      return -1;
+   aimee_db2_request_header_t header = {0};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_TOUCH_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_TOUCH || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_TOUCH_MEMORY_ID_MAX)
+      return -1;
+   *memory_id = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_touch_reply_encode(uint8_t *output, size_t capacity)
+{
+   if (!output || capacity < AIMEE_DB2_TOUCH_RESPONSE_LEN)
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_TOUCH, AIMEE_DB2_RESULT_OK, 0u,
+                                        output, capacity);
+}
+
+static inline int aimee_db2_touch_reply_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_reply_header_t header = {0};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_TOUCH_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_TOUCH &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
 }
 
 static inline int aimee_db2_delete_row_request_encode(uint64_t memory_id, uint8_t *output,

@@ -72,6 +72,7 @@ typedef struct
    int (*demote_id)(int64_t memory_id);
    int (*has_workspace_tag)(int64_t memory_id);
    int (*delete_row)(int64_t memory_id);
+   int (*touch)(int64_t memory_id);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -115,6 +116,8 @@ static int demote_id_calls;
 static int64_t demote_id_last;
 static int workspace_tag_calls;
 static int delete_row_calls;
+static int touch_calls;
+static int64_t touch_last;
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -729,6 +732,19 @@ static int delete_row(int64_t memory_id)
    return memory_id == 42 ? 1 : 0;
 }
 
+int db2_memory_touch(int64_t memory_id)
+{
+   (void)memory_id;
+   return -1;
+}
+
+static int touch(int64_t memory_id)
+{
+   touch_calls++;
+   touch_last = memory_id;
+   return memory_id == 42 ? 0 : -1;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1055,6 +1071,7 @@ int main(void)
        .demote_id = demote_id,
        .has_workspace_tag = has_workspace_tag,
        .delete_row = delete_row,
+       .touch = touch,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1261,6 +1278,13 @@ int main(void)
    assert(aimee_db2_delete_row_call(call_client, &client, 7049, 0, 43u, &removed, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(removed == 0 && delete_row_calls == 2);
+
+   assert(aimee_db2_touch_call(call_client, &client, 7050, 0, 42u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_OK);
+   assert(touch_calls == 1 && touch_last == 42);
+   /* A memory the backend refuses surfaces as INTERNAL, not as a quiet ok. */
+   assert(aimee_db2_touch_call(call_client, &client, 7051, 0, 43u, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INTERNAL);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

@@ -18612,9 +18612,15 @@
           "line": 689
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.touch operation replaces the retrieval-accounting bump; the increment and the stamp are fixed policy behind the handler so a caller can record that a memory was used but cannot choose by how much or when."
+      },
       "signature": "int db2_memory_touch ( int64_t memory_id )",
       "signature_sha256": "20d10f1335b7b4dc04a34fde264a3ef5d5c17bf9cf00662a46bb7701925b4890",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_touch"
     },
     {
@@ -25818,15 +25824,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "b752ff9613fdf8948bcba7c6c5c329c7b35fe6552f4ed3d50135bfc3a67514ac",
+  "fingerprint": "7b75dba19d6e29d9e4cc4721e545736942f8925b8448a6a22bc320264e134c7d",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 659,
+    "audit_pending": 658,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 299
+    "reviewed": 300
   }
 }

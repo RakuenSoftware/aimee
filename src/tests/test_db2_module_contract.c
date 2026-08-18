@@ -37,6 +37,9 @@ static int workspace_tag_calls;
 static int delete_row_value;
 static int delete_row_calls;
 static int64_t delete_row_last;
+static int touch_value;
+static int touch_calls;
+static int64_t touch_last;
 static int64_t workspace_tag_last;
 static int64_t total_count_value;
 static int total_count_calls;
@@ -327,6 +330,19 @@ static int delete_row(int64_t memory_id)
    delete_row_calls++;
    delete_row_last = memory_id;
    return delete_row_value;
+}
+
+int db2_memory_touch(int64_t memory_id)
+{
+   (void)memory_id;
+   return -1;
+}
+
+static int touch(int64_t memory_id)
+{
+   touch_calls++;
+   touch_last = memory_id;
+   return touch_value;
 }
 
 int64_t db2_memory_count(void)
@@ -985,6 +1001,9 @@ static void reset(void)
    delete_row_value = 1;
    delete_row_calls = 0;
    delete_row_last = 0;
+   touch_value = 0;
+   touch_calls = 0;
+   touch_last = 0;
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
    session_l2_count_value = 3;
@@ -2274,6 +2293,31 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_touch_wire(void)
+{
+   uint8_t request[AIMEE_DB2_TOUCH_REQUEST_LEN] = {0};
+   uint64_t memory_id = 99;
+   assert(aimee_db2_touch_request_encode(42u, request, sizeof(request)) == 0);
+   assert(aimee_db2_touch_request_decode(request, sizeof(request), &memory_id) == 0 &&
+          memory_id == 42);
+   assert(aimee_db2_touch_request_encode(0u, request, sizeof(request)) == -1);
+   assert(aimee_db2_touch_request_encode(AIMEE_DB2_TOUCH_MEMORY_ID_MAX + 1ull, request,
+                                         sizeof(request)) == -1);
+   assert(aimee_db2_touch_request_encode(42u, request, sizeof(request) - 1) == -1);
+   assert(aimee_db2_touch_request_encode(42u, request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_touch_request_decode(request, sizeof(request), &memory_id) == -1 &&
+          memory_id == 0);
+
+   uint8_t reply[AIMEE_DB2_TOUCH_RESPONSE_LEN] = {0};
+   assert(aimee_db2_touch_reply_encode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_touch_reply_decode(reply, sizeof(reply)) == 0);
+   assert(aimee_db2_touch_reply_encode(reply, sizeof(reply) - 1) == -1);
+   assert(aimee_db2_touch_reply_encode(reply, sizeof(reply)) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_touch_reply_decode(reply, sizeof(reply)) == -1);
 }
 
 static void test_delete_row_wire(void)
@@ -3714,6 +3758,35 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_touch_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.touch = touch};
+   uint8_t request[AIMEE_DB2_TOUCH_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_TOUCH_RESPONSE_LEN];
+   uint32_t response_len = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_TOUCH};
+   assert(aimee_db2_touch_request_encode(42u, request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(touch_calls == 1 && touch_last == 42);
+   assert(aimee_db2_touch_reply_decode(response, response_len) == 0);
+
+   /* The backend collapses a missing row and a statement failure into the same
+    * non-zero, so both arrive as INTERNAL. There is deliberately no count in
+    * the reply that a caller could mistake for proof the memory existed. */
+   touch_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   touch_value = 0;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_delete_row_handler(void)
 {
    reset();
@@ -4820,6 +4893,7 @@ int main(void)
    test_demote_id_wire();
    test_has_workspace_tag_wire();
    test_delete_row_wire();
+   test_touch_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -4857,6 +4931,7 @@ int main(void)
    test_demote_id_handler();
    test_has_workspace_tag_handler();
    test_delete_row_handler();
+   test_touch_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

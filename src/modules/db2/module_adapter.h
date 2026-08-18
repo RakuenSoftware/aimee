@@ -59,6 +59,7 @@ typedef struct
    int (*demote_id)(int64_t memory_id);
    int (*has_workspace_tag)(int64_t memory_id);
    int (*delete_row)(int64_t memory_id);
+   int (*touch)(int64_t memory_id);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

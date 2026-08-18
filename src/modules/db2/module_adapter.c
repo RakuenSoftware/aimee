@@ -274,6 +274,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .demote_id = db2_memory_promotion_demote_id,
        .has_workspace_tag = db2_memory_has_any_workspace_tag,
        .delete_row = db2_memory_delete_row,
+       .touch = db2_memory_touch,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -902,6 +903,25 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_delete_row_reply_encode((uint32_t)deleted, response_body, response_capacity,
                                                response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t touch_memory_id = 0u;
+      if (aimee_db2_touch_request_decode(request_body, request_len, &touch_memory_id) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_TOUCH_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->touch)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         /* The backend reports both an absent row and a statement failure as
+          * non-zero, so this is an acknowledgement rather than evidence the
+          * memory existed. */
+         if (backend->touch((int64_t)touch_memory_id) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_touch_reply_encode(response_body, response_capacity) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         *response_len = AIMEE_DB2_TOUCH_RESPONSE_LEN;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

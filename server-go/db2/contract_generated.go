@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "d3ddea4b22735b8eb89a5af9eee2fc0730e439ea8fba09bd41756784c2fabe02"
+const ContractSHA256 = "f9ae4a4f7f8f12494976c0a22e5803fb173f1bd0af0eee264dbdc00d79ed1d17"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -243,6 +243,10 @@ const StageDeleteRow = FamilyMemory
 const OperationDeleteRow uint32 = 27
 const DeleteRowMemoryIDMax uint64 = 9223372036854775807
 const DeleteRowMax uint32 = 1
+const EventTouch = EventMemory
+const StageTouch = FamilyMemory
+const OperationTouch uint32 = 28
+const TouchMemoryIDMax uint64 = 9223372036854775807
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -809,6 +813,53 @@ func DecodeDeleteRowReply(reply []byte) (uint32, error) {
 		return 0, ErrMalformedEnvelope
 	}
 	return deletedRows, nil
+}
+
+// EncodeTouchRequest emits the memory whose retrieval is being recorded.
+func EncodeTouchRequest(memoryID uint64) ([]byte, error) {
+	if memoryID == 0 || memoryID > TouchMemoryIDMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeRequestHeader(OperationTouch, 0, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], memoryID)
+	return request, nil
+}
+
+// DecodeTouchRequest validates the envelope and the bounded memory.
+func DecodeTouchRequest(request []byte) (uint64, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTouch || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {
+		return 0, ErrMalformedEnvelope
+	}
+	memoryID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if memoryID == 0 || memoryID > TouchMemoryIDMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return memoryID, nil
+}
+
+// EncodeTouchReply acknowledges the bump without a payload.
+func EncodeTouchReply() ([]byte, error) {
+	header, err := EncodeReplyHeader(OperationTouch, ResultOK, 0)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	return header, nil
+}
+
+// DecodeTouchReply validates the acknowledgement and refuses any payload.
+func DecodeTouchReply(reply []byte) error {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationTouch || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

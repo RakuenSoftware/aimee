@@ -1045,6 +1045,29 @@
         "encoded_size_error": 24,
         "field": {"name": "deleted_rows", "type": "u32", "minimum": 0, "maximum": 1}
       }
+    },
+    {
+      "family": "memory",
+      "id": 28,
+      "name": "touch",
+      "wire_format": "db2-envelope-u64-ack-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Use counts and last-used stamps are canonical relational retrieval evidence owned by DB2 and are not derivable from portable ANN state.",
+      "c_symbols": ["db2_memory_touch"],
+      "request": {
+        "encoded_size": 32,
+        "field": {"name": "memory_id", "type": "u64", "minimum": 1,
+                  "maximum": 9223372036854775807}
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
     }
   ]
 }

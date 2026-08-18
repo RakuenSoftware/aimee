@@ -227,12 +227,14 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "prune_orphaned_l0",
                                                                 "lifecycle_sweep_expired",
                                                                 "demote_id",
-                                                                "delete_row") else
+                                                                "delete_row",
+                                                                "touch") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
         # observationally neutral the way every other operation here is.
-        expected_idempotency = ("unsafe" if name in ("health_record", "demote_id")
+        expected_idempotency = ("unsafe"
+                                if name in ("health_record", "demote_id", "touch")
                                 else "safe")
         if operation["scope"] != "none" or operation["transaction"] != expected_transaction or \
                 operation["idempotency"] != expected_idempotency:
@@ -1373,9 +1375,35 @@ def validate_catalog(value: object) -> dict[str, object]:
                               "maximum": 1}):
                 fail("delete-row-reply",
                      "reply must contain the single-row deletion count")
+        elif key == ("memory", 28) and name == "touch" and \
+                operation["wire_format"] == "db2-envelope-u64-ack-v1":
+            # The caller records that a memory was used. How much the count
+            # moves and what stamp is written are fixed, so retrieval evidence
+            # cannot be inflated from outside DB2.
+            if operation["c_symbols"] != ["db2_memory_touch"]:
+                fail("operation-c-symbols", "touch C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "touch results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "field"}, "touch.request")
+            request_field = _keys(request["field"], {"name", "type", "minimum", "maximum"},
+                                  "touch.request.field")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN + 8 or
+                    request_field != {"name": "memory_id", "type": "u64", "minimum": 1,
+                                      "maximum": 0x7fffffffffffffff}):
+                fail("touch-request",
+                     "request must name one positive memory and carry nothing else")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields"}, "touch.reply")
+            # An acknowledgement only. The backend distinguishes a missing row
+            # from a fault, but reports both as failure, so there is no count
+            # here that could be mistaken for evidence the row existed.
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != []):
+                fail("touch-reply", "reply must acknowledge the bump without a payload")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 37 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 38 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1386,9 +1414,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "health_record", "health_retention", "health_counters", "stats_counts",
             "expire", "demote", "promote_stable", "reclassify_directives",
             "record_l4_approval", "prune_orphaned_l0", "lifecycle_sweep_expired",
-            "demote_id", "has_workspace_tag", "delete_row"]:
+            "demote_id", "has_workspace_tag", "delete_row", "touch"]:
         fail("unsupported-operation",
-             "the partial generator requires the thirty-seven supported operations exactly once")
+             "the partial generator requires the thirty-eight supported operations exactly once")
     return catalog
 
 
@@ -1549,6 +1577,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     demote_id = catalog["operations"][34]
     has_workspace_tag = catalog["operations"][35]
     delete_row = catalog["operations"][36]
+    touch = catalog["operations"][37]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1744,6 +1773,10 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     delete_row_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(delete_row["id"]), 0, _put_u32(1),
     )
+    touch_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(touch["id"]), 0, _put_u64(42),
+    )
+    touch_ok = _envelope(catalog, ENVELOPE_REPLY_MAGIC, int(touch["id"]), 0, b"")
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
     )
@@ -3560,6 +3593,44 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (delete_row_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": touch["family"],
+            "id": touch["id"],
+            "name": touch["name"],
+            "request": {
+                "positive": touch_request.hex(),
+                "memory_id": 42,
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(touch_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(touch_request, 16, 4).hex()},
+                    {"mutation": "zero_memory", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(touch["id"]), 0,
+                               _put_u64(0)).hex()},
+                    {"mutation": "memory_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(touch["id"]), 0,
+                               _put_u64(0x8000000000000000)).hex()},
+                    {"mutation": "short", "hex": touch_request[:-1].hex()},
+                    {"mutation": "long", "hex": (touch_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "hex": touch_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(touch_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(touch_ok, 12, 5).hex()},
+                    {"mutation": "unexpected_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC, int(touch["id"]), 0,
+                               _put_u32(0)).hex()},
+                    {"mutation": "short", "hex": touch_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (touch_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -3609,6 +3680,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     demote_id = catalog["operations"][34]
     has_workspace_tag = catalog["operations"][35]
     delete_row = catalog["operations"][36]
+    touch = catalog["operations"][37]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -4133,6 +4205,14 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{delete_row['request']['field']['maximum']}ull"),
         ("AIMEE_DB2_DELETE_ROW_MAX",
          f"{delete_row['reply']['field']['maximum']}u"),
+        ("AIMEE_DB2_EVENT_TOUCH", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_TOUCH", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_TOUCH", f"{touch['id']}u"),
+        ("AIMEE_DB2_TOUCH_REQUEST_LEN", f"{touch['request']['encoded_size']}u"),
+        ("AIMEE_DB2_TOUCH_RESPONSE_LEN", f"{touch['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_TOUCH_ERROR_LEN", f"{touch['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_TOUCH_MEMORY_ID_MAX",
+         f"{touch['request']['field']['maximum']}ull"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -6075,6 +6155,56 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    return 0;
 }}
 
+static inline int aimee_db2_touch_request_encode(uint64_t memory_id, uint8_t *output,
+                                                size_t capacity)
+{{
+   if (!output || memory_id == 0u || memory_id > AIMEE_DB2_TOUCH_MEMORY_ID_MAX ||
+       capacity < AIMEE_DB2_TOUCH_REQUEST_LEN ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_TOUCH, 0u, 8u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, memory_id);
+   return 0;
+}}
+
+static inline int aimee_db2_touch_request_decode(const uint8_t *input, size_t input_len,
+                                                 uint64_t *memory_id)
+{{
+   if (memory_id)
+      *memory_id = 0u;
+   if (!memory_id)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_TOUCH_REQUEST_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_TOUCH || header.flags != 0u ||
+       header.payload_len != 8u)
+      return -1;
+   uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded == 0u || decoded > AIMEE_DB2_TOUCH_MEMORY_ID_MAX)
+      return -1;
+   *memory_id = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_touch_reply_encode(uint8_t *output, size_t capacity)
+{{
+   if (!output || capacity < AIMEE_DB2_TOUCH_RESPONSE_LEN)
+      return -1;
+   return aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_TOUCH, AIMEE_DB2_RESULT_OK, 0u,
+                                        output, capacity);
+}}
+
+static inline int aimee_db2_touch_reply_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_reply_header_t header = {{0}};
+   return aimee_db2_reply_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_TOUCH_RESPONSE_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_TOUCH &&
+                  header.result == AIMEE_DB2_RESULT_OK && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
 static inline int aimee_db2_delete_row_request_encode(uint64_t memory_id, uint8_t *output,
                                                      size_t capacity)
 {{
@@ -7313,6 +7443,10 @@ extern "C"
        uint64_t memory_id, uint32_t *deleted_rows, aimee_module_cancelled_fn cancelled,
        void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_touch_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -8159,6 +8293,30 @@ aimee_module_call_result_t aimee_db2_delete_row_call(aimee_db2_call_fn call, voi
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_touch_call(aimee_db2_call_fn call, void *call_context,
+                                                uint64_t trace_id, uint64_t deadline_ns,
+                                                uint64_t memory_id,
+                                                aimee_module_cancelled_fn cancelled,
+                                                void *cancel_context)
+{
+   if (!call)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_TOUCH_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_TOUCH_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_touch_request_encode(memory_id, request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport = call(
+       call_context, AIMEE_DB2_EVENT_TOUCH, AIMEE_DB2_STAGE_TOUCH, trace_id, deadline_ns, request,
+       sizeof(request), response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_touch_reply_decode(response, response_len) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -8435,6 +8593,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     demote_id = catalog["operations"][34]
     has_workspace_tag = catalog["operations"][35]
     delete_row = catalog["operations"][36]
+    touch = catalog["operations"][37]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -8679,6 +8838,10 @@ const StageDeleteRow = FamilyMemory
 const OperationDeleteRow uint32 = {delete_row['id']}
 const DeleteRowMemoryIDMax uint64 = {delete_row['request']['field']['maximum']}
 const DeleteRowMax uint32 = {delete_row['reply']['field']['maximum']}
+const EventTouch = EventMemory
+const StageTouch = FamilyMemory
+const OperationTouch uint32 = {touch['id']}
+const TouchMemoryIDMax uint64 = {touch['request']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -9243,6 +9406,53 @@ func DecodeDeleteRowReply(reply []byte) (uint32, error) {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return deletedRows, nil
+}}
+
+// EncodeTouchRequest emits the memory whose retrieval is being recorded.
+func EncodeTouchRequest(memoryID uint64) ([]byte, error) {{
+	if memoryID == 0 || memoryID > TouchMemoryIDMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeRequestHeader(OperationTouch, 0, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 8)...)
+	binary.LittleEndian.PutUint64(request[EnvelopeHeaderLen:], memoryID)
+	return request, nil
+}}
+
+// DecodeTouchRequest validates the envelope and the bounded memory.
+func DecodeTouchRequest(request []byte) (uint64, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationTouch || header.Flags != 0 ||
+		header.PayloadLen != 8 || len(request) != int(EnvelopeHeaderLen)+8 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	memoryID := binary.LittleEndian.Uint64(request[EnvelopeHeaderLen:])
+	if memoryID == 0 || memoryID > TouchMemoryIDMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return memoryID, nil
+}}
+
+// EncodeTouchReply acknowledges the bump without a payload.
+func EncodeTouchReply() ([]byte, error) {{
+	header, err := EncodeReplyHeader(OperationTouch, ResultOK, 0)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	return header, nil
+}}
+
+// DecodeTouchReply validates the acknowledgement and refuses any payload.
+func DecodeTouchReply(reply []byte) error {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationTouch || header.Result != ResultOK ||
+		header.PayloadLen != 0 || len(reply) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.
