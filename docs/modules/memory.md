@@ -21,8 +21,9 @@ thresholds.
 | `extract_index` | `5889` | pattern-first extraction, and the §4 retraction pre-scan (two request shapes, distinct magics) |
 | `retrieve` | `5892` | the §7 PII recall gate: whether a turn asks for sensitive data, and each relation's sensitivity tier (two request shapes) |
 | `reranking` | `5893` | the fixed-point confidence band |
+| `embedding` | `5891` | HTTP single-text embedding and its process-owned dependency breaker |
 
-Only pure decisions moved. Each has a seam in the C: a registered provider that
+Those four pure decisions each have a seam in the C: a registered provider that
 is authoritative and never falls back to the local implementation, because a
 silent fallback lets a broken module look healthy. What a failure does instead
 is chosen per seam: the write gate defers (nothing written, caller retries),
@@ -31,10 +32,13 @@ gate fail closed, withholding rather than exposing. The retraction scan does not
 retract, because that path deletes and a fact left behind is recoverable where
 one deleted by mistake is not.
 
-`embedding` (`5891`) is still unimplemented and continues to fail closed. It is
-not a pure decision (it needs a model and a DB handle), so there is no
-in-process core to relocate; moving it would relocate I/O, not logic. Storage,
-graph, and lifecycle units likewise remain C.
+`embedding` (`5891`) is served by the Go module for HTTP embedders. Its
+process-local circuit breaker distinguishes suppression, authorization refusal,
+and attempted-call failure, and grants exactly one half-open probe. DB2 reaches
+that stage through a startup-installed host contract and accepts only bounded,
+finite vectors. Program-based embedders remain in the C host path by explicit
+contract: the Go module declines those commands without changing its breaker.
+Storage, graph, and lifecycle units likewise remain C.
 
 Every ported decision is held to the C by differential fixtures generated from
 the C itself (`scripts/gen-memory-pattern-fixtures.c`,
