@@ -1402,6 +1402,63 @@ static int write_result(int status)
 {read_result}"""
 
 
+# Header text, read and comment-stripped once per root.
+#
+# Four helpers below ask the headers a question per operation: what a symbol
+# returns, how it spells its parameters, which struct members are pointers, and
+# which header declares what. Each used to glob the directory, read every file
+# and strip its comments for every question asked. At 275 operations over ~70
+# headers that is fifty thousand regex searches and five seconds a run -- times
+# fifty-one tests, which is what pushed the descriptor-envelope job past its
+# five-minute budget and got it cancelled rather than failed.
+#
+# Keyed by root because the tests build catalogs in sandboxes and a cache that
+# ignored the root would answer one sandbox's question with another's headers.
+_HEADER_CACHE: dict[str, list[tuple[str, str, str]]] = {}
+
+
+def header_texts(root: Path) -> list[tuple[str, str, str]]:
+    """(name, raw, comment-stripped) for every DB1 header, in sorted order."""
+    key = str(root)
+    cached = _HEADER_CACHE.get(key)
+    if cached is None:
+        cached = []
+        for header in sorted((root / SOURCE_DIR).glob("*.h")):
+            raw = header.read_text(errors="ignore")
+            cached.append((header.name, raw, re.sub(r"/\*.*?\*/", "", raw, flags=re.S)))
+        _HEADER_CACHE[key] = cached
+    return cached
+
+
+def forget_header_texts() -> None:
+    """Drop the caches, for a caller that rewrites headers between runs."""
+    _HEADER_CACHE.clear()
+    _SYMBOL_CACHE.clear()
+
+
+_SYMBOL_CACHE: dict[str, dict[str, tuple[str, str, str]]] = {}
+
+
+def declaring_headers(root: Path) -> dict[str, tuple[str, str, str]]:
+    """Which header names each symbol, so a lookup reads one file rather than all.
+
+    Scanning every header for every symbol is the same answer and quadratic
+    work: the regex that finds a return type backtracks across a whole file to
+    conclude the symbol is not in it, and it concludes that about sixty-nine
+    files out of seventy.
+    """
+    key = str(root)
+    index = _SYMBOL_CACHE.get(key)
+    if index is None:
+        index = {}
+        called = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+        for entry in header_texts(root):
+            for symbol in called.findall(entry[2]):
+                index.setdefault(symbol, entry)
+        _SYMBOL_CACHE[key] = index
+    return index
+
+
 def domain_headers(root: Path, operations: list[dict[str, object]]) -> list[str]:
     """The DB1 headers that declare these operations.
 
@@ -1409,13 +1466,10 @@ def domain_headers(root: Path, operations: list[dict[str, object]]) -> list[str]
     for the first family and do not in general, so a header named after the
     family is a header that does not exist.
     """
-    found: set[str] = set()
-    for header in sorted((root / SOURCE_DIR).glob("*.h")):
-        text = header.read_text(errors="ignore")
-        for operation in operations:
-            symbol = str(operation.get("c_name", ""))
-            if symbol and re.search(r"\b" + re.escape(symbol) + r"\s*\(", text):
-                found.add(header.name)
+    index = declaring_headers(root)
+    found = {index[symbol][0]
+             for symbol in (str(o.get("c_name", "")) for o in operations)
+             if symbol and symbol in index}
     return sorted(found)
 
 
@@ -1429,9 +1483,9 @@ def declared_parameters(root: Path, symbol: str) -> dict[str, str]:
     different function. Same lesson as the return type: read the header.
     """
     pattern = re.compile(r"\b" + re.escape(symbol) + r"\s*\(([^;{]*)\)\s*;", re.S)
-    for header in sorted((root / SOURCE_DIR).glob("*.h")):
-        found = pattern.search(re.sub(r"/\*.*?\*/", "", header.read_text(errors="ignore"),
-                                      flags=re.S))
+    entry = declaring_headers(root).get(symbol)
+    for _name, _raw, stripped in ([entry] if entry else []):
+        found = pattern.search(stripped)
         if not found:
             continue
         spelled: dict[str, str] = {}
@@ -1452,10 +1506,10 @@ def declared_return(root: Path, symbol: str) -> str:
     header says the other is a conflicting declaration. The header is the
     contract; this reads it rather than assuming a spelling.
     """
-    pattern = re.compile(r"([A-Za-z_][A-Za-z0-9_ ]*?)\s+" + re.escape(symbol) + r"\s*\(")
-    for header in sorted((root / SOURCE_DIR).glob("*.h")):
-        found = pattern.search(re.sub(r"/\*.*?\*/", "", header.read_text(errors="ignore"),
-                                      flags=re.S))
+    entry = declaring_headers(root).get(symbol)
+    if entry:
+        pattern = re.compile(r"([A-Za-z_][A-Za-z0-9_ ]*?)\s+" + re.escape(symbol) + r"\s*\(")
+        found = pattern.search(entry[2])
         if found:
             return " ".join(found.group(1).split())
     return "int64_t"
@@ -1471,9 +1525,9 @@ def pointer_members(root: Path, struct: str) -> set[str]:
     separate from whether the field is required.
     """
     body = ""
-    for header in sorted((root / SOURCE_DIR).glob("*.h")):
+    for _name, raw, _stripped in header_texts(root):
         found = re.search(r"typedef\s+struct\s*\{(.*?)\}\s*" + re.escape(struct) + r"\s*;",
-                          header.read_text(errors="ignore"), re.S)
+                          raw, re.S)
         if found:
             body = found.group(1)
             break
