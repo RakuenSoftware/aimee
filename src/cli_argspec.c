@@ -23,6 +23,22 @@
 #define SRC_POSITIONAL_FLAG "positional_or_flag"
 #define SRC_ARGV_JOINED     "argv_joined"
 
+/* Whether a field present-but-empty is sent or dropped. Absent means "drop".
+ *
+ * Both conventions are real, and "drop" is the RARE one: 81 positional sites
+ * gate on pos_count alone -- `aimee vault set "" x y` sends "agent": "" -- and
+ * 2 also require a non-empty value. The spec's default followed the two.
+ *
+ * I first refused to add this, on the grounds that describing the common
+ * convention would enshrine something that looks like a bug. That was wrong, and
+ * the count is why: a vocabulary that can express 2 of 83 sites is not taking a
+ * principled stand, it is incomplete. Whether those 81 sites SHOULD send an
+ * empty field is a separate question, and changing them is not this file's
+ * business -- describing them faithfully is.
+ */
+#define EMPTY_DROP "drop"
+#define EMPTY_EMIT "emit"
+
 /* How a value becomes JSON. Absent means "string". */
 #define TYPE_STRING      "string"
 #define TYPE_NUMBER      "number"
@@ -39,6 +55,11 @@ static int known_source(const char *from)
 {
    return from && (!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL) ||
                    !strcmp(from, SRC_POSITIONAL_FLAG) || !strcmp(from, SRC_ARGV_JOINED));
+}
+
+static int known_empty(const char *e)
+{
+   return !e || !strcmp(e, EMPTY_DROP) || !strcmp(e, EMPTY_EMIT);
 }
 
 static int known_type(const char *type)
@@ -75,6 +96,8 @@ int cli_argspec_supported(const cJSON *spec)
       if (!json_name || !json_name[0] || !known_source(from))
          return 0;
       if (!known_type(field_str(f, "type")))
+         return 0;
+      if (!known_empty(field_str(f, "empty")))
          return 0;
       /* A source must carry what it reads from, or the row means nothing. */
       if ((!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL_FLAG)) && !field_str(f, "flag"))
@@ -146,9 +169,13 @@ static const char *field_value(const cJSON *field, const cli_args_t *opts, const
 
    const cJSON *idx = cJSON_GetObjectItemCaseSensitive(field, "index");
    int i = (int)idx->valuedouble;
-   const char *pos = (opts->pos_count > i && opts->positional[i] && opts->positional[i][0])
-                         ? opts->positional[i]
-                         : NULL;
+   const char *empty = field_str(field, "empty");
+   int emit_empty = empty && !strcmp(empty, EMPTY_EMIT);
+   /* With "emit", presence is the COUNT alone -- an empty argument is a value
+      the operator typed, and the marshallers that do this send it. */
+   const char *pos = NULL;
+   if (opts->pos_count > i && opts->positional[i] && (emit_empty || opts->positional[i][0]))
+      pos = opts->positional[i];
    if (pos)
       return pos;
    /* positional_or_flag falls back to the named flag, which is how the compiled
@@ -174,8 +201,10 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
       return 0;
    }
 
+   const char *empty = field_str(field, "empty");
+   int emit_empty = empty && !strcmp(empty, EMPTY_EMIT);
    const char *value = field_value(field, opts, joined);
-   if (!value || !value[0])
+   if (!value || (!value[0] && !emit_empty))
       return required ? -1 : 0;
 
    if (!type || !strcmp(type, TYPE_STRING))

@@ -120,6 +120,36 @@ static const sample_t SAMPLES[] = {
     {"dogfood.report", {"--dir", "reports/aug", NULL}},
     {"dogfood.report", {"--month", "2026-08", "--dir", "reports/aug", NULL}},
     {"dogfood.report", {"stray-positional", NULL}},
+
+    /* The "empty":"emit" family. Every one of these gates on pos_count alone,
+     * so an empty argument is a value the operator typed and is sent. The
+     * empty-string samples are the whole point: without the flag each of these
+     * disagreed with its marshaller on exactly that input, and on nothing
+     * else. */
+    {"eval.results", {NULL}},
+    {"eval.results", {"suite-a", NULL}},
+    {"eval.results", {"", NULL}},
+
+    {"cert.revoke", {NULL}},
+    {"cert.revoke", {"AB12", NULL}},
+    {"cert.revoke", {"", NULL}},
+
+    {"vault.capability", {NULL}},
+    {"vault.capability", {"grant", NULL}},
+    {"vault.capability", {"grant", "uid:1000", NULL}},
+    {"vault.capability", {"", "uid:1000", NULL}},
+
+    {"vault.delete", {"git", "token", NULL}},
+    {"vault.delete", {"git", "", NULL}},
+    {"vault.delete", {NULL}},
+
+    {"vault.set", {"git", "token", "s3cret", NULL}},
+    {"vault.set", {"git", "token", "", NULL}},
+    {"vault.set", {"git", NULL}},
+
+    {"vault.set_server", {"git", "token", "s3cret", NULL}},
+    {"vault.set_server", {"git", "", "s3cret", NULL}},
+    {"vault.set_server", {NULL}},
 };
 
 static const char *spec_for(const char *method)

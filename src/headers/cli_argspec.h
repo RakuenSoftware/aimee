@@ -19,7 +19,11 @@
  *                "type": "true_if_set"},
  *               {"json": "open_weights_only", "from": "flag",       "flag": "open-weights",
  *                "type": "bool"},
- *               {"json": "name",              "from": "positional", "index": 0}]}}
+ *               {"json": "name",              "from": "positional", "index": 0,
+ *                "empty": "emit"}]}}
+ *
+ * `empty` says whether a present-but-empty value is sent ("emit") or dropped
+ * ("drop", the default). Both are real: 81 positional sites send it, 2 drop it.
  *
  * What it deliberately CANNOT express: reading the client's filesystem or
  * environment, composing prompts, or cross-field rules like "either --task or
