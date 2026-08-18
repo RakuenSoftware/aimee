@@ -56,13 +56,13 @@ SCOPES = ("none", "conversation", "session", "repository", "global")
 TRANSACTIONS = ("none", "single")
 IDEMPOTENCY = ("safe", "idempotent", "unsafe")
 WIRE_FORMATS = ("db1-keyed-blob-v1", "db1-fields-v2")
-PAYLOADS = ("none", "state", "text", "int", "int64", "double", "struct")
+PAYLOADS = ("none", "state", "text", "int", "int64", "double", "float", "struct")
 # A request carries a double for the same reason a reply does: a cost is a
 # number, and rounding it to an integer at the boundary would bill differently
 # on each side of it. The conversion is the one the reply already uses.
-FIELD_TYPES = ("text", "int", "int64", "double")
+FIELD_TYPES = ("text", "int", "int64", "double", "float")
 # Members that travel as decimal text and convert back on arrival.
-NUMERIC = ("int", "int64", "double")
+NUMERIC = ("int", "int64", "double", "float")
 
 
 # Widest decimal text a member can become, with room for the NUL. A %.17g
@@ -82,6 +82,10 @@ def numeric_format(kind: str) -> tuple[str, str]:
         return "%lld", "(long long)"
     if kind == "double":
         return "%.17g", "(double)"
+    if kind == "float":
+        # %.9g is the shortest form that reads back as the same IEEE-754
+        # single, the way %.17g is for a double.
+        return "%.9g", "(double)"
     return "%d", ""
 
 
@@ -95,6 +99,8 @@ def numeric_parse(kind: str, cell: str) -> str:
     """
     if kind == "int64":
         return f"(int64_t)strtoll({cell}, NULL, 10)"
+    if kind == "float":
+        return f"(float)strtod({cell}, NULL)"
     if kind == "double":
         return f"strtod({cell}, NULL)"
     return f"(int)strtol({cell}, NULL, 10)"
@@ -132,8 +138,9 @@ def load_json(path: Path) -> object:
         fail("parse", f"cannot parse {path}: {exc}")
 
 
-# A field name, or one element of an expanded array member.
-ELEMENT = re.compile(r"[a-z][a-z0-9_]*(\[[0-9]+\])?")
+# A field name, or one element of an expanded array or nested member: "qa[3]",
+# "hypothesis.content", "qa[3].answer" -- the way C spells each of them.
+ELEMENT = re.compile(r"[a-z][a-z0-9_]*(\[[0-9]+\])?(\.[a-z][a-z0-9_]*)?")
 
 
 def expand_repeats(fields: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -151,10 +158,21 @@ def expand_repeats(fields: list[dict[str, object]]) -> list[dict[str, object]]:
         # the way C spells them. Same trick as the array: every emitter that
         # writes row.{name} keeps working because "outer.inner" IS that.
         nested = field.get("fields")
+        if nested is not None and "repeat" in field:
+            for index in range(int(field["repeat"])):
+                for member in nested:
+                    inner = dict(member)
+                    inner["name"] = f"{field['name']}[{index}].{member['name']}"
+                    if "required" in field:
+                        inner.setdefault("required", field["required"])
+                    grown.append(inner)
+            continue
         if nested is not None and "repeat" not in field:
             for member in nested:
                 inner = dict(member)
                 inner["name"] = f"{field['name']}.{member['name']}"
+                if "required" in field:
+                    inner.setdefault("required", field["required"])
                 grown.append(inner)
             continue
         repeat = field.get("repeat")
@@ -427,10 +445,13 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
         fields = []
         for position, entry_field in enumerate(raw_fields):
             repeated_member = isinstance(entry_field, dict) and "repeat" in entry_field
-            declared = keys(entry_field,
-                            {"name", "type", "required", "repeat"} if repeated_member
-                            else {"name", "type", "required"},
-                            f"{name}.request.fields[{position}]")
+            nested_member = isinstance(entry_field, dict) and "fields" in entry_field
+            allowed = {"name", "type", "required"}
+            if repeated_member:
+                allowed = allowed | {"repeat"}
+            if nested_member:
+                allowed = allowed | {"fields"}
+            declared = keys(entry_field, allowed, f"{name}.request.fields[{position}]")
             if repeated_member:
                 # Only a struct has members wide enough to need this. A bare
                 # argument that repeats is the `repeated` shape, which carries
@@ -439,10 +460,10 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                     fail("field-repeat",
                          f"{name} field {declared['name']!r} repeats, which only a struct "
                          f"member does; a repeating argument is the repeated shape")
-                if str(declared["type"]) != "text":
+                if str(declared["type"]) not in ("text", "struct"):
                     fail("field-repeat",
-                         f"{name} field {declared['name']!r} repeats, so it carries text: "
-                         f"a repeated number has no caller yet and no test")
+                         f"{name} field {declared['name']!r} repeats, so it carries text or "
+                         f"rows: a repeated number has no caller yet and no test")
                 integer(declared["repeat"], f"{name}.request.fields[{position}].repeat", 2, 64)
             if type(declared["required"]) is not bool:
                 fail("field-required",
@@ -451,7 +472,10 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             if position == 0 and not declared["required"] and operation["scope"] != "global":
                 fail("field-required",
                      f"{name} is scoped, so its first field cannot be optional")
-            if declared["type"] not in FIELD_TYPES:
+            # A member that carries rows says "struct" and declares them; every
+            # other field is one of the closed payload types.
+            if declared["type"] not in FIELD_TYPES and not (nested_member and
+                                                            str(declared["type"]) == "struct"):
                 fail("field-type",
                      f"{name} field {declared['name']!r} type must be one of {list(FIELD_TYPES)}")
             fields.append(str(declared["name"]))
@@ -686,7 +710,9 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                     fail("field-nested",
                          f"{name} nested member {declared['name']!r} declares no members")
             repeated_member = isinstance(declared, dict) and "repeat" in declared
-            allowed_field = ({"name", "type", "fields"} if nested_member
+            allowed_field = ({"name", "type", "fields", "repeat"}
+                             if nested_member and "repeat" in declared
+                             else {"name", "type", "fields"} if nested_member
                              else {"name", "type", "width"}
                              if scalar_reply and isinstance(declared, dict) and "width" in declared
                              else {"name", "type", "repeat"} if repeated_member
@@ -717,9 +743,16 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                     fail("field-repeat",
                          f"{name} reply field {declared['name']!r} repeats, which only a "
                          f"struct member does")
-                if str(declared["type"]) != "text":
+                # An array of strings, or an array of rows when it says what a
+                # row is. Anything else repeating is a number nobody has needed.
+                if str(declared["type"]) not in ("text", "struct"):
                     fail("field-repeat",
-                         f"{name} reply field {declared['name']!r} repeats, so it carries text")
+                         f"{name} reply field {declared['name']!r} repeats, so it carries text "
+                         f"or rows")
+                if str(declared["type"]) == "struct" and "fields" not in declared:
+                    fail("field-repeat",
+                         f"{name} reply field {declared['name']!r} repeats rows, so it says "
+                         f"what a row is")
                 integer(declared["repeat"], f"{name}.reply.fields[{position}].repeat", 2, 64)
             shape = keys(declared, allowed_field, f"{name}.reply.fields[{position}]")
             if nested_member:
@@ -735,6 +768,32 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                      f"{name} reply field type must be one of {[p for p in PAYLOADS if p != 'none']}")
             if not NAME.fullmatch(str(shape["name"])):
                 fail("reply-field-name", f"{name} invalid reply field {shape['name']!r}")
+        # A row crosses whole or it does not cross honestly. The catalog says
+        # which members travel, and a member it leaves out is not refused --
+        # it is simply never written, so the caller reads the zero memset left
+        # and cannot tell that from a row whose field really is empty.
+        for shaped, where in ((reply, "reply"), (request, "request")):
+            if "struct" not in shaped:
+                continue
+            # Fields before struct_from are ordinary arguments beside the
+            # struct, not members of it.
+            lead = int(shaped["struct_from"]) if "struct_from" in shaped else 0
+            declared = [str(f["name"]).split("[")[0].split(".")[0]
+                        for f in shaped["fields"][lead:]]
+            seen, ordered = set(), []
+            for one in declared:
+                if one not in seen:
+                    seen.add(one)
+                    ordered.append(one)
+            actual = struct_members(root, str(shaped["struct"]))
+            if actual and ordered != actual:
+                missing = [m for m in actual if m not in seen]
+                extra = [m for m in ordered if m not in set(actual)]
+                fail("struct-members",
+                     f"{name} {where} declares {shaped['struct']} as {ordered}, but the "
+                     f"header declares {actual}"
+                     + (f"; missing {missing}" if missing else "")
+                     + (f"; unknown {extra}" if extra else ""))
         reply_fields = expand_repeats(reply_fields)
         reply["fields"] = reply_fields
         operation["reply"]["fields"] = reply_fields
@@ -776,10 +835,13 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                      f"{name} carries its return beside a read, so its reply declares "
                      f"exactly one text value: the buffer the caller passed")
         if operation.get("c_returns") == "void":
-            if reply_fields:
+            # Nothing comes back as a RETURN. Out-parameters are a different
+            # question: db1_clarify_weakest_dim fills a buffer and answers
+            # nothing about whether it did, which is the contract it has.
+            if reply_fields and "scalars" not in reply:
                 fail("c-returns",
-                     f"{name} returns nothing, so its reply carries nothing: a value "
-                     f"nobody can receive is a value nobody checks")
+                     f"{name} returns nothing, so anything it carries is an out-parameter: "
+                     f"say scalars, or carry nothing")
             if declared_return(root, str(operation["c_name"])) != "void":
                 fail("c-returns",
                      f"{name} declares c_returns void, but its header does not")
@@ -809,6 +871,7 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
             # A cost is returned as a double, and rounding it at the boundary
             # would bill differently on each side of it.
             wanted = (("double",) if spelled == "double"
+                      else ("float",) if spelled == "float"
                       else ("int", "int64") if spelled == "int" else ("int64",))
             if len(reply_fields) != 1 or str(reply_fields[0]["type"]) not in wanted:
                 fail("c-returns",
@@ -1320,6 +1383,17 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
          result = -1;
       else if (filled_out)
          *filled_out = fields_in;
+      /* Fewer values than the caller has slots for is the same contract
+         mismatch read from the other side, and it used to pass: the unfilled
+         slots keep the empty string cleared above, so the caller reads a row
+         whose last members are blank and cannot tell that from a row that is
+         blank. A list says how many rows it found through filled_out and is
+         variable by construction; every other shape has one arity, and a stage
+         answering with a different one is a stage built against a different
+         version of this contract. Two processes, two binaries, two deployment
+         times -- so say it rather than zero-fill. */
+      else if (status == (uint32_t)AIMEE_DB1_STATUS_OK && fields_in != slots)
+         result = -1;
       uint32_t at = 8u;
       for (uint32_t i = 0; i < fields_in && result != -1; ++i)
       {{
@@ -1365,6 +1439,64 @@ static int write_result(int status)
 {read_result}"""
 
 
+# Header text, read and comment-stripped once per root.
+#
+# Four helpers below ask the headers a question per operation: what a symbol
+# returns, how it spells its parameters, which struct members are pointers, and
+# which header declares what. Each used to glob the directory, read every file
+# and strip its comments for every question asked. At 275 operations over ~70
+# headers that is fifty thousand regex searches and five seconds a run -- times
+# fifty-one tests, which is what pushed the descriptor-envelope job past its
+# five-minute budget and got it cancelled rather than failed.
+#
+# Keyed by root because the tests build catalogs in sandboxes and a cache that
+# ignored the root would answer one sandbox's question with another's headers.
+_HEADER_CACHE: dict[str, list[tuple[str, str, str]]] = {}
+
+
+def header_texts(root: Path) -> list[tuple[str, str, str]]:
+    """(name, raw, comment-stripped) for every DB1 header, in sorted order."""
+    key = str(root)
+    cached = _HEADER_CACHE.get(key)
+    if cached is None:
+        cached = []
+        for header in sorted((root / SOURCE_DIR).glob("*.h")):
+            raw = header.read_text(errors="ignore")
+            cached.append((header.name, raw, re.sub(r"/\*.*?\*/", "", raw, flags=re.S)))
+        _HEADER_CACHE[key] = cached
+    return cached
+
+
+def forget_header_texts() -> None:
+    """Drop the caches, for a caller that rewrites headers between runs."""
+    _HEADER_CACHE.clear()
+    _SYMBOL_CACHE.clear()
+    _WIDER_CACHE.clear()
+
+
+_SYMBOL_CACHE: dict[str, dict[str, tuple[str, str, str]]] = {}
+
+
+def declaring_headers(root: Path) -> dict[str, tuple[str, str, str]]:
+    """Which header names each symbol, so a lookup reads one file rather than all.
+
+    Scanning every header for every symbol is the same answer and quadratic
+    work: the regex that finds a return type backtracks across a whole file to
+    conclude the symbol is not in it, and it concludes that about sixty-nine
+    files out of seventy.
+    """
+    key = str(root)
+    index = _SYMBOL_CACHE.get(key)
+    if index is None:
+        index = {}
+        called = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+        for entry in header_texts(root):
+            for symbol in called.findall(entry[2]):
+                index.setdefault(symbol, entry)
+        _SYMBOL_CACHE[key] = index
+    return index
+
+
 def domain_headers(root: Path, operations: list[dict[str, object]]) -> list[str]:
     """The DB1 headers that declare these operations.
 
@@ -1372,13 +1504,10 @@ def domain_headers(root: Path, operations: list[dict[str, object]]) -> list[str]
     for the first family and do not in general, so a header named after the
     family is a header that does not exist.
     """
-    found: set[str] = set()
-    for header in sorted((root / SOURCE_DIR).glob("*.h")):
-        text = header.read_text(errors="ignore")
-        for operation in operations:
-            symbol = str(operation.get("c_name", ""))
-            if symbol and re.search(r"\b" + re.escape(symbol) + r"\s*\(", text):
-                found.add(header.name)
+    index = declaring_headers(root)
+    found = {index[symbol][0]
+             for symbol in (str(o.get("c_name", "")) for o in operations)
+             if symbol and symbol in index}
     return sorted(found)
 
 
@@ -1392,9 +1521,9 @@ def declared_parameters(root: Path, symbol: str) -> dict[str, str]:
     different function. Same lesson as the return type: read the header.
     """
     pattern = re.compile(r"\b" + re.escape(symbol) + r"\s*\(([^;{]*)\)\s*;", re.S)
-    for header in sorted((root / SOURCE_DIR).glob("*.h")):
-        found = pattern.search(re.sub(r"/\*.*?\*/", "", header.read_text(errors="ignore"),
-                                      flags=re.S))
+    entry = declaring_headers(root).get(symbol)
+    for _name, _raw, stripped in ([entry] if entry else []):
+        found = pattern.search(stripped)
         if not found:
             continue
         spelled: dict[str, str] = {}
@@ -1415,13 +1544,93 @@ def declared_return(root: Path, symbol: str) -> str:
     header says the other is a conflicting declaration. The header is the
     contract; this reads it rather than assuming a spelling.
     """
-    pattern = re.compile(r"([A-Za-z_][A-Za-z0-9_ ]*?)\s+" + re.escape(symbol) + r"\s*\(")
-    for header in sorted((root / SOURCE_DIR).glob("*.h")):
-        found = pattern.search(re.sub(r"/\*.*?\*/", "", header.read_text(errors="ignore"),
-                                      flags=re.S))
+    entry = declaring_headers(root).get(symbol)
+    if entry:
+        pattern = re.compile(r"([A-Za-z_][A-Za-z0-9_ ]*?)\s+" + re.escape(symbol) + r"\s*\(")
+        found = pattern.search(entry[2])
         if found:
             return " ".join(found.group(1).split())
     return "int64_t"
+
+
+_WIDER_CACHE: dict[str, list[tuple[str, str, str]]] = {}
+
+
+def wider_headers(root: Path) -> list[tuple[str, str, str]]:
+    """Headers outside src/modules/db1 that declare a type the wire carries.
+
+    cron_job_t lives in the config module and provider_model_t in src/headers,
+    and both cross the boundary. Looking only where DB1 keeps its own headers
+    would leave exactly those two rows unchecked -- and a rule that silently
+    has no opinion about some of the rows it is meant to guard is worse than
+    one that says so.
+    """
+    key = str(root)
+    cached = _WIDER_CACHE.get(key)
+    if cached is None:
+        cached = []
+        seen: set[Path] = set()
+        for pattern in ("headers/*.h", "modules/*/*.h", "modules/*/include/*.h",
+                        "modules/*/include/*/*.h"):
+            for header in sorted((root / "src").glob(pattern)):
+                if header in seen:
+                    continue
+                seen.add(header)
+                raw = header.read_text(errors="ignore")
+                cached.append((header.name, raw, re.sub(r"/\*.*?\*/", "", raw, flags=re.S)))
+        _WIDER_CACHE[key] = cached
+    return cached
+
+
+def struct_body(text: str, struct: str) -> str | None:
+    """The body of `typedef struct { ... } struct;`, matched by braces.
+
+    A regex cannot do this: ".*?" between the first "typedef struct {" and the
+    named closing brace swallows every struct declared before it in the same
+    header, and the members of those come back as members of this one. Walking
+    the braces is the only way to know which "}" belongs to which "{".
+    """
+    for opened in re.finditer(r"typedef\s+struct\s*(?:[A-Za-z_][A-Za-z0-9_]*\s*)?\{", text):
+        depth, at = 1, opened.end()
+        while depth and at < len(text):
+            depth += (text[at] == "{") - (text[at] == "}")
+            at += 1
+        tail = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*;", text[at:])
+        if tail and tail.group(1) == struct:
+            return text[opened.end():at - 1]
+    return None
+
+
+def struct_members(root: Path, struct: str) -> list[str]:
+    """Every member `struct` declares, in order, or [] if it is not a DB1 type.
+
+    The catalog says which members of a row cross the wire, and nothing used to
+    check that against the row itself. A member the catalog omits is simply not
+    carried: the client leaves it as memset left it, and the caller reads an
+    empty string or a zero where a real value used to be. That is silent, it
+    survives regeneration, and it is exactly what happens when somebody adds a
+    field to a struct and does not think about the wire.
+
+    Structs the wire does not own are not this rule's business -- a caller's own
+    type is found here only if a DB1 header declares it -- so an empty list
+    means "no opinion", not "no members".
+    """
+    for _name, _raw, stripped in header_texts(root) + wider_headers(root):
+        body = struct_body(stripped, struct)
+        if body is None:
+            continue
+        names: list[str] = []
+        for member in body.split(";"):
+            member = re.sub(r"/\*.*?\*/", "", member, flags=re.S).strip()
+            if not member:
+                continue
+            # The declarator's name: the last identifier before any array
+            # bounds, with the pointer star and the type in front of it.
+            matched = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]*\]\s*)*$", member)
+            if matched:
+                names.append(matched.group(1))
+        return names
+    return []
 
 
 def pointer_members(root: Path, struct: str) -> set[str]:
@@ -1434,9 +1643,9 @@ def pointer_members(root: Path, struct: str) -> set[str]:
     separate from whether the field is required.
     """
     body = ""
-    for header in sorted((root / SOURCE_DIR).glob("*.h")):
+    for _name, raw, _stripped in header_texts(root):
         found = re.search(r"typedef\s+struct\s*\{(.*?)\}\s*" + re.escape(struct) + r"\s*;",
-                          header.read_text(errors="ignore"), re.S)
+                          raw, re.S)
         if found:
             body = found.group(1)
             break
@@ -1523,13 +1732,15 @@ static int read_result(int status, const char *value_out)
         returns_text = operation.get("c_returns") == "text"
         returns_id = operation.get("c_returns") == "int64"
         returns_text_with_scalars = returns_text and bool(scalars)
+        struct_inputs = (int(request["struct_from"]) + 1 if "struct_from" in request
+                         else 1) if in_struct else 0
         if returns_text_with_scalars:
-            split = len(fields)
+            split = struct_inputs or len(fields)
             inputs, outputs = names[:split], names[split:]
         elif returns_text or returns_id:
             inputs, outputs = list(names), []
         elif scalars:
-            split = len(fields)
+            split = struct_inputs or len(fields)
             inputs, outputs = names[:split], names[split:]
         elif listed:
             # The rows parameter can sit anywhere in the signature -- some
@@ -1627,7 +1838,7 @@ static int read_result(int status, const char *value_out)
                     # it: long long and int64_t are the same width and not the
                     # same type, and declaring one where the header says the
                     # other is a conflicting declaration.
-                    ctype = {"int": "int", "int64": "int64_t", "double": "double"}[kind]
+                    ctype = {"int": "int", "int64": "int64_t", "double": "double", "float": "float"}[kind]
                     out_spelled = declared_parameters(
                         root, str(operation.get("c_name", ""))).get(outputs[position])
                     params.append(out_spelled or f"{ctype} *{outputs[position]}")
@@ -1794,7 +2005,7 @@ static int read_result(int status, const char *value_out)
             body.append("      return -1;")
             spelled = declared_return(root, str(operation["c_name"])).strip()
             body.append(f"   return ({spelled})" +
-                        ("strtod(slot0, NULL);" if spelled == "double"
+                        ("strtod(slot0, NULL);" if spelled in ("double", "float")
                          else "strtoll(slot0, NULL, 10);"))
         elif returns_text_with_scalars:
             cap = int(reply["fields"][0].get("alloc", reply["max_bytes"]))
@@ -1873,10 +2084,15 @@ static int read_result(int status, const char *value_out)
             body.append(f"   int wire_status = call_stage({op_symbol}, fields, {arity}, values, caps, "
                         f"{len(scalar_members)}, NULL);")
             found = operation.get("c_returns") == "found"
+            voided = operation.get("c_returns") == "void"
             body.append("   if (wire_status != (int)AIMEE_DB1_STATUS_OK)")
             body.append("   {")
             body += [f"      free(held{i});" for i, _ in handed]
-            if found:
+            if voided:
+                # The caller cannot be told, so it is left with the buffer it
+                # arrived with rather than a half-written one.
+                body.append("      return;")
+            elif found:
                 # Nothing there and broken are different answers, and a caller
                 # polling for a live turn treats them differently.
                 body.append("      return wire_status == (int)AIMEE_DB1_STATUS_MISSING "
@@ -1890,7 +2106,8 @@ static int read_result(int status, const char *value_out)
                 body.append(f"   char *shrunk{index} = realloc(held{index}, "
                             f"strlen(held{index}) + 1u);")
                 body.append(f"   *{out_name} = shrunk{index} ? shrunk{index} : held{index};")
-            body.append("   return 1;" if found else "   return 0;")
+            if not voided:
+                body.append("   return 1;" if found else "   return 0;")
         elif returns_text:
             cap = int(reply["max_bytes"])
             # Allocated at the declared maximum because the size is not known
@@ -2112,11 +2329,11 @@ static int read_result(int status, const char *value_out)
                     body.append(f"      memset({target}, 0, sizeof *{target});")
                 body.append("      return -1;")
                 body.append("   }")
+            # Every numeric member, not a list of the kinds that existed when
+            # this was written: a kind missing from that list is a member the
+            # caller silently gets zero for.
             for index, (member, kind) in enumerate(members):
-                if kind == "int":
-                    body.append(f"   {target}->{member} = "
-                                f"{numeric_parse(kind, f'slot{index}')};")
-                elif kind in ("int64", "double"):
+                if kind in NUMERIC:
                     body.append(f"   {target}->{member} = "
                                 f"{numeric_parse(kind, f'slot{index}')};")
             for member in allocated:
@@ -2393,7 +2610,16 @@ aimee_module_status_t aimee_db1_stage_{stem}(const uint8_t *request_body, uint32
       uint32_t out_count = rows ? row_count : (reads ? 1u : 0u);
       if (status != AIMEE_DB1_STATUS_OK && rows)
          out_count = 0u; /* nothing to report but the status */
-      write_reply(response_body, response_capacity, response_len, status, out_values, out_count);
+      /* A reply that does not fit is a failure, not a success with nothing in
+         it. write_reply refuses rather than truncating -- which is right -- but
+         discarding that answer left the caller a well-formed frame carrying no
+         rows, and a read cannot tell that from a row that is genuinely empty.
+         Say it in the frame instead: a bare status needs eight bytes, so the
+         second call fits wherever the first did not. */
+      if (write_reply(response_body, response_capacity, response_len, status, out_values,
+                      out_count) != status)
+         write_reply(response_body, response_capacity, response_len, AIMEE_DB1_STATUS_FAILED,
+                     NULL, 0u);
    }}
    free(cells_owned);
    free(numeric_owned);
@@ -2488,9 +2714,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             for position, kind in enumerate(types[:lead]):
                 if kind in NUMERIC:
                     conv = ("parse_int" if kind == "int"
-                            else "parse_double" if kind == "double" else "parse_int64")
+                            else "parse_double" if kind in ("double", "float")
+                            else "parse_int64")
                     ctype = ("int" if kind == "int"
-                             else "double" if kind == "double" else "int64_t")
+                             else "double" if kind in ("double", "float") else "int64_t")
                     parse.append(f"      {ctype} parsed{position};\n"
                                  f"      if ({conv}(field[{position}], &parsed{position}) != 0)\n"
                                  f"      {{\n         free(scratch);\n"
@@ -2505,9 +2732,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                     continue
                 if kind in NUMERIC:
                     conv = ("parse_int" if kind == "int"
-                            else "parse_double" if kind == "double" else "parse_int64")
+                            else "parse_double" if kind in ("double", "float")
+                            else "parse_int64")
                     ctype = ("int" if kind == "int"
-                             else "double" if kind == "double" else "int64_t")
+                             else "double" if kind in ("double", "float") else "int64_t")
                     parse.append(f"      {ctype} member_{position} = 0;\n"
                                  f"      if ({conv}(field[{position}], &member_{position}) != 0)\n"
                                  f"      {{\n         free(scratch);\n"
@@ -2528,9 +2756,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
             for position, kind in enumerate(types):
                 if kind in NUMERIC:
                     conv = ("parse_int" if kind == "int"
-                            else "parse_double" if kind == "double" else "parse_int64")
+                            else "parse_double" if kind in ("double", "float")
+                            else "parse_int64")
                     ctype = ("int" if kind == "int"
-                             else "double" if kind == "double" else "int64_t")
+                             else "double" if kind in ("double", "float") else "int64_t")
                     args.append(f"parsed{position}")
                     parse.append(f"      {ctype} parsed{position};\n"
                                  f"      if ({conv}(field[{position}], &parsed{position}) != 0)\n"
@@ -2548,13 +2777,13 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
         returns_text = operation.get("c_returns") == "text"
         if returns_id:
             returned = declared_return(root, str(operation["c_name"])).strip()
-            if returned == "double":
+            if returned in ("double", "float"):
                 # A double has no negative failure value to test: the domain
                 # reports trouble by answering zero, which is what it always
                 # did, so the call happening is the success.
                 tail.append("      rc = 0;\n")
                 tail.append('      snprintf(row_text[0], sizeof row_text[0], "%.17g", '
-                            "(double)produced);\n")
+                            "(double)produced);\n")  # a float widens losslessly
             else:
                 tail.append("      rc = (produced >= 0) ? 0 : -1;\n")
                 tail.append('      snprintf(row_text[0], sizeof row_text[0], "%lld", '
@@ -2600,7 +2829,7 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                     width = str(scalar_fields[index]["width"])
                     args += [f"scalar{index}", f"(size_t){width}"]
                 else:
-                    ctype = {"int": "int", "int64": "int64_t", "double": "double"}[kind]
+                    ctype = {"int": "int", "int64": "int64_t", "double": "double", "float": "float"}[kind]
                     spelled_out = declared_parameters(
                         root, str(operation.get("c_name", ""))).get(
                             str(operation["c_params"][len(request["fields"]) + index])
@@ -2849,9 +3078,10 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                 mname, mkind = str(member["name"]), str(member["type"])
                 if mkind in NUMERIC:
                     conv = ("parse_int" if mkind == "int"
-                            else "parse_double" if mkind == "double" else "parse_int64")
+                            else "parse_double" if mkind in ("double", "float")
+                            else "parse_int64")
                     ctype = ("int" if mkind == "int"
-                             else "double" if mkind == "double" else "int64_t")
+                             else "double" if mkind in ("double", "float") else "int64_t")
                     parse.append(f"         {ctype} member_{index} = 0;\n")
                     parse.append(f"         if ({conv}({cell}, &member_{index}) != 0)\n"
                                  f"         {{\n            free(scratch);\n"
@@ -2896,7 +3126,11 @@ def stage_bytes(family: dict[str, object], operations: list[dict[str, object]],
                    # A void domain has no rc to take. It reports failure the
                    # only way it ever did -- by not having happened -- so the
                    # stage answers OK for a request it accepted and delivered.
+                   # rc starts at -1, so saying so is not optional: without it
+                   # every void call replies FAILED, which a void client
+                   # discards and a void call WITH an out-parameter does not.
                    else f"      {operation['c_name']}({', '.join(args)});\n"
+                        f"      rc = 0;\n"
                    if operation.get("c_returns") == "void"
                    else f"      rc = {operation['c_name']}({', '.join(args)});\n")
                 + "".join(tail)

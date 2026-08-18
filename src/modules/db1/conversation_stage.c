@@ -13,6 +13,7 @@
 #include "db1_stages.h"
 
 #include "db1_module_api.h"
+#include "clarify.h"
 #include "conv_context.h"
 #include "db1_windows.h"
 #include "payload_rewrite_state.h"
@@ -180,8 +181,9 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
    int found = 0;
    payload_rewrite_state_t row_payload_rewrite_state_t;
    wm_entry_t row_wm_entry_t;
-   const char *row_slots[11];
-   char row_text[6][32];
+   clarify_session_t row_clarify_session_t;
+   const char *row_slots[48];
+   char row_text[20][32];
    /* A domain that returns a string hands over the allocation with it. The
       reply is written straight out of it rather than copied into value: the
       stack buffer is sized for identifiers and these carry documents. */
@@ -189,6 +191,11 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
    void *domain_rows = NULL;
    void *cells_owned = NULL;
    void *numeric_owned = NULL;
+   /* Text scalars are written by the domain and read after the switch
+      closes, so their storage cannot live in a case block. One
+      allocation holds all of an operation's values end to end, and one
+      free returns it. */
+   char *scalar_owned = NULL;
 
    switch (op)
    {
@@ -1783,6 +1790,1032 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
       rc = db1_user_memory_upsert(field[0], field[1], field[2], field[3], parsed4, field[5]);
       break;
    }
+   case AIMEE_DB1_OP_CLARIFY_START:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      memset(&row_clarify_session_t, 0, sizeof row_clarify_session_t);
+      rc = db1_clarify_start(field[0], &row_clarify_session_t);
+      snprintf(row_text[0], sizeof row_text[0], "%d", row_clarify_session_t.id);
+      snprintf(row_text[1], sizeof row_text[1], "%d", row_clarify_session_t.status);
+      snprintf(row_text[2], sizeof row_text[2], "%.9g", (double)row_clarify_session_t.score);
+      snprintf(row_text[3], sizeof row_text[3], "%d", row_clarify_session_t.qa[0].answered);
+      snprintf(row_text[4], sizeof row_text[4], "%d", row_clarify_session_t.qa[0].seq);
+      snprintf(row_text[5], sizeof row_text[5], "%d", row_clarify_session_t.qa[1].answered);
+      snprintf(row_text[6], sizeof row_text[6], "%d", row_clarify_session_t.qa[1].seq);
+      snprintf(row_text[7], sizeof row_text[7], "%d", row_clarify_session_t.qa[2].answered);
+      snprintf(row_text[8], sizeof row_text[8], "%d", row_clarify_session_t.qa[2].seq);
+      snprintf(row_text[9], sizeof row_text[9], "%d", row_clarify_session_t.qa[3].answered);
+      snprintf(row_text[10], sizeof row_text[10], "%d", row_clarify_session_t.qa[3].seq);
+      snprintf(row_text[11], sizeof row_text[11], "%d", row_clarify_session_t.qa[4].answered);
+      snprintf(row_text[12], sizeof row_text[12], "%d", row_clarify_session_t.qa[4].seq);
+      snprintf(row_text[13], sizeof row_text[13], "%d", row_clarify_session_t.qa[5].answered);
+      snprintf(row_text[14], sizeof row_text[14], "%d", row_clarify_session_t.qa[5].seq);
+      snprintf(row_text[15], sizeof row_text[15], "%d", row_clarify_session_t.qa[6].answered);
+      snprintf(row_text[16], sizeof row_text[16], "%d", row_clarify_session_t.qa[6].seq);
+      snprintf(row_text[17], sizeof row_text[17], "%d", row_clarify_session_t.qa[7].answered);
+      snprintf(row_text[18], sizeof row_text[18], "%d", row_clarify_session_t.qa[7].seq);
+      snprintf(row_text[19], sizeof row_text[19], "%d", row_clarify_session_t.qa_count);
+      row_slots[0] = row_text[0];
+      row_slots[1] = row_clarify_session_t.description;
+      row_slots[2] = row_text[1];
+      row_slots[3] = row_text[2];
+      row_slots[4] = row_clarify_session_t.qa[0].dimension;
+      row_slots[5] = row_clarify_session_t.qa[0].question;
+      row_slots[6] = row_clarify_session_t.qa[0].answer;
+      row_slots[7] = row_text[3];
+      row_slots[8] = row_text[4];
+      row_slots[9] = row_clarify_session_t.qa[1].dimension;
+      row_slots[10] = row_clarify_session_t.qa[1].question;
+      row_slots[11] = row_clarify_session_t.qa[1].answer;
+      row_slots[12] = row_text[5];
+      row_slots[13] = row_text[6];
+      row_slots[14] = row_clarify_session_t.qa[2].dimension;
+      row_slots[15] = row_clarify_session_t.qa[2].question;
+      row_slots[16] = row_clarify_session_t.qa[2].answer;
+      row_slots[17] = row_text[7];
+      row_slots[18] = row_text[8];
+      row_slots[19] = row_clarify_session_t.qa[3].dimension;
+      row_slots[20] = row_clarify_session_t.qa[3].question;
+      row_slots[21] = row_clarify_session_t.qa[3].answer;
+      row_slots[22] = row_text[9];
+      row_slots[23] = row_text[10];
+      row_slots[24] = row_clarify_session_t.qa[4].dimension;
+      row_slots[25] = row_clarify_session_t.qa[4].question;
+      row_slots[26] = row_clarify_session_t.qa[4].answer;
+      row_slots[27] = row_text[11];
+      row_slots[28] = row_text[12];
+      row_slots[29] = row_clarify_session_t.qa[5].dimension;
+      row_slots[30] = row_clarify_session_t.qa[5].question;
+      row_slots[31] = row_clarify_session_t.qa[5].answer;
+      row_slots[32] = row_text[13];
+      row_slots[33] = row_text[14];
+      row_slots[34] = row_clarify_session_t.qa[6].dimension;
+      row_slots[35] = row_clarify_session_t.qa[6].question;
+      row_slots[36] = row_clarify_session_t.qa[6].answer;
+      row_slots[37] = row_text[15];
+      row_slots[38] = row_text[16];
+      row_slots[39] = row_clarify_session_t.qa[7].dimension;
+      row_slots[40] = row_clarify_session_t.qa[7].question;
+      row_slots[41] = row_clarify_session_t.qa[7].answer;
+      row_slots[42] = row_text[17];
+      row_slots[43] = row_text[18];
+      row_slots[44] = row_text[19];
+      row_slots[45] = row_clarify_session_t.spec;
+      row_slots[46] = row_clarify_session_t.created_at;
+      row_slots[47] = row_clarify_session_t.updated_at;
+      rows = row_slots;
+      row_count = 48u;
+      reads = 1;
+      found = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_CLARIFY_GET:
+   {
+      if (count != 1u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed0;
+      if (parse_int(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      memset(&row_clarify_session_t, 0, sizeof row_clarify_session_t);
+      rc = db1_clarify_get(parsed0, &row_clarify_session_t);
+      snprintf(row_text[0], sizeof row_text[0], "%d", row_clarify_session_t.id);
+      snprintf(row_text[1], sizeof row_text[1], "%d", row_clarify_session_t.status);
+      snprintf(row_text[2], sizeof row_text[2], "%.9g", (double)row_clarify_session_t.score);
+      snprintf(row_text[3], sizeof row_text[3], "%d", row_clarify_session_t.qa[0].answered);
+      snprintf(row_text[4], sizeof row_text[4], "%d", row_clarify_session_t.qa[0].seq);
+      snprintf(row_text[5], sizeof row_text[5], "%d", row_clarify_session_t.qa[1].answered);
+      snprintf(row_text[6], sizeof row_text[6], "%d", row_clarify_session_t.qa[1].seq);
+      snprintf(row_text[7], sizeof row_text[7], "%d", row_clarify_session_t.qa[2].answered);
+      snprintf(row_text[8], sizeof row_text[8], "%d", row_clarify_session_t.qa[2].seq);
+      snprintf(row_text[9], sizeof row_text[9], "%d", row_clarify_session_t.qa[3].answered);
+      snprintf(row_text[10], sizeof row_text[10], "%d", row_clarify_session_t.qa[3].seq);
+      snprintf(row_text[11], sizeof row_text[11], "%d", row_clarify_session_t.qa[4].answered);
+      snprintf(row_text[12], sizeof row_text[12], "%d", row_clarify_session_t.qa[4].seq);
+      snprintf(row_text[13], sizeof row_text[13], "%d", row_clarify_session_t.qa[5].answered);
+      snprintf(row_text[14], sizeof row_text[14], "%d", row_clarify_session_t.qa[5].seq);
+      snprintf(row_text[15], sizeof row_text[15], "%d", row_clarify_session_t.qa[6].answered);
+      snprintf(row_text[16], sizeof row_text[16], "%d", row_clarify_session_t.qa[6].seq);
+      snprintf(row_text[17], sizeof row_text[17], "%d", row_clarify_session_t.qa[7].answered);
+      snprintf(row_text[18], sizeof row_text[18], "%d", row_clarify_session_t.qa[7].seq);
+      snprintf(row_text[19], sizeof row_text[19], "%d", row_clarify_session_t.qa_count);
+      row_slots[0] = row_text[0];
+      row_slots[1] = row_clarify_session_t.description;
+      row_slots[2] = row_text[1];
+      row_slots[3] = row_text[2];
+      row_slots[4] = row_clarify_session_t.qa[0].dimension;
+      row_slots[5] = row_clarify_session_t.qa[0].question;
+      row_slots[6] = row_clarify_session_t.qa[0].answer;
+      row_slots[7] = row_text[3];
+      row_slots[8] = row_text[4];
+      row_slots[9] = row_clarify_session_t.qa[1].dimension;
+      row_slots[10] = row_clarify_session_t.qa[1].question;
+      row_slots[11] = row_clarify_session_t.qa[1].answer;
+      row_slots[12] = row_text[5];
+      row_slots[13] = row_text[6];
+      row_slots[14] = row_clarify_session_t.qa[2].dimension;
+      row_slots[15] = row_clarify_session_t.qa[2].question;
+      row_slots[16] = row_clarify_session_t.qa[2].answer;
+      row_slots[17] = row_text[7];
+      row_slots[18] = row_text[8];
+      row_slots[19] = row_clarify_session_t.qa[3].dimension;
+      row_slots[20] = row_clarify_session_t.qa[3].question;
+      row_slots[21] = row_clarify_session_t.qa[3].answer;
+      row_slots[22] = row_text[9];
+      row_slots[23] = row_text[10];
+      row_slots[24] = row_clarify_session_t.qa[4].dimension;
+      row_slots[25] = row_clarify_session_t.qa[4].question;
+      row_slots[26] = row_clarify_session_t.qa[4].answer;
+      row_slots[27] = row_text[11];
+      row_slots[28] = row_text[12];
+      row_slots[29] = row_clarify_session_t.qa[5].dimension;
+      row_slots[30] = row_clarify_session_t.qa[5].question;
+      row_slots[31] = row_clarify_session_t.qa[5].answer;
+      row_slots[32] = row_text[13];
+      row_slots[33] = row_text[14];
+      row_slots[34] = row_clarify_session_t.qa[6].dimension;
+      row_slots[35] = row_clarify_session_t.qa[6].question;
+      row_slots[36] = row_clarify_session_t.qa[6].answer;
+      row_slots[37] = row_text[15];
+      row_slots[38] = row_text[16];
+      row_slots[39] = row_clarify_session_t.qa[7].dimension;
+      row_slots[40] = row_clarify_session_t.qa[7].question;
+      row_slots[41] = row_clarify_session_t.qa[7].answer;
+      row_slots[42] = row_text[17];
+      row_slots[43] = row_text[18];
+      row_slots[44] = row_text[19];
+      row_slots[45] = row_clarify_session_t.spec;
+      row_slots[46] = row_clarify_session_t.created_at;
+      row_slots[47] = row_clarify_session_t.updated_at;
+      rows = row_slots;
+      row_count = 48u;
+      reads = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_CLARIFY_ANSWER:
+   {
+      if (count != 2u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      if (!field[0][0])
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      int parsed0;
+      if (parse_int(field[0], &parsed0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      memset(&row_clarify_session_t, 0, sizeof row_clarify_session_t);
+      rc = db1_clarify_answer(parsed0, field[1], &row_clarify_session_t);
+      snprintf(row_text[0], sizeof row_text[0], "%d", row_clarify_session_t.id);
+      snprintf(row_text[1], sizeof row_text[1], "%d", row_clarify_session_t.status);
+      snprintf(row_text[2], sizeof row_text[2], "%.9g", (double)row_clarify_session_t.score);
+      snprintf(row_text[3], sizeof row_text[3], "%d", row_clarify_session_t.qa[0].answered);
+      snprintf(row_text[4], sizeof row_text[4], "%d", row_clarify_session_t.qa[0].seq);
+      snprintf(row_text[5], sizeof row_text[5], "%d", row_clarify_session_t.qa[1].answered);
+      snprintf(row_text[6], sizeof row_text[6], "%d", row_clarify_session_t.qa[1].seq);
+      snprintf(row_text[7], sizeof row_text[7], "%d", row_clarify_session_t.qa[2].answered);
+      snprintf(row_text[8], sizeof row_text[8], "%d", row_clarify_session_t.qa[2].seq);
+      snprintf(row_text[9], sizeof row_text[9], "%d", row_clarify_session_t.qa[3].answered);
+      snprintf(row_text[10], sizeof row_text[10], "%d", row_clarify_session_t.qa[3].seq);
+      snprintf(row_text[11], sizeof row_text[11], "%d", row_clarify_session_t.qa[4].answered);
+      snprintf(row_text[12], sizeof row_text[12], "%d", row_clarify_session_t.qa[4].seq);
+      snprintf(row_text[13], sizeof row_text[13], "%d", row_clarify_session_t.qa[5].answered);
+      snprintf(row_text[14], sizeof row_text[14], "%d", row_clarify_session_t.qa[5].seq);
+      snprintf(row_text[15], sizeof row_text[15], "%d", row_clarify_session_t.qa[6].answered);
+      snprintf(row_text[16], sizeof row_text[16], "%d", row_clarify_session_t.qa[6].seq);
+      snprintf(row_text[17], sizeof row_text[17], "%d", row_clarify_session_t.qa[7].answered);
+      snprintf(row_text[18], sizeof row_text[18], "%d", row_clarify_session_t.qa[7].seq);
+      snprintf(row_text[19], sizeof row_text[19], "%d", row_clarify_session_t.qa_count);
+      row_slots[0] = row_text[0];
+      row_slots[1] = row_clarify_session_t.description;
+      row_slots[2] = row_text[1];
+      row_slots[3] = row_text[2];
+      row_slots[4] = row_clarify_session_t.qa[0].dimension;
+      row_slots[5] = row_clarify_session_t.qa[0].question;
+      row_slots[6] = row_clarify_session_t.qa[0].answer;
+      row_slots[7] = row_text[3];
+      row_slots[8] = row_text[4];
+      row_slots[9] = row_clarify_session_t.qa[1].dimension;
+      row_slots[10] = row_clarify_session_t.qa[1].question;
+      row_slots[11] = row_clarify_session_t.qa[1].answer;
+      row_slots[12] = row_text[5];
+      row_slots[13] = row_text[6];
+      row_slots[14] = row_clarify_session_t.qa[2].dimension;
+      row_slots[15] = row_clarify_session_t.qa[2].question;
+      row_slots[16] = row_clarify_session_t.qa[2].answer;
+      row_slots[17] = row_text[7];
+      row_slots[18] = row_text[8];
+      row_slots[19] = row_clarify_session_t.qa[3].dimension;
+      row_slots[20] = row_clarify_session_t.qa[3].question;
+      row_slots[21] = row_clarify_session_t.qa[3].answer;
+      row_slots[22] = row_text[9];
+      row_slots[23] = row_text[10];
+      row_slots[24] = row_clarify_session_t.qa[4].dimension;
+      row_slots[25] = row_clarify_session_t.qa[4].question;
+      row_slots[26] = row_clarify_session_t.qa[4].answer;
+      row_slots[27] = row_text[11];
+      row_slots[28] = row_text[12];
+      row_slots[29] = row_clarify_session_t.qa[5].dimension;
+      row_slots[30] = row_clarify_session_t.qa[5].question;
+      row_slots[31] = row_clarify_session_t.qa[5].answer;
+      row_slots[32] = row_text[13];
+      row_slots[33] = row_text[14];
+      row_slots[34] = row_clarify_session_t.qa[6].dimension;
+      row_slots[35] = row_clarify_session_t.qa[6].question;
+      row_slots[36] = row_clarify_session_t.qa[6].answer;
+      row_slots[37] = row_text[15];
+      row_slots[38] = row_text[16];
+      row_slots[39] = row_clarify_session_t.qa[7].dimension;
+      row_slots[40] = row_clarify_session_t.qa[7].question;
+      row_slots[41] = row_clarify_session_t.qa[7].answer;
+      row_slots[42] = row_text[17];
+      row_slots[43] = row_text[18];
+      row_slots[44] = row_text[19];
+      row_slots[45] = row_clarify_session_t.spec;
+      row_slots[46] = row_clarify_session_t.created_at;
+      row_slots[47] = row_clarify_session_t.updated_at;
+      rows = row_slots;
+      row_count = 48u;
+      reads = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_CLARIFY_SCORE:
+   {
+      if (count != 48u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      clarify_session_t row;
+      memset(&row, 0, sizeof row);
+      int member_0 = 0;
+      if (parse_int(field[0], &member_0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.id = member_0;
+      snprintf(row.description, sizeof row.description, "%s", field[1]);
+      int member_2 = 0;
+      if (parse_int(field[2], &member_2) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.status = member_2;
+      double member_3 = 0;
+      if (parse_double(field[3], &member_3) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.score = member_3;
+      snprintf(row.qa[0].dimension, sizeof row.qa[0].dimension, "%s", field[4]);
+      snprintf(row.qa[0].question, sizeof row.qa[0].question, "%s", field[5]);
+      snprintf(row.qa[0].answer, sizeof row.qa[0].answer, "%s", field[6]);
+      int member_7 = 0;
+      if (parse_int(field[7], &member_7) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[0].answered = member_7;
+      int member_8 = 0;
+      if (parse_int(field[8], &member_8) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[0].seq = member_8;
+      snprintf(row.qa[1].dimension, sizeof row.qa[1].dimension, "%s", field[9]);
+      snprintf(row.qa[1].question, sizeof row.qa[1].question, "%s", field[10]);
+      snprintf(row.qa[1].answer, sizeof row.qa[1].answer, "%s", field[11]);
+      int member_12 = 0;
+      if (parse_int(field[12], &member_12) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[1].answered = member_12;
+      int member_13 = 0;
+      if (parse_int(field[13], &member_13) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[1].seq = member_13;
+      snprintf(row.qa[2].dimension, sizeof row.qa[2].dimension, "%s", field[14]);
+      snprintf(row.qa[2].question, sizeof row.qa[2].question, "%s", field[15]);
+      snprintf(row.qa[2].answer, sizeof row.qa[2].answer, "%s", field[16]);
+      int member_17 = 0;
+      if (parse_int(field[17], &member_17) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[2].answered = member_17;
+      int member_18 = 0;
+      if (parse_int(field[18], &member_18) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[2].seq = member_18;
+      snprintf(row.qa[3].dimension, sizeof row.qa[3].dimension, "%s", field[19]);
+      snprintf(row.qa[3].question, sizeof row.qa[3].question, "%s", field[20]);
+      snprintf(row.qa[3].answer, sizeof row.qa[3].answer, "%s", field[21]);
+      int member_22 = 0;
+      if (parse_int(field[22], &member_22) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[3].answered = member_22;
+      int member_23 = 0;
+      if (parse_int(field[23], &member_23) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[3].seq = member_23;
+      snprintf(row.qa[4].dimension, sizeof row.qa[4].dimension, "%s", field[24]);
+      snprintf(row.qa[4].question, sizeof row.qa[4].question, "%s", field[25]);
+      snprintf(row.qa[4].answer, sizeof row.qa[4].answer, "%s", field[26]);
+      int member_27 = 0;
+      if (parse_int(field[27], &member_27) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[4].answered = member_27;
+      int member_28 = 0;
+      if (parse_int(field[28], &member_28) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[4].seq = member_28;
+      snprintf(row.qa[5].dimension, sizeof row.qa[5].dimension, "%s", field[29]);
+      snprintf(row.qa[5].question, sizeof row.qa[5].question, "%s", field[30]);
+      snprintf(row.qa[5].answer, sizeof row.qa[5].answer, "%s", field[31]);
+      int member_32 = 0;
+      if (parse_int(field[32], &member_32) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[5].answered = member_32;
+      int member_33 = 0;
+      if (parse_int(field[33], &member_33) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[5].seq = member_33;
+      snprintf(row.qa[6].dimension, sizeof row.qa[6].dimension, "%s", field[34]);
+      snprintf(row.qa[6].question, sizeof row.qa[6].question, "%s", field[35]);
+      snprintf(row.qa[6].answer, sizeof row.qa[6].answer, "%s", field[36]);
+      int member_37 = 0;
+      if (parse_int(field[37], &member_37) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[6].answered = member_37;
+      int member_38 = 0;
+      if (parse_int(field[38], &member_38) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[6].seq = member_38;
+      snprintf(row.qa[7].dimension, sizeof row.qa[7].dimension, "%s", field[39]);
+      snprintf(row.qa[7].question, sizeof row.qa[7].question, "%s", field[40]);
+      snprintf(row.qa[7].answer, sizeof row.qa[7].answer, "%s", field[41]);
+      int member_42 = 0;
+      if (parse_int(field[42], &member_42) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[7].answered = member_42;
+      int member_43 = 0;
+      if (parse_int(field[43], &member_43) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[7].seq = member_43;
+      int member_44 = 0;
+      if (parse_int(field[44], &member_44) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa_count = member_44;
+      snprintf(row.spec, sizeof row.spec, "%s", field[45]);
+      snprintf(row.created_at, sizeof row.created_at, "%s", field[46]);
+      snprintf(row.updated_at, sizeof row.updated_at, "%s", field[47]);
+      float produced = db1_clarify_score(&row);
+      rc = 0;
+      snprintf(row_text[0], sizeof row_text[0], "%.17g", (double)produced);
+      row_slots[0] = row_text[0];
+      rows = row_slots;
+      row_count = 1u;
+      break;
+   }
+   case AIMEE_DB1_OP_CLARIFY_WEAKEST_DIM:
+   {
+      if (count != 48u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      clarify_session_t row;
+      memset(&row, 0, sizeof row);
+      int member_0 = 0;
+      if (parse_int(field[0], &member_0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.id = member_0;
+      snprintf(row.description, sizeof row.description, "%s", field[1]);
+      int member_2 = 0;
+      if (parse_int(field[2], &member_2) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.status = member_2;
+      double member_3 = 0;
+      if (parse_double(field[3], &member_3) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.score = member_3;
+      snprintf(row.qa[0].dimension, sizeof row.qa[0].dimension, "%s", field[4]);
+      snprintf(row.qa[0].question, sizeof row.qa[0].question, "%s", field[5]);
+      snprintf(row.qa[0].answer, sizeof row.qa[0].answer, "%s", field[6]);
+      int member_7 = 0;
+      if (parse_int(field[7], &member_7) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[0].answered = member_7;
+      int member_8 = 0;
+      if (parse_int(field[8], &member_8) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[0].seq = member_8;
+      snprintf(row.qa[1].dimension, sizeof row.qa[1].dimension, "%s", field[9]);
+      snprintf(row.qa[1].question, sizeof row.qa[1].question, "%s", field[10]);
+      snprintf(row.qa[1].answer, sizeof row.qa[1].answer, "%s", field[11]);
+      int member_12 = 0;
+      if (parse_int(field[12], &member_12) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[1].answered = member_12;
+      int member_13 = 0;
+      if (parse_int(field[13], &member_13) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[1].seq = member_13;
+      snprintf(row.qa[2].dimension, sizeof row.qa[2].dimension, "%s", field[14]);
+      snprintf(row.qa[2].question, sizeof row.qa[2].question, "%s", field[15]);
+      snprintf(row.qa[2].answer, sizeof row.qa[2].answer, "%s", field[16]);
+      int member_17 = 0;
+      if (parse_int(field[17], &member_17) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[2].answered = member_17;
+      int member_18 = 0;
+      if (parse_int(field[18], &member_18) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[2].seq = member_18;
+      snprintf(row.qa[3].dimension, sizeof row.qa[3].dimension, "%s", field[19]);
+      snprintf(row.qa[3].question, sizeof row.qa[3].question, "%s", field[20]);
+      snprintf(row.qa[3].answer, sizeof row.qa[3].answer, "%s", field[21]);
+      int member_22 = 0;
+      if (parse_int(field[22], &member_22) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[3].answered = member_22;
+      int member_23 = 0;
+      if (parse_int(field[23], &member_23) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[3].seq = member_23;
+      snprintf(row.qa[4].dimension, sizeof row.qa[4].dimension, "%s", field[24]);
+      snprintf(row.qa[4].question, sizeof row.qa[4].question, "%s", field[25]);
+      snprintf(row.qa[4].answer, sizeof row.qa[4].answer, "%s", field[26]);
+      int member_27 = 0;
+      if (parse_int(field[27], &member_27) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[4].answered = member_27;
+      int member_28 = 0;
+      if (parse_int(field[28], &member_28) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[4].seq = member_28;
+      snprintf(row.qa[5].dimension, sizeof row.qa[5].dimension, "%s", field[29]);
+      snprintf(row.qa[5].question, sizeof row.qa[5].question, "%s", field[30]);
+      snprintf(row.qa[5].answer, sizeof row.qa[5].answer, "%s", field[31]);
+      int member_32 = 0;
+      if (parse_int(field[32], &member_32) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[5].answered = member_32;
+      int member_33 = 0;
+      if (parse_int(field[33], &member_33) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[5].seq = member_33;
+      snprintf(row.qa[6].dimension, sizeof row.qa[6].dimension, "%s", field[34]);
+      snprintf(row.qa[6].question, sizeof row.qa[6].question, "%s", field[35]);
+      snprintf(row.qa[6].answer, sizeof row.qa[6].answer, "%s", field[36]);
+      int member_37 = 0;
+      if (parse_int(field[37], &member_37) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[6].answered = member_37;
+      int member_38 = 0;
+      if (parse_int(field[38], &member_38) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[6].seq = member_38;
+      snprintf(row.qa[7].dimension, sizeof row.qa[7].dimension, "%s", field[39]);
+      snprintf(row.qa[7].question, sizeof row.qa[7].question, "%s", field[40]);
+      snprintf(row.qa[7].answer, sizeof row.qa[7].answer, "%s", field[41]);
+      int member_42 = 0;
+      if (parse_int(field[42], &member_42) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[7].answered = member_42;
+      int member_43 = 0;
+      if (parse_int(field[43], &member_43) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[7].seq = member_43;
+      int member_44 = 0;
+      if (parse_int(field[44], &member_44) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa_count = member_44;
+      snprintf(row.spec, sizeof row.spec, "%s", field[45]);
+      snprintf(row.created_at, sizeof row.created_at, "%s", field[46]);
+      snprintf(row.updated_at, sizeof row.updated_at, "%s", field[47]);
+      scalar_owned = calloc(1u, CLARIFY_DIM_NAME_LEN);
+      if (!scalar_owned)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      char *scalar0 = scalar_owned;
+      db1_clarify_weakest_dim(&row, scalar0, (size_t)CLARIFY_DIM_NAME_LEN);
+      rc = 0;
+      row_slots[0] = scalar0;
+      rows = row_slots;
+      row_count = 1u;
+      break;
+   }
+   case AIMEE_DB1_OP_CLARIFY_NEXT_QUESTION:
+   {
+      if (count != 48u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      clarify_session_t row;
+      memset(&row, 0, sizeof row);
+      int member_0 = 0;
+      if (parse_int(field[0], &member_0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.id = member_0;
+      snprintf(row.description, sizeof row.description, "%s", field[1]);
+      int member_2 = 0;
+      if (parse_int(field[2], &member_2) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.status = member_2;
+      double member_3 = 0;
+      if (parse_double(field[3], &member_3) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.score = member_3;
+      snprintf(row.qa[0].dimension, sizeof row.qa[0].dimension, "%s", field[4]);
+      snprintf(row.qa[0].question, sizeof row.qa[0].question, "%s", field[5]);
+      snprintf(row.qa[0].answer, sizeof row.qa[0].answer, "%s", field[6]);
+      int member_7 = 0;
+      if (parse_int(field[7], &member_7) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[0].answered = member_7;
+      int member_8 = 0;
+      if (parse_int(field[8], &member_8) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[0].seq = member_8;
+      snprintf(row.qa[1].dimension, sizeof row.qa[1].dimension, "%s", field[9]);
+      snprintf(row.qa[1].question, sizeof row.qa[1].question, "%s", field[10]);
+      snprintf(row.qa[1].answer, sizeof row.qa[1].answer, "%s", field[11]);
+      int member_12 = 0;
+      if (parse_int(field[12], &member_12) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[1].answered = member_12;
+      int member_13 = 0;
+      if (parse_int(field[13], &member_13) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[1].seq = member_13;
+      snprintf(row.qa[2].dimension, sizeof row.qa[2].dimension, "%s", field[14]);
+      snprintf(row.qa[2].question, sizeof row.qa[2].question, "%s", field[15]);
+      snprintf(row.qa[2].answer, sizeof row.qa[2].answer, "%s", field[16]);
+      int member_17 = 0;
+      if (parse_int(field[17], &member_17) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[2].answered = member_17;
+      int member_18 = 0;
+      if (parse_int(field[18], &member_18) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[2].seq = member_18;
+      snprintf(row.qa[3].dimension, sizeof row.qa[3].dimension, "%s", field[19]);
+      snprintf(row.qa[3].question, sizeof row.qa[3].question, "%s", field[20]);
+      snprintf(row.qa[3].answer, sizeof row.qa[3].answer, "%s", field[21]);
+      int member_22 = 0;
+      if (parse_int(field[22], &member_22) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[3].answered = member_22;
+      int member_23 = 0;
+      if (parse_int(field[23], &member_23) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[3].seq = member_23;
+      snprintf(row.qa[4].dimension, sizeof row.qa[4].dimension, "%s", field[24]);
+      snprintf(row.qa[4].question, sizeof row.qa[4].question, "%s", field[25]);
+      snprintf(row.qa[4].answer, sizeof row.qa[4].answer, "%s", field[26]);
+      int member_27 = 0;
+      if (parse_int(field[27], &member_27) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[4].answered = member_27;
+      int member_28 = 0;
+      if (parse_int(field[28], &member_28) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[4].seq = member_28;
+      snprintf(row.qa[5].dimension, sizeof row.qa[5].dimension, "%s", field[29]);
+      snprintf(row.qa[5].question, sizeof row.qa[5].question, "%s", field[30]);
+      snprintf(row.qa[5].answer, sizeof row.qa[5].answer, "%s", field[31]);
+      int member_32 = 0;
+      if (parse_int(field[32], &member_32) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[5].answered = member_32;
+      int member_33 = 0;
+      if (parse_int(field[33], &member_33) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[5].seq = member_33;
+      snprintf(row.qa[6].dimension, sizeof row.qa[6].dimension, "%s", field[34]);
+      snprintf(row.qa[6].question, sizeof row.qa[6].question, "%s", field[35]);
+      snprintf(row.qa[6].answer, sizeof row.qa[6].answer, "%s", field[36]);
+      int member_37 = 0;
+      if (parse_int(field[37], &member_37) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[6].answered = member_37;
+      int member_38 = 0;
+      if (parse_int(field[38], &member_38) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[6].seq = member_38;
+      snprintf(row.qa[7].dimension, sizeof row.qa[7].dimension, "%s", field[39]);
+      snprintf(row.qa[7].question, sizeof row.qa[7].question, "%s", field[40]);
+      snprintf(row.qa[7].answer, sizeof row.qa[7].answer, "%s", field[41]);
+      int member_42 = 0;
+      if (parse_int(field[42], &member_42) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[7].answered = member_42;
+      int member_43 = 0;
+      if (parse_int(field[43], &member_43) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[7].seq = member_43;
+      int member_44 = 0;
+      if (parse_int(field[44], &member_44) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa_count = member_44;
+      snprintf(row.spec, sizeof row.spec, "%s", field[45]);
+      snprintf(row.created_at, sizeof row.created_at, "%s", field[46]);
+      snprintf(row.updated_at, sizeof row.updated_at, "%s", field[47]);
+      scalar_owned = calloc(1u, CLARIFY_TEXT_LEN + CLARIFY_DIM_NAME_LEN);
+      if (!scalar_owned)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      }
+      char *scalar0 = scalar_owned;
+      char *scalar1 = scalar_owned + CLARIFY_TEXT_LEN;
+      rc = db1_clarify_next_question(&row, scalar0, (size_t)CLARIFY_TEXT_LEN, scalar1, (size_t)CLARIFY_DIM_NAME_LEN);
+      row_slots[0] = scalar0;
+      row_slots[1] = scalar1;
+      rows = row_slots;
+      row_count = 2u;
+      found = 1;
+      break;
+   }
+   case AIMEE_DB1_OP_CLARIFY_CRYSTALLIZE:
+   {
+      if (count != 48u)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      clarify_session_t row;
+      memset(&row, 0, sizeof row);
+      int member_0 = 0;
+      if (parse_int(field[0], &member_0) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.id = member_0;
+      snprintf(row.description, sizeof row.description, "%s", field[1]);
+      int member_2 = 0;
+      if (parse_int(field[2], &member_2) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.status = member_2;
+      double member_3 = 0;
+      if (parse_double(field[3], &member_3) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.score = member_3;
+      snprintf(row.qa[0].dimension, sizeof row.qa[0].dimension, "%s", field[4]);
+      snprintf(row.qa[0].question, sizeof row.qa[0].question, "%s", field[5]);
+      snprintf(row.qa[0].answer, sizeof row.qa[0].answer, "%s", field[6]);
+      int member_7 = 0;
+      if (parse_int(field[7], &member_7) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[0].answered = member_7;
+      int member_8 = 0;
+      if (parse_int(field[8], &member_8) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[0].seq = member_8;
+      snprintf(row.qa[1].dimension, sizeof row.qa[1].dimension, "%s", field[9]);
+      snprintf(row.qa[1].question, sizeof row.qa[1].question, "%s", field[10]);
+      snprintf(row.qa[1].answer, sizeof row.qa[1].answer, "%s", field[11]);
+      int member_12 = 0;
+      if (parse_int(field[12], &member_12) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[1].answered = member_12;
+      int member_13 = 0;
+      if (parse_int(field[13], &member_13) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[1].seq = member_13;
+      snprintf(row.qa[2].dimension, sizeof row.qa[2].dimension, "%s", field[14]);
+      snprintf(row.qa[2].question, sizeof row.qa[2].question, "%s", field[15]);
+      snprintf(row.qa[2].answer, sizeof row.qa[2].answer, "%s", field[16]);
+      int member_17 = 0;
+      if (parse_int(field[17], &member_17) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[2].answered = member_17;
+      int member_18 = 0;
+      if (parse_int(field[18], &member_18) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[2].seq = member_18;
+      snprintf(row.qa[3].dimension, sizeof row.qa[3].dimension, "%s", field[19]);
+      snprintf(row.qa[3].question, sizeof row.qa[3].question, "%s", field[20]);
+      snprintf(row.qa[3].answer, sizeof row.qa[3].answer, "%s", field[21]);
+      int member_22 = 0;
+      if (parse_int(field[22], &member_22) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[3].answered = member_22;
+      int member_23 = 0;
+      if (parse_int(field[23], &member_23) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[3].seq = member_23;
+      snprintf(row.qa[4].dimension, sizeof row.qa[4].dimension, "%s", field[24]);
+      snprintf(row.qa[4].question, sizeof row.qa[4].question, "%s", field[25]);
+      snprintf(row.qa[4].answer, sizeof row.qa[4].answer, "%s", field[26]);
+      int member_27 = 0;
+      if (parse_int(field[27], &member_27) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[4].answered = member_27;
+      int member_28 = 0;
+      if (parse_int(field[28], &member_28) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[4].seq = member_28;
+      snprintf(row.qa[5].dimension, sizeof row.qa[5].dimension, "%s", field[29]);
+      snprintf(row.qa[5].question, sizeof row.qa[5].question, "%s", field[30]);
+      snprintf(row.qa[5].answer, sizeof row.qa[5].answer, "%s", field[31]);
+      int member_32 = 0;
+      if (parse_int(field[32], &member_32) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[5].answered = member_32;
+      int member_33 = 0;
+      if (parse_int(field[33], &member_33) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[5].seq = member_33;
+      snprintf(row.qa[6].dimension, sizeof row.qa[6].dimension, "%s", field[34]);
+      snprintf(row.qa[6].question, sizeof row.qa[6].question, "%s", field[35]);
+      snprintf(row.qa[6].answer, sizeof row.qa[6].answer, "%s", field[36]);
+      int member_37 = 0;
+      if (parse_int(field[37], &member_37) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[6].answered = member_37;
+      int member_38 = 0;
+      if (parse_int(field[38], &member_38) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[6].seq = member_38;
+      snprintf(row.qa[7].dimension, sizeof row.qa[7].dimension, "%s", field[39]);
+      snprintf(row.qa[7].question, sizeof row.qa[7].question, "%s", field[40]);
+      snprintf(row.qa[7].answer, sizeof row.qa[7].answer, "%s", field[41]);
+      int member_42 = 0;
+      if (parse_int(field[42], &member_42) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[7].answered = member_42;
+      int member_43 = 0;
+      if (parse_int(field[43], &member_43) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa[7].seq = member_43;
+      int member_44 = 0;
+      if (parse_int(field[44], &member_44) != 0)
+      {
+         free(scratch);
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      }
+      row.qa_count = member_44;
+      snprintf(row.spec, sizeof row.spec, "%s", field[45]);
+      snprintf(row.created_at, sizeof row.created_at, "%s", field[46]);
+      snprintf(row.updated_at, sizeof row.updated_at, "%s", field[47]);
+      char *produced = db1_clarify_crystallize(&row);
+      rc = produced ? 1 : 0;
+      text_owned = produced;
+      reads = 1;
+      break;
+   }
    default:
       free(scratch);
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
@@ -1826,10 +2859,20 @@ aimee_module_status_t aimee_db1_stage_conversation(const uint8_t *request_body, 
       uint32_t out_count = rows ? row_count : (reads ? 1u : 0u);
       if (status != AIMEE_DB1_STATUS_OK && rows)
          out_count = 0u; /* nothing to report but the status */
-      write_reply(response_body, response_capacity, response_len, status, out_values, out_count);
+      /* A reply that does not fit is a failure, not a success with nothing in
+         it. write_reply refuses rather than truncating -- which is right -- but
+         discarding that answer left the caller a well-formed frame carrying no
+         rows, and a read cannot tell that from a row that is genuinely empty.
+         Say it in the frame instead: a bare status needs eight bytes, so the
+         second call fits wherever the first did not. */
+      if (write_reply(response_body, response_capacity, response_len, status, out_values,
+                      out_count) != status)
+         write_reply(response_body, response_capacity, response_len, AIMEE_DB1_STATUS_FAILED,
+                     NULL, 0u);
    }
    free(cells_owned);
    free(numeric_owned);
+   free(scalar_owned);
    free(domain_rows);
    free(text_owned);
    return AIMEE_MODULE_STATUS_OK;

@@ -97,6 +97,13 @@
 #define AIMEE_DB1_OP_USER_MEMORY_LIST_RECALL    33u
 #define AIMEE_DB1_OP_USER_MEMORY_ANY            34u
 #define AIMEE_DB1_OP_USER_MEMORY_UPSERT         35u
+#define AIMEE_DB1_OP_CLARIFY_START              37u
+#define AIMEE_DB1_OP_CLARIFY_GET                38u
+#define AIMEE_DB1_OP_CLARIFY_ANSWER             39u
+#define AIMEE_DB1_OP_CLARIFY_SCORE              40u
+#define AIMEE_DB1_OP_CLARIFY_WEAKEST_DIM        41u
+#define AIMEE_DB1_OP_CLARIFY_NEXT_QUESTION      42u
+#define AIMEE_DB1_OP_CLARIFY_CRYSTALLIZE        43u
 
 /* Family 4: queued agent work: logs, coordination jobs and the cron that
  * drives them. */

@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "contracts": "src/modules/process-contracts.json",
+  "c_build": "c-build.json",
+  "process_count": 21,
+  "runtimes": {
+    "memory": "go",
+    "learning": "go",
+    "routing": "go",
+    "delegates": "go",
+    "tools": "go",
+    "workspace": "go",
+    "git": "go",
+    "skills": "go",
+    "response-composition": "go",
+    "governance": "go",
+    "workflows": "go",
+    "roundtable": "go",
+    "kb-synthesis": "go",
+    "runtime-web": "go",
+    "control-web": "go",
+    "benchmarks": "go",
+    "sandbox": "go",
+    "economizer": "go",
+    "postgres": "go",
+    "db2": "c",
+    "db1": "c"
+  },
+  "placements": {
+    "server": [
+      "memory\t/usr/local/libexec/aimee-modules/aimee-module-memory",
+      "learning\t/usr/local/libexec/aimee-modules/aimee-module-learning",
+      "routing\t/usr/local/libexec/aimee-modules/aimee-module-routing",
+      "delegates\t/usr/local/libexec/aimee-modules/aimee-module-delegates",
+      "tools\t/usr/local/libexec/aimee-modules/aimee-module-tools",
+      "workspace\t/usr/local/libexec/aimee-modules/aimee-module-workspace",
+      "git\t/usr/local/libexec/aimee-modules/aimee-module-git",
+      "skills\t/usr/local/libexec/aimee-modules/aimee-module-skills",
+      "response-composition\t/usr/local/libexec/aimee-modules/aimee-module-response-composition",
+      "runtime-web\t/usr/local/libexec/aimee-modules/aimee-module-runtime-web",
+      "sandbox\t/usr/local/libexec/aimee-modules/aimee-module-sandbox",
+      "db1\t/usr/local/libexec/aimee-modules/aimee-module-db1"
+    ],
+    "kb": [
+      "control-web\t/usr/local/libexec/aimee-modules/aimee-module-control-web",
+      "postgres\t/usr/local/libexec/aimee-modules/aimee-module-postgres"
+    ]
+  }
+}

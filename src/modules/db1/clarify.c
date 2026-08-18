@@ -7,7 +7,6 @@
 
 #include "clarify.h"
 #include "db1_internal.h"
-#include "dstr.h"
 #include "cJSON.h"
 
 #include <sqlite3.h>
@@ -152,23 +151,37 @@ char *db1_clarify_crystallize(const clarify_session_t *s)
    if (!s)
       return NULL;
 
-   dstr_t out;
-   dstr_init(&out);
-   dstr_appendf(&out, "# Task Specification\n\n## Task\n%s\n", s->description);
+   /* Sized to what this can actually produce rather than to the column it is
+      usually stored in: the description plus every answered pair. A growable
+      buffer would be the same bytes and one more thing for the module process
+      to link. */
+   enum
+   {
+      SPEC_MAX = CLARIFY_DESC_LEN +
+                 CLARIFY_MAX_QA * (CLARIFY_DIM_NAME_LEN + 2 * CLARIFY_TEXT_LEN + 32) + 64
+   };
+   char *out = malloc(SPEC_MAX);
+   if (!out)
+      return NULL;
+
+   size_t at = 0;
+   at += (size_t)snprintf(out + at, SPEC_MAX - at, "# Task Specification\n\n## Task\n%s\n",
+                          s->description);
 
    if (s->qa_count > 0)
    {
-      dstr_appendf(&out, "\n## Clarifications\n");
-      for (int i = 0; i < s->qa_count; i++)
+      /* The header rides on there being pairs at all, not on any being
+         answered -- which is what this produced before. */
+      at += (size_t)snprintf(out + at, SPEC_MAX - at, "\n## Clarifications\n");
+      for (int i = 0; i < s->qa_count && at < SPEC_MAX; i++)
       {
          if (!s->qa[i].answered)
             continue;
-         dstr_appendf(&out, "\n**%s**: %s\n> %s\n", s->qa[i].dimension, s->qa[i].question,
-                      s->qa[i].answer);
+         at += (size_t)snprintf(out + at, SPEC_MAX - at, "\n**%s**: %s\n> %s\n", s->qa[i].dimension,
+                                s->qa[i].question, s->qa[i].answer);
       }
    }
-
-   return dstr_steal(&out);
+   return out;
 }
 
 /* --- DB helpers (private) --- */
@@ -406,36 +419,3 @@ int db1_clarify_answer(int id, const char *answer, clarify_session_t *out)
 }
 
 /* --- JSON serialisation --- */
-
-char *db1_clarify_to_json(const clarify_session_t *s)
-{
-   if (!s)
-      return NULL;
-
-   const char *status_str = (s->status == CLARIFY_READY)       ? "ready"
-                            : (s->status == CLARIFY_CANCELLED) ? "cancelled"
-                                                               : "open";
-   cJSON *obj = cJSON_CreateObject();
-   cJSON_AddNumberToObject(obj, "id", s->id);
-   cJSON_AddStringToObject(obj, "description", s->description);
-   cJSON_AddStringToObject(obj, "status", status_str);
-   cJSON_AddNumberToObject(obj, "score", (double)s->score);
-   cJSON_AddStringToObject(obj, "spec", s->spec);
-   cJSON_AddStringToObject(obj, "created_at", s->created_at);
-   cJSON_AddStringToObject(obj, "updated_at", s->updated_at);
-
-   cJSON *qa_arr = cJSON_AddArrayToObject(obj, "qa");
-   for (int i = 0; i < s->qa_count; i++)
-   {
-      cJSON *qa = cJSON_CreateObject();
-      cJSON_AddStringToObject(qa, "dimension", s->qa[i].dimension);
-      cJSON_AddStringToObject(qa, "question", s->qa[i].question);
-      cJSON_AddStringToObject(qa, "answer", s->qa[i].answer);
-      cJSON_AddBoolToObject(qa, "answered", s->qa[i].answered);
-      cJSON_AddItemToArray(qa_arr, qa);
-   }
-
-   char *json = cJSON_PrintUnformatted(obj);
-   cJSON_Delete(obj);
-   return json;
-}

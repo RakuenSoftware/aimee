@@ -16,6 +16,7 @@
  * generator emits, and reflowing generated output would put the file and the
  * catalog permanently one reformat apart. */
 /* clang-format off */
+#include "clarify.h"
 #include "conv_context.h"
 #include "db1_windows.h"
 #include "payload_rewrite_state.h"
@@ -168,6 +169,17 @@ static int call_stage(uint32_t op, const char *const *fields, uint32_t count, ch
          result = -1;
       else if (filled_out)
          *filled_out = fields_in;
+      /* Fewer values than the caller has slots for is the same contract
+         mismatch read from the other side, and it used to pass: the unfilled
+         slots keep the empty string cleared above, so the caller reads a row
+         whose last members are blank and cannot tell that from a row that is
+         blank. A list says how many rows it found through filled_out and is
+         variable by construction; every other shape has one arity, and a stage
+         answering with a different one is a stage built against a different
+         version of this contract. Two processes, two binaries, two deployment
+         times -- so say it rather than zero-fill. */
+      else if (status == (uint32_t)AIMEE_DB1_STATUS_OK && fields_in != slots)
+         result = -1;
       uint32_t at = 8u;
       for (uint32_t i = 0; i < fields_in && result != -1; ++i)
       {
@@ -1155,6 +1167,401 @@ int db1_user_memory_upsert(const char *kind, const char *tier, const char *key, 
    snprintf(arg4, sizeof arg4, "%.17g", (double)confidence);
    const char *fields[] = {kind, tier, key, content, arg4, source_session ? source_session : ""};
    return write_result(call_stage(AIMEE_DB1_OP_USER_MEMORY_UPSERT, fields, 6, NULL, NULL, 0, NULL));
+}
+
+int db1_clarify_start(const char *description, clarify_session_t *out)
+{
+   if (!description || !description[0] || !out)
+      return -1;
+   const char *fields[] = {description};
+   char slot0[32];
+   char slot2[32];
+   char slot3[32];
+   char slot7[32];
+   char slot8[32];
+   char slot12[32];
+   char slot13[32];
+   char slot17[32];
+   char slot18[32];
+   char slot22[32];
+   char slot23[32];
+   char slot27[32];
+   char slot28[32];
+   char slot32[32];
+   char slot33[32];
+   char slot37[32];
+   char slot38[32];
+   char slot42[32];
+   char slot43[32];
+   char slot44[32];
+   memset(out, 0, sizeof *out);
+   char *const values[] = {slot0, out->description, slot2, slot3, out->qa[0].dimension, out->qa[0].question, out->qa[0].answer, slot7, slot8, out->qa[1].dimension, out->qa[1].question, out->qa[1].answer, slot12, slot13, out->qa[2].dimension, out->qa[2].question, out->qa[2].answer, slot17, slot18, out->qa[3].dimension, out->qa[3].question, out->qa[3].answer, slot22, slot23, out->qa[4].dimension, out->qa[4].question, out->qa[4].answer, slot27, slot28, out->qa[5].dimension, out->qa[5].question, out->qa[5].answer, slot32, slot33, out->qa[6].dimension, out->qa[6].question, out->qa[6].answer, slot37, slot38, out->qa[7].dimension, out->qa[7].question, out->qa[7].answer, slot42, slot43, slot44, out->spec, out->created_at, out->updated_at};
+   const size_t caps[] = {sizeof slot0, sizeof out->description, sizeof slot2, sizeof slot3, sizeof out->qa[0].dimension, sizeof out->qa[0].question, sizeof out->qa[0].answer, sizeof slot7, sizeof slot8, sizeof out->qa[1].dimension, sizeof out->qa[1].question, sizeof out->qa[1].answer, sizeof slot12, sizeof slot13, sizeof out->qa[2].dimension, sizeof out->qa[2].question, sizeof out->qa[2].answer, sizeof slot17, sizeof slot18, sizeof out->qa[3].dimension, sizeof out->qa[3].question, sizeof out->qa[3].answer, sizeof slot22, sizeof slot23, sizeof out->qa[4].dimension, sizeof out->qa[4].question, sizeof out->qa[4].answer, sizeof slot27, sizeof slot28, sizeof out->qa[5].dimension, sizeof out->qa[5].question, sizeof out->qa[5].answer, sizeof slot32, sizeof slot33, sizeof out->qa[6].dimension, sizeof out->qa[6].question, sizeof out->qa[6].answer, sizeof slot37, sizeof slot38, sizeof out->qa[7].dimension, sizeof out->qa[7].question, sizeof out->qa[7].answer, sizeof slot42, sizeof slot43, sizeof slot44, sizeof out->spec, sizeof out->created_at, sizeof out->updated_at};
+   int wire_status = call_stage(AIMEE_DB1_OP_CLARIFY_START, fields, 1, values, caps, 48, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return -1;
+   }
+   out->id = (int)strtol(slot0, NULL, 10);
+   out->status = (int)strtol(slot2, NULL, 10);
+   out->score = (float)strtod(slot3, NULL);
+   out->qa[0].answered = (int)strtol(slot7, NULL, 10);
+   out->qa[0].seq = (int)strtol(slot8, NULL, 10);
+   out->qa[1].answered = (int)strtol(slot12, NULL, 10);
+   out->qa[1].seq = (int)strtol(slot13, NULL, 10);
+   out->qa[2].answered = (int)strtol(slot17, NULL, 10);
+   out->qa[2].seq = (int)strtol(slot18, NULL, 10);
+   out->qa[3].answered = (int)strtol(slot22, NULL, 10);
+   out->qa[3].seq = (int)strtol(slot23, NULL, 10);
+   out->qa[4].answered = (int)strtol(slot27, NULL, 10);
+   out->qa[4].seq = (int)strtol(slot28, NULL, 10);
+   out->qa[5].answered = (int)strtol(slot32, NULL, 10);
+   out->qa[5].seq = (int)strtol(slot33, NULL, 10);
+   out->qa[6].answered = (int)strtol(slot37, NULL, 10);
+   out->qa[6].seq = (int)strtol(slot38, NULL, 10);
+   out->qa[7].answered = (int)strtol(slot42, NULL, 10);
+   out->qa[7].seq = (int)strtol(slot43, NULL, 10);
+   out->qa_count = (int)strtol(slot44, NULL, 10);
+   return out->id;
+}
+
+int db1_clarify_get(int id, clarify_session_t *out)
+{
+   if (!out)
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", id);
+   const char *fields[] = {arg0};
+   char slot0[32];
+   char slot2[32];
+   char slot3[32];
+   char slot7[32];
+   char slot8[32];
+   char slot12[32];
+   char slot13[32];
+   char slot17[32];
+   char slot18[32];
+   char slot22[32];
+   char slot23[32];
+   char slot27[32];
+   char slot28[32];
+   char slot32[32];
+   char slot33[32];
+   char slot37[32];
+   char slot38[32];
+   char slot42[32];
+   char slot43[32];
+   char slot44[32];
+   memset(out, 0, sizeof *out);
+   char *const values[] = {slot0, out->description, slot2, slot3, out->qa[0].dimension, out->qa[0].question, out->qa[0].answer, slot7, slot8, out->qa[1].dimension, out->qa[1].question, out->qa[1].answer, slot12, slot13, out->qa[2].dimension, out->qa[2].question, out->qa[2].answer, slot17, slot18, out->qa[3].dimension, out->qa[3].question, out->qa[3].answer, slot22, slot23, out->qa[4].dimension, out->qa[4].question, out->qa[4].answer, slot27, slot28, out->qa[5].dimension, out->qa[5].question, out->qa[5].answer, slot32, slot33, out->qa[6].dimension, out->qa[6].question, out->qa[6].answer, slot37, slot38, out->qa[7].dimension, out->qa[7].question, out->qa[7].answer, slot42, slot43, slot44, out->spec, out->created_at, out->updated_at};
+   const size_t caps[] = {sizeof slot0, sizeof out->description, sizeof slot2, sizeof slot3, sizeof out->qa[0].dimension, sizeof out->qa[0].question, sizeof out->qa[0].answer, sizeof slot7, sizeof slot8, sizeof out->qa[1].dimension, sizeof out->qa[1].question, sizeof out->qa[1].answer, sizeof slot12, sizeof slot13, sizeof out->qa[2].dimension, sizeof out->qa[2].question, sizeof out->qa[2].answer, sizeof slot17, sizeof slot18, sizeof out->qa[3].dimension, sizeof out->qa[3].question, sizeof out->qa[3].answer, sizeof slot22, sizeof slot23, sizeof out->qa[4].dimension, sizeof out->qa[4].question, sizeof out->qa[4].answer, sizeof slot27, sizeof slot28, sizeof out->qa[5].dimension, sizeof out->qa[5].question, sizeof out->qa[5].answer, sizeof slot32, sizeof slot33, sizeof out->qa[6].dimension, sizeof out->qa[6].question, sizeof out->qa[6].answer, sizeof slot37, sizeof slot38, sizeof out->qa[7].dimension, sizeof out->qa[7].question, sizeof out->qa[7].answer, sizeof slot42, sizeof slot43, sizeof slot44, sizeof out->spec, sizeof out->created_at, sizeof out->updated_at};
+   int wire_status = call_stage(AIMEE_DB1_OP_CLARIFY_GET, fields, 1, values, caps, 48, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return -1;
+   }
+   out->id = (int)strtol(slot0, NULL, 10);
+   out->status = (int)strtol(slot2, NULL, 10);
+   out->score = (float)strtod(slot3, NULL);
+   out->qa[0].answered = (int)strtol(slot7, NULL, 10);
+   out->qa[0].seq = (int)strtol(slot8, NULL, 10);
+   out->qa[1].answered = (int)strtol(slot12, NULL, 10);
+   out->qa[1].seq = (int)strtol(slot13, NULL, 10);
+   out->qa[2].answered = (int)strtol(slot17, NULL, 10);
+   out->qa[2].seq = (int)strtol(slot18, NULL, 10);
+   out->qa[3].answered = (int)strtol(slot22, NULL, 10);
+   out->qa[3].seq = (int)strtol(slot23, NULL, 10);
+   out->qa[4].answered = (int)strtol(slot27, NULL, 10);
+   out->qa[4].seq = (int)strtol(slot28, NULL, 10);
+   out->qa[5].answered = (int)strtol(slot32, NULL, 10);
+   out->qa[5].seq = (int)strtol(slot33, NULL, 10);
+   out->qa[6].answered = (int)strtol(slot37, NULL, 10);
+   out->qa[6].seq = (int)strtol(slot38, NULL, 10);
+   out->qa[7].answered = (int)strtol(slot42, NULL, 10);
+   out->qa[7].seq = (int)strtol(slot43, NULL, 10);
+   out->qa_count = (int)strtol(slot44, NULL, 10);
+   return 0;
+}
+
+int db1_clarify_answer(int id, const char *answer, clarify_session_t *out)
+{
+   if (!out)
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", id);
+   const char *fields[] = {arg0, answer ? answer : ""};
+   char slot0[32];
+   char slot2[32];
+   char slot3[32];
+   char slot7[32];
+   char slot8[32];
+   char slot12[32];
+   char slot13[32];
+   char slot17[32];
+   char slot18[32];
+   char slot22[32];
+   char slot23[32];
+   char slot27[32];
+   char slot28[32];
+   char slot32[32];
+   char slot33[32];
+   char slot37[32];
+   char slot38[32];
+   char slot42[32];
+   char slot43[32];
+   char slot44[32];
+   memset(out, 0, sizeof *out);
+   char *const values[] = {slot0, out->description, slot2, slot3, out->qa[0].dimension, out->qa[0].question, out->qa[0].answer, slot7, slot8, out->qa[1].dimension, out->qa[1].question, out->qa[1].answer, slot12, slot13, out->qa[2].dimension, out->qa[2].question, out->qa[2].answer, slot17, slot18, out->qa[3].dimension, out->qa[3].question, out->qa[3].answer, slot22, slot23, out->qa[4].dimension, out->qa[4].question, out->qa[4].answer, slot27, slot28, out->qa[5].dimension, out->qa[5].question, out->qa[5].answer, slot32, slot33, out->qa[6].dimension, out->qa[6].question, out->qa[6].answer, slot37, slot38, out->qa[7].dimension, out->qa[7].question, out->qa[7].answer, slot42, slot43, slot44, out->spec, out->created_at, out->updated_at};
+   const size_t caps[] = {sizeof slot0, sizeof out->description, sizeof slot2, sizeof slot3, sizeof out->qa[0].dimension, sizeof out->qa[0].question, sizeof out->qa[0].answer, sizeof slot7, sizeof slot8, sizeof out->qa[1].dimension, sizeof out->qa[1].question, sizeof out->qa[1].answer, sizeof slot12, sizeof slot13, sizeof out->qa[2].dimension, sizeof out->qa[2].question, sizeof out->qa[2].answer, sizeof slot17, sizeof slot18, sizeof out->qa[3].dimension, sizeof out->qa[3].question, sizeof out->qa[3].answer, sizeof slot22, sizeof slot23, sizeof out->qa[4].dimension, sizeof out->qa[4].question, sizeof out->qa[4].answer, sizeof slot27, sizeof slot28, sizeof out->qa[5].dimension, sizeof out->qa[5].question, sizeof out->qa[5].answer, sizeof slot32, sizeof slot33, sizeof out->qa[6].dimension, sizeof out->qa[6].question, sizeof out->qa[6].answer, sizeof slot37, sizeof slot38, sizeof out->qa[7].dimension, sizeof out->qa[7].question, sizeof out->qa[7].answer, sizeof slot42, sizeof slot43, sizeof slot44, sizeof out->spec, sizeof out->created_at, sizeof out->updated_at};
+   int wire_status = call_stage(AIMEE_DB1_OP_CLARIFY_ANSWER, fields, 2, values, caps, 48, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return -1;
+   }
+   out->id = (int)strtol(slot0, NULL, 10);
+   out->status = (int)strtol(slot2, NULL, 10);
+   out->score = (float)strtod(slot3, NULL);
+   out->qa[0].answered = (int)strtol(slot7, NULL, 10);
+   out->qa[0].seq = (int)strtol(slot8, NULL, 10);
+   out->qa[1].answered = (int)strtol(slot12, NULL, 10);
+   out->qa[1].seq = (int)strtol(slot13, NULL, 10);
+   out->qa[2].answered = (int)strtol(slot17, NULL, 10);
+   out->qa[2].seq = (int)strtol(slot18, NULL, 10);
+   out->qa[3].answered = (int)strtol(slot22, NULL, 10);
+   out->qa[3].seq = (int)strtol(slot23, NULL, 10);
+   out->qa[4].answered = (int)strtol(slot27, NULL, 10);
+   out->qa[4].seq = (int)strtol(slot28, NULL, 10);
+   out->qa[5].answered = (int)strtol(slot32, NULL, 10);
+   out->qa[5].seq = (int)strtol(slot33, NULL, 10);
+   out->qa[6].answered = (int)strtol(slot37, NULL, 10);
+   out->qa[6].seq = (int)strtol(slot38, NULL, 10);
+   out->qa[7].answered = (int)strtol(slot42, NULL, 10);
+   out->qa[7].seq = (int)strtol(slot43, NULL, 10);
+   out->qa_count = (int)strtol(slot44, NULL, 10);
+   return 0;
+}
+
+float db1_clarify_score(const clarify_session_t *s)
+{
+   if (!s)
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", s->id);
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", s->status);
+   char arg3[32];
+   snprintf(arg3, sizeof arg3, "%.9g", (double)s->score);
+   char arg7[32];
+   snprintf(arg7, sizeof arg7, "%d", s->qa[0].answered);
+   char arg8[32];
+   snprintf(arg8, sizeof arg8, "%d", s->qa[0].seq);
+   char arg12[32];
+   snprintf(arg12, sizeof arg12, "%d", s->qa[1].answered);
+   char arg13[32];
+   snprintf(arg13, sizeof arg13, "%d", s->qa[1].seq);
+   char arg17[32];
+   snprintf(arg17, sizeof arg17, "%d", s->qa[2].answered);
+   char arg18[32];
+   snprintf(arg18, sizeof arg18, "%d", s->qa[2].seq);
+   char arg22[32];
+   snprintf(arg22, sizeof arg22, "%d", s->qa[3].answered);
+   char arg23[32];
+   snprintf(arg23, sizeof arg23, "%d", s->qa[3].seq);
+   char arg27[32];
+   snprintf(arg27, sizeof arg27, "%d", s->qa[4].answered);
+   char arg28[32];
+   snprintf(arg28, sizeof arg28, "%d", s->qa[4].seq);
+   char arg32[32];
+   snprintf(arg32, sizeof arg32, "%d", s->qa[5].answered);
+   char arg33[32];
+   snprintf(arg33, sizeof arg33, "%d", s->qa[5].seq);
+   char arg37[32];
+   snprintf(arg37, sizeof arg37, "%d", s->qa[6].answered);
+   char arg38[32];
+   snprintf(arg38, sizeof arg38, "%d", s->qa[6].seq);
+   char arg42[32];
+   snprintf(arg42, sizeof arg42, "%d", s->qa[7].answered);
+   char arg43[32];
+   snprintf(arg43, sizeof arg43, "%d", s->qa[7].seq);
+   char arg44[32];
+   snprintf(arg44, sizeof arg44, "%d", s->qa_count);
+   const char *fields[] = {arg0, s->description, arg2, arg3, s->qa[0].dimension, s->qa[0].question, s->qa[0].answer, arg7, arg8, s->qa[1].dimension, s->qa[1].question, s->qa[1].answer, arg12, arg13, s->qa[2].dimension, s->qa[2].question, s->qa[2].answer, arg17, arg18, s->qa[3].dimension, s->qa[3].question, s->qa[3].answer, arg22, arg23, s->qa[4].dimension, s->qa[4].question, s->qa[4].answer, arg27, arg28, s->qa[5].dimension, s->qa[5].question, s->qa[5].answer, arg32, arg33, s->qa[6].dimension, s->qa[6].question, s->qa[6].answer, arg37, arg38, s->qa[7].dimension, s->qa[7].question, s->qa[7].answer, arg42, arg43, arg44, s->spec, s->created_at, s->updated_at};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_CLARIFY_SCORE, fields, 48, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (float)strtod(slot0, NULL);
+}
+
+void db1_clarify_weakest_dim(const clarify_session_t *s, char *dim_out, size_t len)
+{
+   if (!s || !dim_out || len == 0)
+      return;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", s->id);
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", s->status);
+   char arg3[32];
+   snprintf(arg3, sizeof arg3, "%.9g", (double)s->score);
+   char arg7[32];
+   snprintf(arg7, sizeof arg7, "%d", s->qa[0].answered);
+   char arg8[32];
+   snprintf(arg8, sizeof arg8, "%d", s->qa[0].seq);
+   char arg12[32];
+   snprintf(arg12, sizeof arg12, "%d", s->qa[1].answered);
+   char arg13[32];
+   snprintf(arg13, sizeof arg13, "%d", s->qa[1].seq);
+   char arg17[32];
+   snprintf(arg17, sizeof arg17, "%d", s->qa[2].answered);
+   char arg18[32];
+   snprintf(arg18, sizeof arg18, "%d", s->qa[2].seq);
+   char arg22[32];
+   snprintf(arg22, sizeof arg22, "%d", s->qa[3].answered);
+   char arg23[32];
+   snprintf(arg23, sizeof arg23, "%d", s->qa[3].seq);
+   char arg27[32];
+   snprintf(arg27, sizeof arg27, "%d", s->qa[4].answered);
+   char arg28[32];
+   snprintf(arg28, sizeof arg28, "%d", s->qa[4].seq);
+   char arg32[32];
+   snprintf(arg32, sizeof arg32, "%d", s->qa[5].answered);
+   char arg33[32];
+   snprintf(arg33, sizeof arg33, "%d", s->qa[5].seq);
+   char arg37[32];
+   snprintf(arg37, sizeof arg37, "%d", s->qa[6].answered);
+   char arg38[32];
+   snprintf(arg38, sizeof arg38, "%d", s->qa[6].seq);
+   char arg42[32];
+   snprintf(arg42, sizeof arg42, "%d", s->qa[7].answered);
+   char arg43[32];
+   snprintf(arg43, sizeof arg43, "%d", s->qa[7].seq);
+   char arg44[32];
+   snprintf(arg44, sizeof arg44, "%d", s->qa_count);
+   const char *fields[] = {arg0, s->description, arg2, arg3, s->qa[0].dimension, s->qa[0].question, s->qa[0].answer, arg7, arg8, s->qa[1].dimension, s->qa[1].question, s->qa[1].answer, arg12, arg13, s->qa[2].dimension, s->qa[2].question, s->qa[2].answer, arg17, arg18, s->qa[3].dimension, s->qa[3].question, s->qa[3].answer, arg22, arg23, s->qa[4].dimension, s->qa[4].question, s->qa[4].answer, arg27, arg28, s->qa[5].dimension, s->qa[5].question, s->qa[5].answer, arg32, arg33, s->qa[6].dimension, s->qa[6].question, s->qa[6].answer, arg37, arg38, s->qa[7].dimension, s->qa[7].question, s->qa[7].answer, arg42, arg43, arg44, s->spec, s->created_at, s->updated_at};
+   char *const values[] = {dim_out};
+   const size_t caps[] = {len};
+   int wire_status = call_stage(AIMEE_DB1_OP_CLARIFY_WEAKEST_DIM, fields, 48, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return;
+   }
+}
+
+int db1_clarify_next_question(const clarify_session_t *s, char *q_out, size_t q_len, char *dim_out, size_t dim_len)
+{
+   if (!s || !q_out || q_len == 0 || !dim_out || dim_len == 0)
+      return -1;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", s->id);
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", s->status);
+   char arg3[32];
+   snprintf(arg3, sizeof arg3, "%.9g", (double)s->score);
+   char arg7[32];
+   snprintf(arg7, sizeof arg7, "%d", s->qa[0].answered);
+   char arg8[32];
+   snprintf(arg8, sizeof arg8, "%d", s->qa[0].seq);
+   char arg12[32];
+   snprintf(arg12, sizeof arg12, "%d", s->qa[1].answered);
+   char arg13[32];
+   snprintf(arg13, sizeof arg13, "%d", s->qa[1].seq);
+   char arg17[32];
+   snprintf(arg17, sizeof arg17, "%d", s->qa[2].answered);
+   char arg18[32];
+   snprintf(arg18, sizeof arg18, "%d", s->qa[2].seq);
+   char arg22[32];
+   snprintf(arg22, sizeof arg22, "%d", s->qa[3].answered);
+   char arg23[32];
+   snprintf(arg23, sizeof arg23, "%d", s->qa[3].seq);
+   char arg27[32];
+   snprintf(arg27, sizeof arg27, "%d", s->qa[4].answered);
+   char arg28[32];
+   snprintf(arg28, sizeof arg28, "%d", s->qa[4].seq);
+   char arg32[32];
+   snprintf(arg32, sizeof arg32, "%d", s->qa[5].answered);
+   char arg33[32];
+   snprintf(arg33, sizeof arg33, "%d", s->qa[5].seq);
+   char arg37[32];
+   snprintf(arg37, sizeof arg37, "%d", s->qa[6].answered);
+   char arg38[32];
+   snprintf(arg38, sizeof arg38, "%d", s->qa[6].seq);
+   char arg42[32];
+   snprintf(arg42, sizeof arg42, "%d", s->qa[7].answered);
+   char arg43[32];
+   snprintf(arg43, sizeof arg43, "%d", s->qa[7].seq);
+   char arg44[32];
+   snprintf(arg44, sizeof arg44, "%d", s->qa_count);
+   const char *fields[] = {arg0, s->description, arg2, arg3, s->qa[0].dimension, s->qa[0].question, s->qa[0].answer, arg7, arg8, s->qa[1].dimension, s->qa[1].question, s->qa[1].answer, arg12, arg13, s->qa[2].dimension, s->qa[2].question, s->qa[2].answer, arg17, arg18, s->qa[3].dimension, s->qa[3].question, s->qa[3].answer, arg22, arg23, s->qa[4].dimension, s->qa[4].question, s->qa[4].answer, arg27, arg28, s->qa[5].dimension, s->qa[5].question, s->qa[5].answer, arg32, arg33, s->qa[6].dimension, s->qa[6].question, s->qa[6].answer, arg37, arg38, s->qa[7].dimension, s->qa[7].question, s->qa[7].answer, arg42, arg43, arg44, s->spec, s->created_at, s->updated_at};
+   char *const values[] = {q_out, dim_out};
+   const size_t caps[] = {q_len, dim_len};
+   int wire_status = call_stage(AIMEE_DB1_OP_CLARIFY_NEXT_QUESTION, fields, 48, values, caps, 2, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+   {
+      return wire_status == (int)AIMEE_DB1_STATUS_MISSING ? 0 : -1;
+   }
+   return 1;
+}
+
+char *db1_clarify_crystallize(const clarify_session_t *s)
+{
+   if (!s)
+      return NULL;
+   char arg0[32];
+   snprintf(arg0, sizeof arg0, "%d", s->id);
+   char arg2[32];
+   snprintf(arg2, sizeof arg2, "%d", s->status);
+   char arg3[32];
+   snprintf(arg3, sizeof arg3, "%.9g", (double)s->score);
+   char arg7[32];
+   snprintf(arg7, sizeof arg7, "%d", s->qa[0].answered);
+   char arg8[32];
+   snprintf(arg8, sizeof arg8, "%d", s->qa[0].seq);
+   char arg12[32];
+   snprintf(arg12, sizeof arg12, "%d", s->qa[1].answered);
+   char arg13[32];
+   snprintf(arg13, sizeof arg13, "%d", s->qa[1].seq);
+   char arg17[32];
+   snprintf(arg17, sizeof arg17, "%d", s->qa[2].answered);
+   char arg18[32];
+   snprintf(arg18, sizeof arg18, "%d", s->qa[2].seq);
+   char arg22[32];
+   snprintf(arg22, sizeof arg22, "%d", s->qa[3].answered);
+   char arg23[32];
+   snprintf(arg23, sizeof arg23, "%d", s->qa[3].seq);
+   char arg27[32];
+   snprintf(arg27, sizeof arg27, "%d", s->qa[4].answered);
+   char arg28[32];
+   snprintf(arg28, sizeof arg28, "%d", s->qa[4].seq);
+   char arg32[32];
+   snprintf(arg32, sizeof arg32, "%d", s->qa[5].answered);
+   char arg33[32];
+   snprintf(arg33, sizeof arg33, "%d", s->qa[5].seq);
+   char arg37[32];
+   snprintf(arg37, sizeof arg37, "%d", s->qa[6].answered);
+   char arg38[32];
+   snprintf(arg38, sizeof arg38, "%d", s->qa[6].seq);
+   char arg42[32];
+   snprintf(arg42, sizeof arg42, "%d", s->qa[7].answered);
+   char arg43[32];
+   snprintf(arg43, sizeof arg43, "%d", s->qa[7].seq);
+   char arg44[32];
+   snprintf(arg44, sizeof arg44, "%d", s->qa_count);
+   const char *fields[] = {arg0, s->description, arg2, arg3, s->qa[0].dimension, s->qa[0].question, s->qa[0].answer, arg7, arg8, s->qa[1].dimension, s->qa[1].question, s->qa[1].answer, arg12, arg13, s->qa[2].dimension, s->qa[2].question, s->qa[2].answer, arg17, arg18, s->qa[3].dimension, s->qa[3].question, s->qa[3].answer, arg22, arg23, s->qa[4].dimension, s->qa[4].question, s->qa[4].answer, arg27, arg28, s->qa[5].dimension, s->qa[5].question, s->qa[5].answer, arg32, arg33, s->qa[6].dimension, s->qa[6].question, s->qa[6].answer, arg37, arg38, s->qa[7].dimension, s->qa[7].question, s->qa[7].answer, arg42, arg43, arg44, s->spec, s->created_at, s->updated_at};
+   char *value = malloc(65536u);
+   if (!value)
+      return NULL;
+   char *const values[] = {value};
+   const size_t caps[] = {65536u};
+   int wire_status = call_stage(AIMEE_DB1_OP_CLARIFY_CRYSTALLIZE, fields, 48, values, caps, 1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK || !value[0])
+   {
+      free(value);
+      return NULL;
+   }
+   char *shrunk = realloc(value, strlen(value) + 1u);
+   return shrunk ? shrunk : value;
 }
 
 /* clang-format on */

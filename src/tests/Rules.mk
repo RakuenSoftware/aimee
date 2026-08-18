@@ -127,7 +127,8 @@ DB1_MIGRATED_OBJS = $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/modules/db1/payload_rew
                     $(OBJDIR)/modules/db1/interaction_events.o \
                     $(OBJDIR)/modules/db1/guardrail_events.o \
                     $(OBJDIR)/modules/db1/eval.o \
-                    $(OBJDIR)/modules/db1/diagnose.o $(OBJDIR)/delegate_exit_classify.o
+                    $(OBJDIR)/modules/db1/diagnose.o \
+                    $(OBJDIR)/modules/db1/clarify.o $(OBJDIR)/delegate_exit_classify.o
 
 TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o $(OBJDIR)/modules/workspace/workspace_turn.o $(DB1_OBJS) $(DB1_MIGRATED_OBJS) $(OBJDIR)/user_memory_merge.o \
                             $(OBJDIR)/modules/config/agent_config.o $(OBJDIR)/modules/vault/agent_credentials.o $(OBJDIR)/modules/config/agent_registry.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
@@ -178,7 +179,7 @@ TEST_MCP_CLIENT_OBJS = $(OBJDIR)/modules/protocols/mcp/mcp_client.o \
                        $(OBJDIR)/cJSON.o \
                        $(PLATFORM_BASIC_OBJS)
 
-TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(OBJDIR)/rel_types.o $(OBJDIR)/agent_job_release.o $(OBJDIR)/delegate_exit_classify.o $(OBJDIR)/diagnose_render.o $(OBJDIR)/interaction_event_names.o $(OBJDIR)/modules/memory/memory_fact_gate.o $(OBJDIR)/modules/memory/memory_extract_patterns.o $(OBJDIR)/db2/rel_types_store.o $(OBJDIR)/db2/entity_registry.o $(OBJDIR)/db2/fact_lifecycle.o $(OBJDIR)/db2/ontology_evolution.o $(OBJDIR)/db2/fact_ingest.o $(OBJDIR)/db2/fact_recall.o $(OBJDIR)/modules/memory/memory_pii_gate.o $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_implicit.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/integrity_gate.o \
+TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(OBJDIR)/rel_types.o $(OBJDIR)/agent_job_release.o $(OBJDIR)/delegate_exit_classify.o $(OBJDIR)/diagnose_render.o $(OBJDIR)/clarify_render.o $(OBJDIR)/interaction_event_names.o $(OBJDIR)/modules/memory/memory_fact_gate.o $(OBJDIR)/modules/memory/memory_extract_patterns.o $(OBJDIR)/db2/rel_types_store.o $(OBJDIR)/db2/entity_registry.o $(OBJDIR)/db2/fact_lifecycle.o $(OBJDIR)/db2/ontology_evolution.o $(OBJDIR)/db2/fact_ingest.o $(OBJDIR)/db2/fact_recall.o $(OBJDIR)/modules/memory/memory_pii_gate.o $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_implicit.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/integrity_gate.o \
                  $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/posix/memory.o \
                  $(OBJDIR)/modules/memory/memory_logic.o $(OBJDIR)/modules/memory/memory_effective.o $(OBJDIR)/modules/memory/memory_health.o $(OBJDIR)/modules/memory/memory_conflict.o $(OBJDIR)/modules/memory/memory_context.o $(OBJDIR)/modules/memory/memory_assemble.o $(OBJDIR)/modules/memory/memory_advanced.o $(OBJDIR)/modules/memory/memory_prospective.o $(OBJDIR)/modules/memory/memory_lifecycle.o $(OBJDIR)/modules/memory/memory_directives.o $(OBJDIR)/modules/memory/memory_maintenance.o $(OBJDIR)/modules/memory/memory_graph.o $(OBJDIR)/modules/memory/memory_graph_fusion.o $(OBJDIR)/modules/memory/memory_scan.o $(OBJDIR)/modules/memory/memory_improve.o $(OBJDIR)/modules/memory/memory_episodes.o \
                  $(OBJDIR)/workflow_learn.o \
@@ -5248,6 +5249,7 @@ $(TESTPREFIX)/unit-test-db1-module-stage: \
                                        $(OBJDIR)/modules/db1/git_ownership.o \
                                        $(OBJDIR)/modules/db1/git_ownership_stage.o \
                                        $(OBJDIR)/modules/db1/conversation_stage.o \
+                                       $(OBJDIR)/modules/db1/clarify.o \
                                        $(OBJDIR)/modules/db1/payload_rewrite_state.o \
                                        $(OBJDIR)/modules/db1/wm.o $(OBJDIR)/util.o \
                                        $(OBJDIR)/modules/db1/agent_work_stage.o \
@@ -6288,6 +6290,7 @@ $(TESTPREFIX)/unit-test-diagnose: $(OBJDIR)/tests/test_diagnose.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-clarify: $(OBJDIR)/tests/test_clarify.o \
+                                 $(OBJDIR)/clarify_render.o \
                                   $(OBJDIR)/modules/db1/db1_init.o $(OBJDIR)/modules/db1/db_schema.o $(OBJDIR)/modules/db1/clarify.o \
                                   $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
