@@ -56,6 +56,11 @@ typedef struct
 
    /* turn arbitration */
    int turn_in_flight;
+   /* When the live turn was acquired. Only ever read to answer "how long has
+    * this been in flight", which is the one thing a bare in-flight flag cannot
+    * say — and the difference between a turn that is slow and one whose worker
+    * is gone. See presence_turn_inflight_age. */
+   time_t turn_started_at;
    char turn_id[PRESENCE_TURN_ID_MAX];
    char turn_holder[48]; /* attach_id holding the live turn */
    char queue[PRESENCE_QUEUE_MAX][48];
@@ -318,6 +323,7 @@ int presence_detach(const char *session_id, const char *attach_id)
       snprintf(data, sizeof(data), "{\"turn_id\":\"%s\"}", p->turn_id);
       publish_locked(p, PRESENCE_EV_TURN, "turn_done", data);
       p->turn_in_flight = 0;
+      p->turn_started_at = 0;
       p->turn_id[0] = '\0';
       p->turn_holder[0] = '\0';
    }
@@ -537,6 +543,7 @@ presence_turn_result_t presence_turn_acquire(const char *session_id, const char 
    snprintf(p->turn_id, sizeof(p->turn_id), "turn-%llu", (unsigned long long)++g_id_counter);
    snprintf(p->turn_holder, sizeof(p->turn_holder), "%s", attach_id);
    p->turn_in_flight = 1;
+   p->turn_started_at = time(NULL);
    if (out_turn_id && id_n)
       snprintf(out_turn_id, id_n, "%s", p->turn_id);
 
@@ -601,6 +608,7 @@ presence_turn_result_t presence_turn_acquire_wait(const char *session_id, const 
          snprintf(p->turn_id, sizeof(p->turn_id), "turn-%llu", (unsigned long long)++g_id_counter);
          snprintf(p->turn_holder, sizeof(p->turn_holder), "%s", attach_id);
          p->turn_in_flight = 1;
+         p->turn_started_at = time(NULL);
          if (out_turn_id && id_n)
             snprintf(out_turn_id, id_n, "%s", p->turn_id);
          char data[96];
@@ -679,6 +687,7 @@ int presence_turn_release(const char *session_id, const char *turn_id)
    snprintf(data, sizeof(data), "{\"turn_id\":\"%s\"}", p->turn_id);
    publish_locked(p, PRESENCE_EV_TURN, "turn_done", data);
    p->turn_in_flight = 0;
+   p->turn_started_at = 0;
    p->turn_id[0] = '\0';
    p->turn_holder[0] = '\0';
    pthread_cond_broadcast(&g_cond); /* wake the queue head so it can acquire */
@@ -696,6 +705,64 @@ int presence_turn_is_live(const char *session_id, const char *turn_id)
       live = 1;
    pthread_mutex_unlock(&g_lock);
    return live;
+}
+
+long presence_turn_inflight_age(const char *session_id, char *out_turn_id, size_t id_n)
+{
+   if (out_turn_id && id_n)
+      out_turn_id[0] = '\0';
+   pthread_mutex_lock(&g_lock);
+   int idx = find_locked(session_id);
+   if (idx < 0 || !g_pres[idx].turn_in_flight)
+   {
+      pthread_mutex_unlock(&g_lock);
+      return -1;
+   }
+   presence_t *p = &g_pres[idx];
+   if (out_turn_id && id_n)
+      snprintf(out_turn_id, id_n, "%s", p->turn_id);
+   /* A clock that went backwards must not report a turn as younger than it is;
+    * clamping at 0 makes a stepped clock look brand new rather than ancient,
+    * which is the safe direction for anything deciding to reclaim. */
+   double age = difftime(time(NULL), p->turn_started_at);
+   pthread_mutex_unlock(&g_lock);
+   return age > 0 ? (long)age : 0;
+}
+
+int presence_turn_reclaim(const char *session_id, const char *turn_id)
+{
+   pthread_mutex_lock(&g_lock);
+   int idx = find_locked(session_id);
+   if (idx < 0)
+   {
+      pthread_mutex_unlock(&g_lock);
+      return 0;
+   }
+   presence_t *p = &g_pres[idx];
+   /* Still matched against the live turn id: the caller decided some SPECIFIC
+    * turn was abandoned, and between that decision and this call the real
+    * holder may have finished and a new turn begun. Reclaiming by session
+    * alone would then kill a healthy turn — the failure this exists to
+    * prevent, caused by the repair for it. */
+   if (!p->turn_in_flight || !turn_id || !turn_id[0] || strcmp(p->turn_id, turn_id) != 0)
+   {
+      pthread_mutex_unlock(&g_lock);
+      return 0;
+   }
+   release_holdings_locked(p, p->turn_holder);
+   char data[96];
+   snprintf(data, sizeof(data), "{\"turn_id\":\"%s\"}", p->turn_id);
+   /* turn_done, not a distinct event: to every surface watching the stream this
+    * turn is over, and inventing a second ending would make each of them learn
+    * a new one to avoid hanging on a turn that is already gone. */
+   publish_locked(p, PRESENCE_EV_TURN, "turn_done", data);
+   p->turn_in_flight = 0;
+   p->turn_started_at = 0;
+   p->turn_id[0] = '\0';
+   p->turn_holder[0] = '\0';
+   pthread_cond_broadcast(&g_cond);
+   pthread_mutex_unlock(&g_lock);
+   return 1;
 }
 
 /* ====================================================================== */
