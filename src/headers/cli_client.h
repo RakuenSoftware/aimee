@@ -308,6 +308,8 @@ typedef struct
 /* Parse __LAUNCH__ metadata from server output.
  * Returns 1 if launch metadata was found and parsed, 0 otherwise. */
 int parse_launch_meta(const char *output, launch_meta_t *meta);
+/* Bind one session id and worktree, then exec the client in place. */
+int client_launch_exec(int argc, char **argv);
 
 /* Client-local command handlers (run in the client so they see its working
  * tree). Defined in cmd_profile.c / cmd_manuscript.c. */

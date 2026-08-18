@@ -2103,6 +2103,11 @@ int main(int argc, char **argv)
    if (strcmp(cmd, "session-start") == 0)
       return handle_session_start(json_output);
 
+   /* Client-neutral process boundary: allocate and bind the session before any
+    * host (Codex, Claude, OpenCode, or another executable) starts. */
+   if (strcmp(cmd, "launch") == 0)
+      return client_launch_exec(sub_argc, sub_argv);
+
    /* UserPromptSubmit hook (P1 per-turn context pre-injection for Claude Code;
     * settings.json wires it as `aimee user-prompt-submit`). */
    if (strcmp(cmd, "user-prompt-submit") == 0)
