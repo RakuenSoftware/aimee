@@ -84,6 +84,30 @@
       "reason": "The typed lifecycle.health operation exposes canonical KB-table readiness together with the schema probe; that evidence remains DB2 authority."
     },
     {
+      "symbol": "db2_kb_txn_begin",
+      "signature_sha256": "349a811accb8cd0d8fbbe80bab6cce0ab28350eb3a64791f675dad2f519a9cde",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Beginning a caller-held content transaction cannot cross the module boundary; each document, PDF, or code-index mutation becomes one bounded operation with DB2-owned atomicity."
+    },
+    {
+      "symbol": "db2_kb_txn_commit",
+      "signature_sha256": "274f323961bf40fe76f2cb137a2e2c23ac740b207167d989b5d7a1ffbf7f86cf",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Caller-controlled content commits are private DB2 mechanics; a complete index-family mutation commits before returning its structured reply and never exposes a transaction token."
+    },
+    {
+      "symbol": "db2_kb_txn_rollback",
+      "signature_sha256": "2f7f6990ffe4b9f4c6efaccf891d2df80ee71aa144165daff515e05f07dced6f",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "Content transaction rollback stays inside DB2; failed, denied, or cancelled composite index operations roll back before returning and cannot leave caller-owned database state."
+    },
+    {
       "symbol": "db2_lease_end",
       "signature_sha256": "95d4dcf624e3c0ca7a478db19bc628afa3e18fc7a0343f966e58f2435ce6cefc",
       "disposition": "private-db2",

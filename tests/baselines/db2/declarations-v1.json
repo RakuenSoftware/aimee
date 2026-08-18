@@ -12683,9 +12683,15 @@
           "line": 181
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "index",
+        "reason": "Beginning a caller-held content transaction cannot cross the module boundary; each document, PDF, or code-index mutation becomes one bounded operation with DB2-owned atomicity."
+      },
       "signature": "int db2_kb_txn_begin ( void )",
       "signature_sha256": "349a811accb8cd0d8fbbe80bab6cce0ab28350eb3a64791f675dad2f519a9cde",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_txn_begin"
     },
     {
@@ -12701,9 +12707,15 @@
           "line": 182
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "index",
+        "reason": "Caller-controlled content commits are private DB2 mechanics; a complete index-family mutation commits before returning its structured reply and never exposes a transaction token."
+      },
       "signature": "int db2_kb_txn_commit ( void )",
       "signature_sha256": "274f323961bf40fe76f2cb137a2e2c23ac740b207167d989b5d7a1ffbf7f86cf",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_txn_commit"
     },
     {
@@ -12720,9 +12732,15 @@
           "line": 183
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "index",
+        "reason": "Content transaction rollback stays inside DB2; failed, denied, or cancelled composite index operations roll back before returning and cannot leave caller-owned database state."
+      },
       "signature": "void db2_kb_txn_rollback ( void )",
       "signature_sha256": "2f7f6990ffe4b9f4c6efaccf891d2df80ee71aa144165daff515e05f07dced6f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_txn_rollback"
     },
     {
@@ -24594,15 +24612,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "8c990da15e54a8115e3daa12e9e4999c66da8e8e18649f7de179c6d8f308036f",
+  "fingerprint": "894212420318f380034f7b8995515e87139eb849be296ff60d99a34fda82cf4b",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 863,
+    "audit_pending": 860,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 95
+    "reviewed": 98
   }
 }
