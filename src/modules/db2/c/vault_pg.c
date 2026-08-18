@@ -14,7 +14,6 @@
 #include "db2_internal.h" /* db2_conn */
 #include "db_postgres.h"  /* aimee_pg_* */
 #include "vault_crypto.h"
-#include "vault_kek_check.h"
 #include "vault_store.h"     /* VAULT_STORE_NO_ENTRY, vault_store_entry_t */
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX */
 #include "../support/db2_log.h"
@@ -30,6 +29,150 @@
 #define VP_SECRET_MAX 4096 /* max credential plaintext length (matches jsonfile) */
 #define VP_AAD_MAX    VAULT_ENVELOPE_AAD_MAX
 #define VP_MAX_SLOTS  512 /* per-principal slot cap for list/rekey iteration */
+
+static db2_vault_crypto_provider_t vp_crypto;
+
+void aimee_db2_register_vault_crypto_provider(const db2_vault_crypto_provider_t *provider)
+{
+   if (provider)
+      vp_crypto = *provider;
+   else
+      memset(&vp_crypto, 0, sizeof(vp_crypto));
+}
+
+int db2_vault_crypto_random(uint8_t *out, size_t len)
+{
+   if (!out || len == 0 || len > VP_SECRET_MAX || !vp_crypto.random ||
+       vp_crypto.random(out, len) != 0)
+   {
+      if (out && len <= VP_SECRET_MAX)
+         OPENSSL_cleanse(out, len);
+      return -1;
+   }
+   return 0;
+}
+
+static int vp_aad_build(int legacy, const char *principal, const char *agent, const char *cred,
+                        int64_t version, uint8_t *out, size_t cap, size_t *out_len)
+{
+   if (out_len)
+      *out_len = 0;
+   if (!principal || !agent || !cred || !out || !out_len || cap == 0 || cap > VP_AAD_MAX)
+      return -1;
+   int rc =
+       legacy
+           ? (vp_crypto.aad_build_v1_safe
+                  ? vp_crypto.aad_build_v1_safe(principal, agent, cred, version, out, cap, out_len)
+                  : -1)
+           : (vp_crypto.aad_build_v2
+                  ? vp_crypto.aad_build_v2(principal, agent, cred, version, out, cap, out_len)
+                  : -1);
+   if (rc != 0 || *out_len == 0 || *out_len > cap)
+   {
+      OPENSSL_cleanse(out, cap);
+      *out_len = 0;
+      return -1;
+   }
+   return 0;
+}
+
+int db2_vault_aad_build_v2(const char *principal, const char *agent, const char *cred,
+                           int64_t version, uint8_t *out, size_t cap, size_t *out_len)
+{
+   return vp_aad_build(0, principal, agent, cred, version, out, cap, out_len);
+}
+
+int db2_vault_aad_build_v1_safe(const char *principal, const char *agent, const char *cred,
+                                int64_t version, uint8_t *out, size_t cap, size_t *out_len)
+{
+   return vp_aad_build(1, principal, agent, cred, version, out, cap, out_len);
+}
+
+int db2_vault_dek_wrap(const uint8_t kek[VAULT_KEK_LEN], const uint8_t dek[VAULT_DEK_LEN],
+                       uint8_t wrapped[VAULT_WRAPPED_DEK_LEN])
+{
+   if (!kek || !dek || !wrapped || !vp_crypto.dek_wrap ||
+       vp_crypto.dek_wrap(kek, dek, wrapped) != 0)
+   {
+      if (wrapped)
+         OPENSSL_cleanse(wrapped, VAULT_WRAPPED_DEK_LEN);
+      return -1;
+   }
+   return 0;
+}
+
+int db2_vault_dek_unwrap(const uint8_t kek[VAULT_KEK_LEN],
+                         const uint8_t wrapped[VAULT_WRAPPED_DEK_LEN], uint8_t dek[VAULT_DEK_LEN])
+{
+   if (!kek || !wrapped || !dek || !vp_crypto.dek_unwrap ||
+       vp_crypto.dek_unwrap(kek, wrapped, dek) != 0)
+   {
+      if (dek)
+         OPENSSL_cleanse(dek, VAULT_DEK_LEN);
+      return -1;
+   }
+   return 0;
+}
+
+int db2_vault_secret_encrypt(const uint8_t dek[VAULT_DEK_LEN], const uint8_t *aad, size_t aad_len,
+                             const uint8_t *plaintext, size_t plaintext_len,
+                             uint8_t nonce[VAULT_GCM_NONCE_LEN], uint8_t *ciphertext,
+                             uint8_t tag[VAULT_GCM_TAG_LEN])
+{
+   if (!dek || (!aad && aad_len) || aad_len > VP_AAD_MAX || !plaintext ||
+       plaintext_len > VP_SECRET_MAX || !nonce || !ciphertext || !tag ||
+       !vp_crypto.secret_encrypt ||
+       vp_crypto.secret_encrypt(dek, aad, aad_len, plaintext, plaintext_len, nonce, ciphertext,
+                                tag) != 0)
+   {
+      if (nonce)
+         OPENSSL_cleanse(nonce, VAULT_GCM_NONCE_LEN);
+      if (ciphertext && plaintext_len <= VP_SECRET_MAX)
+         OPENSSL_cleanse(ciphertext, plaintext_len);
+      if (tag)
+         OPENSSL_cleanse(tag, VAULT_GCM_TAG_LEN);
+      return -1;
+   }
+   return 0;
+}
+
+int db2_vault_secret_decrypt(const uint8_t dek[VAULT_DEK_LEN], const uint8_t *aad, size_t aad_len,
+                             const uint8_t nonce[VAULT_GCM_NONCE_LEN], const uint8_t *ciphertext,
+                             size_t ciphertext_len, const uint8_t tag[VAULT_GCM_TAG_LEN],
+                             uint8_t *plaintext)
+{
+   if (!dek || (!aad && aad_len) || aad_len > VP_AAD_MAX || !nonce || !ciphertext ||
+       ciphertext_len > VP_SECRET_MAX || !tag || !plaintext || !vp_crypto.secret_decrypt ||
+       vp_crypto.secret_decrypt(dek, aad, aad_len, nonce, ciphertext, ciphertext_len, tag,
+                                plaintext) != 0)
+   {
+      if (plaintext && ciphertext_len <= VP_SECRET_MAX)
+         OPENSSL_cleanse(plaintext, ciphertext_len);
+      return -1;
+   }
+   return 0;
+}
+
+int db2_vault_kek_check_wrap(const uint8_t kek[VAULT_KEK_LEN],
+                             uint8_t wrapped[VAULT_WRAPPED_DEK_LEN])
+{
+   if (!kek || !wrapped || !vp_crypto.kek_check_wrap || vp_crypto.kek_check_wrap(kek, wrapped) != 0)
+   {
+      if (wrapped)
+         OPENSSL_cleanse(wrapped, VAULT_WRAPPED_DEK_LEN);
+      return -1;
+   }
+   return 0;
+}
+
+int db2_vault_kek_check_verify(const uint8_t kek[VAULT_KEK_LEN],
+                               const uint8_t wrapped[VAULT_WRAPPED_DEK_LEN])
+{
+   return kek && wrapped && vp_crypto.kek_check_verify &&
+                  vp_crypto.kek_check_verify(kek, wrapped) == 0
+              ? 0
+              : -1;
+}
 
 /* Derive the tenant team_id from a slot principal. A "team:<digits>" principal
  * (optionally followed by a ':' separator) is a team-scoped tenant secret
@@ -98,7 +241,7 @@ static int vault_pg_get_or_create_salt(void *ctx, const char *principal,
    if (!conn)
       return -1;
    uint8_t fresh[VAULT_SALT_LEN];
-   if (vault_crypto_random(fresh, sizeof(fresh)) != 0)
+   if (db2_vault_crypto_random(fresh, sizeof(fresh)) != 0)
       return -1;
 
    char err[VP_ERR] = "";
@@ -200,7 +343,7 @@ static int kek_check_read(void *conn, const char *principal, uint8_t out[VAULT_W
 static int kek_check_set(void *conn, const char *principal, const uint8_t kek[VAULT_KEK_LEN])
 {
    uint8_t wrapped[VAULT_WRAPPED_DEK_LEN];
-   if (vault_kek_check_wrap(kek, wrapped) != 0)
+   if (db2_vault_kek_check_wrap(kek, wrapped) != 0)
       return -1;
    char err[VP_ERR] = "";
    aimee_pg_stmt_t *st =
@@ -237,9 +380,9 @@ static int vault_pg_unlock_check(void *ctx, const char *principal, const uint8_t
          return -1;
       if (kek_check_read(conn, principal, wrapped) != 1)
          return -1;
-      return vault_kek_check_verify(kek, wrapped);
+      return db2_vault_kek_check_verify(kek, wrapped);
    }
-   return vault_kek_check_verify(kek, wrapped);
+   return db2_vault_kek_check_verify(kek, wrapped);
 }
 
 /* ── set / get ────────────────────────────────────────────────────────────── */
@@ -275,14 +418,14 @@ static int vault_pg_set(void *ctx, const char *principal, const uint8_t kek[VAUL
    uint8_t *ct = malloc(pt_len ? pt_len : 1);
    if (!ct)
       goto out;
-   if (vault_aad_build_v2(principal, agent, cred, version, aad, sizeof(aad), &aad_len) != 0)
+   if (db2_vault_aad_build_v2(principal, agent, cred, version, aad, sizeof(aad), &aad_len) != 0)
       goto out;
-   if (vault_crypto_random(dek, sizeof(dek)) != 0)
+   if (db2_vault_crypto_random(dek, sizeof(dek)) != 0)
       goto out;
-   if (vault_secret_encrypt(dek, aad, aad_len, (const uint8_t *)secret, pt_len, nonce, ct, tag) !=
-       0)
+   if (db2_vault_secret_encrypt(dek, aad, aad_len, (const uint8_t *)secret, pt_len, nonce, ct,
+                                tag) != 0)
       goto out;
-   if (vault_dek_wrap(kek, dek, wrapped) != 0)
+   if (db2_vault_dek_wrap(kek, dek, wrapped) != 0)
       goto out;
 
    {
@@ -394,15 +537,15 @@ static int vault_pg_get(void *ctx, const char *principal, const uint8_t kek[VAUL
          goto out;
       uint8_t aad[VP_AAD_MAX];
       size_t aad_len = 0;
-      if (vault_aad_build_v2(principal, agent, cred, version, aad, sizeof(aad), &aad_len) != 0)
+      if (db2_vault_aad_build_v2(principal, agent, cred, version, aad, sizeof(aad), &aad_len) != 0)
          goto out;
-      if (vault_dek_unwrap(kek, wrapped, dek) != 0 ||
-          (vault_secret_decrypt(dek, aad, aad_len, nonce, (const uint8_t *)ctbuf, (size_t)clen, tag,
-                                pt) != 0 &&
-           (vault_aad_build_v1_safe(principal, agent, cred, version, aad, sizeof(aad), &aad_len) !=
-                0 ||
-            vault_secret_decrypt(dek, aad, aad_len, nonce, (const uint8_t *)ctbuf, (size_t)clen,
-                                 tag, pt) != 0)))
+      if (db2_vault_dek_unwrap(kek, wrapped, dek) != 0 ||
+          (db2_vault_secret_decrypt(dek, aad, aad_len, nonce, (const uint8_t *)ctbuf, (size_t)clen,
+                                    tag, pt) != 0 &&
+           (db2_vault_aad_build_v1_safe(principal, agent, cred, version, aad, sizeof(aad),
+                                        &aad_len) != 0 ||
+            db2_vault_secret_decrypt(dek, aad, aad_len, nonce, (const uint8_t *)ctbuf, (size_t)clen,
+                                     tag, pt) != 0)))
          goto out; /* fail-closed: wrong KEK / tamper / AAD mismatch */
       memcpy(out, pt, (size_t)clen);
       out[clen] = '\0';
@@ -549,8 +692,8 @@ static int rekey_compute(void *conn, const char *principal, const uint8_t old_ke
       int wlen = aimee_pg_column_bytes(st, 3);
       uint8_t dek[VAULT_DEK_LEN];
       if (!w || wlen != VAULT_WRAPPED_DEK_LEN ||
-          vault_dek_unwrap(old_kek, (const uint8_t *)w, dek) != 0 ||
-          vault_dek_wrap(new_kek, dek, plan[n].rewrapped) != 0)
+          db2_vault_dek_unwrap(old_kek, (const uint8_t *)w, dek) != 0 ||
+          db2_vault_dek_wrap(new_kek, dek, plan[n].rewrapped) != 0)
       {
          OPENSSL_cleanse(dek, sizeof(dek));
          rc = -1; /* wrong old KEK / tamper -> abort, write nothing */
@@ -610,7 +753,7 @@ static int vault_pg_rekey(void *ctx, const char *principal, const uint8_t old_ke
     * verifier was never unlocked: refuse. */
    uint8_t wrapped[VAULT_WRAPPED_DEK_LEN];
    if (kek_check_read(conn, principal, wrapped) != 1 ||
-       vault_kek_check_verify(old_kek, wrapped) != 0)
+       db2_vault_kek_check_verify(old_kek, wrapped) != 0)
       goto rollback;
 
    vp_rewrap_t *plan = calloc(VP_MAX_SLOTS, sizeof(*plan));

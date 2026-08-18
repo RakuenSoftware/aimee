@@ -3,12 +3,25 @@
 #include "kb_module_stage_adapters.h"
 
 #include "kb_curator_grounding.h"
+#include "kb_identity.h"
 #include "kb_mdl.h"
 #include "kb_route_acl.h"
 #include "aimee.h"
 #include "cJSON.h"
+#include "css_analyze.h"
+#include "css_render_oracle.h"
 #include "log.h"
 #include "memory.h"
+#include "vault_crypto.h"
+#include "vault_kek_check.h"
+#include "vault_mutation_budget.h"
+#include "vault_reseal_receipt.h"
+#include "vault_witness_checkpoint.h"
+#include "vault_witness_export.h"
+#include "vault_witness_merkle.h"
+#include "vault_witness_record.h"
+#include "vault_witness_signer.h"
+#include "vault_witness_verify.h"
 
 #include <aimee/audit/audit_worm_chain.h>
 #include <aimee/audit/obs_bus.h>
@@ -32,6 +45,122 @@
 #define KB_MODULE_EMBED_DEADLINE_NS (25ULL * 1000000000ULL)
 
 static atomic_uint_fast64_t next_trace = 1;
+
+static const aimee_db2_vault_crypto_provider_t vault_crypto_provider = {
+    .aad_build_v2 = vault_aad_build_v2,
+    .aad_build_v1_safe = vault_aad_build_v1_safe,
+    .random = vault_crypto_random,
+    .dek_wrap = vault_dek_wrap,
+    .dek_unwrap = vault_dek_unwrap,
+    .secret_encrypt = vault_secret_encrypt,
+    .secret_decrypt = vault_secret_decrypt,
+    .kek_check_wrap = vault_kek_check_wrap,
+    .kek_check_verify = vault_kek_check_verify,
+};
+
+static int64_t vault_reseal_deadline_ms(uint32_t per_call_ms)
+{
+   vault_mutation_budget_t *budget = vault_mutation_budget_current();
+   if (budget)
+      return vault_mutation_budget_deadline_ms(budget, per_call_ms);
+   struct timespec now;
+   if (!per_call_ms || clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+      return -1;
+   int64_t current = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+   return current <= INT64_MAX - per_call_ms ? current + per_call_ms : -1;
+}
+
+static const aimee_db2_vault_reseal_provider_t vault_reseal_provider = {
+    .deadline_ms = vault_reseal_deadline_ms,
+    .operation_id_to_hex = vault_reseal_operation_id_to_hex,
+    .operation_id_from_hex = vault_reseal_operation_id_from_hex,
+    .receipt_decode = vault_reseal_receipt_decode,
+    .receipt_digest = vault_reseal_receipt_digest,
+};
+
+static int vault_witness_checkpoint_verify_contract(const vault_witness_checkpoint_t *checkpoint,
+                                                    const vault_witness_anchor_t *anchors,
+                                                    size_t anchor_count)
+{
+   return (int)vault_witness_checkpoint_verify(checkpoint, anchors, anchor_count);
+}
+
+static int vault_witness_export_frame_contract(int kind, const uint8_t *payload, size_t payload_len,
+                                               uint8_t *out, size_t cap, size_t *out_len)
+{
+   if (kind < VAULT_WITNESS_EXPORT_RECORD || kind > VAULT_WITNESS_EXPORT_SNAPSHOT)
+      return -1;
+   return vault_witness_export_frame((vault_witness_export_kind_t)kind, payload, payload_len, out,
+                                     cap, out_len);
+}
+
+static int
+vault_witness_verify_checkpoint_run_contract(const vault_witness_checkpoint_t *checkpoints,
+                                             size_t count, size_t *gap_after_index)
+{
+   return (int)vault_witness_verify_checkpoint_run(checkpoints, count, gap_after_index);
+}
+
+static const aimee_db2_vault_witness_provider_t vault_witness_provider = {
+    .checkpoint_digest = vault_witness_checkpoint_digest,
+    .checkpoint_encode = vault_witness_checkpoint_encode,
+    .checkpoint_sign = vault_witness_checkpoint_sign,
+    .checkpoint_verify = vault_witness_checkpoint_verify_contract,
+    .export_frame = vault_witness_export_frame_contract,
+    .leaf_hash = vault_witness_leaf_hash,
+    .merkle_root = vault_witness_merkle_root,
+    .record_digest = vault_witness_record_digest,
+    .record_encode = vault_witness_record_encode,
+    .shard_key_hash = vault_witness_shard_key_hash,
+    .signer_identity = vault_witness_signer_identity,
+    .verify_checkpoint_run = vault_witness_verify_checkpoint_run_contract,
+};
+
+static int css_render_compare(const char *before_json, const char *after_json, int *before_valid,
+                              int *after_valid, int *available, int *equivalent, int *diff_count)
+{
+   if (!before_valid || !after_valid || !available || !equivalent || !diff_count)
+      return -1;
+   css_render_snapshot_t *before = before_json ? css_render_snapshot_parse(before_json) : NULL;
+   css_render_snapshot_t *after = after_json ? css_render_snapshot_parse(after_json) : NULL;
+   css_render_result_t *result = css_render_oracle_compare(before, after);
+   if (!result)
+   {
+      css_render_snapshot_free(before);
+      css_render_snapshot_free(after);
+      return -1;
+   }
+   *before_valid = before != NULL;
+   *after_valid = after != NULL;
+   *available = result->available;
+   *equivalent = result->equivalent;
+   *diff_count = result->diff_count;
+   css_render_result_free(result);
+   css_render_snapshot_free(before);
+   css_render_snapshot_free(after);
+   return 0;
+}
+
+_Static_assert((int)AIMEE_DB2_PRINCIPAL_NONE == (int)KB_PRIN_NONE, "DB2 principal NONE ABI drift");
+_Static_assert((int)AIMEE_DB2_PRINCIPAL_OIDC == (int)KB_PRIN_OIDC, "DB2 principal OIDC ABI drift");
+_Static_assert((int)AIMEE_DB2_PRINCIPAL_CERT == (int)KB_PRIN_CERT, "DB2 principal CERT ABI drift");
+_Static_assert((int)AIMEE_DB2_PRINCIPAL_OWNER == (int)KB_PRIN_OWNER,
+               "DB2 principal OWNER ABI drift");
+_Static_assert((int)AIMEE_DB2_PRINCIPAL_HOST == (int)KB_PRIN_HOST, "DB2 principal HOST ABI drift");
+_Static_assert(AIMEE_DB2_CSS_CLASS_TOKEN_MAX == CSS_CLASS_TOKEN_MAX,
+               "DB2 CSS class-token ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_KEK_LEN == VAULT_KEK_LEN, "DB2 vault KEK ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_DEK_LEN == VAULT_DEK_LEN, "DB2 vault DEK ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_NONCE_LEN == VAULT_GCM_NONCE_LEN, "DB2 vault nonce ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_TAG_LEN == VAULT_GCM_TAG_LEN, "DB2 vault tag ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_WRAPPED_DEK_LEN == VAULT_WRAPPED_DEK_LEN,
+               "DB2 vault wrapped-DEK ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_RESEAL_RECEIPT_LEN == VAULT_RESEAL_RECEIPT_V1_LEN,
+               "DB2 vault reseal-receipt ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_RESEAL_OPERATION_LEN == VAULT_RESEAL_OPERATION_ID_LEN,
+               "DB2 vault reseal-operation ABI drift");
+_Static_assert(AIMEE_DB2_VAULT_RESEAL_OPERATION_HEX == VAULT_RESEAL_OPERATION_HEX_LEN,
+               "DB2 vault reseal-operation hex ABI drift");
 
 static uint64_t monotonic_ns(void)
 {
@@ -344,6 +473,39 @@ static int embed_text(const char *text, const char *command, int input_type, flo
    return embed_over_module(text, command, input_type, out, max_dim);
 }
 
+static int identity_key(int kind, const char *issuer, const char *subject, int authenticated,
+                        char *out, size_t cap)
+{
+   kb_principal_t principal;
+   memset(&principal, 0, sizeof(principal));
+   if (!issuer || !subject || !out || cap < 2 || authenticated != 1 ||
+       strnlen(issuer, sizeof(principal.issuer)) == sizeof(principal.issuer) ||
+       strnlen(subject, sizeof(principal.subject)) == sizeof(principal.subject))
+      return -1;
+
+   switch (kind)
+   {
+   case AIMEE_DB2_PRINCIPAL_OIDC:
+      principal.kind = KB_PRIN_OIDC;
+      break;
+   case AIMEE_DB2_PRINCIPAL_CERT:
+      principal.kind = KB_PRIN_CERT;
+      break;
+   case AIMEE_DB2_PRINCIPAL_OWNER:
+      principal.kind = KB_PRIN_OWNER;
+      break;
+   case AIMEE_DB2_PRINCIPAL_HOST:
+      principal.kind = KB_PRIN_HOST;
+      break;
+   default:
+      return -1;
+   }
+   memcpy(principal.issuer, issuer, strlen(issuer) + 1);
+   memcpy(principal.subject, subject, strlen(subject) + 1);
+   principal.authenticated = 1;
+   return kb_identity_key(&principal, out, cap);
+}
+
 int kb_module_postgres_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_tables_ok)
 {
    uint8_t request[AIMEE_POSTGRES_REQUEST_LEN];
@@ -385,6 +547,13 @@ void kb_module_stage_adapters_configure(void)
    aimee_db2_register_fact_extract_provider(extract_facts);
    aimee_db2_register_fact_scan_provider(scan_fact_turn);
    aimee_db2_register_embed_provider(embed_text);
+   aimee_db2_register_identity_key_provider(identity_key);
+   aimee_db2_register_css_render_compare_provider(css_render_compare);
+   aimee_db2_register_css_analysis_providers(css_analyze, css_stylesheet_free,
+                                             css_extract_class_tokens);
+   aimee_db2_register_vault_crypto_provider(&vault_crypto_provider);
+   aimee_db2_register_vault_reseal_provider(&vault_reseal_provider);
+   aimee_db2_register_vault_witness_provider(&vault_witness_provider);
    kb_curator_grounding_register_provider(grounding_decide);
    kb_route_acl_register_authorization_provider(control_web_authorize);
 }

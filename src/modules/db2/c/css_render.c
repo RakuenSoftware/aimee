@@ -3,7 +3,6 @@
 #include "css_render.h"
 
 #include "../support/db2_runtime_config.h"
-#include "css_render_oracle.h"
 #include "db2.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
@@ -14,6 +13,42 @@
 #include <string.h>
 
 #define CSSR_ERRBUF 256
+
+static db2_css_render_compare_fn css_render_compare_provider;
+
+void aimee_db2_register_css_render_compare_provider(db2_css_render_compare_fn provider)
+{
+   css_render_compare_provider = provider;
+}
+
+int db2_css_render_compare(const char *before_json, const char *after_json, int *before_valid,
+                           int *after_valid, int *available, int *equivalent, int *diff_count)
+{
+   if (!before_valid || !after_valid || !available || !equivalent || !diff_count)
+      return -1;
+   *before_valid = 0;
+   *after_valid = 0;
+   *available = 0;
+   *equivalent = 0;
+   *diff_count = 0;
+   if (!css_render_compare_provider ||
+       css_render_compare_provider(before_json, after_json, before_valid, after_valid, available,
+                                   equivalent, diff_count) != 0 ||
+       (*before_valid != 0 && *before_valid != 1) || (*after_valid != 0 && *after_valid != 1) ||
+       (*available != 0 && *available != 1) || (*equivalent != 0 && *equivalent != 1) ||
+       *diff_count < 0 || *available != (*before_valid && *after_valid) ||
+       (!*available && (*equivalent || *diff_count)) ||
+       (*available && *equivalent != (*diff_count == 0)))
+   {
+      *before_valid = 0;
+      *after_valid = 0;
+      *available = 0;
+      *equivalent = 0;
+      *diff_count = 0;
+      return -1;
+   }
+   return 0;
+}
 
 static int cssr_enabled(void)
 {
@@ -168,31 +203,24 @@ int db2_css_render_oracle_evaluate(const char *project, const char *unit_path, c
    db2_css_render_snapshot_get(project, unit_path, "before", &bjson);
    db2_css_render_snapshot_get(project, unit_path, "after", &ajson);
 
-   css_render_snapshot_t *bs = bjson ? css_render_snapshot_parse(bjson) : NULL;
-   css_render_snapshot_t *as = ajson ? css_render_snapshot_parse(ajson) : NULL;
-
-   css_render_result_t *r = css_render_oracle_compare(bs, as);
-   if (!r)
+   int before_valid = 0, after_valid = 0;
+   if (db2_css_render_compare(bjson, ajson, &before_valid, &after_valid, &out->available,
+                              &out->equivalent, &out->diff_count) != 0)
    {
       free(bjson);
       free(ajson);
-      css_render_snapshot_free(bs);
-      css_render_snapshot_free(as);
       return -1;
    }
 
-   out->available = r->available;
-   out->equivalent = r->equivalent;
-   out->diff_count = r->diff_count;
    int oracle_equivalent;
-   if (!r->available)
+   if (!out->available)
    {
       oracle_equivalent = -1; /* unknown — conservative */
       snprintf(out->summary, sizeof(out->summary),
-               "rendered oracle: unknown (%s%s snapshot missing)", bs ? "" : "before",
-               as ? "" : (bs ? "after" : "/after"));
+               "rendered oracle: unknown (%s%s snapshot missing)", before_valid ? "" : "before",
+               after_valid ? "" : (before_valid ? "after" : "/after"));
    }
-   else if (r->equivalent)
+   else if (out->equivalent)
    {
       oracle_equivalent = 1;
       snprintf(out->summary, sizeof(out->summary), "rendered oracle: equivalent");
@@ -201,14 +229,11 @@ int db2_css_render_oracle_evaluate(const char *project, const char *unit_path, c
    {
       oracle_equivalent = 0;
       snprintf(out->summary, sizeof(out->summary), "rendered oracle: %d computed-style diff(s)",
-               r->diff_count);
+               out->diff_count);
    }
 
    cssr_record_verdict(conn, project, unit_path, oracle_equivalent, out->summary, now_iso);
 
-   css_render_result_free(r);
-   css_render_snapshot_free(bs);
-   css_render_snapshot_free(as);
    free(bjson);
    free(ajson);
    return 0;

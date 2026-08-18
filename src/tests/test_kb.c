@@ -13,6 +13,7 @@
 #include "modules/db2/c/db2_test_shim.h"
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/db2_tenant.h"
 #include "../modules/db2/c/artifacts.h"
 #include "../modules/db2/c/kb_payload.h"
 #include "../modules/db2/c/code_index.h"
@@ -56,6 +57,60 @@ static void test_db2_embed_contract(void)
    assert(db2_kb_embed_text("hello", MEMORY_EMBED_TEST_FIXTURE, -1, vec, 8) == 0);
    assert(db2_kb_embed_text("hello", MEMORY_EMBED_TEST_FIXTURE, DB2_EMBED_QUERY, vec, 8) > 0);
    printf("  PASS: DB2 embedding contract fails closed on unavailable or malformed answers\n");
+}
+
+static int test_identity_key_mode;
+
+static int test_db2_identity_key_provider(int kind, const char *issuer, const char *subject,
+                                          int authenticated, char *out, size_t cap)
+{
+   if (test_identity_key_mode == 1)
+      return -1;
+   if (test_identity_key_mode == 2)
+   {
+      snprintf(out, cap, "oidc:ambiguous:extra:separator");
+      return 0;
+   }
+   if (test_identity_key_mode == 3)
+   {
+      memset(out, 'x', cap);
+      return 0;
+   }
+   kb_principal_t principal;
+   memset(&principal, 0, sizeof(principal));
+   principal.kind = (kb_principal_kind_t)kind;
+   snprintf(principal.issuer, sizeof(principal.issuer), "%s", issuer);
+   snprintf(principal.subject, sizeof(principal.subject), "%s", subject);
+   principal.authenticated = authenticated;
+   return kb_identity_key(&principal, out, cap);
+}
+
+static void test_db2_identity_key_contract(void)
+{
+   kb_principal_t principal = {.kind = KB_PRIN_OIDC, .authenticated = 1};
+   snprintf(principal.issuer, sizeof(principal.issuer), "%s", "https://idp.example/tenant:a");
+   snprintf(principal.subject, sizeof(principal.subject), "%s", "subject%42");
+   char key[576] = "not-cleared";
+
+   aimee_db2_register_identity_key_provider(NULL);
+   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   aimee_db2_register_identity_key_provider(test_db2_identity_key_provider);
+   test_identity_key_mode = 1;
+   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   test_identity_key_mode = 2;
+   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   test_identity_key_mode = 3;
+   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   test_identity_key_mode = 0;
+   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == 0);
+   assert(strcmp(key, "oidc:https%3A//idp.example/tenant%3Aa:subject%2542") == 0);
+   principal.authenticated = 0;
+   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   principal.authenticated = 1;
+   principal.kind = KB_PRIN_NONE;
+   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   aimee_db2_register_identity_key_provider(test_db2_identity_key_provider);
+   printf("  PASS: DB2 identity-key contract rejects unavailable or malformed answers\n");
 }
 
 static int test_kb_vector_upsert_document(int64_t document_id, const float *vec, int dim,
@@ -1247,6 +1302,7 @@ int main(void)
    printf("test_kb:\n");
 
    test_db2_embed_contract();
+   test_db2_identity_key_contract();
 
    /* kb_resolve_project tests */
    test_resolve_project_explicit();

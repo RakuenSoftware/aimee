@@ -39,6 +39,7 @@
 #include "modules/vault/vault_witness_offline.h"
 #include "modules/vault/vault_witness_signer.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
+#include "vault_witness_provider_fixture.h"
 
 /* Every step of this test either performs the tampering or checks for it, so none
  * of it may be compiled away. assert() would vanish under NDEBUG and leave a
@@ -132,6 +133,7 @@ static int disable_worm(void *conn)
 
 int main(void)
 {
+   test_register_vault_witness_provider();
    const char *url = getenv("AIMEE_TEST_PG_URL");
    if (!url || !url[0])
    {

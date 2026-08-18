@@ -1,4 +1,5 @@
 #include "db2_witness_checkpoint.h"
+#include "db2_vault_witness_provider.h"
 
 #include <openssl/crypto.h>
 #include <openssl/sha.h>
@@ -9,12 +10,201 @@
 #include "db2_internal.h" /* db2_conn */
 #include "db_postgres.h"  /* aimee_pg_* */
 #include "modules/vault/vault_witness_checkpoint.h"
+#include "modules/vault/vault_witness_export.h"
 #include "modules/vault/vault_witness_merkle.h"
-#include "modules/vault/vault_witness_record.h" /* vault_witness_shard_key_hash */
-#include "modules/vault/vault_witness_signer.h"
-#include "modules/vault/vault_witness_verify.h"
+#include "modules/vault/vault_witness_record.h"
 
 #define CP_ERR 256
+
+static db2_vault_witness_provider_t witness_provider;
+
+void aimee_db2_register_vault_witness_provider(const db2_vault_witness_provider_t *provider)
+{
+   if (provider)
+      witness_provider = *provider;
+   else
+      memset(&witness_provider, 0, sizeof(witness_provider));
+}
+
+static int provider_bytes_result(int rc, uint8_t *out, size_t len)
+{
+   if (rc == 0)
+      return 0;
+   if (out)
+      OPENSSL_cleanse(out, len);
+   return -1;
+}
+
+int db2_vault_witness_checkpoint_digest(const vault_witness_checkpoint_t *checkpoint,
+                                        uint8_t digest[32])
+{
+   if (digest)
+      OPENSSL_cleanse(digest, 32);
+   if (!checkpoint || !digest || !witness_provider.checkpoint_digest)
+      return -1;
+   return provider_bytes_result(witness_provider.checkpoint_digest(checkpoint, digest), digest, 32);
+}
+
+int db2_vault_witness_checkpoint_encode(const vault_witness_checkpoint_t *checkpoint, uint8_t *out,
+                                        size_t cap, size_t *out_len)
+{
+   if (out_len)
+      *out_len = 0;
+   if (!checkpoint || !out || !out_len || cap == 0 || cap > VAULT_WITNESS_CHECKPOINT_WIRE_MAX ||
+       !witness_provider.checkpoint_encode ||
+       witness_provider.checkpoint_encode(checkpoint, out, cap, out_len) != 0 || *out_len == 0 ||
+       *out_len > cap)
+   {
+      if (out)
+         OPENSSL_cleanse(out, cap);
+      if (out_len)
+         *out_len = 0;
+      return -1;
+   }
+   return 0;
+}
+
+int db2_vault_witness_checkpoint_sign(vault_witness_checkpoint_t *checkpoint)
+{
+   if (!checkpoint || !witness_provider.checkpoint_sign ||
+       witness_provider.checkpoint_sign(checkpoint) != 0 ||
+       checkpoint->sig_alg != VAULT_WITNESS_SIG_ED25519 || checkpoint->sig_version == 0)
+   {
+      if (checkpoint)
+      {
+         OPENSSL_cleanse(checkpoint->signer_key_id, sizeof(checkpoint->signer_key_id));
+         OPENSSL_cleanse(checkpoint->signature, sizeof(checkpoint->signature));
+         checkpoint->sig_alg = 0;
+         checkpoint->sig_version = 0;
+      }
+      return -1;
+   }
+   return 0;
+}
+
+int db2_vault_witness_checkpoint_verify(const vault_witness_checkpoint_t *checkpoint,
+                                        const vault_witness_anchor_t *anchors, size_t anchor_count)
+{
+   if (!checkpoint || (!anchors && anchor_count != 0) || !witness_provider.checkpoint_verify)
+      return VAULT_WITNESS_CP_MALFORMED;
+   int verdict = witness_provider.checkpoint_verify(checkpoint, anchors, anchor_count);
+   return verdict >= VAULT_WITNESS_CP_OK && verdict <= VAULT_WITNESS_CP_BAD_SIG
+              ? verdict
+              : VAULT_WITNESS_CP_MALFORMED;
+}
+
+int db2_vault_witness_export_frame(int kind, const uint8_t *payload, size_t payload_len,
+                                   uint8_t *out, size_t cap, size_t *out_len)
+{
+   if (out_len)
+      *out_len = 0;
+   size_t expected = payload_len <= SIZE_MAX - VAULT_WITNESS_EXPORT_HEADER_LEN
+                         ? payload_len + VAULT_WITNESS_EXPORT_HEADER_LEN
+                         : 0;
+   if (kind < VAULT_WITNESS_EXPORT_RECORD || kind > VAULT_WITNESS_EXPORT_SNAPSHOT ||
+       (!payload && payload_len != 0) || !out || !out_len || expected == 0 || cap < expected ||
+       !witness_provider.export_frame ||
+       witness_provider.export_frame(kind, payload, payload_len, out, cap, out_len) != 0 ||
+       *out_len != expected)
+   {
+      if (out)
+         OPENSSL_cleanse(out, cap);
+      if (out_len)
+         *out_len = 0;
+      return -1;
+   }
+   return 0;
+}
+
+int db2_vault_witness_leaf_hash(const char *tenant, const char *provider, uint64_t sequence,
+                                const uint8_t head_hash[32], uint8_t out[32])
+{
+   if (out)
+      OPENSSL_cleanse(out, 32);
+   if (!tenant || !provider || !head_hash || !out || !witness_provider.leaf_hash)
+      return -1;
+   return provider_bytes_result(
+       witness_provider.leaf_hash(tenant, provider, sequence, head_hash, out), out, 32);
+}
+
+int db2_vault_witness_merkle_root(const vault_witness_leaf_t *leaves, size_t count,
+                                  uint8_t root[32])
+{
+   if (root)
+      OPENSSL_cleanse(root, 32);
+   if ((!leaves && count != 0) || count > VAULT_WITNESS_SHARD_CEILING || !root ||
+       !witness_provider.merkle_root)
+      return -1;
+   return provider_bytes_result(witness_provider.merkle_root(leaves, count, root), root, 32);
+}
+
+int db2_vault_witness_record_digest(const vault_witness_record_t *record, uint8_t digest[32])
+{
+   if (digest)
+      OPENSSL_cleanse(digest, 32);
+   if (!record || !digest || !witness_provider.record_digest)
+      return -1;
+   return provider_bytes_result(witness_provider.record_digest(record, digest), digest, 32);
+}
+
+int db2_vault_witness_record_encode(const vault_witness_record_t *record, uint8_t *out, size_t cap,
+                                    size_t *out_len)
+{
+   if (out_len)
+      *out_len = 0;
+   if (!record || !out || !out_len || cap == 0 || cap > VAULT_WITNESS_RECORD_MAX ||
+       !witness_provider.record_encode ||
+       witness_provider.record_encode(record, out, cap, out_len) != 0 || *out_len == 0 ||
+       *out_len > cap)
+   {
+      if (out)
+         OPENSSL_cleanse(out, cap);
+      if (out_len)
+         *out_len = 0;
+      return -1;
+   }
+   return 0;
+}
+
+int db2_vault_witness_shard_key_hash(const char *tenant, const char *provider, uint8_t out[8])
+{
+   if (out)
+      OPENSSL_cleanse(out, 8);
+   if (!tenant || !provider || !out || !witness_provider.shard_key_hash)
+      return -1;
+   return provider_bytes_result(witness_provider.shard_key_hash(tenant, provider, out), out, 8);
+}
+
+int db2_vault_witness_signer_identity(uint8_t public_key[32], uint8_t key_id[16])
+{
+   if (public_key)
+      OPENSSL_cleanse(public_key, 32);
+   if (key_id)
+      OPENSSL_cleanse(key_id, 16);
+   if (!public_key || !key_id || !witness_provider.signer_identity ||
+       witness_provider.signer_identity(public_key, key_id) != 0)
+   {
+      if (public_key)
+         OPENSSL_cleanse(public_key, 32);
+      if (key_id)
+         OPENSSL_cleanse(key_id, 16);
+      return -1;
+   }
+   return 0;
+}
+
+int db2_vault_witness_verify_checkpoint_run(const vault_witness_checkpoint_t *checkpoints,
+                                            size_t count, size_t *gap_after_index)
+{
+   if (gap_after_index)
+      *gap_after_index = 0;
+   if ((!checkpoints && count != 0) || !witness_provider.verify_checkpoint_run)
+      return VAULT_WITNESS_CONTINUITY_BROKEN;
+   int verdict = witness_provider.verify_checkpoint_run(checkpoints, count, gap_after_index);
+   return verdict >= VAULT_WITNESS_CONTINUITY_OK && verdict <= VAULT_WITNESS_CONTINUITY_BROKEN
+              ? verdict
+              : VAULT_WITNESS_CONTINUITY_BROKEN;
+}
 
 /* Leaf snapshot wire format (canonical, so a consumer can rebuild the tree):
  *   u32 count, then per leaf: u16 tlen, tenant, u16 plen, provider, u64 seq, head[32].
@@ -175,7 +365,7 @@ static int previous_digest(void *conn, int *has_pred, uint8_t pred[32])
    aimee_pg_finalize(st);
    if (!ok)
       return -1;
-   if (vault_witness_checkpoint_digest(&prev, pred) != 0)
+   if (db2_vault_witness_checkpoint_digest(&prev, pred) != 0)
       return -1;
    *has_pred = 1;
    return 0;
@@ -242,8 +432,9 @@ db2_witness_checkpoint_result_t db2_witness_checkpoint_produce(int64_t *out_seq)
             leaves = nl;
             cap = ncap;
          }
-         if (vault_witness_shard_key_hash(tenant, provider, leaves[n].key) != 0 ||
-             vault_witness_leaf_hash(tenant, provider, (uint64_t)seq, head, leaves[n].hash) != 0)
+         if (db2_vault_witness_shard_key_hash(tenant, provider, leaves[n].key) != 0 ||
+             db2_vault_witness_leaf_hash(tenant, provider, (uint64_t)seq, head, leaves[n].hash) !=
+                 0)
          {
             aimee_pg_finalize(st);
             goto rollback;
@@ -315,7 +506,7 @@ db2_witness_checkpoint_result_t db2_witness_checkpoint_produce(int64_t *out_seq)
    if (n > 1)
       qsort(leaves, n, sizeof *leaves, leaf_cmp);
    uint8_t root[32];
-   if (vault_witness_merkle_root(leaves, n, root) != 0)
+   if (db2_vault_witness_merkle_root(leaves, n, root) != 0)
       goto rollback; /* duplicate key collision, or over ceiling */
 
    /* 4. Predecessor digest from the prior checkpoint (C-side digesting). */
@@ -360,7 +551,7 @@ db2_witness_checkpoint_result_t db2_witness_checkpoint_produce(int64_t *out_seq)
       if (st)
          aimee_pg_finalize(st);
    }
-   if (vault_witness_checkpoint_sign(&cp) != 0)
+   if (db2_vault_witness_checkpoint_sign(&cp) != 0)
       goto rollback;
 
    /* 7. Persist (fenced, monotonic). */
@@ -480,7 +671,7 @@ int db2_witness_checkpoint_verify_run(int limit, db2_witness_verify_report_t *ou
       return -1;
 
    uint8_t pub[VAULT_WITNESS_ED25519_PUB_LEN], key_id[VAULT_WITNESS_SIGNER_KEY_ID_LEN];
-   if (vault_witness_signer_identity(pub, key_id) != 0)
+   if (db2_vault_witness_signer_identity(pub, key_id) != 0)
       return -1;
    vault_witness_anchor_t anchor;
    memset(&anchor, 0, sizeof anchor);
@@ -558,7 +749,7 @@ int db2_witness_checkpoint_verify_run(int limit, db2_witness_verify_report_t *ou
 
    for (size_t i = 0; i < n; i++)
    {
-      switch (vault_witness_checkpoint_verify(&cps[i], &anchor, 1))
+      switch (db2_vault_witness_checkpoint_verify(&cps[i], &anchor, 1))
       {
       case VAULT_WITNESS_CP_OK:
          break;
@@ -575,7 +766,7 @@ int db2_witness_checkpoint_verify_run(int limit, db2_witness_verify_report_t *ou
    if (n > 1)
    {
       size_t gap = 0;
-      switch (vault_witness_verify_checkpoint_run(cps, n, &gap))
+      switch (db2_vault_witness_verify_checkpoint_run(cps, n, &gap))
       {
       case VAULT_WITNESS_CONTINUITY_OK:
          break;

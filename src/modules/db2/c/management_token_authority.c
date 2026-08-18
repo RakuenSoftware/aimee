@@ -32,6 +32,27 @@ static const char SQL_IDENTITY_READBACK[] =
 static const char SQL_IDENTITY_FINALIZE[] =
     "SELECT public.kb_management_identity_authority_finalize(?1,?2)";
 
+static db2_mgmt_token_record_valid_fn g_management_record_valid;
+static db2_identity_token_record_valid_fn g_identity_record_valid;
+
+void aimee_db2_register_token_record_validators(db2_mgmt_token_record_valid_fn management,
+                                                db2_identity_token_record_valid_fn identity)
+{
+   g_management_record_valid = management;
+   g_identity_record_valid = identity;
+}
+
+int db2_management_token_authority_record_validate(const kb_mgmt_token_authority_record_t *record)
+{
+   return g_management_record_valid && g_management_record_valid(record) == 1;
+}
+
+int db2_management_identity_authority_record_validate(
+    const kb_identity_token_authority_record_t *record)
+{
+   return g_identity_record_valid && g_identity_record_valid(record) == 1;
+}
+
 static int exact_hex_input(const char *s, size_t n)
 {
    if (!s || strnlen(s, n + 1) != n)
@@ -178,7 +199,7 @@ static int decode_record(aimee_pg_stmt_t *st, kb_mgmt_token_authority_record_t *
    r->envelope.version = r->token_version;
    memcpy(r->envelope.hwm_attestation, r->hwm_attestation, r->hwm_attestation_len);
    r->envelope.hwm_attestation_len = r->hwm_attestation_len;
-   if (!kb_mgmt_token_authority_record_valid(r))
+   if (!db2_management_token_authority_record_validate(r))
       goto invalid;
    return 0;
 invalid:
@@ -247,7 +268,7 @@ static int decode_identity_record(aimee_pg_stmt_t *st, const char *namespace_jti
    r->envelope.version = r->token_version;
    memcpy(r->envelope.hwm_attestation, r->hwm_attestation, r->hwm_attestation_len);
    r->envelope.hwm_attestation_len = r->hwm_attestation_len;
-   if (!kb_identity_token_authority_record_valid(r))
+   if (!db2_management_identity_authority_record_validate(r))
       goto invalid;
    return 0;
 invalid:

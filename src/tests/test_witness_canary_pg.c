@@ -35,6 +35,7 @@
 #include "modules/db2/c/db2_witness_emit.h"
 #include "modules/db2/c/db_postgres.h"
 #include "modules/vault/vault_witness_signer.h"
+#include "vault_witness_provider_fixture.h"
 
 #define MUST(cond, ...)                                                                            \
    do                                                                                              \
@@ -158,6 +159,7 @@ static int64_t count_query(void *conn, const char *sql, const char *arg)
 
 int main(void)
 {
+   test_register_vault_witness_provider();
    const char *url = getenv("AIMEE_TEST_PG_URL");
    if (!url || !url[0])
    {
