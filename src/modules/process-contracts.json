@@ -674,6 +674,11 @@
           "id": 5,
           "name": "db1-delegation",
           "event_kind": 11781
+        },
+        {
+          "id": 6,
+          "name": "db1-sessions",
+          "event_kind": 11782
         }
       ]
     }
