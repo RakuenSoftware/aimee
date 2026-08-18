@@ -429,6 +429,29 @@
         "encoded_size_error": 24,
         "field": {"name": "count", "type": "u64", "minimum": 0, "maximum": 9223372036854775807}
       }
+    },
+    {
+      "family": "memory",
+      "id": 5,
+      "name": "session_l2_count",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Session attribution and canonical L2 memory rows remain relational DB2 authority rather than portable ANN state.",
+      "c_symbols": ["db2_memory_count_l2_for_session"],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 155,
+        "field": {"name": "source_session", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 127}
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+      }
     }
   ]
 }

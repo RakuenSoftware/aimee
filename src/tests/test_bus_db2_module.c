@@ -34,6 +34,7 @@ typedef struct
    int (*level2_count)(void);
    int (*orphaned_l0_count)(void);
    int64_t (*total_count)(void);
+   int (*session_l2_count)(const char *source_session);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -72,6 +73,7 @@ static int level3_count_calls;
 static int level2_count_calls;
 static int orphaned_l0_count_calls;
 static int total_count_calls;
+static int session_l2_count_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -177,6 +179,18 @@ static int64_t total_count(void)
 {
    total_count_calls++;
    return 1234567890123LL;
+}
+
+int db2_memory_count_l2_for_session(const char *source_session)
+{
+   session_l2_count_calls++;
+   return strcmp(source_session, "session-123") == 0 ? 3 : 0;
+}
+
+static int session_l2_count(const char *source_session)
+{
+   session_l2_count_calls++;
+   return strcmp(source_session, "session-123") == 0 ? 3 : 0;
 }
 
 void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
@@ -437,6 +451,7 @@ int main(void)
        .level2_count = level2_count,
        .orphaned_l0_count = orphaned_l0_count,
        .total_count = total_count,
+       .session_l2_count = session_l2_count,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -504,6 +519,11 @@ int main(void)
    assert(aimee_db2_total_count_call(call_client, &client, 7023, 0, &memory_total, NULL, NULL) ==
           AIMEE_MODULE_CALL_OK);
    assert(memory_total == 1234567890123ULL && total_count_calls == 1);
+
+   uint32_t session_l2_total = 99;
+   assert(aimee_db2_session_l2_count_call(call_client, &client, 7024, 0, "session-123",
+                                          &session_l2_total, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(session_l2_total == 3 && session_l2_count_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

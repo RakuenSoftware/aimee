@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "8a6211747147bc72ab9e736466be73b8aaf57120274ffcdb3960aa47c9498da2"
+const ContractSHA256 = "c5b9b77dde4c5a0501abb210ceb1351eb0021cf15bf98db0c7559b5219c20c69"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -96,6 +96,11 @@ const EventTotalCount = EventMemory
 const StageTotalCount = FamilyMemory
 const OperationTotalCount uint32 = 4
 const TotalCountMax uint64 = 9223372036854775807
+const EventSessionL2Count = EventMemory
+const StageSessionL2Count = FamilyMemory
+const OperationSessionL2Count uint32 = 5
+const SessionL2CountSessionMax = 127
+const SessionL2CountMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -441,6 +446,76 @@ func DecodeTotalCountReply(reply []byte) (uint64, error) {
 	}
 	count := binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen:])
 	if count > TotalCountMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return count, nil
+}
+
+// EncodeSessionL2CountRequest emits one non-empty bounded session identifier.
+func EncodeSessionL2CountRequest(sourceSession string) ([]byte, error) {
+	if len(sourceSession) == 0 || len(sourceSession) > SessionL2CountSessionMax {
+		return nil, ErrMalformedEnvelope
+	}
+	for index := 0; index < len(sourceSession); index++ {
+		if sourceSession[index] == 0 {
+			return nil, ErrMalformedEnvelope
+		}
+	}
+	header, err := EncodeRequestHeader(OperationSessionL2Count, 0, uint32(4+len(sourceSession)))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, 4+len(sourceSession))...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], uint32(len(sourceSession)))
+	copy(request[EnvelopeHeaderLen+4:], sourceSession)
+	return request, nil
+}
+
+// DecodeSessionL2CountRequest validates and returns the bounded session identifier.
+func DecodeSessionL2CountRequest(request []byte) (string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationSessionL2Count || header.Flags != 0 ||
+		header.PayloadLen < 5 {
+		return "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	decodedLen := binary.LittleEndian.Uint32(payload[:4])
+	if decodedLen == 0 || decodedLen > SessionL2CountSessionMax ||
+		header.PayloadLen != 4+decodedLen {
+		return "", ErrMalformedEnvelope
+	}
+	sourceSession := string(payload[4:])
+	for index := 0; index < len(sourceSession); index++ {
+		if sourceSession[index] == 0 {
+			return "", ErrMalformedEnvelope
+		}
+	}
+	return sourceSession, nil
+}
+
+// EncodeSessionL2CountReply emits one bounded u32 success payload.
+func EncodeSessionL2CountReply(count uint32) ([]byte, error) {
+	if count > SessionL2CountMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationSessionL2Count, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}
+
+// DecodeSessionL2CountReply validates the operation and bounded count.
+func DecodeSessionL2CountReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationSessionL2Count || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	count := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if count > SessionL2CountMax {
 		return 0, ErrMalformedEnvelope
 	}
 	return count, nil

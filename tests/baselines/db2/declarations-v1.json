@@ -15162,9 +15162,15 @@
           "line": 555
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.session_l2_count operation replaces the bounded per-session retention probe; canonical session attribution and L2 rows remain DB2 authority."
+      },
       "signature": "int db2_memory_count_l2_for_session ( const char * source_session )",
       "signature_sha256": "447897831aedd4c1f883f2710c9ea68a7f1798dd6ee26566d33572943a696458",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_count_l2_for_session"
     },
     {
@@ -25092,15 +25098,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "b8e430cfae53911a69f2ca1f8f7934a8d8641f202d90f84dbc50b6975b6d4640",
+  "fingerprint": "c8101461577a24b25c94c159d32a19b4843bdf419c094b63f834ff82659bb62f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 780,
+    "audit_pending": 779,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 178
+    "reviewed": 179
   }
 }

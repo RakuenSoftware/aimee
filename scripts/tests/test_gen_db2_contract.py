@@ -206,6 +206,21 @@ class ContractTests(unittest.TestCase):
              "count_too_large", "short", "long"],
         )
 
+    def test_session_l2_count_vectors_cover_string_and_count_bounds(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][14]
+        self.assertEqual(operation["name"], "session_l2_count")
+        self.assertEqual(operation["request"]["source_session"], "session-123")
+        self.assertEqual(
+            [row["mutation"] for row in operation["request"]["negative"]],
+            ["bad_flags", "empty_session", "length_mismatch", "session_too_large",
+             "embedded_nul", "short", "long"],
+        )
+        self.assertEqual(
+            [(row["result"], row["count"]) for row in operation["reply"]["positive"]],
+            [(0, 3)],
+        )
+
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
         operation = baseline["operations"][2]
@@ -394,7 +409,7 @@ class ContractTests(unittest.TestCase):
             "operation-duplicate",
         )
         self.assert_rule(
-            lambda value: value["operations"].insert(-4, {
+            lambda value: value["operations"].insert(-5, {
                 **copy.deepcopy(value["operations"][0]),
                 "id": 11,
                 "name": "health_second",
@@ -492,6 +507,21 @@ class ContractTests(unittest.TestCase):
              "total-count-request"),
             (lambda value: value["operations"][13]["reply"]["field"].__setitem__(
                 "maximum", 0xffffffffffffffff), "total-count-reply"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_session_l2_count_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][14].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][14].__setitem__("results", ["ok", "invalid_state"]),
+             "operation-results"),
+            (lambda value: value["operations"][14]["request"]["field"].__setitem__(
+                "maximum_bytes", 128), "session-l2-count-request"),
+            (lambda value: value["operations"][14]["reply"]["field"].__setitem__(
+                "maximum", 0xffffffff), "session-l2-count-reply"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):

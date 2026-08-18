@@ -572,15 +572,45 @@ def validate_catalog(value: object) -> dict[str, object]:
                     field != {"name": "count", "type": "u64", "minimum": 0,
                               "maximum": 0x7fffffffffffffff}):
                 fail("total-count-reply", "reply must contain one bounded u64 count")
+        elif key == ("memory", 5) and name == "session_l2_count" and \
+                operation["wire_format"] == "db2-envelope-string-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_count_l2_for_session"]:
+                fail("operation-c-symbols",
+                     "session_l2_count C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "session_l2_count results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "field"},
+                            "session_l2_count.request")
+            request_field = _keys(request["field"],
+                                  {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                  "session_l2_count.request.field")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "session_l2_count.reply")
+            reply_field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                                "session_l2_count.reply.field")
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 5 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 4 + 127 or
+                    request_field != {"name": "source_session", "type": "utf8",
+                                      "minimum_bytes": 1, "maximum_bytes": 127}):
+                fail("session-l2-count-request",
+                     "request must contain one non-empty bounded session identifier")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply_field != {"name": "count", "type": "u32", "minimum": 0,
+                                    "maximum": 0x7fffffff}):
+                fail("session-l2-count-reply", "reply must contain one bounded u32 count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 14 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 15 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
-            "level3_count", "level2_count", "orphaned_l0_count", "total_count"]:
+            "level3_count", "level2_count", "orphaned_l0_count", "total_count",
+            "session_l2_count"]:
         fail("unsupported-operation",
-             "the partial generator requires the fourteen supported operations exactly once")
+             "the partial generator requires the fifteen supported operations exactly once")
     return catalog
 
 
@@ -707,6 +737,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     level2_count = catalog["operations"][11]
     orphaned_l0_count = catalog["operations"][12]
     total_count = catalog["operations"][13]
+    session_l2_count = catalog["operations"][14]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -877,6 +908,14 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     total_count_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(total_count["id"]), 0, _put_u64(1234567890123),
+    )
+    source_session = b"session-123"
+    session_l2_count_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(session_l2_count["id"]), 0,
+        _put_u32(len(source_session)) + source_session,
+    )
+    session_l2_count_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(session_l2_count["id"]), 0, _put_u32(3),
     )
 
     value = {
@@ -1490,6 +1529,50 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (total_count_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": session_l2_count["family"],
+            "id": session_l2_count["id"],
+            "name": session_l2_count["name"],
+            "request": {
+                "positive": session_l2_count_request.hex(),
+                "source_session": source_session.decode(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(session_l2_count_request, 12, 1).hex()},
+                    {"mutation": "empty_session", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(session_l2_count["id"]), 0, _put_u32(0)).hex()},
+                    {"mutation": "length_mismatch", "hex":
+                     mutate_u32(session_l2_count_request, ENVELOPE_HEADER_LEN,
+                                len(source_session) + 1).hex()},
+                    {"mutation": "session_too_large", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC,
+                               int(session_l2_count["id"]), 0,
+                               _put_u32(128) + b"x" * 128).hex()},
+                    {"mutation": "embedded_nul", "hex":
+                     (session_l2_count_request[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex": session_l2_count_request[:-1].hex()},
+                    {"mutation": "long", "hex": (session_l2_count_request + b"x").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "count": 3, "hex": session_l2_count_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(session_l2_count_ok, 8, 4).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(session_l2_count_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(session_l2_count["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (session_l2_count_ok[:-4] + _put_u32(0x80000000)).hex()},
+                    {"mutation": "short", "hex": session_l2_count_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (session_l2_count_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -1516,6 +1599,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     level2_count = catalog["operations"][11]
     orphaned_l0_count = catalog["operations"][12]
     total_count = catalog["operations"][13]
+    session_l2_count = catalog["operations"][14]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -1682,6 +1766,21 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{total_count['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_TOTAL_COUNT_MAX",
          f"{total_count['reply']['field']['maximum']}ull"),
+        ("AIMEE_DB2_EVENT_SESSION_L2_COUNT", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_SESSION_L2_COUNT", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_SESSION_L2_COUNT", f"{session_l2_count['id']}u"),
+        ("AIMEE_DB2_SESSION_L2_COUNT_REQUEST_MIN_LEN",
+         f"{session_l2_count['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_SESSION_L2_COUNT_REQUEST_MAX_LEN",
+         f"{session_l2_count['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_SESSION_L2_COUNT_RESPONSE_LEN",
+         f"{session_l2_count['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_SESSION_L2_COUNT_ERROR_LEN",
+         f"{session_l2_count['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_SESSION_L2_COUNT_SESSION_MAX",
+         f"{session_l2_count['request']['field']['maximum_bytes']}u"),
+        ("AIMEE_DB2_SESSION_L2_COUNT_MAX",
+         f"{session_l2_count['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -2173,6 +2272,88 @@ static inline int aimee_db2_total_count_reply_decode(const uint8_t *input, size_
       return -1;
    uint64_t decoded = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
    if (decoded > AIMEE_DB2_TOTAL_COUNT_MAX)
+      return -1;
+   *count = decoded;
+   return 0;
+}}
+
+static inline int aimee_db2_session_l2_count_request_encode(const char *source_session,
+                                                            uint8_t *output, size_t capacity,
+                                                            uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!source_session || !output || !output_len)
+      return -1;
+   size_t session_len = 0u;
+   while (session_len <= AIMEE_DB2_SESSION_L2_COUNT_SESSION_MAX &&
+          source_session[session_len])
+      ++session_len;
+   if (session_len == 0u || session_len > AIMEE_DB2_SESSION_L2_COUNT_SESSION_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + session_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_SESSION_L2_COUNT, 0u,
+                                       4u + (uint32_t)session_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, (uint32_t)session_len);
+   memcpy(payload + 4, source_session, session_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u + (uint32_t)session_len;
+   return 0;
+}}
+
+static inline int aimee_db2_session_l2_count_request_decode(
+    const uint8_t *input, size_t input_len, char *source_session, size_t source_session_capacity)
+{{
+   if (source_session && source_session_capacity)
+      source_session[0] = '\\0';
+   if (!source_session || source_session_capacity == 0u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_SESSION_L2_COUNT || header.flags != 0u ||
+       input_len < AIMEE_DB2_SESSION_L2_COUNT_REQUEST_MIN_LEN ||
+       input_len > AIMEE_DB2_SESSION_L2_COUNT_REQUEST_MAX_LEN || header.payload_len < 5u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t decoded_len = aimee_db2_get_u32(payload);
+   if (decoded_len == 0u || decoded_len > AIMEE_DB2_SESSION_L2_COUNT_SESSION_MAX ||
+       header.payload_len != 4u + decoded_len || source_session_capacity <= decoded_len ||
+       memchr(payload + 4, '\\0', decoded_len) != NULL)
+      return -1;
+   memcpy(source_session, payload + 4, decoded_len);
+   source_session[decoded_len] = '\\0';
+   return 0;
+}}
+
+static inline int aimee_db2_session_l2_count_reply_encode(uint32_t count, uint8_t *output,
+                                                          size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || count > AIMEE_DB2_SESSION_L2_COUNT_MAX ||
+       capacity < AIMEE_DB2_SESSION_L2_COUNT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_SESSION_L2_COUNT,
+                                     AIMEE_DB2_RESULT_OK, 4u, output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, count);
+   *output_len = AIMEE_DB2_SESSION_L2_COUNT_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_session_l2_count_reply_decode(const uint8_t *input,
+                                                          size_t input_len, uint32_t *count)
+{{
+   if (count)
+      *count = 0u;
+   if (!count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_SESSION_L2_COUNT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_SESSION_L2_COUNT_MAX)
       return -1;
    *count = decoded;
    return 0;
@@ -3051,6 +3232,11 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t *count, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_session_l2_count_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       const char *source_session, uint32_t *count,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -3271,6 +3457,33 @@ aimee_module_call_result_t aimee_db2_total_count_call(aimee_db2_call_fn call, vo
    if (transport != AIMEE_MODULE_CALL_OK)
       return transport;
    if (aimee_db2_total_count_reply_decode(response, response_len, count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+aimee_module_call_result_t
+aimee_db2_session_l2_count_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                uint64_t deadline_ns, const char *source_session, uint32_t *count,
+                                aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (count)
+      *count = 0u;
+   if (!call || !source_session || !count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_SESSION_L2_COUNT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_SESSION_L2_COUNT_RESPONSE_LEN];
+   uint32_t request_len = 0u, response_len = 0u;
+   if (aimee_db2_session_l2_count_request_encode(source_session, request, sizeof(request),
+                                                 &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_SESSION_L2_COUNT, AIMEE_DB2_STAGE_SESSION_L2_COUNT,
+            trace_id, deadline_ns, request, request_len, response, sizeof(response), &response_len,
+            cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_session_l2_count_reply_decode(response, response_len, count) != 0)
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
@@ -3528,6 +3741,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     level2_count = catalog["operations"][11]
     orphaned_l0_count = catalog["operations"][12]
     total_count = catalog["operations"][13]
+    session_l2_count = catalog["operations"][14]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -3625,6 +3839,11 @@ const EventTotalCount = EventMemory
 const StageTotalCount = FamilyMemory
 const OperationTotalCount uint32 = {total_count['id']}
 const TotalCountMax uint64 = {total_count['reply']['field']['maximum']}
+const EventSessionL2Count = EventMemory
+const StageSessionL2Count = FamilyMemory
+const OperationSessionL2Count uint32 = {session_l2_count['id']}
+const SessionL2CountSessionMax = {session_l2_count['request']['field']['maximum_bytes']}
+const SessionL2CountMax uint32 = {session_l2_count['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -3968,6 +4187,76 @@ func DecodeTotalCountReply(reply []byte) (uint64, error) {{
 	}}
 	count := binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen:])
 	if count > TotalCountMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return count, nil
+}}
+
+// EncodeSessionL2CountRequest emits one non-empty bounded session identifier.
+func EncodeSessionL2CountRequest(sourceSession string) ([]byte, error) {{
+	if len(sourceSession) == 0 || len(sourceSession) > SessionL2CountSessionMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	for index := 0; index < len(sourceSession); index++ {{
+		if sourceSession[index] == 0 {{
+			return nil, ErrMalformedEnvelope
+		}}
+	}}
+	header, err := EncodeRequestHeader(OperationSessionL2Count, 0, uint32(4+len(sourceSession)))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, 4+len(sourceSession))...)
+	binary.LittleEndian.PutUint32(request[EnvelopeHeaderLen:], uint32(len(sourceSession)))
+	copy(request[EnvelopeHeaderLen+4:], sourceSession)
+	return request, nil
+}}
+
+// DecodeSessionL2CountRequest validates and returns the bounded session identifier.
+func DecodeSessionL2CountRequest(request []byte) (string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationSessionL2Count || header.Flags != 0 ||
+		header.PayloadLen < 5 {{
+		return "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	decodedLen := binary.LittleEndian.Uint32(payload[:4])
+	if decodedLen == 0 || decodedLen > SessionL2CountSessionMax ||
+		header.PayloadLen != 4+decodedLen {{
+		return "", ErrMalformedEnvelope
+	}}
+	sourceSession := string(payload[4:])
+	for index := 0; index < len(sourceSession); index++ {{
+		if sourceSession[index] == 0 {{
+			return "", ErrMalformedEnvelope
+		}}
+	}}
+	return sourceSession, nil
+}}
+
+// EncodeSessionL2CountReply emits one bounded u32 success payload.
+func EncodeSessionL2CountReply(count uint32) ([]byte, error) {{
+	if count > SessionL2CountMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationSessionL2Count, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], count)
+	return reply, nil
+}}
+
+// DecodeSessionL2CountReply validates the operation and bounded count.
+func DecodeSessionL2CountReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationSessionL2Count || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	count := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if count > SessionL2CountMax {{
 		return 0, ErrMalformedEnvelope
 	}}
 	return count, nil

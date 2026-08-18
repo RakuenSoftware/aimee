@@ -692,6 +692,14 @@
       "reason": "The typed memory.level2_count operation replaces the bounded global working-memory count; canonical relational memory rows remain DB2 authority."
     },
     {
+      "symbol": "db2_memory_count_l2_for_session",
+      "signature_sha256": "447897831aedd4c1f883f2710c9ea68a7f1798dd6ee26566d33572943a696458",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.session_l2_count operation replaces the bounded per-session retention probe; canonical session attribution and L2 rows remain DB2 authority."
+    },
+    {
       "symbol": "db2_memory_count_l3",
       "signature_sha256": "ec77af304ef5e486914f4b45c1f568284bfb0df733d333bfa80d74efe0101862",
       "disposition": "wire-operation",
