@@ -3,6 +3,7 @@
 #include <aimee/db2/module_api.h>
 
 #include "c/db2.h"
+#include "c/db2_internal.h"
 #include "c/db2_pool.h"
 #include "c/kind_lifecycle.h"
 #include "c/memory_health.h"
@@ -95,6 +96,26 @@ static int production_list_kinds_in_tier(const char *tier, char (*kinds)[16], in
    for (int index = 0; index < found; index++)
       snprintf(kinds[index], sizeof(kinds[index]), "%s", rows[index].kind);
    return found;
+}
+
+static void production_now_utc(char *buf, size_t len)
+{
+   db2_now_utc(buf, len);
+}
+
+static int production_kind_demote_policy(const char *kind, double *confidence, int *days)
+{
+   if (!confidence || !days)
+      return -1;
+   kind_lifecycle_t lifecycle;
+   memset(&lifecycle, 0, sizeof(lifecycle));
+   /* A miss fills the default fact lifecycle, which is still a usable policy. */
+   (void)db2_kind_lifecycle_load(kind, &lifecycle);
+   *confidence = lifecycle.demote_confidence;
+   /* Resistance stretches the idle window a kind must sit through before it
+    * demotes; it lives with the thresholds it scales. */
+   *days = (int)(lifecycle.demote_days * lifecycle.demotion_resistance);
+   return 0;
 }
 
 static int production_kind_expire_days(const char *kind)
@@ -240,6 +261,10 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .kind_expire_days = production_kind_expire_days,
        .delete_stale_l1_provenance = db2_memory_promotion_delete_stale_l1_provenance,
        .delete_stale_l1 = db2_memory_promotion_delete_stale_l1,
+       .now_utc = production_now_utc,
+       .kind_demote_policy = production_kind_demote_policy,
+       .demote_kind = db2_memory_promotion_demote_kind,
+       .demote_cascade = db2_memory_promotion_demote_cascade,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -649,6 +674,65 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_module_invocation_cancelled(invocation))
             return AIMEE_MODULE_STATUS_CANCELLED;
          if (aimee_db2_expire_reply_encode((uint32_t)level0, (uint32_t)stale, response_body,
+                                           response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      if (aimee_db2_demote_request_decode(request_body, request_len) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_DEMOTE_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->now_utc || !backend->list_kinds_in_tier ||
+             !backend->kind_demote_policy || !backend->demote_kind || !backend->demote_cascade)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+
+         /* One stamp for the whole action: the cascade matches dependants of
+          * exactly the rows this call demoted. */
+         char stamp[32] = "";
+         backend->now_utc(stamp, sizeof(stamp));
+         if (!stamp[0])
+            return AIMEE_MODULE_STATUS_INTERNAL;
+
+         char kinds[AIMEE_DB2_DEMOTE_KINDS_MAX][16];
+         int kind_count = backend->list_kinds_in_tier(AIMEE_DB2_DEMOTE_TIER, kinds,
+                                                      (int)AIMEE_DB2_DEMOTE_KINDS_MAX);
+         if (kind_count < 0 || kind_count > (int)AIMEE_DB2_DEMOTE_KINDS_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+
+         long demoted = 0;
+         for (int index = 0; index < kind_count; index++)
+         {
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            double confidence = 0.0;
+            int days = 0;
+            if (backend->kind_demote_policy(kinds[index], &confidence, &days) != 0 || days <= 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            char window[16];
+            if (snprintf(window, sizeof(window), "-%d", days) >= (int)sizeof(window))
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            int changed = backend->demote_kind(stamp, kinds[index], confidence, window);
+            if (changed < 0)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            demoted += changed;
+            if (demoted > (long)AIMEE_DB2_DEMOTE_MAX)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+         }
+
+         /* Nothing demoted means nothing to cascade to. */
+         long cascaded = 0;
+         if (demoted > 0)
+         {
+            if (aimee_module_invocation_cancelled(invocation))
+               return AIMEE_MODULE_STATUS_CANCELLED;
+            int changed = backend->demote_cascade(stamp);
+            if (changed < 0 || changed > (int)AIMEE_DB2_DEMOTE_MAX)
+               return AIMEE_MODULE_STATUS_INTERNAL;
+            cascaded = changed;
+         }
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (aimee_db2_demote_reply_encode((uint32_t)demoted, (uint32_t)cascaded, response_body,
                                            response_capacity, response_len) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;

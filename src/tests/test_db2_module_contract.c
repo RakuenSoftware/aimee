@@ -83,6 +83,13 @@ static int expire_stale_value;
 static int expire_l0_provenance_calls;
 static int expire_stale_provenance_calls;
 static char expire_last_window[16];
+static int demote_policy_result;
+static int demote_days_value;
+static int demote_kind_value;
+static int demote_cascade_value;
+static int demote_cascade_calls;
+static char demote_kind_stamp[32];
+static char demote_cascade_stamp[32];
 static int pool_status_result;
 static long long refused_count_value;
 static int last_offered_value;
@@ -128,6 +135,7 @@ static int transport_expect_health_retention;
 static int transport_expect_health_counters;
 static int transport_expect_stats_counts;
 static int transport_expect_expire;
+static int transport_expect_demote;
 static int transport_expect_pool;
 static int transport_expect_refusals;
 static int transport_expect_postgres;
@@ -570,9 +578,11 @@ static int delete_l0(void)
    return expire_l0_value;
 }
 
+/* Both tier-cycle operations enumerate kinds through this one entry: expire
+ * walks L1, demote walks L2. */
 static int list_kinds_in_tier(const char *tier, char (*kinds)[16], int max)
 {
-   if (strcmp(tier, AIMEE_DB2_EXPIRE_STALE_TIER) != 0)
+   if (strcmp(tier, AIMEE_DB2_EXPIRE_STALE_TIER) != 0 && strcmp(tier, AIMEE_DB2_DEMOTE_TIER) != 0)
       return -1;
    if (expire_kind_count < 0 || expire_kind_count > max)
       return expire_kind_count;
@@ -600,6 +610,51 @@ static int delete_stale_l1(const char *kind, const char *days_neg)
    (void)kind;
    (void)days_neg;
    return expire_stale_value;
+}
+
+int db2_memory_promotion_demote_kind(const char *ts, const char *kind, double confidence,
+                                     const char *days_neg)
+{
+   (void)ts;
+   (void)kind;
+   (void)confidence;
+   (void)days_neg;
+   return 0;
+}
+
+int db2_memory_promotion_demote_cascade(const char *ts)
+{
+   (void)ts;
+   return 0;
+}
+
+static void contract_now_utc(char *buf, size_t len)
+{
+   snprintf(buf, len, "%s", "2026-08-18T09:00:00Z");
+}
+
+static int kind_demote_policy(const char *kind, double *confidence, int *days)
+{
+   (void)kind;
+   *confidence = 0.6;
+   *days = demote_days_value;
+   return demote_policy_result;
+}
+
+static int demote_kind(const char *ts, const char *kind, double confidence, const char *days_neg)
+{
+   (void)kind;
+   (void)confidence;
+   snprintf(demote_kind_stamp, sizeof(demote_kind_stamp), "%s", ts);
+   snprintf(expire_last_window, sizeof(expire_last_window), "%s", days_neg);
+   return demote_kind_value;
+}
+
+static int demote_cascade(const char *ts)
+{
+   demote_cascade_calls++;
+   snprintf(demote_cascade_stamp, sizeof(demote_cascade_stamp), "%s", ts);
+   return demote_cascade_value;
 }
 
 static int stats_counts(aimee_db2_memory_stats_t *stats)
@@ -841,6 +896,13 @@ static void reset(void)
    expire_l0_provenance_calls = 0;
    expire_stale_provenance_calls = 0;
    expire_last_window[0] = '\0';
+   demote_policy_result = 0;
+   demote_days_value = 14;
+   demote_kind_value = 3;
+   demote_cascade_value = 2;
+   demote_cascade_calls = 0;
+   demote_kind_stamp[0] = '\0';
+   demote_cascade_stamp[0] = '\0';
    pool_status_result = 0;
    refused_count_value = 7;
    last_offered_value = 768;
@@ -881,6 +943,7 @@ static void reset(void)
    transport_expect_health_counters = 0;
    transport_expect_stats_counts = 0;
    transport_expect_expire = 0;
+   transport_expect_demote = 0;
    transport_expect_pool = 0;
    transport_expect_refusals = 0;
    transport_expect_postgres = 0;
@@ -901,7 +964,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
 {
    assert(context == (void *)0x1234);
    uint32_t expected_event =
-       transport_expect_expire                    ? AIMEE_DB2_EVENT_EXPIRE
+       transport_expect_demote                    ? AIMEE_DB2_EVENT_DEMOTE
+       : transport_expect_expire                  ? AIMEE_DB2_EVENT_EXPIRE
        : transport_expect_stats_counts            ? AIMEE_DB2_EVENT_STATS_COUNTS
        : transport_expect_health_counters         ? AIMEE_DB2_EVENT_HEALTH_COUNTERS
        : transport_expect_health_retention        ? AIMEE_DB2_EVENT_HEALTH_RETENTION
@@ -930,7 +994,8 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
        : transport_expect_dimension               ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
                                                   : AIMEE_DB2_EVENT_HEALTH;
    uint32_t expected_stage =
-       transport_expect_expire                    ? AIMEE_DB2_STAGE_EXPIRE
+       transport_expect_demote                    ? AIMEE_DB2_STAGE_DEMOTE
+       : transport_expect_expire                  ? AIMEE_DB2_STAGE_EXPIRE
        : transport_expect_stats_counts            ? AIMEE_DB2_STAGE_STATS_COUNTS
        : transport_expect_health_counters         ? AIMEE_DB2_STAGE_HEALTH_COUNTERS
        : transport_expect_health_retention        ? AIMEE_DB2_STAGE_HEALTH_RETENTION
@@ -962,7 +1027,9 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
    assert(stage_id == expected_stage);
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   if (transport_expect_expire)
+   if (transport_expect_demote)
+      assert(aimee_db2_demote_request_decode(request_body, request_len) == 0);
+   else if (transport_expect_expire)
       assert(aimee_db2_expire_request_decode(request_body, request_len) == 0);
    else if (transport_expect_stats_counts)
       assert(aimee_db2_stats_counts_request_decode(request_body, request_len) == 0);
@@ -1899,6 +1966,41 @@ static void test_expire_wire(void)
    aimee_db2_put_u32(reply + AIMEE_DB2_ENVELOPE_HEADER_LEN + 4u, 0x80000000u);
    assert(aimee_db2_expire_reply_decode(reply, reply_len, &level0, &stale) == -1);
    assert(level0 == 0 && stale == 0);
+}
+
+static void test_demote_wire(void)
+{
+   uint8_t request[AIMEE_DB2_DEMOTE_REQUEST_LEN] = {0};
+   assert(aimee_db2_demote_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_demote_request_decode(request, sizeof(request)) == 0);
+   aimee_db2_put_u32(request + 12u, 1u);
+   assert(aimee_db2_demote_request_decode(request, sizeof(request)) == -1);
+
+   uint8_t reply[AIMEE_DB2_DEMOTE_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, demoted = 99, cascaded = 99;
+   assert(aimee_db2_demote_reply_encode(6u, 2u, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_demote_reply_decode(reply, reply_len, &demoted, &cascaded) == 0);
+   assert(demoted == 6 && cascaded == 2);
+
+   /* An idle cycle is a legal reply. */
+   assert(aimee_db2_demote_reply_encode(0u, 0u, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_demote_reply_decode(reply, reply_len, &demoted, &cascaded) == 0 &&
+          demoted == 0 && cascaded == 0);
+
+   /* A cascade without a demotion contradicts the invariant, on both sides. */
+   assert(aimee_db2_demote_reply_encode(0u, 1u, reply, sizeof(reply), &reply_len) == -1);
+   assert(reply_len == 0);
+   assert(aimee_db2_demote_reply_encode(6u, 2u, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + AIMEE_DB2_ENVELOPE_HEADER_LEN, 0u);
+   assert(aimee_db2_demote_reply_decode(reply, reply_len, &demoted, &cascaded) == -1);
+   assert(demoted == 0 && cascaded == 0);
+
+   /* Each count is bounded independently. */
+   assert(aimee_db2_demote_reply_encode(AIMEE_DB2_DEMOTE_MAX + 1u, 2u, reply, sizeof(reply),
+                                        &reply_len) == -1);
+   assert(aimee_db2_demote_reply_encode(6u, AIMEE_DB2_DEMOTE_MAX + 1u, reply, sizeof(reply),
+                                        &reply_len) == -1);
+   assert(reply_len == 0);
 }
 
 static void test_pool_status_wire(void)
@@ -2975,6 +3077,75 @@ static void test_expire_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_demote_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {
+       .now_utc = contract_now_utc,
+       .list_kinds_in_tier = list_kinds_in_tier,
+       .kind_demote_policy = kind_demote_policy,
+       .demote_kind = demote_kind,
+       .demote_cascade = demote_cascade,
+   };
+   uint8_t request[AIMEE_DB2_DEMOTE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DEMOTE_RESPONSE_LEN];
+   uint32_t response_len = 99, demoted = 99, cascaded = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_DEMOTE};
+   assert(aimee_db2_demote_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_demote_reply_decode(response, response_len, &demoted, &cascaded) == 0);
+   /* Two kinds at 3 rows each, one cascade, and the per-kind window applied. */
+   assert(demoted == 6 && cascaded == 2 && demote_cascade_calls == 1);
+   assert(strcmp(expire_last_window, "-14") == 0);
+   /* The cascade must run against exactly the stamp the demotions carried. */
+   assert(demote_kind_stamp[0] && strcmp(demote_kind_stamp, demote_cascade_stamp) == 0);
+
+   /* Nothing demoted means no cascade at all, not a zero-row cascade. */
+   reset();
+   demote_kind_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_demote_reply_decode(response, response_len, &demoted, &cascaded) == 0);
+   assert(demoted == 0 && cascaded == 0 && demote_cascade_calls == 0);
+
+   /* Every stage's failure fails the whole action. */
+   reset();
+   demote_policy_result = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   reset();
+   demote_kind_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   reset();
+   demote_cascade_value = -1;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+
+   /* A kind whose window is missing must not demote on an unbounded one. */
+   reset();
+   demote_days_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+
+   /* Every composed capability is required. */
+   reset();
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   aimee_db2_module_backend_t partial = backend;
+   partial.demote_cascade = NULL;
+   assert(invoke(&partial, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   partial = backend;
+   partial.now_utc = NULL;
+   assert(invoke(&partial, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_pool_status_handler(void)
 {
    reset();
@@ -3629,6 +3800,21 @@ static void test_expire_typed_client(void)
    assert(level0 == 9 && stale == 17 && transport_calls == 1);
 }
 
+static void test_demote_typed_client(void)
+{
+   reset();
+   transport_expect_demote = 1;
+   uint32_t demoted = 99, cascaded = 99;
+   assert(aimee_db2_demote_call(NULL, NULL, 77, 88, &demoted, &cascaded, NULL, NULL) ==
+          AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(demoted == 0 && cascaded == 0);
+   assert(aimee_db2_demote_reply_encode(6u, 2u, transport_response, sizeof(transport_response),
+                                        &transport_response_len) == 0);
+   assert(aimee_db2_demote_call(transport, (void *)0x1234, 77, 88, &demoted, &cascaded, NULL,
+                                NULL) == AIMEE_MODULE_CALL_OK);
+   assert(demoted == 6 && cascaded == 2 && transport_calls == 1);
+}
+
 static void test_pool_status_typed_client(void)
 {
    reset();
@@ -3818,6 +4004,7 @@ int main(void)
    test_health_counters_wire();
    test_stats_counts_wire();
    test_expire_wire();
+   test_demote_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -3846,6 +4033,7 @@ int main(void)
    test_health_counters_handler();
    test_stats_counts_handler();
    test_expire_handler();
+   test_demote_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();
@@ -3874,6 +4062,7 @@ int main(void)
    test_health_counters_typed_client();
    test_stats_counts_typed_client();
    test_expire_typed_client();
+   test_demote_typed_client();
    test_pool_status_typed_client();
    test_embedding_refusals_typed_client();
    test_postgres_status_typed_client();

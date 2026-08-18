@@ -45,6 +45,12 @@ typedef struct
    int (*kind_expire_days)(const char *kind);
    int (*delete_stale_l1_provenance)(const char *kind, const char *days_neg);
    int (*delete_stale_l1)(const char *kind, const char *days_neg);
+   /* demote composes these. The stamp is issued once so the cascade matches
+    * exactly the rows this action demoted. */
+   void (*now_utc)(char *buf, size_t len);
+   int (*kind_demote_policy)(const char *kind, double *confidence, int *days);
+   int (*demote_kind)(const char *ts, const char *kind, double confidence, const char *days_neg);
+   int (*demote_cascade)(const char *ts);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);

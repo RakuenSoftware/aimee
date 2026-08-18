@@ -518,6 +518,28 @@ class ContractTests(unittest.TestCase):
              "level0_deleted_too_large", "stale_level1_deleted_too_large", "short", "long"],
         )
 
+    def test_demote_vectors_cover_the_cascade_invariant(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][28]
+        self.assertEqual(operation["name"], "demote")
+        self.assertEqual(operation["request"]["demote_tier"], "L2")
+        self.assertEqual(operation["request"]["maximum_kinds"], 16)
+        self.assertEqual(
+            [row["mutation"] for row in operation["request"]["negative"]],
+            ["bad_flags", "payload_length", "short", "long"],
+        )
+        self.assertEqual(
+            [(row["result"], row["demoted_count"], row["cascaded_count"])
+             for row in operation["reply"]["positive"]],
+            [(0, 6, 2), (0, 0, 0)],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_payload",
+             "demoted_count_too_large", "cascaded_count_too_large",
+             "cascade_without_demotion", "short", "long"],
+        )
+
     def test_pool_status_vectors_cover_results_and_relations(self) -> None:
         baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
         operation = baseline["operations"][2]
@@ -1085,6 +1107,28 @@ class ContractTests(unittest.TestCase):
             (lambda value: value["operations"][27]["reply"]["fields"].pop(), "expire-reply"),
             (lambda value: value["operations"][27]["reply"]["fields"][1].__setitem__(
                 "maximum", 0xffffffff), "expire-reply"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_demote_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][28].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][28].__setitem__("results", ["ok", "not_found"]),
+             "operation-results"),
+            (lambda value: value["operations"][28]["request"]["policy"].__setitem__(
+                "demote_tier", "L1"), "demote-request"),
+            (lambda value: value["operations"][28]["request"]["policy"].__setitem__(
+                "maximum_kinds", 64), "demote-request"),
+            # Dropping the cascade would let demoted rows keep confident dependants.
+            (lambda value: value["operations"][28]["c_symbols"].remove(
+                "db2_memory_promotion_demote_cascade"), "operation-c-symbols"),
+            (lambda value: value["operations"][28]["reply"].__setitem__("consistency", ""),
+             "demote-reply"),
+            (lambda value: value["operations"][28]["reply"]["fields"][1].__setitem__(
+                "maximum", 0xffffffff), "demote-reply"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):

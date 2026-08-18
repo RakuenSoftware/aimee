@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "a6164c129f13aa2e0fbdc9e60f00db8c6b919dce84cb7a47dbccd763139e515a"
+const ContractSHA256 = "955fb6b818a63076ec2f47a0c3625d9a1899f42accb4a22e4bef3da6b1844f7c"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -183,6 +183,12 @@ const OperationExpire uint32 = 18
 const ExpireStaleTier = "L1"
 const ExpireKindsMax uint32 = 16
 const ExpireMax uint32 = 2147483647
+const EventDemote = EventMemory
+const StageDemote = FamilyMemory
+const OperationDemote uint32 = 19
+const DemoteTier = "L2"
+const DemoteKindsMax uint32 = 16
+const DemoteMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1020,6 +1026,59 @@ type EffectivenessStats struct {
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}
+
+// EncodeDemoteRequest emits the empty request for the fixed demotion policy.
+func EncodeDemoteRequest() []byte {
+	header, err := EncodeRequestHeader(OperationDemote, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeDemoteRequest validates the exact empty operation envelope.
+func DecodeDemoteRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDemote || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeDemoteReply emits the demotion count and its cascade count.
+func EncodeDemoteReply(demotedCount, cascadedCount uint32) ([]byte, error) {
+	// The cascade only runs when something was demoted.
+	if demotedCount > DemoteMax || cascadedCount > DemoteMax ||
+		(demotedCount == 0 && cascadedCount != 0) {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationDemote, ResultOK, 8)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 8)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, demotedCount)
+	binary.LittleEndian.PutUint32(payload[4:], cascadedCount)
+	return reply, nil
+}
+
+// DecodeDemoteReply validates the operation, both bounded counts, and the cascade invariant.
+func DecodeDemoteReply(reply []byte) (uint32, uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDemote || header.Result != ResultOK ||
+		header.PayloadLen != 8 || len(reply) != int(EnvelopeHeaderLen)+8 {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	payload := reply[EnvelopeHeaderLen:]
+	demoted := binary.LittleEndian.Uint32(payload)
+	cascaded := binary.LittleEndian.Uint32(payload[4:])
+	if demoted > DemoteMax || cascaded > DemoteMax || (demoted == 0 && cascaded != 0) {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return demoted, cascaded, nil
 }
 
 // EncodeExpireRequest emits the empty request for the fixed expiry policy.

@@ -808,6 +808,33 @@
           {"name": "stale_level1_deleted", "type": "u32", "minimum": 0, "maximum": 2147483647}
         ]
       }
+    },
+    {
+      "family": "memory",
+      "id": 19,
+      "name": "demote",
+      "wire_format": "db2-envelope-u32-pair-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Demoting canonical relational memory tiers and cascading confidence to dependants is DB2 lifecycle authority and does not belong to portable ANN providers.",
+      "c_symbols": ["db2_memory_promotion_demote_kind", "db2_memory_promotion_demote_cascade"],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {"demote_tier": "L2", "maximum_kinds": 16}
+      },
+      "reply": {
+        "encoded_size_ok": 32,
+        "encoded_size_error": 24,
+        "fields": [
+          {"name": "demoted_count", "type": "u32", "minimum": 0, "maximum": 2147483647},
+          {"name": "cascaded_count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+        ],
+        "consistency": "demoted_count=0 requires cascaded_count=0"
+      }
     }
   ]
 }

@@ -1580,6 +1580,22 @@
       "reason": "The typed memory.expire operation clears stale-L1 provenance immediately before the rows it describes, under the same per-kind window and inside the same DB2 action."
     },
     {
+      "symbol": "db2_memory_promotion_demote_cascade",
+      "signature_sha256": "7a998434c41d41721e6cb739fc20cac3f70675a7fdfdde3b20d2de539ff65b6e",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.demote operation cascades reduced confidence to dependants of the rows it just demoted, matched by the stamp it issued; exposing the cascade alone would let a caller match rows a different action had stamped."
+    },
+    {
+      "symbol": "db2_memory_promotion_demote_kind",
+      "signature_sha256": "1a8dc69de29ad0e38b3465d730a1963cb251cabd32cdefa2e0243ea4c93c5f7f",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.demote operation applies each kind's own confidence floor and resistance-scaled idle window from the private lifecycle thresholds, so the per-kind demotion is never reachable with a caller-chosen threshold or window."
+    },
+    {
       "symbol": "db2_memory_promotion_list_kinds_in_tier",
       "signature_sha256": "8c8d53bd4b7fd1a3b266e4973f3bb77d83c5e9e93df2ce6922a825a94d16d312",
       "disposition": "private-db2",

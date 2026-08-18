@@ -17507,9 +17507,15 @@
           "line": 46
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.demote operation cascades reduced confidence to dependants of the rows it just demoted, matched by the stamp it issued; exposing the cascade alone would let a caller match rows a different action had stamped."
+      },
       "signature": "int db2_memory_promotion_demote_cascade ( const char * ts )",
       "signature_sha256": "7a998434c41d41721e6cb739fc20cac3f70675a7fdfdde3b20d2de539ff65b6e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_demote_cascade"
     },
     {
@@ -17538,9 +17544,15 @@
           "line": 41
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.demote operation applies each kind's own confidence floor and resistance-scaled idle window from the private lifecycle thresholds, so the per-kind demotion is never reachable with a caller-chosen threshold or window."
+      },
       "signature": "int db2_memory_promotion_demote_kind ( const char * ts , const char * kind , double demote_confidence , const char * days_neg_str )",
       "signature_sha256": "1a8dc69de29ad0e38b3465d730a1963cb251cabd32cdefa2e0243ea4c93c5f7f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_demote_kind"
     },
     {
@@ -25758,15 +25770,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "7a5c6f2a0edde64ccc96d499eb8c816b692ba04acb7454b3e723d7c91a094fa2",
+  "fingerprint": "7a51a8b27ca369d469f74455b67dcd4598696ab3caeab761402015d468d337aa",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 669,
+    "audit_pending": 667,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 289
+    "reviewed": 291
   }
 }

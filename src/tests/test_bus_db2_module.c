@@ -60,6 +60,10 @@ typedef struct
    int (*kind_expire_days)(const char *kind);
    int (*delete_stale_l1_provenance)(const char *kind, const char *days_neg);
    int (*delete_stale_l1)(const char *kind, const char *days_neg);
+   void (*now_utc)(char *buf, size_t len);
+   int (*kind_demote_policy)(const char *kind, double *confidence, int *days);
+   int (*demote_kind)(const char *ts, const char *kind, double confidence, const char *days_neg);
+   int (*demote_cascade)(const char *ts);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -118,6 +122,8 @@ static int health_counters_calls;
 static int stats_counts_calls;
 static int expire_l0_provenance_calls;
 static int expire_stale_provenance_calls;
+static int demote_cascade_calls;
+static char demote_kind_stamp[32];
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -527,9 +533,13 @@ static int delete_l0(void)
    return 9;
 }
 
+/* Both tier-cycle operations enumerate kinds through this one entry: expire
+ * walks L1, demote walks L2. */
 static int list_kinds_in_tier(const char *tier, char (*kinds)[16], int max)
 {
-   if (strcmp(tier, AIMEE_DB2_EXPIRE_STALE_TIER) != 0 || max < 2)
+   if (max < 2)
+      return -1;
+   if (strcmp(tier, AIMEE_DB2_EXPIRE_STALE_TIER) != 0 && strcmp(tier, AIMEE_DB2_DEMOTE_TIER) != 0)
       return -1;
    snprintf(kinds[0], sizeof(kinds[0]), "%s", "scratch");
    snprintf(kinds[1], sizeof(kinds[1]), "%s", "fact");
@@ -554,6 +564,49 @@ static int delete_stale_l1(const char *kind, const char *days_neg)
    if (strcmp(kind, "scratch") == 0)
       return strcmp(days_neg, "-7") == 0 ? 5 : -1;
    return strcmp(days_neg, "-30") == 0 ? 12 : -1;
+}
+
+int db2_memory_promotion_demote_kind(const char *ts, const char *kind, double confidence,
+                                     const char *days_neg)
+{
+   (void)ts;
+   (void)kind;
+   (void)confidence;
+   (void)days_neg;
+   return 0;
+}
+
+int db2_memory_promotion_demote_cascade(const char *ts)
+{
+   (void)ts;
+   return 0;
+}
+
+static void bus_now_utc(char *buf, size_t len)
+{
+   snprintf(buf, len, "%s", "2026-08-18T09:00:00Z");
+}
+
+static int kind_demote_policy(const char *kind, double *confidence, int *days)
+{
+   *confidence = strcmp(kind, "scratch") == 0 ? 0.4 : 0.6;
+   *days = strcmp(kind, "scratch") == 0 ? 3 : 14;
+   return 0;
+}
+
+static int demote_kind(const char *ts, const char *kind, double confidence, const char *days_neg)
+{
+   snprintf(demote_kind_stamp, sizeof(demote_kind_stamp), "%s", ts);
+   if (strcmp(kind, "scratch") == 0)
+      return (confidence == 0.4 && strcmp(days_neg, "-3") == 0) ? 4 : -1;
+   return (confidence == 0.6 && strcmp(days_neg, "-14") == 0) ? 2 : -1;
+}
+
+static int demote_cascade(const char *ts)
+{
+   demote_cascade_calls++;
+   /* The cascade must see exactly the stamp the demotions carried. */
+   return strcmp(ts, demote_kind_stamp) == 0 ? 3 : -1;
 }
 
 static int stats_counts(aimee_db2_memory_stats_t *stats)
@@ -870,6 +923,10 @@ int main(void)
        .kind_expire_days = kind_expire_days,
        .delete_stale_l1_provenance = delete_stale_l1_provenance,
        .delete_stale_l1 = delete_stale_l1,
+       .now_utc = bus_now_utc,
+       .kind_demote_policy = kind_demote_policy,
+       .demote_kind = demote_kind,
+       .demote_cascade = demote_cascade,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1021,6 +1078,13 @@ int main(void)
    /* Each kind expires on its own window: scratch at -7, fact at -30. */
    assert(level0_deleted == 9 && stale_deleted == 17 && expire_l0_provenance_calls == 1 &&
           expire_stale_provenance_calls == 2);
+
+   uint32_t tier_demoted = 99, tier_cascaded = 99;
+   assert(aimee_db2_demote_call(call_client, &client, 7038, 0, &tier_demoted, &tier_cascaded, NULL,
+                                NULL) == AIMEE_MODULE_CALL_OK);
+   /* Both kinds demote on their own threshold and window, then one cascade
+    * runs against the stamp they shared. */
+   assert(tier_demoted == 6 && tier_cascaded == 3 && demote_cascade_calls == 1);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

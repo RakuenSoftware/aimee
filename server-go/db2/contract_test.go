@@ -49,6 +49,7 @@ type wireBaseline struct {
 			MaximumIDs                 uint32 `json:"maximum_ids"`
 			StaleL1Tier                string `json:"stale_l1_tier"`
 			MaximumKinds               uint32 `json:"maximum_kinds"`
+			DemoteTier                 string `json:"demote_tier"`
 			Promotions                 uint32 `json:"promotions"`
 			Demotions                  uint32 `json:"demotions"`
 			Expirations                uint32 `json:"expirations"`
@@ -83,6 +84,7 @@ type wireBaseline struct {
 				Conflicts             uint32            `json:"conflicts"`
 				Level0Deleted         uint32            `json:"level0_deleted"`
 				StaleLevel1Deleted    uint32            `json:"stale_level1_deleted"`
+				CascadedCount         uint32            `json:"cascaded_count"`
 				Exists                uint32            `json:"exists"`
 				Found                 uint32            `json:"found"`
 				ID                    uint64            `json:"id"`
@@ -201,7 +203,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 28 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 29 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -228,7 +230,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[24].Name != "health_retention" ||
 		baseline.Operations[25].Name != "health_counters" ||
 		baseline.Operations[26].Name != "stats_counts" ||
-		baseline.Operations[27].Name != "expire" {
+		baseline.Operations[27].Name != "expire" ||
+		baseline.Operations[28].Name != "demote" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -956,6 +959,54 @@ func TestExpireMatchesEverySharedCVector(t *testing.T) {
 	}
 	if _, err := EncodeExpireReply(0, ExpireMax+1); !errors.Is(err, ErrMalformedEnvelope) {
 		t.Fatalf("stale L1 count past its bound encoded: %v", err)
+	}
+}
+
+func TestDemoteMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[28]
+	if operation.Request.DemoteTier != DemoteTier ||
+		operation.Request.MaximumKinds != DemoteKindsMax {
+		t.Fatalf("demotion policy = (%q, %d), generated = (%q, %d)",
+			operation.Request.DemoteTier, operation.Request.MaximumKinds,
+			DemoteTier, DemoteKindsMax)
+	}
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeDemoteRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeDemoteRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeDemoteRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeDemoteReply(vector.DemotedCount, vector.CascadedCount)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		demoted, cascaded, err := DecodeDemoteReply(got)
+		if err != nil || demoted != vector.DemotedCount || cascaded != vector.CascadedCount {
+			t.Fatalf("decode = (%d, %d, %v)", demoted, cascaded, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		demoted, cascaded, err := DecodeDemoteReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 || cascaded != 0 {
+			t.Fatalf("negative reply %s = (%d, %d, %v)", vector.Mutation, demoted, cascaded, err)
+		}
+	}
+	// The cascade only runs when something was demoted.
+	if _, err := EncodeDemoteReply(0, 1); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("cascade without demotion encoded: %v", err)
+	}
+	if _, err := EncodeDemoteReply(DemoteMax+1, 0); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("demoted count past its bound encoded: %v", err)
+	}
+	if _, err := EncodeDemoteReply(1, DemoteMax+1); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("cascaded count past its bound encoded: %v", err)
 	}
 }
 

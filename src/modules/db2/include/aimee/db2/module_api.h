@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "a6164c129f13aa2e0fbdc9e60f00db8c6b919dce84cb7a47dbccd763139e515a"
+#define AIMEE_DB2_CONTRACT_SHA256 "955fb6b818a63076ec2f47a0c3625d9a1899f42accb4a22e4bef3da6b1844f7c"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -270,6 +270,15 @@
 #define AIMEE_DB2_EXPIRE_STALE_TIER                       "L1"
 #define AIMEE_DB2_EXPIRE_KINDS_MAX                        16u
 #define AIMEE_DB2_EXPIRE_MAX                              2147483647u
+#define AIMEE_DB2_EVENT_DEMOTE                            AIMEE_DB2_EVENT_MEMORY
+#define AIMEE_DB2_STAGE_DEMOTE                            AIMEE_DB2_FAMILY_MEMORY
+#define AIMEE_DB2_OPERATION_DEMOTE                        19u
+#define AIMEE_DB2_DEMOTE_REQUEST_LEN                      24u
+#define AIMEE_DB2_DEMOTE_RESPONSE_LEN                     32u
+#define AIMEE_DB2_DEMOTE_ERROR_LEN                        24u
+#define AIMEE_DB2_DEMOTE_TIER                             "L2"
+#define AIMEE_DB2_DEMOTE_KINDS_MAX                        16u
+#define AIMEE_DB2_DEMOTE_MAX                              2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -1846,6 +1855,72 @@ static inline int aimee_db2_expire_reply_decode(const uint8_t *input, size_t inp
       return -1;
    *level0_deleted = level0;
    *stale_level1_deleted = stale;
+   return 0;
+}
+
+static inline int aimee_db2_demote_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_DEMOTE, 0u, 0u, output, capacity);
+}
+
+static inline int aimee_db2_demote_request_decode(const uint8_t *input, size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_DEMOTE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_DEMOTE && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_demote_reply_encode(uint32_t demoted_count, uint32_t cascaded_count,
+                                                uint8_t *output, size_t capacity,
+                                                uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || demoted_count > AIMEE_DB2_DEMOTE_MAX ||
+       cascaded_count > AIMEE_DB2_DEMOTE_MAX ||
+       (demoted_count == 0u && cascaded_count != 0u) ||
+       capacity < AIMEE_DB2_DEMOTE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_DEMOTE, AIMEE_DB2_RESULT_OK, 8u, output,
+                                     capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, demoted_count);
+   aimee_db2_put_u32(payload + 4u, cascaded_count);
+   *output_len = AIMEE_DB2_DEMOTE_RESPONSE_LEN;
+   return 0;
+}
+
+static inline int aimee_db2_demote_reply_decode(const uint8_t *input, size_t input_len,
+                                                uint32_t *demoted_count,
+                                                uint32_t *cascaded_count)
+{
+   if (demoted_count)
+      *demoted_count = 0u;
+   if (cascaded_count)
+      *cascaded_count = 0u;
+   if (!demoted_count || !cascaded_count)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_DEMOTE_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_DEMOTE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 8u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t demoted = aimee_db2_get_u32(payload);
+   uint32_t cascaded = aimee_db2_get_u32(payload + 4u);
+   if (demoted > AIMEE_DB2_DEMOTE_MAX || cascaded > AIMEE_DB2_DEMOTE_MAX)
+      return -1;
+   /* The cascade only runs when something was demoted, so a reply claiming
+    * cascaded rows with nothing demoted is malformed. */
+   if (demoted == 0u && cascaded != 0u)
+      return -1;
+   *demoted_count = demoted;
+   *cascaded_count = cascaded;
    return 0;
 }
 

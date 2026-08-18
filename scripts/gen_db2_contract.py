@@ -1063,9 +1063,41 @@ def validate_catalog(value: object) -> dict[str, object]:
                                 "maximum": 0x7fffffff}
                                for name_ in ("level0_deleted", "stale_level1_deleted")]):
                 fail("expire-reply", "reply must contain both bounded deletion counts")
+        elif key == ("memory", 19) and name == "demote" and \
+                operation["wire_format"] == "db2-envelope-u32-pair-v1":
+            if operation["c_symbols"] != ["db2_memory_promotion_demote_kind",
+                                          "db2_memory_promotion_demote_cascade"]:
+                fail("operation-c-symbols",
+                     "demote C symbols differ from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "demote results must equal ['ok']")
+            request = _keys(operation["request"], {"encoded_size", "payload", "policy"},
+                            "demote.request")
+            if (request["encoded_size"] != ENVELOPE_HEADER_LEN or
+                    request["payload"] != "none" or
+                    request["policy"] != {"demote_tier": "L2", "maximum_kinds": 16}):
+                fail("demote-request",
+                     "request must carry no payload and use the fixed tier and kind bound")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "fields", "consistency"},
+                          "demote.reply")
+            reply_fields = reply["fields"]
+            if not isinstance(reply_fields, list) or len(reply_fields) != 2:
+                fail("demote-reply", "reply must report the demotion and its cascade")
+            counts = [_keys(field, {"name", "type", "minimum", "maximum"},
+                            f"demote.reply.fields[{index}]")
+                      for index, field in enumerate(reply_fields)]
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 8 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["consistency"] != "demoted_count=0 requires cascaded_count=0" or
+                    counts != [{"name": name_, "type": "u32", "minimum": 0,
+                                "maximum": 0x7fffffff}
+                               for name_ in ("demoted_count", "cascaded_count")]):
+                fail("demote-reply",
+                     "reply must contain both bounded counts and the cascade invariant")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 28 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 29 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1074,9 +1106,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "key_exists_in_tier_pair", "effectiveness_update", "retention_enforce",
             "effectiveness_demote", "effectiveness_stats", "l2_memory_ids",
             "health_record", "health_retention", "health_counters", "stats_counts",
-            "expire"]:
+            "expire", "demote"]:
         fail("unsupported-operation",
-             "the partial generator requires the twenty-eight supported operations exactly once")
+             "the partial generator requires the twenty-nine supported operations exactly once")
     return catalog
 
 
@@ -1228,6 +1260,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     health_counters = catalog["operations"][25]
     stats_counts = catalog["operations"][26]
     expire = catalog["operations"][27]
+    demote = catalog["operations"][28]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1519,6 +1552,15 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     expire_ok = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(expire["id"]), 0, _put_u32(9) + _put_u32(17),
+    )
+    demote_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(demote["id"]), 0, b"",
+    )
+    demote_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(demote["id"]), 0, _put_u32(6) + _put_u32(2),
+    )
+    demote_idle = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(demote["id"]), 0, _put_u32(0) + _put_u32(0),
     )
 
     value = {
@@ -2808,6 +2850,48 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (expire_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": demote["family"],
+            "id": demote["id"],
+            "name": demote["name"],
+            "request": {
+                "positive": demote_request.hex(),
+                "demote_tier": demote["request"]["policy"]["demote_tier"],
+                "maximum_kinds": demote["request"]["policy"]["maximum_kinds"],
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(demote_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(demote_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": demote_request[:-1].hex()},
+                    {"mutation": "long", "hex": (demote_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "demoted_count": 6, "cascaded_count": 2,
+                     "hex": demote_ok.hex()},
+                    {"result": 0, "demoted_count": 0, "cascaded_count": 0,
+                     "hex": demote_idle.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(demote_ok, 8, 18).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(demote_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC, int(demote["id"]), 0, b"").hex()},
+                    {"mutation": "demoted_count_too_large", "hex":
+                     mutate_u32(demote_ok, ENVELOPE_HEADER_LEN, 0x80000000).hex()},
+                    {"mutation": "cascaded_count_too_large", "hex":
+                     mutate_u32(demote_ok, ENVELOPE_HEADER_LEN + 4, 0x80000000).hex()},
+                    # A cascade without a demotion contradicts the invariant.
+                    {"mutation": "cascade_without_demotion", "hex":
+                     mutate_u32(demote_idle, ENVELOPE_HEADER_LEN + 4, 1).hex()},
+                    {"mutation": "short", "hex": demote_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (demote_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -2848,6 +2932,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     health_counters = catalog["operations"][25]
     stats_counts = catalog["operations"][26]
     expire = catalog["operations"][27]
+    demote = catalog["operations"][28]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -3227,6 +3312,15 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         ("AIMEE_DB2_EXPIRE_STALE_TIER", f"\"{expire['request']['policy']['stale_l1_tier']}\""),
         ("AIMEE_DB2_EXPIRE_KINDS_MAX", f"{expire['request']['policy']['maximum_kinds']}u"),
         ("AIMEE_DB2_EXPIRE_MAX", f"{expire['reply']['fields'][0]['maximum']}u"),
+        ("AIMEE_DB2_EVENT_DEMOTE", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_DEMOTE", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_DEMOTE", f"{demote['id']}u"),
+        ("AIMEE_DB2_DEMOTE_REQUEST_LEN", f"{demote['request']['encoded_size']}u"),
+        ("AIMEE_DB2_DEMOTE_RESPONSE_LEN", f"{demote['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_DEMOTE_ERROR_LEN", f"{demote['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_DEMOTE_TIER", f"\"{demote['request']['policy']['demote_tier']}\""),
+        ("AIMEE_DB2_DEMOTE_KINDS_MAX", f"{demote['request']['policy']['maximum_kinds']}u"),
+        ("AIMEE_DB2_DEMOTE_MAX", f"{demote['reply']['fields'][0]['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -4832,6 +4926,72 @@ static inline int aimee_db2_expire_reply_decode(const uint8_t *input, size_t inp
    return 0;
 }}
 
+static inline int aimee_db2_demote_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_DEMOTE, 0u, 0u, output, capacity);
+}}
+
+static inline int aimee_db2_demote_request_decode(const uint8_t *input, size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_DEMOTE_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_DEMOTE && header.flags == 0u &&
+                  header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_demote_reply_encode(uint32_t demoted_count, uint32_t cascaded_count,
+                                                uint8_t *output, size_t capacity,
+                                                uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || demoted_count > AIMEE_DB2_DEMOTE_MAX ||
+       cascaded_count > AIMEE_DB2_DEMOTE_MAX ||
+       (demoted_count == 0u && cascaded_count != 0u) ||
+       capacity < AIMEE_DB2_DEMOTE_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_DEMOTE, AIMEE_DB2_RESULT_OK, 8u, output,
+                                     capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u32(payload, demoted_count);
+   aimee_db2_put_u32(payload + 4u, cascaded_count);
+   *output_len = AIMEE_DB2_DEMOTE_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_demote_reply_decode(const uint8_t *input, size_t input_len,
+                                                uint32_t *demoted_count,
+                                                uint32_t *cascaded_count)
+{{
+   if (demoted_count)
+      *demoted_count = 0u;
+   if (cascaded_count)
+      *cascaded_count = 0u;
+   if (!demoted_count || !cascaded_count)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       input_len != AIMEE_DB2_DEMOTE_RESPONSE_LEN ||
+       header.operation != AIMEE_DB2_OPERATION_DEMOTE ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 8u)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint32_t demoted = aimee_db2_get_u32(payload);
+   uint32_t cascaded = aimee_db2_get_u32(payload + 4u);
+   if (demoted > AIMEE_DB2_DEMOTE_MAX || cascaded > AIMEE_DB2_DEMOTE_MAX)
+      return -1;
+   /* The cascade only runs when something was demoted, so a reply claiming
+    * cascaded rows with nothing demoted is malformed. */
+   if (demoted == 0u && cascaded != 0u)
+      return -1;
+   *demoted_count = demoted;
+   *cascaded_count = cascaded;
+   return 0;
+}}
+
 static inline int aimee_db2_pool_status_request_encode(uint8_t *output, size_t capacity)
 {{
    return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_POOL_STATUS, 0u, 0u, output,
@@ -5772,6 +5932,11 @@ extern "C"
        uint32_t *level0_deleted, uint32_t *stale_level1_deleted,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_demote_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *demoted_count, uint32_t *cascaded_count, aimee_module_cancelled_fn cancelled,
+       void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -6382,6 +6547,34 @@ aimee_module_call_result_t aimee_db2_expire_call(aimee_db2_call_fn call, void *c
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_demote_call(aimee_db2_call_fn call, void *call_context,
+                                                 uint64_t trace_id, uint64_t deadline_ns,
+                                                 uint32_t *demoted_count, uint32_t *cascaded_count,
+                                                 aimee_module_cancelled_fn cancelled,
+                                                 void *cancel_context)
+{
+   if (demoted_count)
+      *demoted_count = 0u;
+   if (cascaded_count)
+      *cascaded_count = 0u;
+   if (!call || !demoted_count || !cascaded_count)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_DEMOTE_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_DEMOTE_RESPONSE_LEN];
+   uint32_t response_len = 0u;
+   if (aimee_db2_demote_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport = call(
+       call_context, AIMEE_DB2_EVENT_DEMOTE, AIMEE_DB2_STAGE_DEMOTE, trace_id, deadline_ns, request,
+       sizeof(request), response, sizeof(response), &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_demote_reply_decode(response, response_len, demoted_count, cascaded_count) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -6649,6 +6842,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     health_counters = catalog["operations"][25]
     stats_counts = catalog["operations"][26]
     expire = catalog["operations"][27]
+    demote = catalog["operations"][28]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -6833,6 +7027,12 @@ const OperationExpire uint32 = {expire['id']}
 const ExpireStaleTier = "{expire['request']['policy']['stale_l1_tier']}"
 const ExpireKindsMax uint32 = {expire['request']['policy']['maximum_kinds']}
 const ExpireMax uint32 = {expire['reply']['fields'][0]['maximum']}
+const EventDemote = EventMemory
+const StageDemote = FamilyMemory
+const OperationDemote uint32 = {demote['id']}
+const DemoteTier = "{demote['request']['policy']['demote_tier']}"
+const DemoteKindsMax uint32 = {demote['request']['policy']['maximum_kinds']}
+const DemoteMax uint32 = {demote['reply']['fields'][0]['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -7668,6 +7868,59 @@ type EffectivenessStats struct {{
 	AvgEffectiveness      float64
 	LowEffectivenessCount uint32
 	HighImpactCount       uint32
+}}
+
+// EncodeDemoteRequest emits the empty request for the fixed demotion policy.
+func EncodeDemoteRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationDemote, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeDemoteRequest validates the exact empty operation envelope.
+func DecodeDemoteRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationDemote || header.Flags != 0 ||
+		header.PayloadLen != 0 || len(request) != int(EnvelopeHeaderLen) {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeDemoteReply emits the demotion count and its cascade count.
+func EncodeDemoteReply(demotedCount, cascadedCount uint32) ([]byte, error) {{
+	// The cascade only runs when something was demoted.
+	if demotedCount > DemoteMax || cascadedCount > DemoteMax ||
+		(demotedCount == 0 && cascadedCount != 0) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationDemote, ResultOK, 8)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 8)...)
+	payload := reply[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint32(payload, demotedCount)
+	binary.LittleEndian.PutUint32(payload[4:], cascadedCount)
+	return reply, nil
+}}
+
+// DecodeDemoteReply validates the operation, both bounded counts, and the cascade invariant.
+func DecodeDemoteReply(reply []byte) (uint32, uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationDemote || header.Result != ResultOK ||
+		header.PayloadLen != 8 || len(reply) != int(EnvelopeHeaderLen)+8 {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	payload := reply[EnvelopeHeaderLen:]
+	demoted := binary.LittleEndian.Uint32(payload)
+	cascaded := binary.LittleEndian.Uint32(payload[4:])
+	if demoted > DemoteMax || cascaded > DemoteMax || (demoted == 0 && cascaded != 0) {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	return demoted, cascaded, nil
 }}
 
 // EncodeExpireRequest emits the empty request for the fixed expiry policy.
