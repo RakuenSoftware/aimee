@@ -13024,9 +13024,15 @@
           "line": 143
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The relation-schema cJSON list is caller presentation; a typed bounded query returns canonical relation definitions and truncation state."
+      },
       "signature": "cJSON * db2_kb_service_relations_schema_list_json ( void )",
       "signature_sha256": "97fdaec26b95aad3cb59d23df19b3a449e39853ad7813f696c38c77835db3dae",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_relations_schema_list_json"
     },
     {
@@ -13251,9 +13257,15 @@
           "line": 227
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The session-commitment cJSON array remains local rendering; a typed bounded briefing query returns commitment records."
+      },
       "signature": "cJSON * db2_kb_service_session_briefing_commitments_json ( int limit )",
       "signature_sha256": "6b84e7bbd668fe80cef231f81decc14104b8a440cf8b6eb64325fffcc114f044",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_session_briefing_commitments_json"
     },
     {
@@ -13267,9 +13279,15 @@
           "line": 228
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The session-directive cJSON array is caller presentation; a typed bounded briefing query returns directive records."
+      },
       "signature": "cJSON * db2_kb_service_session_briefing_directives_json ( int limit )",
       "signature_sha256": "18953420501a59df2986280d6f8131d95b133ff3071dd04e4d5d48c0b80f569c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_session_briefing_directives_json"
     },
     {
@@ -13430,9 +13448,15 @@
           "line": 142
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "index",
+        "reason": "The tool-lookup cJSON object remains a compatibility facade; a typed bounded name request returns the registry record and explicit found state."
+      },
       "signature": "cJSON * db2_kb_service_tool_registry_lookup_json ( const char * name )",
       "signature_sha256": "1053c71b67cc023fea4bb567dad0c6105e322161622a84dc53378499d89d4690",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_tool_registry_lookup_json"
     },
     {
@@ -13446,9 +13470,15 @@
           "line": 141
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "index",
+        "reason": "The tool-registry snapshot cJSON tree cannot cross the typed module ABI; a bounded typed snapshot operation owns records and truncation evidence."
+      },
       "signature": "cJSON * db2_kb_service_tool_registry_snapshot_json ( void )",
       "signature_sha256": "e925fa8a6996930e0f02dac1ebeea9440aa0cc52cf476036b8be56091d39ab73",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_tool_registry_snapshot_json"
     },
     {
@@ -25584,15 +25614,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "51392f377e1e9727ba64076ac87a119721515a282d292545f8848f19e2306514",
+  "fingerprint": "19d03867d10d83721433c46d5de37758d6ffac7b891d230847861b5c05e8a427",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 698,
+    "audit_pending": 693,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 260
+    "reviewed": 265
   }
 }

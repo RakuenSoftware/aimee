@@ -1068,6 +1068,14 @@
       "reason": "The cJSON note-search response cannot define the wire shape; DB2 returns bounded typed matches for caller-owned serialization."
     },
     {
+      "symbol": "db2_kb_service_relations_schema_list_json",
+      "signature_sha256": "97fdaec26b95aad3cb59d23df19b3a449e39853ad7813f696c38c77835db3dae",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The relation-schema cJSON list is caller presentation; a typed bounded query returns canonical relation definitions and truncation state."
+    },
+    {
       "symbol": "db2_kb_service_rules_decay_json",
       "signature_sha256": "83366f3f71f8923c3a1d9d6fc71e1747a7bc34e671b9288a409d146ffdc84a67",
       "disposition": "private-db2",
@@ -1140,6 +1148,22 @@
       "reason": "The cJSON scene-member facade stays out of the transport contract; DB2 returns a bounded array of fixed member records and the caller renders JSON."
     },
     {
+      "symbol": "db2_kb_service_session_briefing_commitments_json",
+      "signature_sha256": "6b84e7bbd668fe80cef231f81decc14104b8a440cf8b6eb64325fffcc114f044",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The session-commitment cJSON array remains local rendering; a typed bounded briefing query returns commitment records."
+    },
+    {
+      "symbol": "db2_kb_service_session_briefing_directives_json",
+      "signature_sha256": "18953420501a59df2986280d6f8131d95b133ff3071dd04e4d5d48c0b80f569c",
+      "disposition": "private-db2",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The session-directive cJSON array is caller presentation; a typed bounded briefing query returns directive records."
+    },
+    {
       "symbol": "db2_kb_service_task_add_edge_json",
       "signature_sha256": "c81a2eb65eeb84b8d3cd7615b70b1bf4f59b72efa0404854c31410ba64263471",
       "disposition": "private-db2",
@@ -1186,6 +1210,22 @@
       "family": "learning",
       "db3_placement": "retained-db2",
       "reason": "The cJSON task-state facade is retired at the process boundary; a typed mutation validates the closed state and returns structured status."
+    },
+    {
+      "symbol": "db2_kb_service_tool_registry_lookup_json",
+      "signature_sha256": "1053c71b67cc023fea4bb567dad0c6105e322161622a84dc53378499d89d4690",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The tool-lookup cJSON object remains a compatibility facade; a typed bounded name request returns the registry record and explicit found state."
+    },
+    {
+      "symbol": "db2_kb_service_tool_registry_snapshot_json",
+      "signature_sha256": "e925fa8a6996930e0f02dac1ebeea9440aa0cc52cf476036b8be56091d39ab73",
+      "disposition": "private-db2",
+      "family": "index",
+      "db3_placement": "retained-db2",
+      "reason": "The tool-registry snapshot cJSON tree cannot cross the typed module ABI; a bounded typed snapshot operation owns records and truncation evidence."
     },
     {
       "symbol": "db2_kb_txn_begin",
