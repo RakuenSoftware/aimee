@@ -112,6 +112,14 @@ static const sample_t SAMPLES[] = {
     {"graph.sync_code", {NULL}},
     {"graph.sync_code", {"aimee", NULL}},
     {"graph.sync_code", {"--project", "aimee", NULL}},
+
+    /* dogfood.report — two optional valued flags, neither with a positional
+     * fallback, so a bare positional must not become either field. */
+    {"dogfood.report", {NULL}},
+    {"dogfood.report", {"--month", "2026-08", NULL}},
+    {"dogfood.report", {"--dir", "reports/aug", NULL}},
+    {"dogfood.report", {"--month", "2026-08", "--dir", "reports/aug", NULL}},
+    {"dogfood.report", {"stray-positional", NULL}},
 };
 
 static const char *spec_for(const char *method)
