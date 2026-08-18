@@ -11,6 +11,7 @@
   "db1_time",
   "db1_write",
   "db_schema",
+  "diagnostics",
   "maintenance",
   "module_adapter"
  ],
@@ -188,8 +189,33 @@
   },
   {
    "id": 8,
-   "name": "identity",
+   "name": "telemetry",
    "event_kind": 11784,
+   "active": true,
+   "doc": "what the system spent and what it noticed: token and cost ledgers, guardrail and interaction events, eval results and diagnoses.",
+   "client_doc": "",
+   "covers": "cost_fold, diagnose, eval, guardrail_events, interaction_events, token_audit",
+   "sources": [
+    "cost_fold",
+    "diagnose",
+    "eval",
+    "guardrail_events",
+    "interaction_events",
+    "token_audit"
+   ],
+   "retired_sources": [
+    "cost_fold.c",
+    "diagnose.c",
+    "eval.c",
+    "guardrail_events.c",
+    "interaction_events.c",
+    "token_audit.c"
+   ]
+  },
+  {
+   "id": 9,
+   "name": "identity",
+   "event_kind": 11785,
    "active": false,
    "doc": "secrets and the replay stores behind token consumption.",
    "client_doc": "",
@@ -199,26 +225,6 @@
     "secrets",
     "server_identity_jti",
     "server_management_jti"
-   ],
-   "retired_sources": []
-  },
-  {
-   "id": 9,
-   "name": "telemetry",
-   "event_kind": 11785,
-   "active": false,
-   "doc": "token accounting, evaluations and recorded events.",
-   "client_doc": "",
-   "covers": "token_audit, cost_fold, interaction_events, guardrail_events, eval, ensemble, diagnose, diagnostics",
-   "sources": [
-    "cost_fold",
-    "diagnose",
-    "diagnostics",
-    "ensemble",
-    "eval",
-    "guardrail_events",
-    "interaction_events",
-    "token_audit"
    ],
    "retired_sources": []
   },
@@ -251,6 +257,19 @@
    "covers": "session_state",
    "sources": [
     "session_state"
+   ],
+   "retired_sources": []
+  },
+  {
+   "id": 12,
+   "name": "ensemble",
+   "event_kind": 11788,
+   "active": false,
+   "doc": "multi-agent ensemble runs: the DB1 rows are a run's state, but the template that starts one is a file under a project root, which is a boundary question rather than a wire one.",
+   "client_doc": "",
+   "covers": "ensemble",
+   "sources": [
+    "ensemble"
    ],
    "retired_sources": []
   }
@@ -11798,6 +11817,2751 @@
    "reply": {
     "fields": [],
     "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 1,
+   "name": "token_audit_insert",
+   "c_name": "db1_token_audit_insert",
+   "c_params": [
+    "row"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "db1_token_audit_row_t",
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "project_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "tool_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "role",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "model",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "source",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "requested_model",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "stop_reason",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "usage_kind",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "agent_log_id",
+      "type": "int64",
+      "required": false
+     },
+     {
+      "name": "request_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "idempotency_key",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "attempt",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "principal",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "served_model",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "duration_ms",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "metadata",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "cache_write_tokens",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "cache_read_tokens",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "estimated_cost_usd",
+      "type": "double",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 2,
+   "name": "token_audit_ensure_idem_index",
+   "c_name": "db1_token_audit_ensure_idem_index",
+   "c_params": [],
+   "c_returns": "void",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 3,
+   "name": "token_audit_cost_for_delegation",
+   "c_name": "db1_token_audit_cost_for_delegation",
+   "c_params": [
+    "delegation_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "cost",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 48
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 4,
+   "name": "token_audit_cost_for_delegation_ex",
+   "c_name": "db1_token_audit_cost_for_delegation_ex",
+   "c_params": [
+    "delegation_id",
+    "out_cost"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "delegation_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "cost",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 48
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 5,
+   "name": "token_audit_session_split",
+   "c_name": "db1_token_audit_session_split",
+   "c_params": [
+    "session_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_token_audit_session_split_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "supervisor_calls",
+      "type": "int"
+     },
+     {
+      "name": "supervisor_prompt_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "supervisor_completion_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "supervisor_cache_write_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "supervisor_cache_read_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "supervisor_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "worker_calls",
+      "type": "int"
+     },
+     {
+      "name": "worker_prompt_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "worker_completion_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "worker_cache_write_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "worker_cache_read_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "worker_cost_usd",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 1024
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 6,
+   "name": "token_audit_totals",
+   "c_name": "db1_token_audit_totals",
+   "c_params": [
+    "since_hours",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since_hours",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_token_audit_totals_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "total_calls",
+      "type": "int"
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "cache_write_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "cache_read_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "estimated_cost_usd",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 512
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 7,
+   "name": "token_audit_spend_breakdown",
+   "c_name": "db1_token_audit_spend_breakdown",
+   "c_params": [
+    "since_hours",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since_hours",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_token_audit_spend_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "realized_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "estimated_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "avoided_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "partial_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "spend_cost_usd",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 512
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 8,
+   "name": "token_audit_by_role",
+   "c_name": "db1_token_audit_by_role",
+   "c_params": [
+    "since_hours",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since_hours",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_token_audit_role_summary_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 256
+    },
+    "fields": [
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "calls",
+      "type": "int"
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "estimated_cost_usd",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 9,
+   "name": "token_audit_by_tool",
+   "c_name": "db1_token_audit_by_tool",
+   "c_params": [
+    "since_hours",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since_hours",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_token_audit_tool_summary_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 256
+    },
+    "fields": [
+     {
+      "name": "tool_name",
+      "type": "text"
+     },
+     {
+      "name": "calls",
+      "type": "int"
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "estimated_cost_usd",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 10,
+   "name": "token_audit_by_model",
+   "c_name": "db1_token_audit_by_model",
+   "c_params": [
+    "since_hours",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since_hours",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_token_audit_model_summary_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 256
+    },
+    "fields": [
+     {
+      "name": "model",
+      "type": "text"
+     },
+     {
+      "name": "calls",
+      "type": "int"
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "estimated_cost_usd",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 11,
+   "name": "token_audit_by_source",
+   "c_name": "db1_token_audit_by_source",
+   "c_params": [
+    "since_hours",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since_hours",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_token_audit_source_summary_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 256
+    },
+    "fields": [
+     {
+      "name": "source",
+      "type": "text"
+     },
+     {
+      "name": "calls",
+      "type": "int"
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "estimated_cost_usd",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 12,
+   "name": "token_audit_list_dashboard",
+   "c_name": "db1_token_audit_list_dashboard",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_token_audit_dashboard_row_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 256
+    },
+    "fields": [
+     {
+      "name": "tool_name",
+      "type": "text"
+     },
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "cache_write_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "cache_read_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "estimated_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "call_count",
+      "type": "int"
+     },
+     {
+      "name": "last_seen",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 13,
+   "name": "insights_by_platform",
+   "c_name": "db1_insights_by_platform",
+   "c_params": [
+    "since_hours",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since_hours",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_insights_platform_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "platform",
+      "type": "text"
+     },
+     {
+      "name": "session_count",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 14,
+   "name": "insights_top_sessions",
+   "c_name": "db1_insights_top_sessions",
+   "c_params": [
+    "since_hours",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since_hours",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_insights_top_session_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "title",
+      "type": "text"
+     },
+     {
+      "name": "model",
+      "type": "text"
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int64"
+     },
+     {
+      "name": "estimated_cost_usd",
+      "type": "double"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 15,
+   "name": "insights_delegates_by_role",
+   "c_name": "db1_insights_delegates_by_role",
+   "c_params": [
+    "since_hours",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "since_hours",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_insights_delegate_role_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "role",
+      "type": "text"
+     },
+     {
+      "name": "total",
+      "type": "int"
+     },
+     {
+      "name": "completed",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 16,
+   "name": "cost_fold_record",
+   "c_name": "db1_cost_fold_record",
+   "c_params": [
+    "parent_session_id",
+    "child_session_id",
+    "cost_usd",
+    "source"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "parent_session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "child_session_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "cost_usd",
+      "type": "double",
+      "required": true
+     },
+     {
+      "name": "source",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "folded",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 48
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 17,
+   "name": "cost_fold_total",
+   "c_name": "db1_cost_fold_total",
+   "c_params": [
+    "parent_session_id"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "parent_session_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "total",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 48
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 18,
+   "name": "interaction_event_record",
+   "c_name": "db1_interaction_event_record",
+   "c_params": [
+    "session_id",
+    "type_name",
+    "actor",
+    "payload_json",
+    "outcome"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "type_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "actor",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "payload_json",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "outcome",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "evicted",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 48
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 19,
+   "name": "interaction_event_list_unreflected",
+   "c_name": "db1_interaction_event_list_unreflected",
+   "c_params": [
+    "session_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "ie_event_row_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "event_type",
+      "type": "text"
+     },
+     {
+      "name": "actor",
+      "type": "text"
+     },
+     {
+      "name": "payload",
+      "type": "text"
+     },
+     {
+      "name": "outcome",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 20,
+   "name": "interaction_event_list_for_session",
+   "c_name": "db1_interaction_event_list_for_session",
+   "c_params": [
+    "session_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "ie_event_row_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "event_type",
+      "type": "text"
+     },
+     {
+      "name": "actor",
+      "type": "text"
+     },
+     {
+      "name": "payload",
+      "type": "text"
+     },
+     {
+      "name": "outcome",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 21,
+   "name": "interaction_event_list_promotion_feed",
+   "c_name": "db1_interaction_event_list_promotion_feed",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "ie_event_row_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "event_type",
+      "type": "text"
+     },
+     {
+      "name": "actor",
+      "type": "text"
+     },
+     {
+      "name": "payload",
+      "type": "text"
+     },
+     {
+      "name": "outcome",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 22,
+   "name": "interaction_event_mark_reflected",
+   "c_name": "db1_interaction_event_mark_reflected",
+   "c_params": [
+    "ids",
+    "count"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [],
+    "repeated": {
+     "values": "ids",
+     "count": "count",
+     "max_values": 512,
+     "kind": "int"
+    }
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "marked",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 48
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 23,
+   "name": "interaction_event_mark_promoted",
+   "c_name": "db1_interaction_event_mark_promoted",
+   "c_params": [
+    "ids",
+    "count"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [],
+    "repeated": {
+     "values": "ids",
+     "count": "count",
+     "max_values": 512,
+     "kind": "int"
+    }
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "marked",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 48
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 24,
+   "name": "interaction_event_evict_if_needed",
+   "c_name": "db1_interaction_event_evict_if_needed",
+   "c_params": [
+    "cap"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "cap",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 25,
+   "name": "guardrail_event_insert",
+   "c_name": "db1_guardrail_event_insert",
+   "c_params": [
+    "e"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "guardrail_event_t",
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "tool_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "overall_risk",
+      "type": "double",
+      "required": false
+     },
+     {
+      "name": "action_risk",
+      "type": "double",
+      "required": false
+     },
+     {
+      "name": "diff_risk",
+      "type": "double",
+      "required": false
+     },
+     {
+      "name": "drift_risk",
+      "type": "double",
+      "required": false
+     },
+     {
+      "name": "antipattern_similarity",
+      "type": "double",
+      "required": false
+     },
+     {
+      "name": "recommendation",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "labels",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "final_action",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "explanation",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "dry_run",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 26,
+   "name": "guardrail_event_counts_7d",
+   "c_name": "db1_guardrail_event_counts_7d",
+   "c_params": [
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": []
+   },
+   "reply": {
+    "struct": "guardrail_event_counts_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "dry_run",
+      "type": "int"
+     },
+     {
+      "name": "warn",
+      "type": "int"
+     },
+     {
+      "name": "prompt",
+      "type": "int"
+     },
+     {
+      "name": "block",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 256
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 27,
+   "name": "guardrail_event_session_advisory_count",
+   "c_name": "db1_guardrail_event_session_advisory_count",
+   "c_params": [
+    "session_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "session_id",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "scalars": true,
+    "fields": [
+     {
+      "name": "advisories",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 28,
+   "name": "guardrail_event_list",
+   "c_name": "db1_guardrail_event_list",
+   "c_params": [
+    "limit",
+    "only_advisory",
+    "rows",
+    "count"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "limit",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "only_advisory",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "guardrail_event_row_t",
+    "list": {
+     "out": "rows",
+     "bound": "limit",
+     "max_rows": 256,
+     "count": "count"
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "recorded_at",
+      "type": "text"
+     },
+     {
+      "name": "session_id",
+      "type": "text"
+     },
+     {
+      "name": "tool_name",
+      "type": "text"
+     },
+     {
+      "name": "overall_risk",
+      "type": "double"
+     },
+     {
+      "name": "labels",
+      "type": "text"
+     },
+     {
+      "name": "final_action",
+      "type": "text"
+     },
+     {
+      "name": "explanation",
+      "type": "text"
+     },
+     {
+      "name": "dry_run",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 29,
+   "name": "eval_result_insert",
+   "c_name": "db1_eval_result_insert",
+   "c_params": [
+    "row"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "struct": "db1_eval_result_row_t",
+    "fields": [
+     {
+      "name": "suite",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "task_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "agent_name",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "ablation",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "success",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "turns",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "tool_calls",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "tool_call_failures",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "rescue_recoveries",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "prompt_tokens",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "completion_tokens",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "latency_ms",
+      "type": "int",
+      "required": false
+     },
+     {
+      "name": "response",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "error",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "dataset_hash",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "target_hash",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "harness_version",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "hardware_profile",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "seed",
+      "type": "int",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 30,
+   "name": "eval_failed_tasks_recent",
+   "c_name": "db1_eval_failed_tasks_recent",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_eval_failed_task_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "task_name",
+      "type": "text"
+     },
+     {
+      "name": "error",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 31,
+   "name": "eval_passed_tasks_recent",
+   "c_name": "db1_eval_passed_tasks_recent",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_eval_passed_task_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "task_name",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 32,
+   "name": "eval_results_list",
+   "c_name": "db1_eval_results_list",
+   "c_params": [
+    "suite_or_null",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "suite_or_null",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "db1_eval_display_row_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "suite",
+      "type": "text"
+     },
+     {
+      "name": "task_name",
+      "type": "text"
+     },
+     {
+      "name": "agent_name",
+      "type": "text"
+     },
+     {
+      "name": "ablation",
+      "type": "text"
+     },
+     {
+      "name": "success",
+      "type": "int"
+     },
+     {
+      "name": "turns",
+      "type": "int"
+     },
+     {
+      "name": "tool_calls",
+      "type": "int"
+     },
+     {
+      "name": "tool_call_failures",
+      "type": "int"
+     },
+     {
+      "name": "rescue_recoveries",
+      "type": "int"
+     },
+     {
+      "name": "latency_ms",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 33,
+   "name": "diagnose_start",
+   "c_name": "db1_diagnose_start",
+   "c_params": [
+    "symptom"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "symptom",
+      "type": "text",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "diagnosis_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 48
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 34,
+   "name": "diagnose_add_observation",
+   "c_name": "db1_diagnose_add_observation",
+   "c_params": [
+    "diag_id",
+    "content",
+    "source"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "diag_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "content",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "source",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "item_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 35,
+   "name": "diagnose_add_hypothesis",
+   "c_name": "db1_diagnose_add_hypothesis",
+   "c_params": [
+    "diag_id",
+    "content"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "diag_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "content",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "item_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 36,
+   "name": "diagnose_add_evidence",
+   "c_name": "db1_diagnose_add_evidence",
+   "c_params": [
+    "diag_id",
+    "hypothesis_id",
+    "kind",
+    "content",
+    "source",
+    "rank"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "diag_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "hypothesis_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "kind",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "content",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "source",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "rank",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "item_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 37,
+   "name": "diagnose_add_probe",
+   "c_name": "db1_diagnose_add_probe",
+   "c_params": [
+    "diag_id",
+    "hypothesis_id",
+    "content"
+   ],
+   "c_returns": "int64",
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "diag_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "hypothesis_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "content",
+      "type": "text",
+      "required": false
+     }
+    ]
+   },
+   "reply": {
+    "fields": [
+     {
+      "name": "item_id",
+      "type": "int"
+     }
+    ],
+    "max_bytes": 32
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 38,
+   "name": "diagnose_get",
+   "c_name": "db1_diagnose_get",
+   "c_params": [
+    "diag_id",
+    "out"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "diag_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "diagnosis_t",
+    "out": "out",
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "symptom",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "conclusion",
+      "type": "text"
+     },
+     {
+      "name": "confidence",
+      "type": "double"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 4096
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 39,
+   "name": "diagnose_list",
+   "c_name": "db1_diagnose_list",
+   "c_params": [
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "diagnosis_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "symptom",
+      "type": "text"
+     },
+     {
+      "name": "status",
+      "type": "text"
+     },
+     {
+      "name": "conclusion",
+      "type": "text"
+     },
+     {
+      "name": "confidence",
+      "type": "double"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     },
+     {
+      "name": "updated_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 40,
+   "name": "diagnose_list_items",
+   "c_name": "db1_diagnose_list_items",
+   "c_params": [
+    "diag_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "diag_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "diagnosis_item_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 256
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "diagnosis_id",
+      "type": "int"
+     },
+     {
+      "name": "kind",
+      "type": "text"
+     },
+     {
+      "name": "parent_id",
+      "type": "int"
+     },
+     {
+      "name": "content",
+      "type": "text"
+     },
+     {
+      "name": "source",
+      "type": "text"
+     },
+     {
+      "name": "evidence_rank",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 41,
+   "name": "diagnose_list_hypotheses",
+   "c_name": "db1_diagnose_list_hypotheses",
+   "c_params": [
+    "diag_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "diag_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "diagnosis_item_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 256
+    },
+    "fields": [
+     {
+      "name": "id",
+      "type": "int"
+     },
+     {
+      "name": "diagnosis_id",
+      "type": "int"
+     },
+     {
+      "name": "kind",
+      "type": "text"
+     },
+     {
+      "name": "parent_id",
+      "type": "int"
+     },
+     {
+      "name": "content",
+      "type": "text"
+     },
+     {
+      "name": "source",
+      "type": "text"
+     },
+     {
+      "name": "evidence_rank",
+      "type": "int"
+     },
+     {
+      "name": "created_at",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 42,
+   "name": "diagnose_rank_hypotheses",
+   "c_name": "db1_diagnose_rank_hypotheses",
+   "c_params": [
+    "diag_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "diag_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "diagnosis_ranking_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 128
+    },
+    "fields": [
+     {
+      "name": "hypothesis",
+      "type": "struct",
+      "fields": [
+       {
+        "name": "id",
+        "type": "int"
+       },
+       {
+        "name": "diagnosis_id",
+        "type": "int"
+       },
+       {
+        "name": "kind",
+        "type": "text"
+       },
+       {
+        "name": "parent_id",
+        "type": "int"
+       },
+       {
+        "name": "content",
+        "type": "text"
+       },
+       {
+        "name": "source",
+        "type": "text"
+       },
+       {
+        "name": "evidence_rank",
+        "type": "int"
+       },
+       {
+        "name": "created_at",
+        "type": "text"
+       }
+      ]
+     },
+     {
+      "name": "evidence_for_count",
+      "type": "int"
+     },
+     {
+      "name": "evidence_against_count",
+      "type": "int"
+     },
+     {
+      "name": "strongest_for_rank",
+      "type": "int"
+     },
+     {
+      "name": "strongest_against_rank",
+      "type": "int"
+     },
+     {
+      "name": "confidence",
+      "type": "double"
+     }
+    ],
+    "max_bytes": 524288
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 43,
+   "name": "diagnose_conclude",
+   "c_name": "db1_diagnose_conclude",
+   "c_params": [
+    "diag_id",
+    "conclusion",
+    "confidence"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "diag_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "conclusion",
+      "type": "text",
+      "required": false
+     },
+     {
+      "name": "confidence",
+      "type": "double",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 44,
+   "name": "diagnose_abandon",
+   "c_name": "db1_diagnose_abandon",
+   "c_params": [
+    "diag_id"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "single",
+   "idempotency": "unsafe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "diag_id",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "fields": [],
+    "max_bytes": 0
+   }
+  },
+  {
+   "family": "telemetry",
+   "id": 48,
+   "name": "diagnose_suggest_probes",
+   "c_name": "db1_diagnose_suggest_probes",
+   "c_params": [
+    "diag_id",
+    "out",
+    "max"
+   ],
+   "wire_format": "db1-fields-v2",
+   "scope": "global",
+   "transaction": "none",
+   "idempotency": "safe",
+   "results": [
+    "ok",
+    "invalid",
+    "failed"
+   ],
+   "request": {
+    "fields": [
+     {
+      "name": "diag_id",
+      "type": "int",
+      "required": true
+     },
+     {
+      "name": "max",
+      "type": "int",
+      "required": true
+     }
+    ]
+   },
+   "reply": {
+    "struct": "diagnosis_probe_suggestion_t",
+    "list": {
+     "out": "out",
+     "bound": "max",
+     "max_rows": 64
+    },
+    "fields": [
+     {
+      "name": "hypothesis_a_id",
+      "type": "int"
+     },
+     {
+      "name": "hypothesis_b_id",
+      "type": "int"
+     },
+     {
+      "name": "suggestion",
+      "type": "text"
+     }
+    ],
+    "max_bytes": 65536
    }
   }
  ]

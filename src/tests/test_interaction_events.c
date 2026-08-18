@@ -63,7 +63,8 @@ static void test_event_type_names(void)
 static void test_record_without_db_fails(void)
 {
    db1_shutdown();
-   assert(ie_record("s", IE_DELEGATE_EXIT, "system", "{}", "ok") == -1);
+   assert(db1_interaction_event_record("s", ie_event_type_name(IE_DELEGATE_EXIT), "system", "{}",
+                                       "ok") == -1);
 }
 
 static void test_record_delegate_exit_defaults_and_truncates(void)
@@ -83,7 +84,8 @@ static void test_record_delegate_exit_defaults_and_truncates(void)
    payload[sizeof(payload) - 2] = '"';
    payload[sizeof(payload) - 1] = '\0';
 
-   assert(ie_record("sess-1", IE_DELEGATE_EXIT, NULL, payload, NULL) == 0);
+   assert(db1_interaction_event_record("sess-1", ie_event_type_name(IE_DELEGATE_EXIT), NULL,
+                                       payload, NULL) == 0);
    db1_shutdown();
 
    assert(scalar_int(path, "SELECT COUNT(*) FROM interaction_events") == 1);
@@ -105,11 +107,12 @@ static void test_record_failover_event_payload(void)
    tmp_db_path(path, sizeof(path), "failover");
    assert(db1_init(path) == 0);
 
-   assert(ie_record("sess-failover", IE_FAILOVER_EVENT, NULL,
-                    "{\"provider\":\"openrouter\",\"model\":\"m\",\"http_status\":404,"
-                    "\"reason\":\"provider_policy\",\"action\":\"fallback_provider\","
-                    "\"attempt\":1,\"recovered\":false}",
-                    "error") == 0);
+   assert(db1_interaction_event_record(
+              "sess-failover", ie_event_type_name(IE_FAILOVER_EVENT), NULL,
+              "{\"provider\":\"openrouter\",\"model\":\"m\",\"http_status\":404,"
+              "\"reason\":\"provider_policy\",\"action\":\"fallback_provider\","
+              "\"attempt\":1,\"recovered\":false}",
+              "error") == 0);
    db1_shutdown();
 
    assert(scalar_int(path, "SELECT COUNT(*) FROM interaction_events WHERE "
@@ -129,12 +132,15 @@ static void test_eviction_prefers_reflected_promoted(void)
    char path[256];
    tmp_db_path(path, sizeof(path), "evict");
    assert(db1_init(path) == 0);
-   assert(ie_record("sess", IE_USER_TURN, NULL, "{\"n\":1}", "ok") == 0);
-   assert(ie_record("sess", IE_AGENT_TURN, NULL, "{\"n\":2}", "ok") == 0);
-   assert(ie_record("sess", IE_DELEGATE_EXIT, NULL, "{\"n\":3}", "error") == 0);
+   assert(db1_interaction_event_record("sess", ie_event_type_name(IE_USER_TURN), NULL, "{\"n\":1}",
+                                       "ok") == 0);
+   assert(db1_interaction_event_record("sess", ie_event_type_name(IE_AGENT_TURN), NULL, "{\"n\":2}",
+                                       "ok") == 0);
+   assert(db1_interaction_event_record("sess", ie_event_type_name(IE_DELEGATE_EXIT), NULL,
+                                       "{\"n\":3}", "error") == 0);
    exec_sql(path, "UPDATE interaction_events SET reflected_at='r', promoted_at='p' WHERE "
                   "event_type='user_turn'");
-   assert(interaction_events_evict_if_needed(2) == 0);
+   assert(db1_interaction_event_evict_if_needed(2) == 0);
    db1_shutdown();
 
    assert(scalar_int(path, "SELECT COUNT(*) FROM interaction_events") == 2);
@@ -153,26 +159,29 @@ static void test_reflection_and_promotion_feeds(void)
    char path[256];
    tmp_db_path(path, sizeof(path), "feed");
    assert(db1_init(path) == 0);
-   assert(ie_record("sess-feed", IE_TOOL_CALL, "agent", "{\"tool\":\"bash\"}", "ok") == 0);
-   assert(ie_record("sess-feed", IE_TOOL_OUTCOME, "system", "{\"ok\":true}", "ok") == 0);
-   assert(ie_record("other", IE_USER_TURN, "user", "{\"tokens\":3}", "ok") == 0);
+   assert(db1_interaction_event_record("sess-feed", ie_event_type_name(IE_TOOL_CALL), "agent",
+                                       "{\"tool\":\"bash\"}", "ok") == 0);
+   assert(db1_interaction_event_record("sess-feed", ie_event_type_name(IE_TOOL_OUTCOME), "system",
+                                       "{\"ok\":true}", "ok") == 0);
+   assert(db1_interaction_event_record("other", ie_event_type_name(IE_USER_TURN), "user",
+                                       "{\"tokens\":3}", "ok") == 0);
 
    ie_event_row_t rows[4];
-   int n = ie_list_unreflected_for_session("sess-feed", rows, 4);
+   int n = db1_interaction_event_list_unreflected("sess-feed", rows, 4);
    assert(n == 2);
    assert(strcmp(rows[0].session_id, "sess-feed") == 0);
    assert(strcmp(rows[0].event_type, "tool_call") == 0);
    assert(strstr(rows[0].payload, "bash") != NULL);
 
    int ids[2] = {rows[0].id, rows[1].id};
-   assert(ie_mark_reflected(ids, 2) == 0);
-   assert(ie_list_unreflected_for_session("sess-feed", rows, 4) == 0);
+   assert(db1_interaction_event_mark_reflected(ids, 2) == 0);
+   assert(db1_interaction_event_list_unreflected("sess-feed", rows, 4) == 0);
 
-   n = ie_list_promotion_feed(rows, 4);
+   n = db1_interaction_event_list_promotion_feed(rows, 4);
    assert(n == 2);
    assert(strcmp(rows[0].event_type, "tool_call") == 0);
-   assert(ie_mark_promoted(ids, 2) == 0);
-   assert(ie_list_promotion_feed(rows, 4) == 0);
+   assert(db1_interaction_event_mark_promoted(ids, 2) == 0);
+   assert(db1_interaction_event_list_promotion_feed(rows, 4) == 0);
 
    db1_shutdown();
    unlink(path);
