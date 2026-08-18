@@ -42,8 +42,20 @@
 /* How a value becomes JSON. Absent means "string". */
 #define TYPE_STRING      "string"
 #define TYPE_NUMBER      "number"
+#define TYPE_NUMBER_LAX  "number_lenient"
 #define TYPE_BOOL        "bool"
 #define TYPE_TRUE_IF_SET "true_if_set"
+
+/* Two numeric conventions, and "number" is the RARE one: 53 sites parse with
+ * atoi()/cli_args_get_int(), so "12x" becomes 12 and "abc" becomes 0, while 3
+ * refuse trailing garbage outright (kb.grant's team_id, which selects an
+ * authorization scope and must not be rounded into a different team).
+ *
+ * Same finding as `empty`, same conclusion: describing only the strict 3 left
+ * the spec unable to say what almost every marshaller does. Whether those 53
+ * SHOULD refuse instead of coercing is a real question and an open one -- and
+ * kb.grant's comment is the argument that they should -- but that is a change
+ * to the CLI, not to a file whose job is to describe it. */
 
 static const char *field_str(const cJSON *field, const char *key)
 {
@@ -67,7 +79,8 @@ static int known_type(const char *type)
    /* Absent is legal and means string: the commonest field should not have to
     * say so in every row. */
    return !type || !strcmp(type, TYPE_STRING) || !strcmp(type, TYPE_NUMBER) ||
-          !strcmp(type, TYPE_BOOL) || !strcmp(type, TYPE_TRUE_IF_SET);
+          !strcmp(type, TYPE_NUMBER_LAX) || !strcmp(type, TYPE_BOOL) ||
+          !strcmp(type, TYPE_TRUE_IF_SET);
 }
 
 int cli_argspec_supported(const cJSON *spec)
@@ -204,11 +217,24 @@ static int add_field(cJSON *req, const cJSON *field, const cli_args_t *opts, con
    const char *empty = field_str(field, "empty");
    int emit_empty = empty && !strcmp(empty, EMPTY_EMIT);
    const char *value = field_value(field, opts, joined);
+   /* `default` reproduces cli_args_get_int(opts, name, def): the field is
+    * emitted even when the flag is absent, carrying the default. Absent means
+    * "omit when absent", which is what every other field does. */
+   const cJSON *dflt = cJSON_GetObjectItemCaseSensitive(field, "default");
+   if ((!value || !value[0]) && cJSON_IsNumber(dflt) && !emit_empty)
+   {
+      cJSON_AddNumberToObject(req, json_name, dflt->valuedouble);
+      return 0;
+   }
    if (!value || (!value[0] && !emit_empty))
       return required ? -1 : 0;
 
    if (!type || !strcmp(type, TYPE_STRING))
       cJSON_AddStringToObject(req, json_name, value);
+   else if (!strcmp(type, TYPE_NUMBER_LAX))
+      /* atoi(): leading digits, 0 for anything else, no refusal. Exactly what
+       * the 53 sites do -- described, not endorsed. */
+      cJSON_AddNumberToObject(req, json_name, (double)atoi(value));
    else if (!strcmp(type, TYPE_NUMBER))
    {
       /* Strict: a field the spec called a number is refused rather than

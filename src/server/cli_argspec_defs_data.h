@@ -116,3 +116,28 @@
 {"vault.set_server",
  "{\"fields\":[{\"json\":\"agent\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"cred\",\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},{\"json\":\"secret\",\"from\":\"positional\",\"index\":2,\"empty\":\"emit\"}]}"},
 
+/* The lenient-number family. Each parses with atoi()/cli_args_get_int(), so a
+   non-numeric argument becomes 0 rather than a refusal -- described with
+   "number_lenient", and sampled with a non-numeric value so the description is
+   proven rather than assumed. */
+
+{"graph.explain",
+ "{\"fields\":[{\"json\":\"entity\",\"from\":\"positional\",\"index\":0,"
+ "\"empty\":\"emit\"},"
+ "{\"json\":\"limit\",\"from\":\"flag\",\"flag\":\"limit\","
+ "\"type\":\"number_lenient\",\"default\":40}]}"},
+
+{"aux.test",
+ "{\"fields\":[{\"json\":\"task\",\"from\":\"positional\",\"index\":0,"
+ "\"empty\":\"emit\"},"
+ "{\"json\":\"prompt\",\"from\":\"positional\",\"index\":1,\"empty\":\"emit\"},"
+ "{\"json\":\"max_tokens\",\"from\":\"positional\",\"index\":2,"
+ "\"type\":\"number_lenient\",\"empty\":\"emit\"}]}"},
+
+{"dogfood.review",
+ "{\"bool_flags\":[\"json\"],"
+ "\"fields\":[{\"json\":\"month\",\"from\":\"flag\",\"flag\":\"month\"},"
+ "{\"json\":\"dir\",\"from\":\"flag\",\"flag\":\"dir\"},"
+ "{\"json\":\"limit\",\"from\":\"flag\",\"flag\":\"limit\","
+ "\"type\":\"number_lenient\"}]}"},
+

@@ -150,6 +150,28 @@ static const sample_t SAMPLES[] = {
     {"vault.set_server", {"git", "token", "s3cret", NULL}},
     {"vault.set_server", {"git", "", "s3cret", NULL}},
     {"vault.set_server", {NULL}},
+
+    /* The lenient-number family. The non-numeric samples are the point: atoi
+     * turns "abc" into 0 and "12x" into 12, and a spec claiming to describe
+     * these has to do the same or it diverges on the first typo. */
+    {"graph.explain", {NULL}},
+    {"graph.explain", {"widget", NULL}},
+    {"graph.explain", {"widget", "--limit", "5", NULL}},
+    {"graph.explain", {"widget", "--limit", "abc", NULL}},
+    {"graph.explain", {"widget", "--limit", "12x", NULL}},
+
+    {"aux.test", {NULL}},
+    {"aux.test", {"t", NULL}},
+    {"aux.test", {"t", "p", NULL}},
+    {"aux.test", {"t", "p", "512", NULL}},
+    {"aux.test", {"t", "p", "abc", NULL}},
+    {"aux.test", {"t", "", "7", NULL}},
+
+    {"dogfood.review", {NULL}},
+    {"dogfood.review", {"--month", "2026-08", NULL}},
+    {"dogfood.review", {"--limit", "9", NULL}},
+    {"dogfood.review", {"--limit", "nine", NULL}},
+    {"dogfood.review", {"--json", NULL}},
 };
 
 static const char *spec_for(const char *method)

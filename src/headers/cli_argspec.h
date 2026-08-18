@@ -25,6 +25,11 @@
  * `empty` says whether a present-but-empty value is sent ("emit") or dropped
  * ("drop", the default). Both are real: 81 positional sites send it, 2 drop it.
  *
+ * `type` distinguishes the two numeric conventions the same way: "number"
+ * refuses trailing garbage (3 sites), "number_lenient" is atoi (53 sites).
+ * `default` carries the value a field takes when its flag is absent, which is
+ * what cli_args_get_int(opts, name, def) does.
+ *
  * What it deliberately CANNOT express: reading the client's filesystem or
  * environment, composing prompts, or cross-field rules like "either --task or
  * --proposal". The first two are the thin client's own job and must not move
