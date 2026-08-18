@@ -11432,9 +11432,15 @@
           "line": 249
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The cJSON memory-alert response is caller presentation; a typed bounded memory query returns alert records and explicit truncation evidence."
+      },
       "signature": "cJSON * db2_kb_service_memory_alerts_json ( const char * since )",
       "signature_sha256": "eec0b776d9d01e70b8230f84a55ac18495571fb7843eb221530d8b5149ebc210",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_memory_alerts_json"
     },
     {
@@ -11448,9 +11454,15 @@
           "line": 297
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The cJSON memory-question facade is local serialization; a typed operation validates bounded query and scope fields and returns structured answer evidence."
+      },
       "signature": "cJSON * db2_kb_service_memory_ask_json ( const char * query , const char * scope_type , const char * scope_value , int limit )",
       "signature_sha256": "6f96ef961d233c1eb21cf47d9d163742f5a217928bca62ec138aac7f583e4f53",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_memory_ask_json"
     },
     {
@@ -11464,9 +11476,15 @@
           "line": 265
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The assembled-context cJSON tree cannot define the module ABI; a complete bounded memory operation owns retrieval and returns typed context sections."
+      },
       "signature": "cJSON * db2_kb_service_memory_assemble_context_json ( const char * task_hint )",
       "signature_sha256": "e9e096bbb6094bf7ea588418833f258ece5907f6488be9fabf5d0e536309053c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_memory_assemble_context_json"
     },
     {
@@ -11480,9 +11498,15 @@
           "line": 284
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The cJSON briefing document is presentation-only; typed bounded briefing sections form the stable memory reply."
+      },
       "signature": "cJSON * db2_kb_service_memory_briefing_json ( int limit_tokens )",
       "signature_sha256": "afd1f44ae0a58b71cd92e1ff28494c0a17f13017269c736173fe389c823c85a9",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_memory_briefing_json"
     },
     {
@@ -11496,9 +11520,15 @@
           "line": 203
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The cJSON drift report remains local rendering; a typed memory diagnostic returns bounded counters and findings."
+      },
       "signature": "cJSON * db2_kb_service_memory_check_drift_json ( int64_t task_id , const char * file_path , const char * command )",
       "signature_sha256": "1e09988d1dea3863b632002e9d2c9fd130d10ba5cf5784773b09d9f948c31a9e",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_memory_check_drift_json"
     },
     {
@@ -11512,9 +11542,15 @@
           "line": 264
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The cJSON compaction facade cannot split or define the mutation boundary; a typed memory operation owns the complete window compaction and returns bounded results."
+      },
       "signature": "cJSON * db2_kb_service_memory_compact_windows_json ( void )",
       "signature_sha256": "6392347314e7864304ad112d6388b992cd9b19cffc65aa6d6ebc84a474ec52aa",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_memory_compact_windows_json"
     },
     {
@@ -11528,9 +11564,15 @@
           "line": 285
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The context-block cJSON envelope is caller presentation; a typed bounded query returns the context block and provenance fields."
+      },
       "signature": "cJSON * db2_kb_service_memory_context_block_json ( const char * query , const char * block_type , int limit )",
       "signature_sha256": "632049b1f218704e51fd623ed69c34e3938f1cd1bcaa91e0240f941642b79b0c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_memory_context_block_json"
     },
     {
@@ -11544,9 +11586,15 @@
           "line": 145
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The cJSON export-status wrapper is local presentation; a declared export operation validates its destination policy and returns a typed row count."
+      },
       "signature": "cJSON * db2_kb_service_memory_decisions_export_jsonl_json ( const char * path )",
       "signature_sha256": "f687bb7a84ff8076e271adef8de2cddb7a818b1fa3e5657779d794630e9386fe",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_memory_decisions_export_jsonl_json"
     },
     {
@@ -11560,9 +11608,15 @@
           "line": 255
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The cJSON deletion facade is not the mutation contract; a typed memory.delete operation owns relational cleanup and returns explicit status before caller serialization."
+      },
       "signature": "cJSON * db2_kb_service_memory_delete_json ( int64_t id )",
       "signature_sha256": "f7fae92869a13282ea171253afbf164c8d23261773b5141d316789cd0d3ce5b2",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_memory_delete_json"
     },
     {
@@ -11576,9 +11630,15 @@
           "line": 271
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The scoped-diagnostic cJSON document remains a compatibility view; a typed operation validates explicit bounded scope and returns structured findings."
+      },
       "signature": "cJSON * db2_kb_service_memory_diagnose_scoped_json ( const char * query , const char * scope_type , const char * scope_value , int limit )",
       "signature_sha256": "241e4fe67ce20019b8d5d990cd9592b14d123a0abc9e3cd2aea974f7927c233b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_memory_diagnose_scoped_json"
     },
     {
@@ -11592,9 +11652,15 @@
           "line": 262
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The effectiveness-stat cJSON response is presentation code; bounded typed counters and scores define the stable memory reply."
+      },
       "signature": "cJSON * db2_kb_service_memory_effectiveness_stats_json ( void )",
       "signature_sha256": "34e37ee22a6ed024376bb47aff06499d938549f64bb1c41028dee72c724aa362",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_memory_effectiveness_stats_json"
     },
     {
@@ -11608,9 +11674,15 @@
           "line": 292
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The entity-edge cJSON array is caller serialization; a typed bounded query returns edge records and truncation state."
+      },
       "signature": "cJSON * db2_kb_service_memory_entity_edges_json ( const char * entity , int limit )",
       "signature_sha256": "336e478c753419932625b565abec8b60433aec7df2218643c7f49dc1fb4eaf79",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_memory_entity_edges_json"
     },
     {
@@ -11624,9 +11696,15 @@
           "line": 291
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "memory",
+        "reason": "The entity-profile cJSON tree stays local presentation; a typed memory operation returns bounded profile statistics and relation records."
+      },
       "signature": "cJSON * db2_kb_service_memory_entity_profile_json ( const char * entity )",
       "signature_sha256": "de652743d15d5dec814bf4ae740c20b7dabb64e093d55d6a90c91e415887e15b",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_memory_entity_profile_json"
     },
     {
@@ -25176,15 +25254,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "b86c8f1678f30967a5d5cda0dd4e3a95233ac0f9437be4907b9629c830623912",
+  "fingerprint": "d4d9791b6cab6b10916f4407fc3d8173b1157ee519dd5a601dcc11d0b6c7046e",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 766,
+    "audit_pending": 753,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 192
+    "reviewed": 205
   }
 }
