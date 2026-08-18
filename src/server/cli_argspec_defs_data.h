@@ -30,6 +30,13 @@
  *   - DERIVED FIELDS. catalog.show splits "provider:model" into two fields;
  *     workspace.add inverts --no-scan into "scan": false and nests part of its
  *     body under `args`.
+ *   - EMPTY POSITIONALS. 45 positional sites gate on pos_count alone, so
+ *     `aimee eval results ""` sends "suite": "" and filters on the empty
+ *     string; a handful of others require non-empty and drop it. The spec's
+ *     `positional` source follows the second, so it cannot describe the first
+ *     without a flag that would enshrine a convention that looks like a bug.
+ *     Found by the differential test on the first attempt to serve
+ *     eval.results, which is exactly what it is for.
  *   - CROSS-FIELD RULES. cron.enable's --all is valid only for two of the five
  *     cron methods; trigger.fire accepts --task OR --proposal; dogfood.tag's
  *     --surprise and --no-surprise are exclusive. These are judgements about
@@ -82,4 +89,8 @@
 
 {"graph.sync_code",
  "{\"fields\":[{\"json\":\"project\",\"from\":\"positional\",\"index\":0}]}"},
+
+{"dogfood.report",
+ "{\"fields\":[{\"json\":\"month\",\"from\":\"flag\",\"flag\":\"month\"},"
+ "{\"json\":\"dir\",\"from\":\"flag\",\"flag\":\"dir\"}]}"},
 
