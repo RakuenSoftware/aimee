@@ -440,6 +440,21 @@ int main(int argc, char **argv)
    assert(aimee_db2_reject_call(call_client, &client, 9068, 0, 0u, NULL, NULL) ==
           AIMEE_MODULE_CALL_INVALID_ARGUMENT);
 
+   /* Memory 42 does not exist, so nothing is rewritten and the count is zero.
+    * Replayed because writing the same text to the same absent row is
+    * genuinely neutral -- and would be neutral for a present row too, which is
+    * why this one is safe while memory.reject beside it is not. */
+   uint32_t rewritten = 99;
+   assert(aimee_db2_update_content_call(call_client, &client, 9069, 0, 42u, "revised text",
+                                        &rewritten, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(rewritten == 0);
+   rewritten = 99;
+   assert(aimee_db2_update_content_call(call_client, &client, 9070, 0, 42u, "revised text",
+                                        &rewritten, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(rewritten == 0);
+   assert(aimee_db2_update_content_call(call_client, &client, 9071, 0, 42u, "", &rewritten, NULL,
+                                        NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;
    assert(aimee_db2_pool_status_call(call_client, &client, 9011, 0, &domain_result, &pool, NULL,

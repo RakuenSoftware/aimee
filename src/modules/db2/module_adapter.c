@@ -290,6 +290,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .valid_at = db2_memory_valid_at,
        .has_scope_type = db2_memory_has_scope_type,
        .reject = production_reject,
+       .update_content = db2_memory_update_content,
        .pool_status = production_pool_status,
        .embedding_refusals = production_embedding_refusals,
        .postgres_status = production_postgres_status,
@@ -1011,6 +1012,25 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
          if (aimee_db2_reject_reply_encode(response_body, response_capacity) != 0)
             return AIMEE_MODULE_STATUS_INTERNAL;
          *response_len = AIMEE_DB2_REJECT_RESPONSE_LEN;
+         return AIMEE_MODULE_STATUS_OK;
+      }
+      uint64_t content_memory_id = 0u;
+      static _Thread_local char new_content[AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX + 1];
+      if (aimee_db2_update_content_request_decode(request_body, request_len, &content_memory_id,
+                                                  new_content, sizeof(new_content)) == 0)
+      {
+         if (response_capacity < AIMEE_DB2_UPDATE_CONTENT_RESPONSE_LEN)
+            return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+         if (!backend || !backend->update_content)
+            return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+         int updated = backend->update_content((int64_t)content_memory_id, new_content);
+         if (aimee_module_invocation_cancelled(invocation))
+            return AIMEE_MODULE_STATUS_CANCELLED;
+         if (updated < 0 || (uint32_t)updated > AIMEE_DB2_UPDATE_CONTENT_MAX)
+            return AIMEE_MODULE_STATUS_INTERNAL;
+         if (aimee_db2_update_content_reply_encode((uint32_t)updated, response_body,
+                                                   response_capacity, response_len) != 0)
+            return AIMEE_MODULE_STATUS_INTERNAL;
          return AIMEE_MODULE_STATUS_OK;
       }
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;

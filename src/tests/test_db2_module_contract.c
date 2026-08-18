@@ -50,6 +50,9 @@ static int scope_type_calls;
 static int reject_value;
 static int reject_calls;
 static int64_t reject_last;
+static int update_content_value;
+static int update_content_calls;
+static char update_content_last[2048];
 static char scope_type_last[64];
 static int64_t link_delete_last;
 static int64_t workspace_tag_last;
@@ -412,6 +415,21 @@ static int reject(int64_t memory_id)
    reject_calls++;
    reject_last = memory_id;
    return reject_value;
+}
+
+int db2_memory_update_content(int64_t memory_id, const char *content)
+{
+   (void)memory_id;
+   (void)content;
+   return 0;
+}
+
+static int update_content(int64_t memory_id, const char *content)
+{
+   (void)memory_id;
+   update_content_calls++;
+   snprintf(update_content_last, sizeof(update_content_last), "%s", content);
+   return update_content_value;
 }
 
 int64_t db2_memory_count(void)
@@ -1085,6 +1103,9 @@ static void reset(void)
    reject_value = 0;
    reject_calls = 0;
    reject_last = 0;
+   update_content_value = 1;
+   update_content_calls = 0;
+   update_content_last[0] = '\0';
    total_count_value = 1234567890123LL;
    total_count_calls = 0;
    session_l2_count_value = 3;
@@ -2374,6 +2395,52 @@ static void test_prune_orphaned_l0_wire(void)
    aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
    assert(aimee_db2_prune_orphaned_l0_reply_decode(reply, reply_len, &deleted) == -1 &&
           deleted == 0);
+}
+
+static void test_update_content_wire(void)
+{
+   static uint8_t request[AIMEE_DB2_UPDATE_CONTENT_REQUEST_MAX_LEN];
+   static char content[AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX + 1];
+   uint32_t request_len = 99;
+   uint64_t memory_id = 99;
+   assert(aimee_db2_update_content_request_encode(42u, "revised text", request, sizeof(request),
+                                                  &request_len) == 0);
+   assert(aimee_db2_update_content_request_decode(request, request_len, &memory_id, content,
+                                                  sizeof(content)) == 0);
+   assert(memory_id == 42 && strcmp(content, "revised text") == 0);
+
+   assert(aimee_db2_update_content_request_encode(0u, "revised text", request, sizeof(request),
+                                                  &request_len) == -1);
+   /* Empty content is not an update, it is a deletion of the text; the backend
+    * refuses it and so must the wire. */
+   assert(aimee_db2_update_content_request_encode(42u, "", request, sizeof(request),
+                                                  &request_len) == -1);
+
+   /* Exactly the memory record's content width encodes; one byte more does
+    * not, because a longer value would be truncated by whatever reads the row
+    * back into a memory_t rather than rejected. */
+   static char at_bound[AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX + 2];
+   memset(at_bound, 'x', AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX);
+   at_bound[AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX] = '\0';
+   assert(aimee_db2_update_content_request_encode(42u, at_bound, request, sizeof(request),
+                                                  &request_len) == 0);
+   assert(request_len == AIMEE_DB2_UPDATE_CONTENT_REQUEST_MAX_LEN);
+   at_bound[AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX] = 'x';
+   at_bound[AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX + 1] = '\0';
+   assert(aimee_db2_update_content_request_encode(42u, at_bound, request, sizeof(request),
+                                                  &request_len) == -1);
+
+   uint8_t reply[AIMEE_DB2_UPDATE_CONTENT_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, updated = 99;
+   assert(aimee_db2_update_content_reply_encode(1, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_update_content_reply_decode(reply, reply_len, &updated) == 0 && updated == 1);
+   assert(aimee_db2_update_content_reply_encode(0, reply, sizeof(reply), &reply_len) == 0);
+   assert(aimee_db2_update_content_reply_decode(reply, reply_len, &updated) == 0 && updated == 0);
+   assert(aimee_db2_update_content_reply_encode(2, reply, sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_update_content_reply_encode(1, reply, sizeof(reply) - 1, &reply_len) == -1);
+   assert(aimee_db2_update_content_reply_encode(1, reply, sizeof(reply), &reply_len) == 0);
+   aimee_db2_put_u32(reply + 12, AIMEE_DB2_RESULT_INVALID_STATE);
+   assert(aimee_db2_update_content_reply_decode(reply, reply_len, &updated) == -1 && updated == 0);
 }
 
 static void test_reject_wire(void)
@@ -3983,6 +4050,45 @@ static void test_prune_orphaned_l0_handler(void)
                  &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
 }
 
+static void test_update_content_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {.update_content = update_content};
+   static uint8_t request[AIMEE_DB2_UPDATE_CONTENT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_UPDATE_CONTENT_RESPONSE_LEN];
+   uint32_t request_len = 0, response_len = 99, updated = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_UPDATE_CONTENT};
+   assert(aimee_db2_update_content_request_encode(42u, "revised text", request, sizeof(request),
+                                                  &request_len) == 0);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(update_content_calls == 1 && strcmp(update_content_last, "revised text") == 0);
+   assert(aimee_db2_update_content_reply_decode(response, response_len, &updated) == 0 &&
+          updated == 1);
+
+   /* Rewriting a memory that is not there is a success reporting zero; the
+    * backend reports a fault the same way, so zero carries both. */
+   update_content_value = 0;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_update_content_reply_decode(response, response_len, &updated) == 0 &&
+          updated == 0);
+
+   update_content_value = 2;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   update_content_value = -1;
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_INTERNAL);
+   update_content_value = 1;
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, request_len, response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, request_len, response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+}
+
 static void test_reject_handler(void)
 {
    reset();
@@ -5255,6 +5361,7 @@ int main(void)
    test_valid_at_wire();
    test_has_scope_type_wire();
    test_reject_wire();
+   test_update_content_wire();
    test_pool_status_wire();
    test_embedding_refusals_wire();
    test_postgres_status_wire();
@@ -5297,6 +5404,7 @@ int main(void)
    test_valid_at_handler();
    test_has_scope_type_handler();
    test_reject_handler();
+   test_update_content_handler();
    test_pool_status_handler();
    test_embedding_refusals_handler();
    test_postgres_status_handler();

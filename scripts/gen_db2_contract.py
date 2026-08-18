@@ -230,7 +230,8 @@ def validate_catalog(value: object) -> dict[str, object]:
                                                                 "delete_row",
                                                                 "touch",
                                                                 "link_delete",
-                                                                "reject") else
+                                                                "reject",
+                                                                "update_content") else
                                 "single" if name in ("reembed_clear_maintenance",
                                                      "dimension_reset") else "none")
         # A health-cycle snapshot appends a row per call, so replaying it is not
@@ -1531,9 +1532,49 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
                     reply["fields"] != []):
                 fail("reject-reply", "reply must acknowledge the penalty without a payload")
+        elif key == ("memory", 33) and name == "update_content" and \
+                operation["wire_format"] == "db2-envelope-u64-string-u32-v1":
+            if operation["c_symbols"] != ["db2_memory_update_content"]:
+                fail("operation-c-symbols",
+                     "update_content C symbol differs from the reviewed backend")
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "update_content results must equal ['ok']")
+            request = _keys(operation["request"],
+                            {"encoded_size_min", "encoded_size_max", "fields"},
+                            "update_content.request")
+            request_fields = request["fields"]
+            if not isinstance(request_fields, list) or len(request_fields) != 2:
+                fail("update-content-request", "request must carry the memory and the text")
+            memory_field = _keys(request_fields[0], {"name", "type", "minimum", "maximum"},
+                                 "update_content.request.fields[0]")
+            content_field = _keys(request_fields[1],
+                                  {"name", "type", "minimum_bytes", "maximum_bytes"},
+                                  "update_content.request.fields[1]")
+            # Bounded to the memory record's own content width: a longer value
+            # would be accepted here and then truncated by whatever reads it
+            # back into a memory_t, which is a silent corruption rather than a
+            # rejected write.
+            if (request["encoded_size_min"] != ENVELOPE_HEADER_LEN + 13 or
+                    request["encoded_size_max"] != ENVELOPE_HEADER_LEN + 12 + 2047 or
+                    memory_field != {"name": "memory_id", "type": "u64", "minimum": 1,
+                                     "maximum": 0x7fffffffffffffff} or
+                    content_field != {"name": "content", "type": "utf8", "minimum_bytes": 1,
+                                      "maximum_bytes": 2047}):
+                fail("update-content-request",
+                     "request must name one positive memory and one non-empty bounded text")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "update_content.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "update_content.reply.field")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "updated_rows", "type": "u32", "minimum": 0,
+                              "maximum": 1}):
+                fail("update-content-reply", "reply must contain the single-row update count")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 42 or [item["name"] for item in raw_operations] != [
+    if len(raw_operations) != 43 or [item["name"] for item in raw_operations] != [
             "health", "embedding_dimension", "pool_status", "embedding_refusals",
             "postgres_status", "reembed_status", "reembed_clear",
             "reembed_clear_maintenance", "embedder_serving_id", "dimension_reset",
@@ -1545,9 +1586,9 @@ def validate_catalog(value: object) -> dict[str, object]:
             "expire", "demote", "promote_stable", "reclassify_directives",
             "record_l4_approval", "prune_orphaned_l0", "lifecycle_sweep_expired",
             "demote_id", "has_workspace_tag", "delete_row", "touch", "link_delete",
-            "valid_at", "has_scope_type", "reject"]:
+            "valid_at", "has_scope_type", "reject", "update_content"]:
         fail("unsupported-operation",
-             "the partial generator requires the forty-two supported operations exactly once")
+             "the partial generator requires the forty-three supported operations exactly once")
     return catalog
 
 
@@ -1713,6 +1754,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     valid_at = catalog["operations"][39]
     has_scope_type = catalog["operations"][40]
     reject = catalog["operations"][41]
+    update_content = catalog["operations"][42]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -1939,6 +1981,14 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
         catalog, ENVELOPE_REQUEST_MAGIC, int(reject["id"]), 0, _put_u64(42),
     )
     reject_ok = _envelope(catalog, ENVELOPE_REPLY_MAGIC, int(reject["id"]), 0, b"")
+    update_content_text = b"the revised memory text"
+    update_content_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(update_content["id"]), 0,
+        _put_u64(42) + _put_u32(len(update_content_text)) + update_content_text,
+    )
+    update_content_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(update_content["id"]), 0, _put_u32(1),
+    )
     total_count_request = _envelope(
         catalog, ENVELOPE_REQUEST_MAGIC, int(total_count["id"]), 0, b"",
     )
@@ -3973,6 +4023,56 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (reject_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": update_content["family"],
+            "id": update_content["id"],
+            "name": update_content["name"],
+            "request": {
+                "positive": update_content_request.hex(),
+                "memory_id": 42,
+                "content": update_content_text.decode("ascii"),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(update_content_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(update_content_request, 16, 4).hex()},
+                    {"mutation": "zero_memory", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(update_content["id"]), 0,
+                               _put_u64(0) + _put_u32(len(update_content_text)) +
+                               update_content_text).hex()},
+                    {"mutation": "empty_content", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(update_content["id"]), 0,
+                               _put_u64(42) + _put_u32(0)).hex()},
+                    {"mutation": "content_length_mismatch", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(update_content["id"]), 0,
+                               _put_u64(42) + _put_u32(len(update_content_text) + 1) +
+                               update_content_text).hex()},
+                    {"mutation": "embedded_nul", "hex":
+                     _envelope(catalog, ENVELOPE_REQUEST_MAGIC, int(update_content["id"]), 0,
+                               _put_u64(42) + _put_u32(len(update_content_text)) +
+                               update_content_text[:-1] + b"\0").hex()},
+                    {"mutation": "short", "hex": update_content_request[:-1].hex()},
+                    {"mutation": "long", "hex": (update_content_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "updated_rows": 1, "hex": update_content_ok.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(update_content_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(update_content_ok, 12, 5).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(update_content["id"]), 0, b"").hex()},
+                    {"mutation": "count_too_large", "hex":
+                     (update_content_ok[:-4] + _put_u32(2)).hex()},
+                    {"mutation": "short", "hex": update_content_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (update_content_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -4027,6 +4127,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     valid_at = catalog["operations"][39]
     has_scope_type = catalog["operations"][40]
     reject = catalog["operations"][41]
+    update_content = catalog["operations"][42]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -4616,6 +4717,23 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
          f"{reject['request']['policy']['confidence_penalty_binary64_bits']}ull"),
         ("AIMEE_DB2_REJECT_FLOOR_BITS",
          f"{reject['request']['policy']['confidence_floor_binary64_bits']}ull"),
+        ("AIMEE_DB2_EVENT_UPDATE_CONTENT", "AIMEE_DB2_EVENT_MEMORY"),
+        ("AIMEE_DB2_STAGE_UPDATE_CONTENT", "AIMEE_DB2_FAMILY_MEMORY"),
+        ("AIMEE_DB2_OPERATION_UPDATE_CONTENT", f"{update_content['id']}u"),
+        ("AIMEE_DB2_UPDATE_CONTENT_REQUEST_MIN_LEN",
+         f"{update_content['request']['encoded_size_min']}u"),
+        ("AIMEE_DB2_UPDATE_CONTENT_REQUEST_MAX_LEN",
+         f"{update_content['request']['encoded_size_max']}u"),
+        ("AIMEE_DB2_UPDATE_CONTENT_RESPONSE_LEN",
+         f"{update_content['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_UPDATE_CONTENT_ERROR_LEN",
+         f"{update_content['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_UPDATE_CONTENT_MEMORY_ID_MAX",
+         f"{update_content['request']['fields'][0]['maximum']}ull"),
+        ("AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX",
+         f"{update_content['request']['fields'][1]['maximum_bytes']}u"),
+        ("AIMEE_DB2_UPDATE_CONTENT_MAX",
+         f"{update_content['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -6558,6 +6676,100 @@ static inline int aimee_db2_prune_orphaned_l0_reply_decode(const uint8_t *input,
    return 0;
 }}
 
+static inline int aimee_db2_update_content_request_encode(uint64_t memory_id,
+                                                         const char *content, uint8_t *output,
+                                                         size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!content || !output || !output_len)
+      return -1;
+   size_t content_len = 0u;
+   while (content_len <= AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX && content[content_len])
+      ++content_len;
+   size_t payload_len = 12u + content_len;
+   if (memory_id == 0u || memory_id > AIMEE_DB2_UPDATE_CONTENT_MEMORY_ID_MAX ||
+       content_len == 0u || content_len > AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX ||
+       capacity < AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len ||
+       aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_UPDATE_CONTENT, 0u,
+                                       (uint32_t)payload_len, output, capacity) != 0)
+      return -1;
+   uint8_t *payload = output + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   aimee_db2_put_u64(payload, memory_id);
+   aimee_db2_put_u32(payload + 8u, (uint32_t)content_len);
+   memcpy(payload + 12u, content, content_len);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + (uint32_t)payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_update_content_request_decode(const uint8_t *input, size_t input_len,
+                                                          uint64_t *memory_id, char *content,
+                                                          size_t content_capacity)
+{{
+   if (memory_id)
+      *memory_id = 0u;
+   if (content && content_capacity)
+      content[0] = '\\0';
+   if (!memory_id || !content ||
+       content_capacity < (size_t)AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX + 1u)
+      return -1;
+   aimee_db2_request_header_t header = {{0}};
+   if (aimee_db2_request_header_decode(input, input_len, &header) != 0 || header.flags != 0u ||
+       header.operation != AIMEE_DB2_OPERATION_UPDATE_CONTENT || header.payload_len < 13u ||
+       (size_t)AIMEE_DB2_ENVELOPE_HEADER_LEN + header.payload_len != input_len)
+      return -1;
+   const uint8_t *payload = input + AIMEE_DB2_ENVELOPE_HEADER_LEN;
+   uint64_t decoded_memory_id = aimee_db2_get_u64(payload);
+   uint32_t content_len = aimee_db2_get_u32(payload + 8u);
+   if (decoded_memory_id == 0u || decoded_memory_id > AIMEE_DB2_UPDATE_CONTENT_MEMORY_ID_MAX ||
+       content_len == 0u || content_len > AIMEE_DB2_UPDATE_CONTENT_CONTENT_MAX ||
+       (uint32_t)12u + content_len != header.payload_len)
+      return -1;
+   /* An embedded NUL would store a shorter row than the caller sent, silently
+    * dropping the tail of the text it asked to persist. */
+   for (uint32_t index = 0u; index < content_len; ++index)
+      if (payload[12u + index] == 0u)
+         return -1;
+   memcpy(content, payload + 12u, content_len);
+   content[content_len] = '\\0';
+   *memory_id = decoded_memory_id;
+   return 0;
+}}
+
+static inline int aimee_db2_update_content_reply_encode(uint32_t updated_rows, uint8_t *output,
+                                                        size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0u;
+   if (!output || !output_len || updated_rows > AIMEE_DB2_UPDATE_CONTENT_MAX ||
+       capacity < AIMEE_DB2_UPDATE_CONTENT_RESPONSE_LEN ||
+       aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_UPDATE_CONTENT, AIMEE_DB2_RESULT_OK, 4u,
+                                     output, capacity) != 0)
+      return -1;
+   aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, updated_rows);
+   *output_len = AIMEE_DB2_UPDATE_CONTENT_RESPONSE_LEN;
+   return 0;
+}}
+
+static inline int aimee_db2_update_content_reply_decode(const uint8_t *input, size_t input_len,
+                                                        uint32_t *updated_rows)
+{{
+   if (updated_rows)
+      *updated_rows = 0u;
+   if (!updated_rows)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_UPDATE_CONTENT ||
+       header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded > AIMEE_DB2_UPDATE_CONTENT_MAX)
+      return -1;
+   *updated_rows = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_reject_request_encode(uint64_t memory_id, uint8_t *output,
                                                  size_t capacity)
 {{
@@ -8177,6 +8389,11 @@ extern "C"
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint64_t memory_id, aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_update_content_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint64_t memory_id, const char *content, uint32_t *updated_rows,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
@@ -9152,6 +9369,34 @@ aimee_module_call_result_t aimee_db2_reject_call(aimee_db2_call_fn call, void *c
    return AIMEE_MODULE_CALL_OK;
 }
 
+aimee_module_call_result_t aimee_db2_update_content_call(aimee_db2_call_fn call, void *call_context,
+                                                         uint64_t trace_id, uint64_t deadline_ns,
+                                                         uint64_t memory_id, const char *content,
+                                                         uint32_t *updated_rows,
+                                                         aimee_module_cancelled_fn cancelled,
+                                                         void *cancel_context)
+{
+   if (!call || !updated_rows)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   *updated_rows = 0u;
+   static _Thread_local uint8_t request[AIMEE_DB2_UPDATE_CONTENT_REQUEST_MAX_LEN];
+   uint8_t response[AIMEE_DB2_UPDATE_CONTENT_RESPONSE_LEN];
+   uint32_t request_len = 0u, response_len = 0u;
+   if (aimee_db2_update_content_request_encode(memory_id, content, request, sizeof(request),
+                                               &request_len) != 0)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_UPDATE_CONTENT, AIMEE_DB2_STAGE_UPDATE_CONTENT, trace_id,
+            deadline_ns, request, request_len, response, sizeof(response), &response_len, cancelled,
+            cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_update_content_reply_decode(response, response_len, updated_rows) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
+
 aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, void *call_context,
                                                       uint64_t trace_id, uint64_t deadline_ns,
                                                       uint32_t *domain_result,
@@ -9433,6 +9678,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     valid_at = catalog["operations"][39]
     has_scope_type = catalog["operations"][40]
     reject = catalog["operations"][41]
+    update_content = catalog["operations"][42]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -9703,6 +9949,12 @@ const OperationReject uint32 = {reject['id']}
 const RejectMemoryIDMax uint64 = {reject['request']['field']['maximum']}
 const RejectPenaltyBits uint64 = {reject['request']['policy']['confidence_penalty_binary64_bits']}
 const RejectFloorBits uint64 = {reject['request']['policy']['confidence_floor_binary64_bits']}
+const EventUpdateContent = EventMemory
+const StageUpdateContent = FamilyMemory
+const OperationUpdateContent uint32 = {update_content['id']}
+const UpdateContentMemoryIDMax uint64 = {update_content['request']['fields'][0]['maximum']}
+const UpdateContentContentMax = {update_content['request']['fields'][1]['maximum_bytes']}
+const UpdateContentMax uint32 = {update_content['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -10562,6 +10814,75 @@ func DecodeRejectReply(reply []byte) error {{
 		return ErrMalformedEnvelope
 	}}
 	return nil
+}}
+
+// EncodeUpdateContentRequest emits the memory and its replacement text.
+func EncodeUpdateContentRequest(memoryID uint64, content string) ([]byte, error) {{
+	if memoryID == 0 || memoryID > UpdateContentMemoryIDMax || len(content) == 0 ||
+		len(content) > UpdateContentContentMax || hasNUL(content) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	payloadLen := 12 + len(content)
+	header, err := EncodeRequestHeader(OperationUpdateContent, 0, uint32(payloadLen))
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(content)))
+	copy(payload[12:], content)
+	return request, nil
+}}
+
+// DecodeUpdateContentRequest validates the envelope, memory, and text.
+func DecodeUpdateContentRequest(request []byte) (uint64, string, error) {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationUpdateContent || header.Flags != 0 ||
+		header.PayloadLen < 13 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	contentLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > UpdateContentMemoryIDMax || contentLen == 0 ||
+		contentLen > uint32(UpdateContentContentMax) || 12+contentLen != header.PayloadLen {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	content := string(payload[12 : 12+contentLen])
+	if hasNUL(content) {{
+		return 0, "", ErrMalformedEnvelope
+	}}
+	return memoryID, content, nil
+}}
+
+// EncodeUpdateContentReply emits whether the named row existed.
+func EncodeUpdateContentReply(updatedRows uint32) ([]byte, error) {{
+	if updatedRows > UpdateContentMax {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationUpdateContent, ResultOK, 4)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], updatedRows)
+	return reply, nil
+}}
+
+// DecodeUpdateContentReply validates the operation and the single-row bound.
+func DecodeUpdateContentReply(reply []byte) (uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationUpdateContent || header.Result != ResultOK ||
+		header.PayloadLen != 4 {{
+		return 0, ErrMalformedEnvelope
+	}}
+	updatedRows := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if updatedRows > UpdateContentMax {{
+		return 0, ErrMalformedEnvelope
+	}}
+	return updatedRows, nil
 }}
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

@@ -9,7 +9,7 @@ import (
 	"math"
 )
 
-const ContractSHA256 = "0034a46f7896f62a2304893be09bccf1c6b35059740b07c7cacc1fd76f0f0209"
+const ContractSHA256 = "f42cf9af21278faac859d9db1fa57e2045be60fd972beda5960cb3582c15b2e9"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -269,6 +269,12 @@ const OperationReject uint32 = 32
 const RejectMemoryIDMax uint64 = 9223372036854775807
 const RejectPenaltyBits uint64 = 4591870180066957722
 const RejectFloorBits uint64 = 0
+const EventUpdateContent = EventMemory
+const StageUpdateContent = FamilyMemory
+const OperationUpdateContent uint32 = 33
+const UpdateContentMemoryIDMax uint64 = 9223372036854775807
+const UpdateContentContentMax = 2047
+const UpdateContentMax uint32 = 1
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -1130,6 +1136,75 @@ func DecodeRejectReply(reply []byte) error {
 		return ErrMalformedEnvelope
 	}
 	return nil
+}
+
+// EncodeUpdateContentRequest emits the memory and its replacement text.
+func EncodeUpdateContentRequest(memoryID uint64, content string) ([]byte, error) {
+	if memoryID == 0 || memoryID > UpdateContentMemoryIDMax || len(content) == 0 ||
+		len(content) > UpdateContentContentMax || hasNUL(content) {
+		return nil, ErrMalformedEnvelope
+	}
+	payloadLen := 12 + len(content)
+	header, err := EncodeRequestHeader(OperationUpdateContent, 0, uint32(payloadLen))
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	request := append(header, make([]byte, payloadLen)...)
+	payload := request[EnvelopeHeaderLen:]
+	binary.LittleEndian.PutUint64(payload, memoryID)
+	binary.LittleEndian.PutUint32(payload[8:], uint32(len(content)))
+	copy(payload[12:], content)
+	return request, nil
+}
+
+// DecodeUpdateContentRequest validates the envelope, memory, and text.
+func DecodeUpdateContentRequest(request []byte) (uint64, string, error) {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationUpdateContent || header.Flags != 0 ||
+		header.PayloadLen < 13 ||
+		len(request) != int(EnvelopeHeaderLen)+int(header.PayloadLen) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	payload := request[EnvelopeHeaderLen:]
+	memoryID := binary.LittleEndian.Uint64(payload)
+	contentLen := binary.LittleEndian.Uint32(payload[8:])
+	if memoryID == 0 || memoryID > UpdateContentMemoryIDMax || contentLen == 0 ||
+		contentLen > uint32(UpdateContentContentMax) || 12+contentLen != header.PayloadLen {
+		return 0, "", ErrMalformedEnvelope
+	}
+	content := string(payload[12 : 12+contentLen])
+	if hasNUL(content) {
+		return 0, "", ErrMalformedEnvelope
+	}
+	return memoryID, content, nil
+}
+
+// EncodeUpdateContentReply emits whether the named row existed.
+func EncodeUpdateContentReply(updatedRows uint32) ([]byte, error) {
+	if updatedRows > UpdateContentMax {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationUpdateContent, ResultOK, 4)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], updatedRows)
+	return reply, nil
+}
+
+// DecodeUpdateContentReply validates the operation and the single-row bound.
+func DecodeUpdateContentReply(reply []byte) (uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationUpdateContent || header.Result != ResultOK ||
+		header.PayloadLen != 4 {
+		return 0, ErrMalformedEnvelope
+	}
+	updatedRows := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if updatedRows > UpdateContentMax {
+		return 0, ErrMalformedEnvelope
+	}
+	return updatedRows, nil
 }
 
 // EncodeTotalCountRequest emits the empty request envelope for the global memory count.

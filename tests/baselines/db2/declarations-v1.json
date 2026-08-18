@@ -18803,9 +18803,15 @@
           "line": 709
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.update_content operation replaces the canonical text rewrite, bounded to the memory record's own content width; the row is DB2 authority and re-deriving any vector from the new text is a separate provider concern."
+      },
       "signature": "int db2_memory_update_content ( int64_t memory_id , const char * content )",
       "signature_sha256": "c2b8755e73dc6589156aa188fa5b0cd37581030c803584fff6682465aad881e8",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_memory_update_content"
     },
     {
@@ -25848,15 +25854,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "ef907347452c9f24acfa79d3ac1f1d04ce3fd3e890731879d2f362b87c550509",
+  "fingerprint": "fb357b0fbcb0eff1f7c445e22eb071c70f4f053e75270be17e70afdb6f9517fd",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 654,
+    "audit_pending": 653,
     "declarations": 1397,
     "headers": 138,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 304
+    "reviewed": 305
   }
 }

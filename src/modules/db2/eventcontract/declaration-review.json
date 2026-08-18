@@ -1804,6 +1804,14 @@
       "reason": "The typed memory.touch operation replaces the retrieval-accounting bump; the increment and the stamp are fixed policy behind the handler so a caller can record that a memory was used but cannot choose by how much or when."
     },
     {
+      "symbol": "db2_memory_update_content",
+      "signature_sha256": "c2b8755e73dc6589156aa188fa5b0cd37581030c803584fff6682465aad881e8",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "db3_placement": "retained-db2",
+      "reason": "The typed memory.update_content operation replaces the canonical text rewrite, bounded to the memory record's own content width; the row is DB2 authority and re-deriving any vector from the new text is a separate provider concern."
+    },
+    {
       "symbol": "db2_memory_valid_at",
       "signature_sha256": "30ac433991f28055c0180963e01ef95786d77a1300b1d429f697d667d235567f",
       "disposition": "wire-operation",

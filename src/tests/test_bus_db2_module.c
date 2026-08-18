@@ -77,6 +77,7 @@ typedef struct
    int (*valid_at)(int64_t memory_id, const char *as_of);
    int (*has_scope_type)(int64_t memory_id, const char *scope_type);
    int (*reject)(int64_t memory_id);
+   int (*update_content)(int64_t memory_id, const char *content);
    int (*pool_status)(aimee_db2_pool_status_t *status);
    int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
    int (*postgres_status)(aimee_db2_postgres_status_t *status);
@@ -130,6 +131,8 @@ static int scope_type_calls;
 static char scope_type_last[64];
 static int reject_calls;
 static int64_t reject_last;
+static int update_content_calls;
+static char update_content_last[2048];
 static int total_count_calls;
 static int session_l2_count_calls;
 static int key_exists_calls;
@@ -817,6 +820,20 @@ static int reject(int64_t memory_id)
    return memory_id == 42 ? 0 : -1;
 }
 
+int db2_memory_update_content(int64_t memory_id, const char *content)
+{
+   (void)memory_id;
+   (void)content;
+   return 0;
+}
+
+static int update_content(int64_t memory_id, const char *content)
+{
+   update_content_calls++;
+   snprintf(update_content_last, sizeof(update_content_last), "%s", content);
+   return memory_id == 42 ? 1 : 0;
+}
+
 static int stats_counts(aimee_db2_memory_stats_t *stats)
 {
    stats_counts_calls++;
@@ -1148,6 +1165,7 @@ int main(void)
        .valid_at = valid_at,
        .has_scope_type = has_scope_type,
        .reject = reject,
+       .update_content = update_content,
        .pool_status = pool_status,
        .embedding_refusals = embedding_refusals,
        .postgres_status = postgres_status,
@@ -1394,6 +1412,15 @@ int main(void)
    assert(reject_calls == 1 && reject_last == 42);
    assert(aimee_db2_reject_call(call_client, &client, 7060, 0, 43u, NULL, NULL) ==
           AIMEE_MODULE_CALL_INTERNAL);
+
+   uint32_t rewritten = 99u;
+   assert(aimee_db2_update_content_call(call_client, &client, 7061, 0, 42u, "revised text",
+                                        &rewritten, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(rewritten == 1 && update_content_calls == 1 &&
+          strcmp(update_content_last, "revised text") == 0);
+   assert(aimee_db2_update_content_call(call_client, &client, 7062, 0, 43u, "revised text",
+                                        &rewritten, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(rewritten == 0);
 
    aimee_db2_pool_status_t pool = {0};
    domain_result = 9;

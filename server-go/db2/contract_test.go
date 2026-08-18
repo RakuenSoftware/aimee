@@ -46,6 +46,7 @@ type wireBaseline struct {
 			LinkID                     uint64   `json:"link_id"`
 			AsOf                       string   `json:"as_of"`
 			ScopeType                  string   `json:"scope_type"`
+			Content                    string   `json:"content"`
 			HasValue                   uint32   `json:"has_value"`
 			ValueBits                  uint64   `json:"value_bits"`
 			ThresholdBits              uint64   `json:"threshold_bits"`
@@ -90,6 +91,7 @@ type wireBaseline struct {
 				Tagged                uint32            `json:"tagged"`
 				InForce               uint32            `json:"in_force"`
 				Present               uint32            `json:"present"`
+				UpdatedRows           uint32            `json:"updated_rows"`
 				DeletedRows           uint32            `json:"deleted_rows"`
 				DemotedCount          uint32            `json:"demoted_count"`
 				AvgEffectivenessBits  uint64            `json:"avg_effectiveness_bits"`
@@ -226,7 +228,7 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 42 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 43 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
 		baseline.Operations[2].Name != "pool_status" ||
 		baseline.Operations[3].Name != "embedding_refusals" ||
@@ -267,7 +269,8 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 		baseline.Operations[38].Name != "link_delete" ||
 		baseline.Operations[39].Name != "valid_at" ||
 		baseline.Operations[40].Name != "has_scope_type" ||
-		baseline.Operations[41].Name != "reject" {
+		baseline.Operations[41].Name != "reject" ||
+		baseline.Operations[42].Name != "update_content" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
@@ -464,6 +467,52 @@ func TestDemoteIDMatchesEverySharedCVector(t *testing.T) {
 		if !errors.Is(err, ErrMalformedEnvelope) || demoted != 0 {
 			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, demoted, err)
 		}
+	}
+}
+
+func TestUpdateContentMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[42]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	got, err := EncodeUpdateContentRequest(operation.Request.MemoryID, operation.Request.Content)
+	if err != nil || string(got) != string(wantRequest) {
+		t.Fatalf("request = (%x, %v), want %x", got, err, wantRequest)
+	}
+	memoryID, content, err := DecodeUpdateContentRequest(wantRequest)
+	if err != nil || memoryID != operation.Request.MemoryID || content != operation.Request.Content {
+		t.Fatalf("positive request = (%d, %q, %v)", memoryID, content, err)
+	}
+	for _, vector := range operation.Request.Negative {
+		if _, _, err := DecodeUpdateContentRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		got, err := EncodeUpdateContentReply(vector.UpdatedRows)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		updated, err := DecodeUpdateContentReply(got)
+		if err != nil || updated != vector.UpdatedRows {
+			t.Fatalf("decode = (%d, %v)", updated, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		updated, err := DecodeUpdateContentReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || updated != 0 {
+			t.Fatalf("negative reply %s = (%d, %v)", vector.Mutation, updated, err)
+		}
+	}
+	// Exactly the memory record's content width encodes; one byte more is
+	// refused rather than silently truncated by whatever reads the row back.
+	atBound := strings.Repeat("x", UpdateContentContentMax)
+	if _, err := EncodeUpdateContentRequest(42, atBound); err != nil {
+		t.Fatalf("content at the bound refused: %v", err)
+	}
+	if _, err := EncodeUpdateContentRequest(42, atBound+"x"); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("content past the bound encoded: %v", err)
+	}
+	if _, err := EncodeUpdateContentRequest(42, ""); !errors.Is(err, ErrMalformedEnvelope) {
+		t.Fatalf("empty content encoded: %v", err)
 	}
 }
 

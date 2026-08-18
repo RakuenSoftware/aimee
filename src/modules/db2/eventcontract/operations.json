@@ -1172,6 +1172,33 @@
         "encoded_size_error": 24,
         "fields": []
       }
+    },
+    {
+      "family": "memory",
+      "id": 33,
+      "name": "update_content",
+      "wire_format": "db2-envelope-u64-string-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": ["ok"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Memory content is the canonical relational column; a portable ANN provider holds only a derived vector and cannot be the authority for the text.",
+      "c_symbols": ["db2_memory_update_content"],
+      "request": {
+        "encoded_size_min": 37,
+        "encoded_size_max": 2083,
+        "fields": [
+          {"name": "memory_id", "type": "u64", "minimum": 1,
+           "maximum": 9223372036854775807},
+          {"name": "content", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 2047}
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {"name": "updated_rows", "type": "u32", "minimum": 0, "maximum": 1}
+      }
     }
   ]
 }
