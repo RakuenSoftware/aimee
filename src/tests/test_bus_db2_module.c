@@ -28,6 +28,7 @@ typedef struct
 {
    int (*health_probe)(int *schema_ok, int *have_pg_trgm);
    int (*kb_health_probe)(int *kb_tables_ok);
+   int (*embedding_dimension)(void);
 } aimee_db2_module_backend_t;
 
 extern aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
@@ -51,6 +52,7 @@ typedef struct
 
 static int health_calls;
 static int kb_health_calls;
+static int embedding_dimension_calls;
 static atomic_int block_health;
 static atomic_int health_entered;
 static atomic_int health_release;
@@ -85,6 +87,18 @@ int db2_health_probe(int *schema_ok, int *have_pg_trgm)
 int db2_kb_health_probe(int *kb_tables_ok)
 {
    return kb_health_probe(kb_tables_ok);
+}
+
+int db2_embedding_dim(void)
+{
+   embedding_dimension_calls++;
+   return 384;
+}
+
+static int embedding_dimension(void)
+{
+   embedding_dimension_calls++;
+   return 384;
 }
 
 static void *run_process(void *argument)
@@ -217,6 +231,7 @@ int main(void)
    static const aimee_db2_module_backend_t backend = {
        .health_probe = health_probe,
        .kb_health_probe = kb_health_probe,
+       .embedding_dimension = embedding_dimension,
    };
    process_thread_t process = {
        .config = {.socket_path = socket_path,
@@ -250,6 +265,12 @@ int main(void)
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(schema_ok == 1 && have_pg_trgm == 0 && kb_tables_ok == 1);
    assert(health_calls == 1 && kb_health_calls == 1);
+
+   uint32_t domain_result = 9, dimension = 9;
+   assert(aimee_db2_embedding_dimension_call(call_client, &client, 7010, 0, &domain_result,
+                                             &dimension, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && dimension == 384);
+   assert(embedding_dimension_calls == 1);
 
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 7002, 1, &schema_ok, &have_pg_trgm,

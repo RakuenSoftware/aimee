@@ -32,6 +32,7 @@ type wireBaseline struct {
 		} `json:"reply"`
 	} `json:"body_envelope"`
 	Operations []struct {
+		Name    string `json:"name"`
 		Request struct {
 			Positive string `json:"positive"`
 			Negative []struct {
@@ -41,8 +42,10 @@ type wireBaseline struct {
 		} `json:"request"`
 		Reply struct {
 			Positive []struct {
-				Flags uint32 `json:"flags"`
-				Hex   string `json:"hex"`
+				Flags     uint32 `json:"flags"`
+				Result    uint32 `json:"result"`
+				Dimension uint32 `json:"dimension"`
+				Hex       string `json:"hex"`
 			} `json:"positive"`
 			Negative []struct {
 				Mutation string `json:"mutation"`
@@ -137,10 +140,54 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 1 {
-		t.Fatalf("operation count = %d, want 1", len(baseline.Operations))
+	if len(baseline.Operations) != 2 || baseline.Operations[0].Name != "health" ||
+		baseline.Operations[1].Name != "embedding_dimension" {
+		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
+}
+
+func TestEmbeddingDimensionMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[1]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeEmbeddingDimensionRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	if err := DecodeEmbeddingDimensionRequest(wantRequest); err != nil {
+		t.Fatalf("positive request: %v", err)
+	}
+	for _, vector := range operation.Request.Negative {
+		t.Run("request_"+vector.Mutation, func(t *testing.T) {
+			if err := DecodeEmbeddingDimensionRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+				t.Fatalf("negative request error = %v", err)
+			}
+		})
+	}
+	for _, vector := range operation.Reply.Positive {
+		vector := vector
+		t.Run("reply_"+vector.Hex, func(t *testing.T) {
+			got, err := EncodeEmbeddingDimensionReply(vector.Result, vector.Dimension)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			want := decodeHex(t, vector.Hex)
+			if string(got) != string(want) {
+				t.Fatalf("reply = %x, want %x", got, want)
+			}
+			result, dimension, err := DecodeEmbeddingDimensionReply(want)
+			if err != nil || result != vector.Result || dimension != vector.Dimension {
+				t.Fatalf("decode = (%d, %d, %v)", result, dimension, err)
+			}
+		})
+	}
+	for _, vector := range operation.Reply.Negative {
+		t.Run("reply_"+vector.Mutation, func(t *testing.T) {
+			result, dimension, err := DecodeEmbeddingDimensionReply(decodeHex(t, vector.Hex))
+			if !errors.Is(err, ErrMalformedEnvelope) || result != 0 || dimension != 0 {
+				t.Fatalf("negative reply = (%d, %d, %v)", result, dimension, err)
+			}
+		})
+	}
 }
 
 func TestGeneratedIdentityMatchesSharedCatalog(t *testing.T) {

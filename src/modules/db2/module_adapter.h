@@ -7,6 +7,7 @@ typedef struct
 {
    int (*health_probe)(int *schema_ok, int *have_pg_trgm);
    int (*kb_health_probe)(int *kb_tables_ok);
+   int (*embedding_dimension)(void);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

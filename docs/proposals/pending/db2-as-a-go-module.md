@@ -17,7 +17,8 @@
   distinct from DB2 ownership, and includes them in the reproducible source pin; all 138 DB2
   translation units compile and link from the isolated export. The first live S3 replay group now
   starts that packaged executable against fresh PostgreSQL, crosses an executable-bound event bus,
-  compares canonical health bytes, and verifies the recorded dimension and schema effects. This is
+  compares canonical health bytes, verifies the recorded dimension and schema effects, and serves
+  that effective dimension through the first post-bootstrap envelope operation. This is
   explicitly not the S4 ownership cutover or
   the S6 pure-Go DB2 port: production remains on direct calls, pgvector remains in DB2, and no
   external provider grant ships until the complete C backend passes replay and S4 activates it.
@@ -645,9 +646,11 @@ against fresh pgvector PostgreSQL, compares raw response bytes to the generated 
 repeats the call through the typed client, checks schema/extension/KB-table evidence, and terminates
 the process cleanly. CI separately verifies `kb_meta.schema_embedding_dim` and representative
 tables, and the stable `unit-tests` aggregate now requires this job. This proves the current health
-operation and schema bootstrap through the real process boundary. The next replay slice proves an
+operation and schema bootstrap through the real process boundary. The same harness proves an
 expired deadline, deterministic cancellation after request publication, stale-terminal-reply
-draining, and post-cancellation process health; it does not claim the remaining catalog handlers,
+draining, post-cancellation process health, and the first envelope-backed lifecycle operation:
+`embedding_dimension` returns the effective 1–4000 pgvector schema width or `invalid_state`. It does
+not claim the remaining catalog handlers,
 tenant, concurrency, ambiguity, or durability replay groups.
 
 These reductions remain phase-one precursors, not substitutes for the program exit criteria below:

@@ -15,10 +15,13 @@ static int health_result;
 static int kb_health_result;
 static int health_calls;
 static int kb_health_calls;
+static int embedding_dimension_value;
+static int embedding_dimension_calls;
 static aimee_module_call_result_t transport_result;
-static uint8_t transport_response[AIMEE_DB2_RESPONSE_LEN];
+static uint8_t transport_response[AIMEE_DB2_EMBEDDING_DIMENSION_RESPONSE_LEN];
 static uint32_t transport_response_len;
 static int transport_calls;
+static int transport_expect_dimension;
 
 int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
 {
@@ -55,6 +58,18 @@ int db2_kb_health_probe(int *kb_tables_ok)
    return kb_health_probe(kb_tables_ok);
 }
 
+int db2_embedding_dim(void)
+{
+   embedding_dimension_calls++;
+   return embedding_dimension_value;
+}
+
+static int embedding_dimension(void)
+{
+   embedding_dimension_calls++;
+   return embedding_dimension_value;
+}
+
 static void reset(void)
 {
    cancelled = 0;
@@ -64,9 +79,12 @@ static void reset(void)
    kb_health_result = 0;
    health_calls = 0;
    kb_health_calls = 0;
+   embedding_dimension_value = 384;
+   embedding_dimension_calls = 0;
    transport_result = AIMEE_MODULE_CALL_OK;
    transport_response_len = AIMEE_DB2_RESPONSE_LEN;
    transport_calls = 0;
+   transport_expect_dimension = 0;
    assert(aimee_db2_health_response_encode(AIMEE_DB2_FLAG_SCHEMA | AIMEE_DB2_FLAG_KB_TABLES,
                                            transport_response, sizeof(transport_response)) == 0);
 }
@@ -78,11 +96,16 @@ transport(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_
           aimee_module_cancelled_fn cancelled_fn, void *cancel_context)
 {
    assert(context == (void *)0x1234);
-   assert(event_kind == AIMEE_DB2_EVENT_HEALTH);
-   assert(stage_id == AIMEE_DB2_STAGE_HEALTH);
+   assert(event_kind == (transport_expect_dimension ? AIMEE_DB2_EVENT_EMBEDDING_DIMENSION
+                                                    : AIMEE_DB2_EVENT_HEALTH));
+   assert(stage_id == (transport_expect_dimension ? AIMEE_DB2_STAGE_EMBEDDING_DIMENSION
+                                                  : AIMEE_DB2_STAGE_HEALTH));
    assert(trace_id == 77);
    assert(deadline_ns == 88);
-   assert(aimee_db2_health_request_decode(request_body, request_len) == 0);
+   if (transport_expect_dimension)
+      assert(aimee_db2_embedding_dimension_request_decode(request_body, request_len) == 0);
+   else
+      assert(aimee_db2_health_request_decode(request_body, request_len) == 0);
    assert(cancelled_fn == NULL && cancel_context == NULL);
    transport_calls++;
    if (transport_result != AIMEE_MODULE_CALL_OK)
@@ -236,6 +259,62 @@ static void test_body_envelope(void)
    assert(aimee_db2_reply_header_decode(frame, sizeof(frame), NULL) == -1);
 }
 
+static void test_embedding_dimension_wire(void)
+{
+   uint8_t request[AIMEE_DB2_EMBEDDING_DIMENSION_REQUEST_LEN] = {0};
+   assert(aimee_db2_embedding_dimension_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_embedding_dimension_request_decode(request, sizeof(request)) == 0);
+   assert(aimee_db2_embedding_dimension_request_encode(NULL, sizeof(request)) == -1);
+   assert(aimee_db2_embedding_dimension_request_encode(request, sizeof(request) - 1) == -1);
+   aimee_db2_put_u32(request + 12, 1u);
+   assert(aimee_db2_embedding_dimension_request_decode(request, sizeof(request)) == -1);
+   assert(aimee_db2_embedding_dimension_request_encode(request, sizeof(request)) == 0);
+   assert(aimee_db2_embedding_dimension_request_decode(request, sizeof(request) - 1) == -1);
+
+   uint8_t reply[AIMEE_DB2_EMBEDDING_DIMENSION_RESPONSE_LEN] = {0};
+   uint32_t reply_len = 99, result = 99, dimension = 99;
+   assert(aimee_db2_embedding_dimension_reply_encode(AIMEE_DB2_RESULT_OK, 384, reply, sizeof(reply),
+                                                     &reply_len) == 0);
+   assert(reply_len == sizeof(reply));
+   assert(aimee_db2_embedding_dimension_reply_decode(reply, reply_len, &result, &dimension) == 0);
+   assert(result == AIMEE_DB2_RESULT_OK && dimension == 384);
+
+   assert(aimee_db2_embedding_dimension_reply_encode(AIMEE_DB2_RESULT_INVALID_STATE, 0, reply,
+                                                     sizeof(reply), &reply_len) == 0);
+   assert(reply_len == AIMEE_DB2_EMBEDDING_DIMENSION_ERROR_LEN);
+   assert(aimee_db2_embedding_dimension_reply_decode(reply, reply_len, &result, &dimension) == 0);
+   assert(result == AIMEE_DB2_RESULT_INVALID_STATE && dimension == 0);
+
+   assert(aimee_db2_embedding_dimension_reply_encode(AIMEE_DB2_RESULT_OK, 0, reply, sizeof(reply),
+                                                     &reply_len) == -1);
+   assert(reply_len == 0);
+   assert(aimee_db2_embedding_dimension_reply_encode(AIMEE_DB2_RESULT_OK,
+                                                     AIMEE_DB2_EMBEDDING_DIMENSION_MAX + 1u, reply,
+                                                     sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_embedding_dimension_reply_encode(AIMEE_DB2_RESULT_NOT_FOUND, 0, reply,
+                                                     sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_embedding_dimension_reply_encode(AIMEE_DB2_RESULT_INVALID_STATE, 1, reply,
+                                                     sizeof(reply), &reply_len) == -1);
+   assert(aimee_db2_embedding_dimension_reply_encode(AIMEE_DB2_RESULT_OK, 384, NULL, sizeof(reply),
+                                                     &reply_len) == -1);
+   assert(aimee_db2_embedding_dimension_reply_encode(AIMEE_DB2_RESULT_OK, 384, reply, sizeof(reply),
+                                                     NULL) == -1);
+   assert(aimee_db2_embedding_dimension_reply_encode(AIMEE_DB2_RESULT_OK, 384, reply,
+                                                     sizeof(reply) - 1, &reply_len) == -1);
+
+   assert(aimee_db2_embedding_dimension_reply_encode(AIMEE_DB2_RESULT_OK, 384, reply, sizeof(reply),
+                                                     &reply_len) == 0);
+   aimee_db2_put_u32(reply + 8, AIMEE_DB2_OPERATION_HEALTH);
+   assert(aimee_db2_embedding_dimension_reply_decode(reply, reply_len, &result, &dimension) == -1);
+   assert(result == 0 && dimension == 0);
+   assert(aimee_db2_embedding_dimension_reply_encode(AIMEE_DB2_RESULT_OK, 384, reply, sizeof(reply),
+                                                     &reply_len) == 0);
+   aimee_db2_put_u32(reply + AIMEE_DB2_ENVELOPE_HEADER_LEN, 0);
+   assert(aimee_db2_embedding_dimension_reply_decode(reply, reply_len, &result, &dimension) == -1);
+   assert(aimee_db2_embedding_dimension_reply_decode(NULL, reply_len, &result, &dimension) == -1);
+   assert(aimee_db2_embedding_dimension_reply_decode(reply, reply_len, NULL, &dimension) == -1);
+}
+
 static aimee_module_status_t invoke(const aimee_db2_module_backend_t *backend,
                                     aimee_module_invocation_t *invocation, uint8_t *request,
                                     uint32_t request_len, uint8_t *response,
@@ -311,6 +390,54 @@ static void test_handler_success_and_failures(void)
    assert(kb_health_calls == prior_kb_health_calls + 1);
 }
 
+static void test_embedding_dimension_handler(void)
+{
+   reset();
+   const aimee_db2_module_backend_t backend = {
+       .health_probe = health_probe,
+       .kb_health_probe = kb_health_probe,
+       .embedding_dimension = embedding_dimension,
+   };
+   uint8_t request[AIMEE_DB2_EMBEDDING_DIMENSION_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EMBEDDING_DIMENSION_RESPONSE_LEN];
+   uint32_t response_len = 99, result = 99, dimension = 99;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DB2_STAGE_EMBEDDING_DIMENSION};
+   assert(aimee_db2_embedding_dimension_request_encode(request, sizeof(request)) == 0);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(embedding_dimension_calls == 1);
+   assert(aimee_db2_embedding_dimension_reply_decode(response, response_len, &result, &dimension) ==
+          0);
+   assert(result == AIMEE_DB2_RESULT_OK && dimension == 384);
+
+   embedding_dimension_value = 0;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_embedding_dimension_reply_decode(response, response_len, &result, &dimension) ==
+          0);
+   assert(result == AIMEE_DB2_RESULT_INVALID_STATE && dimension == 0);
+   embedding_dimension_value = 4001;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_db2_embedding_dimension_reply_decode(response, response_len, &result, &dimension) ==
+          0);
+   assert(result == AIMEE_DB2_RESULT_INVALID_STATE && dimension == 0);
+
+   const aimee_db2_module_backend_t absent = {0};
+   assert(invoke(&absent, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CAPABILITY_ABSENT);
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response) - 1,
+                 &response_len) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+
+   embedding_dimension_value = 384;
+   cancel_after = 2;
+   cancel_checks = 0;
+   int prior_calls = embedding_dimension_calls;
+   assert(invoke(&backend, &invocation, request, sizeof(request), response, sizeof(response),
+                 &response_len) == AIMEE_MODULE_STATUS_CANCELLED);
+   assert(response_len == 0 && embedding_dimension_calls == prior_calls + 1);
+}
+
 static void test_typed_client(void)
 {
    reset();
@@ -341,12 +468,51 @@ static void test_typed_client(void)
           AIMEE_MODULE_CALL_PROTOCOL);
 }
 
+static void test_embedding_dimension_typed_client(void)
+{
+   reset();
+   transport_expect_dimension = 1;
+   uint32_t domain_result = 9, dimension = 9;
+   assert(aimee_db2_embedding_dimension_call(NULL, NULL, 77, 88, &domain_result, &dimension, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_INVALID_ARGUMENT);
+   assert(domain_result == 0 && dimension == 0);
+
+   assert(aimee_db2_embedding_dimension_reply_encode(AIMEE_DB2_RESULT_OK, 384, transport_response,
+                                                     sizeof(transport_response),
+                                                     &transport_response_len) == 0);
+   assert(aimee_db2_embedding_dimension_call(transport, (void *)0x1234, 77, 88, &domain_result,
+                                             &dimension, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && dimension == 384 && transport_calls == 1);
+
+   assert(aimee_db2_embedding_dimension_reply_encode(AIMEE_DB2_RESULT_INVALID_STATE, 0,
+                                                     transport_response, sizeof(transport_response),
+                                                     &transport_response_len) == 0);
+   assert(aimee_db2_embedding_dimension_call(transport, (void *)0x1234, 77, 88, &domain_result,
+                                             &dimension, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_INVALID_STATE && dimension == 0);
+
+   transport_result = AIMEE_MODULE_CALL_CANCELLED;
+   domain_result = dimension = 9;
+   assert(aimee_db2_embedding_dimension_call(transport, (void *)0x1234, 77, 88, &domain_result,
+                                             &dimension, NULL,
+                                             NULL) == AIMEE_MODULE_CALL_CANCELLED);
+   assert(domain_result == 0 && dimension == 0);
+   transport_result = AIMEE_MODULE_CALL_OK;
+   transport_response[0] ^= 1u;
+   assert(aimee_db2_embedding_dimension_call(transport, (void *)0x1234, 77, 88, &domain_result,
+                                             &dimension, NULL, NULL) == AIMEE_MODULE_CALL_PROTOCOL);
+   assert(domain_result == 0 && dimension == 0);
+}
+
 int main(void)
 {
    test_wire_contract();
    test_body_envelope();
+   test_embedding_dimension_wire();
    test_handler_success_and_failures();
+   test_embedding_dimension_handler();
    test_typed_client();
+   test_embedding_dimension_typed_client();
    puts("test_db2_module_contract: ok");
    return 0;
 }

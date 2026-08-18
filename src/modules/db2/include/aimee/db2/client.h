@@ -22,6 +22,11 @@ extern "C"
        int *schema_ok, int *have_pg_trgm, int *kb_tables_ok,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_embedding_dimension_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, uint32_t *dimension,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
 #ifdef __cplusplus
 }
 #endif

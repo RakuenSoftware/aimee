@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "19b4021429a4b60bd00487df9f4996ad041cfec86219774ce3b0b8e73d00ec9d"
+const ContractSHA256 = "73d206ef0821aafe269b24273a90b6a5a338d1ecd1f61a24e6201aca66d80e6c"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -39,6 +39,11 @@ const ResultInvalidState uint32 = 5
 const EventHealth = EventLifecycle
 const StageHealth = FamilyLifecycle
 const OperationHealth uint32 = 1
+const EventEmbeddingDimension = EventLifecycle
+const StageEmbeddingDimension = FamilyLifecycle
+const OperationEmbeddingDimension uint32 = 2
+const EmbeddingDimensionMin uint32 = 1
+const EmbeddingDimensionMax uint32 = 4000
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -135,6 +140,70 @@ func DecodeReplyHeader(frame []byte) (ReplyHeader, error) {
 		return ReplyHeader{}, err
 	}
 	return ReplyHeader{Operation: operation, Result: result, PayloadLen: payloadLen}, nil
+}
+
+// EncodeEmbeddingDimensionRequest emits the empty request envelope for the
+// effective DB2 pgvector schema width.
+func EncodeEmbeddingDimensionRequest() []byte {
+	header, err := EncodeRequestHeader(OperationEmbeddingDimension, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+// DecodeEmbeddingDimensionRequest validates the exact operation envelope.
+func DecodeEmbeddingDimensionRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEmbeddingDimension ||
+		header.Flags != 0 || header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+// EncodeEmbeddingDimensionReply emits either a bounded u32 success payload or
+// an empty invalid-state result.
+func EncodeEmbeddingDimensionReply(result, dimension uint32) ([]byte, error) {
+	var payloadLen uint32
+	if result == ResultOK {
+		if dimension < EmbeddingDimensionMin || dimension > EmbeddingDimensionMax {
+			return nil, ErrMalformedEnvelope
+		}
+		payloadLen = 4
+	} else if result != ResultInvalidState || dimension != 0 {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationEmbeddingDimension, result, payloadLen)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	if payloadLen == 0 {
+		return header, nil
+	}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], dimension)
+	return reply, nil
+}
+
+// DecodeEmbeddingDimensionReply validates the operation, closed result subset,
+// payload shape, and dimension domain before exposing either field.
+func DecodeEmbeddingDimensionReply(reply []byte) (uint32, uint32, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEmbeddingDimension {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {
+		return header.Result, 0, nil
+	}
+	if header.Result != ResultOK || header.PayloadLen != 4 {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	dimension := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if dimension < EmbeddingDimensionMin || dimension > EmbeddingDimensionMax {
+		return 0, 0, ErrMalformedEnvelope
+	}
+	return header.Result, dimension, nil
 }
 
 // HealthEvidence is DB2-owned PostgreSQL readiness evidence. It intentionally

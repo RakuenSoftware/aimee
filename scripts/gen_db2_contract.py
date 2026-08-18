@@ -137,7 +137,7 @@ def validate_catalog(value: object) -> dict[str, object]:
     if type(catalog["catalog_complete"]) is not bool:
         fail("catalog-complete-type", "catalog_complete must be boolean")
     if catalog["catalog_complete"]:
-        fail("catalog-complete", "the health-only catalog cannot claim declaration completeness")
+        fail("catalog-complete", "the partial catalog cannot claim declaration completeness")
     envelope = _keys(
         catalog["body_envelope"], {"request_magic", "reply_magic", "header_len"},
         "body_envelope",
@@ -169,7 +169,7 @@ def validate_catalog(value: object) -> dict[str, object]:
         seen_kinds.add(kind)
         expected_active = index == 1
         if type(family["active"]) is not bool or family["active"] is not expected_active:
-            fail("family-active", "only lifecycle may be active in the health-only catalog")
+            fail("family-active", "only lifecycle may be active in the partial catalog")
         families[expected_name] = family
 
     if catalog["result_codes"] != list(RESULT_CODES):
@@ -201,36 +201,59 @@ def validate_catalog(value: object) -> dict[str, object]:
         if order and position <= order[-1]:
             fail("operation-order", "operations must be sorted by family id then operation id")
         order.append(position)
-        if operation["wire_format"] != "db2-health-v1" or name != "health" or key != ("lifecycle", 1):
-            fail("unsupported-operation", "the bootstrap generator supports only lifecycle.health")
         if operation["scope"] != "none" or operation["transaction"] != "none" or \
                 operation["idempotency"] != "safe":
-            fail("operation-semantics", "health must be unscoped, transaction-free, and safe")
-        if operation["results"] != ["ok"]:
-            fail("operation-results", "health results must equal ['ok']")
+            fail("operation-semantics", f"{name} must be unscoped, transaction-free, and safe")
         if operation["db3_placement"] != "retained-db2":
-            fail("db3-placement", "health must remain in DB2")
-        _string(operation["db3_reason"], "health.db3_reason", 256)
-        request = _keys(operation["request"], {"magic", "encoded_size"}, "health.request")
-        reply = _keys(operation["reply"], {"magic", "encoded_size", "flags"}, "health.reply")
-        if _integer(request["magic"], "health.request.magic", 0, 0xffffffff) != 0x51483244 or \
-                request["encoded_size"] != 8:
-            fail("health-request", "health request magic/size differ from version 1")
-        if _integer(reply["magic"], "health.reply.magic", 0, 0xffffffff) != 0x52483244 or \
-                reply["encoded_size"] != 16:
-            fail("health-reply", "health reply magic/size differ from version 1")
-        expected_flags = ((0, "schema"), (1, "pg_trgm"), (2, "kb_tables"))
-        if not isinstance(reply["flags"], list) or len(reply["flags"]) != len(expected_flags):
-            fail("health-flags", "health reply flags differ from version 1")
-        for flag_index, (raw_flag, expected_flag) in enumerate(
-                zip(reply["flags"], expected_flags, strict=True)):
-            flag = _keys(raw_flag, {"bit", "name"}, f"health.reply.flags[{flag_index}]")
-            bit, flag_name = expected_flag
-            if _integer(flag["bit"], f"health.reply.flags[{flag_index}].bit", 0, 31) != bit or \
-                    flag["name"] != flag_name:
+            fail("db3-placement", f"{name} must remain in DB2")
+        _string(operation["db3_reason"], f"{name}.db3_reason", 256)
+        if key == ("lifecycle", 1) and name == "health" and \
+                operation["wire_format"] == "db2-health-v1":
+            if operation["results"] != ["ok"]:
+                fail("operation-results", "health results must equal ['ok']")
+            request = _keys(operation["request"], {"magic", "encoded_size"}, "health.request")
+            reply = _keys(operation["reply"], {"magic", "encoded_size", "flags"}, "health.reply")
+            if _integer(request["magic"], "health.request.magic", 0, 0xffffffff) != 0x51483244 or \
+                    request["encoded_size"] != 8:
+                fail("health-request", "health request magic/size differ from version 1")
+            if _integer(reply["magic"], "health.reply.magic", 0, 0xffffffff) != 0x52483244 or \
+                    reply["encoded_size"] != 16:
+                fail("health-reply", "health reply magic/size differ from version 1")
+            expected_flags = ((0, "schema"), (1, "pg_trgm"), (2, "kb_tables"))
+            if not isinstance(reply["flags"], list) or len(reply["flags"]) != len(expected_flags):
                 fail("health-flags", "health reply flags differ from version 1")
-    if len(raw_operations) != 1:
-        fail("unsupported-operation", "the bootstrap generator requires exactly one health operation")
+            for flag_index, (raw_flag, expected_flag) in enumerate(
+                    zip(reply["flags"], expected_flags, strict=True)):
+                flag = _keys(raw_flag, {"bit", "name"}, f"health.reply.flags[{flag_index}]")
+                bit, flag_name = expected_flag
+                if _integer(flag["bit"], f"health.reply.flags[{flag_index}].bit", 0, 31) != bit or \
+                        flag["name"] != flag_name:
+                    fail("health-flags", "health reply flags differ from version 1")
+        elif key == ("lifecycle", 2) and name == "embedding_dimension" and \
+                operation["wire_format"] == "db2-envelope-u32-v1":
+            if operation["results"] != ["ok", "invalid_state"]:
+                fail("operation-results",
+                     "embedding_dimension results must equal ['ok', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "embedding_dimension.request")
+            reply = _keys(operation["reply"],
+                          {"encoded_size_ok", "encoded_size_error", "field"},
+                          "embedding_dimension.reply")
+            field = _keys(reply["field"], {"name", "type", "minimum", "maximum"},
+                          "embedding_dimension.reply.field")
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("embedding-dimension-request", "request must be an empty version-1 envelope")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 4 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    field != {"name": "dimension", "type": "u32", "minimum": 1,
+                              "maximum": 4000}):
+                fail("embedding-dimension-reply", "reply must contain one bounded u32 on success")
+        else:
+            fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
+    if len(raw_operations) != 2 or [item["name"] for item in raw_operations] != [
+            "health", "embedding_dimension"]:
+        fail("unsupported-operation",
+             "the partial generator requires health and embedding_dimension exactly once")
     return catalog
 
 
@@ -309,11 +332,12 @@ def _envelope(
 
 
 def baseline_bytes(catalog: dict[str, object]) -> bytes:
-    operation = catalog["operations"][0]
-    request = _put_u32(operation["request"]["magic"]) + _put_u32(catalog["wire_version"])
+    health = catalog["operations"][0]
+    embedding_dimension = catalog["operations"][1]
+    request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
-        body = (_put_u32(operation["reply"]["magic"]) + _put_u32(catalog["wire_version"]) +
+        body = (_put_u32(health["reply"]["magic"]) + _put_u32(catalog["wire_version"]) +
                 _put_u32(flags) + _put_u32(0))
         replies.append({"flags": flags, "hex": body.hex()})
     response = bytes.fromhex(replies[0]["hex"])
@@ -334,6 +358,16 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
 
     def mutate_u32(frame: bytes, offset: int, value: int) -> bytes:
         return frame[:offset] + _put_u32(value) + frame[offset + 4:]
+
+    dimension_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(embedding_dimension["id"]), 0, b"",
+    )
+    dimension_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedding_dimension["id"]), 0, _put_u32(384),
+    )
+    dimension_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedding_dimension["id"]), 5, b"",
+    )
 
     value = {
         "schema_version": 1,
@@ -391,9 +425,9 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
             },
         },
         "operations": [{
-            "family": operation["family"],
-            "id": operation["id"],
-            "name": operation["name"],
+            "family": health["family"],
+            "id": health["id"],
+            "name": health["name"],
             "request": {
                 "positive": request.hex(),
                 "negative": [
@@ -414,6 +448,44 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (response + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": embedding_dimension["family"],
+            "id": embedding_dimension["id"],
+            "name": embedding_dimension["name"],
+            "request": {
+                "positive": dimension_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(dimension_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(dimension_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": dimension_request[:-1].hex()},
+                    {"mutation": "long", "hex": (dimension_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "dimension": 384, "hex": dimension_ok.hex()},
+                    {"result": 5, "dimension": 0, "hex": dimension_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(dimension_ok, 8, 1).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(dimension_ok, 12, 1).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(embedding_dimension["id"]), 0, b"").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     mutate_u32(dimension_ok, 12, 5).hex()},
+                    {"mutation": "zero_dimension", "hex":
+                     (dimension_ok[:-4] + _put_u32(0)).hex()},
+                    {"mutation": "dimension_too_large", "hex":
+                     (dimension_ok[:-4] + _put_u32(4001)).hex()},
+                    {"mutation": "short", "hex": dimension_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (dimension_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -426,8 +498,9 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
 
     fingerprint = catalog_fingerprint(catalog)
     families = catalog["families"]
-    operation = catalog["operations"][0]
-    flags = operation["reply"]["flags"]
+    health = catalog["operations"][0]
+    embedding_dimension = catalog["operations"][1]
+    flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
         ("AIMEE_DB2_WIRE_VERSION", f"{catalog['wire_version']}u"),
@@ -446,13 +519,26 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     operation_macros = macros([
         ("AIMEE_DB2_EVENT_HEALTH", "AIMEE_DB2_EVENT_LIFECYCLE"),
         ("AIMEE_DB2_STAGE_HEALTH", "AIMEE_DB2_FAMILY_LIFECYCLE"),
-        ("AIMEE_DB2_OPERATION_HEALTH", f"{operation['id']}u"),
+        ("AIMEE_DB2_OPERATION_HEALTH", f"{health['id']}u"),
         ("AIMEE_DB2_REQUEST_MAGIC",
-         f"0x{operation['request']['magic']:08x}u /* \"D2HQ\", little-endian */"),
+         f"0x{health['request']['magic']:08x}u /* \"D2HQ\", little-endian */"),
         ("AIMEE_DB2_RESPONSE_MAGIC",
-         f"0x{operation['reply']['magic']:08x}u /* \"D2HR\", little-endian */"),
-        ("AIMEE_DB2_REQUEST_LEN", f"{operation['request']['encoded_size']}u"),
-        ("AIMEE_DB2_RESPONSE_LEN", f"{operation['reply']['encoded_size']}u"),
+         f"0x{health['reply']['magic']:08x}u /* \"D2HR\", little-endian */"),
+        ("AIMEE_DB2_REQUEST_LEN", f"{health['request']['encoded_size']}u"),
+        ("AIMEE_DB2_RESPONSE_LEN", f"{health['reply']['encoded_size']}u"),
+        ("AIMEE_DB2_EVENT_EMBEDDING_DIMENSION", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_EMBEDDING_DIMENSION", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_EMBEDDING_DIMENSION", f"{embedding_dimension['id']}u"),
+        ("AIMEE_DB2_EMBEDDING_DIMENSION_REQUEST_LEN",
+         f"{embedding_dimension['request']['encoded_size']}u"),
+        ("AIMEE_DB2_EMBEDDING_DIMENSION_RESPONSE_LEN",
+         f"{embedding_dimension['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_EMBEDDING_DIMENSION_ERROR_LEN",
+         f"{embedding_dimension['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EMBEDDING_DIMENSION_MIN",
+         f"{embedding_dimension['reply']['field']['minimum']}u"),
+        ("AIMEE_DB2_EMBEDDING_DIMENSION_MAX",
+         f"{embedding_dimension['reply']['field']['maximum']}u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -600,6 +686,85 @@ static inline int aimee_db2_reply_header_decode(const uint8_t *input, size_t inp
    return 0;
 }}
 
+static inline int aimee_db2_embedding_dimension_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EMBEDDING_DIMENSION, 0u, 0u,
+                                           output, capacity);
+}}
+
+static inline int aimee_db2_embedding_dimension_request_decode(const uint8_t *input,
+                                                               size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EMBEDDING_DIMENSION_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EMBEDDING_DIMENSION &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_embedding_dimension_reply_encode(uint32_t result,
+                                                             uint32_t dimension,
+                                                             uint8_t *output, size_t capacity,
+                                                             uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {{
+      if (dimension < AIMEE_DB2_EMBEDDING_DIMENSION_MIN ||
+          dimension > AIMEE_DB2_EMBEDDING_DIMENSION_MAX ||
+          capacity < AIMEE_DB2_EMBEDDING_DIMENSION_RESPONSE_LEN)
+         return -1;
+      payload_len = 4u;
+   }}
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || dimension != 0u ||
+            capacity < AIMEE_DB2_EMBEDDING_DIMENSION_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EMBEDDING_DIMENSION, result,
+                                     payload_len, output, capacity) != 0)
+      return -1;
+   if (payload_len != 0u)
+      aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, dimension);
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_embedding_dimension_reply_decode(const uint8_t *input,
+                                                             size_t input_len,
+                                                             uint32_t *result,
+                                                             uint32_t *dimension)
+{{
+   if (result)
+      *result = 0u;
+   if (dimension)
+      *dimension = 0u;
+   if (!result || !dimension)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_EMBEDDING_DIMENSION)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 4u)
+      return -1;
+   uint32_t decoded = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN);
+   if (decoded < AIMEE_DB2_EMBEDDING_DIMENSION_MIN ||
+       decoded > AIMEE_DB2_EMBEDDING_DIMENSION_MAX)
+      return -1;
+   *result = header.result;
+   *dimension = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_health_request_encode(uint8_t *output, size_t capacity)
 {{
    if (!output || capacity < AIMEE_DB2_REQUEST_LEN)
@@ -686,6 +851,11 @@ extern "C"
        int *schema_ok, int *have_pg_trgm, int *kb_tables_ok,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_embedding_dimension_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, uint32_t *dimension,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
 #ifdef __cplusplus
 }
 #endif
@@ -730,6 +900,37 @@ aimee_db2_health_call(aimee_db2_call_fn call, void *call_context, uint64_t trace
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_embedding_dimension_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                   uint64_t deadline_ns, uint32_t *domain_result,
+                                   uint32_t *dimension, aimee_module_cancelled_fn cancelled,
+                                   void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (dimension)
+      *dimension = 0u;
+   if (!call || !domain_result || !dimension)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+
+   uint8_t request[AIMEE_DB2_EMBEDDING_DIMENSION_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EMBEDDING_DIMENSION_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (aimee_db2_embedding_dimension_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_EMBEDDING_DIMENSION, AIMEE_DB2_STAGE_EMBEDDING_DIMENSION,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_embedding_dimension_reply_decode(response, response_len, domain_result,
+                                                  dimension) != 0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
 '''
     return text.encode("utf-8")
 
@@ -741,8 +942,9 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
 
     fingerprint = catalog_fingerprint(catalog)
     families = catalog["families"]
-    operation = catalog["operations"][0]
-    flags = operation["reply"]["flags"]
+    health = catalog["operations"][0]
+    embedding_dimension = catalog["operations"][1]
+    flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
         for index, name in enumerate(catalog["result_codes"])
@@ -781,16 +983,21 @@ const WireVersion uint32 = {catalog['wire_version']}
 
 const EventHealth = EventLifecycle
 const StageHealth = FamilyLifecycle
-const OperationHealth uint32 = {operation['id']}
+const OperationHealth uint32 = {health['id']}
+const EventEmbeddingDimension = EventLifecycle
+const StageEmbeddingDimension = FamilyLifecycle
+const OperationEmbeddingDimension uint32 = {embedding_dimension['id']}
+const EmbeddingDimensionMin uint32 = {embedding_dimension['reply']['field']['minimum']}
+const EmbeddingDimensionMax uint32 = {embedding_dimension['reply']['field']['maximum']}
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
 const envelopeReplyMagic uint32 = 0x{ENVELOPE_REPLY_MAGIC:08x}
 
-const healthRequestMagic uint32 = 0x{operation['request']['magic']:08x}
-const healthResponseMagic uint32 = 0x{operation['reply']['magic']:08x}
-const healthRequestLen = {operation['request']['encoded_size']}
-const healthResponseLen = {operation['reply']['encoded_size']}
+const healthRequestMagic uint32 = 0x{health['request']['magic']:08x}
+const healthResponseMagic uint32 = 0x{health['reply']['magic']:08x}
+const healthRequestLen = {health['request']['encoded_size']}
+const healthResponseLen = {health['reply']['encoded_size']}
 
 {flag_lines}
 const healthFlagAll uint32 = 0x{all_flags:x}
@@ -876,6 +1083,70 @@ func DecodeReplyHeader(frame []byte) (ReplyHeader, error) {{
 		return ReplyHeader{{}}, err
 	}}
 	return ReplyHeader{{Operation: operation, Result: result, PayloadLen: payloadLen}}, nil
+}}
+
+// EncodeEmbeddingDimensionRequest emits the empty request envelope for the
+// effective DB2 pgvector schema width.
+func EncodeEmbeddingDimensionRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationEmbeddingDimension, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+// DecodeEmbeddingDimensionRequest validates the exact operation envelope.
+func DecodeEmbeddingDimensionRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEmbeddingDimension ||
+		header.Flags != 0 || header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+// EncodeEmbeddingDimensionReply emits either a bounded u32 success payload or
+// an empty invalid-state result.
+func EncodeEmbeddingDimensionReply(result, dimension uint32) ([]byte, error) {{
+	var payloadLen uint32
+	if result == ResultOK {{
+		if dimension < EmbeddingDimensionMin || dimension > EmbeddingDimensionMax {{
+			return nil, ErrMalformedEnvelope
+		}}
+		payloadLen = 4
+	}} else if result != ResultInvalidState || dimension != 0 {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationEmbeddingDimension, result, payloadLen)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	if payloadLen == 0 {{
+		return header, nil
+	}}
+	reply := append(header, make([]byte, 4)...)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen:], dimension)
+	return reply, nil
+}}
+
+// DecodeEmbeddingDimensionReply validates the operation, closed result subset,
+// payload shape, and dimension domain before exposing either field.
+func DecodeEmbeddingDimensionReply(reply []byte) (uint32, uint32, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEmbeddingDimension {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {{
+		return header.Result, 0, nil
+	}}
+	if header.Result != ResultOK || header.PayloadLen != 4 {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	dimension := binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen:])
+	if dimension < EmbeddingDimensionMin || dimension > EmbeddingDimensionMax {{
+		return 0, 0, ErrMalformedEnvelope
+	}}
+	return header.Result, dimension, nil
 }}
 
 // HealthEvidence is DB2-owned PostgreSQL readiness evidence. It intentionally

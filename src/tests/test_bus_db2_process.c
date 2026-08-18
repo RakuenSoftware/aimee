@@ -181,6 +181,11 @@ int main(int argc, char **argv)
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_OK);
    assert(schema_ok == 1 && have_pg_trgm == 1 && kb_tables_ok == 1);
 
+   uint32_t domain_result = 9, dimension = 9;
+   assert(aimee_db2_embedding_dimension_call(call_client, &client, 9010, 0, &domain_result,
+                                             &dimension, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && dimension == 384);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);
@@ -213,6 +218,7 @@ int main(int argc, char **argv)
    bus_host_destroy(&host);
    pthread_mutex_destroy(&host_lock);
    assert(rmdir(directory) == 0);
-   puts("test_bus_db2_process: Postgres health, deadline, and cancellation replayed over the bus");
+   puts("test_bus_db2_process: Postgres lifecycle facts, deadline, and cancellation replayed over "
+        "the bus");
    return 0;
 }

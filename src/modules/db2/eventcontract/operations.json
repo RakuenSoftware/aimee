@@ -102,6 +102,35 @@
           }
         ]
       }
+    },
+    {
+      "family": "lifecycle",
+      "id": 2,
+      "name": "embedding_dimension",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid_state"
+      ],
+      "db3_placement": "retained-db2",
+      "db3_reason": "The effective dimension is canonical PostgreSQL and pgvector schema evidence.",
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "dimension",
+          "type": "u32",
+          "minimum": 1,
+          "maximum": 4000
+        }
+      }
     }
   ]
 }
