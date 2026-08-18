@@ -768,6 +768,32 @@ def validate_operations(raw: object, families: dict[str, dict[str, object]],
                      f"{name} reply field type must be one of {[p for p in PAYLOADS if p != 'none']}")
             if not NAME.fullmatch(str(shape["name"])):
                 fail("reply-field-name", f"{name} invalid reply field {shape['name']!r}")
+        # A row crosses whole or it does not cross honestly. The catalog says
+        # which members travel, and a member it leaves out is not refused --
+        # it is simply never written, so the caller reads the zero memset left
+        # and cannot tell that from a row whose field really is empty.
+        for shaped, where in ((reply, "reply"), (request, "request")):
+            if "struct" not in shaped:
+                continue
+            # Fields before struct_from are ordinary arguments beside the
+            # struct, not members of it.
+            lead = int(shaped["struct_from"]) if "struct_from" in shaped else 0
+            declared = [str(f["name"]).split("[")[0].split(".")[0]
+                        for f in shaped["fields"][lead:]]
+            seen, ordered = set(), []
+            for one in declared:
+                if one not in seen:
+                    seen.add(one)
+                    ordered.append(one)
+            actual = struct_members(root, str(shaped["struct"]))
+            if actual and ordered != actual:
+                missing = [m for m in actual if m not in seen]
+                extra = [m for m in ordered if m not in set(actual)]
+                fail("struct-members",
+                     f"{name} {where} declares {shaped['struct']} as {ordered}, but the "
+                     f"header declares {actual}"
+                     + (f"; missing {missing}" if missing else "")
+                     + (f"; unknown {extra}" if extra else ""))
         reply_fields = expand_repeats(reply_fields)
         reply["fields"] = reply_fields
         operation["reply"]["fields"] = reply_fields
@@ -1434,6 +1460,7 @@ def forget_header_texts() -> None:
     """Drop the caches, for a caller that rewrites headers between runs."""
     _HEADER_CACHE.clear()
     _SYMBOL_CACHE.clear()
+    _WIDER_CACHE.clear()
 
 
 _SYMBOL_CACHE: dict[str, dict[str, tuple[str, str, str]]] = {}
@@ -1513,6 +1540,86 @@ def declared_return(root: Path, symbol: str) -> str:
         if found:
             return " ".join(found.group(1).split())
     return "int64_t"
+
+
+_WIDER_CACHE: dict[str, list[tuple[str, str, str]]] = {}
+
+
+def wider_headers(root: Path) -> list[tuple[str, str, str]]:
+    """Headers outside src/modules/db1 that declare a type the wire carries.
+
+    cron_job_t lives in the config module and provider_model_t in src/headers,
+    and both cross the boundary. Looking only where DB1 keeps its own headers
+    would leave exactly those two rows unchecked -- and a rule that silently
+    has no opinion about some of the rows it is meant to guard is worse than
+    one that says so.
+    """
+    key = str(root)
+    cached = _WIDER_CACHE.get(key)
+    if cached is None:
+        cached = []
+        seen: set[Path] = set()
+        for pattern in ("headers/*.h", "modules/*/*.h", "modules/*/include/*.h",
+                        "modules/*/include/*/*.h"):
+            for header in sorted((root / "src").glob(pattern)):
+                if header in seen:
+                    continue
+                seen.add(header)
+                raw = header.read_text(errors="ignore")
+                cached.append((header.name, raw, re.sub(r"/\*.*?\*/", "", raw, flags=re.S)))
+        _WIDER_CACHE[key] = cached
+    return cached
+
+
+def struct_body(text: str, struct: str) -> str | None:
+    """The body of `typedef struct { ... } struct;`, matched by braces.
+
+    A regex cannot do this: ".*?" between the first "typedef struct {" and the
+    named closing brace swallows every struct declared before it in the same
+    header, and the members of those come back as members of this one. Walking
+    the braces is the only way to know which "}" belongs to which "{".
+    """
+    for opened in re.finditer(r"typedef\s+struct\s*(?:[A-Za-z_][A-Za-z0-9_]*\s*)?\{", text):
+        depth, at = 1, opened.end()
+        while depth and at < len(text):
+            depth += (text[at] == "{") - (text[at] == "}")
+            at += 1
+        tail = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*;", text[at:])
+        if tail and tail.group(1) == struct:
+            return text[opened.end():at - 1]
+    return None
+
+
+def struct_members(root: Path, struct: str) -> list[str]:
+    """Every member `struct` declares, in order, or [] if it is not a DB1 type.
+
+    The catalog says which members of a row cross the wire, and nothing used to
+    check that against the row itself. A member the catalog omits is simply not
+    carried: the client leaves it as memset left it, and the caller reads an
+    empty string or a zero where a real value used to be. That is silent, it
+    survives regeneration, and it is exactly what happens when somebody adds a
+    field to a struct and does not think about the wire.
+
+    Structs the wire does not own are not this rule's business -- a caller's own
+    type is found here only if a DB1 header declares it -- so an empty list
+    means "no opinion", not "no members".
+    """
+    for _name, _raw, stripped in header_texts(root) + wider_headers(root):
+        body = struct_body(stripped, struct)
+        if body is None:
+            continue
+        names: list[str] = []
+        for member in body.split(";"):
+            member = re.sub(r"/\*.*?\*/", "", member, flags=re.S).strip()
+            if not member:
+                continue
+            # The declarator's name: the last identifier before any array
+            # bounds, with the pointer star and the type in front of it.
+            matched = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]*\]\s*)*$", member)
+            if matched:
+                names.append(matched.group(1))
+        return names
+    return []
 
 
 def pointer_members(root: Path, struct: str) -> set[str]:
