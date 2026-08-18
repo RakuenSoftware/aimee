@@ -12818,9 +12818,15 @@
           "line": 173
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON edge-mutation wrapper is caller presentation code; a typed learning operation validates task identifiers and the closed relation before persistence."
+      },
       "signature": "cJSON * db2_kb_service_task_add_edge_json ( int64_t source , int64_t target , const char * relation )",
       "signature_sha256": "c81a2eb65eeb84b8d3cd7615b70b1bf4f59b72efa0404854c31410ba64263471",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_task_add_edge_json"
     },
     {
@@ -12834,9 +12840,15 @@
           "line": 169
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON task-creation facade is not transported; a typed mutation bounds title, session, and parent and returns an explicit identifier and result."
+      },
       "signature": "cJSON * db2_kb_service_task_create_json ( const char * title , const char * session_id , int64_t parent_id )",
       "signature_sha256": "dde50b060283016c0429b64e6fb361b63023ab435f0bb40cd132bffe4a4e5caf",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_task_create_json"
     },
     {
@@ -12850,9 +12862,15 @@
           "line": 172
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON task-delete wrapper stays outside the wire shape; DB2 performs the typed mutation and returns a closed result."
+      },
       "signature": "cJSON * db2_kb_service_task_delete_json ( int64_t id )",
       "signature_sha256": "8f6c11a94bd56e695d6c9d1ff4269452ec227383bf1bc5121ffcb84e5679ee98",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_task_delete_json"
     },
     {
@@ -12866,9 +12884,15 @@
           "line": 174
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON edge-list response remains local serialization; a typed operation returns a bounded task-edge record set."
+      },
       "signature": "cJSON * db2_kb_service_task_get_edges_json ( int64_t task_id , int max )",
       "signature_sha256": "c7ad36e1d1a834e9043fa0b98ed778dd62599825220318082cba978bece31b5c",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_task_get_edges_json"
     },
     {
@@ -12882,9 +12906,15 @@
           "line": 168
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON task-list builder cannot define the stable contract; DB2 returns bounded state- and session-filtered task records."
+      },
       "signature": "cJSON * db2_kb_service_task_list_json ( const char * state , const char * session_id , int limit )",
       "signature_sha256": "1308a276cb241d4fd7811091b0d7b0b459a235d49bb7e2de0a84adad996bc793",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_task_list_json"
     },
     {
@@ -12898,9 +12928,15 @@
           "line": 171
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "private-db2",
+        "family": "learning",
+        "reason": "The cJSON task-state facade is retired at the process boundary; a typed mutation validates the closed state and returns structured status."
+      },
       "signature": "cJSON * db2_kb_service_task_update_state_json ( int64_t id , const char * state )",
       "signature_sha256": "2002d03a5e1ce8f80d532242478e14516aae3fc0a04b88496a34d7b09c67896f",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_kb_service_task_update_state_json"
     },
     {
@@ -24966,15 +25002,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "5d1f031272044efe397ea278e958b25c408c0072796e97cc28c81cd5ca3e20c4",
+  "fingerprint": "3b4ab6a6cd528591da91066b1fe46e0d0c8404601b39744acf4cac0b4f190f8b",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 801,
+    "audit_pending": 795,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 157
+    "reviewed": 163
   }
 }

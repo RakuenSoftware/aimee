@@ -500,6 +500,54 @@
       "reason": "The cJSON scene-member facade stays out of the transport contract; DB2 returns a bounded array of fixed member records and the caller renders JSON."
     },
     {
+      "symbol": "db2_kb_service_task_add_edge_json",
+      "signature_sha256": "c81a2eb65eeb84b8d3cd7615b70b1bf4f59b72efa0404854c31410ba64263471",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON edge-mutation wrapper is caller presentation code; a typed learning operation validates task identifiers and the closed relation before persistence."
+    },
+    {
+      "symbol": "db2_kb_service_task_create_json",
+      "signature_sha256": "dde50b060283016c0429b64e6fb361b63023ab435f0bb40cd132bffe4a4e5caf",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON task-creation facade is not transported; a typed mutation bounds title, session, and parent and returns an explicit identifier and result."
+    },
+    {
+      "symbol": "db2_kb_service_task_delete_json",
+      "signature_sha256": "8f6c11a94bd56e695d6c9d1ff4269452ec227383bf1bc5121ffcb84e5679ee98",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON task-delete wrapper stays outside the wire shape; DB2 performs the typed mutation and returns a closed result."
+    },
+    {
+      "symbol": "db2_kb_service_task_get_edges_json",
+      "signature_sha256": "c7ad36e1d1a834e9043fa0b98ed778dd62599825220318082cba978bece31b5c",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON edge-list response remains local serialization; a typed operation returns a bounded task-edge record set."
+    },
+    {
+      "symbol": "db2_kb_service_task_list_json",
+      "signature_sha256": "1308a276cb241d4fd7811091b0d7b0b459a235d49bb7e2de0a84adad996bc793",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON task-list builder cannot define the stable contract; DB2 returns bounded state- and session-filtered task records."
+    },
+    {
+      "symbol": "db2_kb_service_task_update_state_json",
+      "signature_sha256": "2002d03a5e1ce8f80d532242478e14516aae3fc0a04b88496a34d7b09c67896f",
+      "disposition": "private-db2",
+      "family": "learning",
+      "db3_placement": "retained-db2",
+      "reason": "The cJSON task-state facade is retired at the process boundary; a typed mutation validates the closed state and returns structured status."
+    },
+    {
       "symbol": "db2_kb_txn_begin",
       "signature_sha256": "349a811accb8cd0d8fbbe80bab6cce0ab28350eb3a64791f675dad2f519a9cde",
       "disposition": "private-db2",
