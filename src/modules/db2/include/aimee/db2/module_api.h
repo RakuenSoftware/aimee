@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AIMEE_DB2_CONTRACT_SHA256 "1cc0c702ce13a8b6f73c3e26fbd5415d55d5e7aa48c10e0e47dd2496026f70e0"
+#define AIMEE_DB2_CONTRACT_SHA256 "1090cceb947a6e7822d79434b57d2d0f881dcda71a3ea173411f64a3227653b5"
 #define AIMEE_DB2_WIRE_VERSION    1u
 
 #define AIMEE_DB2_FAMILY_LIFECYCLE    1u
@@ -55,6 +55,13 @@
 #define AIMEE_DB2_POOL_STATUS_RESPONSE_LEN         68u
 #define AIMEE_DB2_POOL_STATUS_ERROR_LEN            24u
 #define AIMEE_DB2_POOL_SIZE_MAX                    256u
+#define AIMEE_DB2_EVENT_EMBEDDING_REFUSALS         AIMEE_DB2_EVENT_LIFECYCLE
+#define AIMEE_DB2_STAGE_EMBEDDING_REFUSALS         AIMEE_DB2_FAMILY_LIFECYCLE
+#define AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS     4u
+#define AIMEE_DB2_EMBEDDING_REFUSALS_REQUEST_LEN   24u
+#define AIMEE_DB2_EMBEDDING_REFUSALS_RESPONSE_LEN  36u
+#define AIMEE_DB2_EMBEDDING_REFUSALS_ERROR_LEN     24u
+#define AIMEE_DB2_EMBEDDING_OFFERED_MAX            2147483647u
 
 #define AIMEE_DB2_ENVELOPE_REQUEST_MAGIC 0x51523244u /* "D2RQ", little-endian */
 #define AIMEE_DB2_ENVELOPE_REPLY_MAGIC   0x52523244u /* "D2RR", little-endian */
@@ -89,6 +96,12 @@ typedef struct
    uint64_t stuck;
    uint64_t poisoned;
 } aimee_db2_pool_status_t;
+
+typedef struct
+{
+   uint64_t refused_count;
+   uint32_t last_offered;
+} aimee_db2_embedding_refusals_t;
 
 static inline void aimee_db2_put_u16(uint8_t *output, uint16_t value)
 {
@@ -369,6 +382,89 @@ static inline int aimee_db2_pool_status_reply_decode(const uint8_t *input, size_
    };
    if (decoded.size == 0u || decoded.size > AIMEE_DB2_POOL_SIZE_MAX ||
        decoded.in_use > decoded.size)
+      return -1;
+   *result = header.result;
+   *status = decoded;
+   return 0;
+}
+
+static inline int aimee_db2_embedding_refusals_request_encode(uint8_t *output, size_t capacity)
+{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS, 0u, 0u,
+                                           output, capacity);
+}
+
+static inline int aimee_db2_embedding_refusals_request_decode(const uint8_t *input,
+                                                              size_t input_len)
+{
+   aimee_db2_request_header_t header = {0};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EMBEDDING_REFUSALS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}
+
+static inline int aimee_db2_embedding_refusals_reply_encode(
+    uint32_t result, const aimee_db2_embedding_refusals_t *status, uint8_t *output,
+    size_t capacity, uint32_t *output_len)
+{
+   if (output_len)
+      *output_len = 0;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {
+      if (!status || status->last_offered > AIMEE_DB2_EMBEDDING_OFFERED_MAX ||
+          ((status->refused_count == 0u) != (status->last_offered == 0u)) ||
+          capacity < AIMEE_DB2_EMBEDDING_REFUSALS_RESPONSE_LEN)
+         return -1;
+      payload_len = 12u;
+   }
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || status ||
+            capacity < AIMEE_DB2_EMBEDDING_REFUSALS_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS, result, payload_len,
+                                     output, capacity) != 0)
+      return -1;
+   if (status)
+   {
+      aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, status->refused_count);
+      aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN + 8, status->last_offered);
+   }
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}
+
+static inline int aimee_db2_embedding_refusals_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result,
+    aimee_db2_embedding_refusals_t *status)
+{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_embedding_refusals_t){0};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {0};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {
+      *result = header.result;
+      return 0;
+   }
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 12u)
+      return -1;
+   aimee_db2_embedding_refusals_t decoded = {
+       .refused_count = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN),
+       .last_offered = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN + 8),
+   };
+   if (decoded.last_offered > AIMEE_DB2_EMBEDDING_OFFERED_MAX ||
+       ((decoded.refused_count == 0u) != (decoded.last_offered == 0u)))
       return -1;
    *result = header.result;
    *status = decoded;

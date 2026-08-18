@@ -6931,9 +6931,15 @@
           "line": 54
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "lifecycle",
+        "reason": "The typed lifecycle.embedding_refusals operation replaces the KB health direct caller; the rejected width is DB2 pgvector diagnostic evidence."
+      },
       "signature": "int db2_embedding_dim_last_offered ( void )",
       "signature_sha256": "92aaf15164441084370869642322de2e5cd673aa8c51fd27883a292d83554eb2",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_embedding_dim_last_offered"
     },
     {
@@ -6977,9 +6983,15 @@
           "line": 53
         }
       ],
+      "review": {
+        "db3_placement": "retained-db2",
+        "disposition": "wire-operation",
+        "family": "lifecycle",
+        "reason": "The typed lifecycle.embedding_refusals operation replaces the KB health direct caller; refusal count is DB2 pgvector diagnostic evidence."
+      },
       "signature": "long long db2_embedding_dim_refused_count ( void )",
       "signature_sha256": "9f368845466738b971bcf6ab648e4ce0ec1082ef27b5b06a5da618e9a82b40f9",
-      "status": "audit-pending",
+      "status": "reviewed",
       "symbol": "db2_embedding_dim_refused_count"
     },
     {
@@ -24414,15 +24426,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "8f4b413a6e458cfb480ab5e9f05150376a4184cb8fe17fa88de704d4cddea43c",
+  "fingerprint": "b73399f510ec830e29b848d5aa90c6f3990673f48871e54d49ef2b1092157d6d",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 893,
+    "audit_pending": 891,
     "declarations": 1397,
     "headers": 137,
     "internal_unconsumed": 153,
     "private_test_only": 286,
-    "reviewed": 65
+    "reviewed": 67
   }
 }

@@ -656,7 +656,10 @@ expired deadline, deterministic cancellation after request publication, stale-te
 draining, post-cancellation process health, and the first envelope-backed lifecycle operation:
 `embedding_dimension` returns the effective 1–4000 pgvector schema width or `invalid_state`.
 The following `pool_status` operation returns the initialized 16-slot pool plus bounded occupancy,
-waiter, lease, stuck, and poison counters from one DB2-owned snapshot. These operations do not claim
+waiter, lease, stuck, and poison counters from one DB2-owned snapshot. `embedding_refusals` preserves
+the DB2-owned count and last offered dimension that make a rejected schema-width change visible to
+lifecycle health, returning only the valid zero/zero or positive/positive states. These operations do
+not claim
 the remaining catalog handlers, tenant, concurrency, ambiguity, or durability replay groups.
 
 These reductions remain phase-one precursors, not substitutes for the program exit criteria below:

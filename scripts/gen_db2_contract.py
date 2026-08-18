@@ -287,12 +287,37 @@ def validate_catalog(value: object) -> dict[str, object]:
                     reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
                     reply["fields"] != expected_fields):
                 fail("pool-status-reply", "reply must contain the canonical bounded pool snapshot")
+        elif key == ("lifecycle", 4) and name == "embedding_refusals" and \
+                operation["wire_format"] == "db2-envelope-embedding-refusals-v1":
+            if operation["c_symbols"] != ["db2_embedding_dim_last_offered",
+                                           "db2_embedding_dim_refused_count"]:
+                fail("operation-c-symbols",
+                     "embedding_refusals C symbols differ from the reviewed backend")
+            if operation["results"] != ["ok", "invalid_state"]:
+                fail("operation-results",
+                     "embedding_refusals results must equal ['ok', 'invalid_state']")
+            request = _keys(operation["request"], {"encoded_size", "payload"},
+                            "embedding_refusals.request")
+            reply = _keys(operation["reply"], {"encoded_size_ok", "encoded_size_error", "fields"},
+                          "embedding_refusals.reply")
+            expected_fields = [
+                {"name": "refused_count", "type": "u64", "minimum": 0},
+                {"name": "last_offered", "type": "u32", "minimum": 0,
+                 "maximum": 0x7fffffff},
+            ]
+            if request != {"encoded_size": ENVELOPE_HEADER_LEN, "payload": "none"}:
+                fail("embedding-refusals-request", "request must be an empty version-1 envelope")
+            if (reply["encoded_size_ok"] != ENVELOPE_HEADER_LEN + 12 or
+                    reply["encoded_size_error"] != ENVELOPE_HEADER_LEN or
+                    reply["fields"] != expected_fields):
+                fail("embedding-refusals-reply",
+                     "reply must contain the canonical bounded refusal snapshot")
         else:
             fail("unsupported-operation", f"unsupported operation {key!r}/{name!r}")
-    if len(raw_operations) != 3 or [item["name"] for item in raw_operations] != [
-            "health", "embedding_dimension", "pool_status"]:
+    if len(raw_operations) != 4 or [item["name"] for item in raw_operations] != [
+            "health", "embedding_dimension", "pool_status", "embedding_refusals"]:
         fail("unsupported-operation",
-             "the partial generator requires the three supported lifecycle operations exactly once")
+             "the partial generator requires the four supported lifecycle operations exactly once")
     return catalog
 
 
@@ -408,6 +433,7 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     health = catalog["operations"][0]
     embedding_dimension = catalog["operations"][1]
     pool_status = catalog["operations"][2]
+    embedding_refusals = catalog["operations"][3]
     request = _put_u32(health["request"]["magic"]) + _put_u32(catalog["wire_version"])
     replies = []
     for flags in range(8):
@@ -452,6 +478,16 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
     )
     pool_invalid = _envelope(
         catalog, ENVELOPE_REPLY_MAGIC, int(pool_status["id"]), 5, b"",
+    )
+    refusals_request = _envelope(
+        catalog, ENVELOPE_REQUEST_MAGIC, int(embedding_refusals["id"]), 0, b"",
+    )
+    refusals_payload = _put_u64(7) + _put_u32(768)
+    refusals_ok = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedding_refusals["id"]), 0, refusals_payload,
+    )
+    refusals_invalid = _envelope(
+        catalog, ENVELOPE_REPLY_MAGIC, int(embedding_refusals["id"]), 5, b"",
     )
 
     value = {
@@ -612,6 +648,48 @@ def baseline_bytes(catalog: dict[str, object]) -> bytes:
                     {"mutation": "long", "hex": (pool_ok + b"\0").hex()},
                 ],
             },
+        }, {
+            "family": embedding_refusals["family"],
+            "id": embedding_refusals["id"],
+            "name": embedding_refusals["name"],
+            "request": {
+                "positive": refusals_request.hex(),
+                "negative": [
+                    {"mutation": "bad_flags", "hex":
+                     mutate_u32(refusals_request, 12, 1).hex()},
+                    {"mutation": "payload_length", "hex":
+                     mutate_u32(refusals_request, 16, 1).hex()},
+                    {"mutation": "short", "hex": refusals_request[:-1].hex()},
+                    {"mutation": "long", "hex": (refusals_request + b"\0").hex()},
+                ],
+            },
+            "reply": {
+                "positive": [
+                    {"result": 0, "refused_count": 7, "last_offered": 768,
+                     "hex": refusals_ok.hex()},
+                    {"result": 5, "refused_count": 0, "last_offered": 0,
+                     "hex": refusals_invalid.hex()},
+                ],
+                "negative": [
+                    {"mutation": "wrong_operation", "hex":
+                     mutate_u32(refusals_ok, 8, 3).hex()},
+                    {"mutation": "unsupported_result", "hex":
+                     mutate_u32(refusals_ok, 12, 1).hex()},
+                    {"mutation": "ok_without_payload", "hex":
+                     _envelope(catalog, ENVELOPE_REPLY_MAGIC,
+                               int(embedding_refusals["id"]), 0, b"").hex()},
+                    {"mutation": "error_with_payload", "hex":
+                     mutate_u32(refusals_ok, 12, 5).hex()},
+                    {"mutation": "count_without_dimension", "hex":
+                     mutate_u32(refusals_ok, ENVELOPE_HEADER_LEN + 8, 0).hex()},
+                    {"mutation": "dimension_without_count", "hex":
+                     (refusals_ok[:ENVELOPE_HEADER_LEN] + _put_u64(0) + _put_u32(768)).hex()},
+                    {"mutation": "offered_too_large", "hex":
+                     mutate_u32(refusals_ok, ENVELOPE_HEADER_LEN + 8, 0x80000000).hex()},
+                    {"mutation": "short", "hex": refusals_ok[:-1].hex()},
+                    {"mutation": "long", "hex": (refusals_ok + b"\0").hex()},
+                ],
+            },
         }],
     }
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -627,6 +705,7 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
     health = catalog["operations"][0]
     embedding_dimension = catalog["operations"][1]
     pool_status = catalog["operations"][2]
+    embedding_refusals = catalog["operations"][3]
     flags = health["reply"]["flags"]
     version_macros = macros([
         ("AIMEE_DB2_CONTRACT_SHA256", f'"{fingerprint}"'),
@@ -673,6 +752,16 @@ def header_bytes(catalog: dict[str, object]) -> bytes:
         ("AIMEE_DB2_POOL_STATUS_RESPONSE_LEN", f"{pool_status['reply']['encoded_size_ok']}u"),
         ("AIMEE_DB2_POOL_STATUS_ERROR_LEN", f"{pool_status['reply']['encoded_size_error']}u"),
         ("AIMEE_DB2_POOL_SIZE_MAX", "256u"),
+        ("AIMEE_DB2_EVENT_EMBEDDING_REFUSALS", "AIMEE_DB2_EVENT_LIFECYCLE"),
+        ("AIMEE_DB2_STAGE_EMBEDDING_REFUSALS", "AIMEE_DB2_FAMILY_LIFECYCLE"),
+        ("AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS", f"{embedding_refusals['id']}u"),
+        ("AIMEE_DB2_EMBEDDING_REFUSALS_REQUEST_LEN",
+         f"{embedding_refusals['request']['encoded_size']}u"),
+        ("AIMEE_DB2_EMBEDDING_REFUSALS_RESPONSE_LEN",
+         f"{embedding_refusals['reply']['encoded_size_ok']}u"),
+        ("AIMEE_DB2_EMBEDDING_REFUSALS_ERROR_LEN",
+         f"{embedding_refusals['reply']['encoded_size_error']}u"),
+        ("AIMEE_DB2_EMBEDDING_OFFERED_MAX", "2147483647u"),
     ])
     envelope_macros = macros([
         ("AIMEE_DB2_ENVELOPE_REQUEST_MAGIC",
@@ -732,6 +821,12 @@ typedef struct
    uint64_t stuck;
    uint64_t poisoned;
 }} aimee_db2_pool_status_t;
+
+typedef struct
+{{
+   uint64_t refused_count;
+   uint32_t last_offered;
+}} aimee_db2_embedding_refusals_t;
 
 static inline void aimee_db2_put_u16(uint8_t *output, uint16_t value)
 {{
@@ -1018,6 +1113,89 @@ static inline int aimee_db2_pool_status_reply_decode(const uint8_t *input, size_
    return 0;
 }}
 
+static inline int aimee_db2_embedding_refusals_request_encode(uint8_t *output, size_t capacity)
+{{
+   return aimee_db2_request_header_encode(AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS, 0u, 0u,
+                                           output, capacity);
+}}
+
+static inline int aimee_db2_embedding_refusals_request_decode(const uint8_t *input,
+                                                              size_t input_len)
+{{
+   aimee_db2_request_header_t header = {{0}};
+   return aimee_db2_request_header_decode(input, input_len, &header) == 0 &&
+                  input_len == AIMEE_DB2_EMBEDDING_REFUSALS_REQUEST_LEN &&
+                  header.operation == AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS &&
+                  header.flags == 0u && header.payload_len == 0u
+              ? 0
+              : -1;
+}}
+
+static inline int aimee_db2_embedding_refusals_reply_encode(
+    uint32_t result, const aimee_db2_embedding_refusals_t *status, uint8_t *output,
+    size_t capacity, uint32_t *output_len)
+{{
+   if (output_len)
+      *output_len = 0;
+   if (!output || !output_len)
+      return -1;
+   uint32_t payload_len = 0u;
+   if (result == AIMEE_DB2_RESULT_OK)
+   {{
+      if (!status || status->last_offered > AIMEE_DB2_EMBEDDING_OFFERED_MAX ||
+          ((status->refused_count == 0u) != (status->last_offered == 0u)) ||
+          capacity < AIMEE_DB2_EMBEDDING_REFUSALS_RESPONSE_LEN)
+         return -1;
+      payload_len = 12u;
+   }}
+   else if (result != AIMEE_DB2_RESULT_INVALID_STATE || status ||
+            capacity < AIMEE_DB2_EMBEDDING_REFUSALS_ERROR_LEN)
+      return -1;
+   if (aimee_db2_reply_header_encode(AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS, result, payload_len,
+                                     output, capacity) != 0)
+      return -1;
+   if (status)
+   {{
+      aimee_db2_put_u64(output + AIMEE_DB2_ENVELOPE_HEADER_LEN, status->refused_count);
+      aimee_db2_put_u32(output + AIMEE_DB2_ENVELOPE_HEADER_LEN + 8, status->last_offered);
+   }}
+   *output_len = AIMEE_DB2_ENVELOPE_HEADER_LEN + payload_len;
+   return 0;
+}}
+
+static inline int aimee_db2_embedding_refusals_reply_decode(
+    const uint8_t *input, size_t input_len, uint32_t *result,
+    aimee_db2_embedding_refusals_t *status)
+{{
+   if (result)
+      *result = 0u;
+   if (status)
+      *status = (aimee_db2_embedding_refusals_t){{0}};
+   if (!result || !status)
+      return -1;
+   aimee_db2_reply_header_t header = {{0}};
+   if (aimee_db2_reply_header_decode(input, input_len, &header) != 0 ||
+       header.operation != AIMEE_DB2_OPERATION_EMBEDDING_REFUSALS)
+      return -1;
+   if (header.result == AIMEE_DB2_RESULT_INVALID_STATE && header.payload_len == 0u)
+   {{
+      *result = header.result;
+      return 0;
+   }}
+   if (header.result != AIMEE_DB2_RESULT_OK || header.payload_len != 12u)
+      return -1;
+   aimee_db2_embedding_refusals_t decoded = {{
+       .refused_count = aimee_db2_get_u64(input + AIMEE_DB2_ENVELOPE_HEADER_LEN),
+       .last_offered = aimee_db2_get_u32(input + AIMEE_DB2_ENVELOPE_HEADER_LEN + 8),
+   }};
+   if (decoded.last_offered > AIMEE_DB2_EMBEDDING_OFFERED_MAX ||
+       ((decoded.refused_count == 0u) != (decoded.last_offered == 0u)))
+      return -1;
+   *result = header.result;
+   *status = decoded;
+   return 0;
+}}
+
 static inline int aimee_db2_health_request_encode(uint8_t *output, size_t capacity)
 {{
    if (!output || capacity < AIMEE_DB2_REQUEST_LEN)
@@ -1113,6 +1291,11 @@ extern "C"
    aimee_module_call_result_t aimee_db2_pool_status_call(
        aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   aimee_module_call_result_t aimee_db2_embedding_refusals_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, aimee_db2_embedding_refusals_t *status,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
 #ifdef __cplusplus
@@ -1220,6 +1403,35 @@ aimee_module_call_result_t aimee_db2_pool_status_call(aimee_db2_call_fn call, vo
       return AIMEE_MODULE_CALL_PROTOCOL;
    return AIMEE_MODULE_CALL_OK;
 }
+
+aimee_module_call_result_t
+aimee_db2_embedding_refusals_call(aimee_db2_call_fn call, void *call_context, uint64_t trace_id,
+                                  uint64_t deadline_ns, uint32_t *domain_result,
+                                  aimee_db2_embedding_refusals_t *status,
+                                  aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   if (domain_result)
+      *domain_result = 0u;
+   if (status)
+      *status = (aimee_db2_embedding_refusals_t){0};
+   if (!call || !domain_result || !status)
+      return AIMEE_MODULE_CALL_INVALID_ARGUMENT;
+   uint8_t request[AIMEE_DB2_EMBEDDING_REFUSALS_REQUEST_LEN];
+   uint8_t response[AIMEE_DB2_EMBEDDING_REFUSALS_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   if (aimee_db2_embedding_refusals_request_encode(request, sizeof(request)) != 0)
+      return AIMEE_MODULE_CALL_INTERNAL;
+   aimee_module_call_result_t transport =
+       call(call_context, AIMEE_DB2_EVENT_EMBEDDING_REFUSALS, AIMEE_DB2_STAGE_EMBEDDING_REFUSALS,
+            trace_id, deadline_ns, request, sizeof(request), response, sizeof(response),
+            &response_len, cancelled, cancel_context);
+   if (transport != AIMEE_MODULE_CALL_OK)
+      return transport;
+   if (aimee_db2_embedding_refusals_reply_decode(response, response_len, domain_result, status) !=
+       0)
+      return AIMEE_MODULE_CALL_PROTOCOL;
+   return AIMEE_MODULE_CALL_OK;
+}
 '''
     return text.encode("utf-8")
 
@@ -1234,6 +1446,7 @@ def go_contract_bytes(catalog: dict[str, object]) -> bytes:
     health = catalog["operations"][0]
     embedding_dimension = catalog["operations"][1]
     pool_status = catalog["operations"][2]
+    embedding_refusals = catalog["operations"][3]
     flags = health["reply"]["flags"]
     result_lines = "\n".join(
         f"const Result{go_name(name)} uint32 = {index}"
@@ -1283,6 +1496,10 @@ const EventPoolStatus = EventLifecycle
 const StagePoolStatus = FamilyLifecycle
 const OperationPoolStatus uint32 = {pool_status['id']}
 const PoolSizeMax uint32 = 256
+const EventEmbeddingRefusals = EventLifecycle
+const StageEmbeddingRefusals = FamilyLifecycle
+const OperationEmbeddingRefusals uint32 = {embedding_refusals['id']}
+const EmbeddingOfferedMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = {ENVELOPE_HEADER_LEN}
 const envelopeRequestMagic uint32 = 0x{ENVELOPE_REQUEST_MAGIC:08x}
@@ -1523,6 +1740,74 @@ func DecodePoolStatusReply(reply []byte) (uint32, PoolStatus, error) {{
 	}}
 	if status.Size == 0 || status.Size > PoolSizeMax || status.InUse > status.Size {{
 		return 0, PoolStatus{{}}, ErrMalformedEnvelope
+	}}
+	return header.Result, status, nil
+}}
+
+type EmbeddingRefusals struct {{
+	RefusedCount uint64
+	LastOffered  uint32
+}}
+
+func EncodeEmbeddingRefusalsRequest() []byte {{
+	header, err := EncodeRequestHeader(OperationEmbeddingRefusals, 0, 0)
+	if err != nil {{
+		panic(err)
+	}}
+	return header
+}}
+
+func DecodeEmbeddingRefusalsRequest(request []byte) error {{
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEmbeddingRefusals || header.Flags != 0 ||
+		header.PayloadLen != 0 {{
+		return ErrMalformedEnvelope
+	}}
+	return nil
+}}
+
+func EncodeEmbeddingRefusalsReply(result uint32, status EmbeddingRefusals) ([]byte, error) {{
+	var payloadLen uint32
+	if result == ResultOK {{
+		if status.LastOffered > EmbeddingOfferedMax ||
+			(status.RefusedCount == 0) != (status.LastOffered == 0) {{
+			return nil, ErrMalformedEnvelope
+		}}
+		payloadLen = 12
+	}} else if result != ResultInvalidState || status != (EmbeddingRefusals{{}}) {{
+		return nil, ErrMalformedEnvelope
+	}}
+	header, err := EncodeReplyHeader(OperationEmbeddingRefusals, result, payloadLen)
+	if err != nil {{
+		return nil, ErrMalformedEnvelope
+	}}
+	if payloadLen == 0 {{
+		return header, nil
+	}}
+	reply := append(header, make([]byte, payloadLen)...)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen:EnvelopeHeaderLen+8], status.RefusedCount)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen+8:], status.LastOffered)
+	return reply, nil
+}}
+
+func DecodeEmbeddingRefusalsReply(reply []byte) (uint32, EmbeddingRefusals, error) {{
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEmbeddingRefusals {{
+		return 0, EmbeddingRefusals{{}}, ErrMalformedEnvelope
+	}}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {{
+		return header.Result, EmbeddingRefusals{{}}, nil
+	}}
+	if header.Result != ResultOK || header.PayloadLen != 12 {{
+		return 0, EmbeddingRefusals{{}}, ErrMalformedEnvelope
+	}}
+	status := EmbeddingRefusals{{
+		RefusedCount: binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen : EnvelopeHeaderLen+8]),
+		LastOffered:  binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen+8:]),
+	}}
+	if status.LastOffered > EmbeddingOfferedMax ||
+		(status.RefusedCount == 0) != (status.LastOffered == 0) {{
+		return 0, EmbeddingRefusals{{}}, ErrMalformedEnvelope
 	}}
 	return header.Result, status, nil
 }}

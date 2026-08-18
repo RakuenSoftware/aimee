@@ -166,6 +166,28 @@
           {"name": "poisoned", "type": "u64", "minimum": 0}
         ]
       }
+    },
+    {
+      "family": "lifecycle",
+      "id": 4,
+      "name": "embedding_refusals",
+      "wire_format": "db2-envelope-embedding-refusals-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok", "invalid_state"],
+      "db3_placement": "retained-db2",
+      "db3_reason": "Width-refusal evidence diagnoses writes rejected by DB2's canonical pgvector schema.",
+      "c_symbols": ["db2_embedding_dim_last_offered", "db2_embedding_dim_refused_count"],
+      "request": {"encoded_size": 24, "payload": "none"},
+      "reply": {
+        "encoded_size_ok": 36,
+        "encoded_size_error": 24,
+        "fields": [
+          {"name": "refused_count", "type": "u64", "minimum": 0},
+          {"name": "last_offered", "type": "u32", "minimum": 0, "maximum": 2147483647}
+        ]
+      }
     }
   ]
 }

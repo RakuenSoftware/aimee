@@ -30,6 +30,7 @@ typedef struct
    int (*kb_health_probe)(int *kb_tables_ok);
    int (*embedding_dimension)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
+   int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
 } aimee_db2_module_backend_t;
 
 extern aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
@@ -117,6 +118,22 @@ void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, lo
 static int pool_status(aimee_db2_pool_status_t *status)
 {
    *status = (aimee_db2_pool_status_t){16, 2, 1, 10, 3, 4, 5};
+   return 0;
+}
+
+long long db2_embedding_dim_refused_count(void)
+{
+   return 7;
+}
+
+int db2_embedding_dim_last_offered(void)
+{
+   return 768;
+}
+
+static int embedding_refusals(aimee_db2_embedding_refusals_t *status)
+{
+   *status = (aimee_db2_embedding_refusals_t){7, 768};
    return 0;
 }
 
@@ -252,6 +269,7 @@ int main(void)
        .kb_health_probe = kb_health_probe,
        .embedding_dimension = embedding_dimension,
        .pool_status = pool_status,
+       .embedding_refusals = embedding_refusals,
    };
    process_thread_t process = {
        .config = {.socket_path = socket_path,
@@ -299,6 +317,13 @@ int main(void)
    assert(domain_result == AIMEE_DB2_RESULT_OK && pool.size == 16 && pool.in_use == 2 &&
           pool.waiters == 1 && pool.lease_grants == 10 && pool.lease_timeouts == 3 &&
           pool.stuck == 4 && pool.poisoned == 5);
+
+   aimee_db2_embedding_refusals_t refusals = {0};
+   domain_result = 9;
+   assert(aimee_db2_embedding_refusals_call(call_client, &client, 7012, 0, &domain_result,
+                                            &refusals, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && refusals.refused_count == 7 &&
+          refusals.last_offered == 768);
 
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 7002, 1, &schema_ok, &have_pg_trgm,

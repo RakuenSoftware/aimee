@@ -10,6 +10,7 @@ typedef struct
    int (*kb_health_probe)(int *kb_tables_ok);
    int (*embedding_dimension)(void);
    int (*pool_status)(aimee_db2_pool_status_t *status);
+   int (*embedding_refusals)(aimee_db2_embedding_refusals_t *status);
 } aimee_db2_module_backend_t;
 
 aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,

@@ -12,6 +12,22 @@
       "reason": "The typed lifecycle.embedding_dimension operation replaces production direct callers; the effective pgvector schema width remains DB2 authority."
     },
     {
+      "symbol": "db2_embedding_dim_last_offered",
+      "signature_sha256": "92aaf15164441084370869642322de2e5cd673aa8c51fd27883a292d83554eb2",
+      "disposition": "wire-operation",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "The typed lifecycle.embedding_refusals operation replaces the KB health direct caller; the rejected width is DB2 pgvector diagnostic evidence."
+    },
+    {
+      "symbol": "db2_embedding_dim_refused_count",
+      "signature_sha256": "9f368845466738b971bcf6ab648e4ce0ec1082ef27b5b06a5da618e9a82b40f9",
+      "disposition": "wire-operation",
+      "family": "lifecycle",
+      "db3_placement": "retained-db2",
+      "reason": "The typed lifecycle.embedding_refusals operation replaces the KB health direct caller; refusal count is DB2 pgvector diagnostic evidence."
+    },
+    {
       "symbol": "db2_health_probe",
       "signature_sha256": "325f260c51f255dae61d7323836bc549a712cb5486abeb4f4967ffdc57ac05ee",
       "disposition": "wire-operation",

@@ -69,6 +69,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn(b"aimee_db2_health_call", client_header)
         self.assertIn(b"aimee_db2_embedding_dimension_call", client_header)
         self.assertIn(b"aimee_db2_pool_status_call", client_header)
+        self.assertIn(b"aimee_db2_embedding_refusals_call", client_header)
         self.assertIn(b"AIMEE_MODULE_CALL_PROTOCOL", client_source)
         self.assertIn(fingerprint.encode(), go_contract)
         self.assertIn(b"func DecodeHealthResponse", go_contract)
@@ -76,6 +77,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn(b"func DecodeReplyHeader", go_contract)
         self.assertIn(b"func DecodeEmbeddingDimensionReply", go_contract)
         self.assertIn(b"func DecodePoolStatusReply", go_contract)
+        self.assertIn(b"func DecodeEmbeddingRefusalsReply", go_contract)
         self.assertIn(b"ErrMalformedHealth", go_contract)
         self.assertIn(b"ResultOK", go_contract)
         self.assertIn(b"HealthFlagPGTrgm", go_contract)
@@ -163,6 +165,22 @@ class ContractTests(unittest.TestCase):
              "short", "long"],
         )
 
+    def test_embedding_refusal_vectors_cover_relational_failures(self) -> None:
+        baseline = json.loads((REPO_ROOT / generator.BASELINE).read_text(encoding="utf-8"))
+        operation = baseline["operations"][3]
+        self.assertEqual(operation["name"], "embedding_refusals")
+        self.assertEqual(
+            [(row["result"], row["refused_count"], row["last_offered"])
+             for row in operation["reply"]["positive"]],
+            [(0, 7, 768), (5, 0, 0)],
+        )
+        self.assertEqual(
+            [row["mutation"] for row in operation["reply"]["negative"]],
+            ["wrong_operation", "unsupported_result", "ok_without_payload",
+             "error_with_payload", "count_without_dimension", "dimension_without_count",
+             "offered_too_large", "short", "long"],
+        )
+
     def test_root_and_version_mutations(self) -> None:
         cases = (
             (lambda value: value.__setitem__("extra", 1), "keys"),
@@ -232,7 +250,7 @@ class ContractTests(unittest.TestCase):
         self.assert_rule(
             lambda value: value["operations"].append({
                 **copy.deepcopy(value["operations"][0]),
-                "id": 4,
+                "id": 5,
                 "name": "health_second",
                 "c_symbols": ["db2_health_second"],
             }),
@@ -287,6 +305,19 @@ class ContractTests(unittest.TestCase):
              "pool-status-reply"),
             (lambda value: value["operations"][2]["reply"]["fields"][0].__setitem__(
                 "maximum", 255), "pool-status-reply"),
+        )
+        for mutate, rule in cases:
+            with self.subTest(rule=rule):
+                self.assert_rule(mutate, rule)
+
+    def test_embedding_refusal_shape_mutations(self) -> None:
+        cases = (
+            (lambda value: value["operations"][3].__setitem__("wire_format", "raw-sql"),
+             "unsupported-operation"),
+            (lambda value: value["operations"][3].__setitem__("results", ["ok"]),
+             "operation-results"),
+            (lambda value: value["operations"][3]["reply"].__setitem__("encoded_size_ok", 35),
+             "embedding-refusals-reply"),
         )
         for mutate, rule in cases:
             with self.subTest(rule=rule):

@@ -33,6 +33,11 @@ extern "C"
        uint32_t *domain_result, aimee_db2_pool_status_t *status,
        aimee_module_cancelled_fn cancelled, void *cancel_context);
 
+   aimee_module_call_result_t aimee_db2_embedding_refusals_call(
+       aimee_db2_call_fn call, void *call_context, uint64_t trace_id, uint64_t deadline_ns,
+       uint32_t *domain_result, aimee_db2_embedding_refusals_t *status,
+       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
 #ifdef __cplusplus
 }
 #endif

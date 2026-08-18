@@ -192,6 +192,13 @@ int main(int argc, char **argv)
                                      NULL) == AIMEE_MODULE_CALL_OK);
    assert(domain_result == AIMEE_DB2_RESULT_OK && pool.size == 16 && pool.in_use <= pool.size);
 
+   aimee_db2_embedding_refusals_t refusals = {0};
+   domain_result = 9;
+   assert(aimee_db2_embedding_refusals_call(call_client, &client, 9012, 0, &domain_result,
+                                            &refusals, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(domain_result == AIMEE_DB2_RESULT_OK && refusals.refused_count == 0 &&
+          refusals.last_offered == 0);
+
    schema_ok = have_pg_trgm = kb_tables_ok = 9;
    assert(aimee_db2_health_call(call_client, &client, 9003, 1, &schema_ok, &have_pg_trgm,
                                 &kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_DEADLINE_EXCEEDED);

@@ -8,7 +8,7 @@ import (
 	"errors"
 )
 
-const ContractSHA256 = "1cc0c702ce13a8b6f73c3e26fbd5415d55d5e7aa48c10e0e47dd2496026f70e0"
+const ContractSHA256 = "1090cceb947a6e7822d79434b57d2d0f881dcda71a3ea173411f64a3227653b5"
 const WireVersion uint32 = 1
 
 const FamilyLifecycle uint32 = 1
@@ -48,6 +48,10 @@ const EventPoolStatus = EventLifecycle
 const StagePoolStatus = FamilyLifecycle
 const OperationPoolStatus uint32 = 3
 const PoolSizeMax uint32 = 256
+const EventEmbeddingRefusals = EventLifecycle
+const StageEmbeddingRefusals = FamilyLifecycle
+const OperationEmbeddingRefusals uint32 = 4
+const EmbeddingOfferedMax uint32 = 2147483647
 
 const EnvelopeHeaderLen = 24
 const envelopeRequestMagic uint32 = 0x51523244
@@ -290,6 +294,74 @@ func DecodePoolStatusReply(reply []byte) (uint32, PoolStatus, error) {
 	}
 	if status.Size == 0 || status.Size > PoolSizeMax || status.InUse > status.Size {
 		return 0, PoolStatus{}, ErrMalformedEnvelope
+	}
+	return header.Result, status, nil
+}
+
+type EmbeddingRefusals struct {
+	RefusedCount uint64
+	LastOffered  uint32
+}
+
+func EncodeEmbeddingRefusalsRequest() []byte {
+	header, err := EncodeRequestHeader(OperationEmbeddingRefusals, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	return header
+}
+
+func DecodeEmbeddingRefusalsRequest(request []byte) error {
+	header, err := DecodeRequestHeader(request)
+	if err != nil || header.Operation != OperationEmbeddingRefusals || header.Flags != 0 ||
+		header.PayloadLen != 0 {
+		return ErrMalformedEnvelope
+	}
+	return nil
+}
+
+func EncodeEmbeddingRefusalsReply(result uint32, status EmbeddingRefusals) ([]byte, error) {
+	var payloadLen uint32
+	if result == ResultOK {
+		if status.LastOffered > EmbeddingOfferedMax ||
+			(status.RefusedCount == 0) != (status.LastOffered == 0) {
+			return nil, ErrMalformedEnvelope
+		}
+		payloadLen = 12
+	} else if result != ResultInvalidState || status != (EmbeddingRefusals{}) {
+		return nil, ErrMalformedEnvelope
+	}
+	header, err := EncodeReplyHeader(OperationEmbeddingRefusals, result, payloadLen)
+	if err != nil {
+		return nil, ErrMalformedEnvelope
+	}
+	if payloadLen == 0 {
+		return header, nil
+	}
+	reply := append(header, make([]byte, payloadLen)...)
+	binary.LittleEndian.PutUint64(reply[EnvelopeHeaderLen:EnvelopeHeaderLen+8], status.RefusedCount)
+	binary.LittleEndian.PutUint32(reply[EnvelopeHeaderLen+8:], status.LastOffered)
+	return reply, nil
+}
+
+func DecodeEmbeddingRefusalsReply(reply []byte) (uint32, EmbeddingRefusals, error) {
+	header, err := DecodeReplyHeader(reply)
+	if err != nil || header.Operation != OperationEmbeddingRefusals {
+		return 0, EmbeddingRefusals{}, ErrMalformedEnvelope
+	}
+	if header.Result == ResultInvalidState && header.PayloadLen == 0 {
+		return header.Result, EmbeddingRefusals{}, nil
+	}
+	if header.Result != ResultOK || header.PayloadLen != 12 {
+		return 0, EmbeddingRefusals{}, ErrMalformedEnvelope
+	}
+	status := EmbeddingRefusals{
+		RefusedCount: binary.LittleEndian.Uint64(reply[EnvelopeHeaderLen : EnvelopeHeaderLen+8]),
+		LastOffered:  binary.LittleEndian.Uint32(reply[EnvelopeHeaderLen+8:]),
+	}
+	if status.LastOffered > EmbeddingOfferedMax ||
+		(status.RefusedCount == 0) != (status.LastOffered == 0) {
+		return 0, EmbeddingRefusals{}, ErrMalformedEnvelope
 	}
 	return header.Result, status, nil
 }

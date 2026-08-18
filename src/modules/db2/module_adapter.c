@@ -25,6 +25,20 @@ static int production_pool_status(aimee_db2_pool_status_t *status)
    return 0;
 }
 
+static int production_embedding_refusals(aimee_db2_embedding_refusals_t *status)
+{
+   long long refused = db2_embedding_dim_refused_count();
+   int offered = db2_embedding_dim_last_offered();
+   if (!status || refused < 0 || offered < 0 ||
+       (uint32_t)offered > AIMEE_DB2_EMBEDDING_OFFERED_MAX || ((refused == 0) != (offered == 0)))
+      return -1;
+   *status = (aimee_db2_embedding_refusals_t){
+       .refused_count = (uint64_t)refused,
+       .last_offered = (uint32_t)offered,
+   };
+   return 0;
+}
+
 static const aimee_db2_module_backend_t *production_backend(void)
 {
    static const aimee_db2_module_backend_t backend = {
@@ -32,6 +46,7 @@ static const aimee_db2_module_backend_t *production_backend(void)
        .kb_health_probe = db2_kb_health_probe,
        .embedding_dimension = db2_embedding_dim,
        .pool_status = production_pool_status,
+       .embedding_refusals = production_embedding_refusals,
    };
    return &backend;
 }
@@ -98,18 +113,36 @@ aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invo
       return AIMEE_MODULE_STATUS_OK;
    }
 
-   if (aimee_db2_pool_status_request_decode(request_body, request_len) != 0 ||
-       response_capacity < AIMEE_DB2_POOL_STATUS_RESPONSE_LEN)
+   if (aimee_db2_pool_status_request_decode(request_body, request_len) == 0)
+   {
+      if (response_capacity < AIMEE_DB2_POOL_STATUS_RESPONSE_LEN)
+         return AIMEE_MODULE_STATUS_INVALID_REQUEST;
+      if (!backend || !backend->pool_status)
+         return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+      aimee_db2_pool_status_t status = {0};
+      uint32_t result =
+          backend->pool_status(&status) == 0 ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_INVALID_STATE;
+      if (aimee_module_invocation_cancelled(invocation))
+         return AIMEE_MODULE_STATUS_CANCELLED;
+      if (aimee_db2_pool_status_reply_encode(result, result == AIMEE_DB2_RESULT_OK ? &status : NULL,
+                                             response_body, response_capacity, response_len) != 0)
+         return AIMEE_MODULE_STATUS_INTERNAL;
+      return AIMEE_MODULE_STATUS_OK;
+   }
+
+   if (aimee_db2_embedding_refusals_request_decode(request_body, request_len) != 0 ||
+       response_capacity < AIMEE_DB2_EMBEDDING_REFUSALS_RESPONSE_LEN)
       return AIMEE_MODULE_STATUS_INVALID_REQUEST;
-   if (!backend || !backend->pool_status)
+   if (!backend || !backend->embedding_refusals)
       return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
-   aimee_db2_pool_status_t status = {0};
-   uint32_t result =
-       backend->pool_status(&status) == 0 ? AIMEE_DB2_RESULT_OK : AIMEE_DB2_RESULT_INVALID_STATE;
+   aimee_db2_embedding_refusals_t status = {0};
+   uint32_t result = backend->embedding_refusals(&status) == 0 ? AIMEE_DB2_RESULT_OK
+                                                               : AIMEE_DB2_RESULT_INVALID_STATE;
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
-   if (aimee_db2_pool_status_reply_encode(result, result == AIMEE_DB2_RESULT_OK ? &status : NULL,
-                                          response_body, response_capacity, response_len) != 0)
+   if (aimee_db2_embedding_refusals_reply_encode(
+           result, result == AIMEE_DB2_RESULT_OK ? &status : NULL, response_body, response_capacity,
+           response_len) != 0)
       return AIMEE_MODULE_STATUS_INTERNAL;
    return AIMEE_MODULE_STATUS_OK;
 }

@@ -52,6 +52,8 @@ type wireBaseline struct {
 				LeaseTimeouts uint64 `json:"lease_timeouts"`
 				Stuck         uint64 `json:"stuck"`
 				Poisoned      uint64 `json:"poisoned"`
+				RefusedCount  uint64 `json:"refused_count"`
+				LastOffered   uint32 `json:"last_offered"`
 				Hex           string `json:"hex"`
 			} `json:"positive"`
 			Negative []struct {
@@ -147,12 +149,43 @@ func loadWireBaseline(t *testing.T) wireBaseline {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		t.Fatalf("decode shared C/Go wire baseline: %v", err)
 	}
-	if len(baseline.Operations) != 3 || baseline.Operations[0].Name != "health" ||
+	if len(baseline.Operations) != 4 || baseline.Operations[0].Name != "health" ||
 		baseline.Operations[1].Name != "embedding_dimension" ||
-		baseline.Operations[2].Name != "pool_status" {
+		baseline.Operations[2].Name != "pool_status" ||
+		baseline.Operations[3].Name != "embedding_refusals" {
 		t.Fatalf("unexpected operations: %+v", baseline.Operations)
 	}
 	return baseline
+}
+
+func TestEmbeddingRefusalsMatchesEverySharedCVector(t *testing.T) {
+	operation := loadWireBaseline(t).Operations[3]
+	wantRequest := decodeHex(t, operation.Request.Positive)
+	if got := EncodeEmbeddingRefusalsRequest(); string(got) != string(wantRequest) {
+		t.Fatalf("request = %x, want %x", got, wantRequest)
+	}
+	for _, vector := range operation.Request.Negative {
+		if err := DecodeEmbeddingRefusalsRequest(decodeHex(t, vector.Hex)); !errors.Is(err, ErrMalformedEnvelope) {
+			t.Fatalf("negative request %s: %v", vector.Mutation, err)
+		}
+	}
+	for _, vector := range operation.Reply.Positive {
+		status := EmbeddingRefusals{vector.RefusedCount, vector.LastOffered}
+		got, err := EncodeEmbeddingRefusalsReply(vector.Result, status)
+		if err != nil || string(got) != string(decodeHex(t, vector.Hex)) {
+			t.Fatalf("positive reply = (%x, %v)", got, err)
+		}
+		result, decoded, err := DecodeEmbeddingRefusalsReply(got)
+		if err != nil || result != vector.Result || decoded != status {
+			t.Fatalf("decode = (%d, %+v, %v)", result, decoded, err)
+		}
+	}
+	for _, vector := range operation.Reply.Negative {
+		result, status, err := DecodeEmbeddingRefusalsReply(decodeHex(t, vector.Hex))
+		if !errors.Is(err, ErrMalformedEnvelope) || result != 0 || status != (EmbeddingRefusals{}) {
+			t.Fatalf("negative reply %s = (%d, %+v, %v)", vector.Mutation, result, status, err)
+		}
+	}
 }
 
 func TestPoolStatusMatchesEverySharedCVector(t *testing.T) {
