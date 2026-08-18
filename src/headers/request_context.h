@@ -49,6 +49,10 @@ typedef struct
    int compress_disabled;     /* X-Aimee-Compress: 0 — per-request opt-out of ingress
                                * envelope compression (ingress-compression P1b §1.4/B1).
                                * 0 = honor config; never forces compression on. */
+   int aimee_tool_calls;      /* cumulative calls observed in this API transcript */
+   int aimee_redundant_tool_calls;
+   char aimee_intervention[40];
+   char aimee_tool_transport[16];
 } request_context_t;
 
 /* Set the active request context for the current thread (shallow copy). Pass
@@ -88,5 +92,10 @@ void request_context_override_caller_subject(const char *subject);
 
 /* Server-authoritative installation of the already verified caller JWT. */
 void request_context_override_caller_authorization(const char *jwt);
+
+/* Attach model-neutral session observations to the active ingress request so
+ * the normal token-audit row records cost and intervention separately. */
+void request_context_note_aimee_session(int tool_calls, int redundant_tool_calls,
+                                        const char *intervention, const char *tool_transport);
 
 #endif /* DEC_REQUEST_CONTEXT_H */
